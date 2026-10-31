@@ -2,16 +2,25 @@
 "use strict";
 (() => {
   const boot = document.getElementById("tela-boot");
+  // `CELULAR` e `CASCA_LARGA` só existem na casca que os declara.
+  const celular = typeof CELULAR !== "undefined";
   const caixa = boot?.querySelector(".boot-caixa");
   const topo = boot?.querySelector(".boot-topo");
   const proposito = boot?.querySelector(".boot-proposito");
   if (boot && caixa && topo) {
-    const introducao = document.createElement("div"); introducao.className = "inicio-introducao";
-    const titulo = document.createElement("h1"); titulo.textContent = "Conversas";
-    introducao.append(titulo); proposito?.remove(); caixa.prepend(introducao);
-    const contexto = document.createElement("span"); contexto.className = "inicio-contexto"; contexto.textContent = "Início";
-    topo.querySelector(".boot-marca")?.after(contexto);
+    // O celular segue com a introdução e o contexto de sempre; no desktop e no
+    // navegador cada painel traz o próprio título (a entrada do 0.19).
+    if (celular) {
+      const introducao = document.createElement("div"); introducao.className = "inicio-introducao";
+      const titulo = document.createElement("h1"); titulo.textContent = "Conversas";
+      introducao.append(titulo); caixa.prepend(introducao);
+      const contexto = document.createElement("span"); contexto.className = "inicio-contexto"; contexto.textContent = "Início";
+      topo.querySelector(".boot-marca")?.after(contexto);
+    }
+    proposito?.remove();
     boot.prepend(topo);
+    const faixa = boot.querySelector(".boot-faixa-web");
+    if (faixa) boot.prepend(faixa);
   }
   const esquerda = boot?.querySelector(".boot-esq");
   const direita = boot?.querySelector(".boot-dir");
@@ -20,20 +29,31 @@
   if (esquerda && direita && codigo && amigos) {
     const hospedar = document.createElement("div"); hospedar.className = "inicio-hospedar";
     while (direita.firstChild) hospedar.append(direita.firstChild);
-    direita.append(codigo, hospedar);
-    esquerda.append(amigos);
+    if (celular) {
+      direita.append(codigo, hospedar);
+      esquerda.append(amigos);
+    } else {
+      direita.append(hospedar);
+    }
     const conectar = document.createElement("section");
     conectar.className = "inicio-conectar";
     conectar.setAttribute("aria-label", "Conectar");
-    const titulo = document.createElement("h2"); titulo.textContent = "Conectar";
+    const larga = typeof CASCA_LARGA !== "undefined";
     const acao = document.getElementById("botao-conectar")?.closest(".boot-saidas");
     const dica = esquerda.querySelector(".boot-dica");
-    conectar.append(titulo);
+    if (celular) {
+      const titulo = document.createElement("h2"); titulo.textContent = "Conectar";
+      conectar.append(titulo);
+    }
     if (acao) {
       const rotulo = document.createElement("label");
-      rotulo.className = "campo"; rotulo.textContent = "Link, endereço ou código";
+      rotulo.className = "campo";
+      rotulo.textContent = celular ? "Link, endereço ou código"
+        : larga ? "O link que alguém te mandou" : "Outro endereço, ou um link seele://";
       const entrada = document.createElement("input");
-      entrada.type = "text"; entrada.placeholder = "Cole aqui para conectar";
+      entrada.type = "text";
+      entrada.placeholder = celular ? "Cole aqui para conectar"
+        : larga ? "https://seele.sh/#…" : "seele://… ou 10.0.0.4:8383";
       entrada.autocomplete = "off"; entrada.spellcheck = false;
       rotulo.append(entrada);
       const grupo = document.createElement("div"); grupo.className = "inicio-conectar-linha";

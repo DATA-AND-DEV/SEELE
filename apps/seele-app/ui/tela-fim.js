@@ -40,7 +40,33 @@ function saidaSecundaria() {
   return botaoSair;
 }
 
+/**
+ * Desde quando a sessão está aberta, para a etiqueta do fim («CASA · 00:17»).
+ *
+ * Nenhum outro lugar guarda esse instante, e ele é de quem observa: marca-se
+ * quando a tela da sessão passa a aparecer e esquece-se quando ela some. `null`
+ * quando a janela não viu a sessão abrir — e então a etiqueta diz só o servidor,
+ * em vez de inventar uma duração.
+ */
+let sessaoDesde = null;
+new MutationObserver(() => {
+  const aberta = !$("tela-sessao").hidden;
+  if (aberta && sessaoDesde === null) sessaoDesde = Date.now();
+  if (!aberta) sessaoDesde = null;
+}).observe($("tela-sessao"), { attributes: true, attributeFilter: ["hidden"] });
+
+/** `00:17`, ou `1:02:03` a partir de uma hora. */
+function relogioDaDuracao(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const dois = (n) => String(n).padStart(2, "0");
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return h > 0 ? `${h}:${dois(m)}:${dois(total % 60)}` : `${dois(m)}:${dois(total % 60)}`;
+}
+
 function mostrarFim(motivo) {
+  const duracao = sessaoDesde === null ? null : relogioDaDuracao(Date.now() - sessaoDesde);
+  sessaoDesde = null;
   $("tela-sessao").hidden = true;
   $("tela-boot").hidden = true;
   // A autenticação também: uma sessão pode acabar com a conexão ainda por
@@ -71,6 +97,10 @@ function mostrarFim(motivo) {
   alvoDoFim = (typeof alvoDoServer === "string" && alvoDoServer) ||
     ultimoAlvo || null;
   desenharSaidas();
+  const etiqueta = $("fim-etiqueta");
+  const partes = [alvoDoFim, duracao].filter(Boolean);
+  etiqueta.textContent = partes.join(" · ");
+  etiqueta.hidden = partes.length === 0;
 
   const frase = MOTIVOS[motivo] ?? null;
   $("fim-motivo").textContent = frase ?? "ENLACE ENCERRADO";

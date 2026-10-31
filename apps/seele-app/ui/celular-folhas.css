@@ -156,17 +156,24 @@
   overflow-wrap: anywhere;
 }
 
-/* A folha da pessoa: o sinal numa fileira, e o volume com o número escrito. */
+/* A folha da pessoa: um cartão com o sinal numa fileira e o volume embaixo, com
+   o número escrito. O avatar fica antes do nome. */
+:root[data-casca="celular"] .cel-folha-cartao {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 18px;
+}
+
 :root[data-casca="celular"] .cel-folha-sinal {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 12px;
   margin: 0;
-  padding: 14px 16px;
-  background: var(--seele-vidro);
-  border: 1px solid var(--seele-vidro-borda);
-  border-radius: 18px;
 }
 
 :root[data-casca="celular"] .cel-folha-sinal-valor {
@@ -182,14 +189,31 @@
 
 :root[data-casca="celular"] .cel-folha-campo-volume {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
 }
 
 :root[data-casca="celular"] .cel-folha-deslizante {
   box-sizing: border-box;
   width: 100%;
+  min-width: 0;
   min-height: var(--cel-alvo);
+  margin: 0;
   accent-color: var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] .cel-folha-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(22px * var(--cel-escala));
+  color: var(--seele-osso);
+  background: var(--seele-controle);
 }
 
 /* ------------------------------------------- as superfícies de MOD (§7)
@@ -297,63 +321,132 @@
    conversa (specs/07: a sessão esmaece e continua legível). A camada do
    desktop já não intercepta o toque fora da caixa, e o `.na-bateria` dele
    esmaece a sessão embaixo. */
+/* A queda é uma página, e não uma caixa sobre a conversa (Cel-reconectando.dc):
+   o enlace pulsando, o título, a conta grande e, no pé, o que o SEELE tenta.
+   A barra da ligação sobe por cima dela e diz «sem som · reconectando». */
 :root[data-casca="celular"] #bateria.camada-bateria {
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0 0 calc(148px + var(--cel-seguro-pe));
+  pointer-events: auto;
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] .bateria-enlace { display: block; order: 1; margin: 56px auto 0; }
+
+:root[data-casca="celular"] .bateria-enlace-cheio { fill: var(--seele-laranja-nerv); }
+:root[data-casca="celular"] .bateria-enlace-vazio { fill: none; stroke: var(--seele-laranja-nerv); stroke-width: 4; }
+:root[data-casca="celular"] .bateria-enlace-pulso { fill: none; stroke: var(--seele-osso); stroke-width: 4; stroke-dasharray: 4 6; }
+
+:root[data-casca="celular"] .bateria-enlace .bateria-enlace-pulso {
+  animation: cel-bateria-pulso 1.4s ease-in-out infinite;
+}
+
+@keyframes cel-bateria-pulso { 50% { opacity: 0.3; } }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-casca="celular"] .bateria-enlace .bateria-enlace-pulso { animation: none; }
 }
 
 :root[data-casca="celular"] #bateria .bateria-caixa {
   width: 100%;
-  max-width: 600px;
-  padding: 8px 8px 12px;
-  gap: 8px;
-  border-width: 1px;
-  border-radius: var(--seele-raio-painel);
+  max-width: none;
+  max-height: none;
+  height: 100%;
+  padding: calc(var(--cel-seguro-topo) + 28px) calc(20px + var(--cel-seguro-dir)) 0 calc(20px + var(--cel-seguro-esq));
+  gap: 16px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: center;
+  align-items: stretch;
 }
 
-:root[data-casca="celular"] #bateria .bateria-cabeca {
-  padding: calc(var(--cel-seguro-topo) + 8px) calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+:root[data-casca="celular"] #bateria .bateria-cabeca,
+:root[data-casca="celular"] #bateria .bateria-corpo,
+:root[data-casca="celular"] #bateria .bateria-dizeres {
+  display: contents;
 }
 
 :root[data-casca="celular"] #bateria .bateria-nome {
+  order: 2;
+  display: block;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: calc(22px * var(--cel-escala));
+  font-size: calc(32px * var(--cel-escala));
   letter-spacing: var(--seele-tracking-cartela);
   line-height: 1.1;
-  text-transform: none;
+  color: var(--seele-osso);
+  text-transform: lowercase;
   overflow-wrap: anywhere;
 }
 
-:root[data-casca="celular"] #bateria .bateria-corpo {
-  gap: 12px;
-  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+:root[data-casca="celular"] #bateria .bateria-nome::first-letter { text-transform: uppercase; }
+:root[data-casca="celular"] #bateria .bateria-nome::before { display: none; }
+
+:root[data-casca="celular"] #bateria .bateria-frase {
+  order: 3;
+  margin: 0;
+  font-size: calc(14px * var(--cel-escala));
+  color: var(--seele-osso-apagado);
 }
 
 :root[data-casca="celular"] #bateria #bateria-conta {
-  font-size: calc(40px * var(--cel-escala));
+  order: 4;
+  font-size: calc(44px * var(--cel-escala));
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-:root[data-casca="celular"] #bateria .bateria-dizeres {
+:root[data-casca="celular"] #bateria .bateria-dizeres > .rotulo {
+  order: 5;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: calc(12px * var(--cel-escala));
+  letter-spacing: 0;
+  text-transform: lowercase;
+  color: var(--seele-rotulo-claro);
+}
+
+/* O que o SEELE tenta, num cartão no pé. */
+:root[data-casca="celular"] #bateria .bateria-pe {
+  order: 6;
+  margin-top: auto;
   gap: 2px;
+  padding: 12px 16px;
+  text-align: left;
+  border-radius: 18px;
+  background: var(--seele-vidro);
+  border: var(--seele-b) solid var(--seele-vidro-borda);
 }
 
-/* «2 tentativas» não precisa de rótulo embaixo de RECONECTANDO; a frase de que
-   o SEELE já está tentando fica, porque ela é a resposta a «posso apressar?». */
 :root[data-casca="celular"] #bateria .bateria-pe .rotulo {
   display: none;
 }
 
-:root[data-casca="celular"] #bateria .bateria-pe {
-  gap: 2px;
-  padding: 0 calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+:root[data-casca="celular"] #bateria #bateria-tentativas {
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: calc(12px * var(--cel-escala));
 }
 
 :root[data-casca="celular"] #bateria .bateria-forcar {
   margin: 4px 0 0;
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: calc(12px * var(--cel-escala));
   line-height: 1.4;
+  color: var(--seele-osso-apagado);
+}
+
+/* A barra da ligação por cima da página, vermelha: «SEM SOM · RECONECTANDO». */
+:root[data-casca="celular"]:has(#bateria:not([hidden])) #tela-sessao > .voz-celular {
+  position: relative;
+  z-index: 22;
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 85%, var(--seele-negro-absoluto));
 }
 
 /* O alerta em largura cheia. A porta de moderar dele não aparece: moderar é
@@ -507,4 +600,143 @@
 :root[data-casca="celular"] .cel-folha-detalhe {
   min-width: 0;
 }
-:root[data-casca="celular"] #mods-aceite .mods-titulo { font-size:22px; line-height:1.25; font-weight:500; letter-spacing:.02em; }
+/* ------------------------------------------- o aceite de MODs (Cel-mods.dc)
+ *
+ * No celular o aceite é a tela inteira, e não uma caixa sobre a entrada: o
+ * eyebrow no alto, o título grande, um cartão por MOD, e as duas ações no pé,
+ * a que aceita em cima. Os nós são os do desktop (camada-mods.js). */
+:root[data-casca="celular"] #mods-aceite { padding: 0; align-items: stretch; }
+
+:root[data-casca="celular"] #mods-aceite .mods-caixa {
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] #mods-aceite .mods-cabeca {
+  padding: calc(var(--cel-seguro-topo) + 28px) calc(20px + var(--cel-seguro-dir)) 0 calc(20px + var(--cel-seguro-esq));
+  row-gap: 10px;
+  align-items: center;
+}
+
+:root[data-casca="celular"] #mods-aceite .mods-eyebrow {
+  font-family: var(--seele-mono);
+  font-size: calc(11px * var(--cel-escala));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--seele-rotulo-claro);
+  gap: 0;
+}
+
+/* A marca já está na entrada que o aceite cobre: uma forma por tela. */
+:root[data-casca="celular"] #mods-aceite .mods-marca { display: none; }
+
+:root[data-casca="celular"] #mods-aceite .mods-titulo {
+  flex: 0 0 100%;
+  font-size: calc(30px * var(--cel-escala));
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: lowercase;
+}
+
+:root[data-casca="celular"] #mods-aceite .mods-titulo::first-letter { text-transform: uppercase; }
+
+:root[data-casca="celular"] #mods-aceite .mods-corpo-geral {
+  padding: 12px calc(20px + var(--cel-seguro-dir)) 0 calc(20px + var(--cel-seguro-esq));
+  gap: 14px;
+}
+
+:root[data-casca="celular"] #mods-aceite .mods-prosa {
+  font-size: calc(15px * var(--cel-escala));
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
+}
+
+:root[data-casca="celular"] #mods-aceite .mods-prosa b { font-weight: 400; }
+
+:root[data-casca="celular"] #mods-aceite .mods-lista { gap: 10px; }
+
+:root[data-casca="celular"] #mods-aceite .mods-item {
+  padding: 14px 16px;
+  border-radius: 20px;
+}
+
+/* O cartão é texto: nome e versão na primeira linha, o resto cada um na sua. */
+:root[data-casca="celular"] #mods-aceite .mods-ordem { display: none; }
+
+:root[data-casca="celular"] #mods-aceite .mods-corpo {
+  flex-flow: row wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 4px;
+}
+
+:root[data-casca="celular"] #mods-aceite .mods-corpo > :is(.mods-repo, .mods-hash, .mods-alcances, .mods-servidor, .mods-tema) {
+  flex: 0 0 100%;
+}
+
+:root[data-casca="celular"] #mods-aceite :is(.mods-repo, .mods-hash) {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+:root[data-casca="celular"] #mods-aceite :is(.mods-repo, .mods-hash) > span:last-child { overflow-wrap: anywhere; }
+
+:root[data-casca="celular"] #mods-aceite .mods-versao { font-family: var(--seele-mono); }
+
+/* As ações no pé, a que aceita primeiro, sobre um degradê que não corta a lista. */
+:root[data-casca="celular"] #mods-aceite .mods-acoes {
+  position: sticky;
+  bottom: 0;
+  flex-direction: column-reverse;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin: auto 0 0;
+  padding: 14px 0 max(30px, var(--cel-seguro-pe));
+  background: linear-gradient(transparent, var(--seele-negro-absoluto) 30%);
+}
+
+:root[data-casca="celular"] #mods-aceite .mods-acoes > button {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 52px;
+  font-family: var(--seele-ui);
+  font-size: calc(15px * var(--cel-escala));
+}
+
+
+/* O que o celular não faz, dentro de uma folha: a frase como nota, centrada, sem
+   a caixa tracejada (Cel-folha-pessoa.dc). O rótulo fica para quem escuta. */
+:root[data-casca="celular"] .cel-folha .cel-fora {
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+:root[data-casca="celular"] .cel-folha .cel-fora > .rotulo {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* As ações da folha de uma mensagem em frase, e não em caixa alta. */
+:root[data-casca="celular"] :is(#cel-folha-mensagem, #cel-folha-anexar) .cel-folha-acoes > button {
+  font-family: var(--seele-ui);
+  letter-spacing: 0;
+  text-transform: lowercase;
+}
+
+:root[data-casca="celular"] :is(#cel-folha-mensagem, #cel-folha-anexar) .cel-folha-acoes > button::first-letter {
+  text-transform: uppercase;
+}

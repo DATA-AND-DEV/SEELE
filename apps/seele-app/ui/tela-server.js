@@ -90,8 +90,6 @@ const LADOS = [
   },
 ];
 
-/** Quantos blocos o medidor de entrada tem. 26, como no comp. */
-const BLOCOS_DO_MEDIDOR = 26;
 
 /**
  * O que a porta de saída diz, conforme de onde se entrou.
@@ -145,7 +143,8 @@ function abrirSecao(id) {
       pararOTesteDeMicrofone().catch((falha) => console.warn("teste:", falha));
     }
     if (!atual) continue;
-    $("server-titulo").textContent = botao.dataset.titulo;
+    // «MODS» é a única sigla do título: o CSS põe o resto em caixa de frase e deixa esta como está.
+    $("server-titulo").textContent = botao.dataset.titulo === "MODS" ? "MODs" : botao.dataset.titulo;
     $("server-subtitulo").textContent = botao.dataset.sub;
     // **Desenhada ao abrir, e não ao subir a janela.** As duas listas de MODS
     // leem disco e perguntam ao servidor hospedado; fazê-lo no arranque
@@ -398,12 +397,12 @@ function desenharNivel(snapshot) {
   if (nota) { nota.textContent = ""; nota.hidden = true; }
 
   const nivel = Math.max(0, Math.min(1, snapshot.telemetry.input_level));
-  const cheios = Math.round(nivel * BLOCOS_DO_MEDIDOR);
   medidor.dataset.vivo = "sim";
   // O número acompanha os blocos pela mesma regra que a marca acompanha a cor:
   // a forma sozinha não é legível em monocromático nem por leitor de tela.
-  medidor.textContent =
-    "█".repeat(cheios) + "░".repeat(BLOCOS_DO_MEDIDOR - cheios) + ` ${Math.round(nivel * 100)}%`;
+  // A barra é desenho do CSS (`--parte`); o texto é só o número, que é o que o leitor de tela lê.
+  medidor.style.setProperty("--parte", `${Math.round(nivel * 100)}%`);
+  medidor.textContent = `${Math.round(nivel * 100)}%`;
 }
 
 /**
@@ -1463,8 +1462,6 @@ async function tirarIcone() {
 // `Option<VersaoNova>` ou como uma das seis variantes de `FalhaAoAtualizar`,
 // que viram frase em `frases.js` como todo o resto.
 
-/** Quantos blocos a barra do download tem. Vinte, como a do roster. */
-const BLOCOS_DO_DOWNLOAD = 20;
 
 /** Quantos bytes tem um megabyte, para a contagem ao lado da barra. */
 const BYTES_POR_MEGA = 1024 * 1024;
@@ -1507,7 +1504,8 @@ function desenharAndamentoDoDownload(andamento) {
   const parte = Math.max(0, Math.min(100, Math.round((andamento.baixados / andamento.total) * 100)));
   // A porcentagem ao lado dos blocos, sempre: `specs/06-clientes-gui.md` proíbe
   // informação que só a forma carregue, e uma parede de blocos é forma.
-  medido(barra, `${blocos(parte, BLOCOS_DO_DOWNLOAD)} ${parte}%`);
+  barra.style.setProperty("--parte", `${parte}%`);
+  medido(barra, `${parte}%`);
   contagem.textContent = `${emMegabytes(andamento.baixados)} de ${emMegabytes(andamento.total)}`;
 }
 

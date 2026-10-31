@@ -7,6 +7,8 @@
 body {
   margin: 0;
   min-height: 100vh;
+  display: grid;
+  place-items: center;
   padding: 16px;
   box-sizing: border-box;
   background-color: var(--seele-negro-absoluto);
@@ -18,7 +20,7 @@ main {
   box-sizing: border-box;
   width: 720px;
   max-width: 100%;
-  padding: 36px 40px;
+  padding: 40px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -27,6 +29,24 @@ main {
   background: var(--seele-vidro);
 }
 .diag-marca { display: flex; align-items: center; gap: 12px; }
+.diag-marca-rotulo { margin: 0; font-size: 11px; letter-spacing: var(--seele-tracking-rotulo); text-transform: uppercase; color: var(--seele-rotulo-painel); }
+.diag-campo { display: flex; flex-direction: column; gap: 8px; }
+.diag-dica { margin: 0; font-family: var(--seele-ui); font-size: 12px; color: var(--seele-osso-apagado); }
+.diag-etapas {
+  list-style: none; margin: 0; padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--seele-campo); border: 1px solid var(--seele-vidro-borda); border-radius: var(--seele-raio-cartao);
+  font-size: 13px;
+}
+.diag-etapas li { display: flex; align-items: baseline; gap: 12px; }
+.diag-etapas li > span:first-child { flex: 0 0 auto; width: 1ch; color: var(--seele-fosforo); }
+.diag-etapas li[data-estado="falha"] > span:first-child { color: var(--seele-vermelho-alerta); }
+.diag-etapas li > span:nth-child(2) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.diag-etapas li > span:nth-child(3) { flex: 0 0 auto; color: var(--seele-rotulo-painel); }
+.diag-bruto { font-size: 12px; color: var(--seele-osso-apagado); }
+.diag-bruto:has(pre:empty) { display: none; }
+.diag-bruto > summary { cursor: pointer; min-height: 24px; letter-spacing: var(--seele-tracking-rotulo); text-transform: uppercase; }
+.diag-bruto > pre { margin-top: 10px; }
 .diag-marca img { display: block; flex: 0 0 auto; }
 h1 {
   margin: 0;
@@ -34,15 +54,19 @@ h1 {
   font-weight: 700;
   font-size: 40px;
   line-height: 1.1;
+  text-wrap: balance;
   letter-spacing: -0.045em;
 }
 label { display: block; font-family: var(--seele-ui); font-weight: 500; }
 textarea {
   box-sizing: border-box;
+  display: block;
   width: 100%;
-  min-height: 48px;
-  padding: 12px 16px;
+  min-height: 52px;
+  padding: 14px 16px;
+  resize: vertical;
   font: inherit;
+  font-family: var(--seele-ui);
   color: var(--seele-osso);
   background: var(--seele-campo);
   border: 1px solid var(--seele-campo-borda);
@@ -52,6 +76,7 @@ textarea::placeholder { color: var(--seele-rotulo-painel); }
 textarea:focus { outline: none; border-color: var(--seele-laranja-nerv); }
 .diag-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 button, a.diag-primario {
+  text-transform: uppercase;
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -81,7 +106,7 @@ button:hover:not(:disabled) { background: var(--seele-controle-hover); }
 button.diag-primario:hover:not(:disabled), a.diag-primario:hover { background: var(--seele-laranja-hover); border-color: var(--seele-laranja-hover); }
 button:disabled { opacity: .5; cursor: default; }
 button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
-#estado { margin: 0; font-family: var(--seele-ui); font-size: 12px; color: var(--seele-osso-apagado); }
+#estado { margin: 0 0 0 auto; font-family: var(--seele-ui); font-size: 12px; color: var(--seele-osso-apagado); text-align: right; }
 /* O resultado é a caixa escura do canvas: borda a 7%, canto de 18px. */
 pre {
   margin: 0;

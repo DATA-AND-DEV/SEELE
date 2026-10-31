@@ -45,6 +45,7 @@
       // o alvo das contribuições `pessoa.detalhes`, que a folha mostra.
       id: linha.dataset.pessoaId ?? null,
       nome: linha.querySelector(".pessoa-nome")?.textContent ?? "",
+      iniciais: linha.querySelector(".pessoa-avatar")?.textContent ?? "",
       sinal: linha.querySelector(".pessoa-sync-valor")?.textContent ?? "",
       estado: linha.querySelector(".pastilha")?.textContent ?? "",
       volume: deslizante ? Number(deslizante.value) : null,
@@ -60,6 +61,55 @@
       podeModerar: !!linha.querySelector("button[data-moderar-pessoa]"),
     });
   }
+
+  // ------------------------------------------------------------- o filtro
+  //
+  // A busca e os recortes só escondem linhas da lista: o desenho e a
+  // reconciliação continuam do desktop. «Na sala» é quem está num grupo com
+  // ocupação (n/m); «Fora», quem está fora de sala.
+  const filtro = document.getElementById("pessoas-filtro");
+  filtro.hidden = false;
+  const busca = document.getElementById("pessoas-busca");
+  const recortes = [...filtro.querySelectorAll("[data-recorte]")];
+  let recorte = "todas";
+
+  const naSala = (linha) => /\//.test(linha.closest(".roster-grupo")?.querySelector(".roster-sala-conta")?.textContent ?? "");
+  const semAcento = (texto) => texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+  function aplicarFiltro() {
+    const termo = semAcento(busca.value.trim());
+    const contas = { todas: 0, sala: 0, fora: 0 };
+    for (const linha of lista.querySelectorAll("li.pessoa")) {
+      const dentro = naSala(linha);
+      contas.todas += 1;
+      contas[dentro ? "sala" : "fora"] += 1;
+      const nome = semAcento(linha.querySelector(".pessoa-nome")?.textContent ?? "");
+      linha.hidden = (recorte === "sala" && !dentro) || (recorte === "fora" && dentro) || (termo !== "" && !nome.includes(termo));
+    }
+    for (const grupo of lista.querySelectorAll(":scope > .roster-grupo")) {
+      const pessoas = grupo.querySelectorAll("li.pessoa");
+      // O grupo de quem está fora do ar não tem pessoa: só some quando se filtra.
+      grupo.hidden = pessoas.length
+        ? ![...pessoas].some((linha) => !linha.hidden)
+        : (recorte !== "todas" || termo !== "");
+    }
+    for (const [nome, valor] of Object.entries(contas)) {
+      const conta = filtro.querySelector(`[data-conta="${nome}"]`);
+      if (conta) conta.textContent = String(valor);
+    }
+  }
+
+  for (const botao of recortes) {
+    botao.addEventListener("click", () => {
+      recorte = botao.dataset.recorte;
+      for (const outro of recortes) outro.setAttribute("aria-pressed", String(outro === botao));
+      aplicarFiltro();
+    });
+  }
+  busca.addEventListener("input", aplicarFiltro);
+  // Cada quadro do desktop pode trazer linhas novas: elas nascem sem o filtro.
+  new MutationObserver(aplicarFiltro).observe(lista, { childList: true, subtree: true });
+  aplicarFiltro();
 
   // Pelo apelido, para quem abre a folha de fora da lista (a grade da CHAMADA).
   // O alias interno resolve o PersonId, inclusive para quem não tem deslizante.

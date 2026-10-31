@@ -86,26 +86,40 @@
   font-size: 32px;
   line-height: 1.1;
   letter-spacing: var(--seele-tracking-cartela);
+  text-transform: none;
   color: var(--seele-osso);
 }
 
-/* A tecla que fecha, escrita, em pílula de 44px. */
+/* «esc fecha»: a tecla num chip e a palavra ao lado, como no desenho. O botão
+   inteiro segue com 44px de alvo, mas sem moldura própria. */
 .compartilhar-fechar {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 44px;
   min-height: 44px;
-  padding: 0 14px;
+  padding: 0 4px;
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-osso);
-  background: var(--seele-controle);
-  border: 1px solid var(--seele-controle-borda);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-rotulo-painel);
+  background: transparent;
+  border: 0;
   border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
-.compartilhar-fechar:hover { background: var(--seele-controle-hover); }
+.compartilhar-tecla {
+  padding: 0 8px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 8px;
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+}
+
+.compartilhar-fechar:hover .compartilhar-tecla { background: var(--seele-controle-hover); }
 
 .compartilhar-fechar:focus-visible {
   outline: var(--seele-b-forte) solid var(--seele-osso);
@@ -129,8 +143,65 @@
   margin: 0;
 }
 
-.compartilhar-corpo > .compartilhar-escolha:not(.compartilhar-escolha-som):not(:has(.compartilhar-fontes-caixa)) {
-  flex: 0 1 auto;
+/* A linha dos tetos: resolução, quadros e som lado a lado, quebrando por
+   inteiro quando a largura não dá. */
+.compartilhar-opcoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 24px;
+}
+
+.compartilhar-opcoes > .compartilhar-escolha { flex: 0 1 auto; }
+
+.compartilhar-pilulas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Rádio nativo dentro da pílula: o teclado percorre com as setas e o leitor de
+   tela anuncia «1 de 3». A escolhida diz-se também por `checked`, não só pela
+   cor do fundo. */
+.compartilhar-pilula {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.compartilhar-pilula:hover { background: var(--seele-controle-hover); }
+
+.compartilhar-pilula input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.compartilhar-pilula:has(input:checked) {
+  border-color: var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 14%, transparent);
+  color: var(--seele-laranja-claro);
+}
+
+.compartilhar-pilula:has(input:focus-visible) {
+  outline: var(--seele-b-forte) solid var(--seele-osso);
+  outline-offset: 2px;
 }
 
 /* ---------- a permissão e o módulo que falta ----------
@@ -166,6 +237,16 @@
   grid-column: 2;
   grid-row: 1 / span 3;
   margin-left: 16px;
+}
+
+/* No desenho o botão do aviso é neutro e baixo: o laranja fica para o
+   COMPARTILHAR do rodapé, que é a ação da caixa. */
+.compartilhar-modulo > button,
+.compartilhar-permissao > button {
+  min-height: 44px;
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  color: var(--seele-osso);
 }
 
 .compartilhar-permissao-diz,
@@ -228,10 +309,16 @@
   accent-color: var(--seele-laranja-nerv);
 }
 
-.compartilhar-som-rotulo .rotulo { color: var(--seele-osso); }
+.compartilhar-som-rotulo .rotulo {
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--seele-osso);
+}
 
 .compartilhar-som-aviso {
-  margin: 0;
+  margin: -8px 0 0;
   font-family: var(--seele-ui);
   font-size: 12px;
   line-height: 1.5;
@@ -300,6 +387,10 @@
   background: color-mix(in srgb, var(--seele-osso) 8%, var(--seele-negro-absoluto));
 }
 
+.compartilhar-fonte[aria-pressed="true"]::before {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--seele-osso) 12%, var(--seele-negro-absoluto)), var(--seele-negro-absoluto));
+}
+
 .compartilhar-fonte:hover { background: var(--seele-controle-hover); }
 
 .compartilhar-fonte:focus-visible {
@@ -353,8 +444,20 @@
 .compartilhar-select {
   font-family: var(--seele-ui);
   font-size: 14px;
-  min-width: 200px;
   color: var(--seele-osso);
+  /* Fora da vista e do foco: quem escolhe é a pílula (ver `.compartilhar-pilula`). */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .compartilhar-select:focus-visible {

@@ -453,3 +453,66 @@
   #perfil .perfil-corpo { padding: 14px 20px 20px; }
   #perfil .perfil-previa { width: 72px; height: 72px; border-radius: 22px; font-size: 30px; }
 }
+
+/* ---- 0.19, segunda passada: títulos, rótulos e a ordem do perfil ----
+   O desenho escreve os títulos e rótulos em caixa de frase («Seu perfil»,
+   «Nome da sala»). O texto continua o mesmo no DOM; a caixa baixa com a
+   primeira letra alta é só apresentação, e só onde não há sigla no meio. */
+.nomear-titulo, .nomear-campo > .rotulo { text-transform: lowercase; }
+.nomear-titulo::first-letter, .nomear-campo > .rotulo::first-letter { text-transform: uppercase; }
+.perfil-rotulo-nota { font-weight: 400; color: var(--seele-osso-apagado); }
+.perfil-rotulo-nota::first-letter { text-transform: none; }
+
+/* O perfil em ordem de leitura do desenho: imagem, apelido, ligações diretas, os
+   botões do apelido e, por último, a agenda. O formulário dissolve a caixa dele
+   (`display: contents`) para os botões descerem para depois do cartão do código;
+   ele continua sendo o `<form>`, e o submit é o mesmo. */
+#perfil .perfil-cartao-eu { display: contents; }
+#perfil .perfil-painel { display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
+#perfil .perfil-imagem { order: 1; }
+#perfil .nomear-campo { order: 2; }
+#perfil #perfil-sem-nome { order: 2; }
+#perfil .perfil-cartao-codigo { order: 3; }
+#perfil .perfil-fim { order: 4; justify-content: flex-end; display: flex; }
+#perfil #perfil-erro { order: 5; }
+#perfil .perfil-cartao-agenda { order: 6; }
+#perfil .perfil-imagem-rotulo {
+  order: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--seele-osso);
+}
+#perfil .perfil-imagem-texto { display: flex; flex-direction: column; }
+#perfil .perfil-imagem-texto .nota { font-family: var(--seele-mono); font-size: 11px; letter-spacing: 0; }
+
+/* Ligações diretas: o rótulo e o código na mesma linha, «receber» e o estado na de baixo. */
+#perfil .area-cartao.perfil-cartao-codigo {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 12px;
+}
+#perfil .perfil-sala-eyebrow {
+  grid-column: 1 / -1;
+  font-family: var(--seele-mono);
+  font-size: 10px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+#perfil .perfil-cartao-codigo > .rotulo {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-osso-apagado);
+}
+#perfil .perfil-sala-codigo { grid-column: 2 / -1; }
+#perfil #perfil-codigo { background: none; border-color: transparent; padding-inline: 0; font-size: 15px; }
+#perfil .perfil-sala-receber { grid-column: 1 / 3; }
+#perfil #perfil-sala-estado { grid-column: 3; justify-self: end; text-align: right; }
+#perfil .perfil-sala-firewall { grid-column: 1 / -1; }
+@media (max-width: 520px) {
+  #perfil .area-cartao.perfil-cartao-codigo { grid-template-columns: minmax(0, 1fr); }
+  #perfil .perfil-sala-codigo, #perfil .perfil-sala-receber, #perfil #perfil-sala-estado { grid-column: 1; justify-self: start; text-align: left; }
+}

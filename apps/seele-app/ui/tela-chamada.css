@@ -1313,3 +1313,118 @@ body[data-vendo-tela="sim"] .varredura {
 @media(max-width:900px) {
   #tela-sessao[data-vista="ligacao"] .chamada-acoes-estreitas { display:none; }
 }
+
+/* ================= redesign 0.19, segunda passada: a chamada =================
+
+   Fonte: o canvas `Chamada`. A barra de cima vira rótulo + título à esquerda e
+   as duas pílulas à direita; a tela compartilhada tem o cabeçalho e os controles
+   numa fileira só (o que o canvas desenha), e os cartões das pessoas seguem o
+   desenho dele: avatar de 56px, pílula de estado, a barra de sinal com o número
+   ao lado, e o volume em passos.
+
+   O que **não** foi trazido, e por quê: a coluna de salas e canais fica, porque é
+   o único caminho daqui para outra sala ou para a conversa; e o CHAT e o
+   DESLIGAR do canvas pedem um comportamento que a chamada de servidor não tem. */
+
+/* ---------- a barra: rótulo, título e pílulas ---------- */
+:root:not([data-casca="celular"]) #vista-chamada .vista-chamada-barra {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "placa enlace campo" "nome enlace campo";
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 0;
+  padding: 20px 22px 4px;
+  border-bottom: 0;
+}
+:root:not([data-casca="celular"]) #vista-chamada .vista-chamada-barra > .espaco { display: none; }
+:root:not([data-casca="celular"]) #vista-chamada .chamada-placa { grid-area: placa; padding: 0; background: none; border: 0; }
+:root:not([data-casca="celular"]) #vista-chamada #chamada-nome { grid-area: nome; font-size: 32px; line-height: 1.1; }
+:root:not([data-casca="celular"]) #vista-chamada .chamada-enlace { grid-area: enlace; grid-row: 1 / 3; align-self: center; }
+:root:not([data-casca="celular"]) #vista-chamada .chamada-campo { grid-area: campo; grid-row: 1 / 3; align-self: center; }
+:root:not([data-casca="celular"]) #vista-chamada #palco-de-mods-ver-o-palco { grid-row: 1 / 3; }
+
+/* ---------- a tela compartilhada: cabeçalho e controles na mesma fileira ---------- */
+:root:not([data-casca="celular"]) #palco {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 12px 22px 0;
+  background: color-mix(in srgb, var(--seele-negro-painel) 90%, transparent);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 22px;
+}
+:root:not([data-casca="celular"]) #palco .chamada-palco-cabeca,
+:root:not([data-casca="celular"]) #palco .chamada-palco-controles { display: contents; }
+:root:not([data-casca="celular"]) #palco .chamada-palco-controles[hidden] { display: none; }
+:root:not([data-casca="celular"]) #palco .chamada-titulo { order: 1; padding: 10px 0 10px 14px; border: 0; }
+:root:not([data-casca="celular"]) #palco .chamada-palco-razao { order: 2; padding: 10px 0; }
+:root:not([data-casca="celular"]) #palco #palco-mudo { order: 10; margin-left: auto; }
+:root:not([data-casca="celular"]) #palco .chamada-palco-volume { order: 11; }
+:root:not([data-casca="celular"]) #palco #palco-cheia { order: 12; margin-left: 0; }
+:root:not([data-casca="celular"]) #palco #palco-cheia:not([hidden]) + .chamada-palco-controles { order: 12; }
+:root:not([data-casca="celular"]) #palco #palco-parar-de-assistir { order: 13; margin-right: 14px; }
+:root:not([data-casca="celular"]) #palco .chamada-palco-corpo { order: 20; flex: 1 0 100%; border-top: 1px solid var(--seele-vidro-borda); }
+:root:not([data-casca="celular"]) #palco .chamada-palco-aperto { order: 30; flex: 1 0 100%; }
+:root:not([data-casca="celular"]) #palco .chamada-palco-acao,
+:root:not([data-casca="celular"]) #palco .chamada-palco-cheia,
+:root:not([data-casca="celular"]) #palco .chamada-palco-volume {
+  min-height: 36px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0;
+  padding: 0 16px;
+}
+:root:not([data-casca="celular"]) #palco .chamada-palco-volume .rotulo { font-family: var(--seele-ui); font-size: 13px; letter-spacing: 0; color: inherit; }
+
+/* ---------- os cartões das pessoas ---------- */
+:root:not([data-casca="celular"]) #chamada-grade {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 10px;
+  padding: 14px 22px;
+}
+:root:not([data-casca="celular"]) .chamada-cartao {
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
+}
+:root:not([data-casca="celular"]) .chamada-cartao[data-fala="sim"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--seele-fosforo) 25%, transparent);
+  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
+}
+:root:not([data-casca="celular"]) .chamada-cartao[data-fala="sim"] .chamada-cartao-nome { color: var(--seele-osso); }
+:root:not([data-casca="celular"]) .chamada-avatar { width: 56px; height: 56px; border-radius: 18px; border: 0; font-size: 22px; background-color: var(--seele-controle-hover); }
+:root:not([data-casca="celular"]) .chamada-cartao-topo { gap: 8px; }
+:root:not([data-casca="celular"]) .chamada-cartao-estados { order: 2; }
+:root:not([data-casca="celular"]) .chamada-pastilha { min-height: 22px; display: inline-flex; align-items: center; border-radius: var(--seele-raio-pilula); }
+:root:not([data-casca="celular"]) .chamada-cartao-quem .nota { font-size: 11px; color: var(--seele-rotulo-painel); }
+/* O sinal: a barra e, ao lado dela, o número — o rótulo SINAL segue para quem
+   escuta a tela, e sai da vista porque a barra colorida é a leitura. */
+:root:not([data-casca="celular"]) .chamada-cartao-sync { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 6px; }
+:root:not([data-casca="celular"]) .chamada-cartao-linha { display: contents; }
+:root:not([data-casca="celular"]) .chamada-cartao-linha .rotulo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:root:not([data-casca="celular"]) .chamada-cartao-barra { grid-column: 1; grid-row: 1; letter-spacing: -1px; }
+:root:not([data-casca="celular"]) .chamada-cartao-numero { grid-column: 2; grid-row: 1; }
+:root:not([data-casca="celular"]) .chamada-cartao-marca { display: none; }
+:root:not([data-casca="celular"]) .chamada-cartao-valor { font-size: 11px; font-weight: 400; }
+:root:not([data-casca="celular"]) .chamada-volume { padding-top: 2px; font-size: 12px; }
+:root:not([data-casca="celular"]) .chamada-volume .rotulo { font-family: var(--seele-mono); font-size: 12px; letter-spacing: 0; text-transform: lowercase; color: var(--seele-osso-apagado); }
+:root:not([data-casca="celular"]) .chamada-vol-passo { border-radius: 50%; background: transparent; border: 1px solid var(--seele-campo-borda); color: var(--seele-osso); }
+:root:not([data-casca="celular"]) .chamada-volume { flex-wrap: wrap; row-gap: 6px; }
+:root:not([data-casca="celular"]) .chamada-volume .rotulo { order: 1; }
+:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-passo[data-vol-acao="menos"] { order: 2; }
+:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-valor { order: 3; width: auto; min-width: 40px; text-align: center; font-size: 12px; }
+:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-passo[data-vol-acao="mais"] { order: 4; }
+:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-celas { order: 5; flex: 1 0 100%; }
+
+:root:not([data-casca="celular"]) #palco { justify-content: flex-end; }
+:root:not([data-casca="celular"]) #palco .chamada-palco-razao { margin-right: auto; }

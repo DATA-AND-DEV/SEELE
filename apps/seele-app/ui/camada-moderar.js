@@ -305,6 +305,7 @@ function desenharModeracao(snapshot) {
   // e a camada diz o motivo de cada caixa desligada.
   if (typeof abrirCargos === "function" && !portaDosCargos) {
     portaDosCargos = elemento("div", "moderar-acao");
+    portaDosCargos.append(elemento("span", "moderar-acao-titulo", "Cargos"));
     const botao = elemento("button", "moderar-verbo", FRASES_DOS_CARGOS.cargosDestaPessoa);
     botao.type = "button";
     botao.addEventListener("click", () => {
@@ -362,7 +363,8 @@ function quemEstaEscolhido() {
  * O foco pousa no CANCELAR de propósito. Para um ato que não se desfaz, a tecla
  * que já está debaixo do dedo tem que ser a que não faz nada.
  */
-function armarAto(rotulo, consequencia, executar) {
+function armarAto(rotulo, consequencia, executar, titulo = null) {
+  if (titulo) $("moderar-titulo").textContent = titulo;
   atoArmado = { rotulo, consequencia, executar };
   $("moderar-escolha").hidden = true;
   $("moderar-confirmacao").hidden = false;
@@ -387,6 +389,8 @@ function desarmarAto() {
   $("moderar-fechar").hidden = false;
   $("moderar-erro").hidden = true;
   $("moderar-escolha").hidden = false;
+  // O título da confirmação («Banir Lia?») volta a ser o da escolha.
+  $("moderar-titulo").textContent = "Moderar uma pessoa";
   if ($("moderar-vazio").hidden) $("moderar-quem").focus();
   else $("moderar-fechar").focus();
 }
@@ -430,7 +434,7 @@ async function abrirModeracao(alvo) {
   $("moderar-fechar").hidden = false;
   caixaComEscolha = true;
   atoArmado = null;
-  $("moderar-titulo").textContent = "MODERAÇÃO";
+  $("moderar-titulo").textContent = "Moderar uma pessoa";
   $("moderar-confirmacao").hidden = true;
   $("moderar-fechar").hidden = false;
   $("moderar-escolha").hidden = false;
@@ -843,6 +847,7 @@ $("moderar-expulsar").addEventListener("click", () => {
   if (!quem) return;
   armarAto(`EXPULSAR ${quem.nome}`, consequenciaDeExpulsar(quem), () =>
     invoke("expulsar_pessoa", { person: quem.id }),
+    `Expulsar ${quem.nome}?`,
   );
 });
 
@@ -876,6 +881,7 @@ $("moderar-banir").addEventListener("click", async () => {
       reason: motivo === "" ? null : motivo,
       expiresAt: ate,
     }),
+    dias > 0 ? `Banir ${quem.nome} por ${dias} ${dias === 1 ? "dia" : "dias"}?` : `Banir ${quem.nome} para sempre?`,
   );
 });
 
@@ -886,6 +892,7 @@ $("moderar-mover").addEventListener("click", () => {
   const destino = para.options[para.selectedIndex]?.textContent ?? "";
   armarAto(`MOVER ${quem.nome}`, consequenciaDeMover(quem, destino), () =>
     invoke("mover_pessoa", { person: quem.id, voiceRoom: Number(para.value) }),
+    `Mover ${quem.nome}?`,
   );
 });
 

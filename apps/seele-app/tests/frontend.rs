@@ -5722,7 +5722,9 @@ fn the_download_bar_is_left_unmeasured_when_the_package_carries_no_total() {
     let Some(unmeasured) = body.find("naoMedido(") else {
         panic!("the missing total is not marked absent anywhere:\n{body}");
     };
-    let Some(bar) = body.find("blocos(") else {
+    // Since the second 0.19 pass the bar is a CSS gradient driven by `--parte`
+    // and the text is only the number; `medido(` is what writes it.
+    let Some(bar) = body.find("medido(") else {
         panic!("nothing draws the bar at all:\n{body}");
     };
 
@@ -5739,7 +5741,7 @@ fn the_download_bar_is_left_unmeasured_when_the_package_carries_no_total() {
     assert!(
         body.contains("${parte}%"),
         "the bar has no number beside it, and `specs/06-clientes-gui.md` forbids \
-         information carried by shape alone — a wall of blocks is shape:\n{body}"
+         information carried by shape alone — a drawn bar is shape:\n{body}"
     );
 }
 
@@ -7782,8 +7784,12 @@ fn a_knock_is_identified_by_its_fingerprint_and_never_by_the_name_it_claims() {
     // O nome declarado identifica o pedido; a chave permanece conferível
     // num bloco próprio e continua sendo a identidade usada na decisão.
     let corpo = body_of(&scripts(), "function cartao");
-    assert!(corpo.contains("identidade.append(") && corpo.contains(", impressao)"));
-    assert!(corpo.contains("linha.append(apelido, contexto, batida, identidade, acoes)"));
+    // 0.19: o cartão é uma linha de cima (inicial, texto, botões) e a conferência
+    // da impressão abaixo; a impressão continua num bloco próprio, dentro do
+    // `<details>` da identidade, e a decisão continua nos botões do cartão.
+    assert!(corpo.contains("identidade.append(") && corpo.contains("impressao,"));
+    assert!(corpo.contains("topo.append(inicial, texto, acoes)"));
+    assert!(corpo.contains("linha.append(topo, identidade)"));
 
     // And the nickname is presented as a claim rather than as a fact.
     assert!(

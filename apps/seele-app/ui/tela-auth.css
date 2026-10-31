@@ -191,7 +191,7 @@
    muda é a pele: painéis de vidro de 24px, campos de 16px, a cartela do estado
    virando o chip em pílula e o botão virando a pílula laranja de 52px. */
 .tela[data-modo] .auth-grade {
-  width: min(100%, 1280px);
+  width: 100%;
   padding: 16px;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
@@ -217,16 +217,6 @@
   align-items: flex-start;
 }
 .auth-corpo > * { max-width: 100%; }
-.auth-titulo {
-  margin: 0;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 48px;
-  line-height: 1.1;
-  color: var(--seele-osso);
-  letter-spacing: var(--seele-tracking-cartela);
-  overflow-wrap: anywhere;
-}
 
 /* A cartela do estado vira o chip em pílula. O rótulo continua escrito por
    extenso: a cor nunca é a única informação. */
@@ -298,21 +288,6 @@
 
    `pre-line` mantém a impressão digital na sua própria linha sem inventar um
    segundo elemento, como na frase da espera. */
-.auth-conferido {
-  margin: 0;
-  padding: 20px 22px;
-  border-left: 2px solid var(--seele-fosforo);
-  background: color-mix(in srgb, var(--seele-azul-fraco) 65%, transparent);
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--seele-azul-claro);
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-  align-self: stretch;
-  border: 1px solid color-mix(in srgb, var(--seele-padrao-azul) 45%, transparent);
-  border-radius: 20px;
-  font-family: var(--seele-ui);
-}
 
 /* O botão é a pílula laranja de 52px; o estado da conexão não o pinta mais. */
 .botao-auth, .botao-auth[data-padrao] {
@@ -392,13 +367,6 @@
   letter-spacing: var(--seele-tracking-rotulo);
   text-transform: uppercase;
 }
-.auth-server-corpo {
-  padding: 12px 28px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-}
 .auth-server-nome {
   margin: 0;
   font-family: var(--seele-display);
@@ -414,15 +382,6 @@
   letter-spacing: 0.16em;
   color: var(--seele-osso-apagado);
   font-family: var(--seele-ui);
-}
-.auth-pares {
-  margin: 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--seele-vidro-borda);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  font-size: 14px;
 }
 .auth-par dt { font-family: var(--seele-ui); letter-spacing: var(--seele-tracking-rotulo); }
 
@@ -454,29 +413,9 @@
   color: var(--seele-osso);
 }
 .auth-aperto[open] > summary.coordenada { padding-bottom: 10px; }
-.registro-linhas {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-  line-height: 1.5;
-  overflow-y: auto;
-  min-height: 0;
-  overflow: visible;
-}
 /* `min-width: 0` e `overflow-wrap: anywhere` no texto, e não na linha: uma
    impressão digital são 64 caracteres sem espaço nenhum onde quebrar, e sem
    isto ela empurra a coluna inteira. Foi a correção que o v2 fez neste painel. */
-.registro-linha {
-  display: flex;
-  gap: 12px;
-  min-width: 0;
-  padding: 6px 0;
-  align-items: baseline;
-}
 .registro-hora {
   flex-shrink: 0;
   color: var(--seele-rotulo-painel);
@@ -502,3 +441,189 @@
   .auth-servidor-cabecalho { padding: 20px 20px 0; }
   .auth-aperto, .tela[data-modo="espera"] .auth-aperto { padding: 16px 20px; }
 }
+
+/* ---- 0.19, segunda passada: o cabeçalho, a impressão e os detalhes dentro do painel ----
+   O desenho põe o rótulo «ENTRAR NO SERVIDOR» sobre o nome do servidor em 48px, o
+   chip do estado à direita da mesma linha, a impressão digital em grupos de 4 e
+   os detalhes da conexão dentro do painel largo, e não numa coluna ao lado. */
+.auth-cabeca {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.auth-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 48px;
+  line-height: 1.1;
+  color: var(--seele-osso);
+  letter-spacing: var(--seele-tracking-cartela);
+  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auth-eyebrow {
+  font-family: var(--seele-ui);
+  font-weight: 400;
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+.auth-titulo-nome { display: block; }
+.auth-titulo-nome[hidden] { display: none; }
+.tela[data-modo="espera"] .auth-eyebrow {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 48px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: none;
+  color: var(--seele-osso);
+}
+.auth-selo { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 100%; }
+.auth-selo .auth-nota { margin: 0; text-align: right; }
+.auth-chip-icone {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.auth-conferido {
+  margin: 0;
+  padding: 20px 22px;
+  border-left: 2px solid var(--seele-fosforo);
+  background: color-mix(in srgb, var(--seele-azul-fraco) 65%, transparent);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--seele-azul-claro);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  align-self: stretch;
+  border: 1px solid color-mix(in srgb, var(--seele-padrao-azul) 45%, transparent);
+  border-radius: 20px;
+  font-family: var(--seele-ui);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.auth-conferido-titulo { font-weight: 600; font-size: 16px; color: var(--seele-osso); }
+.auth-impressao {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px 12px;
+  font-family: var(--seele-mono);
+  font-size: 13px;
+  color: var(--seele-azul-claro);
+}
+/* Um grupo de 4 caracteres da impressão: não quebra no meio. */
+.auth-grupo { white-space: nowrap; letter-spacing: .04em; }
+@media (max-width: 700px) { .auth-impressao { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* Os detalhes moram no painel largo, separados por um fio, e o registro é a lista
+   em mono do desenho: marca de estado, texto em caixa alta, hora apagada. */
+.auth-entrada > .auth-aperto,
+.tela[data-modo="espera"] .auth-entrada > .auth-aperto {
+  grid-column: auto;
+  grid-row: auto;
+  align-self: stretch;
+  padding: 20px 0 0;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--seele-vidro-borda);
+  border-radius: 0;
+  margin-top: auto;
+}
+.auth-aperto > summary.coordenada { font-weight: 500; }
+.registro-linhas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-y: auto;
+  min-height: 0;
+  overflow: visible;
+  font-family: var(--seele-mono);
+}
+.registro-linha {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 0;
+  align-items: center;
+}
+/* A marca de estado é desenhada com bordas: a face de dados não tem ✓ nem ○. */
+.registro-linha::before {
+  content: "";
+  flex: 0 0 5px;
+  width: 5px;
+  height: 9px;
+  margin: 0 7px 3px 4px;
+  border: solid var(--seele-fosforo);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.registro-linha:has([data-tom="apagado"])::before,
+.registro-linha:has([data-tom="atencao"])::before {
+  flex-basis: 8px;
+  width: 8px;
+  height: 8px;
+  margin: 0 6px 0 3px;
+  border: 1px solid var(--seele-osso-apagado);
+  border-radius: 50%;
+  transform: none;
+}
+.registro-linha:has([data-tom="atencao"])::before {
+  border-color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-nerv);
+}
+.registro-linha .registro-hora { order: 2; margin-left: auto; font-size: 11px; }
+.registro-linha .registro-texto { order: 1; }
+
+/* A ficha do servidor: o nome já é o título, e as linhas são o par rótulo/valor em mono. */
+.auth-server-ident { display: none; }
+.auth-server-corpo {
+  padding: 12px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding-top: 14px;
+}
+.auth-pares {
+  margin: 0;
+  padding-top: 0;
+  border-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 14px;
+  font-family: var(--seele-mono);
+}
+.auth-par dt { text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--seele-osso-apagado); }
+.auth-par dd { color: var(--seele-osso); }
+
+/* Janela estreita e celular: uma coluna só. `.auth-server` declara `grid-column: 2`
+   mais acima, e sem isto ele abria uma segunda coluna numa grade de uma. */
+@media (max-width: 700px) {
+  .tela[data-modo] .auth-server, .tela[data-modo] .auth-entrada > .auth-aperto { grid-column: 1; grid-row: auto; }
+  .auth-selo { align-items: flex-start; }
+  .auth-selo .auth-nota { text-align: left; }
+}
+:root[data-casca="celular"] #tela-auth .auth-server { grid-column: 1; grid-row: auto; }
+:root[data-casca="celular"] #tela-auth .auth-selo { align-items: flex-start; }
+:root[data-casca="celular"] #tela-auth .auth-selo .auth-nota { text-align: left; }
+:root[data-casca="celular"] #tela-auth .cartela-padrao-rotulo { font-size: 12px; }

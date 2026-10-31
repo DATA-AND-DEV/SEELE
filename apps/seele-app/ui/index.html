@@ -303,6 +303,12 @@
          data-foco="botao-conectar"
          data-anuncio="Entrada. Conecte a um servidor, ou hospede um aqui.">
   <div class="boot-caixa">
+    <!-- Só no navegador (casca larga): de onde vem a página, e a troca para a casca do celular. -->
+    <div class="boot-faixa-web" role="note">
+      <span class="boot-faixa-origem">seele.sh</span>
+      <span class="boot-faixa-texto">a página vem de seele.sh · a tecla de falar só vale com esta aba em foco</span>
+      <button id="boot-abrir-como-celular" class="botao-fantasma" type="button">ABRIR COMO CELULAR</button>
+    </div>
     <header class="boot-topo">
     <div class="boot-marca">
       <!--
@@ -357,13 +363,17 @@
       <button id="botao-server" class="botao-fantasma" type="button"
               aria-label="Abrir configurações"
               title="configuração local desta máquina"
-              data-glifo="engrenagem"></button>
+              ><svg class="boot-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></button>
     </div>
 
     </header>
 
     <div class="boot-colunas">
       <nav class="boot-coluna boot-esq" aria-label="Servidores e conversas">
+    <div class="boot-painel-cabeca">
+      <span class="boot-painel-rotulo"><span class="boot-so-app">SERVIDORES E CONVERSAS</span><span class="boot-so-web">SERVIDORES DESTE NAVEGADOR</span></span>
+      <h2 class="boot-painel-titulo">Onde você está</h2>
+    </div>
     <!--
       **Os servidores, sempre à vista** (0.17, a entrada em largura total): a
       lista de onde você já esteve, a mesma do diálogo do CONECTAR (comando
@@ -392,7 +402,22 @@
 
       </nav>
       <section class="boot-coluna boot-centro" aria-label="Você e seus amigos">
-    <button id="boot-conversa-pessoal" class="botao" type="button" hidden>CONVERSAR POR LINK</button>
+    <div class="boot-painel-cabeca">
+      <span class="boot-painel-rotulo"><span class="boot-so-app">VOCÊ E SEUS AMIGOS</span><span class="boot-so-web">VOCÊ</span></span>
+      <h2 class="boot-painel-titulo"><span class="boot-so-app">Ligar direto</span><span class="boot-so-web">Sua identidade</span></h2>
+    </div>
+    <!-- Só no navegador: a chave mora na página, e o cartão diz de quem é. O nome vem do perfil (`larga-casca.js`). -->
+    <div class="boot-identidade boot-so-web">
+      <p class="boot-identidade-frase">Sua chave mora neste navegador, neste aparelho. Apagar os dados do site apaga a chave junto.</p>
+      <div class="boot-identidade-cartao">
+        <span id="boot-identidade-inicial" class="boot-identidade-avatar" aria-hidden="true"></span>
+        <span class="boot-identidade-texto">
+          <span id="boot-identidade-nome" class="boot-identidade-nome"></span>
+          <span class="boot-identidade-sub">chave guardada neste navegador</span>
+        </span>
+      </div>
+    </div>
+    <button id="boot-conversa-pessoal" class="botao" type="button" hidden><svg class="boot-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/></svg>CONVERSAR POR LINK</button>
     <!--
       **O seu código, na entrada** (0.17). Ele é seu e não depende de nenhuma
       sessão: está aqui com o app aberto, haja ou não conversa. A frase de baixo
@@ -407,7 +432,7 @@
       <div class="perfil-sala-codigo">
         <input id="boot-codigo-valor" readonly spellcheck="false" autocomplete="off"
                aria-labelledby="boot-codigo-titulo">
-        <button id="boot-copiar-codigo" class="botao-fantasma" type="button">COPIAR</button>
+        <button id="boot-copiar-codigo" class="botao-fantasma" type="button"><svg class="boot-icone" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>COPIAR</button>
       </div>
       <p id="boot-codigo-estado" class="nota" role="status"></p>
     </section>
@@ -424,10 +449,12 @@
       <p id="boot-amigos-vazia" class="nota" hidden></p>
       <ul id="boot-amigos-lista" class="amigos-lista"></ul>
       <form id="boot-amigos-form" class="boot-amigos-form" autocomplete="off">
-        <input id="boot-amigo-codigo" spellcheck="false" maxlength="64"
-               placeholder="código do amigo" aria-label="Código do amigo">
-        <input id="boot-amigo-nome" spellcheck="false" maxlength="48"
-               placeholder="nome" aria-label="Nome do amigo">
+        <label class="boot-amigos-campo"><span class="boot-amigos-campo-rotulo">Código do amigo</span>
+          <input id="boot-amigo-codigo" spellcheck="false" maxlength="64"
+                 placeholder="XXXX-XXXX-XX" aria-label="Código do amigo"></label>
+        <label class="boot-amigos-campo"><span class="boot-amigos-campo-rotulo">Nome</span>
+          <input id="boot-amigo-nome" spellcheck="false" maxlength="48"
+                 placeholder="como chamar" aria-label="Nome do amigo"></label>
         <button id="boot-amigo-adicionar" class="botao-fantasma" type="submit">ADICIONAR</button>
       </form>
       <p id="boot-amigos-erro" class="nomear-erro" role="alert" hidden></p>
@@ -455,7 +482,11 @@
     -->
       </section>
       <aside class="boot-coluna boot-dir" aria-label="Hospedar">
-        <span class="rotulo boot-hospedar-titulo">HOSPEDAR</span>
+        <div class="boot-painel-cabeca">
+          <span class="rotulo boot-hospedar-titulo">HOSPEDAR</span>
+          <h2 class="boot-painel-titulo"><span class="boot-so-app">Seu servidor, nesta máquina</span><span class="boot-so-web">Só pelo app</span></h2>
+        </div>
+        <p class="boot-hospedar-frase boot-so-app">Seus amigos conectam direto aqui. Sem conta e sem ninguém no meio.</p>
 
     <!--
       O servidor que esta janela hospeda, no ar, com a sessão fora dele (tarefas
@@ -472,6 +503,8 @@
         <button id="boot-parar-de-hospedar" type="button" class="botao-fantasma">PARAR DE HOSPEDAR</button>
       </div>
     </div>
+    <pre class="boot-terminal boot-so-app" aria-label="Ou pelo terminal"><span class="boot-terminal-nota"># ou pelo terminal</span>
+<span class="boot-terminal-cifrao">$</span> seeled 0.0.0.0:8383</pre>
     <div class="boot-saidas">
       <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
     </div>
@@ -490,6 +523,18 @@
          Servidor 0.15 (spec 0.16, §1), e a tela diz isso uma vez.
          Preenchido por camada-versoes.js. -->
     <p id="boot-linha-legada" class="nota" role="status" hidden></p>
+
+    <!-- Só no navegador (o canvas da casca larga): o que a página não faz, e onde a tela é a mesma. -->
+    <div class="boot-so-web boot-fora">
+      <span class="boot-fora-rotulo">O QUE O NAVEGADOR NÃO FAZ</span>
+      <ul class="boot-fora-lista">
+        <li>hospedar um servidor</li>
+        <li>guardar versões antigas</li>
+        <li>tela entre pares</li>
+        <li>falar com a aba em segundo plano</li>
+      </ul>
+      <p class="boot-fora-nota">Dentro do servidor, a tela do navegador é a mesma do app.</p>
+    </div>
 
 
       </aside>
@@ -750,9 +795,9 @@
            parece quebrado. -->
       <p id="antes-hospedar-motivo" class="antes-motivo" hidden></p>
       <div class="boot-saidas">
+        <button id="antes-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
         <button id="antes-hospedar" type="button" class="botao"
                 aria-describedby="antes-hospedar-motivo">HOSPEDAR</button>
-        <button id="antes-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
       </div>
       <p id="antes-etapa" class="etapa" role="status" hidden></p>
       <p id="antes-erro" class="erro" role="alert" hidden></p>
@@ -784,8 +829,13 @@
        aria-labelledby="portaria-titulo" tabindex="-1" hidden>
     <div class="portaria-caixa">
       <div class="portaria-cabeca">
-        <span class="portaria-marca" data-glifo="chave"></span>
-        <h2 id="portaria-titulo" class="portaria-titulo">A PORTA DESTE SERVIDOR</h2>
+        <div class="portaria-titulos">
+          <!-- Em cima do título, como no desenho; escrito por `desenharPortaria`
+               porque «hospedado nesta máquina» só vale com a hospedagem no ar. -->
+          <span id="portaria-eyebrow" class="portaria-eyebrow" aria-hidden="true">HOSPEDADO NESTA MÁQUINA</span>
+          <h2 id="portaria-titulo" class="portaria-titulo">A porta deste servidor</h2>
+        </div>
+        <span id="portaria-chip" class="portaria-chip" aria-hidden="true" hidden></span>
         <button id="portaria-fechar" class="portaria-fechar" type="button">FECHAR</button>
       </div>
 
@@ -823,7 +873,7 @@
           é uma lista cujas últimas linhas deixam de existir.
         -->
         <div class="portaria-rolagem">
-          <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
+          <h3 id="portaria-secao-fila" class="portaria-secao">QUEM ESTÁ BATENDO</h3>
           <p id="portaria-fila-vazia" class="nota" hidden>Fila vazia.</p>
           <ul id="portaria-fila" class="portaria-lista"></ul>
 
@@ -834,8 +884,9 @@
 
         <!-- As três camadas, sempre as três, e sempre em palavras. -->
         <div class="portaria-camadas">
+          <h3 class="portaria-secao">COMO SE ENTRA</h3>
           <div class="portaria-camada">
-            <span class="rotulo">SENHA DO SERVIDOR</span>
+            <span class="rotulo">Senha do servidor</span>
             <span id="portaria-estado-senha" class="portaria-estado">——</span>
             <input id="portaria-senha" class="portaria-senha" type="password"
                    autocomplete="new-password" placeholder="uma senha para o grupo">
@@ -844,7 +895,7 @@
           </div>
 
           <div class="portaria-camada">
-            <span class="rotulo">CONVITE DE USO ÚNICO</span>
+            <span class="rotulo">Convite de uso único</span>
             <span id="portaria-estado-convites" class="portaria-estado">——</span>
             <input id="portaria-observacao" class="portaria-observacao" type="text"
                    placeholder="para quem é este convite">
@@ -852,7 +903,7 @@
           </div>
 
           <div class="portaria-camada">
-            <span class="rotulo">PORTARIA</span>
+            <span class="rotulo">Pedir permissão</span>
             <span id="portaria-estado-portaria" class="portaria-estado">——</span>
             <button id="portaria-ligar" class="botao-fantasma" type="button"
                     aria-pressed="false">LIGAR</button>
@@ -1104,10 +1155,13 @@
       </div>
 
       <div class="bateria-pe">
+        <!-- A caixa das tentativas, que o canvas 0.19 desenha à parte da nota de baixo. -->
+        <div class="bateria-lista">
         <p class="rotulo">TENTATIVAS DE RECONEXÃO</p>
         <!-- A contagem é real: `InternalBattery.attempts`. É o único valor que
              o protocolo carrega sobre as tentativas. -->
         <p id="bateria-tentativas">reconectando…</p>
+        </div>
         <!--
           As três colunas do comp — QUANDO, ROTA e DESFECHO — saíram, e com elas
           a linha de três travessões embaixo e a legenda que a explicava.
@@ -1179,6 +1233,8 @@
       imagem se reconhece de relance, três letras se leem.
     -->
     <nav class="trilha" aria-labelledby="trilha-titulo">
+      <!-- A marca do canvas 0.19 no alto da trilha: desenho, e não dado. -->
+      <svg class="trilha-logo" viewBox="0 0 96 96" width="32" height="32" aria-hidden="true"><path d="M34 34L62 62" fill="none" stroke="currentColor" stroke-width="4"/><rect x="12" y="12" width="24" height="24" fill="currentColor"/><rect x="62" y="62" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4"/></svg>
       <h2 id="trilha-titulo" class="trilha-titulo">REDES</h2>
       <!--
         **As sessões abertas, o servidor no ar e o histórico, separados** (E3 da
@@ -1270,6 +1326,22 @@
         voz e a engrenagem têm que estar alcançáveis com a lista rolada até o
         fim, que é justamente quando a pessoa está procurando onde entrar.
       -->
+      <!--
+        O servidor em que se está, no alto da coluna (canvas 0.19, `Main`): o
+        nome, o chip do estado da conexão e o endereço com que se entrou.
+        `desenharCabecaDoServidor`, em `tela-sessao.js`, escreve os nós com o
+        que `#barra-servidor-*` já escreve.
+      -->
+      <div class="canais-servidor">
+        <div class="canais-servidor-linha">
+          <h2 id="canais-servidor-nome" class="canais-servidor-nome"></h2>
+          <span id="canais-servidor-chip" class="canais-servidor-chip" data-padrao="">
+            <svg class="canais-servidor-escudo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="m9 12 2 2 4-4"/></svg>
+            <span id="canais-servidor-chip-texto"></span>
+          </span>
+        </div>
+        <p id="canais-servidor-endereco" class="canais-servidor-endereco" hidden></p>
+      </div>
       <div class="canais-rolagem">
         <div class="canais-cabeca">
           <!--
@@ -1773,6 +1845,7 @@
         <div class="linha-barra">
           <span class="linha-barra-cerquilha" aria-hidden="true">#</span>
           <span id="linha-nome" class="linha-nome">—</span>
+          <span class="linha-sub">conversa do servidor</span>
           <!--
             `canal.cabecalho` - ADR 0052. O que um MOD acrescenta a barra do
             canal aberto: um estado da mesa, um aviso do tema, uma contagem.
@@ -1876,6 +1949,7 @@
           <span id="anexo-estado" class="anexo-estado"></span>
         </div>
         <form id="form-mensagem" class="compor" autocomplete="off">
+          <label for="campo-mensagem" class="compor-rotulo">Sua mensagem em <span id="compor-rotulo-canal" class="compor-rotulo-canal"></span></label>
           <!--
             O sinal de maior, e não o triângulo desenhado: o comp escreve `>` aqui,
             e ele é ASCII — a face de dados tem o glifo, então não há segunda face
@@ -1986,7 +2060,7 @@
           -->
           <span id="compositor-ferramentas" class="compositor-ferramentas"></span>
           <button id="botao-enviar" class="compor-enviar" type="submit"
-                  aria-label="Enviar a mensagem">ENVIAR</button>
+                  aria-label="Enviar a mensagem">ENVIAR<svg class="compor-enviar-seta" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
         </form>
       </div>
     </section>
@@ -2050,6 +2124,23 @@
         acrescenta acima da lista. Substituída, ela é a ordem e os grupos dentro
         de cada sala — as seções das salas são do produto.
       -->
+      <!--
+        O filtro da aba PESSOAS do celular (Cel-pessoas.dc): a busca por nome e
+        os três recortes da lista. É só o que a lista mostra: ninguém sai da
+        sala por ele. O desktop não o desenha (`celular-pessoas.js` o liga, e a
+        folha do celular o mostra).
+      -->
+      <div id="pessoas-filtro" class="pessoas-filtro" hidden>
+        <label class="pessoas-busca">
+          <svg class="pessoas-busca-lupa" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="pessoas-busca" type="search" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Buscar pessoa" placeholder="buscar pessoa">
+        </label>
+        <div class="pessoas-recortes" role="group" aria-label="Filtrar a lista">
+          <button type="button" class="pessoas-recorte" data-recorte="todas" aria-pressed="true">Todas · <span data-conta="todas">0</span></button>
+          <button type="button" class="pessoas-recorte" data-recorte="sala" aria-pressed="false">Na sala · <span data-conta="sala">0</span></button>
+          <button type="button" class="pessoas-recorte" data-recorte="fora" aria-pressed="false">Fora · <span data-conta="fora">0</span></button>
+        </div>
+      </div>
       <div id="roster-mods" class="roster-mods" hidden></div>
       <ul id="lista-roster" class="roster"></ul>
     </section>
@@ -2123,6 +2214,7 @@
     a média, que não é de ninguém.
   -->
   <footer class="telemetria">
+    <span id="tel-estado" class="telemetria-estado" data-estado="normal">NORMAL</span>
     <span class="metrica"><b class="rotulo">ATRASO</b> <span id="tel-rtt">·</span></span>
     <span class="metrica"><b class="rotulo">JITTER</b> <span id="tel-jit">·</span></span>
     <span class="metrica"><b class="rotulo">DISTÚRBIO</b> <span id="tel-loss">·</span></span>
@@ -2285,7 +2377,17 @@
 
     <!-- ---------------- A·02 ---------------- -->
     <div class="auth-entrada">
-      <h1 class="auth-titulo">Entrar no servidor</h1>
+      <div class="auth-cabeca">
+        <h1 class="auth-titulo"><span class="auth-eyebrow">Entrar no servidor</span> <span id="auth-titulo-nome" class="auth-titulo-nome">——</span></h1>
+        <div class="auth-selo">
+        <div id="auth-padrao" class="cartela-padrao" data-padrao="Offline">
+          <svg class="auth-chip-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/></svg>
+          <span id="auth-padrao-rotulo" class="cartela-padrao-rotulo">SEM CONEXÃO</span>
+          <span id="auth-padrao-kanji" class="cartela-padrao-kanji kanji" lang="ja"></span>
+        </div>
+        <p id="auth-padrao-nota" class="auth-nota"></p>
+        </div>
+      </div>
 
       <div class="auth-corpo">
         <!--
@@ -2293,11 +2395,6 @@
           regra de inversão que o v2 endureceu (§12 do inventário). O valor é
           `Snapshot.link_state`, que já é exatamente `Offline` / `Orange` / `Blue`.
         -->
-        <div id="auth-padrao" class="cartela-padrao" data-padrao="Offline">
-          <span id="auth-padrao-rotulo" class="cartela-padrao-rotulo">SEM CONEXÃO</span>
-          <span id="auth-padrao-kanji" class="cartela-padrao-kanji kanji" lang="ja"></span>
-        </div>
-        <p id="auth-padrao-nota" class="auth-nota"></p>
 
         <div class="campo campo-auth">
           <span class="rotulo">ENDEREÇO DO SERVIDOR</span>
@@ -2398,7 +2495,6 @@
           VOLTAR À ENTRADA
         </button>
       </div>
-    </div>
 
     <!-- ---------------- B·02 ---------------- -->
     <details class="auth-aperto">
@@ -2413,12 +2509,13 @@
       -->
       <ol id="auth-registro" class="registro-linhas"></ol>
     </details>
+    </div>
 
     <!-- ---------------- C·02 ---------------- -->
     <div class="auth-server">
       <h2 class="auth-servidor-cabecalho">Servidor</h2>
       <div class="auth-server-corpo">
-        <div>
+        <div class="auth-server-ident">
           <p id="auth-server-nome" class="auth-server-nome">——</p>
           <p class="auth-server-sub">SERVIDOR</p>
         </div>
@@ -2663,7 +2760,7 @@
                   data-sub="O que está instalado nesta máquina e a quem você já disse sim">
             <span class="server-secao-icone" data-glifo="chave"></span>
             <span class="server-secao-texto">
-              <span class="server-secao-nome">MODS</span>
+              <span class="server-secao-nome">MODs</span>
             </span>
           </button>
         </li>
@@ -2694,7 +2791,7 @@
                   data-sub="O nome e a imagem que todo mundo vê ao entrar aqui">
             <span class="server-secao-icone" data-glifo="aparencia"></span>
             <span class="server-secao-texto">
-              <span class="server-secao-nome">SERVIDOR</span>
+              <span class="server-secao-nome">NOME E IMAGEM</span>
             </span>
           </button>
         </li>
@@ -3604,7 +3701,7 @@
                 </div>
                 </div>
 
-                <button id="mods-instalar" class="botao" type="button">INSTALAR MOD DE UMA PASTA</button>
+                <button id="mods-instalar" class="botao" type="button"><svg class="mods-instalar-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg>INSTALAR MOD DE UMA PASTA</button>
 
               </div>
             </div>
@@ -4076,6 +4173,7 @@
   <div class="boot">
     <!-- A marca sem ligação: o nó cheio, o nó vazado e o traço entre eles partido. Cores pela folha da tela (`tela-fim.css`). -->
     <svg class="fim-simbolo" viewBox="0 0 96 96" preserveAspectRatio="xMinYMid meet" width="72" height="72" aria-hidden="true" focusable="false"><rect class="fim-no-cheio" x="12" y="12" width="24" height="24"/><rect class="fim-no-vazio" x="62" y="62" width="20" height="20"/><path class="fim-traco" d="M34 34L42 42M54 54L62 62"/></svg>
+    <p id="fim-etiqueta" class="fim-etiqueta" hidden></p>
     <h1 class="fim-titulo">ENLACE ENCERRADO</h1>
     <p id="fim-motivo" class="fim-motivo"></p>
     <button id="botao-voltar" class="botao" type="button">VOLTAR À ENTRADA</button>
@@ -4259,6 +4357,7 @@
         -->
         <span id="perfil-previa" class="perfil-previa" role="img"></span>
         <div class="perfil-imagem-texto">
+          <span class="perfil-imagem-rotulo" aria-hidden="true">Imagem</span>
           <p class="nota">PNG · até 8 KiB · 256 px.</p>
           <div class="perfil-imagem-acoes">
             <button id="perfil-escolher" class="botao-fantasma" type="button" aria-label="Escolher imagem">ESCOLHER</button>
@@ -4281,7 +4380,7 @@
         número em `#perfil-erro`.
       -->
       <label class="nomear-campo">
-        <span class="rotulo">APELIDO</span>
+        <span class="rotulo">APELIDO<span class="perfil-rotulo-nota"> como as pessoas te veem</span></span>
         <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
                name="apelido"
                spellcheck="false" autocomplete="off"
@@ -4334,6 +4433,7 @@
     <section id="perfil-sala" class="perfil-sala" data-sala-pessoal
              aria-labelledby="perfil-sala-titulo" hidden>
       <div class="area-cartao perfil-cartao-codigo">
+      <span class="perfil-sala-eyebrow" aria-hidden="true">Ligações diretas</span>
       <span id="perfil-sala-titulo" class="rotulo">SEU CÓDIGO</span>
       <div class="perfil-sala-codigo">
         <input id="perfil-codigo" readonly spellcheck="false" autocomplete="off"
@@ -4398,8 +4498,9 @@
      aria-labelledby="ajuda-titulo" tabindex="-1" hidden>
   <div class="ajuda-caixa">
     <div class="ajuda-cabeca">
-      <h2 id="ajuda-titulo" class="ajuda-titulo">O QUE É O QUÊ</h2>
-      <button id="ajuda-fechar" class="ajuda-fechar" type="button">ESC</button>
+      <h2 id="ajuda-titulo" class="ajuda-titulo">O que é o quê</h2>
+      <span class="ajuda-dica" aria-hidden="true"><span class="ajuda-dica-tecla">esc</span> fecha</span>
+      <button id="ajuda-fechar" class="ajuda-fechar" type="button" aria-label="Fechar a ajuda (Esc)"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg></button>
     </div>
 
     <div class="ajuda-corpo">
@@ -4499,8 +4600,8 @@
      aria-labelledby="compartilhar-titulo" tabindex="-1" hidden>
   <div class="compartilhar-caixa">
     <div class="compartilhar-cabeca">
-      <h2 id="compartilhar-titulo" class="compartilhar-titulo">COMPARTILHAR A TELA</h2>
-      <button id="compartilhar-fechar" class="compartilhar-fechar" type="button">ESC</button>
+      <h2 id="compartilhar-titulo" class="compartilhar-titulo">Compartilhar a tela</h2>
+      <button id="compartilhar-fechar" class="compartilhar-fechar" type="button"><span class="compartilhar-tecla">esc</span> fecha</button>
     </div>
 
     <div class="compartilhar-corpo">
@@ -4549,9 +4650,15 @@
         </div>
       </div>
 
+      <div class="compartilhar-opcoes">
       <div class="compartilhar-escolha">
-        <label class="rotulo" for="compartilhar-resolucao">RESOLUÇÃO</label>
-        <select id="compartilhar-resolucao" class="compartilhar-select">
+        <span class="rotulo" id="compartilhar-resolucao-rotulo">RESOLUÇÃO</span>
+        <div class="compartilhar-pilulas" id="compartilhar-resolucao-pilulas" role="radiogroup" aria-labelledby="compartilhar-resolucao-rotulo">
+          <label class="compartilhar-pilula"><input type="radio" name="compartilhar-resolucao-pilula" value="540"><span>540p</span></label>
+          <label class="compartilhar-pilula"><input type="radio" name="compartilhar-resolucao-pilula" value="720" checked><span>720p</span></label>
+          <label class="compartilhar-pilula"><input type="radio" name="compartilhar-resolucao-pilula" value="1080"><span>1080p</span></label>
+        </div>
+        <select id="compartilhar-resolucao" class="compartilhar-select" aria-hidden="true" tabindex="-1">
           <option value="540">540p</option>
           <option value="720" selected>720p</option>
           <option value="1080">1080p</option>
@@ -4570,8 +4677,12 @@
         mandar 60, e `cadencia_para` baixa quando os bits não pagam.
       -->
       <div class="compartilhar-escolha">
-        <label class="rotulo" for="compartilhar-quadros">QUADROS</label>
-        <select id="compartilhar-quadros" class="compartilhar-select">
+        <span class="rotulo" id="compartilhar-quadros-rotulo">QUADROS</span>
+        <div class="compartilhar-pilulas" id="compartilhar-quadros-pilulas" role="radiogroup" aria-labelledby="compartilhar-quadros-rotulo">
+          <label class="compartilhar-pilula"><input type="radio" name="compartilhar-quadros-pilula" value="30"><span>30 por segundo</span></label>
+          <label class="compartilhar-pilula"><input type="radio" name="compartilhar-quadros-pilula" value="60" checked><span>60 por segundo</span></label>
+        </div>
+        <select id="compartilhar-quadros" class="compartilhar-select" aria-hidden="true" tabindex="-1">
           <option value="30">30 por segundo</option>
           <option value="60" selected>60 por segundo</option>
         </select>
@@ -4596,15 +4707,18 @@
         Marcado por padrão: som é o que se espera de um vídeo compartilhado.
       -->
       <div class="compartilhar-escolha compartilhar-escolha-som">
+        <span class="rotulo" aria-hidden="true">SOM</span>
         <label class="compartilhar-som-rotulo" for="compartilhar-som">
           <input id="compartilhar-som" type="checkbox" checked>
           <span class="rotulo">INCLUIR SOM</span>
         </label>
-        <p id="compartilhar-som-aviso" class="compartilhar-som-aviso"></p>
       </div>
+      </div>
+      <p id="compartilhar-som-aviso" class="compartilhar-som-aviso"></p>
       <p id="compartilhar-erro" class="erro" hidden></p>
 
       <div class="compartilhar-botoes">
+        <button id="compartilhar-cancelar" class="botao-secundario" type="button">CANCELAR</button>
         <button id="compartilhar-comecar" class="botao" type="button">COMPARTILHAR</button>
         <button id="compartilhar-parar" class="botao-secundario" type="button" hidden>PARAR</button>
       </div>
@@ -4630,8 +4744,9 @@
      aria-labelledby="mods-titulo" tabindex="-1" hidden>
   <div class="mods-caixa">
     <div class="mods-cabeca">
-      <h2 id="mods-titulo" class="mods-titulo">ESTE SERVIDOR USA MODS</h2>
+      <span class="mods-eyebrow"><svg class="mods-marca" viewBox="0 0 96 96" width="24" height="24" aria-hidden="true" focusable="false"><rect class="mods-marca-cheio" x="12" y="12" width="24" height="24"/><rect class="mods-marca-vazio" x="62" y="62" width="20" height="20"/><path class="mods-marca-traco" d="M34 34L62 62"/></svg>Antes de entrar</span>
       <span id="mods-contagem" class="mods-contagem"></span>
+      <h2 id="mods-titulo" class="mods-titulo">ESTE SERVIDOR USA MODS</h2>
     </div>
     <div class="mods-corpo-geral">
       <p class="mods-prosa"><b>MODs são parte deste servidor.</b> Eles executam
@@ -4741,7 +4856,9 @@
           O kanji de acento (`指揮`) saiu com o resto do japonês decorativo:
           `MODERAÇÃO` ao lado já dizia tudo o que ele dizia.
         -->
-        <h2 id="moderar-titulo" class="moderar-titulo">MODERAÇÃO</h2>
+        <span class="moderar-eyebrow moderar-eyebrow-escolha" aria-hidden="true">MODERAÇÃO</span>
+        <span class="moderar-eyebrow moderar-eyebrow-confirma" aria-hidden="true">CONFIRMAR</span>
+        <h2 id="moderar-titulo" class="moderar-titulo">Moderar uma pessoa</h2>
       </div>
 
       <div id="moderar-escolha" class="moderar-corpo">
@@ -4759,19 +4876,21 @@
 
         <div id="moderar-sobre" class="moderar-sobre">
           <label class="moderar-campo">
-            <span class="rotulo">QUEM</span>
+            <span class="rotulo">Quem</span>
             <select id="moderar-quem" class="moderar-select"></select>
           </label>
 
           <div id="moderar-acao-expulsar" class="moderar-acao">
+            <span class="moderar-acao-titulo">Expulsar</span>
             <button id="moderar-expulsar" class="moderar-verbo" type="button">EXPULSAR</button>
             <span class="nota">Encerra a sessão da pessoa agora. Ela pode entrar
               de novo em seguida — expulsar não barra a volta.</span>
           </div>
 
           <div id="moderar-acao-banir" class="moderar-acao">
+            <span class="moderar-acao-titulo">Banir</span>
             <label class="moderar-campo">
-              <span class="rotulo">ATÉ QUANDO</span>
+              <span class="rotulo">Até quando</span>
               <!--
                 O prazo existe aqui por um motivo e não por completude: um
                 banimento com prazo é o único que se desfaz sozinho. Não há
@@ -4795,7 +4914,7 @@
               motivo recusado não chega a abrir.
             -->
             <label class="moderar-campo">
-              <span class="rotulo">MOTIVO</span>
+              <span class="rotulo">Motivo</span>
               <input id="moderar-motivo" name="motivo"
                      spellcheck="false" autocomplete="off"
                      placeholder="opcional, e só para o seu registro">
@@ -4808,7 +4927,7 @@
 
           <div id="moderar-acao-mover" class="moderar-acao">
             <label class="moderar-campo">
-              <span class="rotulo">MOVER PARA</span>
+              <span class="rotulo">Mover para</span>
               <select id="moderar-para" class="moderar-select"></select>
             </label>
             <button id="moderar-mover" class="moderar-verbo" type="button">MOVER</button>
@@ -4855,8 +4974,18 @@
      aria-labelledby="cargos-titulo" aria-describedby="cargos-servidor" hidden>
   <div class="cargos-caixa">
     <div class="cargos-cabeca">
-      <h2 id="cargos-titulo" class="cargos-titulo">CARGOS E PERMISSÕES</h2>
-      <span id="cargos-servidor" class="cargos-servidor"></span>
+      <div class="cargos-titulos">
+        <h2 id="cargos-titulo" class="cargos-titulo">Cargos e permissões</h2>
+        <span id="cargos-servidor" class="cargos-servidor"></span>
+      </div>
+      <div class="cargos-abas" role="tablist" aria-label="cargos e permissões">
+        <button id="cargos-aba-cargos" class="cargos-aba" type="button" role="tab"
+                aria-controls="cargos-painel-cargos" aria-selected="true">CARGOS</button>
+        <button id="cargos-aba-pessoas" class="cargos-aba" type="button" role="tab"
+                aria-controls="cargos-painel-pessoas" aria-selected="false" tabindex="-1">PESSOAS</button>
+        <button id="cargos-aba-explicar" class="cargos-aba" type="button" role="tab"
+                aria-controls="cargos-painel-explicar" aria-selected="false" tabindex="-1">QUEM PODE O QUÊ</button>
+      </div>
       <button id="cargos-fechar" class="cargos-fechar" type="button">FECHAR</button>
     </div>
 
@@ -4866,15 +4995,6 @@
       <p id="cargos-regra-proprietario" class="cargos-regra-frase"></p>
     </div>
 
-    <div class="cargos-abas" role="tablist" aria-label="cargos e permissões">
-      <button id="cargos-aba-cargos" class="cargos-aba" type="button" role="tab"
-              aria-controls="cargos-painel-cargos" aria-selected="true">CARGOS</button>
-      <button id="cargos-aba-pessoas" class="cargos-aba" type="button" role="tab"
-              aria-controls="cargos-painel-pessoas" aria-selected="false" tabindex="-1">PESSOAS</button>
-      <button id="cargos-aba-explicar" class="cargos-aba" type="button" role="tab"
-              aria-controls="cargos-painel-explicar" aria-selected="false" tabindex="-1">QUEM PODE O QUÊ</button>
-    </div>
-
     <p id="cargos-estado" class="cargos-estado" role="status"></p>
     <!-- Revelado antes de escrito: `role="alert"` não lê o que entrou escondido. -->
     <p id="cargos-erro" class="erro cargos-recusa" role="alert" hidden></p>
@@ -4882,6 +5002,7 @@
     <section id="cargos-painel-cargos" class="cargos-painel" role="tabpanel"
              aria-labelledby="cargos-aba-cargos">
       <div class="cargos-mestre">
+        <h3 class="cargos-mestre-titulo">ORDEM</h3>
         <div class="cargos-rolo">
           <ol id="cargos-lista" class="cargos-lista"
               aria-label="cargos, do mais alto ao mais baixo"></ol>
@@ -4894,17 +5015,22 @@
         <button id="cargos-voltar" class="cargos-voltar" type="button">VOLTAR AOS CARGOS</button>
         <p id="cargos-editor-vazio" class="cargos-vazio"></p>
         <form id="cargos-form" class="cargos-form" aria-labelledby="cargos-editor-titulo" hidden>
-          <h3 id="cargos-editor-titulo" class="cargos-editor-titulo" tabindex="-1"></h3>
+          <h3 id="cargos-editor-titulo" class="cargos-editor-titulo cargos-editor-titulo-oculto" tabindex="-1"></h3>
           <p id="cargos-editor-motivo" class="cargos-motivo" hidden></p>
           <div class="cargos-campos">
             <label class="cargos-campo">
-              <span class="rotulo">NOME DO CARGO</span>
+              <span class="rotulo">Nome do cargo</span>
               <input id="cargos-nome" class="cargos-entrada" name="nome"
                      spellcheck="false" autocomplete="off">
             </label>
             <label class="cargos-campo">
-              <span class="rotulo">COR</span>
-              <select id="cargos-cor" class="cargos-entrada" name="cor"></select>
+              <span class="rotulo" id="cargos-cor-rotulo">Cor</span>
+              <!-- O `<select>` segue sendo a fonte da verdade (o script lê e
+                   escreve nele); fora da vista e do foco. Quem escolhe são as
+                   amostras logo abaixo, rádios nativos escritos por
+                   `cargosDesenharAmostras`. -->
+              <select id="cargos-cor" class="cargos-entrada cargos-cor-select" name="cor" aria-hidden="true" tabindex="-1"></select>
+              <span id="cargos-amostras" class="cargos-amostras" role="radiogroup" aria-labelledby="cargos-cor-rotulo"></span>
             </label>
           </div>
           <p id="cargos-estado-nota" class="nota cargos-estado-nota"></p>
@@ -4912,15 +5038,6 @@
             <div id="cargos-permissoes" class="cargos-permissoes"></div>
           </div>
           <p id="cargos-rascunho" class="cargos-rascunho" hidden></p>
-          <!--
-            O GANHO EFETIVO, antes de salvar: quem passa a poder e quem deixa de
-            poder o quê, calculado pelo servidor. Tirar uma restrição nunca
-            parece inofensivo aqui: ela aparece como o que devolve.
-          -->
-          <div id="cargos-previa" class="cargos-previa" aria-live="polite" hidden>
-            <h4 class="cargos-previa-titulo">O QUE MUDA PARA AS PESSOAS</h4>
-            <ul id="cargos-previa-lista" class="cargos-previa-lista"></ul>
-          </div>
           <p id="cargos-form-erro" class="erro cargos-recusa" role="alert" hidden></p>
           <div class="cargos-botoes">
             <button id="cargos-apagar" class="cargos-botao cargos-botao-apagar" type="button">APAGAR O CARGO</button>
@@ -4930,11 +5047,25 @@
           </div>
         </form>
       </div>
+
+      <aside class="cargos-lateral">
+        <!--
+          O GANHO EFETIVO, antes de salvar: quem passa a poder e quem deixa de
+          poder o quê, calculado pelo servidor. Tirar uma restrição nunca
+          parece inofensivo aqui: ela aparece como o que devolve.
+        -->
+        <div id="cargos-previa" class="cargos-previa" aria-live="polite" hidden>
+          <h4 class="cargos-previa-titulo">O QUE MUDA PARA AS PESSOAS</h4>
+          <ul id="cargos-previa-lista" class="cargos-previa-lista"></ul>
+        </div>
+        <p class="cargos-lateral-dica">Confira a aba QUEM PODE O QUÊ para ver o resultado por pessoa, com o motivo.</p>
+      </aside>
     </section>
 
     <section id="cargos-painel-pessoas" class="cargos-painel" role="tabpanel"
              aria-labelledby="cargos-aba-pessoas" hidden>
       <div class="cargos-mestre">
+        <h3 class="cargos-mestre-titulo">PESSOAS</h3>
         <div class="cargos-rolo">
           <ul id="cargos-pessoas" class="cargos-lista" aria-label="pessoas deste servidor"></ul>
         </div>

@@ -31,6 +31,25 @@ function sinalDaFamilia(sinal, familia) {
   const resultado = document.getElementById("resultado");
   const copiar = document.getElementById("copiar");
   const entrar = document.getElementById("entrar");
+  const etapas = document.getElementById("etapas");
+  /** O resultado em linhas (o canvas): uma por etapa medida, e o desfecho. O JSON completo segue abaixo, e é ele que se copia. */
+  function desenharAsEtapas(relatorio) {
+    const linha = (marca, estado, texto, valor) => {
+      const li = document.createElement("li");
+      li.dataset.estado = estado;
+      const m = document.createElement("span"); m.setAttribute("aria-hidden", "true"); m.textContent = marca;
+      const t = document.createElement("span"); t.textContent = texto;
+      li.append(m, t);
+      if (valor) { const v = document.createElement("span"); v.textContent = valor; li.append(v); }
+      return li;
+    };
+    const linhas = (relatorio.etapas || []).map(e => linha("\u2713", "ok", e.etapa, `${e.ms}ms`));
+    linhas.push(relatorio.conectou
+      ? linha("\u2713", "ok", "conectou", `${relatorio.duracaoMs}ms`)
+      : linha("!", "falha", "não conectou", relatorio.motivo || ""));
+    etapas.replaceChildren(...linhas);
+    etapas.hidden = false;
+  }
   let ativo = null, geracao = 0, pararMedidas = () => {};
   const pedida = Number(new URLSearchParams(location.search).get("familia"));
   const familia = pedida === 4 || pedida === 6 ? pedida : null;
@@ -75,7 +94,7 @@ function sinalDaFamilia(sinal, familia) {
   testar.addEventListener("click", async () => {
     const vez = ++geracao, inicio = performance.now();
     testar.disabled = true; parar.disabled = false; copiar.disabled = true; entrar.hidden = true;
-    resultado.textContent = ""; estado.textContent = "Verificando conexão…";
+    resultado.textContent = ""; etapas.replaceChildren(); etapas.hidden = true; estado.textContent = "Verificando conexão…";
     const relatorio = { teste: "servidor-hospedado-3", horario: new Date().toISOString(), etapas: [] };
     let pararEstaMedicao = () => {};
     let enlace;
@@ -130,6 +149,7 @@ function sinalDaFamilia(sinal, familia) {
       if (vez === geracao) {
         ativo = null; testar.disabled = false; parar.disabled = true;
         resultado.textContent = JSON.stringify(relatorio, null, 2); copiar.disabled = false;
+        desenharAsEtapas(relatorio);
       }
     }
   });

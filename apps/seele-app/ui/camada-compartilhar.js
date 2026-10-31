@@ -636,6 +636,32 @@ async function aplicarEscolhaDeQualidade() {
 $("compartilhar-resolucao").addEventListener("change", aplicarEscolhaDeQualidade);
 $("compartilhar-quadros").addEventListener("change", aplicarEscolhaDeQualidade);
 
+// ------------------------------------------------------------ pílulas de teto
+// Resolução e quadros aparecem como pílulas: rádios nativos escritos no
+// `index.html`, que o teclado já sabe percorrer com as setas. O `<select>`
+// continua sendo a fonte da verdade — o que lê `limitesEscolhidos` e o que o
+// resto do script escreve — e fica fora da vista e do foco; as pílulas só o
+// espelham.
+function sincronizarPilulas(idSelect) {
+  const valor = $(idSelect).value;
+  for (const radio of document.querySelectorAll(`input[name="${idSelect}-pilula"]`)) {
+    radio.checked = radio.value === valor;
+  }
+}
+
+function ligarPilulas(idSelect) {
+  const select = $(idSelect);
+  $(`${idSelect}-pilulas`).addEventListener("change", (evento) => {
+    const radio = evento.target;
+    if (!radio?.checked) return;
+    select.value = radio.value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  select.addEventListener("change", () => sincronizarPilulas(idSelect));
+}
+ligarPilulas("compartilhar-resolucao");
+ligarPilulas("compartilhar-quadros");
+
 // ---------------------------------------------------------------- navegação
 
 /** Abre a caixa por cima da chamada. */
@@ -655,6 +681,8 @@ async function abrirCompartilhar() {
       // 60 junto, sem ninguém ter pedido.
       $("compartilhar-resolucao").value = String(pedido.altura_maxima);
       $("compartilhar-quadros").value = String(pedido.quadros_maximos);
+      sincronizarPilulas("compartilhar-resolucao");
+      sincronizarPilulas("compartilhar-quadros");
     }
   } catch (_) { /* O desenho abaixo mostra falhas da sessão. */ }
   await desenharCompartilhar({ relistar: true });
@@ -695,6 +723,7 @@ function abandonarCompartilhar() {
 // ------------------------------------------------------------------- ligação
 
 $("compartilhar-fechar").addEventListener("click", fecharCompartilhar);
+$("compartilhar-cancelar").addEventListener("click", fecharCompartilhar);
 fecharAoClicarFora("compartilhar", fecharCompartilhar);
 
 /**

@@ -26,7 +26,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 16px;
 }
 
 .camada-cargos::before {
@@ -52,8 +52,8 @@
   gap: 12px;
   box-sizing: border-box;
   width: 100%;
-  max-width: 1280px;
-  height: min(900px, calc(100dvh - 48px));
+  max-width: none;
+  height: calc(100dvh - 32px);
   padding: 16px;
   padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
   padding-bottom: max(16px, env(safe-area-inset-bottom));
@@ -70,9 +70,9 @@
 .cargos-cabeca {
   order: 1;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px 16px;
+  gap: 8px 32px;
   padding: 18px 24px;
   color: var(--seele-osso);
   background: var(--seele-vidro);
@@ -81,18 +81,31 @@
   flex: 0 0 auto;
 }
 
+/* O sobrescrito do desenho em cima do título: o servidor, em mono apagado. A
+   ordem escrita é título e depois servidor (é o que `aria-describedby` lê); é
+   a coluna invertida que põe o servidor por cima. */
+.cargos-titulos {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 4px;
+  min-width: 0;
+}
+
 .cargos-titulo {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: 700;
-  font-size: 30px;
+  font-size: 32px;
   line-height: 1.1;
   letter-spacing: var(--seele-tracking-cartela);
+  text-transform: none;
 }
 
 .cargos-servidor {
   font-family: var(--seele-mono);
-  font-size: 12px;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
   color: var(--seele-rotulo-painel);
   overflow-wrap: anywhere;
 }
@@ -138,6 +151,7 @@
   line-height: 1.6;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   flex: 0 0 auto;
+  counter-reset: regra;
 }
 
 .cargos-regra-frase {
@@ -147,20 +161,26 @@
   line-height: 1.6;
   color: var(--seele-osso-apagado);
   max-width: var(--seele-leitura);
+  counter-increment: regra;
 }
 
 .cargos-regra-frase:empty { display: none; }
+
+/* 1. 2. 3., com o número em laranja, como no desenho. Contador e não texto: as
+   frases vêm do servidor e do script, e a numeração é só de apresentação. */
+.cargos-regra-frase::before {
+  content: counter(regra) ". ";
+  color: var(--seele-laranja-nerv);
+}
 
 /* ---------- as abas ----------
    Pílulas: a ativa é vidro com borda, as outras só texto. Ficam logo abaixo do
    cabeçalho, antes da regra (`order` em cada um: cabeçalho 1, abas 2, regra 3,
    estado e recusa 4, painéis 5): no desenho elas moram dentro do cabeçalho. */
 .cargos-abas {
-  order: 2;
   display: flex;
   gap: 4px;
-  padding: 0 8px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
 }
 
 .cargos-aba {
@@ -214,6 +234,10 @@
   grid-template-columns: 280px minmax(0, 1fr);
 }
 
+/* A aba dos cargos tem a terceira coluna do desenho: o que muda para as
+   pessoas. */
+.cargos-painel:has(> .cargos-lateral) { grid-template-columns: 280px minmax(0, 1fr) 280px; }
+
 .cargos-painel[hidden] { display: none; }
 
 .cargos-painel-unico {
@@ -246,6 +270,40 @@
   background: var(--seele-vidro);
   border: 1px solid var(--seele-vidro-borda);
   border-radius: var(--seele-raio-painel);
+}
+
+.cargos-mestre-titulo {
+  margin: 0;
+  padding: 0 12px;
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
+}
+
+/* A coluna da direita: a prévia (quando há rascunho) e, embaixo, a dica de
+   onde ver o resultado por pessoa. */
+.cargos-lateral {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 16px;
+  overflow-y: auto;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+}
+
+.cargos-lateral .cargos-previa-lista { max-height: none; overflow: visible; }
+
+.cargos-lateral-dica {
+  margin: auto 0 0;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--seele-rotulo-painel);
 }
 
 /* O que o servidor enche rola por dentro: um servidor com quarenta cargos não
@@ -501,6 +559,7 @@
 }
 
 .cargos-campo {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -509,7 +568,7 @@
 
 .cargos-campos > .cargos-campo:first-child { flex: 1 1 240px; }
 
-.cargos-campo > .rotulo { font-family: var(--seele-ui); font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--seele-osso); }
+.cargos-campo > .rotulo { font-family: var(--seele-ui); font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--seele-osso); }
 
 /* Os campos são os de `base.css` (48px, canto de 16px, fundo negro a 55%). */
 .cargos-entrada {
@@ -562,9 +621,10 @@
   min-width: 0;
   margin: 0;
   padding: 10px 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
   align-items: center;
   border: 0;
   border-top: var(--seele-b) solid var(--seele-vidro-borda);
@@ -576,8 +636,8 @@
    é assim que o nome e os três estados dividem a mesma linha. */
 .cargos-permissao-nome {
   float: left;
-  grid-column: 1;
-  grid-row: 1;
+  order: 1;
+  flex: 1 1 16ch;
   padding: 0;
   font-family: var(--seele-ui);
   font-weight: 500;
@@ -587,7 +647,8 @@
 }
 
 .cargos-permissao-desc {
-  grid-column: 1 / -1;
+  order: 3;
+  flex: 1 0 100%;
   margin: 0;
   font-family: var(--seele-ui);
   font-size: 13px;
@@ -596,7 +657,7 @@
   max-width: var(--seele-leitura);
 }
 
-.cargos-permissao .cargos-motivo { grid-column: 1 / -1; }
+.cargos-permissao .cargos-motivo { order: 4; flex: 1 0 100%; }
 
 /* O que outro gestor mudou enquanto se editava: a régua grossa e a frase, e
    não só a cor. */
@@ -608,7 +669,8 @@
 }
 
 .cargos-mudou {
-  grid-column: 1 / -1;
+  order: 5;
+  flex: 1 0 100%;
   margin: 0;
   font-family: var(--seele-mono);
   font-size: var(--seele-t-rotulo);
@@ -628,8 +690,9 @@
    escolhido enche — verde para CONCEDE, neutro para NÃO DECIDE, laranja para
    RESTRINGE. */
 .cargos-tres {
-  grid-column: 2;
-  grid-row: 1;
+  order: 2;
+  flex: 0 0 auto;
+  margin-left: auto;
   display: flex;
   gap: 2px;
   padding: 2px;
@@ -646,6 +709,7 @@
   letter-spacing: 0.06em;
   padding: 0 10px;
   min-height: 36px;
+  white-space: nowrap;
   color: var(--seele-rotulo-painel);
   border-radius: var(--seele-raio-pilula);
   cursor: pointer;
@@ -819,6 +883,10 @@
    ou uma pessoa mostra o detalhe com VOLTAR no alto, e a regra continua à vista
    no topo — quem só vê um painel por vez também lê a regra. */
 @media (max-width: 760px), (max-height: 500px) {
+  .cargos-painel:has(> .cargos-lateral) { grid-template-columns: 1fr; grid-template-rows: none; }
+  .cargos-painel:not([data-detalhe="sim"]) .cargos-lateral { display: none; }
+  .cargos-lateral { grid-column: auto; grid-row: auto; max-height: none; overflow: visible; }
+  .cargos-mestre { grid-row: auto; }
   /* Uma página só, que rola inteira: a regra sobe com o resto e devolve a tela
      ao que se edita. Os rolos de dentro deixam de rolar sozinhos. */
   .cargos-caixa {
@@ -847,8 +915,7 @@
   .cargos-painel[data-detalhe="sim"] .cargos-mestre { display: none; }
   .cargos-painel:not([data-detalhe="sim"]) .cargos-detalhe { display: none; }
   .cargos-voltar { display: block; }
-  .cargos-permissao { grid-template-columns: 1fr; }
-  .cargos-tres { grid-column: 1; grid-row: auto; }
+  .cargos-tres { flex: 1 0 100%; margin-left: 0; }
   .cargos-opcao { flex: 1 1 0; justify-content: center; min-height: 44px; }
   .cargos-campo { min-width: 0; flex: 1 1 140px; }
   .cargos-botoes { justify-content: stretch; }
@@ -857,13 +924,106 @@
 }
 
 
+/* O nome do cargo que se edita já está no campo ao lado: o título do formulário
+   continua na página (é o nome do formulário e o alvo do foco ao escolher um
+   cargo), mas fora da vista. */
+.cargos-editor-titulo-oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* O nome e a cor na mesma linha, como no desenho. */
+.cargos-campos > .cargos-campo:last-child { min-width: 0; flex: 0 0 auto; }
+
+/* A cor como amostras. O `<select>` fica na página, fora da vista e do foco:
+   quem escolhe é o rádio dentro de cada amostra, que tem o nome da cor como
+   rótulo. O alvo do rádio passa dos 32px da amostra (`inset` negativo) para
+   chegar aos 44px, e a escolhida leva o anel e o traço, não só a cor. */
+.cargos-cor-select {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cargos-amostras {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+}
+
+.cargos-amostra {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--seele-rotulo-painel);
+}
+
+.cargos-amostra.cargos-cor-osso { background: var(--seele-osso); }
+.cargos-amostra.cargos-cor-laranja { background: var(--seele-laranja-nerv); }
+.cargos-amostra.cargos-cor-ambar { background: var(--seele-placa-laranja-1); }
+.cargos-amostra.cargos-cor-fosforo { background: var(--seele-fosforo); }
+
+/* «Sem cor»: contorno vazio, sem preenchimento. */
+.cargos-amostra-sem {
+  background: none;
+  border: 1px dashed var(--seele-controle-borda);
+}
+
+.cargos-amostra input {
+  position: absolute;
+  inset: -6px;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.cargos-amostra:has(input:checked) {
+  border-color: var(--seele-osso);
+  outline: 2px solid var(--seele-negro-absoluto);
+  outline-offset: -4px;
+}
+
+.cargos-amostra-sem:has(input:checked) { border-style: solid; }
+.cargos-amostra:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--seele-negro-absoluto), 0 0 0 5px var(--seele-osso); }
+.cargos-amostra:has(input:disabled) { opacity: 0.5; }
+.cargos-amostra input:disabled { cursor: not-allowed; }
+
+/* O desenho em larguras médias: a coluna da prévia desce para baixo do editor
+   em vez de espremê-lo. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .cargos-painel:has(> .cargos-lateral) { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .cargos-lateral { grid-column: 2; grid-row: 2; max-height: 200px; }
+  .cargos-mestre { grid-row: 1 / -1; }
+  .cargos-cabeca { gap: 8px 16px; }
+}
+
 /* A nota do editor (como PODE e NÃO PODE combinam) tem a medida de leitura; a classe `.nota` é de `base.css`, e esta é a classe da própria tela. */
 .cargos-estado-nota { max-width: var(--seele-leitura); }
 
-@media(max-width:700px) { .camada-cargos { padding:12px; } .cargos-caixa { height:calc(100dvh - 24px); } .cargos-cabeca,.cargos-regra,.cargos-detalhe { padding:16px; } .cargos-abas { padding:0 16px; gap:8px; overflow-x:auto; } .cargos-aba { white-space:nowrap; } .cargos-painel { grid-template-columns:minmax(0,1fr); } .cargos-botoes { flex-wrap:wrap; } .cargos-botoes > button { min-height:44px; } }
+@media(max-width:700px) { .camada-cargos { padding:12px; } .cargos-caixa { height:calc(100dvh - 24px); } .cargos-cabeca,.cargos-regra,.cargos-detalhe { padding:16px; } .cargos-abas { gap:4px; } .cargos-aba { padding:6px 8px; line-height:1.2; } .cargos-painel { grid-template-columns:minmax(0,1fr); } .cargos-botoes { flex-wrap:wrap; } .cargos-botoes > button { min-height:44px; } }
 
 
 
 @media(max-width:700px) { .cargos-regra { grid-template-columns:minmax(0,1fr); gap:8px; } }
 
-@media(max-width:700px) { .cargos-cabeca { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 12px; } .cargos-titulo { grid-column:1; font-size:24px; } .cargos-servidor { grid-column:1; font-size:12px; } .cargos-fechar { grid-column:2; grid-row:1 / span 2; margin:0; align-self:center; } }
+@media(max-width:700px) { .cargos-cabeca { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 12px; } .cargos-titulos { grid-column:1; } .cargos-abas { grid-column:1 / -1; grid-row:2; } .cargos-titulo { grid-column:1; font-size:24px; } .cargos-servidor { grid-column:1; font-size:12px; } .cargos-fechar { grid-column:2; grid-row:1; margin:0; align-self:center; } }

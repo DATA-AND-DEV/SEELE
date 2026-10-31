@@ -59,7 +59,7 @@ function linhaDoServidor(conhecido) {
   // A sigla continua sendo o que aparece sem imagem, e passa a sair do nome
   // quando ele existe: `CA` de «Casa» é o que alguém reconhece, e `19` de
   // `192.168.0.39` não é nada.
-  const ladrilho = elemento("span", "servidor-sigla", siglaDoAlvo(nome));
+  const ladrilho = elemento("span", "servidor-sigla", Array.from(siglaDoAlvo(nome))[0] ?? "");
   if (conhecido.icone) {
     ladrilho.style.backgroundImage = `url(${uriDeIcone(conhecido.icone)})`;
     ladrilho.textContent = "";
@@ -69,13 +69,21 @@ function linhaDoServidor(conhecido) {
     ladrilho,
     (() => {
       const texto = elemento("span", "servidor-texto");
-      texto.append(
-        elemento("span", "servidor-nome", nome),
+      const sub = elemento("span", "servidor-sub");
+      sub.append(
         elemento("span", "servidor-endereco", conhecido.alvo),
+        elemento("span", "servidor-visto", quandoFoi(conhecido.visto_em)),
       );
+      texto.append(elemento("span", "servidor-nome", nome), sub);
       return texto;
     })(),
-    elemento("span", "servidor-visto", quandoFoi(conhecido.visto_em)),
+    // O ENTRAR do cartão é desenho: quem entra é o botão inteiro, e o nome
+    // dele (title) já diz o que faz.
+    (() => {
+      const entrar = elemento("span", "servidor-entrar", "ENTRAR");
+      entrar.setAttribute("aria-hidden", "true");
+      return entrar;
+    })(),
   );
   botao.title = `entrar em ${nome} como ${conhecido.apelido || "você mesmo"}`;
   item.append(botao);

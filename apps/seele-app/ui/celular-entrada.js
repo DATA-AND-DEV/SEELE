@@ -49,6 +49,7 @@
   /** Troca o que a tela mostra; o título leva o foco, e o teclado não sobe sozinho. */
   function mostrar(conteudo, acoes) {
     delete tela.dataset.inicio;
+    delete tela.dataset.tipo;
     desenho += 1;
     corpo.replaceChildren(...conteudo.flat(Infinity).filter(Boolean));
     pe.replaceChildren(...acoes.filter(Boolean));
@@ -248,13 +249,15 @@
           h("ol", { class: "cel-entrada-passos" }, doEstado.passos.map((p) => h("li", { text: p })))),
       });
 
+    const podeEntrar = !bloqueia && !encerrou && ["pronto", "ja-conhecido", "numa-aba"].includes(estado);
+    // A ordem do protótipo: o que se lê de relance (endereço, versão, validade)
+    // primeiro, e a impressão, que se confere, num cartão com a nota dentro.
     const ficha = lido.endereco && h("dl", { class: "cel-entrada-ficha" },
       h("dt", {}, rotulo(f.endereco)), h("dd", { text: lido.endereco }),
-      lido.impressao && [h("dt", {}, rotulo(f.impressao)), h("dd", {}, impressaoEmGrupos(lido.impressao))],
       lido.versaoDoServidor && [h("dt", {}, rotulo(f.versao)), h("dd", { text: PALAVRAS.inicio.servidor(lido.versaoDoServidor) })],
-      lido.valeAte && [h("dt", {}, rotulo(f.vale)), h("dd", { text: dia(lido.valeAte) })]);
-
-    const podeEntrar = !bloqueia && !encerrou && ["pronto", "ja-conhecido", "numa-aba"].includes(estado);
+      lido.valeAte && [h("dt", {}, rotulo(f.vale)), h("dd", { text: dia(lido.valeAte) })],
+      lido.impressao && [h("dt", {}, rotulo(f.impressao)), h("dd", {}, impressaoEmGrupos(lido.impressao),
+        podeEntrar && h("p", { class: "cel-entrada-nota", text: f.impressaoNota }))]);
     const campo = podeEntrar && h("input", {
       type: "text", id: "cel-entrada-apelido", class: "cel-entrada-campo-texto",
       autocomplete: "nickname", autocapitalize: "none", spellcheck: "false", enterkeyhint: "go",
@@ -314,15 +317,16 @@
     }
 
     mostrar([
+      h("button", { class: "cel-entrada-voltar", type: "button", onclick: agoraNao }, h("span", { "aria-hidden": "true", text: "‹ " }), h("span", { text: FRASES_DAS_SESSOES.voltar })),
       titulo(f.titulo, " ", h("span", { class: "cel-entrada-endereco", text: lido.endereco ? `${lido.endereco}?` : "" })),
       avisoDoDesfecho,
       avisoDoEstado,
       ficha,
-      podeEntrar && h("p", { class: "cel-entrada-nota", text: f.impressaoNota }),
       campo && [h("label", { class: "cel-entrada-campo", for: "cel-entrada-apelido" }, rotulo(f.apelido)), campo],
       podeEntrar && (estado === "pronto" || estado === "numa-aba") && h("p", { class: "cel-entrada-nota", text: f.primeiraEntrada }),
       lido.persistencia && h("p", { class: "cel-entrada-nota", text: PALAVRAS.persistencia[lido.persistencia] }),
     ], acoes);
+    tela.dataset.tipo = "entrar-em";
     if (desfecho?.erro === "apelido-tomado") campo?.focus();
   }
 

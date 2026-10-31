@@ -82,7 +82,8 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     el.setAttribute("aria-label", texto);
     const icone = texto === "LIGAR MICROFONE" ? glifoComEstado("microfone", true) : glifo(desenhos[texto] || "avancar");
     const curto = { "LIGAR MICROFONE": "MICROFONE", "DESLIGAR MICROFONE": "MICROFONE", "COMPARTILHAR TELA": "TELA", "PARAR COMPARTILHAMENTO": "PARAR TELA", "SAIR DA CONVERSA": "SAIR" };
-    el.replaceChildren(icone, no("span", "pessoal-web-botao-texto", curto[texto] || texto));
+    // Em janela larga o botão diz o rótulo inteiro (o canvas); em janela estreita, o curto.
+    el.replaceChildren(icone, no("span", "pessoal-web-botao-texto", curto[texto] || texto), no("span", "pessoal-web-botao-longo", texto));
   };
   const botao = (texto, acao, principal = false, local = false) => {
     const el = no("button", principal ? "botao" : "botao-fantasma", texto);
@@ -101,8 +102,12 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   const voltar = botao("VOLTAR", () => acoes.voltar());
   const assinatura = no("div", "pessoal-web-assinatura");
   const marca = no("img", "pessoal-web-marca");
-  marca.src = "marca-assinatura.svg"; marca.alt = "SEELE";
-  assinatura.append(marca, titulo);
+  marca.src = "marca-simbolo.svg"; marca.alt = "SEELE";
+  // A pastilha de «conversa conectada» e o tempo de conversa ficam ao lado do
+  // título; as duas são desenho (aria-hidden): quem anuncia é o `estado`.
+  const estadoNoTopo = no("span", "pessoal-web-estado-topo"); estadoNoTopo.setAttribute("aria-hidden", "true");
+  const tempo = no("span", "pessoal-web-tempo"); tempo.setAttribute("aria-hidden", "true");
+  assinatura.append(marca, titulo, estadoNoTopo, tempo);
   topo.append(assinatura, voltar);
   const corpo = no("div", "pessoal-web-corpo");
   const palco = no("div", "pessoal-web-palco");
@@ -144,7 +149,9 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   }
   const meuCartao = cartao(), outroCartao = cartao();
   const entradaTitulo = no("h2", "pessoal-web-entrada-titulo", "Conversa pessoal");
-  centro.append(entradaTitulo, estado, participantes, nomeRotulo, convite, conviteAcoes);
+  const secaoRotulo = no("span", "pessoal-web-secao-rotulo", "CRIAR UMA CONVERSA");
+  secaoRotulo.setAttribute("aria-hidden", "true");
+  centro.append(entradaTitulo, secaoRotulo, estado, participantes, nomeRotulo, convite, conviteAcoes);
   const tela = no("div", "pessoal-web-tela");
   tela.setAttribute("aria-label", "Tela compartilhada");
   tela.hidden = true;
@@ -181,8 +188,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       form.requestSubmit();
     }
   });
-  const chatTitulo = no("h2", "pessoal-web-chat-titulo", "MENSAGENS");
-  chatTitulo.prepend(glifo("linhas"));
+  const chatTitulo = no("h2", "pessoal-web-chat-titulo", "CHAT DA CONVERSA");
   chat.append(chatTitulo, mensagens, form);
   corpo.append(palco, chat);
   const rodape = no("footer", "pessoal-web-rodape");
@@ -195,6 +201,8 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     if (!painelDaSaida.hidden) listaDaSaida.focus();
   }, false, true);
   saida.classList.add("pessoal-web-saida");
+  const nomeDaSaida = no("span", "pessoal-web-saida-nome");
+  saida.append(nomeDaSaida);
   saida.setAttribute("aria-expanded", "false");
   const painelDaSaida = no("div", "pessoal-web-painel-saida");
   painelDaSaida.hidden = true;
@@ -217,6 +225,12 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   erro.hidden = true;
   rodape.append(mic, compartilhar, saida, desligar);
   raiz.append(topo, corpo, erro, rodape, painelDaSaida);
+  // Em janela larga a barra de ações mora no painel do palco, no pé dele (o
+  // canvas); na estreita ela segue sob os painéis, como a mão alcança.
+  const janelaLarga = (documento.defaultView ?? window).matchMedia("(min-width: 701px) and (min-height: 501px)");
+  const acomodarARodape = () => { if (janelaLarga.matches) palco.append(rodape); else raiz.insertBefore(rodape, painelDaSaida); };
+  janelaLarga.addEventListener?.("change", acomodarARodape);
+  acomodarARodape();
   let retrato = { estado: "livre" };
   let recebido = false;
   let nomeDoPar = "";
@@ -234,10 +248,26 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     conectando: "Conectando…", reconectando: "Reconectando…",
     dentro: "Conversa conectada", encerrada: "Conversa encerrada",
   };
+  // O tempo de conversa: conta desde que a fase virou «dentro», só enquanto ela dura.
+  let inicioDaConversa = 0, relogio = 0;
+  const duracao = (ms, comHoras) => {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const dois = n => String(n).padStart(2, "0");
+    const m = `${dois(Math.floor(total / 60) % 60)}:${dois(total % 60)}`;
+    return comHoras ? `${dois(Math.floor(total / 3600))}:${m}` : m;
+  };
+  function tiqueTaque() { tempo.textContent = inicioDaConversa ? duracao(Date.now() - inicioDaConversa, true) : ""; }
+  function marcarOTempo(dentro) {
+    if (dentro && !inicioDaConversa) { inicioDaConversa = Date.now(); relogio = setInterval(tiqueTaque, 1000); tiqueTaque(); }
+    if (!dentro && inicioDaConversa) { inicioDaConversa = 0; clearInterval(relogio); relogio = 0; tiqueTaque(); }
+  }
   function desenhar() {
     const fase = retrato.estado;
     const dentro = fase === "dentro";
+    marcarOTempo(dentro);
+    estadoNoTopo.textContent = dentro ? frases.dentro : "";
     entradaTitulo.hidden = !["livre", "encerrada", "recebendo"].includes(fase);
+    secaoRotulo.hidden = !["livre", "encerrada"].includes(fase);
     raiz.dataset.fase = fase;
     const iniciais = texto => texto.trim().split(/\s+/u).filter(Boolean).slice(0, 2).map(p => Array.from(p)[0]).join("").toUpperCase();
     meuCartao.nome.textContent = nome.value.trim() || "Você";
@@ -310,7 +340,9 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       if (ids.has(chave)) return;
       ids.add(chave);
       const item = no("li", "pessoal-web-mensagem");
-      item.append(no("span", "pessoal-web-autor", de === "eu" ? "Você" : retrato.apelido || "Outra pessoa"),
+      if (de === "eu") item.dataset.eu = "sim";
+      item.append(no("span", "pessoal-web-hora", duracao(inicioDaConversa ? Date.now() - inicioDaConversa : 0, false)),
+        no("span", "pessoal-web-autor", de === "eu" ? "Você" : retrato.apelido || "Outra pessoa"),
         no("p", "pessoal-web-conteudo", conteudo));
       mensagens.append(item);
       // A conversa não grava histórico ilimitado na memória da aba.
@@ -328,6 +360,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       if (novo.indisponivel) listaDaSaida.selectedIndex = -1;
       escolherSaida.hidden = !novo.nativa;
       saida.title = `Saída de áudio: ${novo.nome || "Sistema"}`;
+      nomeDaSaida.textContent = novo.nome || "Sistema";
       saida.setAttribute("aria-label", saida.title);
       desenhar();
     },
@@ -348,6 +381,6 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       rotular(compartilhar, "COMPARTILHAR TELA"); compartilhar.setAttribute("aria-pressed", "false");
       desenhar();
     },
-    fechar() { ++operacao; ocupado = false; raiz.hidden = true; link.value = ""; },
+    fechar() { ++operacao; ocupado = false; raiz.hidden = true; link.value = ""; marcarOTempo(false); },
   });
 }

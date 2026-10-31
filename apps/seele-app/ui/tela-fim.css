@@ -48,17 +48,6 @@
    atrás do mesmo nome: no dia em que a entrada da 0.9.0 mudou o seu para uma
    fileira, o título do fim virou uma fileira junto, e a margem de que ele
    dependia sumiu quando a regra de `base.css` deixou de existir. */
-.fim-titulo {
-  color: var(--seele-osso);
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  letter-spacing: var(--seele-tracking-cartela);
-  font-size: 72px;
-  line-height: 1.1;
-  display: block;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
 /* Mesmo tratamento do `.erro` da entrada — `pre-line` e `overflow-wrap:
    anywhere` —, e a mesma razão: um motivo de queda pode trazer impressão
    digital, que são 64 caracteres sem espaço nenhum onde quebrar. Osso e não
@@ -100,3 +89,31 @@
   .fim-titulo { font-size: 44px; }
   .fim-motivo { font-size: 17px; }
 }
+
+/* ---- 0.19, segunda passada: a etiqueta «servidor · duração» e a caixa do título ---- */
+.fim-etiqueta {
+  margin: -6px 0 0;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+.fim-etiqueta[hidden] { display: none; }
+#tela-fim .boot > .fim-etiqueta { flex: 1 0 100%; }
+/* O título em caixa de frase, como no desenho; o texto no DOM continua o mesmo. */
+.fim-titulo {
+  color: var(--seele-osso);
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+  font-size: 72px;
+  line-height: 1.1;
+  display: block;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-transform: lowercase;
+}
+.fim-titulo::first-letter { text-transform: uppercase; }
+#tela-fim .botao, #tela-fim .fim-sair { min-height: 52px; padding: 0 26px; border-radius: var(--seele-raio-pilula); }
+@media (max-width: 700px) { #tela-fim .botao, #tela-fim .fim-sair { min-height: 52px; } }

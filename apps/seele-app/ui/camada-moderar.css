@@ -90,10 +90,28 @@
    negro, como no desenho. */
 .moderar-cabeca {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 30px 32px 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 32px 32px 0;
   color: var(--seele-osso);
+}
+
+/* O sobrescrito do desenho, em mono apagado. Dois, e a caixa diz qual vale:
+   `MODERAÇÃO` na escolha, `CONFIRMAR` (em laranja, o acento da moldura que
+   avisa) quando há um ato armado. Decorativos: o título já diz o que é. */
+.moderar-eyebrow {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
+}
+
+.moderar-eyebrow-confirma { display: none; color: var(--seele-laranja-nerv); }
+.moderar-caixa:has(.moderar-confirmacao:not([hidden])) .moderar-eyebrow-escolha { display: none; }
+.moderar-caixa:has(.moderar-confirmacao:not([hidden])) .moderar-eyebrow-confirma { display: block; }
+.moderar-caixa:has(.moderar-confirmacao:not([hidden])) {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 55%, transparent);
 }
 
 /* O kanji é acento. `MODERAÇÃO` ao lado carrega a informação, e é por isso que
@@ -112,6 +130,7 @@
   font-size: 32px;
   line-height: 1.1;
   letter-spacing: var(--seele-tracking-cartela);
+  text-transform: none;
 }
 
 /* ---------- o corpo ---------- */
@@ -146,7 +165,7 @@
   min-width: 0;
 }
 
-.moderar-campo > .rotulo { font-family: var(--seele-ui); font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--seele-osso); }
+.moderar-campo > .rotulo { font-family: var(--seele-ui); font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--seele-osso); }
 
 /* O `select` é o único desta janela, e por isso ele é desenhado aqui e não em
    `base.css`: um primitivo compartilhado por um consumidor é um primitivo
@@ -166,29 +185,52 @@
    irreversíveis, e três botões encostados são três botões que se erra. O banir
    tem dois campos (até quando e motivo), e eles sentam lado a lado. */
 .moderar-acao {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  align-items: center;
+  gap: 8px 12px;
   padding: 16px 18px;
   border: 1px solid var(--seele-vidro-borda);
   border-radius: var(--seele-raio-cartao);
   background: var(--seele-vidro);
 }
 
-.moderar-acao:has(> .moderar-campo + .moderar-campo) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  align-items: start;
-  gap: 10px 12px;
+/* O cartão do desenho: o nome do verbo à esquerda e o botão à direita na
+   mesma linha, a frase embaixo, e (no banir) os dois campos por último. A
+   ordem escrita na marcação segue sendo a de leitura — campos, botão, frase —
+   e é a grade que a embaralha só por fora. */
+.moderar-acao-titulo {
+  grid-column: 1;
+  grid-row: 1;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--seele-osso);
 }
 
-.moderar-acao:has(> .moderar-campo + .moderar-campo) > :not(.moderar-campo) { grid-column: 1 / -1; justify-self: start; }
+.moderar-acao > .moderar-verbo { grid-column: 2; grid-row: 1; justify-self: end; }
+.moderar-acao > .nota { grid-column: 1 / -1; grid-row: 2; font-size: 13px; line-height: 1.5; color: var(--seele-rotulo-painel); }
+.moderar-acao > .moderar-campo { grid-row: 3; margin-top: 4px; }
+.moderar-acao > .erro { grid-column: 1 / -1; grid-row: 4; margin: 0; }
 
-.moderar-acao > .nota { font-size: 13px; line-height: 1.5; color: var(--seele-rotulo-painel); }
+/* Mover: «Mover para», a lista e o botão numa linha só. O rótulo continua
+   dentro do `<label>` (o nome acessível não muda); `contents` só solta o
+   rótulo e a lista na grade do cartão. */
+#moderar-acao-mover { grid-template-columns: auto minmax(0, 1fr) auto; }
+#moderar-acao-mover > .moderar-campo { display: contents; }
+#moderar-acao-mover > .moderar-campo > .rotulo { grid-column: 1; grid-row: 1; }
+#moderar-acao-mover > .moderar-campo > .moderar-select { grid-column: 2; grid-row: 1; }
+#moderar-acao-mover > .moderar-verbo { grid-column: 3; grid-row: 1; }
+
+/* O banir é o ato sem volta: o cartão ganha o tom de laranja do desenho e o
+   botão, a moldura quente. */
+#moderar-acao-banir {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 7%, var(--seele-vidro));
+}
 
 .moderar-verbo {
-  align-self: flex-start;
+  align-self: start;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -268,6 +310,16 @@
 .moderar-confirmar {
   flex: 0 1 auto;
   min-height: 44px;
+}
+
+/* O botão que executa o que não se desfaz fica de contorno e tom laranja, e
+   não cheio: o laranja cheio é o primário comum, e este ato pede um peso à
+   parte. (O desenho o pinta de vermelho; `tokens.css` reserva o vermelho para
+   alerta e queda, e a moderação não o gasta.) */
+.moderar-caixa .moderar-confirmar {
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 16%, transparent);
+  border: 1px solid var(--seele-laranja-nerv);
+  color: var(--seele-laranja-claro);
 }
 
 /* **A saída não sai de vista.** A caixa rola — `max-height` mais
@@ -391,8 +443,14 @@ li:hover .moderar-remover,
   .moderar-cabeca { padding: 20px 16px 0; }
   .moderar-corpo, .moderar-confirmacao { padding: 16px; }
   .moderar-fechar { margin: 0 16px 16px; }
-  .moderar-acao:has(> .moderar-campo + .moderar-campo) { grid-template-columns: minmax(0, 1fr); }
+  .moderar-acao { grid-template-columns: minmax(0, 1fr) auto; }
+  .moderar-acao > .moderar-campo { grid-column: 1 / -1; grid-row: auto; }
+  .moderar-acao > .erro { grid-row: auto; }
+  #moderar-acao-mover { grid-template-columns: minmax(0, 1fr) auto; }
+  #moderar-acao-mover > .moderar-campo > .rotulo { grid-column: 1 / -1; grid-row: 1; }
+  #moderar-acao-mover > .moderar-campo > .moderar-select { grid-column: 1; grid-row: 2; }
+  #moderar-acao-mover > .moderar-verbo { grid-column: 2; grid-row: 2; }
+  #moderar-acao-mover > .nota { grid-row: 3; }
   .moderar-acao > button, .moderar-botoes > button { min-height: 44px; }
   .moderar-botoes > button { flex: 1 1 120px; }
-  .moderar-acao > button { flex: 0 0 auto; align-self: flex-start; }
 }

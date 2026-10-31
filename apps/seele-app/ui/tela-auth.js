@@ -300,9 +300,15 @@ function dizerSeOConviteJaConferiu(veredito, deOnde = null) {
   const linha = $("auth-conferido");
   linha.hidden = conferido === null;
   const quem = deOnde?.origem === "Lista" ? "A LISTA" : "O CONVITE";
-  linha.textContent = conferido
-    ? `${quem} JÁ CONFIRMOU A CHAVE DESTE SERVIDOR\n${conferido.fingerprint}`
-    : "";
+  linha.replaceChildren();
+  if (!conferido) return;
+  // O título e a impressão em grupos de 4, como no desenho: 64 caracteres sem
+  // espaço são ilegíveis, e a grade deixa a pessoa comparar grupo a grupo.
+  const grupos = String(conferido.fingerprint).replace(/\s+/g, "").match(/.{1,4}/g) ?? [];
+  const impressao = elemento("span", "auth-impressao");
+  impressao.append(...grupos.map((g) => elemento("span", "auth-grupo", g)));
+  impressao.setAttribute("aria-label", String(conferido.fingerprint));
+  linha.append(elemento("span", "auth-conferido-titulo", `${quem} JÁ CONFIRMOU A CHAVE DESTE SERVIDOR`), impressao);
 }
 
 /**
@@ -321,6 +327,8 @@ function dizerSeOConviteJaConferiu(veredito, deOnde = null) {
  */
 function desenharServerDaEntrada(snapshot) {
   $("auth-server-nome").textContent = snapshot?.server || AUSENTE;
+  $("auth-titulo-nome").textContent = snapshot?.server || AUSENTE;
+  $("auth-titulo-nome").hidden = !snapshot?.server;
   $("auth-voice_rooms").textContent = doisDigitos(snapshot?.voice_rooms?.length);
   $("auth-linhas").textContent = doisDigitos(snapshot?.channels?.length);
 }

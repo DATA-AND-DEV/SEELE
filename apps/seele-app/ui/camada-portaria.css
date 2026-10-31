@@ -35,7 +35,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 16px;
 }
 
 /* O véu num pseudoelemento, e não `opacity` na caixa: apagar a caixa apagaria
@@ -56,8 +56,8 @@
   position: relative;
   box-sizing: border-box;
   width: 100%;
-  max-width: 1200px;
-  max-height: calc(100dvh - 48px);
+  max-width: none;
+  height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -84,16 +84,44 @@
   border-radius: var(--seele-raio-painel);
 }
 
-.portaria-marca {
-  display: inline-flex;
-  align-items: center;
-  color: var(--seele-laranja-nerv);
+.portaria-titulos {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
+/* O sobrescrito do desenho, e o chip do estado ao lado do título. */
+.portaria-eyebrow {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
+}
+
+.portaria-chip {
+  margin-right: auto;
+  padding: 2px 12px;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso-apagado);
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+}
+
+.portaria-chip[data-batendo="true"] {
+  color: var(--seele-laranja-claro);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 60%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 10%, transparent);
+}
+
+.portaria-chip[hidden] { display: none; }
+
 .portaria-titulo {
-  flex: 1 1 auto;
   margin: 0;
-  font-size: 30px;
+  font-size: 32px;
+  text-transform: none;
   letter-spacing: var(--seele-tracking-cartela);
   font-family: var(--seele-display);
   font-weight: 700;
@@ -101,6 +129,7 @@
 }
 
 .portaria-fechar {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -124,23 +153,35 @@
    entrada à direita. O aviso e o erro ocupam a largura toda. */
 .portaria-corpo {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  /* `max-content` e não `auto`: com a altura da caixa definida, as faixas
-     `auto` encolhem até o mínimo de cada item e os painéis se sobrepõem em vez
-     de fazer o corpo rolar. */
-  grid-auto-rows: max-content;
-  align-items: start;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 0 12px;
+  flex: 1 1 auto;
   min-height: 0;
   padding: 0;
   overflow-y: auto;
 }
 
 .portaria-corpo > * { grid-column: 1 / -1; margin: 0; }
-.portaria-corpo > .portaria-rolagem { grid-column: 1; }
-.portaria-corpo > .portaria-camadas { grid-column: 2; }
+.portaria-corpo > .portaria-rolagem { grid-column: 1; grid-row: 3; }
+.portaria-corpo > .portaria-camadas { grid-column: 2; grid-row: 3; }
+.portaria-corpo > .portaria-alarme { grid-row: 2; margin-bottom: 12px; }
+.portaria-corpo > #portaria-erro { grid-row: 4; margin-top: 12px; }
 
 .portaria-corpo > .nota:empty { display: none; }
+
+/* O estado da porta já está no título, no chip e na lista: esta frase fica só
+   para o leitor de tela (`role="status"`), que anuncia de qual hospedagem é a
+   camada. */
+.portaria-corpo > #portaria-qual-servidor {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* O único vermelho desta folha. Ver o cabeçalho. A banda do desenho: canto de
    18px, moldura a 50% e o texto em rosa claro. */
@@ -158,6 +199,15 @@
   flex: 0 0 auto;
 }
 
+/* O «[!]» do desenho, só para quem vê: o alerta já diz o que é por escrito. */
+.portaria-alarme::before {
+  content: "[!]" / "";
+  margin-right: 10px;
+  font-family: var(--seele-mono);
+  font-weight: 700;
+  color: var(--seele-vermelho-claro);
+}
+
 /* ---------- as camadas de entrada ----------
    O painel da direita: senha, convite e portaria, cada um num cartão de vidro
    com o rótulo, o estado em palavras e os controles. */
@@ -167,6 +217,10 @@
   gap: 12px;
   padding: 22px 24px;
   flex: 0 0 auto;
+  min-height: 0;
+  overflow-y: auto;
+  align-self: start;
+  max-height: 100%;
   background: var(--seele-vidro);
   border: 1px solid var(--seele-vidro-borda);
   border-radius: var(--seele-raio-painel);
@@ -183,7 +237,66 @@
   background: var(--seele-vidro);
 }
 
-.portaria-camada > .rotulo { flex: 1 1 100%; }
+/* O nome do cartão é o título do desenho: sentença, Inter em negrito. */
+.portaria-camada > .rotulo {
+  flex: 1 1 100%;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-osso);
+}
+
+/* O interruptor do desenho. O botão continua sendo um botão (`aria-pressed`,
+   o rótulo LIGAR/DESLIGAR para o leitor de tela), mas se desenha como trilho
+   com a bolinha: o estado também está escrito na frase logo acima. */
+#portaria-ligar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 56px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 0;
+  color: transparent;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+#portaria-ligar::before {
+  content: "";
+  position: absolute;
+  inset: 8px 0;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+}
+
+#portaria-ligar::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--seele-osso-apagado);
+  transition: transform 0.15s ease;
+}
+
+#portaria-ligar[aria-pressed="true"]::before {
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+
+#portaria-ligar[aria-pressed="true"]::after {
+  transform: translateX(28px);
+  background: var(--seele-negro-absoluto);
+}
+
+#portaria-ligar:hover::before { border-color: var(--seele-osso-apagado); }
+#portaria-ligar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; border-radius: var(--seele-raio-pilula); }
 
 /* O estado em palavras, e nunca só por cor ou por posição de um interruptor.
    `specs/06-clientes-gui.md` pede a palavra, e aqui ela é o que separa «senha
@@ -196,6 +309,11 @@
   color: var(--seele-osso-apagado);
 }
 
+#portaria-ligar { order: 2; }
+.portaria-camada:has(#portaria-ligar) { position: relative; }
+.portaria-camada:has(#portaria-ligar) > .rotulo { flex: 1 1 0; order: 0; }
+.portaria-camada:has(#portaria-ligar) > .portaria-estado { order: 3; }
+
 .portaria-senha,
 .portaria-observacao {
   flex: 1 1 160px;
@@ -205,16 +323,16 @@
 }
 
 /* LIGAR/DESLIGAR é o interruptor do desenho: ligado, o botão acende em laranja. */
-.portaria-camada .botao-fantasma[aria-pressed="true"] {
-  color: var(--seele-laranja-claro);
-  background: color-mix(in srgb, var(--seele-laranja-nerv) 14%, transparent);
-  border-color: var(--seele-laranja-nerv);
-}
+/* Ligada, a frase de estado acende em verde, como no desenho; a palavra
+   `ligada` é quem diz, não a cor. */
+.portaria-camada:has(#portaria-ligar[aria-pressed="true"]) .portaria-estado { color: var(--seele-fosforo); }
 
 /* ---------- a fila e o histórico ----------
    O painel da esquerda. */
 .portaria-rolagem {
   flex: 0 0 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -262,13 +380,45 @@
   border-color: color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
 }
 
+/* A linha de cima do cartão: a inicial, o texto e os botões. */
+.portaria-topo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.portaria-avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-family: var(--seele-ui);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-radius: 12px;
+}
+
+.portaria-cartao:not(:has(.portaria-veredito)) .portaria-avatar {
+  color: var(--seele-fosforo);
+  background: var(--seele-fosforo-fraco);
+}
+
+.portaria-texto { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.portaria-meta { display: flex; flex-wrap: wrap; gap: 0 6px; }
+.portaria-meta > .portaria-quando::before { content: "· "; }
+
 /* A identidade, e é por isso que ela é a linha grande e a primeira do cartão.
    Monoespaçada e com `word-break` porque sessenta e quatro caracteres em grupos
    de oito têm de caber sem que nenhum grupo se parta ao meio numa janela
    estreita — um grupo partido é exatamente onde a conferência por olho erra.
    No desenho ela é a caixa azul de «identidade verificada». */
 .portaria-impressao {
-  margin: 8px 0 0;
+  margin: 0;
   padding: 10px 14px;
   font-family: var(--seele-mono);
   font-size: 13px;
@@ -319,7 +469,7 @@
    com a moldura do estado. */
 .portaria-veredito {
   margin: 0;
-  align-self: flex-start;
+  align-self: center;
   padding: 3px 10px;
   border: var(--seele-b) solid var(--seele-controle-borda);
   border-radius: var(--seele-raio-pilula);
@@ -340,18 +490,19 @@
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  margin-left: auto;
 }
 
 /* ADMITIR é o primário do cartão de quem espera: laranja cheio, como no
    desenho. Nos já decididos o único botão é REVOGAR, e fica de vidro. */
-.portaria-cartao:not(:has(.portaria-veredito)) .portaria-acoes > button:first-child {
+.portaria-cartao:not(:has(.portaria-veredito)) .portaria-acoes > button:last-child {
   color: var(--seele-tinta-no-acento);
   background: var(--seele-laranja-nerv);
   border-color: var(--seele-laranja-nerv);
   font-weight: 600;
 }
 
-.portaria-cartao:not(:has(.portaria-veredito)) .portaria-acoes > button:first-child:hover {
+.portaria-cartao:not(:has(.portaria-veredito)) .portaria-acoes > button:last-child:hover {
   background: var(--seele-laranja-hover);
   border-color: var(--seele-laranja-hover);
 }
@@ -490,12 +641,15 @@
 
 .portaria-identidade { color: var(--seele-osso); font-family: var(--seele-ui); font-size: 13px; }
 .portaria-identidade summary { cursor: pointer; padding: 8px 0; color: var(--seele-osso-apagado); }
+.portaria-identidade-nota { margin: 8px 0 0; font-family: var(--seele-ui); font-size: 12px; color: var(--seele-rotulo-painel); }
+
 
 
 @media (max-width: 900px) {
-  .portaria-corpo { grid-template-columns: minmax(0, 1fr); }
+  .portaria-corpo { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: max-content; align-content: start; gap: 12px; }
   .portaria-corpo > .portaria-rolagem,
-  .portaria-corpo > .portaria-camadas { grid-column: 1; }
+  .portaria-corpo > .portaria-camadas { grid-column: 1; grid-row: auto; overflow: visible; max-height: none; }
+  .portaria-corpo > .portaria-alarme, .portaria-corpo > #portaria-erro { grid-row: auto; margin: 0; }
 }
 
 @media (max-width: 700px) {

@@ -64,6 +64,30 @@ let focoAntesDoAceite = null;
  */
 let aceitePendente = null;
 
+const FORMAS_DO_ICONE = {
+  tema: [["circle", { cx: 12, cy: 12, r: 8 }], ["path", { d: "M12 4a8 8 0 0 1 0 16z", fill: "currentColor" }]],
+  pagina: [["rect", { x: 5, y: 5, width: 14, height: 14, rx: 3 }], ["path", { d: "M9 10h6M9 14h4" }]],
+  pulso: [["path", { d: "M3 12h4l2-6 4 12 2-6h6" }]],
+  mod: [["rect", { x: 5, y: 5, width: 14, height: 14, rx: 3 }]],
+};
+
+/** O desenho do cartão: tema, página (ou armazenamento), código no servidor, ou o genérico. */
+function iconeDoMod(mod) {
+  const alcances = Array.isArray(mod.reach) ? mod.reach : [];
+  const qual = mod.tema ? "tema" : mod.no_servidor ? "pulso" : alcances.length ? "pagina" : "mod";
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "mods-icone");
+  svg.setAttribute("aria-hidden", "true");
+  for (const [tag, atributos] of FORMAS_DO_ICONE[qual]) {
+    const forma = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(atributos)) forma.setAttribute(k, String(v));
+    svg.append(forma);
+  }
+  return svg;
+}
+
 /**
  * Desenha uma linha da lista.
  *
@@ -76,7 +100,11 @@ let aceitePendente = null;
 function linhaDeMod(mod, indice) {
   const linha = elemento("li", "mods-item");
 
-  const ordem = elemento("span", "mods-ordem", String(indice + 1).padStart(2, "0"));
+  // A marca do cartão é o desenho do que o MOD mexe, como no desenho do aceite;
+  // o número da ordem passa para o rótulo de leitura, que a tela não perde.
+  const ordem = elemento("span", "mods-ordem");
+  ordem.append(iconeDoMod(mod));
+  ordem.title = `MOD ${indice + 1}`;
   const corpo = elemento("div", "mods-corpo");
 
   corpo.append(

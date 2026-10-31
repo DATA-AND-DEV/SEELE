@@ -13,14 +13,14 @@
    cima, que já é a borda da última placa. */
 .trilha-grupo {
   margin: 0;
-  padding: 6px 0 4px;
+  padding: 10px 0 4px;
   flex: 0 0 auto;
   text-align: center;
   font-family: var(--seele-mono);
-  font-size: 8px;
-  letter-spacing: 0.12em;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--seele-rotulo-painel);
-  border-bottom: 1px solid var(--seele-linha);
 }
 
 /* A placa de uma sessão: a sigla no meio, e as marcas nos cantos. */

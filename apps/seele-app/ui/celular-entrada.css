@@ -533,3 +533,83 @@
 :root[data-casca="celular"] #tela-boot:has(.cel-entrada[data-inicio]) > .estado-sem-sessao { display: flex; }
 :root[data-casca="celular"] #tela-boot .inicio-hospedar { display: none; }
 :root[data-casca="celular"] .chamada-acoes-estreitas { display:none; }
+
+/* ------------------------------------- a «ENTRAR EM», como o Cel-entrar.dc */
+
+/* Sem a marca: no alto vem o «‹ voltar», e a conferência começa logo abaixo. */
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-marca { display: none; }
+
+:root[data-casca="celular"] #tela-boot .cel-entrada[data-tipo="entrar-em"] .cel-entrada-corpo {
+  grid-row: 2;
+  align-content: start;
+  padding-top: calc(var(--cel-seguro-topo) + 20px);
+  gap: 14px;
+}
+
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-pe { grid-row: 3; }
+
+:root[data-casca="celular"] .cel-entrada .cel-entrada-voltar {
+  justify-self: start;
+  width: auto;
+  min-height: var(--cel-alvo);
+  margin: -8px 0 -14px;
+  padding: 0 12px 0 0;
+  font-family: var(--seele-ui);
+  font-size: calc(14px * var(--cel-escala));
+  font-weight: 400;
+  text-transform: lowercase;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+/* O título em frase, e não em caixa alta: «Entrar em casa.seele.sh?». */
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-titulo {
+  font-size: calc(30px * var(--cel-escala));
+  text-transform: lowercase;
+}
+
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-titulo::first-letter {
+  text-transform: uppercase;
+}
+
+/* Os rótulos da ficha são legenda em Inter, em minúsculas, e não o rótulo mono. */
+:root[data-casca="celular"] .cel-entrada-ficha dt .rotulo {
+  font-family: var(--seele-ui);
+  font-size: calc(14px * var(--cel-escala));
+  letter-spacing: 0;
+  text-transform: lowercase;
+  color: var(--seele-osso-apagado);
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dt:has(+ dd > .cel-entrada-impressao) .rotulo {
+  font-family: var(--seele-mono);
+  font-size: calc(11px * var(--cel-escala));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* A nota da impressão mora dentro do cartão azul. */
+:root[data-casca="celular"] .cel-entrada-ficha dd > .cel-entrada-nota {
+  margin-top: 10px;
+  font-size: calc(12px * var(--cel-escala));
+  color: var(--seele-azul-claro);
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dd:has(> .cel-entrada-impressao) {
+  margin-bottom: 4px;
+}
+
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-campo > .rotulo {
+  text-transform: lowercase;
+}
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-campo > .rotulo::first-letter {
+  text-transform: uppercase;
+}
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-nota {
+  font-size: calc(12px * var(--cel-escala));
+  color: var(--seele-rotulo-claro);
+}
+:root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-campo > .rotulo { margin-bottom: -8px; }

@@ -100,7 +100,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px 14px;
+  gap: 4px 14px;
   padding: 0;
   border: 0;
 }
@@ -140,20 +140,26 @@
 }
 
 .bateria-dizeres {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
+  display: contents;
 }
 
-.bateria-dizeres .rotulo { letter-spacing: 0.2em; }
+.bateria-dizeres .rotulo {
+  order: 1;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: lowercase;
+  color: var(--seele-osso-apagado);
+}
 
 /* A frase é da casca, e é a do comp menos o nome de rota. O comp escreve
    "Conexão com MEDIA perdida"; o inventário §5 classifica a frase inteira
    como **F/P** — "a frase é da casca, mas nomeia uma rota que não existe".
    Tirando o nome, o que sobra é verdade inteira. */
 .bateria-frase {
-  margin: 0;
+  order: 2;
+  flex: 1 0 100%;
+  margin: 8px 0 0;
   font-family: var(--seele-ui);
   font-size: 14px;
   line-height: 1.6;
@@ -165,11 +171,10 @@
 .bateria-pe {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 16px;
-  border-radius: var(--seele-raio);
-  border: 1px solid var(--seele-vidro-borda);
-  background: var(--seele-campo);
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 
 .bateria-pe .rotulo {
@@ -181,8 +186,10 @@
    coisa que o protocolo carrega sobre elas. Fica em osso e em corpo de dado,
    porque é o valor medido desta seção. */
 #bateria-tentativas {
+  margin: 0;
+  font-family: var(--seele-mono);
   font-size: 13px;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-osso);
 }
 
 /* ---------- o que saiu daqui ----------
@@ -213,7 +220,7 @@
    A classe continua `bateria-forcar` de propósito: é o nome que a marcação e os
    testes procuram, e renomeá-lo é trabalho de quem mexe no `index.html`. */
 .bateria-forcar {
-  margin: 12px 0 0;
+  margin: 14px 0 0;
   padding: 0;
   font-family: var(--seele-ui);
   font-size: 13px;
@@ -230,3 +237,25 @@
 }
 
 @media(max-width:700px) { .bateria-caixa { padding:24px 20px; border-radius:24px; } #bateria-conta { font-size:56px; } }
+
+/* ================= redesign 0.19, segunda passada: a queda =================
+
+   Fonte: o canvas `Conexao-perdida`. O que a primeira passada deixou: a legenda
+   «até a sessão ser encerrada» embaixo do número em caixa alta, e a nota «o SEELE
+   já está tentando» dentro da caixa das tentativas. No canvas a legenda fica ao
+   lado do número, em texto corrido, a frase abaixo dos dois, e a nota fora da
+   caixa, sob ela (as regras de cima já estão escritas assim).
+
+   O que **não** foi trazido: o fundo quase preto do canvas. Aqui a operação fica
+   a 55% (`.na-bateria .paineis`), pela razão escrita no alto desta folha — o
+   histórico precisa continuar legível —, e o canvas o desenha como casca vazia. */
+.bateria-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--seele-raio);
+  border: 1px solid var(--seele-vidro-borda);
+  background: var(--seele-campo);
+}
+.bateria-lista .rotulo { text-transform: none; letter-spacing: var(--seele-tracking-rotulo); }

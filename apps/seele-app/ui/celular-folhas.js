@@ -227,13 +227,15 @@
     return { caixa, pintar };
   }
 
-  function folhaDaPessoa({ id, nome, sinal, estado, volume, mudarVolume, podeModerar }) {
+  function folhaDaPessoa({ id, nome, iniciais = "", sinal, estado, volume, mudarVolume, podeModerar }) {
     let fechar = null;
     let deslizante = null;
-    const corpo = [h("div", { class: "cel-folha-sinal" },
+    // O sinal e o volume num cartão só (Cel-folha-pessoa.dc).
+    const cartao = h("div", { class: "cel-folha-cartao" }, h("div", { class: "cel-folha-sinal" },
       h("span", { class: "rotulo", text: PALAVRAS.sinal }),
       h("span", { class: "cel-folha-sinal-valor", text: sinal }),
-      h("span", { class: "cel-folha-sinal-estado", text: estado }))];
+      h("span", { class: "cel-folha-sinal-estado", text: estado })));
+    const corpo = [cartao];
     if (volume !== null) {
       const rotulo = h("span", { class: "rotulo cel-folha-volume", text: PALAVRAS.volume(volume) });
       deslizante = h("input", {
@@ -249,7 +251,7 @@
           mudarVolume(Number(deslizante.value));
         },
       });
-      corpo.push(h("label", { class: "cel-folha-campo-volume" }, rotulo, deslizante));
+      cartao.append(h("label", { class: "cel-folha-campo-volume" }, rotulo, deslizante));
     }
     const detalhes = id === null ? null : detalhesNaFolha(String(id));
     if (detalhes) corpo.push(detalhes.caixa);
@@ -258,7 +260,10 @@
     }
     const fecharBotao = h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar);
     corpo.push(h("div", { class: "cel-folha-acoes" }, fecharBotao));
-    fechar = abrirFolha(folha("cel-folha-pessoa", nome, ...corpo), () => fechar());
+    const secao = folha("cel-folha-pessoa", nome, ...corpo);
+    // O avatar de iniciais antes do nome: desenho, e o nome diz quem é.
+    if (iniciais) secao.querySelector(".cel-folha-cabeca").prepend(h("span", { class: "cel-folha-avatar", "aria-hidden": "true", text: iniciais }));
+    fechar = abrirFolha(secao, () => fechar());
     if (detalhes) {
       pintarOsDetalhes = detalhes.pintar;
       detalhes.pintar();
@@ -465,6 +470,31 @@
     espera.observe(document.body, { childList: true });
   }
   pintarAPrevia();
+
+  // O enlace pulsando no alto da queda (Cel-reconectando.dc): desenho, e o título
+  // abaixo diz o que aconteceu. A queda é do desktop, e só a casca o desenha.
+  const caixaDaQueda = document.querySelector("#bateria .bateria-caixa");
+  if (caixaDaQueda) {
+    const SVG = "http://www.w3.org/2000/svg";
+    const enlace = document.createElementNS(SVG, "svg");
+    enlace.setAttribute("class", "bateria-enlace");
+    enlace.setAttribute("viewBox", "0 0 96 96");
+    enlace.setAttribute("width", "120");
+    enlace.setAttribute("height", "120");
+    enlace.setAttribute("aria-hidden", "true");
+    enlace.setAttribute("focusable", "false");
+    for (const [tag, classe, atributos] of [
+      ["rect", "bateria-enlace-cheio", { x: "12", y: "12", width: "24", height: "24" }],
+      ["rect", "bateria-enlace-vazio", { x: "62", y: "62", width: "20", height: "20" }],
+      ["path", "bateria-enlace-pulso", { d: "M34 34L62 62" }],
+    ]) {
+      const forma = document.createElementNS(SVG, tag);
+      forma.setAttribute("class", classe);
+      for (const [nome, valor] of Object.entries(atributos)) forma.setAttribute(nome, valor);
+      enlace.append(forma);
+    }
+    caixaDaQueda.prepend(enlace);
+  }
 
   CELULAR.registrar("folhaDeAnexar", folhaDeAnexar);
   CELULAR.registrar("folhaDaPessoa", folhaDaPessoa);

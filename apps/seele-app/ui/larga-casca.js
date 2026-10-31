@@ -12,6 +12,8 @@
 
 (() => {
   if (document.documentElement.dataset.casca !== "larga") return;
+  // A marca para quem monta a entrada depois (`composicao-0174.js`), sem ler a da raiz.
+  globalThis.CASCA_LARGA = true;
 
   // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
   // arquivo não escreve nenhuma.
@@ -42,6 +44,18 @@
   // O propósito perde a metade «ou ponha o seu no ar a partir desta máquina»,
   // que no navegador seria mentira, e HOSPEDAR AQUI vira a frase do app.
   document.getElementById("botao-hospedar").after(h("p", { class: "nota larga-hospedar" }, PALAVRAS.hospedar, linkDoApp()));
+
+  // O cartão de identidade da entrada repete o nome do perfil, que o
+  // `identidade-web.js` e o `camada-nomear.js` escrevem em `#boot-perfil-nome`.
+  const perfilNome = document.getElementById("boot-perfil-nome");
+  const copiarIdentidade = () => {
+    const nome = (perfilNome?.textContent ?? "").trim();
+    const semNome = nome === "" || nome === "—";
+    document.getElementById("boot-identidade-nome").textContent = semNome ? "" : nome;
+    document.getElementById("boot-identidade-inicial").textContent = semNome ? "" : (Array.from(nome)[0] ?? "").toUpperCase();
+  };
+  copiarIdentidade();
+  if (perfilNome) new MutationObserver(copiarIdentidade).observe(perfilNome, { childList: true, characterData: true, subtree: true });
 
   // -------------------------------------------------------- CONFIGURAÇÕES
 
@@ -98,6 +112,12 @@
     pelaTela.hidden = guardada() === null;
   }
   pelaTela.hidden = guardada() === null;
+  // A faixa da entrada: o mesmo ABRIR COMO CELULAR de CONFIGURAÇÕES, e como a
+  // escolha só vale na próxima abertura, a faixa abre a página de novo.
+  document.getElementById("boot-abrir-como-celular").addEventListener("click", () => {
+    escolherCasca("celular");
+    if (guardada() === "celular") location.reload();
+  });
   document.getElementById("tela-server").querySelector(".server-painel").append(
     h("section", { id: "larga-painel-casca", class: "server-painel-secao", hidden: true },
       h("p", { class: "larga-frase", text: PALAVRAS.abriuComoComputador }),

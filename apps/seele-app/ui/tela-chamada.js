@@ -406,6 +406,13 @@ function assistindo(quantos) {
 
 /** A barra de cima: o nome da sala, o enlace e o relógio da sessão. */
 function desenharBarraDaChamada(snapshot, voice_room) {
+  // `SALA DE VOZ · CASA`, como o canvas 0.19: o rótulo acima do nome diz de que
+  // servidor é a sala. O nome vem do mesmo `snapshot.server` do cabeçalho.
+  const placa = document.querySelector("#vista-chamada .chamada-placa");
+  if (placa) {
+    const fraseDaPlaca = snapshot?.server ? `SALA DE VOZ · ${snapshot.server}` : "SALA DE VOZ";
+    if (placa.textContent !== fraseDaPlaca) placa.textContent = fraseDaPlaca;
+  }
   const nome = $("chamada-nome");
   if (voice_room) {
     medido(nome, voice_room.name);

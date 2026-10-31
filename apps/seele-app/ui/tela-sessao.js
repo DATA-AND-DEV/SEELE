@@ -658,7 +658,33 @@ function desenharTopo(snapshot) {
     naoMedido(rotulo, "este servidor não anunciou nome");
   }
 
+  desenharCabecaDoServidor(snapshot);
   desenharTrilha(snapshot);
+}
+
+/**
+ * O nome do servidor no alto da coluna de salas, com o chip do estado da
+ * conexão e o endereço — a mesma informação do `#barra-servidor-*`, vestida
+ * como o canvas 0.19 a desenha. Só escreve o que a barra já escreve: o nome é
+ * o que o servidor anunciou, o chip é uma das três frases do `Trust` e o
+ * endereço é o alvo com que se entrou (`alvoDoServer`).
+ */
+function desenharCabecaDoServidor(snapshot) {
+  const nome = $("canais-servidor-nome");
+  if (!nome) return;
+  const escrever = (no, texto) => { if (no.textContent !== texto) no.textContent = texto; };
+  escrever(nome, snapshot.server || "");
+  nome.title = snapshot.server || "";
+  const chip = $("canais-servidor-chip");
+  chip.dataset.padrao = snapshot.link_state;
+  escrever($("canais-servidor-chip-texto"), {
+    Offline: "SEM CONEXÃO",
+    Unverified: "NÃO VERIFICADA",
+    Verified: "SEGURA",
+  }[snapshot.link_state] ?? "");
+  const endereco = $("canais-servidor-endereco");
+  escrever(endereco, alvoDoServer ? `seele://${alvoDoServer}` : "");
+  endereco.hidden = !alvoDoServer;
 }
 
 /**
@@ -1147,6 +1173,10 @@ function desenharCanais(snapshot) {
     // juntas, e dar-lhes o mesmo peso fazia a lista parecer que oferecia as
     // duas o tempo todo.
     cabeca.append(elemento("span", "espaco"));
+    // O chip do canvas 0.19: a sala em que esta janela está. É o mesmo dado de
+    // `occupied_by_us` que já escolhe o botão VER A CHAMADA, dito também na
+    // linha do nome.
+    if (voice_room.occupied_by_us) cabeca.append(elemento("span", "voice_room-aqui", "VOCÊ ESTÁ AQUI"));
 
     // A última sala de voz vem desabilitada e não escondida: a razão de ela
     // não poder ir embora é coisa que se lê, e uma ausência não se lê.
@@ -1311,6 +1341,16 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
 function desenharOperador(snapshot) {
   aplicarARegiao("operador.barra", $("operador-mods"));
   $("operador-nome").textContent = apelidoApresentado(snapshot.me, snapshot.nickname);
+  // A linha de baixo do nome: onde a voz está. Só descreve o que o snapshot já
+  // diz (a sala em que esta janela está), e sem sala fica o rótulo de sempre.
+  const salaDoOperador = snapshot.voice_rooms.find((c) => c.occupied_by_us);
+  const rotuloDoOperador = document.querySelector("#tela-sessao .operador-rotulo");
+  const fraseDoOperador = salaDoOperador ? `a voz está aqui · ${salaDoOperador.name}` : "operador";
+  if (rotuloDoOperador.textContent !== fraseDoOperador) rotuloDoOperador.textContent = fraseDoOperador;
+  // O apelido também abre a linha de escrever, como no canvas: `alex ❯`.
+  const prompt = document.querySelector("#form-mensagem .prompt");
+  const fraseDoPrompt = `${apelidoApresentado(snapshot.me, snapshot.nickname)} \u276f`;
+  if (prompt && prompt.textContent !== fraseDoPrompt) prompt.textContent = fraseDoPrompt;
   // O próprio retrato, no quadrado que já mostrava a inicial. `snapshot.me` é
   // quem esta janela é para o servidor; sem ele não há a quem pedir a imagem.
   // A inicial ao lado do nome, como a comp a desenha — e é a mesma que a prévia
@@ -1461,6 +1501,9 @@ function desenharLinha(snapshot) {
 
   nome.textContent = aberta ? aberta.name : "nenhum canal aberto";
   nome.classList.toggle("linha-nome-vazio", !aberta);
+  // O rótulo da caixa de escrever diz em que canal a mensagem vai.
+  const rotuloDoCanal = $("compor-rotulo-canal");
+  if (rotuloDoCanal) rotuloDoCanal.textContent = aberta ? `#${aberta.name}` : "";
   if (pode) {
     nome.title = `renomear #${aberta.name}`;
     nome.setAttribute("aria-label", `Renomear o canal ${aberta.name}`);
@@ -1806,7 +1849,11 @@ function itemDeMensagem(mensagem, indice, segue) {
   const conteudo = elemento("span", "mensagem-conteudo");
   const cabeca = elemento("span", "mensagem-cabeca");
   if (!segue) {
-    cabeca.append(elemento("span", "mensagem-autor", apelidoApresentado(mensagem.author, mensagem.author_nickname)));
+    const autor = elemento("span", "mensagem-autor", apelidoApresentado(mensagem.author, mensagem.author_nickname));
+    // Uma de cinco cores por pessoa, pelo identificador: quem escreve se
+    // reconhece de relance numa conversa sem avatares. É pintura, não dado.
+    autor.setAttribute("data-matiz", String(Number(mensagem.author) % 5));
+    cabeca.append(autor);
     cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
   }
   if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
@@ -3506,6 +3553,16 @@ function desenharTelemetria(snapshot) {
 
   const voice_room = snapshot.voice_rooms.find((c) => c.occupied_by_us);
   medido($("tel-voice_room"), voice_room ? voice_room.name : "FORA DE SALA");
+  // A pílula do começo da barra: em que pé a sessão está. Só reescrita quando
+  // muda, como o caminho abaixo.
+  const estadoDaBarra = $("tel-estado");
+  if (estadoDaBarra) {
+    const estado = snapshot.link_state === "Offline" ? "SEM CONEXÃO" : voice_room ? "NA SALA" : "NORMAL";
+    if (estadoDaBarra.textContent !== estado) {
+      estadoDaBarra.textContent = estado;
+      estadoDaBarra.dataset.estado = voice_room ? "sala" : "normal";
+    }
+  }
 
   // A média da sala é vizinha do nome dela, e as duas saem do mesmo achado: a
   // sala em que se está e como ela vai são a mesma pergunta em duas metades.

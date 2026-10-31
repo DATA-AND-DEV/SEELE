@@ -458,59 +458,9 @@
   align-items: center;
 }
 .antes-passo > :not(.antes-passo-topo) { grid-column: 2 / -1; }
-.antes-passo-num {
-  font-family: var(--seele-ui);
-  line-height: 1;
-  color: var(--seele-osso);
-  font-size: 14px;
-  font-weight: 700;
-  grid-column: 1;
-  grid-row: 1;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  align-self: start;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--seele-osso) 6%, transparent);
-}
-.antes-passo-titulo {
-  margin: 0 0 0 16px;
-  flex: none;
-  font-family: var(--seele-ui);
-  color: var(--seele-osso);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0;
-  flex-basis: calc(100% - 48px);
-  grid-column: 2;
-  grid-row: 1;
-  text-transform: none;
-}
 .antes-passo > :not(.antes-passo-topo) { margin-left: 16px; }
 /* O estado em palavra, numa pastilha de borda. Doze pixels e caixa alta: é o
    rótulo do produto (`--seele-t-rotulo`), e não um enfeite. */
-.antes-estado {
-  text-transform: uppercase;
-  border: 1px solid var(--seele-controle-borda);
-  color: var(--seele-osso-apagado);
-  margin-top: 8px;
-  padding: 0 10px;
-  border-radius: var(--seele-raio-pilula);
-  font-size: 11px;
-  letter-spacing: .06em;
-  grid-column: 3;
-  grid-row: 1;
-  justify-self: start;
-  margin: 0 0 0 10px;
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  background: none;
-  font-family: var(--seele-ui);
-  white-space: nowrap;
-}
 .antes-estado:empty { display: none; }
 .antes-passo[data-estado="ok"] .antes-estado {
   color: var(--seele-fosforo);
@@ -670,4 +620,78 @@
   .antes-passo-titulo { font-size: 15px; }
   .antes-estado { grid-column: 2 / -1; grid-row: 2; margin: 6px 0 0 16px; }
   .antes-abre { width: auto; margin: 8px 0 0 16px; }
+}
+
+/* ---- 0.19, segunda passada ----
+   O painel ocupa a altura da janela e a decisão fica no pé dele, como no
+   desenho; VOLTAR vem antes de HOSPEDAR, o primário no canto. O rótulo da etapa
+   e a palavra de estado usam a face de dados, em caixa alta e espaçada. A lista
+   de versões e o campo de nome do desenho moram em «Preparar este servidor», que
+   é outra tela e outro pacote. */
+#tela-antes-de-hospedar .boot-caixa.area {
+  width: min(100%, 1000px);
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+#tela-antes-de-hospedar .antes-corpo { flex: 1 1 auto; }
+#tela-antes-de-hospedar .hospedagem-etapa { font-family: var(--seele-mono); }
+.antes-passo-titulo {
+  margin: 0 0 0 16px;
+  flex: none;
+  font-family: var(--seele-ui);
+  color: var(--seele-osso);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0;
+  flex-basis: calc(100% - 48px);
+  grid-column: 2;
+  grid-row: 1;
+  text-transform: none;
+}
+.antes-passo-num {
+  font-family: var(--seele-ui);
+  line-height: 1;
+  color: var(--seele-osso);
+  font-size: 14px;
+  font-weight: 700;
+  grid-column: 1;
+  grid-row: 1;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--seele-osso) 6%, transparent);
+}
+.antes-passo > :not(.antes-passo-topo) { grid-row: auto; }
+.antes-acoes > button, .antes-linha-acoes > button { min-height: 36px; border-radius: var(--seele-raio-pilula); }
+.antes-rodape.area-barra { margin-top: auto; padding-top: 24px; }
+.antes-rodape .boot-saidas > button { min-height: 44px; }
+@media (max-width: 700px) {
+  #tela-antes-de-hospedar .boot-caixa.area { flex: 1 0 auto; }
+  .antes-rodape .boot-saidas > button { min-height: 44px; }
+}
+#tela-antes-de-hospedar .antes-corpo { align-content: start; }
+.antes-estado {
+  text-transform: uppercase;
+  border: 1px solid var(--seele-controle-borda);
+  color: var(--seele-osso-apagado);
+  margin-top: 8px;
+  padding: 0 10px;
+  border-radius: var(--seele-raio-pilula);
+  font-size: 10px;
+  letter-spacing: .1em;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: start;
+  margin: 0 0 0 10px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  background: none;
+  font-family: var(--seele-mono);
+  white-space: nowrap;
 }

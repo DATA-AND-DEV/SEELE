@@ -1750,3 +1750,261 @@
   .server-marca { padding: 12px 16px; }
   #painel-mods #mods-painel-instalados > .server-bloco > .server-bloco-topo { padding-right: 0; }
 }
+
+/* ======================================================================
+   Segunda passada: o casco da configuração como o canvas (Config-mods,
+   Config-som, Atualizacao). Só a janela larga: no celular (< 700px) a coluna
+   vira o índice de seções e nada daqui vale.
+   ====================================================================== */
+.mods-instalar-icone {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (min-width: 701px) {
+  /* ---- a coluna: o nome em caixa de frase, itens sem ícone, VOLTAR no pé ---- */
+  .server-coluna { padding-bottom: 84px; }
+  .server-marca { padding: 0 12px 12px; }
+  .server-marca-titulo {
+    font-size: 26px;
+    line-height: 1.1;
+    letter-spacing: -0.045em;
+    text-transform: lowercase;
+  }
+  .server-marca-titulo::first-letter { text-transform: uppercase; }
+
+  .server-grupo { padding: 14px 12px 4px; letter-spacing: 0.12em; }
+  .server-marca + .server-grupo { padding-top: 8px; }
+
+  .server-secao {
+    padding: 8px 12px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    color: color-mix(in srgb, var(--seele-osso) 85%, var(--seele-negro-painel));
+  }
+  .server-secao-icone { display: none; }
+  .server-secao-nome { text-transform: lowercase; }
+  .server-secao-nome::first-letter { text-transform: uppercase; }
+  #secao-mods .server-secao-nome { text-transform: none; }
+  .server-secao:hover { background: var(--seele-controle); }
+  .server-secao[aria-current="true"],
+  .server-secao[aria-current="true"]:hover {
+    border-color: var(--seele-controle-borda);
+    background: var(--seele-controle-hover);
+    color: var(--seele-osso);
+  }
+  /* «Tela entre pares» é o nome que o canvas dá à MALHA, e «Atualização» dispensa a nota. */
+  #secao-malha .server-secao-nome,
+  #secao-atualizacao .nota { display: none; }
+  #secao-malha .nota { font-size: 14px; color: inherit; }
+
+  /* VOLTAR sai da faixa do corpo e desce para o pé da coluna: `fixed` não depende de quem é posicionado no caminho, e a camada já é fixa. */
+  .server-voltar:not(.server-so-celular) {
+    position: fixed;
+    z-index: 3;
+    left: 31px;
+    bottom: 39px;
+    width: 218px;
+    justify-content: center;
+    backdrop-filter: blur(10px);
+    font-size: 14px;
+    letter-spacing: 0;
+  }
+
+  /* ---- a faixa: o contexto vira o rótulo de cima, o título em caixa de frase ---- */
+  .server-faixa {
+    position: static;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 24px 28px 0;
+  }
+  .server-contexto {
+    order: -1;
+    text-align: left;
+    font-family: var(--seele-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--seele-rotulo-painel);
+  }
+  .server-faixa-texto { flex: 0 0 auto; gap: 4px; }
+  .server-titulo {
+    font-size: 34px;
+    letter-spacing: -0.045em;
+    text-transform: lowercase;
+  }
+  .server-titulo::first-letter { text-transform: uppercase; }
+  .server-corpo:has(#painel-mods:not([hidden])) .server-titulo { text-transform: none; }
+  .server-faixa-texto > .nota { font-family: var(--seele-ui); font-size: 14px; }
+  .server-painel { padding-top: 16px; }
+
+  /* ---- MICROFONE E SOM: rótulos em Inter, sem os cabeçalhos de bloco ---- */
+  #painel-audio .server-bloco-topo {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  #painel-audio .server-bloco { position: relative; }
+  #painel-audio .server-bloco + .server-bloco { margin-top: 0; }
+  #painel-audio .server-campo > .rotulo {
+    font-family: var(--seele-ui);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0;
+    line-height: 1.6;
+    text-transform: lowercase;
+    color: var(--seele-osso);
+  }
+  #painel-audio .server-campo > .rotulo::first-letter { text-transform: uppercase; }
+  #painel-audio .server-campo:first-child { border-top: 1px solid var(--seele-vidro-borda); }
+
+  /* O medidor de entrada é barra desenhada: o texto é só o número, e o CSS põe o nível em `--parte`. */
+  .server-medidor[data-vivo="sim"] {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 520px;
+  }
+  .server-medidor[data-vivo="sim"]::before {
+    content: "";
+    flex: 1;
+    height: 10px;
+    border-radius: var(--seele-raio-pilula);
+    background: linear-gradient(90deg, var(--seele-fosforo) var(--parte, 0%), var(--seele-controle-hover) var(--parte, 0%));
+  }
+
+  /* ---- ATUALIZAÇÃO: a barra do download é desenho; o número fica ao lado ---- */
+  #painel-atualizacao .server-bloco-topo {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  #painel-atualizacao .server-bloco { position: relative; }
+  #painel-atualizacao #atualizacao-estado { text-transform: lowercase; font-size: 16px; }
+  #painel-atualizacao #atualizacao-estado::first-letter { text-transform: uppercase; }
+  #painel-atualizacao #atualizacao-andamento {
+    max-width: 760px;
+    padding-top: 8px;
+  }
+  .server-atualizacao-barra {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--seele-osso);
+  }
+  .server-atualizacao-barra:not(.ausente)::before {
+    content: "";
+    flex: 1;
+    height: 6px;
+    border-radius: var(--seele-raio-pilula);
+    background: linear-gradient(90deg, var(--seele-laranja-nerv) var(--parte, 0%), var(--seele-controle-hover) var(--parte, 0%));
+  }
+}
+
+/* ---- MODS (a partir de 901px: abaixo disso o botão de instalar volta à lista) ---- */
+@media (min-width: 901px) {
+  #painel-mods #mods-painel-instalados > .server-bloco { position: static; }
+  #painel-mods #mods-painel-instalados > .server-bloco > .server-bloco-topo { padding-right: 0; min-height: 0; }
+  #painel-mods #mods-instalar {
+    position: absolute;
+    z-index: 1;
+    top: 36px;
+    right: 28px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 18px;
+    border-radius: var(--seele-raio-pilula);
+  }
+  .server-faixa { padding-right: 300px; }
+}
+
+@media (min-width: 701px) {
+  /* O painel dos instalados enche o corpo, e o rascunho desce para o pé dele. */
+  #painel-mods { flex: 1 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  #painel-mods #mods-painel-instalados { flex: 1 0 auto; display: flex; flex-direction: column; }
+  #painel-mods #mods-painel-instalados > .server-bloco,
+  #painel-mods #mods-painel-instalados > .server-bloco > .server-bloco-corpo,
+  #painel-mods #mods-painel-instalados .server-campo { flex: 1 0 auto; }
+  #painel-mods .mods-instalados-grade {
+    flex: 1 0 auto;
+    grid-template-columns: minmax(0, 1.16fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto 1fr;
+    column-gap: 16px;
+    row-gap: 0;
+  }
+  #painel-mods .mods-instalados-lista { display: contents; }
+  #painel-mods #lista-mods { grid-column: 1; grid-row: 1; margin: 0; gap: 8px; }
+  #painel-mods .mods-instalados-regras { grid-column: 2; grid-row: 1 / span 3; }
+  #painel-mods #mods-sem-hospedar { grid-column: 1 / -1; grid-row: 2; margin-top: 8px; }
+  #painel-mods #mods-gestao-erro { grid-column: 1 / -1; grid-row: 3; margin-top: 8px; }
+  #painel-mods #mods-rascunho { grid-column: 1 / -1; grid-row: 4; align-self: end; margin-top: 16px; }
+  /* O canvas põe DESCARTAR antes de SALVAR. */
+  #painel-mods .mods-rascunho-botoes { display: flex; flex-direction: row-reverse; gap: 8px; }
+  #painel-mods #mods-salvar,
+  #painel-mods #mods-descartar { min-height: 44px; padding: 0 18px; border-radius: var(--seele-raio-pilula); }
+
+  /* Uma linha de MOD: ícone, nome e fatos, estado em pílula, ações. */
+  #painel-mods #lista-mods > li > .mods-linha-gestao {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto auto;
+    align-items: center;
+    column-gap: 0;
+    row-gap: 2px;
+    padding: 14px 16px;
+    border-radius: 18px;
+  }
+  #painel-mods #lista-mods > li > .mods-linha-gestao::before {
+    content: "";
+    grid-column: 1;
+    grid-row: 1 / span 5;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: var(--seele-laranja-fraco);
+  }
+  #painel-mods #lista-mods > li > .mods-linha-gestao::after {
+    content: "";
+    grid-column: 1;
+    grid-row: 1 / span 5;
+    justify-self: center;
+    width: 16px;
+    height: 16px;
+    border: 1.7px solid var(--seele-laranja-nerv);
+    border-radius: 4px;
+  }
+  #painel-mods #lista-mods > li > .mods-linha-gestao > .server-dispositivo-nome { display: contents; }
+  #painel-mods #lista-mods .mods-id,
+  #painel-mods #lista-mods .mods-versao,
+  #painel-mods #lista-mods .mods-servidor,
+  #painel-mods #lista-mods .mods-recusado { grid-column: 2; margin-left: 14px; }
+  #painel-mods #lista-mods .mods-servidor::before { display: none; }
+  #painel-mods #lista-mods .mods-servidor { font-family: var(--seele-ui); color: var(--seele-rotulo-painel); }
+  #painel-mods #lista-mods .mods-estado { grid-column: 2; justify-self: start; margin: 4px 0 2px 14px; }
+  #painel-mods #lista-mods .mods-exigido { grid-column: 3; grid-row: 1 / span 5; align-self: center; margin-left: 14px; }
+  #painel-mods #lista-mods .mods-linha-gestao > .botao-fantasma { grid-column: 3; grid-row: 1 / span 5; margin-left: 10px; }
+  #painel-mods #lista-mods .mods-linha-gestao > .botao-fantasma ~ .botao-fantasma { grid-column: 4; }
+}
+
+@media (min-width: 701px) and (max-width: 1100px) {
+  #painel-mods .mods-instalados-grade { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto 1fr; }
+  #painel-mods .mods-instalados-regras { grid-column: 1; grid-row: 2; margin-top: 16px; }
+  #painel-mods #mods-sem-hospedar { grid-row: 3; }
+  #painel-mods #mods-gestao-erro { grid-row: 4; }
+  #painel-mods #mods-rascunho { grid-row: 5; }
+}

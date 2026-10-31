@@ -826,7 +826,7 @@
   gap: 8px;
   padding: 4px calc(20px + var(--cel-seguro-dir)) 10px calc(20px + var(--cel-seguro-esq));
   background: none;
-  border-bottom: 1px solid var(--seele-vidro-borda);
+  border-bottom: 0;
 }
 
 /* O título do canal é o título da aba: Inter Tight de 30. O `#` é do nome. */
@@ -869,10 +869,45 @@
 }
 
 :root[data-casca="celular"] #lista-mensagens .mensagem {
-  grid-template-columns: 36px minmax(0, 1fr);
-  column-gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 0;
   padding-left: 0;
   cursor: pointer;
+}
+
+/* Sem avatar: a conversa do celular é o nome, a hora e o texto (Cel-conversa.dc).
+   O nome continua inteiro ao lado da hora, e cada pessoa tem a sua cor. */
+:root[data-casca="celular"] #lista-mensagens .mensagem-avatar,
+:root[data-casca="celular"] #lista-mensagens .mensagem-hora-calha {
+  display: none;
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem-autor[data-matiz="0"] { color: var(--seele-azul-claro); }
+:root[data-casca="celular"] #lista-mensagens .mensagem-autor[data-matiz="1"] { color: var(--seele-laranja-claro); }
+:root[data-casca="celular"] #lista-mensagens .mensagem-autor[data-matiz="2"] { color: var(--seele-fosforo); }
+:root[data-casca="celular"] #lista-mensagens .mensagem-autor[data-matiz="3"] { color: var(--seele-vermelho-claro); }
+:root[data-casca="celular"] #lista-mensagens .mensagem-autor[data-matiz="4"] { color: var(--seele-osso); }
+
+/* A minha, à direita, num balão laranja, com a hora antes do nome. */
+:root[data-casca="celular"] #lista-mensagens .mensagem.propria .mensagem-conteudo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem.propria .mensagem-cabeca {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem.propria .mensagem-cabeca > .mensagem-autor { color: var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] #lista-mensagens .mensagem.propria .corpo {
+  max-width: 82%;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
 }
 
 :root[data-casca="celular"] #lista-mensagens .moderar-remover {
@@ -900,8 +935,8 @@
 
 :root[data-casca="celular"] #lista-mensagens .mensagem .corpo {
   font-family: var(--seele-ui);
-  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
-  line-height: 1.5;
+  font-size: calc(17px * var(--cel-escala));
+  line-height: 1.4;
   color: var(--seele-osso);
 }
 
@@ -969,6 +1004,30 @@
   cursor: pointer;
 }
 
+/* O rótulo do campo é para quem escuta: o placeholder já diz o canal à vista. */
+:root[data-casca="celular"] #form-mensagem .compor-rotulo {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* O anexo é um «+» (Cel-conversa.dc): o clipe do glifo sai, e o mais se desenha
+   com duas barras na cor do texto. */
+:root[data-casca="celular"] .cel-anexar > * { display: none; }
+
+:root[data-casca="celular"] .cel-anexar::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  background:
+    linear-gradient(currentColor, currentColor) center / 18px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 2px 18px no-repeat;
+}
+
 :root[data-casca="celular"] #form-mensagem .compor-caixa {
   min-height: var(--cel-alvo);
   min-width: 0;
@@ -991,15 +1050,27 @@
 }
 
 :root[data-casca="celular"] #form-mensagem .compor-enviar {
-  min-height: var(--cel-alvo);
-  padding: 0 16px;
-  font-family: var(--seele-ui);
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  display: grid;
+  place-items: center;
+  width: var(--cel-alvo);
+  height: var(--cel-alvo);
+  padding: 0;
+  /* Só a seta: o nome do botão é o aria-label, e a palavra sai da vista. */
+  font-size: 0 !important;
   color: var(--seele-tinta-no-acento);
   background: var(--seele-laranja-nerv);
   border: 1px solid var(--seele-laranja-nerv);
-  border-radius: var(--seele-raio-pilula);
+  border-radius: 50%;
+}
+
+:root[data-casca="celular"] #form-mensagem .compor-enviar-seta {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* ------------------------------------------------------------ a aba PESSOAS
@@ -1157,40 +1228,198 @@
 
 /* O resumo do diagnóstico sai: ele repete o número que o sinal já diz, e no
    celular o toque é da linha, e não dele. O `celular-pessoas.js` abre o
-   diagnóstico, e fica o sinal numa fileira só, embaixo do nome: o número e a
-   barra. */
+   diagnóstico. A linha é uma grade (Cel-pessoas.dc): o avatar à esquerda, o
+   nome em cima, e embaixo o estado, o sinal e o número; a seta fecha a linha.
+   Os três blocos do desktop (cabeça, rodapé, diagnóstico) deixam de ser caixas
+   e as peças deles caem na grade. */
 :root[data-casca="celular"] #lista-roster .pessoa-diagnostico-resumo {
   display: none;
 }
 
-:root[data-casca="celular"] #lista-roster .pessoa-diagnostico {
-  margin: -10px 0 10px;
-  padding-left: 56px;
+:root[data-casca="celular"] #lista-roster li.pessoa {
+  display: grid;
+  grid-template-columns: 44px auto minmax(0, 1fr) auto;
+  grid-auto-rows: auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+  padding-block: 10px;
 }
 
-:root[data-casca="celular"] #lista-roster .pessoa-sync {
-  display: inline-flex;
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
-  color: var(--seele-osso);
+:root[data-casca="celular"] #lista-roster li.pessoa[hidden],
+:root[data-casca="celular"] #lista-roster .roster-grupo[hidden] {
+  display: none;
 }
 
-:root[data-casca="celular"] #lista-roster .pessoa-diagnostico .barra {
-  display: inline-block;
-  margin-left: 8px;
+:root[data-casca="celular"] #lista-roster li.pessoa :is(.pessoa-cabeca, .pessoa-identidade, .pessoa-rodape, .pessoa-estados, .pessoa-diagnostico) {
+  display: contents;
 }
 
-/* A pastilha do estado, no meio da linha, à direita. */
-:root[data-casca="celular"] #lista-roster .pessoa-rodape {
-  position: absolute;
-  top: 32px;
-  right: calc(14px + var(--cel-seguro-dir));
-  transform: translateY(-50%);
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-avatar {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  position: relative;
 }
 
-:root[data-casca="celular"] #lista-roster .pastilha[data-estado="escuta"] {
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-nome {
+  grid-column: 2 / span 2;
+  grid-row: 1;
+  align-self: end;
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] #lista-roster li.pessoa::after {
+  content: "›";
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  font-size: 20px;
   color: var(--seele-rotulo-painel);
 }
 
+/* O estado é uma palavra em mono, e não uma pílula. */
+:root[data-casca="celular"] #lista-roster li.pessoa .pastilha {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  min-height: 0;
+  padding: 0;
+  font-family: var(--seele-mono);
+  font-size: calc(11px * var(--cel-escala));
+  letter-spacing: 0.04em;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+:root[data-casca="celular"] #lista-roster .pastilha[data-estado="escuta"] { color: var(--seele-rotulo-claro); }
+:root[data-casca="celular"] #lista-roster .pastilha[data-estado="at"] { color: var(--seele-laranja-nerv); }
+:root[data-casca="celular"] #lista-roster .pastilha[data-estado="fala"] { color: var(--seele-fosforo); }
+:root[data-casca="celular"] #lista-roster .pastilha[data-estado="surdo"] { color: var(--seele-osso); }
+
+/* O sinal: o número e a barra, na fileira do estado. */
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-sync {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: start;
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--seele-mono);
+  font-size: calc(11px * var(--cel-escala));
+  color: var(--seele-rotulo-claro);
+}
+
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-diagnostico .barra {
+  display: none;
+}
+
+/* Quem fala e quem está mudo levam o selo no canto do avatar, em marca e não
+   só em cor: a palavra do estado está ao lado. */
+:root[data-casca="celular"] #lista-roster li:has(.pastilha[data-estado="fala"]) .pessoa-avatar::after,
+:root[data-casca="celular"] #lista-roster li:has(.pastilha[data-estado="at"]) .pessoa-avatar::after {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--seele-negro-painel);
+  border-radius: 50%;
+  font-family: var(--seele-ui);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--seele-tinta-no-acento);
+}
+
+:root[data-casca="celular"] #lista-roster li:has(.pastilha[data-estado="fala"]) .pessoa-avatar::after {
+  content: "▶";
+  background: var(--seele-fosforo);
+}
+
+:root[data-casca="celular"] #lista-roster li:has(.pastilha[data-estado="at"]) .pessoa-avatar::after {
+  content: "×";
+  background: var(--seele-laranja-nerv);
+}
+
+/* O filtro: a busca e os três recortes (Cel-pessoas.dc). Só o celular o mostra. */
+:root[data-casca="celular"] .pessoas-filtro:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 calc(20px + var(--cel-seguro-dir)) 12px calc(20px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .pessoas-busca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 14px;
+  color: var(--seele-rotulo-painel);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-campo-borda);
+  border-radius: 16px;
+}
+
+:root[data-casca="celular"] .pessoas-busca-lupa {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+:root[data-casca="celular"] .pessoas-busca input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  font-family: var(--seele-ui);
+  color: var(--seele-osso);
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+:root[data-casca="celular"] .pessoas-busca:focus-within {
+  border-color: var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] .pessoas-recortes {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+}
+
+:root[data-casca="celular"] .pessoas-recorte {
+  flex: 1 1 0;
+  min-height: 44px;
+  padding: 0 4px;
+  font-family: var(--seele-ui);
+  font-size: calc(13px * var(--cel-escala));
+  font-weight: 500;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 0;
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] .pessoas-recorte[aria-pressed="true"] {
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+}
+
+/* A pessoa sozinha numa sala sem recorte: o quadro do filtro vazio é a lista vazia. */
 :root[data-casca="celular"] #lista-roster input.volume {
   display: none;
 }
@@ -1414,6 +1643,55 @@
   color: var(--seele-rotulo-painel);
 }
 
+/* O cartão em três fileiras (Cel-chamada.dc): o avatar, o nome, e numa só o
+   estado e o sinal em mono. A frase «está só ouvindo» repete a palavra do
+   estado ao lado dela, e a barra repete o número: saem da vista do cartão, que
+   é pequeno, e ficam na folha da pessoa. */
+:root[data-casca="celular"] #chamada-grade > .chamada-cartao {
+  flex-flow: row wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 14px;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao :is(.chamada-cartao-topo, .chamada-cartao-identidade) {
+  display: contents;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao .chamada-cartao-quem {
+  flex: 0 0 100%;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao .chamada-avatar {
+  flex: 0 0 44px;
+  margin-right: calc(100% - 44px);
+  margin-bottom: 6px;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-quem .nota,
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-barra {
+  display: none;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-sync {
+  width: auto;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-linha {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  font-family: var(--seele-mono);
+  font-size: calc(10px * var(--cel-escala));
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-numero {
+  font-size: calc(10px * var(--cel-escala));
+  font-weight: 400;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-nome { font-size: calc(15px * var(--cel-escala)); }
+
 /* ------------------------------------------------------------ a aba AJUSTES
  *
  * A tela de CONFIGURAÇÕES do desktop, entre o topo e a faixa de voz, sem o véu
@@ -1569,8 +1847,33 @@
   overflow-wrap: anywhere;
 }
 
-:root[data-casca="celular"] .cel-perfil-editar {
+:root[data-casca="celular"] .cel-perfil {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+:root[data-casca="celular"] .cel-perfil > .rotulo { grid-column: 1 / -1; }
+
+/* O editar mora dentro do cartão, à direita, como link (Cel-ajustes.dc): a
+   mesma grade, no mesmo lugar do cartão, e ele por cima. */
+:root[data-casca="celular"] .cel-perfil > .cel-perfil-placa {
+  grid-area: 2 / 1 / 3 / 3;
+}
+
+:root[data-casca="celular"] .cel-perfil > .cel-perfil-editar {
+  grid-area: 2 / 2;
+  z-index: 1;
+  align-self: center;
   justify-self: end;
+  margin-right: 12px;
+  padding: 0 8px;
+  background: none;
+  border: 0;
+  font-family: var(--seele-ui);
+  font-size: calc(13px * var(--cel-escala));
+  letter-spacing: 0;
+  text-transform: lowercase;
+  text-decoration: underline;
+  color: var(--seele-laranja-nerv);
 }
 
 /* Cada lista é um cartão de vidro: linhas de 50, o `›` à direita. */
@@ -1619,7 +1922,7 @@
   font-size: inherit;
   font-weight: inherit;
   letter-spacing: inherit;
-  text-transform: none;
+  text-transform: inherit;
 }
 
 /* Sem ícone: no desenho a linha é só o nome e o `›`. */
@@ -1630,6 +1933,13 @@
 :root[data-casca="celular"] #tela-server .cel-ajustes-lista :is(.server-secao, .cel-ajustes-acao) > .server-secao-texto {
   flex: 1 1 auto;
   min-width: 0;
+  /* Frase, e não caixa alta: «Este servidor», e não «ESTE SERVIDOR». */
+  text-transform: lowercase;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-lista :is(.server-secao, .cel-ajustes-acao) > .server-secao-texto::first-letter,
+:root[data-casca="celular"] #tela-server .cel-ajustes-lista .server-secao-nome::first-letter {
+  text-transform: uppercase;
 }
 
 :root[data-casca="celular"] #tela-server .cel-ajustes-lista :is(.server-secao, .cel-ajustes-acao)::after {
@@ -1832,6 +2142,16 @@
   cursor: pointer;
 }
 
+/* Deitado, a saída vai para o canto de baixo, à direita, como na barra do
+   Cel-tela-cheia.dc: o alto da imagem fica livre. Em pé ela segue no alto, e a
+   dica de girar ocupa o pé. */
+@media (orientation: landscape) {
+  :root[data-casca="celular"] .palco-sair-da-cheia {
+    top: auto;
+    bottom: calc(14px + var(--cel-seguro-pe));
+  }
+}
+
 /* A dica de virar o celular, só em retrato: no pé, dentro da safe-area, sem
  * pegar toque (o SAIR fica no topo, e o que está embaixo continua tocável). */
 :root[data-casca="celular"] .palco-dica-girar {
@@ -1932,4 +2252,36 @@
 :root[data-casca="celular"] #tela-sessao > #veredito > #veredito-ver-inteira {
   flex-shrink: 0;
   min-height: 44px;
+}
+
+/* ------------------------------------------- a página de uma seção (Cel-ajustes-mods.dc)
+ *
+ * O «‹ AJUSTES» já volta à lista: o «SEÇÕES» do desktop faz o mesmo e sai da
+ * vista. O título é uma frase, e não a caixa alta da seção. */
+:root[data-casca="celular"] #tela-server #server-ao-indice {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-server .server-faixa {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #tela-server .server-faixa-texto {
+  flex: 1 0 100%;
+}
+
+:root[data-casca="celular"] #tela-server .server-titulo {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(32px * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
+  text-transform: lowercase;
+}
+
+:root[data-casca="celular"] #tela-server .server-titulo::first-letter {
+  text-transform: uppercase;
 }

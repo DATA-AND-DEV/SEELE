@@ -6,10 +6,6 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 14px 16px;
-  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
-  border-radius: var(--seele-raio-cartao);
-  background: color-mix(in srgb, var(--seele-laranja-fraco) 35%, transparent);
 }
 
 .boot-meu-servidor .nota {

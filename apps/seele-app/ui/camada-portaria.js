@@ -91,7 +91,7 @@ function comoChegou(pedido) {
  * («diz chamar-se»). A impressão digital completa está no bloco de conferência
  * e na confirmação da admissão; nunca é substituída pelo nome como identidade.
  */
-function cartao(pedido, botoes) {
+function cartao(pedido, botoes, veredito = null) {
   const linha = elemento("li", "portaria-cartao");
 
   const impressao = elemento("p", "portaria-impressao", agrupar(pedido.impressao));
@@ -132,8 +132,30 @@ function cartao(pedido, botoes) {
   const acoes = elemento("div", "portaria-acoes");
   acoes.append(...botoes);
   const identidade = elemento("details", "portaria-identidade");
-  identidade.append(elemento("summary", "", "Conferir impressão digital"), impressao);
-  linha.append(apelido, contexto, batida, identidade, acoes);
+  identidade.append(
+    elemento("summary", "", "Conferir impressão digital"),
+    impressao,
+    elemento(
+      "p",
+      "portaria-identidade-nota",
+      "Você está decidindo sobre a impressão digital, não sobre o nome. Confira por outro canal antes.",
+    ),
+  );
+
+  // O desenho: uma inicial, o texto (nome, de onde veio e quando) e os botões
+  // na mesma linha; a conferência da impressão abaixo. A inicial é decoração
+  // (`aria-hidden`): o nome já está escrito ao lado.
+  const inicial = elemento("span", "portaria-avatar", (escolhido[0] ?? "?").toLocaleUpperCase("pt-BR"));
+  inicial.setAttribute("aria-hidden", "true");
+  const texto = elemento("div", "portaria-texto");
+  texto.append(apelido);
+  if (veredito) apelido.append(veredito);
+  const meta = elemento("div", "portaria-meta");
+  meta.append(contexto, batida);
+  texto.append(meta);
+  const topo = elemento("div", "portaria-topo");
+  topo.append(inicial, texto, acoes);
+  linha.append(topo, identidade);
   return linha;
 }
 
@@ -178,6 +200,9 @@ async function desenharPortaria() {
   // De qual servidor é esta porta, escrito: com a vista noutro servidor, ou
   // na entrada, a camada não pode deixar dúvida de que hospedagem ela decide.
   const qual = $("portaria-qual-servidor");
+  const nomeDaPorta = portariaAberta.nome ?? meuServidorNoAr?.nome ?? null;
+  $("portaria-titulo").textContent =
+    estado.hospedando && nomeDaPorta ? `A porta de ${nomeDaPorta}` : "A porta deste servidor";
   if (qual) {
     qual.textContent = estado.hospedando
       ? `A PORTA DE ${(portariaAberta.nome ?? meuServidorNoAr?.nome ?? "O SEU SERVIDOR").toLocaleUpperCase("pt-BR")}, hospedado nesta máquina`
@@ -220,6 +245,15 @@ function desenharCamadas(estado) {
   // O rótulo do botão que abre esta camada carrega o estado, porque é a única
   // coisa visível quando ela está fechada.
   $("portaria-abrir").textContent = rotuloDaPorta(estado);
+  // O mesmo estado no cabeçalho da camada, como o chip do desenho. Laranja
+  // quando alguém bate; sem dado nenhum (não hospeda), o chip some.
+  const chip = $("portaria-chip");
+  chip.hidden = !estado.hospedando;
+  chip.textContent = rotuloDaPorta(estado);
+  chip.dataset.batendo = String(estado.pendentes > 0);
+  $("portaria-eyebrow").textContent = estado.hospedando
+    ? "HOSPEDADO NESTA MÁQUINA"
+    : "ESTA MÁQUINA NÃO ESTÁ HOSPEDANDO";
 }
 
 /** O que o botão de abrir esta camada diz sobre a porta. */
@@ -288,9 +322,11 @@ function desenharFila(pedidos, estado) {
   repovoar(
     $("portaria-fila"),
     esperando.map((pedido) =>
+      // RECUSAR antes de ADMITIR, na ordem de leitura e de Tab: o desenho põe o
+      // verbo que decide à direita, e a ordem visual e a do teclado são a mesma.
       cartao(pedido, [
-        botao("ADMITIR", () => perguntarEDecidir(pedido, true, hospedagem)),
         botao("RECUSAR", () => perguntarEDecidir(pedido, false, hospedagem)),
+        botao("ADMITIR", () => perguntarEDecidir(pedido, true, hospedagem)),
       ]),
     ),
   );
@@ -298,17 +334,15 @@ function desenharFila(pedidos, estado) {
   repovoar(
     $("portaria-decididos"),
     decididos.map((pedido) => {
-      const cartaoFeito = cartao(pedido, [
-        botao("REVOGAR", () => perguntarERevogar(pedido, hospedagem)),
-      ]);
-      cartaoFeito.prepend(
+      return cartao(
+        pedido,
+        [botao("REVOGAR", () => perguntarERevogar(pedido, hospedagem))],
         elemento(
-          "p",
+          "span",
           pedido.admitido ? "portaria-veredito portaria-veredito-sim" : "portaria-veredito",
           pedido.admitido ? "ADMITIDO" : "RECUSADO",
         ),
       );
-      return cartaoFeito;
     }),
   );
 }

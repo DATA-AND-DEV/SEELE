@@ -95,10 +95,10 @@
 }
 .pessoal-web-corpo {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1fr) 320px;
   min-height: 0;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 12px 16px 16px;
   width: 100%;
   margin: 0 auto;
 }
@@ -354,3 +354,138 @@
 .pessoal-web-painel-saida label { display: grid; gap: 6px; }
 .pessoal-web-painel-saida select { width: 100%; min-width: 0; min-height: 44px; }
 .pessoal-web-painel-saida button { width: 100%; min-height: 44px; margin-top: 8px; border-radius: var(--seele-raio-pilula); }
+
+
+/* ---- a segunda passada (Web-pessoal do canvas), da janela larga para cima.
+   A faixa de cima fala a pastilha e o tempo; o painel do palco leva as
+   pessoas no alto e a barra de ações no pé; o chat é o painel estreito. */
+.pessoal-web-estado-topo:empty, .pessoal-web-tempo:empty { display: none; }
+.pessoal-web-estado-topo {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 24px; padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  border-radius: var(--seele-raio-pilula);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  font-family: var(--seele-mono); font-size: 11px; letter-spacing: 0.06em; line-height: 1;
+  text-transform: uppercase; color: var(--seele-fosforo); white-space: nowrap;
+}
+.pessoal-web-estado-topo::before { content: "\25CF"; }
+.pessoal-web-tempo { font-family: var(--seele-mono); font-size: 12px; color: var(--seele-rotulo-painel); font-variant-numeric: tabular-nums; }
+.pessoal-web-botao-longo { display: none; }
+@media (max-width: 700px), (max-height: 500px) { .pessoal-web-estado-topo, .pessoal-web-tempo { display: none; } }
+
+@media (min-width: 701px) and (min-height: 501px) {
+  .pessoal-web-topo { padding: 10px 26px 4px; }
+  .pessoal-web-assinatura { flex-wrap: wrap; gap: 12px 16px; }
+  .pessoal-web-marca { width: 30px; height: 30px; }
+  .pessoal-web-palco { display: flex; flex-direction: column; gap: 14px; padding: 18px; place-items: initial; }
+  .pessoal-web-centro { margin: auto; flex: 0 1 auto; }
+  .pessoal-web[data-fase="dentro"] .pessoal-web-centro,
+  .pessoal-web[data-fase="conectando"] .pessoal-web-centro,
+  .pessoal-web[data-fase="reconectando"] .pessoal-web-centro,
+  .pessoal-web[data-fase="tocando"] .pessoal-web-centro { margin: 0; width: 100%; padding: 0; align-content: start; flex: 1 1 auto; }
+  /* Quem fala é anunciado pelo `estado`; a pastilha de cima o repete só no desenho. */
+  .pessoal-web[data-fase="dentro"] .pessoal-web-estado {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); border: 0;
+  }
+  .pessoal-web-participantes { gap: 12px; }
+  .pessoal-web-participante { min-height: min(384px, 46vh); border-radius: 22px; border-color: var(--seele-vidro-borda); background: var(--seele-negro-painel); }
+  /* A outra pessoa à esquerda, como no canvas; o DOM guarda a ordem de sempre. */
+  .pessoal-web-participante:last-child { order: -1; }
+  .pessoal-web-participante-nome { font-family: var(--seele-ui); font-size: 14px; font-weight: 600; }
+  .pessoal-web-participante-papel {
+    display: inline-flex; align-items: center; min-height: 20px; padding: 0 10px;
+    border: 1px solid var(--seele-controle-borda); border-radius: var(--seele-raio-pilula);
+    font-family: var(--seele-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--seele-osso-apagado);
+  }
+  /* A barra de ações, na base do painel. */
+  .pessoal-web-rodape { margin: auto auto 0; max-width: 100%; width: fit-content; background: color-mix(in srgb, var(--seele-osso) 5%, transparent); }
+  .pessoal-web-rodape > button .pessoal-web-botao-texto { display: none; }
+  .pessoal-web-rodape > button .pessoal-web-botao-longo { display: inline; }
+  .pessoal-web .pessoal-web-rodape > .pessoal-web-saida { flex: 0 0 auto; width: auto; padding: 0 18px; gap: 10px; }
+  .pessoal-web-saida .pessoal-web-botao-longo { display: inline; }
+  .pessoal-web-saida .pessoal-web-botao-longo ~ .pessoal-web-saida-nome { display: inline; }
+  .pessoal-web-saida .glifo { display: none; }
+  .pessoal-web-saida::after { content: ""; width: 6px; height: 6px; margin: -3px 0 0 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+  .pessoal-web-saida-nome { font-weight: 400; color: var(--seele-osso); }
+  /* O chat: título, linhas de mono e a caixa de escrever de uma linha. */
+  .pessoal-web-chat { padding: 18px; gap: 10px; }
+  .pessoal-web-chat-titulo .glifo { display: none; }
+  .pessoal-web-mensagens { display: flex; flex-direction: column; gap: 6px; }
+  .pessoal-web-mensagem { padding: 0; font-family: var(--seele-mono); font-size: 13px; gap: 0; flex-wrap: wrap; }
+  .pessoal-web-hora { flex: 0 0 auto; margin-right: 10px; color: var(--seele-rotulo-painel); }
+  .pessoal-web-autor { margin-right: 6px; }
+  .pessoal-web-mensagem[data-eu="sim"] .pessoal-web-autor { color: var(--seele-laranja-nerv); }
+  .pessoal-web-texto { height: 44px; min-height: 44px; max-height: 44px; resize: none; padding: 10px 14px; border-radius: 14px; }
+  .pessoal-web-escrever { align-items: stretch; }
+  .pessoal-web-escrever > button { padding: 0 18px; }
+  .pessoal-web-escrever > button .glifo { display: none; }
+  .pessoal-web-escrever > button .pessoal-web-botao-texto { display: inline; }
+  .pessoal-web-escrever > button .pessoal-web-botao-longo { display: none; }
+}
+
+.pessoal-web-saida-nome { display: none; }
+/* A outra pessoa primeiro (o canvas); o DOM guarda a ordem de sempre. */
+.pessoal-web-participante:last-child { order: -1; }
+
+/* ---- o celular (Cel-pessoal): chat em balões, barra de ações em círculos */
+@media (max-width: 700px) {
+  .pessoal-web-chat-titulo { justify-content: center; }
+  .pessoal-web-chat-titulo .glifo { display: none; }
+  .pessoal-web-mensagens { display: flex; flex-direction: column; gap: 10px; padding: 0 2px; }
+  .pessoal-web-mensagem { display: grid; grid-template-columns: auto auto 1fr; gap: 4px 0; padding: 0; font-family: var(--seele-ui); font-size: 14px; }
+  .pessoal-web-mensagem .pessoal-web-autor { grid-row: 1; grid-column: 1; font-size: 12px; font-weight: 400; color: var(--seele-osso-apagado); }
+  .pessoal-web-autor::after { content: none; }
+  .pessoal-web-mensagem .pessoal-web-hora { grid-row: 1; grid-column: 2; font-family: var(--seele-mono); font-size: 12px; color: var(--seele-rotulo-painel); }
+  .pessoal-web-hora::before { content: "\00B7\00A0"; }
+  .pessoal-web-mensagem .pessoal-web-conteudo {
+    grid-row: 2; grid-column: 1 / -1;
+    padding: 10px 14px; border: 1px solid var(--seele-vidro-borda); border-radius: 16px; background: var(--seele-vidro);
+    font-size: 15px; line-height: 1.4;
+  }
+  .pessoal-web-mensagem .pessoal-web-conteudo { justify-self: start; }
+  .pessoal-web-mensagem[data-eu="sim"] { grid-template-columns: 1fr auto auto; }
+  .pessoal-web-mensagem[data-eu="sim"] .pessoal-web-autor { grid-column: 2; }
+  .pessoal-web-mensagem[data-eu="sim"] .pessoal-web-hora { grid-column: 3; }
+  .pessoal-web-mensagem[data-eu="sim"] .pessoal-web-conteudo { justify-self: end; }
+  .pessoal-web-mensagem[data-eu="sim"] .pessoal-web-conteudo {
+    border-color: color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+    background: color-mix(in srgb, var(--seele-laranja-fraco) 55%, transparent);
+  }
+  .pessoal-web-texto { border-radius: 28px; padding: 14px 18px; height: 52px; min-height: 52px; max-height: 52px; }
+  /* A barra: ícone redondo com a palavra embaixo; SAIR é o laranja cheio. */
+  .pessoal-web-rodape { border: 0; border-top: 1px solid var(--seele-vidro-borda); border-radius: 0; background: none; max-width: none; width: 100%; margin: 0; padding: 10px 12px 12px; justify-content: space-around; }
+  .pessoal-web .pessoal-web-rodape > button {
+    flex: 1 1 0; flex-direction: column; gap: 6px; min-height: 44px; padding: 0;
+    border: 0; background: none; font-size: 10px; letter-spacing: 0.06em; color: var(--seele-osso-apagado);
+  }
+  .pessoal-web .pessoal-web-rodape > button:hover { background: none; }
+  .pessoal-web-rodape > button .glifo {
+    box-sizing: content-box; width: 20px; height: 20px; padding: 16px;
+    border: 1px solid var(--seele-controle-borda); border-radius: var(--seele-raio-pilula); background: var(--seele-controle);
+    color: var(--seele-osso);
+  }
+  .pessoal-web-rodape > button[aria-pressed="true"] .glifo { border-color: var(--seele-laranja-nerv); }
+  .pessoal-web-rodape > button:last-child .glifo { background: var(--seele-laranja-nerv); border-color: var(--seele-laranja-nerv); color: var(--seele-tinta-no-acento); }
+  .pessoal-web .pessoal-web-rodape > button:last-child { background: none; border: 0; color: var(--seele-osso-apagado); }
+  .pessoal-web .pessoal-web-rodape > .pessoal-web-saida { order: 1; }
+  .pessoal-web .pessoal-web-rodape > button:nth-child(2) { order: 2; }
+  .pessoal-web .pessoal-web-rodape > button:last-child { order: 3; }
+}
+
+/* O rótulo da seção de criar (Cel-pessoal-inicio): só no celular, onde a entrada é um cartão. */
+.pessoal-web-secao-rotulo { display: none; }
+@media (max-width: 700px) {
+  .pessoal-web[data-fase="livre"] .pessoal-web-palco,
+  .pessoal-web[data-fase="encerrada"] .pessoal-web-palco,
+  .pessoal-web[data-fase="recebendo"] .pessoal-web-palco { place-items: start stretch; }
+  .pessoal-web[data-fase="livre"] .pessoal-web-centro,
+  .pessoal-web[data-fase="encerrada"] .pessoal-web-centro,
+  .pessoal-web[data-fase="recebendo"] .pessoal-web-centro { align-content: start; justify-items: stretch; text-align: left; padding: 20px; gap: 14px; }
+  .pessoal-web-entrada-titulo { font-size: 30px; }
+  .pessoal-web-secao-rotulo {
+    display: block; font-family: var(--seele-mono); font-size: 11px; letter-spacing: var(--seele-tracking-rotulo);
+    color: var(--seele-rotulo-painel);
+  }
+  .pessoal-web-estado { text-align: left; }
+}

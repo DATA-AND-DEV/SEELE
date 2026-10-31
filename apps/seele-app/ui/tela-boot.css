@@ -1716,3 +1716,298 @@
 @media (max-width: 1100px) {
   #tela-boot #boot-codigo-valor { font-size: 15px; letter-spacing: 0.04em; }
 }
+
+
+/* ======================================================================
+   A entrada do 0.19, segunda passada (Entrada e Web-navegador do canvas).
+
+   Três painéis de vidro lado a lado, cada um com o próprio rótulo e título.
+   O celular tem a entrada dele (`celular-entrada.css`) e não passa por aqui:
+   tudo abaixo fala `:not(:has(.inicio-introducao))`, a introdução que só o celular tem. Os dois textos de cada
+   título (app e navegador) estão no DOM, e a casca larga mostra o dela. */
+
+#tela-boot:not(:has(.inicio-introducao)) .boot-so-web { display: none; }
+#tela-boot:has(.larga-hospedar) .boot-so-web { display: revert; }
+#tela-boot:has(.larga-hospedar) .boot-so-app { display: none; }
+#tela-boot:has(.inicio-introducao) :is(.boot-painel-cabeca, .boot-so-web, .boot-faixa-web, .boot-hospedar-frase, .boot-terminal, .boot-fora) { display: none; }
+#tela-boot:has(.inicio-introducao) :is(#boot-conversa-pessoal, #boot-copiar-codigo) .boot-icone { display: none; }
+#tela-boot:has(.inicio-introducao) #botao-server { font-size: inherit; }
+#tela-boot .boot-icone {
+  width: 18px; height: 18px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* ---- a faixa do navegador (só na casca larga) */
+#tela-boot .boot-faixa-web { display: none; }
+#tela-boot:has(.larga-hospedar) .boot-faixa-web {
+  display: flex; align-items: center; gap: 14px;
+  margin: 16px 16px 0; padding: 8px 8px 8px 18px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  background: var(--seele-vidro);
+  font-family: var(--seele-mono); font-size: 12px; color: var(--seele-osso);
+}
+#tela-boot .boot-faixa-origem {
+  padding: 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  border-radius: var(--seele-raio-pilula);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  color: var(--seele-fosforo);
+  font-size: 11px; letter-spacing: 0.06em;
+}
+#tela-boot .boot-faixa-texto { flex: 1 1 auto; min-width: 0; }
+#tela-boot .boot-faixa-web .botao-fantasma {
+  flex: 0 0 auto; min-height: 44px; padding: 0 18px; margin-left: auto;
+  font-family: var(--seele-ui); font-size: 13px; font-weight: 500; letter-spacing: 0;
+}
+
+/* ---- o topo: marca à esquerda, perfil e configuração à direita */
+#tela-boot:not(:has(.inicio-introducao)) > .boot-topo {
+  width: auto; min-height: 0; margin: 16px 16px 0; padding: 6px 10px;
+  gap: 12px 20px; border: 0; flex-wrap: wrap;
+}
+#tela-boot:has(.larga-hospedar) > .boot-faixa-web + .boot-topo { margin-top: 12px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-marca { gap: 10px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-simbolo { width: 40px; height: 40px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-nome {
+  font-size: 28px; font-weight: 800; letter-spacing: 0.06em; color: var(--seele-osso);
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-marca-texto { gap: 4px 20px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-marca-sub {
+  display: inline; font-family: var(--seele-ui); font-size: 14px; letter-spacing: 0;
+  text-transform: none; color: var(--seele-osso-apagado);
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-topo .inicio-contexto { display: none; }
+
+/* ---- a caixa e as três colunas */
+#tela-boot:not(:has(.inicio-introducao)) > .boot-caixa:not(.area) {
+  max-width: none; width: 100%; margin: 0;
+  padding: 12px 16px 16px; gap: 12px;
+  flex: 1 0 auto;
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-colunas {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch;
+  flex: 1 1 auto; max-width: none;
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-coluna {
+  display: flex; flex-direction: column; gap: 18px;
+  flex: 1 1 360px; min-width: 0;
+  margin: 0; padding: 28px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  background: var(--seele-vidro);
+  grid-column: auto; grid-row: auto;
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-dir {
+  flex-basis: 340px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--seele-laranja-nerv) 8%, transparent), var(--seele-vidro) 55%);
+}
+#tela-boot:not(:has(.inicio-introducao)) .inicio-hospedar { display: contents; }
+
+/* O rótulo e o título do painel. */
+#tela-boot:not(:has(.inicio-introducao)) .boot-painel-cabeca { display: block; order: -2; }
+#tela-boot .boot-painel-rotulo, #tela-boot .boot-hospedar-titulo {
+  display: block; margin: 0;
+  font-family: var(--seele-mono); font-size: 11px; font-weight: 400; line-height: 1.6;
+  letter-spacing: var(--seele-tracking-rotulo); text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+#tela-boot .boot-painel-titulo {
+  margin: 4px 0 0;
+  font-family: var(--seele-display); font-weight: 700; font-size: 34px;
+  line-height: 1.1; letter-spacing: -0.045em; text-transform: none;
+  color: var(--seele-osso);
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-dir > .boot-painel-cabeca .boot-hospedar-titulo { display: block; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-dir .boot-hospedar-frase,
+#tela-boot:not(:has(.inicio-introducao)) .boot-dir .boot-hospedar-frase { margin: 0; }
+#tela-boot .boot-hospedar-frase { font-family: var(--seele-ui); font-size: 14px; line-height: 1.6; color: var(--seele-osso-apagado); }
+
+/* Cada bloco dentro do painel deixa de ser painel. */
+#tela-boot:not(:has(.inicio-introducao)) :is(#boot-servidores, #boot-sessoes, #boot-codigo, #boot-amigos) {
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: none; gap: 6px;
+}
+#tela-boot:not(:has(.inicio-introducao)) #boot-servidores { order: 1; gap: 10px; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-servidores-titulo {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+#tela-boot:not(:has(.inicio-introducao)) #boot-sessoes { order: 2; display: flex; flex-direction: column-reverse; gap: 10px; }
+#tela-boot:not(:has(.inicio-introducao)) .inicio-conectar {
+  order: 3; margin: auto 0 0; padding: 0; border: 0; background: none;
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+/* ---- servidores: o cartão do canvas, com ENTRAR dentro */
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidores-lista { gap: 10px; max-height: none; overflow: visible; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidores-lista li { position: relative; display: block; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-linha {
+  width: 100%; flex-wrap: nowrap; align-items: center; gap: 14px;
+  padding: 14px 64px 14px 16px; text-align: left;
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-sigla { font-size: 14px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-texto { flex: 1 1 auto; min-width: 0; gap: 0; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-nome { overflow: hidden; text-overflow: ellipsis; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-sub {
+  display: flex; flex-wrap: wrap; gap: 0 6px; min-width: 0;
+  font-family: var(--seele-mono); font-size: 12px; color: var(--seele-rotulo-painel);
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-endereco { white-space: normal; overflow-wrap: anywhere; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-visto { flex: 0 0 auto; padding: 0; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-visto:not(:empty)::before { content: "· "; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-entrar {
+  display: inline-flex; align-items: center; margin-left: auto;
+  min-height: 36px; padding: 0 16px;
+  border: 1px solid var(--seele-controle-borda); border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-ui); font-size: 14px; font-weight: 500; letter-spacing: 0; color: var(--seele-osso);
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-linha:hover .servidor-entrar { background: var(--seele-controle-hover); }
+/* O REMOVER vira o × do canvas, no canto do cartão; o nome acessível é o `aria-label`. */
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-esquecer {
+  position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+  width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0; opacity: 0;
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-esquecer::before {
+  content: "×"; font-size: 18px; line-height: 1;
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq li:hover .servidor-esquecer,
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq li:focus-within .servidor-esquecer { opacity: 1; }
+
+/* ---- as conversas abertas: o cartão do canvas em laranja, e a nota com a régua */
+#tela-boot:not(:has(.inicio-introducao)) .boot-sessao {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 35%, transparent);
+}
+#tela-boot:not(:has(.inicio-introducao)) #boot-sessoes-frase {
+  margin: 0; padding-left: 12px;
+  border-left: 2px solid rgba(255, 255, 255, 0.15);
+  font-family: var(--seele-ui); font-size: 13px; line-height: 1.6; color: var(--seele-osso-apagado);
+}
+
+/* ---- conectar, no pé do painel */
+#tela-boot:not(:has(.inicio-introducao)) .inicio-conectar-linha { display: flex; align-items: flex-end; gap: 8px; }
+#tela-boot:not(:has(.inicio-introducao)) .inicio-conectar .campo { flex: 1 1 auto; min-width: 0; gap: 8px; }
+#tela-boot:not(:has(.inicio-introducao)) .inicio-conectar .campo input { min-height: 48px; }
+#tela-boot:not(:has(.inicio-introducao)) .inicio-conectar .boot-saidas { flex: 0 0 auto; }
+#tela-boot:not(:has(.inicio-introducao)) .inicio-conectar #botao-conectar { min-height: 48px; }
+#tela-boot:has(.larga-hospedar) .inicio-conectar #botao-conectar {
+  color: var(--seele-osso); background: var(--seele-controle); border-color: var(--seele-controle-borda); font-weight: 500;
+}
+
+/* ---- o centro: CONVERSAR POR LINK, o código e os amigos */
+#tela-boot:not(:has(.inicio-introducao)) #boot-conversa-pessoal {
+  order: -1; align-self: flex-start; gap: 8px;
+  color: var(--seele-osso); background: var(--seele-controle); border-color: var(--seele-controle-borda); font-weight: 500;
+}
+#tela-boot:not(:has(.inicio-introducao)) #boot-conversa-pessoal:not([hidden]) { display: inline-flex; align-items: center; justify-content: center; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-conversa-pessoal:hover { background: var(--seele-controle-hover); }
+#tela-boot:not(:has(.inicio-introducao)) #boot-codigo { order: 0; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-amigos { order: 1; flex: 1 1 auto; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-codigo-titulo,
+#tela-boot:not(:has(.inicio-introducao)) #boot-amigos-titulo {
+  margin: 0; font-family: var(--seele-mono); font-size: 11px; font-weight: 400; letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase; color: var(--seele-rotulo-painel);
+}
+#tela-boot:not(:has(.inicio-introducao)) #boot-codigo-estado {
+  color: var(--seele-fosforo); font-family: var(--seele-mono); font-size: 12px;
+}
+#tela-boot:not(:has(.inicio-introducao)) #boot-codigo-estado::before { content: "● "; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-copiar-codigo {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+  font-family: var(--seele-ui); font-size: 14px; font-weight: 500;
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-sala-estado, #tela-boot:not(:has(.inicio-introducao)) #boot-sala-estado { order: 2; }
+
+/* amigos: nome e código na linha, LIGAR e × à direita */
+#tela-boot:not(:has(.inicio-introducao)) #boot-amigos .amigo-cartao {
+  grid-template-columns: 36px minmax(0, 1fr) auto; grid-template-areas: "avatar texto acoes";
+}
+#tela-boot:not(:has(.inicio-introducao)) .amigo-texto { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-nome { width: auto; min-width: 0; max-width: 9ch; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-tirar { font-size: 0; width: 44px; min-width: 44px; padding: 0; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-tirar::before { content: "×"; font-size: 16px; line-height: 1; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-ligar { display: inline-flex; align-items: center; gap: 8px; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-amigos-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: auto; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-amigos-form input { min-height: 48px; }
+
+/* ---- hospedar */
+#tela-boot:not(:has(.inicio-introducao)) .boot-meu-servidor { order: 1; display: flex; flex-direction: column; gap: 14px; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-meu-servidor-frase {
+  display: flex; align-items: center; gap: 14px; margin: 0; padding: 14px 16px;
+  border: 1px solid var(--seele-vidro-borda); border-radius: var(--seele-raio-cartao); background: var(--seele-vidro);
+  font-family: var(--seele-ui); font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--seele-osso);
+}
+#tela-boot:not(:has(.inicio-introducao)) .boot-hospedar-frase { order: 0; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-terminal {
+  order: 2; margin: auto 0 0; padding: 14px 16px; overflow-x: auto;
+  border: 1px solid var(--seele-vidro-borda); border-radius: var(--seele-raio); background: var(--seele-campo);
+  font-family: var(--seele-mono); font-size: 12px; line-height: 1.8; color: var(--seele-osso);
+}
+#tela-boot .boot-terminal-nota { color: var(--seele-rotulo-painel); }
+#tela-boot .boot-terminal-cifrao { color: var(--seele-laranja-nerv); }
+#tela-boot:not(:has(.inicio-introducao)) .boot-dir > .boot-saidas:has(#botao-hospedar),
+#tela-boot:not(:has(.inicio-introducao)) .boot-dir .boot-saidas:has(#botao-hospedar) { order: 3; margin-top: 0; }
+
+/* ---- o navegador: identidade e o que a página não faz */
+#tela-boot .boot-identidade { display: flex; flex-direction: column; gap: 18px; }
+#tela-boot .boot-identidade-frase { margin: 0; font-family: var(--seele-ui); font-size: 14px; line-height: 1.6; color: var(--seele-osso-apagado); }
+#tela-boot .boot-identidade-cartao {
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+  border: 1px solid var(--seele-vidro-borda); border-radius: var(--seele-raio-cartao); background: var(--seele-vidro);
+}
+#tela-boot .boot-identidade-avatar {
+  flex: 0 0 auto; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--seele-raio-icone); background: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent);
+  font-family: var(--seele-ui); font-weight: 700; font-size: 14px; color: var(--seele-laranja-nerv);
+}
+#tela-boot .boot-identidade-texto { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+#tela-boot .boot-identidade-nome { font-family: var(--seele-ui); font-weight: 600; font-size: 14px; color: var(--seele-osso); }
+#tela-boot .boot-identidade-sub { font-family: var(--seele-mono); font-size: 12px; color: var(--seele-rotulo-painel); }
+#tela-boot:has(.larga-hospedar) .boot-identidade { order: -2; }
+#tela-boot:has(.larga-hospedar) #boot-conversa-pessoal { order: -1; }
+#tela-boot:has(.larga-hospedar) .boot-larga-fora { display: none; }
+
+#tela-boot .boot-fora { display: flex; flex-direction: column; flex: 1 1 auto; }
+#tela-boot .boot-fora-rotulo {
+  margin-bottom: 8px; font-family: var(--seele-mono); font-size: 11px; letter-spacing: var(--seele-tracking-rotulo); color: var(--seele-rotulo-painel);
+}
+#tela-boot .boot-fora-lista { list-style: none; margin: 0; padding: 0; }
+#tela-boot .boot-fora-lista li {
+  display: flex; align-items: center; gap: 10px; padding: 14px 0;
+  border-top: 1px solid var(--seele-vidro-borda);
+  font-family: var(--seele-ui); font-size: 14px; color: var(--seele-osso);
+}
+#tela-boot .boot-fora-lista li::before { content: "×"; font-family: var(--seele-mono); font-size: 12px; color: var(--seele-laranja-nerv); }
+#tela-boot .boot-fora-nota { margin: auto 0 0; font-family: var(--seele-ui); font-size: 12px; color: var(--seele-osso-apagado); }
+#tela-boot:has(.larga-hospedar) .larga-hospedar { order: 1; }
+#tela-boot:has(.larga-hospedar) .boot-fora { order: 2; }
+
+/* ---- ajustes da segunda passada */
+#tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-nome { font-size: 24px; letter-spacing: 0.1em; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-linha { padding-right: 16px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq li:hover .servidor-linha,
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq li:focus-within .servidor-linha { padding-right: 64px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq li:nth-child(3n+1) .servidor-sigla { background-color: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent); color: var(--seele-laranja-nerv); }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq li:nth-child(3n+2) .servidor-sigla { background-color: color-mix(in srgb, var(--seele-padrao-azul) 25%, transparent); }
+#tela-boot:not(:has(.inicio-introducao)) .boot-codigo .perfil-sala-codigo { width: 100%; display: flex; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-texto { flex-wrap: nowrap; align-items: center; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-detalhe { display: flex; min-width: 0; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-codigo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-nome { flex: 0 1 auto; field-sizing: content; min-width: 3ch; }
+#tela-boot .boot-amigos-campo { flex: 1 1 130px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+#tela-boot .boot-amigos-campo-rotulo { font-family: var(--seele-ui); font-size: 13px; font-weight: 500; color: var(--seele-osso); }
+#tela-boot:not(:has(.inicio-introducao)) #boot-amigos-form input { flex: none; width: 100%; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-amigos-form .botao-fantasma { min-height: 48px; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-texto { flex-direction: row; gap: 0 10px; }
+#tela-boot:not(:has(.inicio-introducao)) .amigo-nome { flex: 0 1 9ch; width: 9ch; text-align: left; field-sizing: initial; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-sub { flex-wrap: nowrap; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-endereco { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; min-width: 0; }
+#tela-boot:has(.larga-hospedar) .boot-faixa-web { padding: 0 0 0 18px; }
+#tela-boot:not(:has(.inicio-introducao)) .boot-meu-servidor .boot-saidas > button { padding: 0 14px; font-size: 13px; }
+#tela-boot:not(:has(.inicio-introducao)) #boot-meu-servidor-frase { font-size: 13px; font-weight: 500; }
+#tela-boot:has(.larga-hospedar) .larga-hospedar { order: -1; margin: 0; gap: 14px; }
+#tela-boot:has(.larga-hospedar) .larga-hospedar a { align-self: flex-start; }
+#tela-boot:has(.larga-hospedar) .boot-fora { order: 1; }
+#tela-boot .boot-fora-lista li:last-child { border-bottom: 0; }

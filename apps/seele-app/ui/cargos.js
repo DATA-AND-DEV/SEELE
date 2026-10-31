@@ -623,6 +623,41 @@ function cargosMaisAlto(quadro, pessoa) {
 }
 
 /**
+ * As amostras de cor do editor: rádios nativos (as setas do teclado percorrem,
+ * e cada um tem o nome da cor como rótulo) que espelham o `<select>`. O
+ * `<select>` continua sendo a fonte da verdade — é nele que o resto do script
+ * lê e escreve —, então escolher uma amostra o muda e dispara o `change` dele.
+ */
+function cargosDesenharAmostras(select) {
+  const grupo = $("cargos-amostras");
+  const opcoes = Array.from(select.options);
+  repovoar(
+    grupo,
+    opcoes.map((opcao) => {
+      const amostra = elemento(
+        "span",
+        opcao.value ? `cargos-amostra cargos-cor-${opcao.value}` : "cargos-amostra cargos-amostra-sem",
+      );
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "cargos-cor-amostra";
+      radio.value = opcao.value;
+      radio.checked = select.value === opcao.value;
+      radio.disabled = select.disabled;
+      radio.setAttribute("aria-label", opcao.textContent);
+      radio.title = opcao.textContent;
+      radio.addEventListener("change", () => {
+        if (!radio.checked) return;
+        select.value = radio.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      amostra.append(radio);
+      return amostra;
+    }),
+  );
+}
+
+/**
  * A amostra de cor de um cargo: só nomes da palheta, e escondida do leitor de
  * tela. `null` quando o modelo do servidor não tem cor (o da 0.17 não tem):
  * um quadrado vazio ao lado de cada cargo seria um enfeite sem dado.
@@ -1111,6 +1146,7 @@ function cargosDesenharEditor(estado) {
   cor.disabled = !gere;
   // Sem cor no modelo do servidor, o campo não aparece: não há o que escolher.
   cor.closest("label").hidden = !quadro.temCor;
+  cargosDesenharAmostras(cor);
 
   $("cargos-estado-nota").textContent = comRestricao ? FRASES_DOS_CARGOS.estadoNota : "";
 
