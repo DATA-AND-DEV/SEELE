@@ -924,7 +924,22 @@ pub async fn atender_imagem(
     entrada: &mut crate::transporte::Recebe,
 ) -> anyhow::Result<()> {
     use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem};
-    let pedido: PedidoDeImagem = crate::frame::read(entrada).await?;
+    // **Um pedido que não passa na validação também tem resposta** (0.19): um
+    // envio declarado acima do teto (10 MiB num perfil) era barrado aqui pelo
+    // `?` e o fluxo acabava mudo, e quem enviou não sabia por quê.
+    let pedido: PedidoDeImagem = match crate::frame::read(entrada).await {
+        Ok(pedido) => pedido,
+        Err(erro) => {
+            tracing::warn!(%pessoa, %erro, "pedido de imagem recusado na leitura");
+            let _ = crate::frame::write(
+                envio,
+                &RespostaDeImagem { erro: Some("pedido-invalido-ou-grande-demais".into()), bytes: 0 },
+            )
+            .await;
+            let _ = envio.finish();
+            return Err(erro.into());
+        }
+    };
     let inicio = Instant::now();
     let resultado: anyhow::Result<Option<tokio::fs::File>> = async {
         match pedido {
@@ -945,10 +960,15 @@ pub async fn atender_imagem(
                 anyhow::ensure!(arquivo.metadata().await?.len() <= seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64, "arquivo-grande-demais");
                 Ok(Some(arquivo))
             }
-            // F2/F4: perfis. As imagens de perfil chegam com o despacho de
-            // `perfis/imagens.rs`; até lá o pedido volta recusado.
-            PedidoDeImagem::EnviarAoPerfil { .. } | PedidoDeImagem::LerDoPerfil { .. } => {
-                Err(anyhow::anyhow!("perfis-ainda-nao-implementado"))
+            // **As imagens do perfil** (0.19) não passam por MOD: o teto é o
+            // `TETO_DA_IMAGEM` (10 MiB), o tipo vem dos bytes, e quem envia é
+            // sempre `pessoa`. Tudo mora em `perfis/imagens.rs`.
+            PedidoDeImagem::EnviarAoPerfil { lado, bytes } => {
+                crate::perfis::imagens::atender_envio(server, pessoa, lado, bytes, entrada).await?;
+                Ok(None)
+            }
+            PedidoDeImagem::LerDoPerfil { pessoa: de_quem, lado, hash } => {
+                Ok(Some(crate::perfis::imagens::atender_leitura(server, de_quem, lado, hash).await?))
             }
         }
     }.await;

@@ -1097,8 +1097,13 @@ mod tags_testes {
         )
         .unwrap();
         let t = c.transaction().unwrap();
-        t.execute_batch(crate::persistence::schema::MIGRATIONS.last().unwrap().sql)
+        // A 19, a das marcas, pelo número: a «última» deixou de ser ela quando a
+        // 0.19 acrescentou a 20 (os perfis).
+        let marcas = crate::persistence::schema::MIGRATIONS
+            .iter()
+            .find(|m| m.version == 19)
             .unwrap();
+        t.execute_batch(marcas.sql).unwrap();
         migrar_tags(&t).unwrap();
         t.commit().unwrap();
         let (id, alias, completa, tag): (i64, String, String, String) = c

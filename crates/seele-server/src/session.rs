@@ -2600,6 +2600,39 @@ async fn run_session(
         }
     }
 
+    // **Os perfis deste servidor** (0.19, protocolo 12), no padrão dos membros:
+    // depois do `subscribe()`, uma mudança entre a leitura e a assinatura chega
+    // como `PerfilMudou` em vez de se perder. Em partes de
+    // `MAX_PERFIS_POR_PARTE`, e só a última diz `ultima`. Um par que fala 11
+    // não recebe nenhuma (`entende_a_mensagem`) e segue vendo apelido e ícone.
+    // Um banco que não responde não manda parte nenhuma, e diz no registro:
+    // uma parte vazia com `ultima` afirmaria que ninguém tem perfil.
+    if session.protocol_version >= seele_proto::vocabulario::desde(&ServerMessage::Perfis {
+        parte: Vec::new(),
+        ultima: true,
+    }) {
+        let perfis = {
+            let guard = server.persistence.lock().await;
+            crate::persistence::perfis::todos(&guard)
+        };
+        match perfis {
+            Ok(perfis) => {
+                for parte in partes_dos_perfis(perfis) {
+                    if entende_a_mensagem(&parte, session.protocol_version) {
+                        escrever!(&parte).await?;
+                    }
+                }
+            }
+            Err(erro) => {
+                tracing::warn!(
+                    person = %session.person,
+                    %erro,
+                    "não deu para ler os perfis; a lista de perfis desta sessão fica sem chegar"
+                );
+            }
+        }
+    }
+
     // E quanto a subida **desta máquina** carrega, que é a perna do teto do
     // §5.1 que só o servidor sabe:
     //
@@ -2721,13 +2754,60 @@ async fn run_session(
                             escrever!(&ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
                         }
                     }
-                    // F2/F4: perfis. A gravação do perfil nativo ainda não existe
-                    // no servidor; recusa dito, e não calado.
-                    ClientMessage::GravarPerfil { .. } | ClientMessage::TirarImagemDoPerfil { .. } => {
-                        escrever!(&ServerMessage::PerfilRecusado {
-                            motivo: seele_proto::perfil::RecusaDePerfil::SemPastaDePerfis,
-                            campos: Vec::new(),
-                        }).await?;
+                    // **O perfil público** (0.19). Sem campo de pessoa no pedido:
+                    // a linha escrita é a de `session.person` e nenhuma outra,
+                    // a mesma regra de `SetNickname` e `SetPersonIcon`, e por
+                    // isso sem permissão a conferir. A validação é a única,
+                    // `seele_proto::perfil::validar`; a recusa volta só para
+                    // quem pediu, e a mudança, depois do commit, para todos.
+                    ClientMessage::GravarPerfil { revisao, nome_exibido, pronomes, status, bio, cor, efeito } => {
+                        let cor_em_texto = seele_proto::perfil::cor_em_texto(cor);
+                        let validado = seele_proto::perfil::validar(&seele_proto::perfil::EntradaDePerfil {
+                            nome_exibido: &nome_exibido,
+                            pronomes: &pronomes,
+                            status: &status,
+                            bio: &bio,
+                            cor: &cor_em_texto,
+                        });
+                        match validado {
+                            Err(campos) => {
+                                escrever!(&ServerMessage::PerfilRecusado {
+                                    motivo: seele_proto::perfil::RecusaDePerfil::Campos,
+                                    campos,
+                                }).await?;
+                            }
+                            Ok(perfil) => {
+                                let gravado = {
+                                    let guard = server.persistence.lock().await;
+                                    match crate::persistence::perfis::gravar(&guard, session.person, revisao, &perfil, efeito) {
+                                        // O commit já foi: lê o que ficou, para difundir.
+                                        Ok(Ok(_)) => crate::persistence::perfis::ler(&guard, session.person).map(Ok),
+                                        Ok(Err(velha)) => Ok(Err(velha)),
+                                        Err(erro) => Err(erro),
+                                    }
+                                };
+                                match gravado {
+                                    Ok(Ok(Some(publico))) => {
+                                        let _ = server.events.send(Event::PerfilMudou(publico));
+                                    }
+                                    Ok(Ok(None)) => {
+                                        tracing::warn!(person = %session.person, "o perfil sumiu entre o commit e a leitura");
+                                    }
+                                    Ok(Err(_velha)) => {
+                                        escrever!(&ServerMessage::PerfilRecusado {
+                                            motivo: seele_proto::perfil::RecusaDePerfil::RevisaoVelha,
+                                            campos: Vec::new(),
+                                        }).await?;
+                                    }
+                                    Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                                }
+                            }
+                        }
+                    }
+                    ClientMessage::TirarImagemDoPerfil { lado } => {
+                        if let Err(erro) = crate::perfis::imagens::tirar(server, session.person, lado).await {
+                            nao_deu(&mut send, session.protocol_version, pedido, &erro).await?;
+                        }
                     }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
@@ -5777,6 +5857,31 @@ fn partes_dos_membros(membros: Vec<seele_proto::control::Membro>) -> Vec<ServerM
         .collect()
 }
 
+/// Os perfis em quadros de [`ServerMessage::Perfis`]: partes de até
+/// [`seele_proto::perfil::MAX_PERFIS_POR_PARTE`], e `ultima` só na última.
+///
+/// Uma lista vazia ainda vira uma parte, vazia e com `ultima`: é ela que diz a
+/// quem recebe que a lista acabou.
+fn partes_dos_perfis(perfis: Vec<seele_proto::perfil::PerfilPublico>) -> Vec<ServerMessage> {
+    if perfis.is_empty() {
+        return vec![ServerMessage::Perfis {
+            parte: perfis,
+            ultima: true,
+        }];
+    }
+    let quantas = perfis
+        .len()
+        .div_ceil(seele_proto::perfil::MAX_PERFIS_POR_PARTE);
+    perfis
+        .chunks(seele_proto::perfil::MAX_PERFIS_POR_PARTE)
+        .enumerate()
+        .map(|(posicao, parte)| ServerMessage::Perfis {
+            parte: parte.to_vec(),
+            ultima: posicao + 1 == quantas,
+        })
+        .collect()
+}
+
 /// Decides whether an event concerns this connection, and what to send.
 fn translate(
     event: &Event,
@@ -5819,6 +5924,17 @@ fn translate(
             person: *person,
             icon: icon.clone(),
         }),
+        // O perfil mudou: para todo mundo, como o nome. Um par 11 é calado por
+        // `entende_a_mensagem`, no laço que escreve.
+        Event::PerfilMudou(perfil) => Some(ServerMessage::PerfilMudou(perfil.clone())),
+        // A recusa de um envio de imagem: só de quem enviou.
+        Event::PerfilRecusado { pessoa, motivo } if *pessoa == self_person => {
+            Some(ServerMessage::PerfilRecusado {
+                motivo: *motivo,
+                campos: Vec::new(),
+            })
+        }
+        Event::PerfilRecusado { .. } => None,
         // Para todo mundo, pela mesma razão do nome: o FORA DO AR é do
         // servidor inteiro.
         Event::MembroNovo { membro } => Some(ServerMessage::MembroNovo {

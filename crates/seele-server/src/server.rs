@@ -277,6 +277,23 @@ pub enum Event {
         /// A figura, ou `None` quando foi tirada.
         icon: Option<Vec<u8>>,
     },
+    /// O perfil de alguém mudou (texto, cor, efeito, foto ou capa), **depois do
+    /// commit** (PERFIS, 0.19).
+    ///
+    /// Difundido a todos, como o nome. Quem fala o protocolo 11 não o recebe:
+    /// `entende_a_mensagem` o cala, e esse par segue vendo apelido e ícone.
+    PerfilMudou(seele_proto::perfil::PerfilPublico),
+    /// Um envio de imagem de perfil foi recusado: **só para quem enviou**.
+    ///
+    /// O envio corre num fluxo próprio, que responde com texto; este evento é
+    /// como a mesma recusa chega ao fluxo de controle como `PerfilRecusado`,
+    /// onde o editor a espera.
+    PerfilRecusado {
+        /// Quem enviou.
+        pessoa: PersonId,
+        /// Por quê.
+        motivo: seele_proto::perfil::RecusaDePerfil,
+    },
     /// Alguém passou a ser membro deste servidor: uma conta criada agora.
     ///
     /// Difundido a todos, pela mesma razão do [`Self::MembroBanido`]. Só na
