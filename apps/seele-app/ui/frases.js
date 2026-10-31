@@ -1773,7 +1773,7 @@ const FRASES_DO_TUNEL = Object.freeze({
  * dirá e a lista não tiver aparece com o próprio nome, e o fato vai ao registro.
  */
 const FRASES_DA_MAQUINA = Object.freeze({
-  titulo: (quem) => `${quem} PEDE PARA RODAR UM SERVIDOR DE JOGO NESTE COMPUTADOR`,
+  titulo: (quem) => `${quem} pede para rodar um servidor de jogo neste computador`,
   mod: (nome, id) => `MOD: ${nome} (${id})`,
   jogo: (titulo, versao) => versao ? `jogo: ${titulo}, versão ${versao}` : `jogo: ${titulo}`,
   receita: (nome, versao) => `receita: ${nome} ${versao}`,

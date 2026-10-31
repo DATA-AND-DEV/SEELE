@@ -341,6 +341,15 @@
 @media (max-width: 700px) {
   :where(:root[data-casca="celular"]) .maquina-titulo { font-size: calc(24px * var(--cel-escala)); }
 }
+@media (max-height: 760px) {
+  :where(:root[data-casca="celular"]) .maquina-titulo { font-size: calc(24px * var(--cel-escala)); }
+}
+@media (max-height: 760px) {
+  :where(:root[data-casca="celular"]) .maquina-sua-conta { font-size: calc(14px * var(--cel-escala)); }
+}
+@media (max-height: 760px) {
+  :where(:root[data-casca="celular"]) .maquina-mudou { font-size: calc(12px * var(--cel-escala)); }
+}
 
 /* camada-portaria.css */
 :where(:root[data-casca="celular"]) .portaria-eyebrow { font-size: calc(11px * var(--cel-escala)); }

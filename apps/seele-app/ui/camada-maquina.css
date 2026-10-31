@@ -256,9 +256,8 @@
   font-size: 32px;
   line-height: 1.12;
   letter-spacing: var(--seele-tracking-cartela);
-  /* Maiúsculas no título: o apelido de quem pede entra nele e aparece em
-     maiúsculas por aqui, sem que o texto guardado mude. */
-  text-transform: uppercase;
+  /* Em caixa de frase, como todo título do canvas: o único texto em
+     maiúsculas da caixa é o rótulo miúdo de cima. */
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
@@ -479,4 +478,17 @@
   /* No celular a largura é do texto: o ícone do cartão sai, o do aviso fica. */
   .maquina-cartao > .maquina-icone { display: none; }
   .maquina-acoes > button { flex: 1 1 140px; min-height: 48px; }
+}
+
+/* **Numa janela baixa, o que encolhe é a moldura, e não os avisos.** O título,
+   os respiros e os dois avisos ficam menores para sobrar altura ao corpo que
+   rola; os dois avisos seguem inteiros e à vista (a conta e o «mudou»). */
+@media (max-height: 760px) {
+  .maquina-caixa { gap: 10px; padding: 22px 32px 20px; }
+  .maquina-titulo { font-size: 24px; }
+  .maquina-aviso { padding: 8px 14px; gap: 10px; }
+  .maquina-aviso > .maquina-icone { flex-basis: 28px; height: 28px; border-radius: var(--seele-raio-miudo); }
+  .maquina-sua-conta { font-size: 14px; }
+  .maquina-mudou { padding: 6px 14px; font-size: 12px; line-height: 1.4; }
+  .maquina-acoes > button { min-height: 44px; }
 }

@@ -146,9 +146,9 @@ async function caso(motor, numero, prova) {
         await caso(motor, "1", async () => {
           await zerar();
           await emitirPedido();
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           const texto = await pagina.evaluate(() => tela());
-          assert.match(texto, /FULANO PEDE PARA RODAR UM SERVIDOR DE JOGO NESTE COMPUTADOR/, `${motor}: 1 · título: ${texto}`);
+          assert.match(texto, /Fulano pede para rodar um servidor de jogo neste computador/, `${motor}: 1 · título: ${texto}`);
           assert.match(texto, /MOD: x\/jogo \(x\/jogo\)/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /jogo: Minecraft, versão 1\.21/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /porta 25565 \(tcp\)/, `${motor}: 1 · ${texto}`);
@@ -174,7 +174,7 @@ async function caso(motor, numero, prova) {
             { titulo: "EULA do jogo", url: "https://exemplo.com/eula" },
             { titulo: "Política de dados", url: "https://exemplo.com/dados" },
           ] });
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           const disabled = () => pagina.evaluate(() => $("maquina-aceitar").disabled);
           const caixas = pagina.locator(".maquina-termo-caixa");
           assert.equal(await caixas.count(), 2, `${motor}: 2 · caixas`);
@@ -201,14 +201,14 @@ async function caso(motor, numero, prova) {
         await caso(motor, "3", async () => {
           await zerar();
           await emitirPedido();
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           assert.equal(await pagina.evaluate(() => document.activeElement?.id), "maquina-recusar", `${motor}: 3 · o foco não nasce no RECUSAR`);
           await pagina.click("#maquina-recusar");
           await esperarFechada();
           const esperado = [{ alvo: "127.0.0.1:7000", modId: "x/jogo", servidor: "srv-1" }];
           assert.deepEqual(await pagina.evaluate(() => chamadasDe("maquina_recusar")), esperado, `${motor}: 3 · RECUSAR`);
           await emitirPedido();
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           await pagina.keyboard.press("Escape");
           await esperarFechada();
           assert.deepEqual(await pagina.evaluate(() => chamadasDe("maquina_recusar")), [...esperado, ...esperado], `${motor}: 3 · Esc`);
@@ -244,7 +244,7 @@ async function caso(motor, numero, prova) {
         await caso(motor, "5", async () => {
           await zerar();
           await emitirPedido({ mudou: ["versao_do_jogo", "rodar", "pacote"] });
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           const texto = await pagina.evaluate(() => tela());
           assert.match(
             texto,
@@ -253,7 +253,7 @@ async function caso(motor, numero, prova) {
           );
           await zerar();
           await emitirPedido();
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           assert.doesNotMatch(await pagina.evaluate(() => tela()), /isto mudou/, `${motor}: 5 · a primeira vez diz que algo mudou`);
         });
 
@@ -262,12 +262,12 @@ async function caso(motor, numero, prova) {
           await zerar();
           await emitirPedido({ pedido_por: "Primeira", servidor: "srv-1" });
           await emitirPedido({ pedido_por: "Segunda", servidor: "srv-2", resumo: "resumo-2" });
-          await esperarTela("PRIMEIRA");
+          await esperarTela("Primeira");
           let texto = await pagina.evaluate(() => tela());
           assert.doesNotMatch(texto, /SEGUNDA/, `${motor}: 6 · o segundo pedido apareceu junto do primeiro: ${texto}`);
           assert.equal(await pagina.evaluate(() => document.querySelectorAll("[id='maquina-aceite']:not([hidden])").length), 1, `${motor}: 6 · duas telas`);
           await pagina.click("#maquina-aceitar");
-          await esperarTela("SEGUNDA");
+          await esperarTela("Segunda");
           texto = await pagina.evaluate(() => tela());
           assert.doesNotMatch(texto, /PRIMEIRA/, `${motor}: 6 · ${texto}`);
           await pagina.click("#maquina-aceitar");
@@ -319,7 +319,7 @@ async function caso(motor, numero, prova) {
               rodar: { comando: "java", argumentos: muitos(40, (i) => `-Dopcao${i}=valor`) },
               termos: muitos(6, (i) => ({ titulo: `Termo ${i}`, url: `https://exemplo.com/t${i}` })),
             });
-            await esperarTela("FULANO");
+            await esperarTela("Fulano");
             const medida = await pagina.evaluate(() => {
               const r = $("maquina-sua-conta").getBoundingClientRect();
               const corpo = $("maquina-corpo");
@@ -355,7 +355,7 @@ async function caso(motor, numero, prova) {
             rodar: { comando: isca, argumentos: [isca] },
             termos: [{ titulo: isca, url: "https://exemplo.com/" }],
           });
-          await esperarTela("PEDE");
+          await esperarTela("pede para rodar");
           assert.equal(await pagina.locator("#maquina-aceite img").count(), 0, `${motor}: 9 · virou marcação`);
           assert.equal(await pagina.evaluate(() => window.xssFoi), false, `${motor}: 9 · o texto do MOD rodou`);
           assert.ok((await pagina.evaluate(() => tela())).includes(isca), `${motor}: 9 · o texto não aparece como texto`);
@@ -365,7 +365,7 @@ async function caso(motor, numero, prova) {
         await caso(motor, "10", async () => {
           await zerar();
           await emitirPedido();
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           await pagina.mouse.click(5, 5);
           assert.equal(await aberta(), true, `${motor}: 10 · a tela fechou por fora`);
           assert.equal(await pagina.evaluate(() => chamadas.filter((c) => c.cmd.startsWith("maquina_")).length), 0, `${motor}: 10 · o clique no véu respondeu`);
@@ -376,7 +376,7 @@ async function caso(motor, numero, prova) {
           await zerar();
           await pagina.evaluate(() => { table.maquina_aceitar = () => { throw "conteudo-nao-bate"; }; });
           await emitirPedido();
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           await pagina.click("#maquina-aceitar");
           await pagina.waitForFunction(() => !$("maquina-erro").hidden, null, { timeout: 5000 });
           const erro = await pagina.evaluate(() => $("maquina-erro").textContent);
@@ -392,7 +392,7 @@ async function caso(motor, numero, prova) {
           for (const [motivo, frase] of [["servidor-saiu", /você saiu do servidor/], ["outro-pedido", /o servidor passou este jogo para outra máquina/]]) {
             await zerar();
             await emitirPedido();
-            await esperarTela("FULANO");
+            await esperarTela("Fulano");
             await pagina.evaluate((m) => {
               titulosDeMaquinas.set(chaveDaMaquina("127.0.0.1:7000", "x/jogo", "srv-1"), "Minecraft");
               emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: m, resumo: "resumo-1" });
@@ -407,7 +407,7 @@ async function caso(motor, numero, prova) {
         await caso(motor, "12b", async () => {
           await zerar();
           await emitirPedido({ resumo: "R2" });
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "outro-pedido" }));
           assert.equal(await aberta(), true, `${motor}: 12b · um aviso sem resumo fechou o diálogo do pedido novo`);
           await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "outro-pedido", resumo: "R1" }));
@@ -478,7 +478,7 @@ async function caso(motor, numero, prova) {
             ],
             origens: ["github.com", "release-assets.githubusercontent.com"],
           });
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           const linhas = await pagina.evaluate(() => [...$("maquina-detalhes").children].map((li) => li.innerText));
           const de = (re) => linhas.filter((l) => re.test(l));
           assert.deepEqual(de(/vai baixar/), ["vai baixar 2 arquivos, 105.0 MB no total:"], `${motor}: 15 · a soma: ${linhas.join(" | ")}`);
@@ -503,7 +503,7 @@ async function caso(motor, numero, prova) {
             rodar: { comando: "java/bin/java", argumentos: ["-jar", "fabric-server-launch.jar", "nogui"] },
             dominios_do_jogo: ["maven.fabricmc.net", "meta.fabricmc.net"],
           });
-          await esperarTela("FULANO");
+          await esperarTela("Fulano");
           const linhas = await pagina.evaluate(() => [...$("maquina-detalhes").children].map((li) => li.innerText));
           const de = (re) => linhas.filter((l) => re.test(l));
           assert.deepEqual(de(/pack do modpack/), ["o pack do modpack, conferido pelo sha512 57764c105ff999ce…"], `${motor}: 16 · o pack: ${linhas.join(" | ")}`);

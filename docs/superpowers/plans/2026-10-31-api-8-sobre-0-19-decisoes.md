@@ -56,8 +56,13 @@ podiam se juntar num 12 só, e a v8 segue emendável.
 - **O aceite da máquina é a caixa do aceite dos MODs** (`Mods-aceite.dc.html`):
   opaca no `negro-painel` (o `#12100E` do canvas não é token), 32px de raio,
   a linha miúda com a marca, o MOD e o servidor (dados do pedido, sem frase
-  nova) e as portas num chip; o título grande em Inter Tight (32px, ainda em
-  maiúsculas: o apelido entra nele, e as bancadas o leem assim); o aviso da
+  nova) e as portas num chip; o título grande em Inter Tight (32px), **em
+  caixa de frase** como todo título do canvas — a frase era escrita em
+  maiúsculas (`FRASES_DA_MAQUINA.titulo`) e o CSS ainda a forçava; agora é
+  «Fulano pede para rodar um servidor de jogo neste computador», as mesmas
+  palavras, e a bancada a lê assim. Numa janela baixa (até 760px de altura) o
+  título desce a 24px e os dois avisos encolhem o respiro, para sobrar corpo;
+  os dois seguem inteiros e à vista; o aviso da
   conta num cartão laranja com o escudo traçado, **fora da área que rola**,
   como antes; «isto mudou desde o seu aceite» na caixa laranja do canvas (era
   azul); o que vai rodar num cartão de vidro com o ícone traçado e as linhas
