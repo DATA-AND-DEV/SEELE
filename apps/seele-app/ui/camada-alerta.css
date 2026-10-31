@@ -67,8 +67,11 @@
   position: relative;
   width: 720px;
   max-width: calc(100vw - 32px);
-  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
-  background: var(--seele-negro-absoluto);
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 55%, var(--seele-negro-absoluto));
+  overflow: hidden;
 }
 
 /* ---------- a cabeça ----------
@@ -77,8 +80,10 @@
    texto colorido sobre fundo escuro. */
 .alerta-cabeca {
   display: flex;
-  align-items: stretch;
-  border-bottom: var(--seele-b) solid var(--seele-laranja-nerv);
+  align-items: center;
+  gap: 4px;
+  padding: 16px 8px 12px 20px;
+  border-bottom: var(--seele-b) solid var(--seele-vidro-borda);
 }
 
 /* ---------- o fechamento, e é um só ----------
@@ -109,11 +114,14 @@
   color: var(--seele-osso-apagado);
   background: none;
   border: 0;
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
-.alerta-fechar:hover { color: var(--seele-osso); }
-
+.alerta-fechar:hover {
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+}
 .alerta-fechar:focus-visible {
   outline: var(--seele-b-forte) solid var(--seele-osso);
   outline-offset: -2px;
@@ -124,9 +132,10 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px 20px;
+  padding: 4px 14px;
+  border-radius: var(--seele-raio-pilula);
   background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  color: var(--seele-tinta-no-acento);
   flex: 0 0 auto;
 }
 
@@ -140,9 +149,9 @@
 }
 
 .alerta-palavra {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 34px;
+  font-family: var(--seele-ui);
+  font-weight: 700;
+  font-size: 13px;
   letter-spacing: 0.1em;
 }
 
@@ -161,9 +170,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.2em;
-  color: var(--seele-osso-apagado);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
 }
 
 /* ---------- a severidade, em palavra ----------
@@ -184,11 +193,13 @@
    `tokens.css` o marca "EXCLUSIVO alerta e queda". */
 .alerta-severidade {
   display: none;
-  padding: 2px 6px;
+  padding: 0 10px;
+  border-radius: var(--seele-raio-pilula);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
   font-weight: 600;
-  letter-spacing: 0.14em;
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  letter-spacing: 0.06em;
+  background: var(--seele-laranja-fraco);
+  color: var(--seele-laranja-claro);
 }
 
 #banner[data-severidade="Info"] .alerta-severidade[data-para="Info"],
@@ -202,6 +213,7 @@
    trás — ver o bloco das células, logo abaixo. */
 .alerta-frase {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-corpo);
   line-height: 1.55;
   color: var(--seele-osso);
@@ -240,14 +252,16 @@
 
 .alerta-ejetar {
   flex: 1;
-  padding: 12px;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 16px;
-  letter-spacing: 0.16em;
+  min-height: 44px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   color: var(--seele-osso);
-  background: none;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
@@ -256,6 +270,6 @@
    leva ao `title`, que é onde está escrito o que faltaria. */
 .alerta-ejetar:disabled {
   color: var(--seele-osso-apagado);
-  border-color: var(--seele-linha);
+  border-color: var(--seele-vidro-borda);
   cursor: help;
 }

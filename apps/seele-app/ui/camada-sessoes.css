@@ -36,8 +36,9 @@
   font-size: 8px;
   line-height: 1;
   letter-spacing: 0.06em;
-  padding: 1px 2px;
+  padding: 1px 3px;
   border: 1px solid currentColor;
+  border-radius: var(--seele-raio-miudo);
   pointer-events: none;
 }
 
@@ -86,8 +87,9 @@
   font-size: 9px;
   line-height: 1.2;
   text-align: center;
-  color: var(--seele-negro-absoluto);
+  color: var(--seele-tinta-no-acento);
   background: var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio-pilula);
   pointer-events: none;
 }
 
@@ -121,9 +123,11 @@
 
 .voz-foco {
   margin: 4px 0 0;
-  padding: 6px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--seele-vidro-borda);
   border-left: 2px solid var(--seele-linha-forte);
-  background: var(--seele-negro-absoluto);
+  border-radius: var(--seele-raio);
+  background: var(--seele-vidro);
 }
 
 .voz-foco[data-voz="aqui"] { border-left-color: var(--seele-fosforo); }
@@ -149,10 +153,10 @@
 
 .boot-sessoes {
   margin: 0 0 16px;
-  padding: 12px;
-  border: 1px solid var(--seele-linha);
-  border-left: 2px solid var(--seele-padrao-azul);
-  background: var(--seele-negro-absoluto);
+  padding: 28px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  background: var(--seele-vidro);
 }
 
 .boot-sessoes .server-dispositivos { margin-top: 10px; }
@@ -160,9 +164,12 @@
 .boot-sessao {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: var(--seele-negro-painel);
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
+  background: var(--seele-vidro);
+  font-family: var(--seele-ui);
 }
 
 .boot-sessao-texto {
@@ -177,12 +184,13 @@
 
 .boot-sessao-nome {
   color: var(--seele-osso);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .boot-sessao-sub {
-  font-size: 11px;
-  color: var(--seele-rotulo-claro);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
 }
 
 /* O COMPARTILHAR sem captura neste navegador (caso 12): à vista e apagado, com

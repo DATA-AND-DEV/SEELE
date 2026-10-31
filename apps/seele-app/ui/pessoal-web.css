@@ -11,31 +11,36 @@
 
 
 .pessoal-web-corpo:has(.pessoal-web-chat[hidden]) { grid-template-columns: minmax(0, 1fr); }
-.pessoal-web-palco { min-height: 0; min-width: 0; display: grid; place-items: center; overflow: auto; }
+.pessoal-web-palco { min-height: 0; min-width: 0; display: grid; place-items: center; overflow: auto; padding: 18px; }
 
 
 .pessoal-web-participantes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; width: 100%; }
 
 
 
-.pessoal-web-participante-nome { font-size: 18px; text-align: center; overflow-wrap: anywhere; max-width: 100%; }
+.pessoal-web-participante-nome { font-family: var(--seele-ui); font-weight: 600; font-size: 18px; text-align: center; overflow-wrap: anywhere; max-width: 100%; }
 
 
-.pessoal-web input, .pessoal-web textarea { font: inherit; color: inherit; background: var(--seele-negro-painel); border: var(--seele-b) solid var(--seele-linha); padding: 12px; min-width: 0; box-sizing: border-box; }
+.pessoal-web input, .pessoal-web textarea { font: inherit; color: inherit; background: var(--seele-campo); border: var(--seele-b) solid var(--seele-campo-borda); border-radius: var(--seele-raio); padding: 0 16px; min-width: 0; box-sizing: border-box; }
+.pessoal-web textarea { padding: 12px 16px; }
+.pessoal-web input:focus, .pessoal-web textarea:focus { outline: none; border-color: var(--seele-laranja-nerv); }
 .pessoal-web-convite { width: 100%; }
 .pessoal-web-link { flex: 1 1 260px; }
 
 
 .pessoal-web-mensagens { min-height: 0; overflow: auto; padding: 0; margin: 0; list-style: none; }
-.pessoal-web-mensagem { padding: 12px 0; border-bottom: var(--seele-b) solid var(--seele-linha); }
-.pessoal-web-autor { font-size: 12px; color: var(--seele-osso-apagado); }
-.pessoal-web-conteudo { margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pessoal-web-mensagem { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 13px; }
+.pessoal-web-autor { flex: 0 0 auto; font-size: 13px; font-weight: 700; color: var(--seele-azul-claro); }
+.pessoal-web-autor::after { content: " \25B8"; font-weight: 400; color: var(--seele-rotulo-painel); }
+.pessoal-web-conteudo { margin: 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pessoal-web-escrever { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
 
 
 
-.pessoal-web-rodape > button[aria-pressed="true"] { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
-.pessoal-web-rodape > button:last-child { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
+.pessoal-web-rodape > button[aria-pressed="true"] { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-claro); }
+/* SAIR DA CONVERSA é o primário do canvas: laranja cheio. */
+.pessoal-web-rodape > button:last-child { border-color: var(--seele-laranja-nerv); background: var(--seele-laranja-nerv); color: var(--seele-tinta-no-acento); font-weight: 600; }
+.pessoal-web-rodape > button:last-child:hover { background: var(--seele-laranja-hover); border-color: var(--seele-laranja-hover); }
 
 .pessoal-web-tela { width: 100%; height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; }
 .pessoal-web-palco:has(.pessoal-web-tela:not([hidden])) .pessoal-web-centro { display: none; }
@@ -53,7 +58,7 @@
 .pessoal-web-tela:-webkit-full-screen > button {
   position: absolute; top: max(12px, env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right)); min-height: 44px;
-  color: var(--seele-osso, white); background: #050403d9; z-index: 1;
+  color: var(--seele-osso); background: color-mix(in srgb, var(--seele-negro-absoluto) 85%, transparent); z-index: 1;
 }
 
 /* Componentes partilhados 0.17.4. Estados continuam vindos do serviço. */
@@ -61,8 +66,10 @@
   position: fixed;
   inset: var(--seele-barra-janela, 0px) 0 0;
   display: grid;
-  grid-template-rows: 64px minmax(0, 1fr) auto auto;
-  background: var(--seele-negro-absoluto);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  background-color: var(--seele-negro-absoluto);
+  background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+  background-size: 6px 6px;
   color: var(--seele-osso);
   padding: 0;
   gap: 0;
@@ -70,18 +77,17 @@
 }
 .pessoal-web-topo {
   justify-content: space-between;
-  border-bottom: 1px solid var(--seele-linha);
-  padding-bottom: 16px;
-  padding: 8px 24px;
+  border-bottom: 0;
+  padding: 16px 26px 6px;
   margin: 0;
 }
 .pessoal-web-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-size: 24px;
-  font-weight: 500;
-  border-left: 1px solid var(--seele-linha-forte);
-  padding-left: 24px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
 }
 .pessoal-web-marca {
   width: 96px;
@@ -89,16 +95,21 @@
 }
 .pessoal-web-corpo {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
   min-height: 0;
-  gap: 24px;
-  padding: 24px;
+  gap: 12px;
+  padding: 12px 16px;
   width: 100%;
-  max-width: 1440px;
   margin: 0 auto;
 }
+/* O palco e o chat são os dois painéis de vidro do canvas. */
+.pessoal-web-palco, .pessoal-web-chat {
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  background: var(--seele-vidro);
+}
 .pessoal-web-centro {
-  width: min(100%, 640px);
+  width: min(100%, 960px);
   display: grid;
   justify-items: center;
   gap: 24px;
@@ -106,15 +117,19 @@
   align-content: start;
 }
 .pessoal-web[data-fase="livre"] .pessoal-web-centro,
-.pessoal-web[data-fase="encerrada"] .pessoal-web-centro { width: min(100%, 480px); border: 1px solid var(--seele-linha); border-radius: var(--seele-raio); padding: 24px; justify-items: stretch; }
+.pessoal-web[data-fase="encerrada"] .pessoal-web-centro { width: min(100%, 480px); padding: 12px 0; justify-items: stretch; }
 .pessoal-web-nome {
   display: grid;
   gap: 8px;
   width: 100%;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 14px;
 }
 .pessoal-web-acoes { width: 100%; justify-content: stretch; }
 .pessoal-web-acoes .botao { flex: 1; }
 .pessoal-web-estado {
+  font-family: var(--seele-ui);
   font-size: 15px;
   text-align: start;
   overflow-wrap: anywhere;
@@ -122,7 +137,23 @@
   color: var(--seele-osso-apagado);
   line-height: 1.6;
 }
-.pessoal-web-entrada-titulo { margin: 0; font-family: var(--seele-display); font-weight: 500; font-size: 32px; line-height: 1.25; }
+/* Conectada: a pastilha verde do canvas, com a marca de ponto (nunca só a cor). */
+.pessoal-web[data-fase="dentro"] .pessoal-web-estado {
+  display: inline-flex; align-items: center; gap: 6px;
+  justify-self: center;
+  min-height: 24px; padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  border-radius: var(--seele-raio-pilula);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--seele-fosforo);
+}
+.pessoal-web[data-fase="dentro"] .pessoal-web-estado::before { content: "\25CF"; }
+.pessoal-web-entrada-titulo { margin: 0; font-family: var(--seele-display); font-weight: 700; font-size: 34px; line-height: 1.1; letter-spacing: -0.045em; }
 .pessoal-web-participante {
   display: flex;
   flex-direction: column;
@@ -131,50 +162,52 @@
   gap: 12px;
   min-width: 0;
   padding: 24px 16px;
-  border: 1px solid var(--seele-linha);
-  border-radius: var(--seele-raio);
-  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 22px;
+  background: var(--seele-negro-painel);
 }
-.pessoal-web-participante:first-child {
-  border-top: 1px solid var(--seele-linha);
-}
+/* Quem fala e quem ouve: o ladrilho do canvas, com a inicial em quadrado. */
 .pessoal-web-inicial {
   display: grid;
   place-items: center;
-  width: 80px;
-  height: 80px;
-  border-radius: var(--seele-raio);
-  background: var(--seele-negro-absoluto);
+  width: 96px;
+  height: 96px;
+  border-radius: 30px;
+  background: color-mix(in srgb, var(--seele-padrao-azul) 22%, transparent);
   color: var(--seele-osso);
+  border: 0;
   font-family: var(--seele-display);
-  font-size: 36px;
   font-weight: 700;
-  border: 1px solid var(--seele-linha-forte);
-  font-family:var(--seele-mono); font-weight:normal; font-size:32px; line-height:normal;
+  font-size: 40px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.pessoal-web-participante:first-child .pessoal-web-inicial {
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent);
+  color: var(--seele-laranja-nerv);
 }
 .pessoal-web-participante-papel {
   font-size: 12px;
   letter-spacing: .02em;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-rotulo-painel);
 }
 .pessoal-web-chat {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 16px;
-  padding: 24px;
-  border: 1px solid var(--seele-linha);
-  border-radius: var(--seele-raio);
-  background: var(--seele-negro-absoluto);
+  gap: 10px;
+  padding: 18px;
 }
 .pessoal-web-chat-titulo {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-family: var(--seele-mono);
+  font-size: 11px;
   font-weight: 400;
-  color: var(--seele-osso-apagado);
-  letter-spacing: .02em;
+  color: var(--seele-rotulo-painel);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
   margin: 0;
 }
 .pessoal-web-texto {
@@ -183,31 +216,40 @@
   resize: vertical;
   line-height: 1.5;
 }
+@media (min-width: 701px) and (min-height: 600px) {
+  .pessoal-web-participante { min-height: 240px; }
+}
+
+/* A barra de ações é a pílula de vidro do canvas, centrada sob os painéis. */
 .pessoal-web-rodape {
-  border-top: 1px solid var(--seele-linha);
-  padding-top: 16px;
-  gap: 12px;
-  padding: 16px 24px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  gap: 8px;
+  padding: 8px;
+  margin: 0 auto 16px;
+  max-width: calc(100% - 32px);
 }
 .pessoal-web-rodape > button {
-  min-width: 130px;
   flex-direction: row;
   gap: 8px;
-  padding: 8px 16px;
-  border: 1px solid var(--seele-linha);
-  border-radius: var(--seele-raio);
-  background: var(--seele-negro-painel);
+  padding: 0 18px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-ui);
   font-size: 14px;
-  border-color: var(--seele-linha-forte);
+  font-weight: 500;
 }
-.pessoal-web-rodape:empty { display: none; }
+.pessoal-web-rodape > button:hover { background: var(--seele-controle-hover); }
+.pessoal-web-rodape:empty, .pessoal-web-rodape:not(:has(button:not([hidden]))) { display: none; }
 .pessoal-web-erro {
   margin: 0;
   text-align: center;
-  padding: 8px 24px;
+  padding: 8px 26px;
   color: var(--seele-vermelho-alerta);
 }
-.pessoal-web-status { padding: 8px 24px; border-top: 1px solid var(--seele-linha); color: var(--seele-osso-apagado); display: flex; gap: 24px; flex-wrap: wrap; font-size: 12px; }
+.pessoal-web-status { padding: 8px 24px; border-top: 1px solid var(--seele-vidro-borda); color: var(--seele-osso-apagado); display: flex; gap: 24px; flex-wrap: wrap; font-size: 12px; }
 
 /* A conversa ocupa a janela: participantes e mensagens dividem o espaço
    restante; somente o histórico rola, mantendo escrita e ações ao alcance. */
@@ -308,7 +350,7 @@
 /* A escolha enumera apenas saídas que o navegador realmente expõe. */
 .pessoal-web .pessoal-web-rodape > .pessoal-web-saida { flex: 0 0 44px; min-width: 44px; width: 44px; padding: 8px; }
 .pessoal-web-saida .pessoal-web-botao-texto { display: none; }
-.pessoal-web-painel-saida { position: absolute; z-index: 3; bottom: 74px; right: 12px; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 100px); overflow: auto; padding: 12px; background: var(--fundo, #17191c); border: 1px solid currentColor; border-radius: 8px; box-shadow: 0 4px 20px #0006; }
+.pessoal-web-painel-saida { position: absolute; z-index: 3; bottom: 74px; right: 12px; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 100px); overflow: auto; padding: 12px; background: var(--seele-negro-painel); border: 1px solid var(--seele-controle-borda); border-radius: var(--seele-raio); }
 .pessoal-web-painel-saida label { display: grid; gap: 6px; }
 .pessoal-web-painel-saida select { width: 100%; min-width: 0; min-height: 44px; }
-.pessoal-web-painel-saida button { width: 100%; min-height: 44px; margin-top: 8px; }
+.pessoal-web-painel-saida button { width: 100%; min-height: 44px; margin-top: 8px; border-radius: var(--seele-raio-pilula); }

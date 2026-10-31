@@ -76,10 +76,10 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--seele-display);
-  font-weight: var(--seele-cartela, 900);
+  font-weight: 700;
   line-height: 1.05;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  text-transform: none;
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
@@ -102,7 +102,7 @@
   flex: 0 0 auto;
   align-self: center;
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-micro, 10px);
+  font-size: 11px;
   letter-spacing: var(--seele-tracking-rotulo);
   text-transform: uppercase;
   color: var(--seele-rotulo-painel);
@@ -155,7 +155,6 @@
   inset: var(--seele-barra-janela, 32px) 0 0;
   z-index: 30;
 }
-
 
 /* A coluna dos painéis: ela **acrescenta** uma coluna, e some quando não há
    nenhum. `.paineis` a declara em `tela-sessao.css`. */
@@ -226,6 +225,7 @@
   min-height: 0;
   border-left: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
+  border-left-color: var(--seele-vidro-borda);
 }
 
 .painel-de-mod[data-lado="esquerda"],
@@ -242,6 +242,7 @@
   gap: var(--mod-respiro);
   padding: 14px var(--mod-margem);
   border-bottom: 1px solid var(--seele-linha);
+  border-bottom-color: var(--seele-vidro-borda);
 }
 
 .painel-de-mod-titulo,
@@ -332,7 +333,10 @@
   width: 100%;
   background: var(--seele-negro-painel);
   border: 1px solid var(--seele-linha-forte);
-  box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
+  box-shadow: none;
+  overflow: hidden;
+  border-color: var(--seele-controle-borda);
+  border-radius: var(--seele-raio-painel);
 }
 
 /* O cabeçalho fica **grudado no topo** da rolagem do corpo, como o da casca
@@ -373,6 +377,7 @@
   padding: 16px var(--mod-margem);
   border-top: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
+  border-color: var(--seele-vidro-borda);
 }
 
 /* ------------------------------------------------------- a saída, sempre */
@@ -385,15 +390,19 @@
   flex: 0 0 auto;
   /* Na borda direita, também quando desce para a linha de baixo. */
   margin-left: auto;
-  min-height: 28px;
-  padding: 2px 10px;
+  min-height: 32px;
+  padding: 0 14px;
   border: 1px solid var(--seele-linha-forte);
-  background: transparent;
+  background: var(--seele-controle);
   color: var(--seele-osso);
   font: inherit;
   font-size: var(--seele-t-dado, 11px);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   cursor: pointer;
+  border-color: var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-ui);
+  font-weight: 500;
 }
 
 .superficie-de-mod-sair:hover { border-color: var(--seele-laranja-nerv); }
@@ -425,12 +434,13 @@
   container: none;
   pointer-events: auto;
   padding: var(--seele-celula-y) var(--seele-celula-x);
-  border: 1px solid var(--seele-linha-forte);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
   border-left: 3px solid var(--seele-laranja-nerv);
   background: var(--seele-negro-painel);
   color: var(--seele-osso);
   font-size: var(--seele-t-dado, 11px);
   overflow-wrap: anywhere;
+  border-radius: var(--seele-raio-cartao);
 }
 
 .aviso-de-mod[data-tom="erro"] { border-left-color: var(--seele-vermelho-alerta); }
@@ -481,3 +491,23 @@
 [data-suspensa="sim"] * {
   animation-play-state: paused !important;
 }
+
+/* ======================================================================
+   Redesign 0.19 — as superfícies de um MOD
+   Página, folha e painel ficam coladas na borda e só trocam a linha pela de
+   vidro; o diálogo e o aviso são cartões arredondados, sem sombra. O que o
+   `container: none` do aviso protege (ver o guarda) não mudou.
+   ====================================================================== */
+
+.pagina-de-mod-cabecalho,
+.dialogo-de-mod-cabecalho,
+
+.painel-de-mod,
+
+.painel-de-mod[data-lado="esquerda"],
+.folha-de-mod[data-lado="esquerda"] { border-right-color: var(--seele-vidro-borda); }
+.painel-de-mod-cabecalho,
+
+.superficie-de-mod-sair:hover { border-color: var(--seele-controle-borda); background: var(--seele-controle-hover); }
+
+.aviso-de-mod[data-tom="erro"] { border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent); }

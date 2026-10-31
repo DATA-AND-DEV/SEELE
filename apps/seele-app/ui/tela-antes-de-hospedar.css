@@ -17,11 +17,9 @@
   overflow: hidden;
 }
 
-
 #tela-antes-de-hospedar .boot-caixa.area {
   flex: 1;
 }
-
 
 .antes-corpo {
   display: grid;
@@ -30,51 +28,14 @@
   align-content: safe center;
 }
 
-
-.antes-contexto {
-  min-width: 0;
-  position: static;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 12px 24px;
-  padding: 0 0 24px;
-  border-bottom: 1px solid var(--seele-linha);
-  margin-bottom: 24px;
-}
-
-
 .antes-principal {
   min-width: 0;
 }
-
-
-
-
-.antes-servidor {
-  margin: 8px 0 0;
-  font-size: var(--seele-t-dado);
-  letter-spacing: 0.04em;
-  color: var(--seele-rotulo-claro);
-}
-
 
 .antes-resumo {
   margin: 0;
   max-width: var(--seele-leitura);
 }
-
-
-.antes-passos {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  align-items: start;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-}
-
 
 /* O passo: um filete à esquerda que muda com o estado, como a linha escolhida
    da configuração. O estado escrito ao lado do título é o que vale; o filete é
@@ -89,7 +50,6 @@
   border-radius: var(--seele-raio);
 }
 
-
 .antes-passo[data-estado="ok"] {
   border-left-color: var(--seele-fosforo);
 }
@@ -103,50 +63,6 @@
   background: var(--seele-laranja-carga);
 }
 
-
-.antes-passo-topo {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-
-.antes-passo-num {
-  font-family: var(--seele-display);
-  line-height: 1;
-  color: var(--seele-laranja-nerv);
-  font-size: 26px;
-  font-weight: 500;
-}
-
-
-.antes-passo-titulo {
-  margin: 0;
-  flex: 1;
-  font-family: var(--seele-display);
-  color: var(--seele-osso);
-  font-size: 25px;
-  font-weight: 500;
-  letter-spacing: 0;
-  flex-basis: calc(100% - 48px);
-}
-
-
-/* O estado em palavra, numa pastilha de borda. Doze pixels e caixa alta: é o
-   rótulo do produto (`--seele-t-rotulo`), e não um enfeite. */
-.antes-estado {
-  text-transform: uppercase;
-  border: 1px solid currentColor;
-  color: var(--seele-rotulo-claro);
-  margin-top: 8px;
-  padding: 5px 8px;
-  border-radius: var(--seele-raio);
-  font-size: 10px;
-  letter-spacing: .03em;
-}
-
-
 .antes-passo[data-estado="ok"] .antes-estado {
   color: var(--seele-fosforo);
 }
@@ -159,58 +75,17 @@
   color: var(--seele-laranja-nerv);
 }
 
-
-.antes-passo-frase {
-  margin: 12px 0 0;
-  color: var(--seele-osso);
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-  max-width: var(--seele-leitura);
-  font-size: 13px;
-  line-height: 1.65;
-  margin-top: 16px;
-}
-
-
-.antes-passo-detalhe {
-  color: var(--seele-rotulo-claro);
-}
-
-
-.antes-acoes {
-  margin: 12px 0 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-
 .antes-acoes:empty {
   display: none;
 }
-
 
 .antes-lista {
   margin: 12px 0 0;
 }
 
-
 .antes-lista:empty {
   display: none;
 }
-
-
-/* A linha de uma versão ou de um MOD: o nome e o que ele quer dizer à
-   esquerda, as ações à direita, e embaixo delas quando não cabem. */
-.antes-linha {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  padding: 12px;
-  background: var(--seele-negro-painel);
-}
-
 
 .antes-linha-texto {
   flex: 1 1 220px;
@@ -223,17 +98,10 @@
   overflow-wrap: anywhere;
 }
 
-
 .antes-linha-nome {
   font-weight: 700;
   letter-spacing: 0.04em;
 }
-
-
-.antes-linha-sub {
-  color: var(--seele-rotulo-claro);
-}
-
 
 /* O que já foi resolvido numa linha: a palavra, e não só o filete. */
 .antes-linha-feito {
@@ -243,7 +111,6 @@
   color: var(--seele-fosforo);
 }
 
-
 .antes-linha-acoes {
   display: flex;
   flex-wrap: wrap;
@@ -251,21 +118,17 @@
   margin-left: auto;
 }
 
-
 /* `.botao-fantasma` traz `margin-left: auto` de `base.css` para empurrar um
    botão só ao fim da linha; aqui os botões vêm em grupo e quem empurra é o
    grupo. */
-.antes-linha-acoes > button,
-.antes-acoes > button {
+.antes-linha-acoes > button, .antes-acoes > button {
   margin-left: 0;
   min-height: 36px;
 }
 
-
 .antes-mods-saidas {
   margin-top: 12px;
 }
-
 
 /* O que pede atenção, no alto: cada item um botão-link para o bloco dele. */
 .antes-pendencias {
@@ -277,25 +140,10 @@
   margin: 0;
 }
 
-
-.antes-ir {
-  font: inherit;
-  font-size: var(--seele-t-dado);
-  padding: 4px 10px;
-  color: var(--seele-laranja-nerv);
-  background: var(--seele-laranja-carga);
-  border: 1px solid var(--seele-laranja-nerv);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-
 .antes-ir:focus-visible {
   outline: 2px solid var(--seele-osso);
   outline-offset: 2px;
 }
-
 
 /* O bloco recebe o foco quando o resumo leva até ele. */
 .antes-passo:focus {
@@ -307,28 +155,10 @@
   outline-offset: 2px;
 }
 
-
-/* O aviso material: à vista sempre, com um filete. O da cópia válida é a
-   prova curta, em fósforo; o resto, em laranja (decisão, e não falha). */
-.antes-aviso {
-  padding: 8px 10px;
-  border-left: 2px solid var(--seele-laranja-nerv);
-  background: var(--seele-laranja-carga);
-}
-
-
 .antes-aviso[data-tom="ok"] {
   border-left-color: var(--seele-fosforo);
   background: var(--seele-fosforo-fraco);
 }
-
-
-/* Os «mais» de cada bloco: o caminho da cópia, as versões anteriores, as
-   APIs. O triângulo do navegador diz «isto abre». */
-.antes-mais {
-  margin: 12px 0 0;
-}
-
 
 .antes-mais > summary {
   cursor: pointer;
@@ -336,7 +166,6 @@
   font-size: var(--seele-t-dado);
   color: var(--seele-rotulo-claro);
 }
-
 
 .antes-mais > summary:hover {
   color: var(--seele-laranja-nerv);
@@ -347,25 +176,6 @@
   outline-offset: 2px;
 }
 
-
-.antes-mods-apis {
-  margin: 8px 0 0;
-  padding: 0 0 0 16px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--seele-rotulo-claro);
-}
-
-
-/* O motivo do HOSPEDAR apagado, ao lado dele. */
-.antes-motivo {
-  margin: 0 0 10px;
-  font-size: var(--seele-t-dado);
-  line-height: 1.45;
-  color: var(--seele-osso);
-}
-
-
 /* **Apagado de verdade** (revisão do Codex): sem o laranja cheio, que lê
    como ativo; borda e texto apagados, e o cursor que diz «não». */
 #antes-hospedar[aria-disabled="true"] {
@@ -375,21 +185,11 @@
   cursor: not-allowed;
 }
 
-
 .antes-garantia {
   margin: 16px 0 0;
   max-width: var(--seele-leitura);
   color: var(--seele-rotulo-claro);
 }
-
-
-/* Os detalhes técnicos: o triângulo do navegador diz «isto abre», como nos
-   outros `<details>` da entrada. Monoespaçado em par termo–valor, para quem
-   copia num relato. */
-.antes-detalhes {
-  margin: 24px 0 0;
-}
-
 
 .antes-detalhes > summary {
   cursor: pointer;
@@ -397,7 +197,6 @@
   font-size: var(--seele-t-dado);
   color: var(--seele-rotulo-claro);
 }
-
 
 .antes-detalhes > summary:hover {
   color: var(--seele-laranja-nerv);
@@ -407,20 +206,6 @@
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 2px;
 }
-
-
-.antes-detalhes-lista {
-  margin: 8px 0 0;
-  padding: 12px 14px;
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 16px;
-  border: 1px solid var(--seele-linha);
-  background: var(--seele-negro-absoluto);
-  font-size: 12px;
-  line-height: 18px;
-}
-
 
 .antes-detalhes-lista > dt {
   color: var(--seele-rotulo-claro);
@@ -432,7 +217,6 @@
   overflow-wrap: anywhere;
 }
 
-
 /* A barra de ações é `.area-barra` (base.css): HOSPEDAR em destaque e VOLTAR ao lado, o motivo do bloqueio junto do botão. */
 .antes-rodape .boot-saidas > button {
   flex: 1 1 0;
@@ -441,11 +225,9 @@
   white-space: normal;
 }
 
-
 #antes-hospedar {
   flex-grow: 2;
 }
-
 
 /* O título recebe o foco ao abrir a tela (o leitor de tela começa por ele),
    mas não é controle: sem anel. */
@@ -453,13 +235,11 @@
   outline: none;
 }
 
-
 /* O HOSPEDAR apagado diz por quê ao lado (o resumo), e o cursor não promete
    clique. */
 #antes-hospedar:disabled {
   cursor: not-allowed;
 }
-
 
 /* Pré-conferência 0.17.4: as três decisões ocupam a largura disponível.
    Estados, bloqueios, cópia comprovada e ações continuam na ordem original. */
@@ -518,7 +298,6 @@
 
 /* Condições de composição, após os valores padrão. */
 
-
 /* O celular e a janela estreita: os passos empilham e perdem um pouco de recuo, e as ações de cada linha descem para baixo do texto, inteiras e
    com alvo de 44px. A barra de ações empilha por conta de `.area-barra`. */
 @media (max-width: 700px) {
@@ -545,7 +324,6 @@
   }
 }
 
-
 @media (min-width: 701px) {
   .antes-abre { display: none; }
 }
@@ -562,4 +340,334 @@
   .antes-rodape .boot-saidas > button { width: 100%; min-width: 0; }
   .antes-detalhes-lista { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .antes-detalhes-lista > dd { margin-bottom: 12px; }
+}
+
+/* ---- 0.19: o painel de vidro de «Antes de hospedar» (Hospedar.dc.html) ----
+   A tela deixa de ser três cartões lado a lado e vira um painel só: o título,
+   três linhas numeradas separadas por filete, e a decisão no pé. Nenhum id,
+   classe ou ordem do DOM mudou — só a apresentação. */
+#tela-antes-de-hospedar { overflow-y: auto; padding: 16px; }
+#tela-antes-de-hospedar .boot-caixa.area {
+  flex: 0 1 auto;
+  width: min(100%, 880px);
+  height: auto;
+  min-height: 0;
+  margin: 0 auto;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  overflow: hidden;
+  font-family: var(--seele-ui);
+}
+#tela-antes-de-hospedar .area-cabeca {
+  padding: 30px 34px 14px;
+  border-bottom: 0;
+  align-items: flex-end;
+  gap: 4px 24px;
+}
+#tela-antes-de-hospedar .hospedagem-etapa {
+  margin: 0 0 4px;
+  flex: 1 0 100%;
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+#tela-antes-de-hospedar .boot-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 36px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+}
+.antes-servidor {
+  margin: 0 0 4px auto;
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--seele-laranja-nerv);
+  font-family: var(--seele-ui);
+}
+#tela-antes-de-hospedar .antes-corpo { padding: 0 34px 8px; }
+.antes-contexto {
+  min-width: 0;
+  position: static;
+  display: flex;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 0 0 6px;
+  border-bottom: 0;
+  margin-bottom: 24px;
+  flex-direction: column;
+  margin: 0;
+}
+.antes-contexto .antes-resumo, .antes-contexto .antes-garantia {
+  max-width: none;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+}
+.antes-ir {
+  font: inherit;
+  font-size: var(--seele-t-dado);
+  padding: 4px 10px;
+  color: var(--seele-laranja-claro);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-family: var(--seele-ui);
+  border-radius: var(--seele-raio-pilula);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+}
+
+/* Os três blocos: uma grade de duas colunas — o número, e o resto — com
+   o filete de cima como separador, como o `.it` do desenho. */
+.antes-passos {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  align-items: stretch;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  flex-direction: column;
+}
+.antes-passo, .antes-passo[data-estado] {
+  display: grid;
+  grid-template-columns: 32px auto minmax(0, 1fr);
+  grid-auto-rows: auto;
+  align-items: center;
+  column-gap: 0;
+  padding: 18px 0;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--seele-vidro-borda);
+  border-radius: 0;
+}
+.antes-passo-topo {
+  display: contents;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.antes-passo > :not(.antes-passo-topo) { grid-column: 2 / -1; }
+.antes-passo-num {
+  font-family: var(--seele-ui);
+  line-height: 1;
+  color: var(--seele-osso);
+  font-size: 14px;
+  font-weight: 700;
+  grid-column: 1;
+  grid-row: 1;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--seele-osso) 6%, transparent);
+}
+.antes-passo-titulo {
+  margin: 0 0 0 16px;
+  flex: none;
+  font-family: var(--seele-ui);
+  color: var(--seele-osso);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+  flex-basis: calc(100% - 48px);
+  grid-column: 2;
+  grid-row: 1;
+  text-transform: none;
+}
+.antes-passo > :not(.antes-passo-topo) { margin-left: 16px; }
+/* O estado em palavra, numa pastilha de borda. Doze pixels e caixa alta: é o
+   rótulo do produto (`--seele-t-rotulo`), e não um enfeite. */
+.antes-estado {
+  text-transform: uppercase;
+  border: 1px solid var(--seele-controle-borda);
+  color: var(--seele-osso-apagado);
+  margin-top: 8px;
+  padding: 0 10px;
+  border-radius: var(--seele-raio-pilula);
+  font-size: 11px;
+  letter-spacing: .06em;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: start;
+  margin: 0 0 0 10px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  background: none;
+  font-family: var(--seele-ui);
+  white-space: nowrap;
+}
+.antes-estado:empty { display: none; }
+.antes-passo[data-estado="ok"] .antes-estado {
+  color: var(--seele-fosforo);
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+}
+.antes-passo[data-estado="leia"] .antes-estado {
+  color: var(--seele-laranja-claro);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+}
+.antes-passo[data-estado="resolva"] .antes-estado {
+  color: var(--seele-vermelho-claro);
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 55%, transparent);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 80%, transparent);
+}
+.antes-passo-frase {
+  margin: 12px 0 0;
+  color: var(--seele-osso-apagado);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  max-width: none;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-top: 6px;
+  font-family: var(--seele-ui);
+}
+.antes-passo-detalhe {
+  color: var(--seele-osso-apagado);
+}
+/* O aviso material: à vista sempre, com um filete. O da cópia válida é a
+   prova curta, em fósforo; o resto, em laranja (decisão, e não falha). */
+.antes-aviso {
+  padding: 8px 10px;
+  border-left: 2px solid var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 50%, transparent);
+  border-radius: var(--seele-raio);
+  color: var(--seele-osso);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+}
+.antes-aviso[data-tom="ok"] {
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 60%, transparent);
+  border-color: color-mix(in srgb, var(--seele-fosforo) 40%, transparent);
+}
+.antes-acoes {
+  margin: 12px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.antes-acoes > button,
+.antes-linha-acoes > button { min-height: 36px; font-size: 13px; }
+/* A linha de uma versão ou de um MOD: o nome e o que ele quer dizer à
+   esquerda, as ações à direita, e embaixo delas quando não cabem. */
+.antes-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio);
+  font-family: var(--seele-ui);
+}
+.antes-linha-sub {
+  color: var(--seele-osso-apagado);
+}
+/* Os «mais» de cada bloco: o caminho da cópia, as versões anteriores, as
+   APIs. O triângulo do navegador diz «isto abre». */
+.antes-mais {
+  margin: 12px 0 0;
+  margin-top: 6px;
+}
+.antes-mais > summary {
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  color: var(--seele-laranja-nerv);
+}
+.antes-mais > summary:hover { color: var(--seele-laranja-hover); }
+.antes-mods-apis {
+  margin: 8px 0 0;
+  padding: 0 0 0 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
+}
+/* Os detalhes técnicos: o triângulo do navegador diz «isto abre», como nos
+   outros `<details>` da entrada. Monoespaçado em par termo–valor, para quem
+   copia num relato. */
+.antes-detalhes {
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--seele-vidro-borda);
+}
+.antes-detalhes > summary {
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  color: var(--seele-osso-apagado);
+}
+.antes-detalhes-lista {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-campo);
+  font-size: 12px;
+  line-height: 18px;
+  border-radius: var(--seele-raio);
+  border-color: var(--seele-campo-borda);
+}
+.antes-detalhes-lista > dt { color: var(--seele-osso-apagado); }
+
+/* A decisão no pé do painel, à direita; o motivo do bloqueio ao lado. */
+.antes-rodape.area-barra {
+  padding: 16px 34px 30px;
+  border-top: 0;
+  background: none;
+  justify-content: flex-end;
+}
+.antes-rodape .boot-saidas { justify-content: flex-end; }
+.antes-rodape .boot-saidas > button {
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 22px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+#antes-hospedar { flex-grow: 0; }
+#antes-hospedar:disabled, #antes-hospedar[aria-disabled="true"] {
+  opacity: .45;
+  cursor: not-allowed;
+  color: var(--seele-tinta-no-acento);
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+/* O motivo do HOSPEDAR apagado, ao lado dele. */
+.antes-motivo {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.45;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
+}
+@media (max-width: 700px) {
+  #tela-antes-de-hospedar { padding: 8px; }
+  #tela-antes-de-hospedar .area-cabeca { padding: 20px 16px 8px; }
+  #tela-antes-de-hospedar .antes-corpo { padding: 0 16px 8px; }
+  .antes-rodape.area-barra { padding: 12px 16px max(16px, env(safe-area-inset-bottom)); }
+  .antes-rodape .boot-saidas > button { white-space: normal; width: 100%; }
+  .antes-passo, .antes-passo[data-estado] { padding: 16px 0; }
+  .antes-passo-titulo { font-size: 15px; }
+  .antes-estado { grid-column: 2 / -1; grid-row: 2; margin: 6px 0 0 16px; }
+  .antes-abre { width: auto; margin: 8px 0 0 16px; }
 }

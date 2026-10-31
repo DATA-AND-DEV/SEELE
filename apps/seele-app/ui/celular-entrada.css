@@ -42,10 +42,10 @@
 :root[data-casca="celular"] .cel-entrada-corpo {
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 24px max(16px,var(--cel-seguro-esq));
+  padding: 24px max(20px,var(--cel-seguro-esq));
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
   width: 100%;
   max-width: 680px;
   margin-inline: auto;
@@ -55,9 +55,9 @@
 :root[data-casca="celular"] .cel-entrada-pe {
   display: grid;
   gap: 12px;
-  padding: 16px max(16px,var(--cel-seguro-esq)) max(16px,var(--cel-seguro-pe));
-  border-top: var(--seele-b) solid var(--seele-linha);
-  background: var(--seele-negro-painel);
+  padding: 14px max(20px,var(--cel-seguro-esq)) max(30px,var(--cel-seguro-pe));
+  border-top: 0;
+  background: linear-gradient(transparent, var(--seele-negro-absoluto) 30%);
   width: 100%;
   max-width: 680px;
   margin-inline: auto;
@@ -70,16 +70,17 @@
 
 :root[data-casca="celular"] .cel-entrada-acao {
   width: 100%;
-  min-height: var(--cel-alvo);
+  min-height: 52px;
+  font-size: calc(15px * var(--cel-escala));
 }
 
 :root[data-casca="celular"] .cel-entrada-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: 500;
-  font-size: 28px;
-  line-height: 1.25;
-  letter-spacing: 0.02em;
+  font-weight: var(--seele-cartela);
+  font-size: calc(30px * var(--cel-escala));
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
   text-transform: none;
   overflow-wrap: anywhere;
 }
@@ -101,8 +102,10 @@
 
 :root[data-casca="celular"] .cel-entrada-nota {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.6;
+  font-family: var(--seele-ui);
+  font-size: calc(13px * var(--cel-escala));
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
 }
 
 /* ------------------------------------------------- SERVIDORES DESTE APARELHO */
@@ -121,11 +124,12 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 14px;
   text-align: left;
   color: var(--seele-osso);
-  background: var(--seele-negro-painel);
-  border: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-vidro);
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: 20px;
   cursor: pointer;
 }
 
@@ -141,19 +145,27 @@
 }
 
 :root[data-casca="celular"] .cel-entrada-servidor-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
-  text-transform: uppercase;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  text-transform: none;
   overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-entrada-servidor > .rotulo {
+  color: var(--seele-laranja-nerv);
 }
 
 /* O que o celular não faz, dito onde o controle estaria: o hospedar. */
 :root[data-casca="celular"] .cel-entrada-fora {
   margin: 16px 0 0;
-  padding: 10px 12px;
-  border: var(--seele-b) dashed var(--seele-linha-forte);
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  padding: 14px 16px;
+  background: var(--seele-vidro);
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: 20px;
+  font-family: var(--seele-ui);
+  font-size: calc(14px * var(--cel-escala));
+  color: var(--seele-osso-apagado);
 }
 
 :root[data-casca="celular"] .cel-entrada-fora .rotulo {
@@ -171,6 +183,17 @@
   max-width: 480px;
 }
 
+/* O rótulo do campo é a pergunta, em Inter (Cel-entrar.dc). */
+:root[data-casca="celular"] .cel-entrada-campo > .rotulo {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--seele-ui);
+  font-size: calc(15px * var(--cel-escala));
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--seele-osso);
+}
+
 /* A letra do campo nunca abaixo de 16: abaixo disso o iOS amplia a página ao
    focar. Com o texto do sistema maior, ela cresce com o corpo. */
 
@@ -181,34 +204,70 @@
 
 /* ------------------------------------------------------ o que se confere */
 
-/* O rótulo em cima do valor, e não ao lado: com o rótulo na coluna da esquerda,
-   a impressão ficava com 130 px e o quarto grupo de cada fileira saía da tela
-   (medido no protótipo, a 390). A impressão é o dado que se confere; ela tem a
-   largura toda. */
+/* A ficha do que se confere: uma linha por dado, o rótulo à esquerda e o valor
+   à direita (Cel-entrar.dc, `.f`). A impressão é o dado que se confere, e tem a
+   largura toda, num cartão azul de quem verifica: com o rótulo na coluna da
+   esquerda ela ficava com 130 px e o quarto grupo de cada fileira saía da tela
+   (medido no protótipo, a 390). */
 :root[data-casca="celular"] .cel-entrada-ficha {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0;
   margin: 0;
-  padding: 20px;
-  border: 1px solid var(--seele-linha);
-  background: var(--seele-negro-painel);
-  border-radius: var(--seele-raio);
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dt,
+:root[data-casca="celular"] .cel-entrada-ficha dd {
+  margin: 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--seele-vidro-borda);
 }
 
 :root[data-casca="celular"] .cel-entrada-ficha dt {
-  margin: 8px 0 0;
-}
-
-:root[data-casca="celular"] .cel-entrada-ficha dt:first-child {
-  margin-top: 0;
+  align-self: baseline;
 }
 
 :root[data-casca="celular"] .cel-entrada-ficha dd {
-  margin: 0;
+  padding-left: 12px;
   font-family: var(--seele-mono);
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  font-size: calc(13px * var(--cel-escala));
+  text-align: right;
   overflow-wrap: anywhere;
+}
+
+/* A impressão: o rótulo e o valor num cartão só, de ponta a ponta. */
+:root[data-casca="celular"] .cel-entrada-ficha dt:has(+ dd > .cel-entrada-impressao),
+:root[data-casca="celular"] .cel-entrada-ficha dd:has(> .cel-entrada-impressao) {
+  grid-column: 1 / -1;
+  padding-inline: 16px;
+  text-align: left;
+  background: color-mix(in srgb, var(--seele-azul-fraco) 70%, transparent);
+  border-inline: 1px solid color-mix(in srgb, var(--seele-padrao-azul) 45%, transparent);
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dt:has(+ dd > .cel-entrada-impressao) {
+  margin-top: 8px;
+  padding-top: 14px;
+  padding-bottom: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--seele-padrao-azul) 45%, transparent);
+  border-radius: 18px 18px 0 0;
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dt:has(+ dd > .cel-entrada-impressao) .rotulo {
+  color: var(--seele-azul-claro);
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dd:has(> .cel-entrada-impressao) {
+  padding-top: 0;
+  padding-bottom: 14px;
+  margin-bottom: 8px;
+  color: var(--seele-azul-claro);
+  border-top: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--seele-padrao-azul) 45%, transparent);
+  border-radius: 0 0 18px 18px;
 }
 
 /* Dezesseis grupos de quatro, quatro por fileira. Com o texto do sistema maior
@@ -230,16 +289,15 @@
 
 :root[data-casca="celular"] .cel-entrada-aviso {
   margin: 0;
-  padding: 16px;
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
-  border-left-width: 3px;
-  background: var(--seele-laranja-fraco);
-  border-radius: var(--seele-raio);
+  padding: 14px 16px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  border-radius: 18px;
 }
 
 :root[data-casca="celular"] .cel-entrada-aviso[data-tipo="erro"] {
-  border-color: var(--seele-vermelho-alerta);
-  background: var(--seele-vermelho-fraco);
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 85%, transparent);
 }
 
 :root[data-casca="celular"] .cel-entrada-aviso-titulo {
@@ -432,15 +490,14 @@
 :root[data-casca="celular"] .cel-entrada-campo-texto {
   width: 100%;
   box-sizing: border-box;
-  min-height: var(--cel-alvo);
-  padding: 8px 10px;
-  font-family: var(--seele-mono);
+  min-height: 52px;
+  padding: 0 16px;
+  font-family: var(--seele-ui);
   font-size: var(--cel-letra-de-campo);
   color: var(--seele-osso);
-  background: var(--seele-negro-absoluto);
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-campo);
+  border: var(--seele-b) solid var(--seele-campo-borda);
   border-radius: var(--seele-raio);
-  border-color: var(--seele-linha-forte);
 }
 
 /* Condições de composição, após os valores padrão do componente. */

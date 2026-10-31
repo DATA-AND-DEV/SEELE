@@ -61,8 +61,8 @@ label.regiao-de-mod-parte {
 /* Dez pixels, como `.rotulo` do produto. Doze fazia o rótulo competir com o
    valor que ele nomeia. */
 .regiao-de-mod-rotulo {
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-micro, 10px);
+  font-family: var(--seele-mono);
+  font-size: 11px;
   letter-spacing: var(--seele-tracking-rotulo);
   text-transform: uppercase;
   color: var(--seele-rotulo-painel);
@@ -78,13 +78,15 @@ label.regiao-de-mod-parte {
 .regiao-de-mod-escolha {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
-  padding: 0 var(--seele-celula-x);
-  border: 1px solid var(--seele-linha);
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--seele-campo-borda);
   background: var(--seele-negro-absoluto);
   color: var(--seele-osso);
   font-family: var(--seele-mono);
   font-size: var(--seele-t-dado);
+  border-radius: var(--seele-raio);
+  background-color: var(--seele-campo);
 }
 
 /* O menu continua nativo ao abrir; o campo fechado segue a régua do app.
@@ -168,7 +170,6 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
 .regiao-de-mod-som {
   margin-top: var(--seele-e1);
 }
-
 
 /* --------------------------------------------------- composição */
 
@@ -326,12 +327,13 @@ button.regiao-de-mod-parte[data-forma="link"] {
 .regiao-de-mod-area {
   width: 100%;
   min-height: 96px;
-  padding: 8px;
-  border: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-absoluto);
+  padding: 12px 16px;
+  border: 1px solid var(--seele-campo-borda);
+  background: var(--seele-campo);
   color: var(--seele-osso);
   font: inherit;
   resize: vertical;
+  border-radius: var(--seele-raio);
 }
 
 .regiao-de-mod-area:focus-visible,
@@ -404,6 +406,7 @@ button.regiao-de-mod-parte[data-forma="link"] {
   border: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-absoluto);
   cursor: pointer;
+  border-radius: var(--seele-raio-icone);
 }
 
 .regiao-de-mod-hexa {
@@ -479,22 +482,25 @@ form.regiao-de-mod-parte[data-erro]::before {
   margin-bottom: 4px;
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
-  border-bottom: 1px solid var(--seele-linha);
+  gap: 4px;
+  border-bottom: 0;
   margin-bottom: var(--seele-celula-x);
 }
 
 .regiao-de-mod-tira {
-  min-height: 30px;
-  padding: 2px 10px;
+  min-height: 40px;
+  padding: 0 16px;
   border: 1px solid transparent;
   border-bottom: none;
   background: none;
   color: var(--seele-osso-apagado);
   font: inherit;
-  font-size: var(--seele-t-dado);
+  font-size: 13px;
   letter-spacing: 0.06em;
   cursor: pointer;
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-ui);
+  font-weight: 500;
 }
 
 /* Selecionada por três coisas ao mesmo tempo — cor, borda e peso —, porque
@@ -577,7 +583,6 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   color: var(--seele-osso-apagado);
   white-space: nowrap;
 }
-
 
 /* ------------------------------------- na interface do SEELE
 
@@ -707,21 +712,20 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   justify-content: center;
   border: 1px solid var(--seele-linha-forte);
   border-radius: var(--seele-raio);
-  background: var(--seele-negro-absoluto);
+  background: var(--seele-controle);
   text-align: center;
   cursor: pointer;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
   list-style: none;
+  border-color: var(--seele-controle-borda);
 }
-
 
 .pessoa-nativo-resumo::-webkit-details-marker { display: none; }
 .pessoa-nativo-resumo:focus-visible {
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 2px;
 }
-
 
 /* O caminho até o MOD numa linha **sem** cartão: quem não preencheu o perfil é
    quem mais precisa alcançar o editor, e um botão sem nada dentro não é um
@@ -782,15 +786,17 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
    peso de uma ação primária competiria com o que a tela existe para fazer. */
 .acao-de-mod {
   min-height: 24px;
-  padding: 1px 8px;
+  padding: 1px 10px;
   border: 1px solid var(--seele-linha-forte);
-  background: none;
+  background: var(--seele-controle);
   color: var(--seele-osso-apagado);
   font: inherit;
   font-size: var(--seele-t-micro);
   letter-spacing: 0.08em;
   cursor: pointer;
   white-space: nowrap;
+  border-color: var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
 }
 
 .acao-de-mod:hover {
@@ -824,3 +830,109 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   gap: 6px;
   min-width: 0;
 }
+
+/* ======================================================================
+   Redesign 0.19 — os controles que um MOD declara
+   Mesma gramática do produto: campo de 48px com canto de 16px, botão em
+   pílula de 44px (o primário cheio de laranja), chave redonda, abas em
+   pílula. Vem depois das regras acima e ganha delas pela ordem; o que um MOD
+   sobrescreve por `estilo` continua ganhando, como antes.
+   ====================================================================== */
+
+.regiao-de-mod-caixa,
+
+select.regiao-de-mod-escolha {
+  height: 48px;
+  border-radius: var(--seele-raio);
+  padding-right: 36px;
+  background-position: calc(100% - 20px) 50%, calc(100% - 15px) 50%;
+}
+.regiao-de-mod-caixa:focus-visible,
+.regiao-de-mod-escolha:focus-visible { outline: none; border-color: var(--seele-laranja-nerv); }
+
+button.regiao-de-mod-parte {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+button.regiao-de-mod-parte:not(:disabled):hover { background: var(--seele-controle-hover); }
+button.regiao-de-mod-parte[data-variante="primaria"] {
+  border-color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-tinta-no-acento);
+  font-weight: 600;
+}
+button.regiao-de-mod-parte[data-variante="primaria"]:not(:disabled):hover {
+  border-color: var(--seele-laranja-hover);
+  background: var(--seele-laranja-hover);
+}
+button.regiao-de-mod-parte[data-variante="primaria"]:disabled {
+  border-color: var(--seele-controle-borda);
+  background: var(--seele-controle);
+}
+button.regiao-de-mod-parte[data-variante="perigo"] {
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent);
+  background: var(--seele-vermelho-fraco);
+  color: var(--seele-vermelho-claro);
+}
+button.regiao-de-mod-parte[data-variante="discreta"] { background: transparent; }
+button.regiao-de-mod-parte[data-variante="discreta"]:hover { border-color: var(--seele-controle-borda); }
+button.regiao-de-mod-parte[data-forma="link"] {
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font-weight: 400;
+}
+
+canvas.regiao-de-mod-parte { border-radius: var(--seele-raio-icone); }
+
+/* A chave: pílula de 40×22 com o botão redondo. */
+.regiao-de-mod-marca[role="switch"] {
+  width: 40px;
+  height: 22px;
+  border-radius: var(--seele-raio-pilula);
+  background:
+    radial-gradient(circle, var(--seele-osso-apagado) 0 5px, transparent 5.5px)
+    left 3px center / 14px 14px no-repeat var(--seele-campo);
+}
+.regiao-de-mod-marca[role="switch"]:checked {
+  background:
+    radial-gradient(circle, var(--seele-laranja-nerv) 0 5px, transparent 5.5px)
+    right 3px center / 14px 14px no-repeat var(--seele-laranja-fraco);
+}
+
+form.regiao-de-mod-parte[data-erro]::before {
+  border: 1px solid color-mix(in srgb, var(--seele-vermelho-alerta) 45%, transparent);
+  border-radius: var(--seele-raio-cartao);
+}
+
+/* As abas de um MOD: pílulas, e a atual em vidro. */
+
+.regiao-de-mod-tira[aria-selected="true"] {
+  border-color: var(--seele-controle-borda);
+  background: var(--seele-controle-hover);
+  font-weight: 500;
+}
+
+/* Retrato e distintivo. */
+span.regiao-de-mod-parte[data-forma="retrato"] { border-color: var(--seele-controle-borda); }
+span.regiao-de-mod-parte[data-formato="arredondado"] { border-radius: var(--seele-raio-miudo); }
+span.regiao-de-mod-parte[data-forma="distintivo"] {
+  padding: 0 10px;
+  border-color: var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+}
+
+/* As portas pequenas que o produto oferece dentro do cartão de pessoa. */
+
+.pessoa-apresentada-porta-vazia,
+

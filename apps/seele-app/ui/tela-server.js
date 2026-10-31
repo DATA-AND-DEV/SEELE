@@ -2091,6 +2091,29 @@ function uriDeIcone(bytes) {
   return `data:image/png;base64,${btoa(cru)}`;
 }
 
+/**
+ * O tom da pílula de estado de cada MOD — só enfeite, nunca informação.
+ *
+ * A frase (`ATIVO NESTE SERVIDOR`, `SELECIONADO · falta SALVAR`…) é escrita por
+ * `camada-mods.js` e continua sendo o que diz o estado; aqui ela só ganha
+ * `data-tom`, que a folha lê para pintar a pílula de verde, laranja ou neutra.
+ * Sem o atributo a pílula é neutra e a tela inteira continua legível.
+ */
+function marcarOTomDosMods() {
+  const lista = $("lista-mods");
+  if (!lista) return;
+  for (const estado of lista.querySelectorAll(".mods-estado")) {
+    const frase = estado.textContent;
+    const tom = frase.startsWith("ATIVO") ? "ativo"
+      : frase.startsWith("SELECIONADO") || frase.startsWith("SERÁ") ? "pendente"
+        : "neutro";
+    if (estado.dataset.tom !== tom) estado.dataset.tom = tom;
+  }
+}
+if (typeof MutationObserver === "function" && $("lista-mods")) {
+  new MutationObserver(marcarOTomDosMods).observe($("lista-mods"), { childList: true, subtree: true });
+}
+
 
 // O botão SEÇÕES (só no celular, dentro de uma seção): volta ao índice e põe o foco na seção que estava aberta.
 $("server-ao-indice").addEventListener("click", () => {

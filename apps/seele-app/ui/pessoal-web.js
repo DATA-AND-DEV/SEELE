@@ -161,7 +161,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   texto.maxLength = 2000;
   texto.placeholder = "Escreva uma mensagem";
   texto.setAttribute("aria-label", "Mensagem");
-  const enviar = no("button", "botao-fantasma", "ENVIAR");
+  const enviar = no("button", "botao", "ENVIAR");
   enviar.type = "submit";
   rotular(enviar, "ENVIAR");
   form.append(texto, enviar);

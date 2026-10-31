@@ -39,6 +39,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
 }
 
 .camada-compartilhar::before {
@@ -46,118 +47,134 @@
   position: absolute;
   inset: 0;
   background: var(--seele-negro-absoluto);
-  opacity: 0.72;
+  opacity: 0.8;
 }
 
 /* ---------- a caixa ----------
-   `overflow-y: auto` porque o que ela mostra vem da máquina: quantas janelas
-   existem é decisão de quem está na frente dela, e sem isto a caixa passaria da
-   janela num corpo com `overflow: hidden`, levando o botão de compartilhar para
-   fora de vista. */
+   Redesign 0.19: modal de 820px, canto de 28px, negro quente com a borda de
+   controle. `overflow-y: auto` porque o que ela mostra vem da máquina: quantas
+   janelas existem é decisão de quem está na frente dela, e sem isto a caixa
+   passaria da janela num corpo com `overflow: hidden`, levando o botão de
+   compartilhar para fora de vista. */
 .compartilhar-caixa {
   position: relative;
-  width: 640px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 64px);
+  box-sizing: border-box;
+  width: 820px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
   overflow-y: auto;
-  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
-  background: var(--seele-negro-absoluto);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 32px 36px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
 }
 
-/* ---------- a cabeça ----------
-   Bloco sólido com texto no negro absoluto, que é a regra de inversão do v2:
-   cartela nunca é texto colorido sobre fundo escuro. */
+/* ---------- a cabeça ---------- */
 .compartilhar-cabeca {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  gap: 12px;
 }
 
 .compartilhar-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 26px;
-  line-height: 1;
-  letter-spacing: 0.12em;
+  font-weight: 700;
+  font-size: 32px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
 }
 
+/* A tecla que fecha, escrita, em pílula de 44px. */
 .compartilhar-fechar {
-  font: inherit;
+  margin-left: auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
   font-family: var(--seele-mono);
   font-size: var(--seele-t-rotulo);
   letter-spacing: var(--seele-tracking-rotulo);
-  padding: 4px 8px;
-  color: var(--seele-negro-absoluto);
-  background: none;
-  border: var(--seele-b) solid var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
+.compartilhar-fechar:hover { background: var(--seele-controle-hover); }
+
 .compartilhar-fechar:focus-visible {
-  outline: var(--seele-b-forte) solid var(--seele-negro-absoluto);
+  outline: var(--seele-b-forte) solid var(--seele-osso);
   outline-offset: 2px;
 }
 
-/* ---------- o corpo ---------- */
+/* ---------- o corpo ----------
+   Uma grade que quebra linha: a lista de fontes, os avisos e o rodapé ocupam a
+   largura toda, e os dois tetos (resolução e quadros) sentam lado a lado. */
 
 .compartilhar-corpo {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 20px;
+  flex-wrap: wrap;
+  gap: 20px 24px;
+  min-width: 0;
 }
 
-/* ---------- a permissão ----------
-   Só aparece quando há o que dizer. Concedida, o bloco some inteiro: dizer
-   «está tudo certo» a cada abertura é ensinar a não ler a linha no dia em que
-   ela não estiver. */
-
-.compartilhar-permissao {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 16px;
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
-  background: var(--seele-laranja-carga);
-}
-
-.compartilhar-permissao-diz {
+.compartilhar-corpo > * {
+  flex: 1 1 100%;
+  min-width: 0;
   margin: 0;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: var(--seele-t-secao);
-  letter-spacing: var(--seele-tracking-cartela);
-  color: var(--seele-laranja-nerv);
 }
 
-/* ---------- o módulo que falta ---------- */
+.compartilhar-corpo > .compartilhar-escolha:not(.compartilhar-escolha-som):not(:has(.compartilhar-fontes-caixa)) {
+  flex: 0 1 auto;
+}
 
-/*
- * A mesma moldura do bloco de permissão, e é de propósito: os dois dizem «falta
- * uma coisa antes de isto funcionar», e dar duas aparências à mesma categoria
- * de recado ensina a lê-los como coisas diferentes.
- */
+/* ---------- a permissão e o módulo que falta ----------
+   Só aparecem quando há o que dizer. Concedida, o bloco da permissão some
+   inteiro: dizer «está tudo certo» a cada abertura é ensinar a não ler a linha
+   no dia em que ela não estiver.
+
+   A mesma moldura nos dois, e é de propósito: os dois dizem «falta uma coisa
+   antes de isto funcionar», e dar duas aparências à mesma categoria de recado
+   ensina a lê-los como coisas diferentes. Laranja do produto, nunca o vermelho:
+   uma permissão negada tem conserto e uma transmissão ocupada acaba. */
+
+.compartilhar-permissao,
 .compartilhar-modulo {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 0;
   padding: 12px 16px;
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
-  background: var(--seele-laranja-carga);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+  border-radius: var(--seele-raio);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 50%, transparent);
 }
 
+.compartilhar-permissao[hidden],
+.compartilhar-modulo[hidden] { display: none; }
+
+.compartilhar-permissao > p,
+.compartilhar-modulo > p { grid-column: 1; margin: 0; }
+
+.compartilhar-permissao > button,
+.compartilhar-modulo > button {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  margin-left: 16px;
+}
+
+.compartilhar-permissao-diz,
 .compartilhar-modulo-diz {
-  margin: 0;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: var(--seele-t-secao);
-  letter-spacing: var(--seele-tracking-cartela);
-  color: var(--seele-laranja-nerv);
+  font-family: var(--seele-ui);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-laranja-claro);
 }
 
 /*
@@ -166,9 +183,8 @@
  * e uma URL cortada com reticências é a que ninguém consegue conferir.
  */
 .compartilhar-modulo-onde {
-  margin: 0;
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
+  font-size: 12px;
   line-height: 1.5;
   color: var(--seele-osso);
   word-break: break-all;
@@ -182,24 +198,42 @@
   gap: 8px;
 }
 
+.compartilhar-escolha > .rotulo { margin: 0; }
+
 /* ---------- INCLUIR SOM, e o que a captura leva junto ----------
 
    R21. O controle e a frase são um bloco: a escolha só é uma escolha quando se
    sabe o que ela evita, e nesta máquina o que ela evita depende do sistema. */
 .compartilhar-escolha-som {
-  gap: 6px;
+  gap: 8px;
 }
 
 .compartilhar-som-rotulo {
-  display: flex;
+  display: inline-flex;
+  align-self: flex-start;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 18px;
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
+.compartilhar-som-rotulo input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--seele-laranja-nerv);
+}
+
+.compartilhar-som-rotulo .rotulo { color: var(--seele-osso); }
+
 .compartilhar-som-aviso {
   margin: 0;
-  font-size: var(--seele-t-dado);
+  font-family: var(--seele-ui);
+  font-size: 12px;
   line-height: 1.5;
   max-width: 60ch;
 }
@@ -208,12 +242,13 @@
    discreta. Onde não exclui, ela é uma limitação e precisa ser lida antes do
    aperto — laranja, que é o acento de «isto pede sua atenção», e não vermelho:
    nada está errado, o sistema é que é assim. */
-.compartilhar-som-aviso[data-exclusao="sim"] { color: var(--seele-osso-apagado); }
+.compartilhar-som-aviso[data-exclusao="sim"] { color: var(--seele-rotulo-painel); }
 .compartilhar-som-aviso[data-exclusao="nao"] { color: var(--seele-laranja-nerv); }
 .compartilhar-som-aviso[data-exclusao="nao-se-sabe"] { display: none; }
 
 .compartilhar-vazio {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-corpo);
   line-height: 1.55;
   color: var(--seele-osso);
@@ -221,62 +256,81 @@
 
 /* Quem rola é a caixa da lista e não a caixa inteira: os limites e o botão de
    compartilhar têm de continuar visíveis enquanto se procura uma janela no meio
-   de trinta. */
+   de trinta. O respiro de 2px é para a moldura do cartão não ser cortada. */
 .compartilhar-fontes-caixa {
-  max-height: 240px;
+  max-height: 300px;
   overflow-y: auto;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  margin: -2px;
+  padding: 2px;
 }
 
 .compartilhar-fontes {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
 }
 
+/* Cada fonte é um cartão com a miniatura (um bloco, que o produto não captura
+   antes de escolher), o nome e as medidas. */
 .compartilhar-fonte {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
   width: 100%;
-  padding: 10px 12px;
-  font: inherit;
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
+  height: 100%;
+  padding: 10px;
+  font-family: var(--seele-ui);
   text-align: left;
   color: var(--seele-osso);
-  background: none;
-  border: 0;
-  border-bottom: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-cartao);
   cursor: pointer;
 }
 
-.compartilhar-fonte:hover { background: var(--seele-negro-painel); }
+.compartilhar-fonte::before {
+  content: "";
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--seele-raio-icone);
+  background: color-mix(in srgb, var(--seele-osso) 8%, var(--seele-negro-absoluto));
+}
+
+.compartilhar-fonte:hover { background: var(--seele-controle-hover); }
 
 .compartilhar-fonte:focus-visible {
   outline: var(--seele-b-forte) solid var(--seele-osso);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 /* A escolhida, e ela é dita em palavra também: `specs/06-clientes-gui.md` proíbe
    informação transmitida só por cor, e qual fonte está armada é informação. A
    palavra vem no `aria-pressed` e no rótulo que o script escreve. */
 .compartilhar-fonte[aria-pressed="true"] {
-  color: var(--seele-laranja-nerv);
-  background: var(--seele-laranja-carga);
-  box-shadow: inset var(--seele-b-forte) 0 0 0 var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 8%, transparent);
 }
 
 .compartilhar-fonte-nome {
   display: block;
+  font-size: 13px;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .compartilhar-fonte-diz {
   display: block;
-  margin-top: 2px;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.12em;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
   color: var(--seele-rotulo-painel);
 }
+
+.compartilhar-fonte[aria-pressed="true"] .compartilhar-fonte-diz { color: var(--seele-laranja-claro); }
 
 /* ---------- os três tetos ---------- */
 
@@ -284,8 +338,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 16px;
-  border-top: var(--seele-b) solid var(--seele-linha);
 }
 
 .compartilhar-campo {
@@ -296,16 +348,13 @@
   margin-top: 8px;
 }
 
+/* O campo é o de `base.css` (48px, canto de 16px, fundo negro a 55%); aqui só a
+   largura mínima, para a opção mais comprida caber sem cortar. */
 .compartilhar-select {
-  font: inherit;
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
-  padding: 6px 8px;
-  min-width: 180px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  min-width: 200px;
   color: var(--seele-osso);
-  background: var(--seele-negro-painel);
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
 }
 
 .compartilhar-select:focus-visible {
@@ -317,7 +366,18 @@
 
 .compartilhar-botoes {
   display: flex;
-  gap: 16px;
-  padding-top: 16px;
-  border-top: var(--seele-b) solid var(--seele-linha);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 700px) {
+  .camada-compartilhar { padding: 12px; }
+  .compartilhar-caixa { padding: 20px 16px; max-height: calc(100dvh - 24px); border-radius: var(--seele-raio-painel); }
+  .compartilhar-titulo { font-size: 26px; }
+  .compartilhar-permissao, .compartilhar-modulo { grid-template-columns: minmax(0, 1fr); }
+  .compartilhar-permissao > button, .compartilhar-modulo > button { grid-column: 1; grid-row: auto; margin: 8px 0 0; justify-self: start; }
+  .compartilhar-fontes { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .compartilhar-corpo > .compartilhar-escolha:not(.compartilhar-escolha-som):not(:has(.compartilhar-fontes-caixa)) { flex: 1 1 100%; }
+  .compartilhar-botoes > button { flex: 1 1 140px; }
 }

@@ -304,7 +304,7 @@ function desenharFila(pedidos, estado) {
       cartaoFeito.prepend(
         elemento(
           "p",
-          "portaria-veredito",
+          pedido.admitido ? "portaria-veredito portaria-veredito-sim" : "portaria-veredito",
           pedido.admitido ? "ADMITIDO" : "RECUSADO",
         ),
       );

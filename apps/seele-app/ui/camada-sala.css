@@ -147,7 +147,7 @@
 }
 
 #tela-sessao[data-vista="ligacao"] .paineis {
-  grid-template-columns: 60px minmax(0, 1fr) auto;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
   grid-template-rows: minmax(0, 1fr) auto;
   grid-template-areas:
     "trilha linha painelmod"
@@ -223,20 +223,22 @@
 }
 
 .ligacao-desligar {
-  min-height: 34px;
-  padding: 0 16px;
-  font: inherit;
-  font-size: var(--seele-t-dado);
-  letter-spacing: 0.12em;
-  color: var(--seele-negro-absoluto);
+  min-height: 44px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--seele-tinta-no-acento);
   background: var(--seele-laranja-nerv);
   border: 1px solid var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
 .ligacao-desligar:hover {
-  background: transparent;
-  color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-hover);
+  border-color: var(--seele-laranja-hover);
 }
 
 /* O cabeçalho: LIGAÇÃO PESSOAL · nome, e o estado da ligação. */

@@ -47,109 +47,128 @@
   position: absolute;
   inset: 0;
   background: var(--seele-negro-absoluto);
-  opacity: 0.72;
+  opacity: 0.8;
 }
 
+/* Redesign 0.19: modal de 980px, canto de 28px, negro quente. */
 .ajuda-caixa {
   position: relative;
+  box-sizing: border-box;
   width: 100%;
-  max-width: 1000px;
+  max-width: 980px;
   max-height: calc(100dvh - 48px);
   display: flex;
   flex-direction: column;
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
+  gap: 18px;
+  padding: 32px 36px;
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
   overflow: hidden;
 }
 
 .ajuda-cabeca {
   display: flex;
   align-items: center;
-  gap: var(--seele-e2);
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--seele-linha);
-  background: var(--seele-negro-absoluto);
-  color: var(--seele-osso);
-  min-height: 64px;
+  gap: 12px;
+  flex: 0 0 auto;
 }
 
 .ajuda-titulo {
   margin: 0;
   flex: 1;
   font-family: var(--seele-display);
-  font-size: 28px;
-  letter-spacing: .02em;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: var(--seele-tracking-cartela);
   color: var(--seele-osso);
-  font-weight: 500;
-  line-height: 1.25;
+  line-height: 1.1;
 }
 
 /* A tecla que fecha, escrita. Um `×` sozinho obriga a pessoa a descobrir que
    `Escape` também serve; escrever a tecla ensina o atalho no único momento em
-   que ela está olhando para ele. */
+   que ela está olhando para ele. Pílula de 44px, com a tecla em laranja como no
+   desenho. */
 .ajuda-fechar {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
   font-family: var(--seele-mono);
-  font-size: 13px;
+  font-size: var(--seele-t-rotulo);
   letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-osso-apagado);
-  background: var(--seele-negro-absoluto);
-  border: 1px solid var(--seele-linha-forte);
-  padding: 8px 12px;
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
-  min-height: 40px;
-  border-radius: var(--seele-raio);
-  font: inherit;
 }
 
 .ajuda-fechar:hover,
 .ajuda-fechar:focus-visible {
-  color: var(--seele-osso);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-hover);
+  background: var(--seele-controle-hover);
 }
 
+.ajuda-fechar:focus-visible {
+  outline: var(--seele-b-forte) solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
+/* As palavras ocupam a coluna larga, as teclas a estreita (460 : 280 no
+   desenho). */
 .ajuda-corpo {
   overflow-y: auto;
-  padding: 24px;
   display: grid;
-  flex-direction: column;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
   gap: 32px;
-  grid-template-columns: repeat(2,minmax(0,1fr));
   align-items: start;
   min-height: 0;
 }
 
+/* O nome da seção é o rótulo miúdo do desenho: caixa alta, mono, apagado. */
 .ajuda-secao-nome {
-  margin: 0 0 16px;
-  font-family: var(--seele-display);
-  font-size: 22px;
-  letter-spacing: .02em;
-  color: var(--seele-laranja-nerv);
-  line-height: 1.3;
+  margin: 0;
+  padding-bottom: 6px;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: var(--seele-tracking-rotulo);
+  line-height: 1.6;
+  color: var(--seele-rotulo-painel);
 }
 
 /* Duas colunas: o termo e o que ele é. `grid` e não uma `<table>` porque o que
    se quer é o alinhamento, e uma tabela traria semântica de dados tabulares
-   para o que é uma lista de definições — que é o que `<dl>` já diz. */
+   para o que é uma lista de definições — que é o que `<dl>` já diz.
+
+   A régua de cima de cada linha é do termo e da definição, cada um com a sua:
+   sem folga entre as colunas ela não se parte. */
 .ajuda-lista {
   margin: 0;
   display: grid;
-  grid-template-columns: minmax(72px,auto) minmax(0,1fr);
-  gap: 12px 16px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 0;
   align-items: baseline;
 }
 
-.ajuda-termo {
+.ajuda-corpo > section + section .ajuda-lista { grid-template-columns: 90px minmax(0, 1fr); }
+
+.ajuda-lista > * {
   margin: 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--seele-vidro-borda);
+}
+
+.ajuda-termo {
+  padding-right: 12px;
   font-family: var(--seele-mono);
   font-size: var(--seele-t-dado);
-  letter-spacing: var(--seele-tracking-rotulo);
+  font-weight: 700;
   color: var(--seele-osso);
 }
 
 .ajuda-diz {
-  margin: 0;
-  font-family: var(--seele-mono);
+  font-family: var(--seele-ui);
   font-size: 14px;
   color: var(--seele-osso-apagado);
   line-height: 1.6;
@@ -158,22 +177,34 @@
 /* A tecla desenhada como tecla. É a única parte desta caixa que a pessoa vai
    querer reconhecer de relance depois de já ter lido uma vez. */
 .ajuda-tecla {
+  display: inline-block;
+  min-width: 24px;
+  box-sizing: border-box;
+  padding: 0 var(--seele-e1);
   font-family: var(--seele-mono);
   font-size: var(--seele-t-micro);
-  letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-osso);
-  border: 1px solid var(--seele-linha-forte);
-  padding: 0 var(--seele-e1);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-align: center;
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-miudo);
   white-space: nowrap;
 }
 
 /* Em janela baixa a caixa encolhe pelo corpo, que rola. O cabeçalho e a linha
    de fechar continuam onde estão: são eles que dizem como sair daqui. */
 @media (max-height: 560px) {
-  .ajuda-corpo {
-    gap: var(--seele-e3);
-    padding: var(--seele-e3);
-  }
+  .ajuda-caixa { padding: var(--seele-e3); }
+  .ajuda-corpo { gap: var(--seele-e3); }
 }
 
-@media(max-width:700px) { .camada-ajuda { padding:12px; } .ajuda-caixa { max-height:calc(100dvh - 24px); } .ajuda-cabeca,.ajuda-corpo { padding:16px; } .ajuda-corpo { grid-template-columns:minmax(0,1fr); gap:24px; } .ajuda-fechar { min-height:44px; } }
+@media (max-width: 700px) {
+  .camada-ajuda { padding: 12px; }
+  .ajuda-caixa { max-height: calc(100dvh - 24px); padding: 20px 16px; border-radius: var(--seele-raio-painel); }
+  .ajuda-titulo { font-size: 26px; }
+  .ajuda-corpo { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .ajuda-lista,
+  .ajuda-corpo > section + section .ajuda-lista { grid-template-columns: 110px minmax(0, 1fr); }
+}

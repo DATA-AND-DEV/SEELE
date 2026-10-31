@@ -45,134 +45,197 @@
   position: absolute;
   inset: 0;
   background: var(--seele-negro-absoluto);
-  opacity: 0.72;
+  opacity: 0.8;
 }
 
+/* ---------- a caixa ----------
+   Redesign 0.19: a página do desenho dentro de uma camada — o negro quente com a
+   grade de pontos e, sobre ele, painéis de vidro de 24px separados por 12px: o
+   cabeçalho, a fila e as camadas de entrada. */
 .portaria-caixa {
   position: relative;
+  box-sizing: border-box;
   width: 100%;
-  max-width: 800px;
+  max-width: 1200px;
   max-height: calc(100dvh - 48px);
   display: flex;
   flex-direction: column;
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
+  gap: 12px;
+  padding: 16px;
+  background-color: var(--seele-negro-absoluto);
+  background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+  background-size: 6px 6px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
   box-shadow: var(--seele-sombra);
   overflow: hidden;
 }
 
 .portaria-cabeca {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--seele-e2);
-  padding: 16px 24px;
-  background: var(--seele-negro-absoluto);
+  gap: 12px 20px;
+  padding: 18px 24px;
   color: var(--seele-osso);
   flex: 0 0 auto;
-  min-height: 64px;
-  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
 }
 
 .portaria-marca {
   display: inline-flex;
   align-items: center;
+  color: var(--seele-laranja-nerv);
 }
 
 .portaria-titulo {
   flex: 1 1 auto;
   margin: 0;
-  font-size: 28px;
-  letter-spacing: .02em;
+  font-size: 30px;
+  letter-spacing: var(--seele-tracking-cartela);
   font-family: var(--seele-display);
-  font-weight: 500;
-  line-height: 1.25;
+  font-weight: 700;
+  line-height: 1.1;
 }
 
 .portaria-fechar {
-  background: var(--seele-negro-absoluto);
-  border: 1px solid var(--seele-linha-forte);
-  color: var(--seele-osso-apagado);
-  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
-  min-height: 40px;
-  border-radius: var(--seele-raio);
-  font: inherit;
-  font-size: 13px;
 }
 
+.portaria-fechar:hover { background: var(--seele-controle-hover); }
+.portaria-fechar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+/* O corpo é uma grade de duas colunas: a fila e o histórico à esquerda (a
+   decisão que a pessoa veio tomar, e por isso a coluna larga), as camadas de
+   entrada à direita. O aviso e o erro ocupam a largura toda. */
 .portaria-corpo {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  /* `max-content` e não `auto`: com a altura da caixa definida, as faixas
+     `auto` encolhem até o mínimo de cada item e os painéis se sobrepõem em vez
+     de fazer o corpo rolar. */
+  grid-auto-rows: max-content;
+  align-items: start;
+  gap: 12px;
   min-height: 0;
-  padding: 24px;
+  padding: 0;
   overflow-y: auto;
 }
 
-/* O único vermelho desta folha. Ver o cabeçalho. */
+.portaria-corpo > * { grid-column: 1 / -1; margin: 0; }
+.portaria-corpo > .portaria-rolagem { grid-column: 1; }
+.portaria-corpo > .portaria-camadas { grid-column: 2; }
+
+.portaria-corpo > .nota:empty { display: none; }
+
+/* O único vermelho desta folha. Ver o cabeçalho. A banda do desenho: canto de
+   18px, moldura a 50% e o texto em rosa claro. */
 .portaria-alarme {
   margin: 0;
-  padding: var(--seele-e1) var(--seele-e2);
-  border: var(--seele-b-forte) solid var(--seele-vermelho-alerta);
-  background: var(--seele-vermelho-fraco);
-  color: var(--seele-osso);
+  padding: 12px 18px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent);
+  border-radius: var(--seele-raio-cartao);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 80%, transparent);
+  color: var(--seele-vermelho-claro);
+  font-family: var(--seele-ui);
   /* A primeira linha é o que houve, a segunda o que fazer. `pre-line` é o que
      mantém as duas separadas sem inventar dois elementos. */
   white-space: pre-line;
   flex: 0 0 auto;
 }
 
+/* ---------- as camadas de entrada ----------
+   O painel da direita: senha, convite e portaria, cada um num cartão de vidro
+   com o rótulo, o estado em palavras e os controles. */
 .portaria-camadas {
   display: flex;
   flex-direction: column;
-  gap: var(--seele-e1);
+  gap: 12px;
+  padding: 22px 24px;
   flex: 0 0 auto;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
 }
 
 .portaria-camada {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 16px;
-  border: var(--seele-b) solid var(--seele-linha);
-  border-radius: var(--seele-raio);
+  gap: 8px 10px;
+  padding: 16px 18px;
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
+  background: var(--seele-vidro);
 }
+
+.portaria-camada > .rotulo { flex: 1 1 100%; }
 
 /* O estado em palavras, e nunca só por cor ou por posição de um interruptor.
    `specs/06-clientes-gui.md` pede a palavra, e aqui ela é o que separa «senha
-   definida» de «nenhuma — a senha não fecha nada». */
+   definida» de «nenhuma — a senha não fecha nada». Na linha de baixo do rótulo,
+   como no desenho. */
 .portaria-estado {
-  flex: 1 1 200px;
-  color: var(--seele-osso);
+  flex: 1 1 100%;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
 }
 
 .portaria-senha,
 .portaria-observacao {
-  flex: 0 1 220px;
-  background: var(--seele-negro-absoluto);
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  flex: 1 1 160px;
+  min-width: 0;
+  font-family: var(--seele-ui);
   color: var(--seele-osso);
-  padding: var(--seele-e1);
 }
 
+/* LIGAR/DESLIGAR é o interruptor do desenho: ligado, o botão acende em laranja. */
+.portaria-camada .botao-fantasma[aria-pressed="true"] {
+  color: var(--seele-laranja-claro);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 14%, transparent);
+  border-color: var(--seele-laranja-nerv);
+}
+
+/* ---------- a fila e o histórico ----------
+   O painel da esquerda. */
 .portaria-rolagem {
   flex: 0 0 auto;
-  min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--seele-e1);
-  overflow: visible;
+  gap: 12px;
+  padding: 22px 24px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
 }
 
 .portaria-secao {
-  margin: var(--seele-e2) 0 0;
-  font-size: 0.75rem;
-  letter-spacing: 0.16em;
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-rotulo-painel);
 }
+
+.portaria-secao ~ .portaria-secao { margin-top: 10px; }
+
+.portaria-rolagem > .nota { margin: 0; }
 
 .portaria-lista {
   list-style: none;
@@ -180,29 +243,40 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--seele-e1);
+  gap: 12px;
 }
 
+/* Quem bate: cartão de 18px. Quem espera decisão leva a moldura laranja; quem
+   já foi decidido (a linha tem o veredito) fica de vidro. */
 .portaria-cartao {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  background: var(--seele-negro-absoluto);
-  border-radius: var(--seele-raio);
+  gap: 8px;
+  padding: 16px 18px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
+  border-radius: 20px;
+}
+
+.portaria-cartao:not(:has(.portaria-veredito)) {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
 }
 
 /* A identidade, e é por isso que ela é a linha grande e a primeira do cartão.
    Monoespaçada e com `word-break` porque sessenta e quatro caracteres em grupos
    de oito têm de caber sem que nenhum grupo se parta ao meio numa janela
-   estreita — um grupo partido é exatamente onde a conferência por olho erra. */
+   estreita — um grupo partido é exatamente onde a conferência por olho erra.
+   No desenho ela é a caixa azul de «identidade verificada». */
 .portaria-impressao {
-  margin: 0;
+  margin: 8px 0 0;
+  padding: 10px 14px;
   font-family: var(--seele-mono);
   font-size: 13px;
   letter-spacing: 0.04em;
-  color: var(--seele-osso);
+  color: var(--seele-azul-claro);
+  background: color-mix(in srgb, var(--seele-azul-fraco) 70%, transparent);
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-padrao-azul) 40%, transparent);
+  border-radius: var(--seele-raio-icone);
   word-break: break-word;
   line-height: 1.6;
 }
@@ -214,43 +288,72 @@
   margin: 0;
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: var(--seele-e1);
 }
 
 .portaria-diz {
+  font-family: var(--seele-mono);
   font-size: 0.75rem;
-  letter-spacing: 0.12em;
-  color: var(--seele-osso-apagado);
+  letter-spacing: 0.06em;
+  color: var(--seele-rotulo-painel);
 }
 
 .portaria-nome {
+  font-family: var(--seele-ui);
+  font-weight: 700;
+  font-size: 15px;
   color: var(--seele-osso);
 }
 
 .portaria-contexto,
 .portaria-quando {
   margin: 0;
-  font-size: 0.8125rem;
-  color: var(--seele-osso-apagado);
+  font-family: var(--seele-mono);
+  font-size: 0.75rem;
+  color: var(--seele-rotulo-painel);
 }
 
 /* Palavra, e não só a cor da borda: `ADMITIDO` e `RECUSADO` têm de se ler numa
-   tela em escala de cinza e por um leitor de tela. */
+   tela em escala de cinza e por um leitor de tela. É o chip do desenho: pílula
+   com a moldura do estado. */
 .portaria-veredito {
   margin: 0;
   align-self: flex-start;
-  padding: 0 var(--seele-e1);
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
-  color: var(--seele-laranja-nerv);
-  font-size: 0.75rem;
-  letter-spacing: 0.16em;
+  padding: 3px 10px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.portaria-veredito-sim {
+  color: var(--seele-fosforo);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
 }
 
 .portaria-acoes {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/* ADMITIR é o primário do cartão de quem espera: laranja cheio, como no
+   desenho. Nos já decididos o único botão é REVOGAR, e fica de vidro. */
+.portaria-cartao:not(:has(.portaria-veredito)) .portaria-acoes > button:first-child {
+  color: var(--seele-tinta-no-acento);
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+  font-weight: 600;
+}
+
+.portaria-cartao:not(:has(.portaria-veredito)) .portaria-acoes > button:first-child:hover {
+  background: var(--seele-laranja-hover);
+  border-color: var(--seele-laranja-hover);
 }
 
 /* ---------- a faixa de quem está batendo ----------
@@ -268,7 +371,8 @@
    cobrir — ela é permanente por decisão de `specs/06-clientes-gui.md`, e tapar
    uma medida para avisar de outra coisa é trocar um buraco por outro.
 
-   Laranja institucional, nunca o vermelho: ver o cabeçalho desta folha. */
+   Laranja institucional, nunca o vermelho: ver o cabeçalho desta folha. Painel
+   de vidro com a moldura laranja, como o resto da família de avisos. */
 .portaria-batendo {
   position: fixed;
   left: 50%;
@@ -276,12 +380,14 @@
   transform: translateX(-50%);
   z-index: 19;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--seele-e2);
   max-width: calc(100vw - var(--seele-e4));
   padding: var(--seele-e1) var(--seele-e2);
-  background: var(--seele-negro-painel);
-  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 60%, transparent);
+  border-radius: var(--seele-raio-painel);
 }
 
 .portaria-batendo-marca {
@@ -291,15 +397,18 @@
 }
 
 .portaria-batendo-texto {
+  flex: 1 1 160px;
+  min-width: 0;
   margin: 0;
+  font-family: var(--seele-ui);
   color: var(--seele-osso);
-  letter-spacing: 0.08em;
 }
 
 
-/* A porta, quando a rede sobe. Mesmos valores do diálogo de nomear — véu de
-   0,78 e moldura laranja —, porque são o mesmo tipo de coisa: uma camada que
-   espera uma resposta. Mais larga porque carrega um link inteiro. */
+/* A porta, quando a rede sobe. Mesmos valores do diálogo de nomear — véu
+   escuro e moldura —, porque são o mesmo tipo de coisa: uma camada que espera
+   uma resposta. Mais larga porque carrega um link inteiro. Modal de vidro de
+   28px, como os outros da 0.19. */
 .camada-porta {
   position: fixed;
   inset: 0;
@@ -315,37 +424,39 @@
   position: absolute;
   inset: 0;
   background: var(--seele-negro-absoluto);
-  opacity: 0.78;
+  opacity: 0.8;
 }
 
 .porta-caixa {
   position: relative;
+  box-sizing: border-box;
   width: 100%;
   max-width: 560px;
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
+  overflow: hidden;
 }
 
 .porta-cabeca {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  padding: 24px 24px 0;
 }
 
 .porta-titulo {
   margin: 0;
   flex: 1;
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 15px;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
 }
 
 .porta-corpo {
-  padding: 24px;
+  padding: 20px 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -353,6 +464,7 @@
 
 .porta-prosa {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: 13px;
   line-height: 1.5;
   color: var(--seele-osso);
@@ -376,12 +488,23 @@
   justify-content: flex-end;
 }
 
-.portaria-identidade { color: var(--seele-osso); font-size: 12px; }
-.portaria-identidade summary { cursor: pointer; padding: 8px 0; }
+.portaria-identidade { color: var(--seele-osso); font-family: var(--seele-ui); font-size: 13px; }
+.portaria-identidade summary { cursor: pointer; padding: 8px 0; color: var(--seele-osso-apagado); }
 
 
-@media(max-width:700px) { .camada-portaria { padding: 12px; } .portaria-caixa { max-height: calc(100dvh - 24px); } .portaria-cabeca, .portaria-corpo { padding: 16px; } .portaria-acoes > button { min-height:44px; flex:1 1 120px; } }
+@media (max-width: 900px) {
+  .portaria-corpo { grid-template-columns: minmax(0, 1fr); }
+  .portaria-corpo > .portaria-rolagem,
+  .portaria-corpo > .portaria-camadas { grid-column: 1; }
+}
 
+@media (max-width: 700px) {
+  .camada-portaria { padding: 12px; }
+  .portaria-caixa { max-height: calc(100dvh - 24px); padding: 12px; border-radius: var(--seele-raio-painel); }
+  .portaria-cabeca { padding: 14px 16px; }
+  .portaria-titulo { font-size: 22px; }
+  .portaria-rolagem, .portaria-camadas { padding: 16px; }
+  .portaria-acoes > button { min-height: 44px; flex: 1 1 120px; }
+}
 
-
-.portaria-acoes > button { margin:0; }
+.portaria-acoes > button { margin: 0; }

@@ -63,7 +63,7 @@
   position: absolute;
   inset: 0;
   background: var(--seele-negro-absoluto);
-  opacity: 0.72;
+  opacity: 0.8;
 }
 
 /* ---------- a caixa ----------
@@ -74,30 +74,26 @@
    o pior lugar possível para um botão sumir. */
 .moderar-caixa {
   position: relative;
-  width: min(100%, 760px);
+  width: min(100%, 620px);
   max-width: none;
   max-height: calc(100dvh - 48px);
-  overflow-y: auto;
-  border: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-absoluto);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: var(--seele-raio);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
 }
 
 /* ---------- a cabeça ----------
-   Bloco sólido com texto no negro absoluto, que é a regra de inversão do v2:
-   cartela nunca é texto colorido sobre fundo escuro. */
+   Redesign 0.19: sem bloco sólido. O título em Inter Tight, solto sobre o
+   negro, como no desenho. */
 .moderar-cabeca {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px 24px;
-  background: var(--seele-negro-absoluto);
+  padding: 30px 32px 0;
   color: var(--seele-osso);
-  min-height: 64px;
-  border-bottom: 1px solid var(--seele-linha);
 }
 
 /* O kanji é acento. `MODERAÇÃO` ao lado carrega a informação, e é por isso que
@@ -112,10 +108,10 @@
 .moderar-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: 500;
-  font-size: 28px;
-  line-height: 1.25;
-  letter-spacing: .02em;
+  font-weight: 700;
+  font-size: 32px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
 }
 
 /* ---------- o corpo ---------- */
@@ -123,14 +119,15 @@
 .moderar-corpo {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 24px;
+  gap: 16px;
+  padding: 16px 32px 24px;
   overflow-y: auto;
   min-height: 0;
 }
 
 .moderar-vazio {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-corpo);
   line-height: 1.55;
   color: var(--seele-osso-apagado);
@@ -145,54 +142,70 @@
 .moderar-campo {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
+
+.moderar-campo > .rotulo { font-family: var(--seele-ui); font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--seele-osso); }
 
 /* O `select` é o único desta janela, e por isso ele é desenhado aqui e não em
    `base.css`: um primitivo compartilhado por um consumidor é um primitivo
    inventado cedo demais. O dia em que uma segunda tela precisar de um, ele
    desce para lá com este bloco inteiro. */
 .moderar-select {
-  font: inherit;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-dado);
   color: var(--seele-osso);
-  background: var(--seele-negro-painel);
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  padding: 8px;
-  border-radius: var(--seele-raio);
 }
 
 .moderar-select:focus-visible {
-  outline: 2px solid var(--seele-osso);
-  outline-offset: 2px;
+  outline: none;
 }
 
-/* Um verbo por bloco, separados por régua: eles fazem coisas diferentes e
-   irreversíveis, e três botões encostados são três botões que se erra. */
+/* Um verbo por bloco, cada um no seu cartão: eles fazem coisas diferentes e
+   irreversíveis, e três botões encostados são três botões que se erra. O banir
+   tem dois campos (até quando e motivo), e eles sentam lado a lado. */
 .moderar-acao {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 16px;
-  border-top: var(--seele-b) solid var(--seele-linha);
-  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
+  background: var(--seele-vidro);
 }
+
+.moderar-acao:has(> .moderar-campo + .moderar-campo) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 10px 12px;
+}
+
+.moderar-acao:has(> .moderar-campo + .moderar-campo) > :not(.moderar-campo) { grid-column: 1 / -1; justify-self: start; }
+
+.moderar-acao > .nota { font-size: 13px; line-height: 1.5; color: var(--seele-rotulo-painel); }
 
 .moderar-verbo {
   align-self: flex-start;
-  font-family: var(--seele-mono);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
   font-weight: 500;
   font-size: 14px;
   letter-spacing: 0;
-  padding: 8px 16px;
   color: var(--seele-osso);
-  background: none;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
-  border-radius: var(--seele-raio);
 }
 
-.moderar-verbo:hover { border-color: var(--seele-laranja-nerv); }
+.moderar-verbo:hover { background: var(--seele-controle-hover); }
 .moderar-verbo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
 /* ---------- a confirmação ----------
@@ -204,7 +217,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px;
+  padding: 16px 32px 24px;
 }
 
 /* `pre-line` porque a consequência vem em duas partes: o que acontece, e o que
@@ -212,9 +225,10 @@
    é justamente a que as pessoas não leem. */
 .moderar-consequencia {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-corpo);
   line-height: 1.6;
-  color: var(--seele-osso);
+  color: var(--seele-osso-apagado);
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
@@ -223,41 +237,37 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
+  margin-top: 6px;
 }
 
-/* CANCELAR primeiro e em contorno, CONFIRMAR depois e sólido. A ordem é a que
-   põe a saída antes da porta: quem tabula chega ao que não faz nada primeiro, e
-   é onde `armarAto` também põe o foco. */
+/* CANCELAR primeiro e em vidro, CONFIRMAR depois e cheio (o `.botao` de
+   `base.css`). A ordem é a que põe a saída antes da porta: quem tabula chega ao
+   que não faz nada primeiro, e é onde `armarAto` também põe o foco. */
 .moderar-cancelar {
   flex: 0 1 auto;
-  font: inherit;
-  font-family: var(--seele-mono);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
   font-weight: 500;
   font-size: 14px;
   letter-spacing: 0;
-  padding: 8px 12px;
-  color: var(--seele-osso-apagado);
-  background: var(--seele-negro-absoluto);
-  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
-  min-height: 40px;
-  border-radius: var(--seele-raio);
 }
 
-.moderar-cancelar:hover { border-color: var(--seele-osso); }
+.moderar-cancelar:hover { background: var(--seele-controle-hover); }
 .moderar-cancelar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
 .moderar-confirmar {
   flex: 0 1 auto;
-  font-family: var(--seele-mono);
-  font-weight: 500;
-  font-size: 14px;
-  letter-spacing: 0;
-  padding: 12px;
-  border: 0;
-  border-radius: var(--seele-raio);
-  min-height: 40px;
+  min-height: 44px;
 }
 
 /* **A saída não sai de vista.** A caixa rola — `max-height` mais
@@ -268,29 +278,31 @@
 
    `sticky` e não um rodapé fora do rolo: a caixa é um elemento só, e parti-la
    em corpo e rodapé mudaria a marcação de uma camada que já está certa. O
-   fundo sólido é o que impede o texto de passar por baixo dele. */
+   corpo é quem rola, e este botão fica abaixo dele, na pílula de vidro. */
 .moderar-fechar {
   position: sticky;
   bottom: 0;
   z-index: 1;
-  width: 100%;
-  font: inherit;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin: 0 32px 28px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
   font-size: 14px;
-  letter-spacing: 0;
-  padding: 8px 12px;
-  color: var(--seele-osso-apagado);
-  background: var(--seele-negro-absoluto);
-  border: 1px solid var(--seele-linha-forte);
-  border-top: var(--seele-b) solid var(--seele-linha);
-  cursor: pointer;
-  min-height: 40px;
-  border-radius: var(--seele-raio);
-  font-family: var(--seele-mono);
   font-weight: 500;
+  letter-spacing: 0;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
 }
 
-.moderar-fechar:hover { color: var(--seele-osso); }
-.moderar-fechar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+.moderar-fechar:hover { background: var(--seele-controle-hover); }
+.moderar-fechar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
 /* ---------- as portas ----------
 
@@ -321,14 +333,15 @@
   font-size: var(--seele-t-rotulo);
   line-height: 1.2;
   letter-spacing: 0.1em;
-  padding: 0 4px;
+  padding: 0 8px;
   color: var(--seele-osso);
-  background: none;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-miudo);
   cursor: pointer;
 }
 
-.moderar-porta:hover { color: var(--seele-laranja-nerv); border-color: var(--seele-laranja-nerv); }
+.moderar-porta:hover { color: var(--seele-laranja-nerv); border-color: var(--seele-laranja-nerv); background: var(--seele-controle-hover); }
 .moderar-porta:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 1px; }
 
 /* **Em repouso ele não está lá.** A comp da 0.9.0 desenha a mensagem com
@@ -372,8 +385,14 @@ li:hover .moderar-remover,
 .moderar-remover:hover { color: var(--seele-laranja-nerv); }
 .moderar-remover:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
-@media(max-width:700px) { .camada-moderar { padding:12px; } .moderar-caixa { max-height:calc(100dvh - 24px); } .moderar-cabeca, .moderar-corpo { padding:16px; } .moderar-acao > button, .moderar-botoes > button { min-height:44px; flex:1 1 120px; } }
-
-
-
-@media(max-width:700px) { .moderar-acao > button { flex:0 0 auto; align-self:flex-start; } }
+@media (max-width: 700px) {
+  .camada-moderar { padding: 12px; }
+  .moderar-caixa { max-height: calc(100dvh - 24px); border-radius: var(--seele-raio-painel); }
+  .moderar-cabeca { padding: 20px 16px 0; }
+  .moderar-corpo, .moderar-confirmacao { padding: 16px; }
+  .moderar-fechar { margin: 0 16px 16px; }
+  .moderar-acao:has(> .moderar-campo + .moderar-campo) { grid-template-columns: minmax(0, 1fr); }
+  .moderar-acao > button, .moderar-botoes > button { min-height: 44px; }
+  .moderar-botoes > button { flex: 1 1 120px; }
+  .moderar-acao > button { flex: 0 0 auto; align-self: flex-start; }
+}

@@ -22,36 +22,40 @@
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
+  gap: 14px;
+  padding: 14px 16px;
   font: inherit;
+  font-family: var(--seele-ui);
   text-align: left;
   color: var(--seele-osso);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
   cursor: pointer;
 }
 
 .servidor-linha:hover {
-  border-color: var(--seele-laranja-nerv);
+  border-color: var(--seele-controle-borda);
+  background: var(--seele-controle);
 }
 
 /* A sigla, do mesmo tamanho da que a trilha de 60px desenha: quem reconhece um
    servidor por ela ali reconhece aqui, sem reaprender. */
 .servidor-sigla {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--seele-linha-forte);
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 14px;
-  letter-spacing: 0.06em;
-  color: var(--seele-laranja-nerv);
-  background-color: var(--seele-negro-absoluto);
+  border: 0;
+  border-radius: var(--seele-raio-icone);
+  font-family: var(--seele-ui);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--seele-osso);
+  background-color: color-mix(in srgb, var(--seele-osso) 10%, transparent);
   background-repeat: no-repeat;
   background-position: center;
   background-size: cover;
@@ -59,7 +63,7 @@
 
 /* Com imagem o ladrilho é a imagem: a sigla existe para quando não há uma, e
    deixar as duas juntas seria escrever por cima do retrato do servidor. */
-.servidor-sigla[data-com-imagem="sim"] { border-color: var(--seele-linha); }
+.servidor-sigla[data-com-imagem="sim"] { border: 0; }
 
 .servidor-texto {
   display: flex;
@@ -69,18 +73,19 @@
 }
 
 .servidor-nome {
-  font-family: var(--seele-display);
-  font-weight: 700;
+  font-family: var(--seele-ui);
+  font-weight: 600;
   font-size: 14px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .servidor-endereco {
-  font-size: 11px;
-  color: var(--seele-osso-apagado);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -90,9 +95,10 @@
    linhas, e comparar pede que os valores fiquem alinhados. */
 .servidor-visto {
   flex: 0 0 auto;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--seele-osso-apagado);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--seele-rotulo-painel);
   font-variant-numeric: tabular-nums;
 }
 
@@ -113,16 +119,20 @@
   min-width: 70px;
   padding-inline: 8px;
   flex: 0 0 auto;
+  min-height: 44px;
   font: inherit;
-  font-size: 10px;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
 .servidor-esquecer:hover {
-  color: var(--seele-negro-absoluto);
+  color: var(--seele-tinta-no-acento);
   background: var(--seele-vermelho-alerta);
   border-color: var(--seele-vermelho-alerta);
 }

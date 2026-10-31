@@ -7,7 +7,6 @@
    Ela ocupa a JANELA INTEIRA: as seções à esquerda, o conteúdo da seção à direita, em grade de cartões que se redistribuem com a largura. Quem
    fica estreito é o parágrafo (a medida de leitura), e não a tela. */
 
-
 .camada-server::before {
   content: "";
   position: absolute;
@@ -16,10 +15,8 @@
   opacity: 0.78;
 }
 
-
 /* A caixa tem fundo próprio: o véu do `::before` é translúcido, e sem fundo a tela de trás continuava legível através da configuração. A
    altura é a da janela (`height: 100%`), e não uma altura fixa que variasse com o conteúdo de cada seção. */
-
 
 /* SEELE — o Terminal Server (`#tela-server`).
    A configuração local: o que é desta máquina e não deste servidor. §8 do comp v3.
@@ -52,8 +49,6 @@
    esta tela decidindo sozinha se a explicação de um controle aparece, e
    `the_note_beside_a_control_is_defined_once_and_never_by_a_screen` reprova. */
 
-
-
 /* ---------- a coluna das seções ---------- */
 
 .server-coluna {
@@ -65,29 +60,28 @@
   overflow-y: auto;
 }
 
-
 .server-marca {
-  padding: 16px;
-  border-bottom: 1px solid var(--seele-linha);
+  padding: 0 12px 12px;
+  border-bottom: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   flex-shrink: 0;
 }
 
-
 /* `line-height: 1` porque a cartela é 22px numa página de entrelinha 16: sem
    isto a linha da marca cresce e empurra a primeira seção meia célula. */
 .server-marca-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 22px;
+  font-weight: 700;
+  font-size: 21px;
   line-height: 1;
-  letter-spacing: 0.06em;
-  color: var(--seele-laranja-nerv);
+  letter-spacing: -0.02em;
+  color: var(--seele-osso);
+  overflow-wrap: normal;
+  word-break: normal;
 }
-
 
 .server-secoes {
   margin: 0;
@@ -96,10 +90,8 @@
   flex-shrink: 0;
 }
 
-
 /* Uma seção. Botão de verdade — e não o `<span>` que esta tela usava quando só
    havia uma —, porque agora as quatro levam a painéis diferentes. */
-
 
 .server-secao:hover {
   background: var(--seele-negro-absoluto);
@@ -110,11 +102,9 @@
   outline-offset: -2px;
 }
 
-
 /* A seção aberta. Nunca só pela cor: `aria-current` é o que um leitor de tela
    anuncia, e a barra da esquerda é o que sobra em monocromático —
    `specs/06-clientes-gui.md` proíbe informação transmitida só por cor. */
-
 
 .server-secao-icone {
   flex-shrink: 0;
@@ -123,11 +113,9 @@
   color: var(--seele-osso-apagado);
 }
 
-
 .server-secao[aria-current="true"] .server-secao-icone {
   color: var(--seele-laranja-nerv);
 }
-
 
 .server-secao-texto {
   min-width: 0;
@@ -135,9 +123,6 @@
   flex-direction: column;
   gap: 2px;
 }
-
-
-
 
 /* Os grupos da coluna — U31.
 
@@ -151,16 +136,13 @@
    toque de 48px, que é o piso, e os títulos de grupo continuam todos lá. */
 .server-grupo {
   margin: 0;
-  padding: 12px 16px 2px;
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  font-weight: var(--seele-cartela);
+  padding: 14px 12px 4px;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  font-weight: 400;
   letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-laranja-nerv);
+  color: var(--seele-rotulo-painel);
 }
-
-
-
 
 /* A porta de saída, no cabeçalho persistente — U33.
 
@@ -169,21 +151,23 @@
    rolar até o fim de uma lista. */
 .server-voltar {
   flex: 0 0 auto;
-  min-height: 40px;
-  padding: 8px 12px;
+  min-height: 44px;
+  padding: 0 18px;
   display: flex;
   align-items: center;
   gap: 8px;
   font: inherit;
-  font-size: 12px;
-  letter-spacing: 0.1em;
+  font-size: 13px;
+  letter-spacing: 0.04em;
   text-align: left;
   color: var(--seele-osso);
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   cursor: pointer;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  border-radius: var(--seele-raio-pilula);
 }
-
 
 .server-voltar:hover {
   color: var(--seele-laranja-nerv);
@@ -194,7 +178,6 @@
   outline-offset: -2px;
 }
 
-
 /* ---------- o corpo ---------- */
 
 .server-corpo {
@@ -204,13 +187,11 @@
   flex-direction: column;
 }
 
-
 /* O cabeçalho persistente: voltar, categoria atual e contexto — U33.
 
    `sticky` e não `fixed`: ele pertence ao corpo que rola, e uma barra fixa
    sobre uma camada que já é fixa é um segundo sistema de coordenadas para
    alguém manter em dia. O fundo é opaco porque o conteúdo passa por baixo. */
-
 
 .server-faixa-texto {
   display: flex;
@@ -219,7 +200,6 @@
   min-width: 0;
   flex: 1 1 240px;
 }
-
 
 /* A faixa de contexto: onde você está enquanto mexe aqui.
 
@@ -230,12 +210,11 @@
   margin: 0;
   flex: 0 1 auto;
   max-width: 100%;
-  font-size: var(--seele-t-dado);
+  font-size: 12px;
   color: var(--seele-osso-apagado);
   text-align: right;
   overflow-wrap: anywhere;
 }
-
 
 /* Onde o comp punha SALVAR, DESCARTAR e «alterações não salvas», esta faixa tem
    título e subtítulo e mais nada. A escolha vale na hora e a tela mostra o que
@@ -245,15 +224,12 @@
 .server-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 30px;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
   color: var(--seele-osso);
 }
-
-
-
 
 .server-painel .rotulo {
   display: block;
@@ -266,7 +242,6 @@
   color: var(--seele-osso-apagado);
 }
 
-
 /* O painel de uma seção. Quatro deles, um só visível — `hidden` em `base.css`
    é `display: none !important`, então esconder não deixa a grade com buracos. */
 /* 24px entre blocos virou 16px, e 16px dentro deles virou 12px, depois da
@@ -275,12 +250,10 @@
    decisão não existe até alguém procurá-la. A régua continua sendo múltipla de
    quatro, e os alvos de toque não mudaram. */
 
-
 /* O que não é um bloco (um aviso, um título solto) ocupa a linha inteira; o parágrafo mantém a medida de leitura. */
 .server-painel-secao > :not(.server-bloco) {
   grid-column: 1 / -1;
 }
-
 
 .server-painel-secao p,
 .server-painel .nota,
@@ -288,18 +261,7 @@
   max-width: var(--seele-leitura);
 }
 
-
 /* ---------- um bloco ---------- */
-
-
-
-
-
-
-
-
-
-
 
 /* ---------- as listas de dispositivo ---------- */
 
@@ -309,28 +271,28 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  background: var(--seele-linha);
-  border: 1px solid var(--seele-linha);
+  gap: 8px;
+  background: none;
+  border: 0;
 }
-
 
 .server-dispositivo {
   width: 100%;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 16px;
   font: inherit;
   font-size: var(--seele-t-dado);
   text-align: left;
   color: var(--seele-osso);
-  background: var(--seele-negro-painel);
-  border: none;
-  border-left: 2px solid transparent;
+  background: var(--seele-vidro);
+  border: 1px solid color-mix(in srgb, var(--seele-osso) 9%, transparent);
   cursor: pointer;
+  min-height: 44px;
+  font-family: var(--seele-ui);
+  border-radius: var(--seele-raio-cartao);
 }
-
 
 .server-dispositivo:hover:not(:disabled) {
   background: var(--seele-negro-absoluto);
@@ -341,7 +303,6 @@
   outline-offset: -2px;
 }
 
-
 /* O escolhido. Nunca só pela cor: o rótulo `EM USO` vem junto, desenhado pelo
    JavaScript, porque `specs/06-clientes-gui.md` proíbe informação transmitida só
    por cor e uma marca laranja sozinha é exatamente isso. */
@@ -350,24 +311,23 @@
   background: var(--seele-laranja-fraco);
 }
 
-
 .server-dispositivo-nome {
   flex: 1;
   overflow-wrap: anywhere;
 }
 
-
 .server-dispositivo-marca {
   font-size: 11px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   color: var(--seele-osso-apagado);
+  padding: 0 10px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
 }
-
 
 .server-dispositivo[data-escolhido="sim"] .server-dispositivo-marca {
   color: var(--seele-laranja-nerv);
 }
-
 
 /* Nada para escolher. Uma lista vazia não quer dizer "sem microfone" — quer
    dizer que a máquina não quis enumerar —, e a frase que o JavaScript escreve
@@ -376,9 +336,8 @@
   padding: 12px;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
-  background: var(--seele-negro-painel);
+  background: none;
 }
-
 
 /* ---------- o medidor de entrada ---------- */
 
@@ -391,34 +350,32 @@
   overflow-wrap: anywhere;
 }
 
-
 /* Sem sessão não há nível, e um medidor apagado não é um medidor em zero. */
 .server-medidor[data-vivo="nao"] {
   color: var(--seele-osso-apagado);
 }
 
-
 /* ---------- os modos do microfone ---------- */
 
-
-
 .server-modo {
-  flex: 1;
-  min-width: 168px;
-  min-height: 56px;
-  padding: 8px 16px;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 18px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   justify-content: center;
   gap: 2px;
   font: inherit;
   text-align: left;
   color: var(--seele-osso);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   cursor: pointer;
+  align-items: center;
+  font-family: var(--seele-ui);
+  border-radius: var(--seele-raio-pilula);
 }
-
 
 .server-modo:hover:not(:disabled) {
   border-color: var(--seele-laranja-nerv);
@@ -429,22 +386,19 @@
   outline-offset: 2px;
 }
 
-
 .server-modo[aria-pressed="true"] {
   border-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
   color: var(--seele-laranja-nerv);
 }
 
-
 .server-modo-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
+  font-family: var(--seele-ui);
+  font-weight: 500;
   font-size: 14px;
   line-height: 1;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.02em;
 }
-
 
 .server-modo-desc {
   font-size: 12px;
@@ -452,11 +406,9 @@
   color: var(--seele-osso-apagado);
 }
 
-
 .server-modo[aria-pressed="true"] .server-modo-desc {
   color: var(--seele-laranja-nerv);
 }
-
 
 /* ---------- o que saiu daqui ----------
 
@@ -478,7 +430,6 @@
   gap: 16px;
 }
 
-
 .server-atalho {
   border-top: 1px solid var(--seele-linha);
   display: flex;
@@ -491,11 +442,9 @@
   gap: 20px;
 }
 
-
 .server-atalho:first-child {
   border-top: 1px solid var(--seele-linha);
 }
-
 
 .server-atalho-texto {
   min-width: 0;
@@ -504,18 +453,15 @@
   gap: 8px;
 }
 
-
 .server-atalho-acao {
   font-size: var(--seele-t-dado);
 }
-
 
 .server-atalho-desc {
   color: var(--seele-osso-apagado);
   font-size: 12px;
   line-height: 1.6;
 }
-
 
 /* A tecla desenhada como tecla. Contorno e fundo do painel, porque ela é a
    única coisa nesta lista que a pessoa vai procurar com o olho. */
@@ -532,7 +478,6 @@
   text-align: center;
 }
 
-
 /*
   A tecla que se pode trocar.
 
@@ -548,11 +493,9 @@
   cursor: pointer;
 }
 
-
 .server-atalho-tecla-troca:hover {
   border-color: var(--seele-laranja-nerv);
 }
-
 
 /*
   Enquanto espera a tecla. Não é só a cor que muda: o rótulo vira «APERTE UMA
@@ -564,13 +507,11 @@
   border-color: var(--seele-laranja-nerv);
 }
 
-
 /* ---------- prosa e pares ---------- */
 
 /* Uma frase que o produto tem para dizer, e que não é o rótulo de controle
    nenhum. `60ch` porque abaixo disso a linha de 13px monoespaçado ainda é uma
    linha que se lê de ponta a ponta sem perder a próxima. */
-
 
 .server-par {
   display: flex;
@@ -581,13 +522,11 @@
   border-bottom: 1px solid var(--seele-linha);
 }
 
-
 .server-par-valor {
   font-size: var(--seele-t-dado);
   text-align: right;
   overflow-wrap: anywhere;
 }
-
 
 /* ---------- os controles de qualidade de voz (F01, F02) ----------
 
@@ -600,8 +539,8 @@
   cursor: pointer;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso);
+  font-family: var(--seele-ui);
 }
-
 
 .server-regua {
   display: flex;
@@ -610,22 +549,19 @@
   flex-wrap: wrap;
 }
 
-
 .server-regua input[type="range"] {
   flex: 1 1 160px;
   min-width: 120px;
   accent-color: var(--seele-laranja-nerv);
 }
 
-
 .server-regua-valor {
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--seele-fosforo);
   flex: 0 0 auto;
 }
-
 
 /* O medidor: uma barra do nível e uma marca de onde a transmissão abre.
 
@@ -638,15 +574,14 @@
   padding-top: 8px;
 }
 
-
 .server-nivel-barra {
   position: relative;
-  height: 14px;
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  background: var(--seele-negro-absoluto);
-  overflow: hidden;
+  height: 10px;
+  border: 0;
+  background: var(--seele-controle-hover);
+  overflow: visible;
+  border-radius: var(--seele-raio-pilula);
 }
-
 
 .server-nivel-preenchido {
   display: block;
@@ -654,8 +589,8 @@
   width: 0;
   background: var(--seele-osso-apagado);
   transition: width 60ms linear;
+  border-radius: var(--seele-raio-pilula);
 }
-
 
 /* Transmitindo é laranja, e a frase ao lado diz a palavra: quem não distingue as
    duas cores lê `TRANSMITINDO` do mesmo jeito.
@@ -669,15 +604,14 @@
   background: var(--seele-laranja-nerv);
 }
 
-
 .server-nivel-corte {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: -4px;
+  bottom: -4px;
   width: 2px;
-  background: var(--seele-fosforo);
+  background: var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio-pilula);
 }
-
 
 /* ---------- uma lista de itens com uma ação cada ----------
 
@@ -692,7 +626,6 @@
   flex-direction: column;
 }
 
-
 .server-lista-item {
   display: flex;
   align-items: baseline;
@@ -702,33 +635,33 @@
   border-bottom: 1px solid var(--seele-linha);
 }
 
-
 .server-lista-valor {
   font-size: var(--seele-t-dado);
   overflow-wrap: anywhere;
   min-width: 0;
 }
 
-
 .server-lista-acao {
-  background: transparent;
-  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   color: var(--seele-osso);
   font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  padding: 2px 6px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 0 14px;
   cursor: pointer;
   flex: 0 0 auto;
+  min-height: 32px;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  border-radius: var(--seele-raio-pilula);
 }
-
 
 .server-lista-acao:hover,
 .server-lista-acao:focus-visible {
   border-color: var(--seele-laranja-nerv);
   color: var(--seele-laranja-nerv);
 }
-
 
 /* ---------- o que ainda não tem comando atrás ----------
    Um controle desabilitado aqui é a exceção, não a convenção: esta tela omite o
@@ -745,12 +678,10 @@
   cursor: default;
 }
 
-
 .server-dispositivo[title]:disabled,
 .server-modo[title]:disabled {
   cursor: help;
 }
-
 
 /* ---------- atualizar (ADR 0026) ----------
 
@@ -769,13 +700,13 @@
 
 .server-atualizacao-estado {
   margin: 0;
-  font-size: var(--seele-t-dado);
+  font-size: 14px;
   line-height: 1.6;
   color: var(--seele-osso);
   white-space: pre-line;
   overflow-wrap: anywhere;
+  font-family: var(--seele-ui);
 }
-
 
 /* As notas do release chegam como o autor as escreveu, com as quebras de linha
    dele. `pre-line` é o que as preserva sem virar `<pre>`, que reflui mal numa
@@ -785,11 +716,11 @@
   max-width: 72ch;
   font-size: var(--seele-t-dado);
   line-height: 1.6;
-  color: var(--seele-osso);
+  color: var(--seele-osso-apagado);
   white-space: pre-line;
   overflow-wrap: anywhere;
+  font-family: var(--seele-ui);
 }
-
 
 /* O aviso do que instalar custa. Moldura laranja e não vermelha: ele não
    relata falha nenhuma, ele diz o preço de uma ação que ainda não aconteceu. */
@@ -802,7 +733,6 @@
   background: var(--seele-laranja-fraco);
 }
 
-
 .server-atualizacao-aviso p {
   margin: 0;
   max-width: 72ch;
@@ -810,7 +740,6 @@
   line-height: 1.6;
   color: var(--seele-osso);
 }
-
 
 /* A barra de blocos do download, na mesma face e no mesmo desenho das outras
    deste produto. Quando o servidor não diz o total ela vira travessão e ganha
@@ -825,13 +754,12 @@
   overflow-wrap: anywhere;
 }
 
-
 .server-atualizacao-baixados {
   margin: 0;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso);
+  font-family: var(--seele-ui);
 }
-
 
 /* ---------- a porta, lá da entrada ----------
    Refina o `.botao-fantasma` de `base.css`, cujo `margin-left: auto` o
@@ -841,7 +769,6 @@
   width: 100%;
   color: var(--seele-osso-apagado);
 }
-
 
 /* ---------- o servidor: nome e imagem ----------
 
@@ -857,14 +784,12 @@
   min-width: 0;
 }
 
-
 /* O nome do servidor cabe em 64 bytes, e uma caixa da largura do painel
    convidaria a escrever um parágrafo. `48ch` é folga sobre o teto sem ser
    convite. */
 .server-nome-campo input {
   max-width: 48ch;
 }
-
 
 /* A moldura do que está valendo. Fica de pé com imagem ou sem, e é isso que a
    faz dizer alguma coisa: um espaço em branco onde a imagem apareceria não
@@ -880,7 +805,6 @@
   border: 1px solid var(--seele-linha-forte);
 }
 
-
 /* `contain` e não `cover`: recortar a imagem de alguém para caber na moldura é
    a tela decidindo o que da imagem importa. O que o servidor aceita já é
    quadrado o bastante — 256px de lado no máximo —, e o que sobra é margem. */
@@ -890,14 +814,12 @@
   object-fit: contain;
 }
 
-
 .server-icone-vazio {
   font-size: var(--seele-t-rotulo);
   letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-osso-apagado);
   text-align: center;
 }
-
 
 .server-icone-botoes {
   display: flex;
@@ -906,14 +828,12 @@
   align-items: center;
 }
 
-
 /* `margin-left: 0` porque `.botao-fantasma` de `base.css` traz um
    `margin-left: auto` que o empurraria para a outra ponta da fileira, longe do
    botão de que ele é o par. */
 .server-icone-botoes .botao-fantasma {
   margin-left: 0;
 }
-
 
 /* ---------- a mesma imagem, no cabeçalho da sessão ----------
 
@@ -934,8 +854,6 @@
   border-right: 1px solid var(--seele-linha);
 }
 
-
-
 /* APARÊNCIA: dois cartões que dizem o que o tema é, e não o alternam.
  *
  * `disabled` e ainda assim desenhados como cartão: eles informam, e um
@@ -951,7 +869,6 @@
   gap: 8px;
 }
 
-
 .aparencia-cartao {
   display: flex;
   flex-direction: column;
@@ -961,19 +878,16 @@
   border: 1px solid var(--seele-linha-forte);
 }
 
-
 /* O que está valendo, marcado pela moldura, pelo nome em laranja **e pela
    palavra** — nunca só pela cor (`06-clientes-gui.md`). */
 .aparencia-cartao[data-valendo="sim"] {
   border-color: var(--seele-laranja-nerv);
 }
 
-
 .aparencia-cartao[data-valendo="sim"] .aparencia-nome,
 .aparencia-cartao[data-valendo="sim"] .aparencia-estado {
   color: var(--seele-laranja-nerv);
 }
-
 
 .aparencia-estado {
   font-size: 9px;
@@ -981,15 +895,12 @@
   color: var(--seele-osso-apagado);
 }
 
-
 .aparencia-nome {
   font-family: var(--seele-display);
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.1em;
 }
-
-
 
 /* Os detalhes sob demanda — U30.
 
@@ -1006,7 +917,6 @@
   padding: 4px 0;
 }
 
-
 .server-detalhes > summary:hover {
   color: var(--seele-laranja-nerv);
 }
@@ -1015,8 +925,6 @@
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 2px;
 }
-
-
 
 /* ---------- o celular e a janela estreita ----------
 
@@ -1029,10 +937,6 @@
   display: none;
 }
 
-
-
-
-
 /* O foco visível dos controles nativos (a caixa de marcar e a régua): o anel do sistema varia entre motores, e este é o mesmo dos botões da tela. */
 .server-marcar input:focus-visible,
 .server-regua input[type="range"]:focus-visible {
@@ -1040,9 +944,7 @@
   outline-offset: 2px;
 }
 
-
 /* O teclado aberto sobre um campo de uma seção: o painel ganha folga embaixo, para o campo poder rolar até ficar acima dele. */
-
 
 /* Direção visual 0.17.4 — componente proprietário. */
 .server-frase {
@@ -1062,11 +964,11 @@
 
 .server-painel {
   min-height: 0;
-  padding: 24px;
+  padding: 20px 28px 24px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -1093,6 +995,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  border-bottom-color: var(--seele-vidro-borda);
 }
 
 .server-bloco-corpo {
@@ -1112,39 +1015,36 @@
   margin: 0;
 }
 
-
 .server-faixa {
   position: sticky;
   top: 0;
   z-index: 2;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--seele-linha);
+  padding: 24px 28px 0;
+  border-bottom: 0;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px 16px;
   flex-shrink: 0;
-  background: var(--seele-negro-absoluto);
+  background: transparent;
   flex-wrap: wrap;
 }
 
 .server-secao {
   width: 100%;
-  min-height: 52px;
-  padding: 6px 16px;
+  min-height: 44px;
+  padding: 8px 12px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   font: inherit;
   text-align: left;
-  color: var(--seele-osso);
+  color: color-mix(in srgb, var(--seele-osso) 82%, var(--seele-negro-painel));
   background: none;
-  border: none;
-  border-bottom: 1px solid var(--seele-linha);
-  border-left: 2px solid transparent;
+  border: 1px solid transparent;
   cursor: pointer;
-  border-radius: var(--seele-raio);
+  border-radius: var(--seele-raio-icone);
+  font-family: var(--seele-ui);
 }
-
 
 .server-secao .nota {
   font-size: 12px;
@@ -1155,8 +1055,6 @@
   background: var(--seele-selected);
   color: var(--seele-laranja-nerv);
 }
-
-
 
 .camada-server {
   --seele-osso-apagado: var(--seele-rotulo-claro);
@@ -1188,27 +1086,28 @@
 
 .server-modos {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .server-secao-nome {
-  font-family: var(--seele-mono);
+  font-family: var(--seele-ui);
   font-weight: 400;
   font-size: 14px;
-  line-height: 1;
+  line-height: 1.2;
   letter-spacing: 0;
 }
 
 .server-bloco-nome {
   margin: 0;
-  font-family: var(--seele-display);
-  font-weight: 500;
-  font-size: 24px;
-  line-height: 1.3;
-  letter-spacing: .02em;
-  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
+  text-transform: uppercase;
 }
 
 .server-painel-secao > * {
@@ -1216,15 +1115,15 @@
 }
 
 .server-painel-secao:not(#painel-audio) .server-bloco {
-  border-color: var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
+  border-color: var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
   overflow: hidden;
   width: 100%;
 }
 
 .server-painel-secao:not(#painel-audio) .server-bloco-topo {
   gap: 8px;
-  padding: 20px 24px;
+  padding: 16px 20px;
 }
 
 .server-painel-secao:not(#painel-audio) .server-bloco-corpo {
@@ -1232,8 +1131,8 @@
 }
 
 .server-painel-secao:not(#painel-audio) .server-bloco-nome {
-  font-size: 26px;
-  letter-spacing: 0;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
 }
 
 .server-painel-secao:not(#painel-audio) .nota,
@@ -1244,7 +1143,7 @@
 
 .server-painel-secao:not(#painel-audio) .rotulo {
   font-size: 11px;
-  letter-spacing: .04em;
+  letter-spacing: var(--seele-tracking-rotulo);
 }
 
 .server-painel-secao:not(#painel-audio) .botao-fantasma {
@@ -1434,7 +1333,6 @@
 
 /* Condições de composição, após os valores padrão. */
 
-
 /* Condições de composição, após os valores padrão do componente. */
 @media (max-width: 700px) {
   .server {
@@ -1473,16 +1371,13 @@
   #tela-server[data-vista="secao"] .server { grid-template-rows: minmax(0, 1fr); }
 }
 
-
 @media (max-width: 700px), (max-height: 500px) {
   html[data-teclado] .server-painel { padding-bottom: 55vh; }
 }
 
-
 @media (min-width: 701px) and (max-width: 1000px) {
 .server-painel-secao { grid-template-columns: minmax(0, 1fr); }
 }
-
 
 @media (max-width: 700px) {
 .server-painel-secao { grid-template-columns: minmax(0, 1fr); }
@@ -1491,11 +1386,9 @@
 .server-faixa { padding: 12px 16px; }
 }
 
-
 @media(max-width: 700px) {
 .server-modos { grid-template-columns: minmax(0, 1fr); }
 }
-
 
 @media (max-width: 700px) {
 .server-modos { display: grid; min-width: 0; }
@@ -1516,4 +1409,344 @@
   #painel-porta .porta-linha > button { min-height: 44px; flex: 1 1 100%; }
   #painel-porta .porta-linha > input { flex-basis: 100%; }
   #painel-servidor .server-icone-botoes > button { white-space: normal; min-height: 44px; }
+}
+
+/* ======================================================================
+   Redesign 0.19 — CONFIGURAÇÕES
+   O canvas «SEELE — novo design» (Config-mods, Config-som, Atualizacao).
+   Vem depois da direção 0.17.4 acima e ganha dela pela ordem. Estrutura e
+   ids intactos; o que muda é só a pele: dois painéis de vidro lado a lado
+   (as seções, o conteúdo), item de navegação em pílula de 12px, título em
+   Inter Tight, controles em pílula e cartões de 18px.
+   ====================================================================== */
+
+/* ---- a casca: coluna de seções + painel de conteúdo, sobre a grade de pontos ---- */
+@media (min-width: 701px) {
+  .camada-server {
+    padding: 16px;
+    background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+    background-size: 6px 6px;
+  }
+  .camada-server > .server {
+    grid-template-columns: 248px minmax(0, 1fr);
+    gap: 12px;
+    background: transparent;
+    overflow: visible;
+  }
+  .server-coluna,
+  .server-corpo {
+    background: var(--seele-vidro);
+    border: 1px solid var(--seele-vidro-borda);
+    border-radius: var(--seele-raio-painel);
+  }
+  .server-coluna { padding: 22px 14px; gap: 4px; }
+  .server-corpo { overflow: hidden; }
+}
+
+/* O nome da tela: Inter Tight, na largura da coluna sem quebrar no meio da palavra. */
+
+/* O rótulo de grupo é o `.L` do canvas: miúdo, mono, caixa alta, apagado. */
+
+/* O item de navegação: 12px de canto, vidro quando aceso. O alvo continua com 44px. */
+
+.server-secao:hover { background: var(--seele-controle); }
+.server-secao[aria-current="true"] {
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+  color: var(--seele-osso);
+}
+
+.server-secao .nota { font-size: 12px; }
+
+/* Voltar: pílula de vidro. */
+
+.server-voltar:hover { color: var(--seele-osso); background: var(--seele-controle-hover); }
+
+/* A faixa de cima do conteúdo: título grande à esquerda, contexto à direita. */
+
+/* ---- blocos e rótulos ---- */
+
+/* ---- as linhas de escolha: cartão de 18px, o escolhido com borda laranja ---- */
+
+.server-dispositivo:hover:not(:disabled) { background: var(--seele-controle); }
+.server-dispositivo[data-escolhido="sim"] {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  background: var(--seele-vidro);
+}
+/* A marca (ESCOLHIDO, EM USO, PADRÃO) é uma pílula, e é texto: a cor nunca é a única. */
+
+.server-dispositivo-marca:empty { display: none; }
+.server-dispositivo[data-escolhido="sim"] .server-dispositivo-marca {
+  color: var(--seele-laranja-claro);
+  background: var(--seele-laranja-fraco);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+}
+
+/* ---- os modos do microfone: três pílulas ---- */
+
+.server-modo:hover:not(:disabled) { background: var(--seele-controle-hover); border-color: var(--seele-controle-borda); }
+
+.server-modo[aria-pressed="true"] {
+  background: var(--seele-laranja-fraco);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 60%, transparent);
+  color: var(--seele-laranja-claro);
+}
+
+/* ---- controles pequenos ---- */
+
+.server-lista-acao:hover,
+.server-lista-acao:focus-visible { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
+#server-testar-microfone, #server-ouvir-microfone { min-height: 44px; padding: 0 18px; font-size: 14px; letter-spacing: 0; }
+.server-marcar input { width: 18px; height: 18px; accent-color: var(--seele-laranja-nerv); }
+
+/* O medidor do teste: pílula de 10px, preenchimento verde, o corte em laranja. */
+
+.server-nivel-preenchido[data-aberto="sim"] { background: var(--seele-fosforo); }
+
+/* ---- MICROFONE E SOM: linhas de rótulo à esquerda, controle à direita ---- */
+#painel-audio { grid-template-columns: minmax(0, 1fr); gap: 0; }
+#painel-audio .server-bloco {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  width: 100%;
+}
+#painel-audio .server-bloco-topo { padding: 0 0 8px; border-bottom: 0; }
+#painel-audio .server-bloco-corpo { padding: 0; gap: 0; }
+#painel-audio .server-campo {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 10px 24px;
+  align-items: start;
+  padding: 18px 0;
+  border-top: 1px solid var(--seele-vidro-borda);
+}
+#painel-audio .server-campo > .rotulo { grid-column: 1; align-self: start; padding-top: 4px; }
+#painel-audio .server-campo > :not(.rotulo) { grid-column: 2; min-width: 0; }
+#painel-audio .server-dispositivos { max-width: 520px; }
+#painel-audio .server-dispositivo { background: var(--seele-campo); border-color: var(--seele-campo-borda); border-radius: 14px; }
+#painel-audio .server-dispositivo[data-escolhido="sim"] { border-color: color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent); }
+#painel-audio .server-modos,
+#painel-audio .server-regua { max-width: 520px; }
+#painel-audio .server-bloco + .server-bloco { margin-top: 12px; }
+#painel-audio .server-bloco + .server-bloco .server-bloco-topo { padding-top: 12px; }
+@media (max-width: 900px) {
+  #painel-audio .server-campo { grid-template-columns: minmax(0, 1fr); }
+  #painel-audio .server-campo > .rotulo,
+  #painel-audio .server-campo > :not(.rotulo) { grid-column: 1; }
+}
+
+/* ---- MODS: abas em pílula, lista em cartões, regras ao lado, rascunho em faixa ---- */
+#painel-mods > .mods-tiras { gap: 4px; margin: 0; border-bottom: 0; }
+#painel-mods .mods-aba {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--seele-raio-pilula);
+  background: transparent;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+#painel-mods .mods-aba:hover { color: var(--seele-osso); }
+#painel-mods .mods-aba[aria-selected="true"] {
+  border-color: var(--seele-controle-borda);
+  background: var(--seele-controle-hover);
+  color: var(--seele-osso);
+  font-weight: 500;
+}
+
+/* Cada aba é uma lista de coisas, e não uma caixa dentro de uma caixa. */
+#painel-mods .mods-painel > .server-bloco {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+#painel-mods .mods-painel > .server-bloco > .server-bloco-topo { padding: 0 0 8px; border-bottom: 0; }
+#painel-mods .mods-painel > .server-bloco > .server-bloco-corpo { padding: 0; }
+#painel-mods .mods-painel > .server-bloco + .server-bloco { margin-top: 16px; }
+
+.mods-instalados-grade {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.mods-instalados-lista,
+.mods-instalados-regras { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+@media (max-width: 1100px) {
+  .mods-instalados-grade { grid-template-columns: minmax(0, 1fr); }
+}
+/* Sem nenhuma das duas perguntas à vista, a lista ocupa a largura toda. */
+.mods-instalados-grade:not(:has(.mods-instalados-regras > .server-bloco:not([hidden]))) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* O botão de instalar sobe para o canto de cima, na fileira do rótulo, como no canvas, e vira vidro. */
+#painel-mods #mods-painel-instalados > .server-bloco { position: relative; }
+#painel-mods #mods-painel-instalados > .server-bloco > .server-bloco-topo {
+  min-height: 44px;
+  justify-content: center;
+  padding-right: 260px;
+}
+#painel-mods #mods-instalar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  font-weight: 500;
+}
+#painel-mods #mods-instalar:not(:disabled):hover { background: var(--seele-controle-hover); }
+@media (max-width: 900px) {
+  #painel-mods #mods-painel-instalados > .server-bloco > .server-bloco-topo { min-height: 0; padding-right: 0; }
+  #painel-mods #mods-instalar { position: static; order: -2; align-self: flex-start; }
+}
+
+/* A linha de um MOD: nome e versão à esquerda, estado em pílula, ações à direita. */
+#painel-mods .mods-linha-gestao {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px 14px;
+  padding: 14px 16px;
+}
+#painel-mods .mods-linha-gestao > .server-dispositivo-nome,
+#painel-mods .mods-linha-gestao > .mods-linha-texto { order: 1; flex: 1 1 200px; gap: 4px; }
+#painel-mods .mods-linha-gestao > .botao-fantasma,
+#painel-mods .mods-linha-gestao > .mods-linha-botoes,
+#painel-mods .mods-linha-gestao > .mods-exigido { order: 2; }
+#painel-mods .mods-linha-gestao > .botao-fantasma { min-height: 36px; padding: 0 14px; font-size: 12px; }
+#painel-mods .mods-linha-gestao:has(.mods-pendente) { border-color: color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent); }
+#painel-mods .mods-id { font-family: var(--seele-ui); font-weight: 600; font-size: 15px; color: var(--seele-osso); }
+#painel-mods .mods-versao,
+#painel-mods .mods-servidor { font-family: var(--seele-ui); font-size: 12px; color: var(--seele-rotulo-painel); }
+#painel-mods .mods-recusado { font-family: var(--seele-ui); font-size: 12px; }
+
+/* O estado é texto numa pílula; `data-tom` vem de `tela-server.js` (só o enfeite lê). */
+#painel-mods .mods-estado,
+#painel-mods .mods-exigido {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso-apagado);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+}
+#painel-mods .mods-estado[data-tom="ativo"] {
+  color: var(--seele-fosforo);
+  background: var(--seele-fosforo-fraco);
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+}
+#painel-mods .mods-estado[data-tom="pendente"] {
+  color: var(--seele-laranja-claro);
+  background: var(--seele-laranja-fraco);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+}
+
+/* As duas perguntas ao lado da lista: QUEM PINTA e QUEM DESENHA O QUE. */
+#painel-mods .mods-instalados-regras .server-bloco {
+  padding: 14px 16px;
+  background: var(--seele-vidro);
+  border-color: color-mix(in srgb, var(--seele-osso) 9%, transparent);
+  border-radius: var(--seele-raio-cartao);
+}
+#painel-mods .mods-instalados-regras .server-bloco-topo { padding: 0 0 6px; border-bottom: 0; }
+#painel-mods .mods-instalados-regras .server-dispositivos { gap: 0; }
+#painel-mods .mods-instalados-regras .server-dispositivo {
+  min-height: 44px;
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--seele-osso) 6%, transparent);
+  border-radius: 0;
+}
+
+/* O rascunho: uma faixa. Laranja só quando há o que salvar; senão, vidro. */
+#painel-mods .mods-rascunho {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 0;
+  padding: 10px 10px 10px 18px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 20px;
+  background: var(--seele-vidro);
+}
+#painel-mods .mods-rascunho:has(#mods-salvar:not(:disabled)) {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 50%, transparent);
+}
+#painel-mods #mods-pendentes { margin: 0; flex: 1 1 240px; }
+#painel-mods .mods-rascunho:has(#mods-salvar:not(:disabled)) #mods-pendentes { color: var(--seele-laranja-claro); }
+#painel-mods .mods-rascunho-botoes { margin-left: auto; }
+
+/* ---- ATUALIZAÇÃO: a versão nova e o aviso de antes de instalar ---- */
+#painel-atualizacao .server-bloco { background: none; border: 0; border-radius: 0; overflow: visible; }
+#painel-atualizacao .server-bloco-topo { padding: 0 0 8px; border-bottom: 0; }
+#painel-atualizacao .server-bloco-corpo { padding: 0; gap: 16px; }
+
+#painel-atualizacao #atualizacao-notas-bloco {
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--seele-osso) 9%, transparent);
+  border-radius: var(--seele-raio-cartao);
+  background: color-mix(in srgb, var(--seele-negro-absoluto) 35%, transparent);
+}
+
+#painel-atualizacao .server-atualizacao-aviso {
+  padding: 24px 28px;
+  gap: 12px;
+  background: var(--seele-negro-painel);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  border-radius: var(--seele-raio-painel);
+}
+#painel-atualizacao .server-atualizacao-aviso .rotulo { color: var(--seele-laranja-nerv); }
+.server-atualizacao-aviso p,
+.server-atualizacao-aviso summary { font-family: var(--seele-ui); }
+.server-atualizacao-aviso p { max-width: none; }
+#painel-atualizacao #atualizacao-achado {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  max-width: 760px;
+}
+#painel-atualizacao #atualizacao-instalar { justify-self: end; }
+/* A mudança de versão do servidor é aviso, e aviso é laranja (vermelho é só alerta e queda). */
+#painel-atualizacao #atualizacao-travessia {
+  margin: 0;
+  max-width: none;
+  padding: 14px 18px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--seele-laranja-claro);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  border-radius: var(--seele-raio-cartao);
+}
+#painel-atualizacao #atualizacao-procurar { align-self: flex-start; }
+#painel-atualizacao #atualizacao-andamento { gap: 6px; }
+
+/* A lista de versões guardadas é a mesma de cartões, com o botão ao fim da linha. */
+#painel-versoes .server-dispositivo,
+#painel-malha .server-dispositivo {
+  border-color: color-mix(in srgb, var(--seele-osso) 9%, transparent);
+  border-radius: var(--seele-raio-cartao);
+}
+
+/* O celular (< 700px) volta ao espaçamento enxuto: sem moldura de vidro, e a faixa e o painel colados nas bordas. */
+@media (max-width: 700px) {
+  .server-faixa { padding: 12px 16px; }
+  .server-painel { padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .server-titulo { font-size: 24px; }
+  .server-marca { padding: 12px 16px; }
+  #painel-mods #mods-painel-instalados > .server-bloco > .server-bloco-topo { padding-right: 0; }
 }

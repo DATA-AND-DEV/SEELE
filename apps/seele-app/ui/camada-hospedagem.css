@@ -5,13 +5,14 @@
 .boot-meu-servidor {
   display: flex;
   flex-direction: column;
-  gap: var(--seele-e1);
-  padding: var(--seele-e1) var(--seele-e2);
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  gap: 14px;
+  padding: 14px 16px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+  border-radius: var(--seele-raio-cartao);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 35%, transparent);
 }
 
 .boot-meu-servidor .nota {
   margin: 0;
   color: var(--seele-osso);
 }
-

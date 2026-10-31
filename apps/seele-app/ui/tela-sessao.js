@@ -3270,6 +3270,14 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
 
   const cabeca = elemento("span", "pessoa-cabeca");
   const identidade = elemento("span", "pessoa-identidade");
+  // O quadrado de iniciais do desenho 0.19, antes do nome. Decoração: o nome
+  // inteiro está ao lado, e anunciar `AN` antes de `ana` seria ler duas vezes.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    const avatar = elemento("span", "pessoa-avatar", iniciaisDoApelido(String(pessoa.nome ?? "")));
+    avatar.setAttribute("aria-hidden", "true");
+    vestirAvatar(avatar, pessoa.id);
+    identidade.append(avatar);
+  }
   // Na apresentação do MOD, este é o nome verificável nos detalhes nativos.
   identidade.append(nomeDaPessoa(pessoa));
 

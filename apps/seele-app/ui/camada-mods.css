@@ -27,133 +27,13 @@
   opacity: 0.78;
 }
 
-.mods-caixa {
-  position: relative;
-  width: 100%;
-  max-width: 760px;
-  max-height: calc(100dvh - 48px);
-  display: flex;
-  flex-direction: column;
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
-}
-
-.mods-cabeca {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 24px;
-  background: var(--seele-negro-absoluto);
-  color: var(--seele-osso);
-  flex: 0 0 auto;
-  min-height: 64px;
-  border-bottom: 1px solid var(--seele-linha);
-}
-
-.mods-titulo {
-  margin: 0;
-  font-family: var(--seele-display);
-  font-weight: 500;
-  font-size: 24px;
-  letter-spacing: .02em;
-  line-height: 1.25;
-}
-
-.mods-contagem {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.08em;
-}
-
-.mods-corpo-geral {
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.mods-prosa {
-  margin: 0;
-  font-size: var(--seele-t-corpo);
-  line-height: 1.45;
-  color: var(--seele-osso);
-}
-
-.mods-servidor-alvo {
-  margin: 0;
-  font-size: var(--seele-t-dado);
-  color: var(--seele-osso-apagado);
-}
-
-.mods-alvo {
-  font-family: var(--seele-mono);
-  color: var(--seele-osso);
-}
-
-/* **A lista rola, e o resto não.**
- *
- * O número de MODs vem do servidor, e nada o limita a caber numa tela. Sem
- * isto, um servidor com muitos MODs empurraria os botões para fora da janela —
- * e o `base.css` põe `overflow: hidden` no `body`, então nem a janela rolaria
- * atrás. A pessoa ficaria presa numa pergunta sem como respondê-la. */
-.mods-lista {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  overflow-y: auto;
-  min-height: 0;
-  background: var(--seele-linha);
-  border: 1px solid var(--seele-linha);
-  max-height: none;
-  overflow: visible;
-  flex: 0 0 auto;
-}
-
-.mods-item {
-  display: flex;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--seele-negro-painel);
-}
-
-.mods-ordem {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-rotulo);
-  color: var(--seele-osso-apagado);
-  flex: 0 0 auto;
-  padding-top: 2px;
-}
-
-.mods-corpo {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.mods-id {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-corpo);
-  color: var(--seele-osso);
-  word-break: break-all;
-}
-
 .mods-versao {
   font-family: var(--seele-mono);
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
 }
 
-.mods-repo,
-.mods-hash {
+.mods-repo, .mods-hash {
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -163,62 +43,11 @@
   word-break: break-all;
 }
 
-.mods-alcances {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.mods-etiqueta {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-  border: 1px solid var(--seele-linha-forte);
-  color: var(--seele-osso);
-}
-
-.mods-etiqueta-vazia { color: var(--seele-osso-apagado); }
-
-/* Laranja e não mais uma etiqueta cinza: rodar na máquina de quem hospeda não é
- * mais um alcance entre outros — é código de terceiro rodando no computador de
- * outra pessoa, e o ADR 0045 o separa pelo mesmo motivo. */
-.mods-servidor {
-  margin: 4px 0 0;
-  font-size: var(--seele-t-dado);
-  line-height: 1.4;
-  color: var(--seele-laranja-nerv);
-}
-
-/* A porta do tema (`"tema": true`): também à parte dos alcances, mas sem o
- * laranja do código que roda na máquina de outra pessoa. É aparência, e não
- * rede nem disco. */
-.mods-tema {
-  margin: 4px 0 0;
-  font-size: var(--seele-t-dado);
-  line-height: 1.4;
-  color: var(--seele-osso);
-}
-
 /* O que falhou no aceite, em linhas: `fraseDeErro` de uma falha que a casca não
  * sabe nomear tem três («ALGO FALHOU…», «Se for relatar, copie…», o texto), e
  * sem `pre-line` elas se emendam numa só, com «abaixo» apontando para nada. */
 #mods-erro {
   white-space: pre-line;
-}
-
-.mods-acoes {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  flex: 0 0 auto;
-  position: sticky;
-  bottom: 0;
-  margin-bottom: 0;
-  padding: 16px 0 0;
-  background: var(--seele-negro-painel);
-  border-top: 1px solid var(--seele-linha);
 }
 
 /* ------------------------------------ a gestão, na tela de CONFIGURAÇÕES
@@ -307,17 +136,6 @@
  * do tempo e empurraria o botão para baixo quando aparecesse. */
 .mods-aviso-bom { color: var(--seele-fosforo); }
 
-/* O aviso de que a lista mudou desde o último sim. Laranja e não vermelho: não
- * é erro — é a informação que decide se vale a pena ler a lista de novo. */
-.mods-mudou {
-  margin: 0;
-  padding: 8px 10px;
-  border-left: 2px solid var(--seele-laranja-nerv);
-  font-size: var(--seele-t-dado);
-  line-height: 1.4;
-  color: var(--seele-laranja-nerv);
-}
-
 /* ---------- exigido por este servidor ----------
 
    Onde quem entrou via um botão DESLIGAR desabilitado. Não é um controle, é
@@ -367,7 +185,6 @@
   color: var(--seele-laranja-nerv);
 }
 
-
 /* O estado de um MOD, em palavra e não em cor — U11.
 
    Quatro perguntas diferentes que duas palavras respondiam: instalado,
@@ -380,7 +197,6 @@
   letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-osso-apagado);
 }
-
 
 /* As abas da gestão — U12.
 
@@ -505,3 +321,241 @@
 
 .mods-acoes > button { font-family:var(--seele-mono); font-size:14px; letter-spacing:0; font-weight:500; margin:0; }
 @media(max-width:700px) { .camada-mods { padding:12px; } .mods-caixa { max-height:calc(100dvh - 24px); } .mods-cabeca,.mods-corpo-geral { padding:16px; } .mods-acoes { flex-wrap:wrap; } .mods-acoes > button { min-height:44px; flex:1 1 120px; } }
+
+/* ---- 0.19: o aceite dos MODs (Mods-aceite.dc.html) ----
+   Uma caixa opaca de 32px de raio, o título grande, e cada MOD num cartão com a
+   marca à esquerda e o que ele alcança em linhas com seta. A lista, as
+   etiquetas e os avisos são os mesmos nós de antes; só a pele muda. */
+.mods-caixa {
+  position: relative;
+  width: 100%;
+  max-width: 760px;
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 32px;
+  overflow: hidden;
+  font-family: var(--seele-ui);
+}
+.mods-cabeca {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 40px 44px 0;
+  background: none;
+  color: var(--seele-osso);
+  flex: 0 0 auto;
+  min-height: 0;
+  border-bottom: 0;
+  flex-wrap: wrap;
+}
+.mods-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 44px;
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
+  color: var(--seele-osso);
+}
+.mods-contagem {
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  letter-spacing: .06em;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 10px;
+  border-radius: var(--seele-raio-pilula);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  color: var(--seele-laranja-claro);
+  white-space: nowrap;
+}
+.mods-corpo-geral {
+  padding: 22px 44px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.mods-prosa {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--seele-osso);
+}
+.mods-servidor-alvo {
+  margin: 0;
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
+}
+.mods-alvo {
+  font-family: var(--seele-mono);
+  color: var(--seele-osso);
+}
+
+/* **A lista rola, e o resto não.**
+ *
+ * O número de MODs vem do servidor, e nada o limita a caber numa tela. Sem
+ * isto, um servidor com muitos MODs empurraria os botões para fora da janela —
+ * e o `base.css` põe `overflow: hidden` no `body`, então nem a janela rolaria
+ * atrás. A pessoa ficaria presa numa pergunta sem como respondê-la. */
+.mods-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  background: none;
+  border: 0;
+  max-height: none;
+  overflow: visible;
+  flex: 0 0 auto;
+}
+.mods-item {
+  display: flex;
+  gap: 16px;
+  padding: 18px 20px;
+  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--seele-osso) 9%, transparent);
+  border-radius: 20px;
+}
+.mods-ordem {
+  font-family: var(--seele-mono);
+  font-size: 14px;
+  color: var(--seele-laranja-nerv);
+  flex: 0 0 44px;
+  padding-top: 2px;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 12%, transparent);
+  font-weight: 500;
+}
+.mods-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.mods-id {
+  font-family: var(--seele-ui);
+  font-size: 16px;
+  color: var(--seele-osso);
+  word-break: break-all;
+  font-weight: 600;
+}
+.mods-versao, .mods-repo, .mods-hash {
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  color: var(--seele-osso-apagado);
+}
+.mods-repo .rotulo,
+.mods-hash .rotulo { font-size: 10px; }
+.mods-alcances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.mods-etiqueta {
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  letter-spacing: .06em;
+  padding: 0 10px;
+  border: 1px solid var(--seele-controle-borda);
+  color: var(--seele-osso-apagado);
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border-radius: var(--seele-raio-pilula);
+}
+.mods-etiqueta-vazia {
+  color: var(--seele-osso-apagado);
+}
+.mods-servidor, .mods-tema {
+  display: flex;
+  gap: 8px;
+  margin: 2px 0 0;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mods-servidor::before, .mods-tema::before {
+  content: "→";
+  flex: 0 0 auto;
+  color: var(--seele-laranja-nerv);
+}
+/* Laranja e não mais uma etiqueta cinza: rodar na máquina de quem hospeda não é
+ * mais um alcance entre outros — é código de terceiro rodando no computador de
+ * outra pessoa, e o ADR 0045 o separa pelo mesmo motivo. */
+.mods-servidor {
+  margin: 4px 0 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+  color: var(--seele-laranja-claro);
+}
+/* A porta do tema (`"tema": true`): também à parte dos alcances, mas sem o
+ * laranja do código que roda na máquina de outra pessoa. É aparência, e não
+ * rede nem disco. */
+.mods-tema {
+  margin: 4px 0 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+  color: var(--seele-osso);
+}
+/* O aviso de que a lista mudou desde o último sim. Laranja e não vermelho: não
+ * é erro — é a informação que decide se vale a pena ler a lista de novo. */
+.mods-mudou {
+  margin: 0;
+  padding: 12px 16px;
+  border-left: 2px solid var(--seele-laranja-nerv);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-laranja-claro);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+  border-radius: var(--seele-raio);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 50%, transparent);
+}
+.mods-corpo-geral > .nota { font-size: 12px; color: var(--seele-osso-apagado); }
+.mods-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  margin-bottom: 0;
+  padding: 16px 44px 40px;
+  background: var(--seele-negro-painel);
+  border-top: 0;
+  margin: 0 -44px;
+}
+.mods-acoes > button {
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 44px;
+}
+.mods-acoes > .nomear-confirmar { font-weight: 600; }
+@media (max-width: 700px) {
+  .mods-caixa { border-radius: 24px; }
+  .mods-cabeca { padding: 24px 20px 0; }
+  .mods-titulo { font-size: 30px; }
+  .mods-corpo-geral { padding: 16px 20px 0; gap: 16px; }
+  .mods-item { padding: 14px; gap: 12px; }
+  .mods-ordem { flex-basis: 36px; height: 36px; }
+  .mods-acoes { margin: 0 -20px; padding: 12px 20px 20px; }
+}

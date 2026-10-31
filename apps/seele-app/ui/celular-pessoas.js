@@ -15,6 +15,15 @@
 
   const lista = document.getElementById("lista-roster");
 
+  // O sinal fica à vista na linha (specs/06: número e barra, nunca só cor). O
+  // desktop recolhe o diagnóstico num `<details>`, e o celular o abre: o resumo
+  // dele é escondido pela folha de estilo, e o toque é da linha.
+  const abrirDiagnosticos = () => {
+    for (const detalhe of lista.querySelectorAll("details.pessoa-diagnostico:not([open])")) detalhe.open = true;
+  };
+  new MutationObserver(abrirDiagnosticos).observe(lista, { childList: true, subtree: true });
+  abrirDiagnosticos();
+
   // A captura vem antes do ouvinte de moderação do desktop, que mora na mesma
   // lista. Só o nome e as partes sem ação da linha abrem a folha: um botão ou
   // um link que um MOD desenhou na linha continua fazendo o que é dele.

@@ -34,72 +34,89 @@
   position: absolute;
   inset: 0;
   background: var(--seele-negro-absoluto);
-  opacity: 0.72;
+  opacity: 0.8;
 }
 
 /* ---------- a caixa ----------
-   A camada ocupa a JANELA INTEIRA (o esqueleto da área útil): o cabeçalho, a regra e as abas em cima, e embaixo a lista e o editor lado a lado, cada
-   um rolando na própria linha. O que fica estreito é o parágrafo (`--seele-leitura`), e não a caixa: uma coluna de 1120px no meio da janela
-   deixava as laterais vazias e o editor apertado. Os recuos do aparelho (a ilha e os cantos, em paisagem) entram como `padding` lateral. */
+   Redesign 0.19: a página do desenho dentro de uma camada — o negro quente com a
+   grade de pontos, e sobre ele painéis de vidro de 24px separados por 12px: o
+   cabeçalho, a lista, o editor. A camada ocupa a JANELA INTEIRA (o esqueleto da
+   área útil): o cabeçalho, as abas e a regra em cima, e embaixo a lista e o
+   editor lado a lado, cada um rolando na própria linha. O que fica estreito é o
+   parágrafo (`--seele-leitura`), e não a caixa. Os recuos do aparelho (a ilha e
+   os cantos, em paisagem) entram como `padding` lateral. */
 .cargos-caixa {
   position: relative;
   display: flex;
   flex-direction: column;
+  gap: 12px;
   box-sizing: border-box;
   width: 100%;
-  height: min(860px, calc(100dvh - 48px));
-  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
-  padding-bottom: env(safe-area-inset-bottom);
-  border: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-absoluto);
+  max-width: 1280px;
+  height: min(900px, calc(100dvh - 48px));
+  padding: 16px;
+  padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
+  background-color: var(--seele-negro-absoluto);
+  background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+  background-size: 6px 6px;
   overflow: hidden;
-  max-width: 1120px;
-  border-radius: var(--seele-raio);
 }
 
+/* O cabeçalho é o primeiro painel de vidro: o rótulo do servidor em cima do
+   título, e FECHAR à direita. */
 .cargos-cabeca {
+  order: 1;
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px 16px;
-  padding: 16px 24px;
-  background: var(--seele-negro-absoluto);
+  padding: 18px 24px;
   color: var(--seele-osso);
-  min-height: 64px;
-  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
   flex: 0 0 auto;
 }
 
 .cargos-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: 500;
-  font-size: 28px;
-  line-height: 1.25;
-  letter-spacing: .02em;
+  font-weight: 700;
+  font-size: 30px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
 }
 
 .cargos-servidor {
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
   overflow-wrap: anywhere;
 }
 
 .cargos-fechar {
   margin-left: auto;
-  font: inherit;
-  font-family: var(--seele-mono);
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
   font-weight: 500;
   font-size: 14px;
   letter-spacing: 0;
-  padding: 8px 12px;
-  color: var(--seele-osso-apagado);
-  background: var(--seele-negro-absoluto);
-  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
-  min-height: 40px;
-  border-radius: var(--seele-raio);
 }
+
+.cargos-fechar:hover { background: var(--seele-controle-hover); }
 
 .cargos-fechar:focus-visible {
   outline: 2px solid var(--seele-laranja-nerv);
@@ -108,68 +125,72 @@
 
 /* ---------- a regra, sempre à vista ----------
    Três frases curtas no alto de toda aba: a ordem, a combinação e o
-   proprietário. É a parte do pedido que diz «precisa ficar bem esclarecido»,
-   e uma regra que só aparece num tooltip não esclarece ninguém. */
+   proprietário. É a parte do pedido que diz «precisa ficar bem esclarecido», e
+   uma regra que só aparece num tooltip não esclarece ninguém. No desenho é uma
+   linha de texto solta, sem painel. */
 .cargos-regra {
+  order: 3;
   display: grid;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px 24px;
-  border-bottom: var(--seele-b) solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
+  gap: 8px 24px;
+  padding: 0 8px;
+  font-family: var(--seele-ui);
   font-size: 13px;
   line-height: 1.6;
-  grid-template-columns: repeat(3,minmax(0,1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   flex: 0 0 auto;
 }
 
 .cargos-regra-frase {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: 13px;
   line-height: 1.6;
-  color: var(--seele-osso);
+  color: var(--seele-osso-apagado);
   max-width: var(--seele-leitura);
 }
 
 .cargos-regra-frase:empty { display: none; }
 
-/* ---------- as abas ---------- */
+/* ---------- as abas ----------
+   Pílulas: a ativa é vidro com borda, as outras só texto. Ficam logo abaixo do
+   cabeçalho, antes da regra (`order` em cada um: cabeçalho 1, abas 2, regra 3,
+   estado e recusa 4, painéis 5): no desenho elas moram dentro do cabeçalho. */
 .cargos-abas {
+  order: 2;
   display: flex;
-  gap: 16px;
-  border-bottom: var(--seele-b) solid var(--seele-linha-forte);
-  padding: 0 24px;
+  gap: 4px;
+  padding: 0 8px;
   flex: 0 0 auto;
 }
 
 .cargos-aba {
   flex: 0 1 auto;
-  font: inherit;
-  font-family: var(--seele-mono);
+  font-family: var(--seele-ui);
   font-weight: 500;
   font-size: 14px;
   letter-spacing: 0;
-  padding: 10px 20px;
+  padding: 0 16px;
   min-height: 44px;
   color: var(--seele-rotulo-claro);
   background: none;
-  border: 0;
-  border-bottom: var(--seele-b-forte) solid transparent;
+  border: 1px solid transparent;
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
-  border-radius: var(--seele-raio);
 }
 
 .cargos-aba[aria-selected="true"] {
   color: var(--seele-osso);
-  border-bottom-color: var(--seele-laranja-nerv);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
 }
 
 .cargos-aba:hover { color: var(--seele-osso); }
 .cargos-aba:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
 
 .cargos-estado {
+  order: 4;
   margin: 0;
-  padding: 0 20px;
+  padding: 0 8px;
   font-size: var(--seele-t-dado);
   color: var(--seele-rotulo-claro);
 }
@@ -177,17 +198,20 @@
 .cargos-estado:empty { display: none; }
 
 .cargos-recusa {
-  margin: 8px 20px 0;
+  order: 4;
+  margin: 0 8px;
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
 /* ---------- os painéis: lista e detalhe ---------- */
 .cargos-painel {
+  order: 5;
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: 240px minmax(0,1fr);
+  gap: 12px;
+  grid-template-columns: 280px minmax(0, 1fr);
 }
 
 .cargos-painel[hidden] { display: none; }
@@ -196,7 +220,10 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px 20px;
+  padding: 22px 26px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
 }
 
 .cargos-mestre {
@@ -204,16 +231,21 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px 20px;
-  border-right: var(--seele-b) solid var(--seele-linha-forte);
+  padding: 18px 12px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
 }
 
 .cargos-detalhe {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 24px;
-  gap: 24px;
+  padding: 22px 26px;
+  gap: 16px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
 }
 
 /* O que o servidor enche rola por dentro: um servidor com quarenta cargos não
@@ -239,32 +271,33 @@
   gap: 4px;
 }
 
+/* A linha do cargo: posição, amostra de cor, nome e meta. A escolhida é vidro
+   mais claro com borda; as outras não têm moldura nenhuma. */
 .cargos-item-botao {
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
   grid-template-columns: auto auto 1fr;
   grid-template-rows: auto auto;
-  column-gap: 8px;
+  column-gap: 10px;
   align-items: center;
   text-align: left;
-  font: inherit;
-  padding: 8px 10px;
+  font-family: var(--seele-ui);
+  padding: 8px 12px;
   min-height: 44px;
   color: var(--seele-osso);
-  background: var(--seele-negro-painel);
-  border: var(--seele-b) solid var(--seele-linha);
-  border-left: var(--seele-b-forte) solid var(--seele-linha-forte);
+  background: none;
+  border: var(--seele-b) solid transparent;
+  border-radius: 14px;
   cursor: pointer;
 }
 
-.cargos-item-botao:hover { border-color: var(--seele-linha-forte); }
+.cargos-item-botao:hover { background: var(--seele-controle); }
 .cargos-item-botao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
 .cargos-item-botao[aria-current="true"] {
-  background: var(--seele-laranja-fraco);
-  border-color: var(--seele-laranja-nerv);
-  border-left-color: var(--seele-laranja-nerv);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
 }
 
 .cargos-item-pos {
@@ -277,12 +310,14 @@
 
 .cargos-item-nome {
   grid-column: 3;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 16px;
-  letter-spacing: 0.06em;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   overflow-wrap: anywhere;
 }
+
+.cargos-item-botao[aria-current="true"] .cargos-item-nome { font-weight: 600; }
 
 .cargos-item-meta {
   grid-column: 3;
@@ -296,8 +331,8 @@
   grid-row: 1 / span 2;
   width: 12px;
   height: 12px;
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  background: none;
+  border-radius: 4px;
+  background: var(--seele-rotulo-painel);
 }
 
 .cargos-cor-osso { background: var(--seele-osso); }
@@ -320,14 +355,15 @@
   font-family: var(--seele-mono);
   font-size: var(--seele-t-dado);
   color: var(--seele-osso);
-  background: none;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: 12px;
   cursor: pointer;
 }
 
 .cargos-ordem-botao .glifo { width: 12px; height: 12px; fill: currentColor; }
 .cargos-ordem-subir .glifo { transform: rotate(180deg); }
-.cargos-ordem-botao:hover:not(:disabled) { border-color: var(--seele-laranja-nerv); }
+.cargos-ordem-botao:hover:not(:disabled) { background: var(--seele-controle-hover); }
 .cargos-ordem-botao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 1px; }
 
 /* Desligado e ainda legível: o `title` diz o motivo, e o texto não some em
@@ -336,45 +372,51 @@
 .cargos-botao:disabled,
 .cargos-salvar:disabled {
   color: var(--seele-rotulo-claro);
-  border-color: var(--seele-linha);
+  border-color: var(--seele-vidro-borda);
   cursor: not-allowed;
 }
 
 /* ---------- botões ---------- */
 .cargos-botao {
   align-self: flex-start;
-  font: inherit;
-  font-family: var(--seele-mono);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--seele-ui);
   font-weight: 500;
   font-size: 14px;
   letter-spacing: 0;
-  padding: 10px 16px;
+  padding: 0 18px;
   min-height: 44px;
   color: var(--seele-osso);
-  background: none;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
-  border-radius: var(--seele-raio);
+  white-space: nowrap;
 }
 
-.cargos-botao:hover:not(:disabled) { border-color: var(--seele-laranja-nerv); }
+.cargos-botao:hover:not(:disabled) { background: var(--seele-controle-hover); }
 .cargos-botao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
-/* APAGAR fica à esquerda, longe do SALVAR: são as duas pontas da caixa. */
-.cargos-botao-apagar { margin-right: auto; }
+/* NOVO CARGO fica no pé da lista, como no desenho. */
+.cargos-mestre > .cargos-botao { margin-top: auto; }
 
-.cargos-salvar {
-  font-family: var(--seele-mono);
-  font-weight: 500;
-  font-size: 14px;
-  letter-spacing: 0;
-  padding: 10px 16px;
-  min-height: 44px;
-  border: 0;
-  border-radius: var(--seele-raio);
+/* APAGAR fica à esquerda, longe do SALVAR: são as duas pontas da caixa. A
+   moldura rosada é o recado de «isto não desfaz»; o texto continua dizendo qual
+   é o ato. */
+.cargos-botao-apagar {
+  margin-right: auto;
+  color: var(--seele-vermelho-claro);
+  border-color: color-mix(in srgb, var(--seele-vermelho-claro) 45%, transparent);
 }
 
-.cargos-salvar:disabled { background: var(--seele-negro-painel); border: var(--seele-b) solid var(--seele-linha); }
+.cargos-botao-apagar:hover:not(:disabled) { background: color-mix(in srgb, var(--seele-vermelho-claro) 10%, transparent); }
+
+/* O SALVAR é o `.botao` de `base.css` (laranja cheio); aqui só o desligado. */
+.cargos-salvar { min-height: 44px; }
+
+.cargos-salvar:disabled { background: var(--seele-controle); border: var(--seele-b) solid var(--seele-vidro-borda); }
 
 .cargos-voltar {
   display: none;
@@ -396,10 +438,11 @@
 .cargos-botoes {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  padding-top: 12px;
-  border-top: var(--seele-b) solid var(--seele-linha);
+  gap: 10px;
+  padding-top: 14px;
+  border-top: var(--seele-b) solid var(--seele-vidro-borda);
 }
 
 /* ---------- o editor ---------- */
@@ -408,7 +451,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .cargos-form[hidden] { display: none; }
@@ -416,17 +459,19 @@
 .cargos-editor-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 22px;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
 
-.cargos-editor-titulo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+.cargos-editor-titulo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; border-radius: var(--seele-raio-miudo); }
 
 .cargos-vazio {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-corpo);
   line-height: 1.55;
   color: var(--seele-osso);
@@ -438,17 +483,20 @@
    é «isto é do produto, olhe», e não alarme. */
 .cargos-motivo {
   margin: 0;
-  padding: 6px 10px;
+  padding: 8px 12px;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-dado);
   line-height: 1.5;
   color: var(--seele-osso);
   border-left: var(--seele-b-forte) solid var(--seele-laranja-nerv);
-  background: var(--seele-laranja-carga);
+  border-radius: var(--seele-raio-miudo);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
 }
 
 .cargos-campos {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
   gap: 16px;
 }
 
@@ -459,77 +507,90 @@
   min-width: 200px;
 }
 
+.cargos-campos > .cargos-campo:first-child { flex: 1 1 240px; }
+
+.cargos-campo > .rotulo { font-family: var(--seele-ui); font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--seele-osso); }
+
+/* Os campos são os de `base.css` (48px, canto de 16px, fundo negro a 55%). */
 .cargos-entrada {
-  font: inherit;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-dado);
-  min-height: 40px;
   color: var(--seele-osso);
-  background: var(--seele-negro-painel);
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  padding: 8px;
-  border-radius: var(--seele-raio);
 }
 
-.cargos-entrada:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 .cargos-entrada:disabled { color: var(--seele-rotulo-claro); cursor: not-allowed; }
 
 .cargos-rascunho {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-dado);
   color: var(--seele-laranja-nerv);
 }
 
-/* ---------- as permissões, por grupo ---------- */
+/* ---------- as permissões, por grupo ----------
+   Duas colunas que se equilibram sozinhas (conversa, voz e MODs de um lado;
+   moderação e servidor do outro), e cada grupo inteiro numa coluna só. */
 .cargos-permissoes {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  columns: 2 340px;
+  column-gap: 32px;
 }
 
 .cargos-grupo {
-  margin: 0;
+  margin: 0 0 12px;
   padding: 0;
   border: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
+  break-inside: avoid;
 }
 
 .cargos-grupo-titulo {
   margin: 0;
-  padding-bottom: 4px;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: var(--seele-t-rotulo);
+  padding: 8px 0 4px;
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
   letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-rotulo-claro);
-  border-bottom: var(--seele-b) solid var(--seele-linha);
+  color: var(--seele-rotulo-painel);
 }
 
+/* A linha da permissão: o nome e a explicação à esquerda, os três estados à
+   direita, e só uma régua em cima. */
 .cargos-permissao {
+  min-width: 0;
   margin: 0;
-  padding: 8px 10px;
+  padding: 10px 0;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 4px 16px;
   align-items: center;
-  border: var(--seele-b) solid var(--seele-linha);
-  background: var(--seele-negro-painel);
+  border: 0;
+  border-top: var(--seele-b) solid var(--seele-vidro-borda);
+  background: none;
 }
 
+/* O nome é um `<legend>`, que numa grade ficaria fora dela, em cima. O `float`
+   o tira do papel especial de legenda e o devolve à grade como um item comum:
+   é assim que o nome e os três estados dividem a mesma linha. */
 .cargos-permissao-nome {
+  float: left;
+  grid-column: 1;
+  grid-row: 1;
   padding: 0;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
+  font-family: var(--seele-ui);
+  font-weight: 500;
   font-size: 14px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   color: var(--seele-osso);
 }
 
 .cargos-permissao-desc {
-  grid-column: 1;
+  grid-column: 1 / -1;
   margin: 0;
-  font-size: var(--seele-t-dado);
+  font-family: var(--seele-ui);
+  font-size: 13px;
   line-height: 1.45;
   color: var(--seele-rotulo-claro);
   max-width: var(--seele-leitura);
@@ -540,8 +601,10 @@
 /* O que outro gestor mudou enquanto se editava: a régua grossa e a frase, e
    não só a cor. */
 .cargos-permissao-mudou {
-  border-color: var(--seele-laranja-nerv);
+  padding-left: 12px;
+  border-radius: var(--seele-raio-miudo);
   border-left: 4px solid var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 50%, transparent);
 }
 
 .cargos-mudou {
@@ -561,12 +624,17 @@
 }
 
 /* Os três estados como um grupo de rádio de verdade: setas do teclado, e um
-   nome por opção que se lê sem a cor. */
+   nome por opção que se lê sem a cor. No desenho é o segmento em pílula: o
+   escolhido enche — verde para CONCEDE, neutro para NÃO DECIDE, laranja para
+   RESTRINGE. */
 .cargos-tres {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   display: flex;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  gap: 2px;
+  padding: 2px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
 }
 
 .cargos-opcao {
@@ -574,15 +642,14 @@
   display: flex;
   align-items: center;
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-rotulo);
+  font-size: 11px;
   letter-spacing: 0.06em;
   padding: 0 10px;
   min-height: 36px;
-  color: var(--seele-rotulo-claro);
+  color: var(--seele-rotulo-painel);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
-
-.cargos-opcao + .cargos-opcao { border-left: var(--seele-b) solid var(--seele-linha-forte); }
 
 /* O rádio fica no lugar, invisível e com tamanho: é ele que recebe o foco e o
    clique, e o leitor de tela o lê pelo rótulo. */
@@ -594,36 +661,36 @@
   cursor: inherit;
 }
 
-.cargos-opcao:has(input:checked) { color: var(--seele-negro-absoluto); background: var(--seele-osso); }
-.cargos-opcao-concede:has(input:checked) { background: var(--seele-fosforo); }
-.cargos-opcao-restringe:has(input:checked) { background: var(--seele-laranja-nerv); }
+.cargos-opcao:has(input:checked) { color: var(--seele-osso); background: var(--seele-controle-hover); }
+.cargos-opcao-concede:has(input:checked) { color: var(--seele-fosforo); background: color-mix(in srgb, var(--seele-fosforo) 14%, transparent); }
+.cargos-opcao-restringe:has(input:checked) { color: var(--seele-laranja-claro); background: color-mix(in srgb, var(--seele-laranja-nerv) 16%, transparent); }
 .cargos-opcao:has(input:focus-visible) { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 .cargos-opcao:has(input:disabled) { cursor: not-allowed; }
 .cargos-opcao:has(input:disabled:not(:checked)) { color: var(--seele-linha-forte); }
 
 /* ---------- a prévia do ganho efetivo ----------
-   Quem passa a poder o quê, antes do ato. A moldura é laranja e cheia: é a
-   coisa que se lê antes de apertar, e não uma nota de rodapé. O que daria a
-   alguém mais do que quem pede tem — e o servidor vai recusar — leva a régua
-   grossa e a palavra, não uma cor só. */
+   Quem passa a poder o quê, antes do ato. No desenho é a coluna «o que muda
+   para as pessoas»: um rótulo e uma pastilha por mudança — verde para o que
+   ganha, laranja para o que perde. O que daria a alguém mais do que quem pede
+   tem — e o servidor vai recusar — leva a régua grossa e a palavra, não uma cor
+   só. */
 .cargos-previa {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
-  background: var(--seele-laranja-carga);
+  gap: 8px;
+  padding: 0;
+  border: 0;
 }
 
 .cargos-previa[hidden] { display: none; }
 
 .cargos-previa-titulo {
   margin: 0;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: var(--seele-t-rotulo);
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
   letter-spacing: var(--seele-tracking-rotulo);
-  color: var(--seele-osso);
+  color: var(--seele-rotulo-painel);
 }
 
 .cargos-previa-lista {
@@ -632,22 +699,36 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   max-height: 160px;
   overflow-y: auto;
 }
 
 .cargos-previa-item {
-  font-size: var(--seele-t-dado);
+  padding: 10px 12px;
+  font-family: var(--seele-ui);
+  font-size: 13px;
   line-height: 1.45;
   color: var(--seele-osso);
   overflow-wrap: anywhere;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 14px;
+  background: var(--seele-vidro);
 }
 
-.cargos-previa-ganha { padding-left: 8px; border-left: var(--seele-b-forte) solid var(--seele-fosforo); }
-.cargos-previa-perde { padding-left: 8px; border-left: var(--seele-b-forte) solid var(--seele-linha-forte); }
+.cargos-previa-ganha {
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 60%, transparent);
+  border-color: color-mix(in srgb, var(--seele-fosforo) 30%, transparent);
+}
+
+.cargos-previa-perde {
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 35%, transparent);
+}
+
 .cargos-previa-alem {
-  padding-left: 8px;
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 35%, transparent);
   border-left: 4px solid var(--seele-laranja-nerv);
   font-weight: 700;
 }
@@ -667,10 +748,11 @@
   grid-template-columns: auto auto 1fr;
   gap: 4px 10px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 8px 12px;
   min-height: 44px;
-  border: var(--seele-b) solid var(--seele-linha);
-  background: var(--seele-negro-painel);
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: 14px;
+  background: var(--seele-vidro);
   cursor: pointer;
 }
 
@@ -685,10 +767,10 @@
 .cargos-atribuicao:has(input:disabled) { cursor: not-allowed; }
 
 .cargos-atribuicao-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 15px;
-  letter-spacing: 0.06em;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
@@ -699,7 +781,7 @@
 .cargos-explicacao {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
 }
 
 .cargos-explicado {
@@ -707,9 +789,10 @@
   grid-template-columns: 9ch 1fr;
   gap: 2px 12px;
   align-items: baseline;
-  padding: 8px 10px;
-  border: var(--seele-b) solid var(--seele-linha);
-  background: var(--seele-negro-painel);
+  padding: 10px 12px;
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: 14px;
+  background: var(--seele-vidro);
 }
 
 .cargos-veredito {
@@ -725,6 +808,7 @@
 
 .cargos-explicado-regra {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-dado);
   line-height: 1.45;
   color: var(--seele-osso);

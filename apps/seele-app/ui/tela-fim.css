@@ -1,45 +1,4 @@
-/* SEELE — a tela de sessão encerrada (`#tela-fim`).
-   O cartão é o mesmo da entrada e vive em `base.css`; o que muda é a cartela
-   vermelha no lugar da assinatura, o motivo escrito abaixo dela e o par de
-   saídas — RECONECTAR e, menor, SAIR.
 
-   **O título tem nome próprio, e passou a ter por um defeito.** Ele se chamava
-   `.boot-marca.fim` e herdava de um `.boot-marca` de `base.css` a margem de
-   baixo — mas `.boot-marca`, na entrada, é o **contêiner** do símbolo e do
-   nome, e este aqui é um `<h1>` de uma palavra. Duas coisas sem relação nenhuma
-   atrás do mesmo nome: no dia em que a entrada da 0.9.0 mudou o seu para uma
-   fileira, o título do fim virou uma fileira junto, e a margem de que ele
-   dependia sumiu quando a regra de `base.css` deixou de existir. */
-
-.fim-titulo {
-  color: var(--seele-vermelho-alerta);
-  font-family: var(--seele-display);
-  font-weight: 500;
-  letter-spacing: .02em;
-  font-size: 28px;
-  line-height: 1.25;
-  display: block;
-  margin: 0 0 16px;
-}
-
-/* Mesmo tratamento do `.erro` da entrada — `pre-line` e `overflow-wrap:
-   anywhere` —, e a mesma razão: um motivo de queda pode trazer impressão
-   digital, que são 64 caracteres sem espaço nenhum onde quebrar. Osso e não
-   vermelho: aqui a sessão já acabou, e a cor de alerta é reservada ao que
-   impede de entrar (`tokens.css:19`).
-
-   Era um par de regras — `.erro, .fim-motivo` e depois `.fim-motivo` — e a
-   segunda só existia para desfazer duas declarações da primeira. Separadas as
-   duas telas, o valor resolvido é este: `margin: 16px 0 0` seguido de
-   `margin-bottom: 32px` é `margin: 16px 0 32px`, e o vermelho nunca chegava a
-   pintar nada. */
-.fim-motivo {
-  margin: 0 0 24px;
-  color: var(--seele-osso);
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-  line-height: 1.6;
-}
 
 /* A saída secundária, embaixo do RECONECTAR e visivelmente menor que ele.
    Um bloco próprio e não `inline`: os dois lado a lado dariam dois botões do
@@ -57,3 +16,87 @@
 #tela-fim .boot { width: min(480px,calc(100vw - 32px)); padding: 24px; border-radius: var(--seele-raio); }
 
 @media(max-width:700px) { #tela-fim .boot { padding:20px; } #tela-fim button { min-height:44px; } }
+
+/* ---- 0.19: «Conexão encerrada» sem cartão (Fim.dc.html) ----
+   O desenho tira a moldura: a marca partida, o título grande e as duas saídas
+   direto sobre o fundo, alinhados à esquerda numa coluna de 760px. */
+#tela-fim .boot {
+  width: min(760px, calc(100vw - 32px));
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 22px;
+  font-family: var(--seele-ui);
+}
+.fim-simbolo { width: 100%; height: 72px; flex: 0 0 auto; }
+.fim-no-cheio { fill: var(--seele-laranja-nerv); }
+.fim-no-vazio { fill: none; stroke: var(--seele-laranja-nerv); stroke-width: 4; }
+.fim-traco { fill: none; stroke: var(--seele-osso); stroke-width: 4; opacity: .5; }
+/* SEELE — a tela de sessão encerrada (`#tela-fim`).
+   O cartão é o mesmo da entrada e vive em `base.css`; o que muda é a cartela
+   vermelha no lugar da assinatura, o motivo escrito abaixo dela e o par de
+   saídas — RECONECTAR e, menor, SAIR.
+
+   **O título tem nome próprio, e passou a ter por um defeito.** Ele se chamava
+   `.boot-marca.fim` e herdava de um `.boot-marca` de `base.css` a margem de
+   baixo — mas `.boot-marca`, na entrada, é o **contêiner** do símbolo e do
+   nome, e este aqui é um `<h1>` de uma palavra. Duas coisas sem relação nenhuma
+   atrás do mesmo nome: no dia em que a entrada da 0.9.0 mudou o seu para uma
+   fileira, o título do fim virou uma fileira junto, e a margem de que ele
+   dependia sumiu quando a regra de `base.css` deixou de existir. */
+.fim-titulo {
+  color: var(--seele-osso);
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+  font-size: 72px;
+  line-height: 1.1;
+  display: block;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* Mesmo tratamento do `.erro` da entrada — `pre-line` e `overflow-wrap:
+   anywhere` —, e a mesma razão: um motivo de queda pode trazer impressão
+   digital, que são 64 caracteres sem espaço nenhum onde quebrar. Osso e não
+   vermelho: aqui a sessão já acabou, e a cor de alerta é reservada ao que
+   impede de entrar (`tokens.css:19`).
+
+   Era um par de regras — `.erro, .fim-motivo` e depois `.fim-motivo` — e a
+   segunda só existia para desfazer duas declarações da primeira. Separadas as
+   duas telas, o valor resolvido é este: `margin: 16px 0 0` seguido de
+   `margin-bottom: 32px` é `margin: 16px 0 32px`, e o vermelho nunca chegava a
+   pintar nada. */
+.fim-motivo {
+  margin: 0;
+  color: var(--seele-osso);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font-family: var(--seele-ui);
+  font-size: 20px;
+}
+#tela-fim .botao, #tela-fim .fim-sair {
+  display: inline-flex;
+  margin: 0;
+  min-height: 44px;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+/* Os dois botões lado a lado, como no desenho: o `SAIR` vem logo depois do
+   principal no DOM, então a coluna vira fileira que quebra. */
+#tela-fim .boot { flex-flow: row wrap; align-content: flex-start; }
+#tela-fim .boot > .fim-simbolo, #tela-fim .boot > .fim-titulo,
+#tela-fim .boot > .fim-motivo { flex: 1 0 100%; }
+#tela-fim .boot > .botao,
+#tela-fim .boot > .fim-sair { flex: 0 1 auto; }
+#tela-fim .boot { row-gap: 22px; column-gap: 10px; }
+@media (max-width: 700px) {
+  #tela-fim .boot { padding: 0 4px; }
+  .fim-titulo { font-size: 44px; }
+  .fim-motivo { font-size: 17px; }
+}

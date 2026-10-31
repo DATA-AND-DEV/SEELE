@@ -36,12 +36,6 @@
   grid-row: 1 / span 2;
 }
 
-.auth-corpo {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 /* A cartela do estado da conexão: bloco sólido de cor com o texto em negro, e
    nunca texto
    colorido sobre fundo escuro. É a regra de inversão que o v2 endureceu (§12 do
@@ -69,34 +63,11 @@
   border-color: var(--seele-laranja-nerv);
 }
 
-.cartela-padrao-rotulo {
-  font-family: var(--seele-display);
-  font-weight: 500;
-  font-size: 24px;
-  letter-spacing: .02em;
-  color: var(--seele-osso);
-  line-height: 1.25;
-}
-
 .cartela-padrao-kanji {
   font-weight: 900;
   font-size: 15px;
   color: var(--seele-osso-apagado);
 }
-
-/* A nota pertence à cartela, e por isso encosta nela: os 24px de `gap` da
-   coluna menos 16 dão os 8px que o comp usa entre as duas. */
-.auth-nota {
-  margin: -16px 0 0;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--seele-osso-apagado);
-}
-
-/* Os dois campos são leitura, e por isso `output` e não `input`: o endereço já
-   foi digitado no boot, e a chave local não atravessa a FFI. A moldura é a do
-   comp, inclusive a marca laranja à esquerda — que só o primeiro campo tem. */
-.campo-auth { gap: 8px; }
 
 .auth-valor {
   padding: 12px;
@@ -110,26 +81,6 @@
 }
 
 .auth-valor-marcado { border-left-color: var(--seele-laranja-nerv); }
-
-/* O convite já conferiu a identidade, e a tela diz isso antes de qualquer
-   clique — achado ALTO da avaliação de usabilidade. Fósforo e não laranja:
-   `tokens.css` reserva o fósforo ao que está nominal, e isto é exatamente uma
-   boa notícia sobre a conferência que já aconteceu. Encosta no campo do
-   endereço, como a nota encosta na cartela, porque é sobre ele que fala.
-
-   `pre-line` mantém a impressão digital na sua própria linha sem inventar um
-   segundo elemento, como na frase da espera. */
-.auth-conferido {
-  margin: 0;
-  padding: 12px;
-  border-left: 2px solid var(--seele-fosforo);
-  background: var(--seele-fosforo-fraco);
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--seele-fosforo);
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-}
 
 .botao-auth {
   width: 100%;
@@ -174,63 +125,23 @@
   padding: 24px;
 }
 
-.tela[data-modo="espera"] .cartela-padrao,
-.tela[data-modo="espera"] .auth-nota,
+.tela[data-modo="espera"] .cartela-padrao, .tela[data-modo="espera"] .auth-nota,
 .tela[data-modo="espera"] .auth-server { display: none; }
 
 .tela[data-modo="aperto"] .auth-espera,
 .tela[data-modo="aperto"] .auth-voltar { display: none; }
-
-.auth-espera { display: flex; flex-direction: column; gap: 16px; }
-
-/* A razão que o servidor mandou, virada frase em `frases.js`. Duas linhas — o que
-   houve e o que fazer —, e `pre-line` é o que as mantém separadas sem inventar
-   dois elementos, como na banda da portaria. */
-.auth-espera-frase {
-  margin: 0;
-  padding: 12px;
-  border-left: 2px solid var(--seele-laranja-nerv);
-  background: var(--seele-negro-painel);
-  font-size: var(--seele-t-dado);
-  line-height: 1.6;
-  white-space: pre-line;
-}
-
-.auth-espera-fatos {
-  margin: 0;
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--seele-osso-apagado);
-}
-
-/* A parede: quem hospeda decidiu que não, e o botão fica desabilitado com o
-   motivo escrito embaixo. Laranja e não vermelho — uma recusa de porta não é
-   alerta nem queda, e `tokens.css` reserva o vermelho às duas. */
-.auth-parede {
-  margin: -16px 0 0;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--seele-laranja-nerv);
-  white-space: pre-line;
-}
 
 /* Quanto falta para a próxima batida. Fica logo acima do botão desabilitado,
    que é onde ele responde a pergunta que aquele botão levanta — «isto está
    fazendo alguma coisa?». Apagado e miúdo: é andamento, e andamento gritado
    vira ruído que se aprende a ignorar. */
 .auth-repique {
-  margin: 0;
-  font-family: var(--seele-mono);
-  font-size: 11px;
-  letter-spacing: var(--seele-tracking-cartela);
+  margin: -8px 0 0;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  letter-spacing: 0;
   color: var(--seele-osso-apagado);
 }
-
-.auth-voltar { align-self: flex-start; }
 
 /* ---- B·02, o aperto de mão ---- */
 
@@ -248,87 +159,17 @@
   align-self: start;
 }
 
-.auth-aperto > .coordenada,
-.auth-server > .coordenada {
+.auth-aperto > .coordenada, .auth-server > .coordenada {
   padding: 12px 16px;
   border-bottom: 1px solid var(--seele-linha);
   flex: 0 0 auto;
 }
-
-.registro-linhas {
-  list-style: none;
-  margin: 0;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  line-height: 1.5;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-/* `min-width: 0` e `overflow-wrap: anywhere` no texto, e não na linha: uma
-   impressão digital são 64 caracteres sem espaço nenhum onde quebrar, e sem
-   isto ela empurra a coluna inteira. Foi a correção que o v2 fez neste painel. */
-.registro-linha { display: flex; gap: 12px; min-width: 0; }
-
-.registro-hora { flex-shrink: 0; color: var(--seele-linha-forte); }
 
 .registro-texto { min-width: 0; overflow-wrap: anywhere; white-space: pre-line; }
 
 .registro-texto[data-tom="atencao"] { color: var(--seele-laranja-nerv); }
 .registro-texto[data-tom="apagado"] { color: var(--seele-osso-apagado); }
 .registro-texto[data-tom="azul"] { color: var(--seele-padrao-azul); }
-
-/* ---- C·02, a ficha do servidor ---- */
-
-.auth-server {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--seele-negro-painel);
-  grid-column: 2;
-  grid-row: 1;
-  border: 1px solid var(--seele-linha);
-  border-radius: var(--seele-raio);
-  align-self: start;
-}
-
-.auth-server-corpo {
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
-}
-
-.auth-server-nome {
-  margin: 0;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 24px;
-  letter-spacing: 0.04em;
-  overflow-wrap: anywhere;
-  line-height: 1.3;
-}
-
-.auth-server-sub {
-  margin: 0;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.16em;
-  color: var(--seele-osso-apagado);
-}
-
-.auth-pares {
-  margin: 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--seele-linha);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 11px;
-}
 
 .auth-par { display: flex; justify-content: space-between; gap: 8px; }
 
@@ -344,5 +185,320 @@
 
 @media(max-width:700px) { .auth-entrada { grid-row:auto; } }
 
-.auth-titulo { margin:0; font-family:var(--seele-display); font-weight:500; font-size:28px; line-height:1.25; color:var(--seele-osso); }
-.auth-servidor-cabecalho { margin:0; padding:16px 24px; font-family:var(--seele-mono); font-weight:400; font-size:13px; line-height:1.5; color:var(--seele-osso-apagado); border-bottom:1px solid var(--seele-linha); }
+/* ---- 0.19: a entrada no servidor em vidro (Auth.dc.html) ----
+   O desenho é um painel largo com o título, o endereço, a identidade e o botão,
+   e uma coluna de painéis menores ao lado. A grade do DOM já era essa; o que
+   muda é a pele: painéis de vidro de 24px, campos de 16px, a cartela do estado
+   virando o chip em pílula e o botão virando a pílula laranja de 52px. */
+.tela[data-modo] .auth-grade {
+  width: min(100%, 1280px);
+  padding: 16px;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  font-family: var(--seele-ui);
+}
+.auth-entrada, .tela[data-modo="espera"] .auth-entrada, .auth-server, .auth-aperto, .tela[data-modo="espera"] .auth-aperto {
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+}
+.auth-entrada, .tela[data-modo="espera"] .auth-entrada {
+  align-self: stretch;
+  padding: 40px 48px;
+  gap: 24px;
+}
+.tela[data-modo="espera"] .auth-entrada { border-color: color-mix(in srgb, var(--seele-laranja-nerv) 35%, transparent); }
+.auth-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  align-items: flex-start;
+}
+.auth-corpo > * { max-width: 100%; }
+.auth-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 48px;
+  line-height: 1.1;
+  color: var(--seele-osso);
+  letter-spacing: var(--seele-tracking-cartela);
+  overflow-wrap: anywhere;
+}
+
+/* A cartela do estado vira o chip em pílula. O rótulo continua escrito por
+   extenso: a cor nunca é a única informação. */
+.cartela-padrao, .cartela-padrao[data-padrao] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: 28px;
+  padding: 4px 14px;
+  border-radius: var(--seele-raio-pilula);
+  border: 1px solid var(--seele-controle-borda);
+  background: none;
+  color: var(--seele-osso-apagado);
+}
+.cartela-padrao[data-padrao="Unverified"], .cartela-padrao[data-padrao="Orange"] {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  color: var(--seele-laranja-claro);
+}
+.cartela-padrao[data-padrao="Blue"], .cartela-padrao[data-padrao="Verified"] {
+  border-color: color-mix(in srgb, var(--seele-padrao-azul) 55%, transparent);
+  background: color-mix(in srgb, var(--seele-azul-fraco) 80%, transparent);
+  color: var(--seele-azul-claro);
+}
+.cartela-padrao-rotulo {
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: .06em;
+  color: inherit;
+  line-height: 1.5;
+}
+.cartela-padrao-kanji:empty { display: none; }
+/* A nota pertence à cartela, e por isso encosta nela: os 24px de `gap` da
+   coluna menos 16 dão os 8px que o comp usa entre as duas. */
+.auth-nota {
+  margin: -16px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
+}
+
+/* Os dois campos são leitura, e por isso `output` e não `input`: o endereço já
+   foi digitado no boot, e a chave local não atravessa a FFI. A moldura é a do
+   comp, inclusive a marca laranja à esquerda — que só o primeiro campo tem. */
+.campo-auth {
+  gap: 6px;
+  align-self: stretch;
+}
+.campo-auth .rotulo { font-family: var(--seele-ui); }
+.auth-valor, .auth-valor.auth-valor-marcado {
+  padding: 12px 16px;
+  background: var(--seele-campo);
+  border: 1px solid var(--seele-campo-borda);
+  border-radius: var(--seele-raio);
+  font-family: var(--seele-mono);
+  font-size: 16px;
+  color: var(--seele-osso);
+}
+
+/* A impressão do servidor já conferida pelo convite: o painel azul do desenho. */
+/* O convite já conferiu a identidade, e a tela diz isso antes de qualquer
+   clique — achado ALTO da avaliação de usabilidade. Fósforo e não laranja:
+   `tokens.css` reserva o fósforo ao que está nominal, e isto é exatamente uma
+   boa notícia sobre a conferência que já aconteceu. Encosta no campo do
+   endereço, como a nota encosta na cartela, porque é sobre ele que fala.
+
+   `pre-line` mantém a impressão digital na sua própria linha sem inventar um
+   segundo elemento, como na frase da espera. */
+.auth-conferido {
+  margin: 0;
+  padding: 20px 22px;
+  border-left: 2px solid var(--seele-fosforo);
+  background: color-mix(in srgb, var(--seele-azul-fraco) 65%, transparent);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--seele-azul-claro);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  align-self: stretch;
+  border: 1px solid color-mix(in srgb, var(--seele-padrao-azul) 45%, transparent);
+  border-radius: 20px;
+  font-family: var(--seele-ui);
+}
+
+/* O botão é a pílula laranja de 52px; o estado da conexão não o pinta mais. */
+.botao-auth, .botao-auth[data-padrao] {
+  width: auto;
+  min-height: 52px;
+  padding: 0 26px;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--seele-tinta-no-acento);
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+.botao-auth:disabled { opacity: .5; }
+.auth-voltar {
+  align-self: flex-start;
+  min-height: 52px;
+  margin-left: 0;
+}
+.auth-espera {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-self: stretch;
+}
+/* A parede: quem hospeda decidiu que não, e o botão fica desabilitado com o
+   motivo escrito embaixo. Laranja e não vermelho — uma recusa de porta não é
+   alerta nem queda, e `tokens.css` reserva o vermelho às duas. */
+.auth-parede {
+  margin: -8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--seele-laranja-nerv);
+  white-space: pre-line;
+  font-family: var(--seele-ui);
+}
+
+/* A espera: a frase e os fatos, no mesmo vocabulário do painel. */
+/* A razão que o servidor mandou, virada frase em `frases.js`. Duas linhas — o que
+   houve e o que fazer —, e `pre-line` é o que as mantém separadas sem inventar
+   dois elementos, como na banda da portaria. */
+.auth-espera-frase {
+  margin: 0;
+  padding: 14px 18px;
+  border-left: 2px solid var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 45%, transparent);
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-line;
+  align-self: stretch;
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 35%, transparent);
+  border-radius: var(--seele-raio);
+  font-family: var(--seele-ui);
+}
+.auth-espera-fatos {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
+}
+
+.auth-servidor-cabecalho {
+  margin: 0;
+  padding: 24px 28px 0;
+  font-family: var(--seele-ui);
+  font-weight: 400;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--seele-rotulo-painel);
+  border-bottom: 0;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+}
+.auth-server-corpo {
+  padding: 12px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+.auth-server-nome {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 26px;
+  letter-spacing: var(--seele-tracking-cartela);
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+}
+.auth-server-sub {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
+}
+.auth-pares {
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--seele-vidro-borda);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+.auth-par dt { font-family: var(--seele-ui); letter-spacing: var(--seele-tracking-rotulo); }
+
+.auth-aperto,
+.tela[data-modo="espera"] .auth-aperto { padding: 20px 28px; min-height: auto; }
+/* ---- C·02, a ficha do servidor ---- */
+
+/* A coluna de apoio. */
+.auth-server {
+  display: flex;
+  flex-direction: column;
+  min-height: auto;
+  background: var(--seele-negro-painel);
+  grid-column: 2;
+  grid-row: 1;
+  border: 1px solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+  align-self: start;
+  padding: 0;
+}
+.auth-aperto > summary.coordenada {
+  padding: 0;
+  border-bottom: 0;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-osso);
+}
+.auth-aperto[open] > summary.coordenada { padding-bottom: 10px; }
+.registro-linhas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-y: auto;
+  min-height: 0;
+  overflow: visible;
+}
+/* `min-width: 0` e `overflow-wrap: anywhere` no texto, e não na linha: uma
+   impressão digital são 64 caracteres sem espaço nenhum onde quebrar, e sem
+   isto ela empurra a coluna inteira. Foi a correção que o v2 fez neste painel. */
+.registro-linha {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 0;
+  align-items: baseline;
+}
+.registro-hora {
+  flex-shrink: 0;
+  color: var(--seele-rotulo-painel);
+}
+
+/* Em espera não há ficha do servidor: uma coluna só, com o registro embaixo. */
+.tela[data-modo="espera"] .auth-grade {
+  grid-template-columns: minmax(0, 640px);
+  grid-template-rows: auto;
+  justify-content: center;
+  align-content: start;
+}
+.tela[data-modo="espera"] .auth-entrada { grid-row: 1; grid-column: 1; }
+.tela[data-modo="espera"] .auth-aperto { grid-row: 2; grid-column: 1; }
+
+@media (max-width: 700px) {
+  .tela[data-modo] .auth-grade { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 12px; gap: 12px; align-content: start; }
+  .auth-entrada, .tela[data-modo="espera"] .auth-entrada { padding: 24px 20px; }
+  .auth-titulo { font-size: 36px; }
+  .botao-auth, .botao-auth[data-padrao] { width: 100%; }
+  .auth-voltar { width: 100%; }
+  .auth-server-corpo { padding: 12px 20px 20px; }
+  .auth-servidor-cabecalho { padding: 20px 20px 0; }
+  .auth-aperto, .tela[data-modo="espera"] .auth-aperto { padding: 16px 20px; }
+}

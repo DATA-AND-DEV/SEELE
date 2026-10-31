@@ -22,19 +22,21 @@
   gap: var(--seele-e2);
   max-width: calc(100vw - var(--seele-e4));
   padding: var(--seele-e1) var(--seele-e2);
-  background: var(--seele-negro-painel);
-  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 60%, transparent);
+  border-radius: var(--seele-raio-painel);
 }
 
 .toque-texto {
   margin: 0;
+  font-family: var(--seele-ui);
   color: var(--seele-osso);
-  letter-spacing: 0.08em;
 }
 
 .toque-nota {
   flex-basis: 100%;
   margin: 0;
+  font-family: var(--seele-ui);
   color: var(--seele-laranja-nerv);
 }
 

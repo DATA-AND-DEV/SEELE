@@ -730,33 +730,10 @@ input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, 
   min-height: 40px; padding: 8px 12px; border: 1px solid var(--seele-linha-forte); background: var(--seele-negro-absoluto); color: var(--seele-osso); min-width: 0;
 }
 input::placeholder, textarea::placeholder { color: var(--seele-osso-apagado); opacity: 1; }
-.botao, .botao-fantasma { min-height: 40px; font-size: 14px; letter-spacing: 0; font-weight: 500; padding: 8px 16px; border-radius: var(--seele-raio); }
-.botao {
-  font: inherit;
-  font-weight: 700;
-  letter-spacing: var(--seele-tracking-rotulo);
-  min-height: 40px;
-  padding: 8px 16px;
-  color: var(--seele-laranja-nerv);
-  background: transparent;
-  border: 1px solid var(--seele-laranja-nerv);
-  cursor: pointer;
-}
-.botao-fantasma {
-  margin-left: auto;
-  font: inherit;
-  font-size: var(--seele-t-dado);
-  min-height: 32px;
-  color: inherit;
-  background: none;
-  border: 1px solid currentColor;
-  padding: 4px 10px;
-  cursor: pointer;
-  border-color: var(--seele-linha-forte);
-}
 .rotulo, .coordenada { font-size: 12px; line-height: 1.5; letter-spacing: .04em; }
 .nota {
   display: block;
+  font-family: var(--seele-ui);
   font-size: 13px;
   line-height: 1.6;
   color: var(--seele-osso-apagado);
@@ -767,8 +744,8 @@ h1, h2, h3, p { overflow-wrap: anywhere; }
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
-  background: var(--seele-negro-absoluto);
-  border-bottom: 1px solid var(--seele-linha);
+  background: transparent;
+  border-bottom: 1px solid var(--seele-vidro-borda);
   user-select: none;
   -webkit-app-region: drag;
 }
@@ -829,7 +806,10 @@ input::placeholder, textarea::placeholder { color: var(--seele-rotulo-painel); }
   font-weight: 500;
   letter-spacing: 0;
   white-space: nowrap;
+  cursor: pointer;
 }
+/* O botão fantasma fica na ponta da linha, como antes da 0.19. */
+.botao-fantasma { margin-left: auto; }
 /* O primário: laranja cheio, tinta escura. */
 .botao {
   color: var(--seele-tinta-no-acento);
@@ -846,7 +826,6 @@ input::placeholder, textarea::placeholder { color: var(--seele-rotulo-painel); }
 }
 .botao-fantasma:not(:disabled):hover, .botao-secundario:not(:disabled):hover { background: var(--seele-controle-hover); }
 .rotulo, .coordenada { font-size: 11px; letter-spacing: var(--seele-tracking-rotulo); text-transform: uppercase; color: var(--seele-rotulo-painel); }
-.nota { font-family: var(--seele-ui); color: var(--seele-osso-apagado); }
 :where(.boot, .area-cartao, .server-bloco, .painel, .nomear-caixa, .portaria-caixa, .mods-caixa, .moderar-caixa, .cargos-caixa, .superficie-de-mod) {
   background: var(--seele-vidro);
   border: 1px solid var(--seele-vidro-borda);
@@ -854,9 +833,6 @@ input::placeholder, textarea::placeholder { color: var(--seele-rotulo-painel); }
 }
 :where(.servidor-linha, .amigo, .roster .pessoa) { border-radius: var(--seele-raio-cartao); }
 :where(.operador-inicial, .perfil-previa, .pessoa-imagem, .trilha-placa) { border-radius: var(--seele-raio-icone); }
-.barra-janela { background: transparent; border-bottom-color: var(--seele-vidro-borda); }
-/* A varredura era da direção CRT; o canvas não a tem. */
-.varredura { display: none !important; }
 /* A rolagem do canvas: fina, laranja translúcida. */
 * { scrollbar-width: thin; scrollbar-color: var(--seele-linha-forte) transparent; }
 

@@ -23,6 +23,17 @@
   display: none;
 }
 
+/* A navegação superior da 0.17.4 (marca, servidor e «Conversa») repete o topo e as
+   abas do celular. Ela só fica quando um MOD registrou uma página: é por ela que
+   se volta da página à conversa, e a lista dela é o que sobra do desktop. */
+:root[data-casca="celular"] #tela-sessao > .abas-superiores:has(#lista-mods-navegacao[hidden]) {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-sessao > .abas-superiores :is(.sessao-assinatura, .sessao-contexto) {
+  display: none;
+}
+
 /* ------------------------------------------------------------------ a sessão
  *
  * Uma coluna, de cima para baixo: o painel da aba, os avisos da sessão, a faixa
@@ -57,6 +68,8 @@
   display: block;
   position: relative;
   overflow: hidden;
+  padding: 0;
+  gap: 0;
 }
 
 :root[data-casca="celular"] #tela-sessao .paineis > .painel {
@@ -74,7 +87,13 @@
   width: 100%;
   height: 100%;
   min-width: 0;
+  /* Cada painel é a página inteira da aba: o vidro e o canto de 24 do desktop
+     ficam de fora, e o respiro é o de cada aba. */
+  gap: 0;
+  padding: 0;
   border: 0;
+  border-radius: 0;
+  background: none;
 }
 
 :root[data-casca="celular"] #tela-sessao > .cel-topo {
@@ -142,6 +161,7 @@
 
 :root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) {
   max-height: 40vh;
+  margin-block: 0 8px;
   overflow-y: auto;
 }
 
@@ -157,7 +177,9 @@
   order: 3;
 }
 
-/* ------------------------------------------------------------------ as abas */
+/* ------------------------------------------------------------------ as abas
+ *
+ * Quatro abas com ícone e rótulo mono, a ativa em laranja (Cel-conversa.dc). */
 
 :root[data-casca="celular"] .cel-abas {
   display: grid;
@@ -167,35 +189,49 @@
   box-sizing: border-box;
   height: calc(var(--cel-abas) + 1px + var(--cel-seguro-pe));
   padding: 0 var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
-  border-top: 1px solid var(--seele-linha);
+  border-top: 1px solid var(--seele-vidro-borda);
   background: var(--seele-negro-painel);
 }
 
 :root[data-casca="celular"] .cel-aba {
   position: relative;
   min-height: var(--cel-abas);
-  display: grid;
-  place-items: end center;
-  padding: 0 2px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 2px;
   background: none;
   border: 0;
-  border-top: 2px solid transparent;
+  border-radius: 0;
   color: var(--seele-rotulo-painel);
   font: inherit;
+  font-family: var(--seele-mono);
   /* **Com teto**, como a barra de abas do iOS: quatro palavras de oito letras
      numa largura de 390 não crescem com o texto do sistema sem uma cobrir a
-     outra (medido a 150 %: 106 px de texto em 98 de aba). O nome inteiro da aba
+     outra (medido a 150%: 106 px de texto em 98 de aba). O nome inteiro da aba
      continua no leitor de tela, e o conteúdo de cada aba cresce sem teto. */
-  font-size: min(calc(var(--seele-t-rotulo) * var(--cel-escala)), 13px);
-  letter-spacing: 0.06em;
+  font-size: min(calc(var(--seele-t-micro) * var(--cel-escala)), 12px);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
 }
 
+:root[data-casca="celular"] .cel-aba-icone {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 :root[data-casca="celular"] .cel-aba[aria-current="page"] {
-  color: var(--seele-osso);
-  border-top-color: var(--seele-laranja-nerv);
-  background: var(--seele-negro-absoluto);
+  color: var(--seele-laranja-nerv);
+  background: none;
 }
 
 /* A aba AJUSTES é a saída do tema: o caminho para «o SEELE desenha» e para
@@ -205,30 +241,31 @@
   font-family: var(--nucleo-pilha);
   color: var(--nucleo-rotulo);
   background: var(--nucleo-painel);
-  border-left: 1px solid var(--nucleo-borda);
 }
 
 :root[data-casca="celular"] .cel-aba[data-nucleo][aria-current="page"] {
-  color: var(--nucleo-texto);
-  border-top-color: var(--nucleo-acento);
-  background: var(--nucleo-fundo);
+  color: var(--nucleo-acento);
+  background: var(--nucleo-painel);
 }
 
 /* ---------------------------------------------------------- a faixa de voz
  *
- * Do tema na superfície, do núcleo nos três controles. A faixa toma o fundo e a
- * borda do tema como o resto da sessão; MUDO, SURDO e SAIR têm fundo, borda e
- * texto opacos do núcleo, e o contraste deles é medido entre texto e fundo do
- * núcleo, sem depender do que o tema pintou em volta. */
+ * Um cartão de vidro com a barra do estado na esquerda, a sala, e três botões
+ * redondos com o nome embaixo (Cel-conversa.dc, `.vs`). Do tema na superfície,
+ * do núcleo nos três controles: MUDO, SURDO e SAIR têm fundo, borda e texto
+ * opacos do núcleo, e o contraste deles é medido entre texto e fundo do núcleo,
+ * sem depender do que o tema pintou em volta. */
 
 :root[data-casca="celular"] .voz-celular {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
   min-height: var(--cel-faixa);
-  padding: 0 var(--cel-seguro-dir) 0 var(--cel-seguro-esq);
-  border-top: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
+  margin: 0 calc(10px + var(--cel-seguro-dir)) 8px calc(10px + var(--cel-seguro-esq));
+  overflow: hidden;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--seele-osso) 5%, var(--seele-negro-painel));
 }
 
 :root[data-casca="celular"] .voz-sala {
@@ -237,10 +274,12 @@
   justify-content: center;
   gap: 2px;
   min-width: 0;
-  padding: 8px 8px 8px 16px;
+  padding: 8px 8px 8px 14px;
   background: none;
   border: 0;
-  border-left: 3px solid var(--seele-laranja-nerv);
+  border-radius: 0;
+  /* A barra do estado: fósforo, a sala no ar. */
+  box-shadow: inset 4px 0 0 var(--seele-fosforo);
   color: var(--seele-osso);
   font: inherit;
   text-align: left;
@@ -248,12 +287,12 @@
 }
 
 :root[data-casca="celular"] .voz-sala-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
-  letter-spacing: var(--seele-tracking-cartela);
-  text-transform: uppercase;
-  line-height: 1.1;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: calc(14px * var(--cel-escala));
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -265,10 +304,10 @@
    abrir a CHAMADA. O nome corta com reticências; a contagem fica inteira. */
 :root[data-casca="celular"] .voz-sala-cabeca {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   min-width: 0;
-  height: calc(var(--seele-t-secao) * var(--cel-escala) * 1.25);
+  height: calc(14px * var(--cel-escala) * 1.35);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -285,13 +324,15 @@
 :root[data-casca="celular"] .voz-sala-conta {
   flex: 0 0 auto;
   font-family: var(--seele-mono);
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  font-weight: 400;
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
   letter-spacing: 0;
+  color: var(--seele-rotulo-painel);
 }
 
 :root[data-casca="celular"] .voz-sala-quem {
   font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
-  color: var(--seele-rotulo-painel);
+  color: var(--seele-osso-apagado);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -311,68 +352,85 @@
    nenhuma cor de borda alcança 3:1 contra qualquer fundo que um tema escolha
    (medido no protótipo: `linha-forte` sobre o painel dá 1,59:1 já sem tema, e o
    osso sobre um painel claro, 1,01:1). Sobre a placa, a borda é medida contra
-   uma cor que o tema não alcança. */
+   uma cor que o tema não alcança. No desenho novo a placa é o recuo escuro do
+   cartão, com os cantos arredondados dele. */
 :root[data-casca="celular"] .voz-controles {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px 8px 8px;
+  gap: 2px;
+  margin: 4px;
+  padding: 4px 6px;
   background: var(--nucleo-fundo);
-  border-left: 1px solid var(--nucleo-borda);
+  border-radius: 18px;
 }
 
-/* Os três controles do núcleo. Nenhuma linha deste bloco lê um `--seele-*` (G6). */
+/* Os três controles do núcleo: o círculo é o glifo, e o nome fica embaixo.
+   Nenhuma linha deste bloco lê um `--seele-*` (G6). */
 :root[data-casca="celular"] .voz-nucleo {
-  display: grid;
-  place-items: center;
-  gap: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
   min-width: 52px;
-  min-height: 48px;
-  padding: 4px 6px;
+  min-height: 52px;
+  padding: 2px 4px;
   font: inherit;
   font-family: var(--nucleo-pilha);
   /* Cresce com o texto do sistema, com teto: medido no Safari 27 com o tamanho
      de acessibilidade, os rótulos fixos em 10 px deixavam pequenos justamente
      os controles mais importantes da tela. A 1,4× a faixa ainda cabe a 360. */
   font-size: calc(10px * min(var(--cel-escala), 1.4));
-  letter-spacing: 0.14em;
+  letter-spacing: 0.06em;
   line-height: 1.2;
   text-transform: uppercase;
   color: var(--nucleo-texto);
-  background: var(--nucleo-painel);
-  border: 2px solid var(--nucleo-rotulo);
-  border-radius: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--seele-raio-miudo);
   box-shadow: none;
   cursor: pointer;
 }
 
 :root[data-casca="celular"] .voz-nucleo .glifo {
-  width: calc(18px * min(var(--cel-escala), 1.4));
-  height: calc(18px * min(var(--cel-escala), 1.4));
+  box-sizing: border-box;
+  width: calc(40px * min(var(--cel-escala), 1.4));
+  height: calc(40px * min(var(--cel-escala), 1.4));
+  padding: calc(11px * min(var(--cel-escala), 1.4));
   vertical-align: 0;
+  color: var(--nucleo-texto);
+  background: color-mix(in srgb, var(--nucleo-texto) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nucleo-texto) 50%, transparent);
+  border-radius: 50%;
 }
 
+/* Ligado (MUDO, SURDO, no ar): o círculo laranja-claro, a letra no acento. */
 :root[data-casca="celular"] .voz-nucleo[aria-pressed="true"] {
-  color: var(--nucleo-fundo);
-  background: var(--nucleo-acento);
-  border-color: var(--nucleo-texto);
+  color: var(--nucleo-acento);
+  background: none;
+}
+
+:root[data-casca="celular"] .voz-nucleo[aria-pressed="true"] .glifo {
+  color: var(--nucleo-acento);
+  background: color-mix(in srgb, var(--nucleo-acento) 16%, transparent);
+  border-color: var(--nucleo-acento);
 }
 
 /* SAIR afastado dos outros dois: é o único que desfaz alguma coisa. */
 :root[data-casca="celular"] #voz-sair {
-  margin-right: 6px;
+  margin-right: 4px;
 }
 
 /* O MUDO é o controle mais tocado da tela, e o maior. */
 :root[data-casca="celular"] #voz-mudo {
-  min-width: 64px;
+  min-width: 60px;
 }
 
 /* SEGURAR PARA FALAR: o mesmo lugar do MUDO, mais largo. O dedo fica parado em
    cima, então nada pode tirá-lo de lá: nem a seleção de texto, nem o menu do
    toque longo do sistema, nem um gesto de rolagem, que cancelaria o toque. */
 :root[data-casca="celular"] #voz-mudo[data-modo="segurar"] {
-  min-width: 84px;
+  min-width: 72px;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
@@ -382,21 +440,28 @@
 /* ------------------------------------------------------------------ o topo
  *
  * Em que servidor se está e o estado da conexão, em toda aba: no desktop isso
- * morava na barra da janela. O título é o da aba (o servidor, na SERVIDOR); na
+ * morava na barra da janela. A linha de cima é o rótulo mono com o selo da
+ * conexão em pílula, e o título é o da aba (o servidor, na SERVIDOR); na
  * CONVERSA e na PESSOAS o cabeçalho ainda é o do desktop, e o título fica vazio. */
 
 :root[data-casca="celular"] .cel-topo {
-  padding: calc(var(--cel-seguro-topo) + 8px) calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
-  border-bottom: 1px solid var(--seele-linha);
-  background: var(--seele-negro-painel);
+  padding: calc(var(--cel-seguro-topo) + 20px) calc(20px + var(--cel-seguro-dir)) 10px calc(20px + var(--cel-seguro-esq));
+  border-bottom: 0;
+  background: none;
   color: var(--seele-osso);
 }
 
 :root[data-casca="celular"] .cel-topo-sobre {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
   margin: 0;
-  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
-  letter-spacing: 0.2em;
+  font-family: var(--seele-mono);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-rotulo);
   text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
   /* Quebra, e não corta: o estado da conexão mora nesta linha, e com o texto
      do sistema a 150 % as reticências o engoliam (medido no protótipo). */
   overflow-wrap: anywhere;
@@ -406,9 +471,9 @@
   margin: 4px 0 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: calc(var(--seele-t-titulo) * var(--cel-escala));
+  font-size: calc(30px * var(--cel-escala));
   letter-spacing: var(--seele-tracking-cartela);
-  text-transform: uppercase;
+  text-transform: none;
   line-height: 1.1;
   overflow-wrap: anywhere;
 }
@@ -417,15 +482,30 @@
   display: none;
 }
 
+/* O título de AJUSTES é uma palavra do produto, em caixa alta; o do servidor é
+   um nome próprio e fica como está. */
+:root[data-casca="celular"] #tela-sessao[data-aba="ajustes"] .cel-topo-titulo {
+  text-transform: lowercase;
+}
+
+:root[data-casca="celular"] #tela-sessao[data-aba="ajustes"] .cel-topo-titulo::first-letter {
+  text-transform: uppercase;
+}
+
 /* O selo da conexão é do núcleo: um tema não apaga nem falsifica o estado da
-   conexão (spec, §6). A cor sai do enum que o desktop põe em `data-padrao`. */
+   conexão (spec, §6). A cor sai do enum que o desktop põe em `data-padrao`. É o
+   chip azul do desenho: pílula de 10 px, letra mono. */
 :root[data-casca="celular"] .cel-selo-seguro {
-  display: inline-block;
-  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
   font-family: var(--nucleo-pilha);
+  font-size: calc(10px * var(--cel-escala));
+  letter-spacing: 0.06em;
   color: var(--nucleo-seguro);
   background: var(--nucleo-fundo);
-  border: 1px solid var(--nucleo-borda);
+  border: 1px solid var(--nucleo-seguro);
+  border-radius: var(--seele-raio-pilula);
 }
 
 :root[data-casca="celular"] .cel-selo-seguro:is([data-padrao="Unverified"], [data-padrao="Offline"]) {
@@ -436,7 +516,7 @@
 /* ----------------------------------------------------------- a aba SERVIDOR
  *
  * A trilha das redes, deitada no alto, e a coluna de salas e canais do
- * desktop em cartões. */
+ * desktop em cartões de vidro (Cel-servidor.dc). */
 
 :root[data-casca="celular"] #tela-sessao[data-aba="servidor"] > main.paineis {
   display: flex;
@@ -449,11 +529,14 @@
   flex-direction: row;
   align-items: center;
   gap: 8px;
-  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  padding: 0 calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
   overflow-x: auto;
   overflow-y: hidden;
   border-right: 0;
-  border-bottom: 1px solid var(--seele-linha);
+  border-bottom: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
   scrollbar-width: none;
 }
 
@@ -468,28 +551,53 @@
   display: none;
 }
 
+/* O quadrado de cada servidor: 52 de alvo, canto de 16, a atual em laranja. */
 :root[data-casca="celular"] .trilha :is(.trilha-item, .trilha-mais) {
   flex: 0 0 auto;
-  width: var(--cel-alvo);
-  height: var(--cel-alvo);
-  border: 1px solid var(--seele-linha-forte);
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--seele-controle-borda);
   border-radius: var(--seele-raio);
+  background: var(--seele-controle);
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--seele-osso);
 }
 
 /* O `+` do desktop vem no apagado, que fica a 4,1:1 do painel: é um controle,
    e lê o rótulo. */
 :root[data-casca="celular"] .trilha .trilha-mais {
   color: var(--seele-rotulo-painel);
+  border-style: dashed;
 }
 
 :root[data-casca="celular"] .trilha .trilha-atual {
   border-color: var(--seele-laranja-nerv);
-  background: var(--seele-negro-absoluto);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 12%, transparent);
+  color: var(--seele-laranja-nerv);
 }
 
 :root[data-casca="celular"] .trilha .trilha-outros {
   display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  width: auto;
   gap: 8px;
+}
+
+:root[data-casca="celular"] .trilha .trilha-outros[hidden] {
+  display: none;
+}
+
+/* A barra do canto da coluna do desktop não existe deitada: a atual é a laranja. */
+:root[data-casca="celular"] .trilha .trilha-atual::before {
+  display: none;
+}
+
+:root[data-casca="celular"] .trilha .trilha-mais {
+  margin: 0;
 }
 
 /* A gestão de salas e canais é pelo SEELE no computador; o que fica é a frase
@@ -499,51 +607,79 @@
 }
 
 :root[data-casca="celular"] .painel-canais .canais-rolagem {
+  gap: 0;
   padding: 0 calc(16px + var(--cel-seguro-dir)) 24px calc(16px + var(--cel-seguro-esq));
   overscroll-behavior: contain;
 }
 
 :root[data-casca="celular"] .painel-canais .canais-cabeca {
-  margin: 20px 0 8px;
+  margin: 18px 0 8px;
   padding: 0;
   border: 0;
+  background: none;
 }
 
-/* Cada sala é um cartão. */
+:root[data-casca="celular"] .painel-canais .painel-titulo {
+  font-family: var(--seele-mono);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  font-weight: 400;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
+}
+
+/* Cada sala é um cartão de vidro. */
 :root[data-casca="celular"] #lista-voice_rooms > .voice_room {
   margin: 0 0 8px;
-  padding: 12px;
-  gap: 10px;
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha);
-  border-radius: var(--seele-raio);
-  box-shadow: var(--seele-sombra);
+  padding: 14px 16px;
+  gap: 8px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 20px;
+  box-shadow: none;
 }
 
-/* A sala em que se está: borda do acento e a marca escrita. **Sem o
+/* A sala em que se está: a borda do fósforo, e a marca escrita. **Sem o
    preenchimento laranja-fraco do desktop**: as cores de estado derivadas do tema
    só garantem 4,5:1 sobre o fundo e o painel, e sobre o tom fraco do acento
    caíam a 3,8:1 (medido no protótipo). */
 :root[data-casca="celular"] #lista-voice_rooms > .voice_room.aberto {
-  background: var(--seele-negro-painel);
-  border-color: var(--seele-laranja-nerv);
-  border-left-width: 3px;
+  background: var(--seele-vidro);
+  border-color: color-mix(in srgb, var(--seele-fosforo) 40%, transparent);
 }
 
 :root[data-casca="celular"] #lista-voice_rooms .canal-cabeca {
   flex-wrap: wrap;
   justify-content: flex-start;
-  align-items: baseline;
+  align-items: center;
+  gap: 4px 8px;
 }
 
 :root[data-casca="celular"] #lista-voice_rooms .voice_room-nome {
-  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: calc(15px * var(--cel-escala));
+  letter-spacing: 0;
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #lista-voice_rooms .voice_room.aberto .voice_room-nome {
+  color: var(--seele-osso);
+}
+
+/* O marcador da sala é o ponto do estado: o fósforo para a sala em que se está, o
+   rótulo para as outras. */
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-nome::before {
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] #lista-voice_rooms .voice_room.aberto .voice_room-nome::before {
+  color: var(--seele-fosforo);
 }
 
 /* A ocupação e quem está dentro vêm no apagado do desktop, a 4,1:1 do painel
    já sem tema. No celular, o rótulo do painel, que o tema também alcança. */
 :root[data-casca="celular"] #lista-voice_rooms .voice_room-ocupacao {
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
   color: var(--seele-rotulo-painel);
 }
 
@@ -552,20 +688,28 @@
   flex: 1 1 auto;
 }
 
+/* A marca é o chip do desenho: pílula de mono, o fósforo para quem está aqui. */
 :root[data-casca="celular"] .cel-marca {
-  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
-  letter-spacing: 0.18em;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--seele-mono);
+  font-size: calc(10px * var(--cel-escala));
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 2px 6px;
-  border: 1px solid currentColor;
+  padding: 1px 8px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  white-space: nowrap;
 }
 
 :root[data-casca="celular"] .cel-marca-aqui {
-  color: var(--seele-padrao-azul);
+  color: var(--seele-fosforo);
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
 }
 
 :root[data-casca="celular"] :is(.cel-marca-cheia, .cel-marca-senha) {
-  color: var(--seele-rotulo-painel);
+  color: var(--seele-osso-apagado);
 }
 
 :root[data-casca="celular"] .cel-marca .glifo {
@@ -578,12 +722,14 @@
 :root[data-casca="celular"] #lista-voice_rooms .voice_room-dentro {
   flex-direction: row;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  gap: 4px 12px;
 }
 
-:root[data-casca="celular"] #lista-voice_rooms .voice_room-pessoa {
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
-  color: var(--seele-rotulo-painel);
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-pessoa,
+:root[data-casca="celular"] #lista-voice_rooms .voice_room.aberto .voice_room-pessoa {
+  font-family: var(--seele-ui);
+  font-size: calc(13px * var(--cel-escala));
+  color: var(--seele-osso-apagado);
 }
 
 :root[data-casca="celular"] #lista-voice_rooms .voice_room-pessoa-marca {
@@ -593,13 +739,22 @@
 /* «ninguém aqui» no tom da linha forte some num fundo escuro; é texto, e lê o
    rótulo. */
 :root[data-casca="celular"] #lista-voice_rooms .voice_room-vazio {
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  font-family: var(--seele-ui);
+  font-size: calc(13px * var(--cel-escala));
   color: var(--seele-rotulo-painel);
 }
 
+/* O ENTRAR é a pílula de vidro do desenho (`.B`); o ENTRAR MUDO, a irmã dela. */
 :root[data-casca="celular"] #lista-voice_rooms .voice_room-entrar {
   min-height: var(--cel-alvo);
-  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  padding: 0 16px;
+  font-family: var(--seele-ui);
+  font-size: calc(14px * var(--cel-escala));
+  font-weight: 500;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
 }
 
 :root[data-casca="celular"] .cel-sala-entrar {
@@ -612,35 +767,47 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
-  letter-spacing: 0.12em;
+  font-size: calc(14px * var(--cel-escala));
+  font-weight: 500;
 }
 
-/* Os canais: uma fileira de 52 por canal, o canal aberto marcado na borda. */
+/* Os canais: uma fileira de 44 por canal, o `#` do canal aberto no acento. */
 :root[data-casca="celular"] #lista-linhas .linha {
-  min-height: 52px;
-  padding: 8px 4px 8px 12px;
+  min-height: 48px;
+  padding: 0 6px;
+  font-family: var(--seele-ui);
   font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
-  border-bottom: 1px solid var(--seele-linha);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--seele-vidro-borda);
+  border-radius: 0;
 }
 
 /* O nome de um canal fechado vem no apagado do desktop, a 4,1:1 do painel; o
-   aberto, no osso. */
+   canal, no osso. */
 :root[data-casca="celular"] #lista-linhas .linha .linha-rotulo {
+  font-family: var(--seele-ui);
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #lista-linhas .linha .linha-cerquilha {
+  font-family: var(--seele-mono);
   color: var(--seele-rotulo-painel);
 }
 
-:root[data-casca="celular"] #lista-linhas .linha.aberto .linha-rotulo {
-  color: var(--seele-osso);
+:root[data-casca="celular"] #lista-linhas .linha.aberto .linha-cerquilha {
+  color: var(--seele-laranja-nerv);
 }
 
 /* O que o celular não faz, dito onde o controle estaria. */
 :root[data-casca="celular"] .cel-fora {
   margin: 16px 0 0;
-  padding: 10px 12px;
-  border: 1px dashed var(--seele-linha-forte);
-  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
-  color: var(--seele-osso);
+  padding: 12px 16px;
+  border: 1px dashed var(--seele-controle-borda);
+  border-radius: 16px;
+  font-family: var(--seele-ui);
+  font-size: calc(13px * var(--cel-escala));
+  color: var(--seele-osso-apagado);
 }
 
 :root[data-casca="celular"] .cel-fora .rotulo {
@@ -657,20 +824,36 @@
 :root[data-casca="celular"] #vista-conversa .linha-barra {
   min-height: 52px;
   gap: 8px;
-  padding: 4px calc(8px + var(--cel-seguro-dir)) 4px calc(16px + var(--cel-seguro-esq));
-  background: var(--seele-negro-painel);
+  padding: 4px calc(20px + var(--cel-seguro-dir)) 10px calc(20px + var(--cel-seguro-esq));
+  background: none;
+  border-bottom: 1px solid var(--seele-vidro-borda);
 }
 
-:root[data-casca="celular"] #vista-conversa #linha-nome {
-  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+/* O título do canal é o título da aba: Inter Tight de 30. O `#` é do nome. */
+:root[data-casca="celular"] #vista-conversa :is(#linha-nome, .linha-barra-cerquilha) {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(30px * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
   color: var(--seele-osso);
   text-decoration: none;
   cursor: default;
 }
 
+:root[data-casca="celular"] #vista-conversa .linha-barra-cerquilha {
+  margin-right: -6px;
+}
+
+/* A busca é um botão redondo de 44. */
 :root[data-casca="celular"] #vista-conversa #botao-buscar {
   width: var(--cel-alvo);
   height: var(--cel-alvo);
+  padding: 0;
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 50%;
+  color: var(--seele-osso);
 }
 
 :root[data-casca="celular"] #vista-conversa #form-busca {
@@ -699,6 +882,8 @@
 /* O autor no osso e a hora no rótulo do painel: o apagado do desktop é, pelo
    próprio token, «4,11:1 só texto grande». */
 :root[data-casca="celular"] #lista-mensagens .mensagem-autor {
+  font-family: var(--seele-ui);
+  font-weight: 600;
   font-size: calc(var(--seele-t-dado) * var(--cel-escala));
   color: var(--seele-osso);
 }
@@ -708,12 +893,15 @@
 }
 
 :root[data-casca="celular"] #lista-mensagens .mensagem-hora {
+  font-family: var(--seele-mono);
   font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
   color: var(--seele-rotulo-painel);
 }
 
 :root[data-casca="celular"] #lista-mensagens .mensagem .corpo {
+  font-family: var(--seele-ui);
   font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  line-height: 1.5;
   color: var(--seele-osso);
 }
 
@@ -749,11 +937,17 @@
   border: 1px solid var(--nucleo-rotulo);
 }
 
-/* O compositor: o `+` do celular, a caixa, e o ENVIAR de tracking curto. O
-   `+` do desktop fica escondido, e é ele que a folha ANEXAR aperta. */
+/* O compositor: uma pílula de vidro com o anexo redondo, a caixa, e o ENVIAR
+   laranja (Cel-conversa.dc). O `+` do desktop fica escondido, e é ele que a
+   folha ANEXAR aperta. */
 :root[data-casca="celular"] #form-mensagem {
+  align-items: flex-end;
   gap: 8px;
-  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  margin: 0 calc(10px + var(--cel-seguro-dir)) 8px calc(10px + var(--cel-seguro-esq));
+  padding: 6px;
+  background: color-mix(in srgb, var(--seele-osso) 6%, transparent);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 24px;
 }
 
 :root[data-casca="celular"] #form-mensagem #botao-anexar,
@@ -769,70 +963,185 @@
   height: var(--cel-alvo);
   padding: 0;
   color: var(--seele-osso);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 50%;
   cursor: pointer;
 }
 
 :root[data-casca="celular"] #form-mensagem .compor-caixa {
   min-height: var(--cel-alvo);
   min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
 }
 
 /* O alvo é o campo, e não a caixa em volta dele: 44 de altura já na primeira
-   fileira. */
+   fileira. O campo é do vidro da pílula, sem caixa própria. */
 :root[data-casca="celular"] #form-mensagem #campo-mensagem {
   box-sizing: border-box;
   min-height: var(--cel-alvo);
-  padding-block: 11px;
+  padding: 11px 4px;
+  font-family: var(--seele-ui);
   font-size: var(--cel-letra-de-campo);
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
 
 :root[data-casca="celular"] #form-mensagem .compor-enviar {
   min-height: var(--cel-alvo);
-  letter-spacing: 0.08em;
+  padding: 0 16px;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--seele-tinta-no-acento);
+  background: var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio-pilula);
 }
 
 /* ------------------------------------------------------------ a aba PESSOAS
  *
- * A lista do desktop, na largura toda e no tamanho do polegar. O sinal fica
- * em número, barra e palavra (specs/06: nunca só cor); o volume sai da linha
- * e vai para a folha da pessoa. */
+ * A lista do desktop, na largura toda e no tamanho do polegar: o título da
+ * aba, e um cartão de vidro por sala (Cel-pessoas.dc). O sinal fica em número,
+ * barra e palavra (specs/06: nunca só cor); o volume sai da linha e vai para a
+ * folha da pessoa. */
 
 :root[data-casca="celular"] .painel-pessoas .pessoas-cartela {
-  padding: 10px calc(16px + var(--cel-seguro-dir)) 10px calc(16px + var(--cel-seguro-esq));
+  align-items: baseline;
   /* A contagem desce para debaixo de PESSOAS quando não cabe ao lado: com o
      texto do sistema no maior tamanho, o «VOZ» passava da tela. */
   flex-wrap: wrap;
-  row-gap: 2px;
+  justify-content: flex-start;
+  gap: 2px 10px;
+  padding: 0 calc(20px + var(--cel-seguro-dir)) 12px calc(20px + var(--cel-seguro-esq));
+  background: none;
+  border: 0;
+  color: var(--seele-osso);
+}
+
+/* O título é o da aba: Inter Tight de 30, e não a caixa alta do desktop. */
+:root[data-casca="celular"] .painel-pessoas .pessoas-cartela > span:first-child {
+  display: block;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(30px * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
+  text-transform: lowercase;
+}
+
+:root[data-casca="celular"] .painel-pessoas .pessoas-cartela > span:first-child::first-letter {
+  text-transform: uppercase;
+}
+
+:root[data-casca="celular"] .painel-pessoas .pessoas-conta {
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0;
+  color: var(--seele-rotulo-painel);
 }
 
 :root[data-casca="celular"] #lista-roster {
   overflow-y: auto;
   overscroll-behavior: contain;
+  gap: 10px;
+  padding: 0 calc(12px + var(--cel-seguro-dir)) 8px calc(12px + var(--cel-seguro-esq));
+}
+
+/* Uma sala, um cartão de vidro. */
+:root[data-casca="celular"] #lista-roster > .roster-grupo {
+  gap: 0;
+  overflow: hidden;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 22px;
 }
 
 :root[data-casca="celular"] #lista-roster .roster-sala {
-  padding: 12px calc(16px + var(--cel-seguro-dir)) 6px calc(16px + var(--cel-seguro-esq));
+  gap: 8px;
+  padding: 12px 14px 6px;
+  min-height: 0;
+  font-family: var(--seele-mono);
+  color: var(--seele-rotulo-painel);
 }
 
-:root[data-casca="celular"] #lista-roster .roster-sala-nome {
+:root[data-casca="celular"] #lista-roster .roster-sala-nome,
+:root[data-casca="celular"] #lista-roster .roster-grupo[data-nossa="sim"] .roster-sala-nome {
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: calc(15px * var(--cel-escala));
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #lista-roster .roster-grupo:not([data-nossa]) .roster-sala-nome {
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] #lista-roster .roster-sala-conta {
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0;
+}
+
+:root[data-casca="celular"] #lista-roster .roster-sala-aqui {
+  margin-left: auto;
+  min-height: 0;
+  padding: 1px 8px;
+  font-family: var(--seele-mono);
+  font-size: calc(10px * var(--cel-escala));
+}
+
+:root[data-casca="celular"] #lista-roster .roster-pessoas {
+  gap: 0;
 }
 
 :root[data-casca="celular"] #lista-roster .pessoa {
   position: relative;
-  min-height: var(--pessoa-altura-minima, 56px);
-  gap: 4px;
-  padding: 10px calc(var(--pessoa-espaco-acoes, 16px) + var(--cel-seguro-dir)) 10px calc(16px + var(--cel-seguro-esq));
+  min-height: var(--pessoa-altura-minima, 64px);
+  gap: 0 8px;
+  padding: 0 calc(14px + var(--cel-seguro-dir)) 0 calc(14px + var(--cel-seguro-esq));
+  border: 0;
+  border-top: 1px solid var(--seele-vidro-borda);
+  border-radius: 0;
+  background: none;
   cursor: pointer;
 }
 
-/* Quem fala: a borda do fósforo, e **sem o fundo** do desktop. Sobre o tom
-   fraco do fósforo, o rótulo cai a 3,5:1 (medido na bancada). */
+/* Quem fala: o fósforo na borda de cima e no avatar, e **sem o fundo** do
+   desktop. Sobre o tom fraco do fósforo, o rótulo cai a 3,5:1 (medido na
+   bancada). */
 :root[data-casca="celular"] #lista-roster .pessoa.falando {
   background: none;
+  border-color: var(--seele-vidro-borda);
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa.falando .pessoa-avatar {
+  box-shadow: 0 0 0 2px var(--seele-negro-absoluto), 0 0 0 4px var(--seele-fosforo);
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-cabeca {
+  min-height: 56px;
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-identidade {
+  gap: 12px;
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  font-size: calc(17px * var(--cel-escala));
 }
 
 /* O nome é texto: abrir a folha é tocar a linha. */
@@ -841,18 +1150,22 @@
 }
 
 :root[data-casca="celular"] #lista-roster .pessoa-nome {
+  font-weight: 600;
   font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  color: var(--seele-osso);
 }
 
 /* O resumo do diagnóstico sai: ele repete o número que o sinal já diz, e no
-   celular o toque é da linha, e não dele. Fica o sinal numa fileira só, o
-   número e a barra, com a palavra do estado no canto. */
+   celular o toque é da linha, e não dele. O `celular-pessoas.js` abre o
+   diagnóstico, e fica o sinal numa fileira só, embaixo do nome: o número e a
+   barra. */
 :root[data-casca="celular"] #lista-roster .pessoa-diagnostico-resumo {
   display: none;
 }
 
 :root[data-casca="celular"] #lista-roster .pessoa-diagnostico {
-  margin-top: 0;
+  margin: -10px 0 10px;
+  padding-left: 56px;
 }
 
 :root[data-casca="celular"] #lista-roster .pessoa-sync {
@@ -866,10 +1179,12 @@
   margin-left: 8px;
 }
 
+/* A pastilha do estado, no meio da linha, à direita. */
 :root[data-casca="celular"] #lista-roster .pessoa-rodape {
   position: absolute;
-  top: 12px;
-  right: calc(16px + var(--cel-seguro-dir));
+  top: 32px;
+  right: calc(14px + var(--cel-seguro-dir));
+  transform: translateY(-50%);
 }
 
 :root[data-casca="celular"] #lista-roster .pastilha[data-estado="escuta"] {
@@ -896,15 +1211,51 @@
 }
 
 :root[data-casca="celular"] #vista-chamada .vista-chamada-barra {
+  display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  align-items: center;
+  gap: 2px 10px;
+  padding: 0 calc(20px + var(--cel-seguro-dir)) 8px calc(20px + var(--cel-seguro-esq));
+  background: none;
+  border: 0;
 }
 
+/* A linha de cima é o rótulo; o nome da sala é o título (Cel-chamada.dc). */
+:root[data-casca="celular"] #vista-chamada .chamada-placa {
+  flex: 1 0 100%;
+  padding: 0;
+  font-family: var(--seele-mono);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-rotulo-painel);
+  background: none;
+  border: 0;
+}
+
+:root[data-casca="celular"] #vista-chamada .chamada-nome {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(34px * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.05;
+  text-transform: none;
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #vista-chamada .vista-chamada-barra > .espaco {
+  flex: 1 1 0;
+}
+
+/* O palco é um cartão de vidro: a tela de quem compartilha, ou o aviso de que
+   ninguém compartilha. */
 :root[data-casca="celular"] #vista-chamada .chamada-palco {
-  margin: 0;
-  border-left: 0;
-  border-right: 0;
+  margin: 4px calc(16px + var(--cel-seguro-dir)) 4px calc(16px + var(--cel-seguro-esq));
+  overflow: hidden;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 18px;
 }
 
 /* A cabeça do palco quebra fileira, e o TELA CHEIA não encolhe abaixo do nome
@@ -972,15 +1323,73 @@
 :root[data-casca="celular"] #chamada-grade {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
   gap: 8px;
-  padding: 12px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+  padding: 6px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
 }
 
+/* Cada pessoa é um cartão pequeno: o avatar, o nome, e o estado em mono. Quem
+   fala ganha a borda do fósforo. */
 :root[data-casca="celular"] #chamada-grade > .chamada-cartao {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   min-width: 0;
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha);
+  padding: 12px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 18px;
   cursor: pointer;
+}
+
+:root[data-casca="celular"] #chamada-grade > .chamada-cartao[data-fala="sim"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 60%, transparent);
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  font-size: calc(18px * var(--cel-escala));
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-identidade {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-quem {
+  gap: 0;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-nome {
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: calc(14px * var(--cel-escala));
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-estados {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* O estado é uma palavra mono pequena, e não a pílula do desktop. */
+:root[data-casca="celular"] #chamada-grade .chamada-pastilha {
+  min-height: 0;
+  padding: 0;
+  font-family: var(--seele-mono);
+  font-size: calc(10px * var(--cel-escala));
+  background: none;
+  border: 0;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-sync {
+  width: 100%;
 }
 
 :root[data-casca="celular"] #chamada-grade .chamada-volume {
@@ -990,11 +1399,10 @@
 /* Em duas colunas, a cabeça do cartão quebra: a identidade numa fileira, os
    estados na outra. Lado a lado, a 360, o nome e a nota ficavam com 3 px. */
 :root[data-casca="celular"] #chamada-grade .chamada-cartao-topo {
-  flex-wrap: wrap;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-identidade {
-  flex: 1 1 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
 }
 
 :root[data-casca="celular"] #chamada-grade .chamada-cartao-quem .nota {
@@ -1017,7 +1425,9 @@
   top: var(--cel-ajustes-topo, 0px);
   bottom: var(--cel-ajustes-pe, 0px);
   padding: 0;
-  background: var(--seele-negro-absoluto);
+  background-color: var(--seele-negro-absoluto);
+  background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+  background-size: 6px 6px;
 }
 
 :root[data-casca="celular"] #tela-server::before {
@@ -1062,9 +1472,10 @@
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  color: var(--seele-osso);
+  color: var(--seele-laranja-nerv);
   background: none;
-  border: 1px solid var(--seele-linha-forte);
+  border: 0;
+  font-family: var(--seele-mono);
   font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
   letter-spacing: var(--seele-tracking-rotulo);
   cursor: pointer;
@@ -1103,20 +1514,29 @@
   display: none;
 }
 
+/* SEU PERFIL: um cartão de vidro com o retrato quadrado de canto 16, o nome, e o
+   EDITAR PERFIL ao lado (Cel-ajustes.dc). */
 :root[data-casca="celular"] .cel-perfil {
   display: grid;
+  flex: 0 0 auto;
   gap: 8px;
-  padding: 16px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
-  border-bottom: 1px solid var(--seele-linha);
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 4px calc(16px + var(--cel-seguro-esq));
+  border: 0;
+}
+
+:root[data-casca="celular"] .cel-perfil > .rotulo {
+  font-family: var(--seele-mono);
+  color: var(--seele-rotulo-painel);
 }
 
 :root[data-casca="celular"] .cel-perfil-placa {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha-forte);
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 20px;
 }
 
 /* Sobre a capa de quem usa, o retrato e o apelido ficam numa placa opaca do
@@ -1129,43 +1549,118 @@
 :root[data-casca="celular"] .cel-perfil-retrato {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  color: var(--seele-osso);
-  border: 1px solid var(--seele-linha-forte);
+  font-size: calc(22px * var(--cel-escala));
+  color: var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent);
+  border: 0;
+  border-radius: var(--seele-raio);
 }
 
 :root[data-casca="celular"] .cel-perfil-apelido {
-  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
 
-:root[data-casca="celular"] .cel-ajustes-lista {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+:root[data-casca="celular"] .cel-perfil-editar {
+  justify-self: end;
 }
 
-/* SOBRE e SAIR DO SERVIDOR são ações, e não seções: o mesmo desenho de uma
-   `.server-secao`, sem a classe que o `abrirSecao` do desktop percorre. */
-:root[data-casca="celular"] .cel-ajustes-acao {
+/* Cada lista é um cartão de vidro: linhas de 50, o `›` à direita. */
+:root[data-casca="celular"] .cel-ajustes-lista {
+  list-style: none;
+  flex: 0 0 auto;
+  margin: 12px calc(16px + var(--cel-seguro-dir)) 0 calc(16px + var(--cel-seguro-esq));
+  padding: 0;
+  overflow: hidden;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 20px;
+}
+
+:root[data-casca="celular"] .cel-ajustes-lista:last-child {
+  margin-bottom: 24px;
+}
+
+:root[data-casca="celular"] .cel-ajustes-lista > li + li {
+  border-top: 1px solid var(--seele-vidro-borda);
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-lista :is(.server-secao, .cel-ajustes-acao) {
   width: 100%;
-  min-height: 48px;
-  padding: 6px 16px;
+  min-height: 50px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  font: inherit;
+  gap: 12px;
+  margin: 0;
+  padding: 0 16px;
+  font-family: var(--seele-ui);
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
   text-align: left;
   color: var(--seele-osso);
   background: none;
-  border: none;
-  border-bottom: 1px solid var(--seele-linha);
-  border-left: 2px solid transparent;
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-lista .server-secao-nome {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+}
+
+/* Sem ícone: no desenho a linha é só o nome e o `›`. */
+:root[data-casca="celular"] #tela-server .cel-ajustes-lista :is(.server-secao, .cel-ajustes-acao) > .server-secao-icone {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-lista :is(.server-secao, .cel-ajustes-acao) > .server-secao-texto {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-lista :is(.server-secao, .cel-ajustes-acao)::after {
+  content: "\203A";
+  flex: 0 0 auto;
+  color: var(--seele-rotulo-painel);
+}
+
+/* SAIR DO SERVIDOR é o botão de vidro em pílula do desenho, e não uma linha. */
+:root[data-casca="celular"] .cel-ajustes-saida {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-saida .cel-ajustes-acao {
+  min-height: 52px;
+  justify-content: center;
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  font-weight: 500;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-saida .cel-ajustes-acao::after {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-saida .cel-ajustes-acao > .server-secao-texto {
+  flex: 0 1 auto;
 }
 
 /* A linha MODS DESTE SERVIDOR é a saída do tema (spec, §6): ela lê o núcleo,
@@ -1173,8 +1668,7 @@
 :root[data-casca="celular"] #tela-server #secao-mods {
   font-family: var(--nucleo-pilha);
   color: var(--nucleo-texto);
-  background: var(--nucleo-painel);
-  border-left: 2px solid var(--nucleo-acento);
+  background: none;
 }
 
 :root[data-casca="celular"] #tela-server #server-modo-aberto {
@@ -1321,17 +1815,20 @@
 /* A saída, sempre à vista: presa à safe-area, com um alvo de toque inteiro. */
 :root[data-casca="celular"] .palco-sair-da-cheia {
   position: fixed;
-  top: calc(12px + var(--cel-seguro-topo));
-  right: calc(12px + var(--cel-seguro-dir));
+  top: calc(14px + var(--cel-seguro-topo));
+  right: calc(16px + var(--cel-seguro-dir));
   z-index: 40;
   min-height: var(--cel-alvo);
   min-width: var(--cel-alvo);
   padding: 0 16px;
-  font-family: var(--seele-display);
-  letter-spacing: var(--seele-tracking-cartela);
+  font-family: var(--seele-ui);
+  font-size: calc(13px * var(--cel-escala));
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--seele-osso);
-  background: rgba(5, 4, 3, 0.85);
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: color-mix(in srgb, var(--seele-negro-painel) 75%, transparent);
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-osso) 18%, transparent);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
 }
 
@@ -1345,8 +1842,8 @@
   z-index: 39;
   margin: 0;
   text-align: center;
-  font-family: var(--seele-display);
-  letter-spacing: var(--seele-tracking-cartela);
+  font-family: var(--seele-mono);
+  letter-spacing: 0.1em;
   font-size: 0.8rem;
   color: var(--seele-osso);
   opacity: 0.8;

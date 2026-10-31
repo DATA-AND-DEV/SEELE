@@ -41,13 +41,18 @@
 
 .bateria-caixa {
   pointer-events: auto;
-  width: min(100%,600px);
+  width: min(100%, 620px);
   max-width: calc(100vw - 32px);
-  border: 1px solid var(--seele-vermelho-alerta);
-  background: var(--seele-negro-absoluto);
+  box-sizing: border-box;
+  padding: 32px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid color-mix(in srgb, var(--seele-vermelho-alerta) 55%, transparent);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 40%, var(--seele-negro-absoluto));
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
-  border-radius: var(--seele-raio);
+  border-radius: 28px;
 }
 
 /* ---------- a cabeça ----------
@@ -55,38 +60,49 @@
    inversão (inventário §12). */
 .bateria-cabeca {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  padding: 16px 24px;
-  background: var(--seele-negro-absoluto);
+  gap: 10px;
   color: var(--seele-vermelho-alerta);
-  min-height: 64px;
-  border-bottom: 1px solid var(--seele-linha);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 
 .bateria-nome {
-  font-family: var(--seele-display);
-  font-weight: 500;
-  font-size: 28px;
-  letter-spacing: .02em;
-  line-height: 1.25;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  line-height: 1.5;
 }
 
 /* Acento, e nada mais: `内部電源` não carrega informação que `BATERIA INTERNA`
    não carregue ao lado (inventário §12, a regra de uso da face japonesa). Daí
    `aria-hidden` na marcação. */
+/* O ponto que pulsa: a conexão está sendo refeita, e o que se move é o único
+   sinal de que alguém ainda tenta. Parado quando a pessoa pede menos movimento. */
+.bateria-nome::before {
+  content: "\25CF";
+  animation: seele-pulso-bateria 1.4s ease-in-out infinite;
+}
+@keyframes seele-pulso-bateria { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .bateria-nome::before { animation: none; } }
 .bateria-kanji { font-weight: 900; font-size: 16px; }
 
 /* ---------- o corpo de cima ---------- */
 
 .bateria-corpo {
-  display: grid;
-  align-items: center;
-  gap: 24px;
-  padding: 24px;
-  border-bottom: var(--seele-b) solid var(--seele-linha);
-  grid-template-columns: 112px minmax(0,1fr);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 0;
+  border: 0;
 }
 
 /* A contagem, em 92px — o maior número desta interface, e o comp o quer assim
@@ -106,11 +122,11 @@
    `prefers-reduced-motion: reduce`. O número continua lá, e continua contando —
    o que se perde é só a batida. */
 #bateria-conta {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 64px;
-  line-height: 1;
-  letter-spacing: 0;
+  font-family: var(--seele-mono);
+  font-weight: 700;
+  font-size: 80px;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
   color: var(--seele-vermelho-alerta);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
@@ -138,9 +154,10 @@
    Tirando o nome, o que sobra é verdade inteira. */
 .bateria-frase {
   margin: 0;
+  font-family: var(--seele-ui);
   font-size: 14px;
   line-height: 1.6;
-  color: var(--seele-osso);
+  color: var(--seele-vermelho-claro);
 }
 
 /* ---------- o corpo de baixo: as tentativas ---------- */
@@ -148,21 +165,24 @@
 .bateria-pe {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 24px;
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: var(--seele-raio);
+  border: 1px solid var(--seele-vidro-borda);
+  background: var(--seele-campo);
 }
 
 .bateria-pe .rotulo {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.2em;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
 }
 
 /* A contagem de tentativas é real — `InternalBattery.attempts` — e é a única
    coisa que o protocolo carrega sobre elas. Fica em osso e em corpo de dado,
    porque é o valor medido desta seção. */
 #bateria-tentativas {
-  font-size: var(--seele-t-dado);
-  color: var(--seele-osso);
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
 }
 
 /* ---------- o que saiu daqui ----------
@@ -195,18 +215,18 @@
 .bateria-forcar {
   margin: 12px 0 0;
   padding: 0;
+  font-family: var(--seele-ui);
   font-size: 13px;
   line-height: 1.6;
   letter-spacing: normal;
   text-align: left;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-rotulo-painel);
   background: none;
   border: 0;
   cursor: default;
   text-transform: none;
-  font-family: inherit;
   min-height: 0;
   opacity: 1;
 }
 
-@media(max-width:700px) { .bateria-cabeca,.bateria-corpo,.bateria-pe { padding:16px; } .bateria-corpo { grid-template-columns:80px minmax(0,1fr); gap:16px; } #bateria-conta { font-size:48px; } }
+@media(max-width:700px) { .bateria-caixa { padding:24px 20px; border-radius:24px; } #bateria-conta { font-size:56px; } }

@@ -67,13 +67,13 @@
    ali explicitamente como um dos casos. Ela diz que tipo de lugar é este; o
    nome ao lado diz qual. */
 .chamada-placa {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: var(--seele-t-secao);
-  letter-spacing: 0.06em;
-  padding: 4px 10px;
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-laranja-nerv);
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  padding: 0;
+  color: var(--seele-rotulo-painel);
+  background: none;
   white-space: nowrap;
   flex: 0 0 auto;
 }
@@ -86,11 +86,15 @@
 }
 
 .chamada-nome {
-  font-size: var(--seele-t-corpo);
+  font-size: 32px;
   color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
 }
 
 .chamada-vao { flex: 1; }
@@ -111,10 +115,11 @@
 }
 
 .chamada-enlace-marca {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   background: currentColor;
   flex: 0 0 auto;
+  border-radius: 50%;
 }
 
 .chamada-enlace[data-enlace="no-ar"] { color: var(--seele-fosforo); }
@@ -176,6 +181,10 @@
   min-height: 0;
   border-bottom: var(--seele-b) solid var(--seele-linha);
   background: var(--seele-negro-painel);
+  margin: 16px 24px 0;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 22px;
+  overflow: hidden;
 }
 
 /* Transmitindo, o palco passa a dividir a altura com a grade. `1 1 40%` e não
@@ -189,11 +198,13 @@
 
 .chamada-palco-cabeca {
   display: flex;
-  align-items: baseline;
-  gap: 16px;
+  align-items: center;
+  gap: 6px 10px;
   padding-right: 16px;
-  border-bottom: var(--seele-b) solid var(--seele-linha);
+  border-bottom: 1px solid var(--seele-vidro-borda);
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  padding: 10px 14px;
 }
 
 /* O título já traz a régua de baixo na cabeça inteira; repeti-la nele
@@ -207,24 +218,24 @@
    entra, e um dígito que empurra a frase para o lado pisca a cada mudança. */
 .chamada-palco-razao {
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: var(--seele-fosforo);
+  color: var(--seele-rotulo-painel);
 }
 
 .chamada-palco-corpo {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 14px;
 }
 
 .chamada-palco-quem {
   margin: 0;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: var(--seele-t-secao);
-  letter-spacing: var(--seele-tracking-cartela);
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: var(--seele-t-corpo);
+  letter-spacing: 0;
   color: var(--seele-osso);
 }
 
@@ -235,10 +246,10 @@
 .chamada-palco-escolha {
   display: flex;
   flex-wrap: wrap;
-  gap: 1px;
-  background: var(--seele-linha);
-  border: 1px solid var(--seele-linha-forte);
-  width: fit-content;
+  gap: 6px;
+  background: none;
+  border: 0;
+  width: auto;
   max-width: 100%;
 }
 
@@ -312,10 +323,10 @@
 .chamada-palco-controles {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 8px 16px;
-  border-top: var(--seele-b) solid var(--seele-linha);
+  padding: 10px 14px;
+  border-top: 1px solid var(--seele-vidro-borda);
   flex: 0 0 auto;
 }
 
@@ -347,8 +358,13 @@
 .chamada-palco-volume {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
 }
 
 .chamada-palco-volume input[type="range"] {
@@ -475,14 +491,15 @@
 .chamada-cartao-topo {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 8px;
+  flex-direction: column;
 }
 
 .chamada-cartao-identidade {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -499,18 +516,19 @@
 .chamada-cartao-quem {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
+  line-height: 1.3;
 }
 
 /* Saira 700, e não 900: o inventário §12 reserva o 700 para nome próprio dentro
    de lista. */
 .chamada-cartao-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 20px;
-  letter-spacing: 0.04em;
-  line-height: 1;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0;
+  line-height: 1.3;
   color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -521,22 +539,29 @@
 
 .chamada-cartao-estados {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 /* A pastilha do canto: o mesmo estado que a nota escreve em frase, na forma
    curta. Contorno por omissão; sólida só quando a pessoa transmite, que é o
    único estado que o comp inverte. */
 .chamada-pastilha {
-  padding: 3px 8px;
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.1em;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  padding: 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--seele-controle-borda);
   color: var(--seele-osso-apagado);
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-mono);
 }
 
 .chamada-pastilha[data-estado="at"] {
@@ -560,7 +585,7 @@
 .chamada-cartao-sync {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 
 .chamada-cartao-linha {
@@ -588,9 +613,9 @@
 }
 
 .chamada-cartao-valor {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 18px;
+  font-family: var(--seele-mono);
+  font-weight: 700;
+  font-size: 16px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -628,9 +653,9 @@
 .chamada-volume {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: var(--seele-b) solid var(--seele-linha);
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 0;
 }
 
 .chamada-volume .rotulo {
@@ -640,8 +665,8 @@
 }
 
 .chamada-vol-passo {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -650,9 +675,11 @@
   font-size: var(--seele-t-corpo);
   line-height: 1;
   color: var(--seele-osso);
-  background: none;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   cursor: pointer;
+  min-height: 28px;
+  border-radius: var(--seele-raio-pilula);
 }
 
 .chamada-vol-passo:hover { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
@@ -661,7 +688,7 @@
 .chamada-vol-celas {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -670,12 +697,13 @@
    volume no que a sétima vale. 16px de altura é uma célula de terminal. */
 .chamada-vol-cela {
   flex: 1 1 auto;
-  height: 16px;
+  height: 12px;
   min-width: 4px;
   padding: 0;
   border: 0;
   background: var(--seele-linha-forte);
   cursor: pointer;
+  border-radius: 4px;
 }
 
 .chamada-vol-cela[data-cheia="sim"] { background: var(--seele-laranja-nerv); }
@@ -689,6 +717,7 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--seele-osso);
+  font-family: var(--seele-mono);
 }
 
 /* ---------- a barra de ações ----------
@@ -930,6 +959,8 @@
   object-fit: contain;
   background: var(--seele-negro-absoluto);
   border: var(--seele-b) solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+  border-color: var(--seele-vidro-borda);
 }
 
 .chamada-palco-cheia {
@@ -1002,7 +1033,7 @@ body[data-cinema="sim"] #palco-imagem {
   min-height: 44px;
   z-index: 40;
   color: var(--seele-osso);
-  background: #050403d9;
+  background: color-mix(in srgb, var(--seele-negro-absoluto) 85%, transparent);
   border: 1px solid var(--seele-linha-forte);
   padding: 8px 16px;
   cursor: pointer;
@@ -1085,15 +1116,15 @@ body[data-vendo-tela="sim"] .varredura {
 .chamada-cartao {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 14px;
   min-width: 0;
   border-right: var(--seele-b) solid var(--seele-linha);
   border-bottom: var(--seele-b) solid var(--seele-linha);
-  background: var(--seele-negro-absoluto);
-  border: 1px solid var(--seele-linha);
-  border-radius: var(--seele-raio);
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 20px;
 }
 .chamada-topo, .chamada-acoes { background: var(--seele-negro-absoluto); }
 #chamada-grade { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); align-content: start; }
@@ -1101,16 +1132,17 @@ body[data-vendo-tela="sim"] .varredura {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 56px;
+  height: 56px;
   flex: 0 0 auto;
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: var(--seele-t-secao);
-  letter-spacing: 0.02em;
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  color: var(--seele-osso-apagado);
-  border-radius: var(--seele-raio);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0;
+  border: 0;
+  color: var(--seele-osso);
+  border-radius: var(--seele-raio-cartao);
+  background-color: var(--seele-controle-hover);
 }
 
 .chamada-acoes-estreitas { display: none; }
@@ -1119,6 +1151,148 @@ body[data-vendo-tela="sim"] .varredura {
 @keyframes seele-sumir {
   0%, 60% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* ================= redesign 0.19: a sala de voz =================
+
+   Fonte: o canvas «SEELE — novo design», tela `Chamada` (05). Vem depois do
+   desenho anterior desta folha e antes das condições de composição do fim.
+   A barra da sala é um título com dois selos; a tela compartilhada é uma
+   moldura de 22px; cada pessoa é um cartão de vidro com avatar de 56px, selo de
+   estado e a barra de sinal. Só tokens; misturas por `color-mix`. */
+
+.chamada-enlace, .chamada-campo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+}
+.chamada-enlace[data-enlace="no-ar"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  color: var(--seele-fosforo);
+}
+.chamada-enlace[data-enlace="bateria"] {
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 55%, transparent);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 70%, transparent);
+  color: var(--seele-vermelho-alerta);
+}
+.chamada-campo .rotulo { font-size: 11px; letter-spacing: 0.06em; }
+
+/* A tela compartilhada. */
+.chamada-palco[data-transmitindo="sim"] { flex: 1 1 40%; }
+.chamada-palco-cabeca .chamada-titulo {
+  padding: 0;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso);
+}
+.chamada-palco[data-transmitindo="nao"] .chamada-palco-quem {
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--seele-osso-apagado);
+}
+.chamada-palco-escolha button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-osso);
+}
+.chamada-palco-escolha button:hover { background: var(--seele-controle-hover); color: var(--seele-osso); }
+.chamada-palco-escolha button[aria-pressed="true"] {
+  border-color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-tinta-no-acento);
+}
+.chamada-palco-escolha button[data-esperando="sim"] {
+  border-color: var(--seele-laranja-nerv);
+  background: var(--seele-controle);
+  color: var(--seele-laranja-claro);
+  box-shadow: none;
+}
+.chamada-palco-acao, .chamada-palco-cheia {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--seele-osso);
+}
+.chamada-palco-acao:hover, .chamada-palco-acao:focus-visible, .chamada-palco-cheia:hover, .chamada-palco-cheia:focus-visible {
+  border-color: var(--seele-controle-borda);
+  background: var(--seele-controle-hover);
+  color: var(--seele-osso);
+}
+.chamada-palco-acao[aria-pressed="true"] {
+  border-color: var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 14%, transparent);
+  color: var(--seele-laranja-claro);
+}
+.chamada-palco-volume .rotulo { font-family: var(--seele-ui); font-weight: 500; font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--seele-osso); }
+.chamada-palco-volume input[type="range"] { width: 90px; min-height: 0; }
+.chamada-palco-aperto, .chamada-palco-parada { font-family: var(--seele-ui); font-size: 13px; color: var(--seele-laranja-claro); }
+
+/* A grade de pessoas. */
+.chamada-grade, #chamada-grade { padding: 16px 24px; gap: 10px; }
+.chamada-cartao[data-fala="sim"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 55%, transparent);
+  background: var(--seele-vidro);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--seele-fosforo) 25%, transparent);
+}
+.chamada-cartao[data-fala="sim"] .chamada-avatar {
+  border: 0;
+  background-color: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent);
+  color: var(--seele-laranja-nerv);
+}
+.chamada-cartao[data-fala="sim"] .chamada-cartao-nome { color: var(--seele-osso); }
+.chamada-cartao .nota { font-size: 11px; line-height: 1.3; color: var(--seele-rotulo-painel); }
+.chamada-cartao-estados:empty { display: none; }
+.chamada-pastilha:empty { display: none; }
+.chamada-pastilha[data-estado="at"] {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  color: var(--seele-laranja-claro);
+}
+.chamada-pastilha[data-estado="fala"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  color: var(--seele-fosforo);
+}
+.chamada-pastilha[data-estado="surdo"] {
+  border-color: color-mix(in srgb, var(--seele-padrao-azul) 55%, transparent);
+  background: color-mix(in srgb, var(--seele-azul-fraco) 80%, transparent);
+  color: var(--seele-azul-claro);
+}
+.chamada-cartao-linha .rotulo { font-size: 11px; letter-spacing: var(--seele-tracking-rotulo); }
+.chamada-vol-passo:hover { border-color: var(--seele-controle-borda); background: var(--seele-controle-hover); color: var(--seele-osso); }
+
+/* Os controles da sala, quando ela ocupa a vista inteira: uma pílula só. */
+#tela-sessao[data-vista="ligacao"] .operador {
+  margin: 0;
+  padding: 8px;
+  border-radius: var(--seele-raio-pilula);
+  border: 1px solid var(--seele-controle-borda);
+  background: color-mix(in srgb, var(--seele-osso) 5%, transparent);
 }
 
 @media(max-width:700px) {

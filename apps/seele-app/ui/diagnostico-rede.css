@@ -1,10 +1,103 @@
-:root { color-scheme: dark; font: 16px system-ui, sans-serif; background: #101214; color: #edf0f2; }
-body { margin: 0; }
-main { max-width: 640px; margin: auto; padding: 28px 20px; }
-h1 { font-size: 24px; }
-label { display: block; margin-bottom: 8px; }
-textarea { box-sizing: border-box; width: 100%; padding: 12px; background: #1c2025; color: inherit; border: 1px solid #535b65; border-radius: 8px; }
-button, a { display: inline-block; margin: 12px 8px 0 0; padding: 12px 16px; border: 0; border-radius: 8px; background: #f16b35; color: #111; font: inherit; }
-button:disabled { opacity: .5; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
-[hidden] { display: none; }
+/* SEELE — o teste de conexão (Web-diagnostico, 0.19).
+   Página solta, sem `base.css`: lê só `tokens.css` e `fontes.css`, então tudo
+   que o canvas desenha (painel de vidro de 28px, campo de 16px, pílulas, caixa
+   de resultado de 18px) está aqui, em tokens. A política da página
+   (`web/_headers`) permite só folhas da própria origem. */
+:root { color-scheme: dark; font: 14px/1.6 var(--seele-mono); background: var(--seele-negro-absoluto); color: var(--seele-osso); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+  background-color: var(--seele-negro-absoluto);
+  background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+  background-size: 6px 6px;
+}
+* { scrollbar-width: thin; scrollbar-color: var(--seele-linha-forte) transparent; }
+main {
+  box-sizing: border-box;
+  width: 720px;
+  max-width: 100%;
+  padding: 36px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 28px;
+  background: var(--seele-vidro);
+}
+.diag-marca { display: flex; align-items: center; gap: 12px; }
+.diag-marca img { display: block; flex: 0 0 auto; }
+h1 {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: -0.045em;
+}
+label { display: block; font-family: var(--seele-ui); font-weight: 500; }
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  font: inherit;
+  color: var(--seele-osso);
+  background: var(--seele-campo);
+  border: 1px solid var(--seele-campo-borda);
+  border-radius: var(--seele-raio);
+}
+textarea::placeholder { color: var(--seele-rotulo-painel); }
+textarea:focus { outline: none; border-color: var(--seele-laranja-nerv); }
+.diag-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+button, a.diag-primario {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 18px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) { background: var(--seele-controle-hover); }
+.diag-primario, button.diag-primario, a.diag-primario {
+  font-weight: 600;
+  color: var(--seele-tinta-no-acento);
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+button.diag-primario:hover:not(:disabled), a.diag-primario:hover { background: var(--seele-laranja-hover); border-color: var(--seele-laranja-hover); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+#estado { margin: 0; font-family: var(--seele-ui); font-size: 12px; color: var(--seele-osso-apagado); }
+/* O resultado é a caixa escura do canvas: borda a 7%, canto de 18px. */
+pre {
+  margin: 0;
+  font-family: var(--seele-mono);
+  padding: 14px 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  background: var(--seele-campo);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
+}
+pre:empty { display: none; }
+[hidden] { display: none !important; }
+@media (max-width: 700px) {
+  body { padding: 16px; }
+  main { padding: 24px 20px; border-radius: var(--seele-raio-painel); }
+  h1 { font-size: 30px; }
+}

@@ -23796,14 +23796,15 @@ const todasParadas = (m) => m.faixas.every((f) => f.readyState === "ended");
   confere("(1) o audio-ligado não saiu uma vez, dizendo o porquê sem eco: " + JSON.stringify(ligados), ligados.length === 1 && typeof ligados[0].semEcoPorque === "string" && ligados[0].cancelamentoDeEco === false);
   confere("(1) a falha da 1ª tentativa não foi contada: " + JSON.stringify(m.de("falha")), m.de("falha").some((f) => f.onde === "microfone"));
 }
-// (2) Encerrada com e sem o eco: recusa nomeada, NENHUM audio-ligado, nada vivo.
+// (2) Encerrada com e sem o eco: recusa nomeada, NENHUM audio-ligado, nenhuma faixa viva, e a ESCUTA de pé (0.19: o microfone que
+// não sobe solta só a captura; quem chamou entra para ouvir e diz SÓ OUVINDO).
 {
   const m = montar({ respostas: ["ended", "ended"] });
   const r = await desfecho(m.voz.ligar({}));
   confere("(2) a faixa morta não deu SeeleCapturaEncerrada: " + r, r === "recusou:SeeleCapturaEncerrada");
   confere("(2) mais de uma tentativa a mais: " + m.conta.gum, m.conta.gum === 2);
   confere("(2) disse audio-ligado com a faixa morta: " + JSON.stringify(m.de("audio-ligado")), m.de("audio-ligado").length === 0);
-  confere("(2) sobrou faixa viva ou contexto aberto: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), todasParadas(m) && m.contextos.every((c) => c.state === "closed"));
+  confere("(2) sobrou faixa viva, ou a escuta caiu junto: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), todasParadas(m) && m.contextos.length === 1 && m.contextos[0].state === "running");
 }
 // (3) Uma recusa nunca se repete: nem na 1ª, nem na tentativa sem eco.
 for (const [nome, respostas, gums] of [["1ª", ["NotAllowedError"], 1], ["2ª", ["ended", "NotAllowedError"], 2], ["NotReadable", ["NotReadableError"], 1]]) {
@@ -23813,7 +23814,7 @@ for (const [nome, respostas, gums] of [["1ª", ["NotAllowedError"], 1], ["2ª", 
   confere("(3/" + nome + ") a recusa não chegou como ela é: " + r, r === "recusou:" + respostas[respostas.length - 1]);
   confere("(3/" + nome + ") a recusa foi repetida: gUM " + m.conta.gum, m.conta.gum === gums);
   confere("(3/" + nome + ") disse audio-ligado: " + m.de("audio-ligado").length, m.de("audio-ligado").length === 0);
-  confere("(3/" + nome + ") sobrou contexto aberto: " + m.contextos.map((c) => c.state), m.contextos.every((c) => c.state === "closed"));
+  confere("(3/" + nome + ") a recusa do microfone derrubou a escuta: " + m.contextos.map((c) => c.state), m.contextos.length === 1 && m.contextos[0].state === "running");
 }
 // (4) O cancelamento DURANTE a tentativa sem eco (o desligar, o pagehide): nada é adotado.
 for (const como of ["desligar", "pagehide"]) {
@@ -23883,7 +23884,7 @@ for (const como of ["desligar", "pagehide"]) {
   confere("(8) o arranque contou como captura perdida: " + JSON.stringify(m.de("audio-fechado")), m.de("audio-fechado").length === 0);
   confere("(8) a faixa nova não ficou viva com o áudio de pé: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), m.faixas[1]?.readyState === "live" && m.contextos[0].state === "running");
 }
-// (9) As duas morrem no arranque: recusa nomeada, nenhum audio-ligado, nenhuma 3ª chamada, nada vivo.
+// (9) As duas morrem no arranque: recusa nomeada, nenhum audio-ligado, nenhuma 3ª chamada, nenhuma faixa viva, a escuta de pé.
 {
   const m = montar({ respostas: ["live-morre", "live-morre"] });
   const r = await desfecho(m.voz.ligar({}));
@@ -23891,7 +23892,7 @@ for (const como of ["desligar", "pagehide"]) {
   confere("(9) não deu SeeleCapturaEncerrada: " + r, r === "recusou:SeeleCapturaEncerrada");
   confere("(9) chamadas: " + m.conta.gum, m.conta.gum === 2);
   confere("(9) disse audio-ligado: " + m.de("audio-ligado").length, m.de("audio-ligado").length === 0);
-  confere("(9) sobrou faixa viva ou contexto aberto: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), todasParadas(m) && m.contextos.every((c) => c.state === "closed"));
+  confere("(9) sobrou faixa viva, ou a escuta caiu junto: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), todasParadas(m) && m.contextos.length === 1 && m.contextos[0].state === "running");
 }
 // (10) O desligar DURANTE o arranque: nada adotado, nenhum audio-ligado, nenhuma tentativa a mais.
 {

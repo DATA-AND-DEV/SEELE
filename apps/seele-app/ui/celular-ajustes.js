@@ -207,12 +207,15 @@
   renomear("secao-mods", PALAVRAS.modsDesteServidor);
 
   const doDesktop = (id) => document.getElementById(id).closest("li");
+  // Em três cartões de vidro (Cel-ajustes.dc), na mesma ordem de sempre: o
+  // aparelho e o servidor, o que a página faz e não faz, e a saída.
   coluna.append(h("ul", { class: "cel-ajustes-lista" },
     doDesktop("secao-audio"),
     doDesktop("secao-aparencia"),
     doDesktop("secao-servidor"),
     doDesktop("secao-mods"),
-    doDesktop("secao-identidade"),
+    doDesktop("secao-identidade")),
+  h("ul", { class: "cel-ajustes-lista" },
     fora,
     comoAbre,
     // Ações, e não seções: o `abrirSecao` do desktop passa por toda
@@ -230,7 +233,8 @@
       h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.cargos })))),
     h("li", {}, h("button", { class: "cel-ajustes-acao cel-sobre", type: "button", onclick: () => abrirAjuda() },
       h("span", { class: "server-secao-icone" }, glifo("comando")),
-      h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.sobre })))),
+      h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.sobre }))))),
+  h("ul", { class: "cel-ajustes-lista cel-ajustes-saida" },
     h("li", {}, h("button", {
       class: "cel-ajustes-acao cel-sair-do-servidor",
       type: "button",

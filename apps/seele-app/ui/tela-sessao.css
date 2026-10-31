@@ -230,8 +230,8 @@
 }
 
 .veredito-texto {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
+  font-family: var(--seele-ui);
+  font-size: 14px;
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
@@ -271,32 +271,37 @@
    sozinho num quadrado não é o nome de nada. */
 .trilha-titulo {
   margin: 0;
-  height: 24px;
+  height: auto;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid var(--seele-linha);
+  border-bottom: 0;
   font-family: var(--seele-mono);
-  font-size: 8px;
+  font-size: 9px;
   font-weight: normal;
-  letter-spacing: 0.16em;
+  letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-rotulo-painel);
 }
 
 .trilha-item {
-  height: 56px;
+  height: 44px;
   flex: 0 0 auto;
-  border: 0;
+  border: 1px solid var(--seele-controle-borda);
   border-bottom: 1px solid var(--seele-linha);
   border-left: 3px solid transparent;
-  background: none;
-  font-family: var(--seele-display);
-  font-weight: 900;
+  background: var(--seele-controle);
+  font-family: var(--seele-ui);
+  font-weight: 600;
   font-size: 15px;
-  letter-spacing: 0.06em;
-  color: var(--seele-osso-apagado);
+  letter-spacing: 0;
+  color: var(--seele-osso);
   cursor: pointer;
+  position: relative;
+  width: 44px;
+  padding: 0;
+  border-radius: 14px;
+  overflow: visible;
 }
 
 /* O servidor em que se está. Desabilitado porque apertá-lo seria entrar onde já se
@@ -327,7 +332,7 @@
    letras, encostada à esquerda de uma coluna de 60px. */
 .trilha-outro {
   display: block;
-  width: 100%;
+  width: 44px;
 }
 
 /* Entrar noutro servidor é sair deste, e a coluna diz isso pelo mesmo canal que
@@ -356,6 +361,7 @@
   height: 100%;
   padding: 8px;
   object-fit: contain;
+  border-radius: 13px;
 }
 
 /* **As regiões da API 6 são caixas fechadas** (rascunho §3, tarefa 5) — esta, a
@@ -376,10 +382,13 @@
   display: flex;
   flex-direction: column;
   max-height: 168px;
-  border-bottom: 1px solid var(--seele-linha);
+  border-bottom: 0;
   overflow-x: hidden;
   overflow-y: auto;
   contain: paint;
+  align-self: stretch;
+  align-items: center;
+  gap: 10px;
 }
 
 /* O `+` de 48px, que hoje faz alguma coisa: leva à entrada para conectar a um
@@ -387,9 +396,9 @@
    em `linha-forte` e com `cursor: default`, porque era moldura; um controle vivo
    com a cor de uma borda é um controle que ninguém tenta apertar. */
 .trilha-mais {
-  height: 48px;
+  height: 44px;
   flex: 0 0 auto;
-  border: 0;
+  border: 1px dashed var(--seele-controle-borda);
   border-bottom: 1px solid var(--seele-linha);
   border-left: 3px solid transparent;
   background: none;
@@ -397,6 +406,11 @@
   font-size: 18px;
   color: var(--seele-osso-apagado);
   cursor: pointer;
+  width: 44px;
+  margin-top: auto;
+  padding: 0;
+  border-radius: 14px;
+  font-family: var(--seele-ui);
 }
 
 .trilha-mais:hover,
@@ -457,8 +471,8 @@
    no corpo do sinal de mais fica maior que ele. Tamanho, moldura e alinhamento
    vêm do `+`, uma vez, para os dois nunca mais divergirem. */
 .painel-ajuda {
-  font-family: var(--seele-mono);
-  font-size: 10px;
+  font-family: var(--seele-ui);
+  font-size: 12px;
 }
 
 
@@ -486,8 +500,8 @@
    ver `desenharORodapeDoOperador`, em `tela-chamada.js`. */
 
 .painel-acao {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -495,10 +509,14 @@
   font: inherit;
   font-size: 14px;
   line-height: 1;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   cursor: pointer;
+  min-height: 28px;
+  padding: 0;
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-ui);
 }
 
 .painel-acao:hover {
@@ -550,6 +568,9 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  gap: 16px;
+  padding: 0;
+  overflow-x: hidden;
 }
 
 .canais {
@@ -557,6 +578,9 @@
   margin: 0;
   padding: 0;
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* A marca de 3px à esquerda é o estado, e é a mesma técnica do comp v3: uma
@@ -577,6 +601,9 @@
   gap: 8px;
   border-top: 1px solid var(--seele-linha);
   padding: 10px 12px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio);
+  background: var(--seele-vidro);
 }
 
 .voice_room.aberto { background: var(--seele-laranja-fraco); }
@@ -584,10 +611,10 @@
 .canal-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 
 .voice_room-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
+  font-family: var(--seele-ui);
+  font-weight: 600;
   font-size: 15px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -627,9 +654,10 @@ button.voice_room-nome:hover { text-decoration: underline; }
    dentro, e duas leituras da mesma medida numa coluna de 268px é uma a mais. */
 .voice_room-ocupacao {
   font-size: var(--seele-t-rotulo);
-  color: var(--seele-osso-apagado);
+  color: var(--seele-rotulo-painel);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
+  font-family: var(--seele-mono);
 }
 
 /* ---- quem está dentro ----
@@ -652,8 +680,9 @@ button.voice_room-nome:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--seele-osso-apagado);
+  font-family: var(--seele-mono);
 }
 
 .voice_room-pessoa-nome {
@@ -669,7 +698,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
   margin-left: auto;
   flex: 0 0 auto;
   letter-spacing: 0.08em;
-  color: var(--seele-laranja-nerv);
+  color: var(--seele-fosforo);
 }
 
 .voice_room-vazio { color: var(--seele-linha-forte); font-size: 11px; }
@@ -679,18 +708,20 @@ button.voice_room-nome:hover { text-decoration: underline; }
    dizendo qual dos dois é o estado corrente. */
 .voice_room-entrar {
   width: 100%;
-  min-height: 38px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 14px;
-  letter-spacing: 0.14em;
-  color: var(--seele-laranja-nerv);
-  background: none;
-  border: 1px solid var(--seele-laranja-nerv);
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   cursor: pointer;
+  padding: 0 18px;
+  border-radius: var(--seele-raio-pilula);
 }
 
 .voice_room-entrar:hover {
@@ -776,7 +807,10 @@ button.voice_room-nome:hover { text-decoration: underline; }
 
 /* A fileira da Linha, quando ela tem controles ao lado. Sem eles o `<li>`
    continua sendo o que era: um único botão de largura cheia. */
-.linha-fileira { display: flex; align-items: stretch; }
+.linha-fileira { display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .linha-fileira .linha { min-width: 0; flex: 1; }
 
 /* Os dois controles do canal, **empilhados e grudados**: o `×` em cima e o
@@ -791,9 +825,11 @@ button.voice_room-nome:hover { text-decoration: underline; }
    isso está certo: o vazio ao lado é a permissão que essa pessoa não tem. */
 .linha-controles {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex: 0 0 auto;
   justify-content: center;
+  gap: 4px;
+  padding-right: 4px;
 }
 
 .linha-controles > button { height: 20px; }
@@ -820,13 +856,13 @@ button.voice_room-nome:hover { text-decoration: underline; }
    centrados não é uma lista. */
 .linha {
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 10px;
+  padding: 6px 10px;
   font: inherit;
-  font-size: var(--seele-t-dado);
+  font-size: 14px;
   text-align: left;
   color: var(--seele-osso-apagado);
   background: none;
@@ -834,6 +870,9 @@ button.voice_room-nome:hover { text-decoration: underline; }
   border-right: 0;
   border-bottom: 0;
   cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-family: var(--seele-ui);
 }
 
 .linha:hover { background: var(--seele-linha); }
@@ -846,7 +885,10 @@ button.voice_room-nome:hover { text-decoration: underline; }
    `linha-forte` e não a placa de marca com que o comp o pinta: as seis placas
    são do ícone do app, e `tokens.css` escreve na cara delas que nenhuma
    superfície do produto se pinta com elas. */
-.linha-cerquilha { color: var(--seele-linha-forte); flex: 0 0 auto; }
+.linha-cerquilha {
+  color: var(--seele-rotulo-painel); flex: 0 0 auto;
+  font-family: var(--seele-mono);
+}
 .linha.aberto .linha-cerquilha { color: var(--seele-laranja-nerv); }
 
 .linha-rotulo {
@@ -859,12 +901,14 @@ button.voice_room-nome:hover { text-decoration: underline; }
 /* A tira do operador. */
 .operador {
   border-top: 1px solid var(--seele-linha);
-  padding: 10px 12px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   flex: 0 0 auto;
-  background: var(--seele-negro-painel);
+  background: color-mix(in srgb, var(--seele-osso) 5%, transparent);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 20px;
 }
 
 /* **A capa de uma pessoa** (`pessoa.capa`; rascunho da API 6, §4; tarefa 6):
@@ -961,20 +1005,25 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background-color: var(--nucleo-painel);
 }
 
-.operador-topo { display: flex; align-items: center; gap: 8px; }
+.operador-topo { display: flex; align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 
 .operador-rotulo {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.2em;
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-rotulo-painel);
 }
 
 .operador-nome {
   font-size: var(--seele-t-dado);
-  color: var(--seele-padrao-azul);
+  color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--seele-ui);
+  font-weight: 600;
 }
 
 /* O `⚙` do comp, 34×34 e contornado — a mesma medida do microfone e do fone
@@ -1040,7 +1089,9 @@ button.voice_room-nome:hover { text-decoration: underline; }
 
 /* ---------- coluna 3: o canal aberto ---------- */
 
-.painel-linha { background: var(--seele-negro-absoluto); }
+.painel-linha {
+  background: var(--seele-vidro);
+}
 
 /* 52px no v3, contra os 40px do v2: o botão `BUSCAR` tem 34px de altura e não
    cabia numa barra de 40. */
@@ -1051,13 +1102,15 @@ button.voice_room-nome:hover { text-decoration: underline; }
    para ele ler como divisão da lista, e não como uma linha que se aperta. */
 .canais-grupo {
   list-style: none;
-  padding: 10px 16px 4px;
+  padding: 8px 8px 2px;
   font-size: var(--seele-t-micro);
-  letter-spacing: 0.18em;
+  letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-rotulo-painel);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--seele-mono);
+  text-transform: uppercase;
 }
 
 /* `canal.cabecalho` substituído (rascunho da API 6, §3): o miolo da barra, no
@@ -1080,9 +1133,13 @@ button.voice_room-nome:hover { text-decoration: underline; }
 .linha-barra:has(> .canal-cabecalho-miolo:not([hidden])) > .espaco { display: none; }
 
 .linha-barra-cerquilha {
-  font-size: 16px;
-  color: var(--seele-laranja-nerv);
+  font-size: 28px;
+  color: var(--seele-osso);
   flex: 0 0 auto;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
 }
 
 
@@ -1120,18 +1177,19 @@ button.linha-nome:hover { text-decoration: underline; }
    do canal e o campo de escrever para dentro. O que o rótulo pagava, o
    `aria-label` e o `title` pagam sem ocupar largura. */
 .linha-buscar {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
   padding: 0;
   font: inherit;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   cursor: pointer;
+  border-radius: var(--seele-raio-pilula);
 }
 
 .linha-buscar:hover,
@@ -1148,7 +1206,7 @@ button.linha-nome:hover { text-decoration: underline; }
 .mensagens {
   list-style: none;
   margin: 0;
-  padding: 16px 16px 8px;
+  padding: 16px 24px;
   overflow-y: auto;
   flex: 1 1 auto;
   display: flex;
@@ -1183,8 +1241,10 @@ button.linha-nome:hover { text-decoration: underline; }
 
 .mensagem-autor {
   font-size: var(--seele-t-dado);
-  letter-spacing: 0.04em;
-  color: var(--seele-osso-apagado);
+  letter-spacing: 0;
+  color: var(--seele-osso);
+  font-family: var(--seele-ui);
+  font-weight: 600;
 }
 
 .mensagem.propria .mensagem-autor { color: var(--seele-padrao-azul); }
@@ -1196,9 +1256,10 @@ button.linha-nome:hover { text-decoration: underline; }
    sai do tamanho — 10px contra os 13px do nome —, não de mais um degrau de
    cinza. */
 .mensagem-hora {
-  font-size: var(--seele-t-rotulo);
-  color: var(--seele-osso-apagado);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
   font-variant-numeric: tabular-nums;
+  font-family: var(--seele-mono);
 }
 
 /* ---- a continuação de uma rajada ----
@@ -1230,8 +1291,8 @@ button.linha-nome:hover { text-decoration: underline; }
   gap: 12px;
   margin: 18px 0 4px;
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.2em;
+  font-size: 12px;
+  letter-spacing: 0.04em;
   color: var(--seele-rotulo-painel);
 }
 
@@ -1362,10 +1423,11 @@ button.linha-nome:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 0 12px;
-  min-height: 44px;
-  border: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
+  padding: 0 14px;
+  min-height: 48px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--seele-negro-absoluto) 85%, transparent);
+  border-radius: var(--seele-raio);
 }
 
 .compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
@@ -1415,10 +1477,11 @@ button.linha-nome:hover { text-decoration: underline; }
   flex: 0 0 auto;
   padding: 0;
   font: inherit;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
   cursor: pointer;
+  border-radius: var(--seele-raio-pilula);
 }
 
 .compor-anexar:hover {
@@ -1439,9 +1502,11 @@ button.linha-nome:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--seele-linha);
-  background: var(--seele-negro-painel);
+  margin: 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio);
+  background: var(--seele-controle);
 }
 
 .anexo-linha {
@@ -1495,11 +1560,13 @@ button.linha-nome:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
+  max-width: 420px;
   margin-top: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
+  padding: 10px 14px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio);
+  background: var(--seele-controle);
 }
 
 .anexo-arquivo {
@@ -1523,41 +1590,47 @@ button.linha-nome:hover { text-decoration: underline; }
 /* SALVAR, e nunca ABRIR. O ADR 0027 não dá a cliente nenhum do SEELE um botão
    que abre arquivo, e esta é a única ação que este bloco oferece. */
 .anexo-salvar {
-  padding: 3px 10px;
-  font-family: var(--seele-display);
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  min-height: 36px;
+  padding: 0 14px;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
   flex: 0 0 auto;
 }
 
 .anexo-salvar:hover {
-  color: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
 }
 
 /* PRÉVIA, ao lado de SALVAR e nunca no lugar dele. Prever não é abrir e não é
    salvar: os bytes vão para a memória desta janela, não para o disco. */
 .anexo-previa {
-  padding: 3px 10px;
-  font-family: var(--seele-display);
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  min-height: 36px;
+  padding: 0 14px;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
   flex: 0 0 auto;
 }
 
 .anexo-previa:hover {
-  color: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
 }
 
 .anexo-previa[disabled] {
@@ -1581,20 +1654,24 @@ button.linha-nome:hover { text-decoration: underline; }
   position: absolute;
   top: 6px;
   right: 6px;
-  padding: 3px 10px;
-  font-family: var(--seele-display);
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  color: var(--seele-osso-apagado);
-  background: var(--seele-negro-absoluto);
-  border: 1px solid var(--seele-linha-forte);
+  min-height: 36px;
+  padding: 0 14px;
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
   cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .anexo-previa-fechar:hover {
-  color: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
 }
 
 /* Numa recusa não há figura sobre a qual flutuar: ele fica na linha. */
@@ -1624,7 +1701,8 @@ button.linha-nome:hover { text-decoration: underline; }
   width: auto;
   height: auto;
   object-fit: contain;
-  border: 1px solid var(--seele-linha);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio);
   background: var(--seele-negro-absoluto);
 }
 
@@ -1636,6 +1714,7 @@ button.linha-nome:hover { text-decoration: underline; }
   margin-top: 6px;
   padding: 6px 8px;
   border-left: 2px solid var(--seele-laranja-nerv);
+  border-radius: 0 var(--seele-raio-miudo) var(--seele-raio-miudo) 0;
   font-family: var(--seele-mono);
   font-size: var(--seele-t-rotulo);
   line-height: 1.5;
@@ -1668,10 +1747,10 @@ button.linha-nome:hover { text-decoration: underline; }
    primeiro. Peso normal e corpo pequeno bastam para ela não competir com o
    título. */
 .pessoas-conta {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-micro);
-  font-weight: normal;
-  letter-spacing: 0.14em;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
   flex: 0 0 auto;
 }
 
@@ -1687,32 +1766,43 @@ button.linha-nome:hover { text-decoration: underline; }
 .roster {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 10px 8px 12px;
   overflow-y: auto;
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.roster-grupo { display: block; }
+.roster-grupo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 /* O cabeçalho de um grupo: o nome da sala e a ocupação, o mesmo par que a
    coluna de salas escreve. Grudento porque a lista rola e um nome de sala que
    sai da tela deixa os cartões de baixo sem dono. */
 .roster-sala {
   margin: 0;
-  position: sticky;
+  position: static;
   top: 0;
   z-index: 1;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  background: var(--seele-negro-painel);
+  padding: 0 8px;
+  background: none;
   border-bottom: 1px solid var(--seele-linha);
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-micro);
+  font-size: 11px;
   font-weight: normal;
-  letter-spacing: 0.16em;
+  letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-rotulo-painel);
+  min-height: 32px;
+  border: 0;
+  border-radius: 10px;
+  text-transform: uppercase;
 }
 
 .roster-sala-nome {
@@ -1736,14 +1826,25 @@ button.linha-nome:hover { text-decoration: underline; }
 .roster-sala-aqui {
   margin-left: auto;
   flex: 0 0 auto;
-  letter-spacing: 0.1em;
-  text-transform: lowercase;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  border-radius: var(--seele-raio-pilula);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  color: var(--seele-fosforo);
 }
 
 .roster-pessoas {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* **FORA DO AR** (D-fio-4, P6): quem é membro e não está conectado. Apagado, e
@@ -1755,13 +1856,17 @@ button.linha-nome:hover { text-decoration: underline; }
    é a diferença que o grupo precisa mostrar. */
 .membro-fora-do-ar {
   border-bottom: 1px solid var(--seele-linha);
-  padding: 6px 14px;
-  font-size: var(--seele-t-corpo);
+  padding: 6px 10px;
+  font-size: 14px;
   letter-spacing: 0.02em;
   color: var(--seele-rotulo-painel);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border: 0;
+  border-radius: 12px;
+  font-family: var(--seele-ui);
+  opacity: 0.7;
 }
 
 /* A região `pessoas.lista` (rascunho da API 6, §3): acima da lista, fechada e
@@ -1811,9 +1916,15 @@ button.linha-nome:hover { text-decoration: underline; }
   background: var(--seele-fosforo-fraco);
 }
 
-.pessoa-cabeca { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pessoa-cabeca { display: flex; justify-content: space-between;
+  align-items: center; gap: 8px;
+  min-height: 44px;
+}
 
-.pessoa-identidade { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pessoa-identidade { display: flex;
+  align-items: center;
+  gap: 10px; min-width: 0;
+}
 
 /* **O nome é a coisa maior da linha** — U15.
  *
@@ -1825,13 +1936,14 @@ button.linha-nome:hover { text-decoration: underline; }
  * O número desceu para o diagnóstico recolhível, e o nome passou a ter o
  * tamanho de quem é o assunto da lista. */
 .pessoa-nome {
-  font-size: var(--seele-t-corpo);
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
   color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--seele-ui);
 }
 
 /* O diagnóstico, recolhido — U15.
@@ -1839,7 +1951,9 @@ button.linha-nome:hover { text-decoration: underline; }
  * Recolher não é tirar: quem precisa do número continua a um toque dele, e o
  * resumo já o carrega. `specs/06-clientes-gui.md` não perde nada — o estado
  * continua em palavra, dentro. */
-.pessoa-diagnostico { margin-top: 4px; }
+.pessoa-diagnostico {
+  margin-top: 0;
+}
 
 
 
@@ -1871,7 +1985,7 @@ button.linha-nome:hover { text-decoration: underline; }
 /* O número, dentro do diagnóstico. De 26px para o corpo de dado: ele deixou de
    competir com o nome porque deixou de estar ao lado dele. */
 .pessoa-sync-valor {
-  font-family: var(--seele-display);
+  font-family: var(--seele-mono);
   font-weight: 700;
   font-size: var(--seele-t-dado);
   line-height: 1;
@@ -1913,10 +2027,19 @@ button.linha-nome:hover { text-decoration: underline; }
    seis pastilhas sólidas empilhadas não distinguiriam nada. Sem contorno
    tampouco: uma moldura em volta do repouso é o mesmo peso por outro meio. */
 .pastilha {
-  padding: 2px 6px;
-  font-weight: 600;
+  padding: 0 10px;
+  font-weight: 400;
   white-space: nowrap;
-  color: var(--seele-negro-absoluto);
+  color: var(--seele-osso-apagado);
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: none;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 
 .pastilha[data-estado="at"] { background: var(--seele-laranja-nerv); }
@@ -1961,9 +2084,12 @@ button.linha-nome:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 16px;
+  padding: 3px 12px;
   border-right: 1px solid var(--seele-linha);
   white-space: nowrap;
+  border: 0;
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
 }
 
 .metrica .rotulo {
@@ -1994,9 +2120,11 @@ button.linha-nome:hover { text-decoration: underline; }
 .falha-local {
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 3px 12px;
   color: var(--seele-vermelho-alerta);
   font-size: 11px;
+  border-radius: var(--seele-raio-pilula);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 70%, transparent);
 }
 
 /* As três luzes. O quadrado é vazado porque não há leitura: o protocolo sabe
@@ -2184,6 +2312,7 @@ button.linha-nome:hover { text-decoration: underline; }
   padding: 4px 16px;
   border-bottom: 1px solid var(--seele-linha);
   flex: 0 0 auto;
+  border-radius: var(--seele-raio);
 }
 
 .busca .prompt { color: var(--seele-laranja-nerv); }
@@ -2450,12 +2579,13 @@ button.linha-nome:hover { text-decoration: underline; }
 /* A barra da vista da chamada, com os valores da comp da 0.9.0. */
 .vista-chamada-barra {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
-  min-height: 48px;
-  padding: 6px 16px;
-  border-bottom: 1px solid var(--seele-linha);
-  background: var(--seele-negro-painel);
+  gap: 8px 14px;
+  min-height: 0;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--seele-vidro-borda);
+  background: none;
   flex: 0 0 auto;
 }
 
@@ -2481,8 +2611,9 @@ button.linha-nome:hover { text-decoration: underline; }
 .operador-frase {
   margin: 0 0 2px;
   font-size: 11px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
 }
 
 
@@ -2493,8 +2624,8 @@ button.linha-nome:hover { text-decoration: underline; }
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  flex: 1;
+  gap: 10px;
+  flex: 1 0 100%;
   min-width: 0;
   padding: 0;
   font: inherit;
@@ -2507,8 +2638,9 @@ button.linha-nome:hover { text-decoration: underline; }
 .operador-quem-texto {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
+  line-height: 1.3;
 }
 
 /* A inicial, que é o que os outros veem de quem não pôs imagem. 32×32, que é o
@@ -2521,11 +2653,13 @@ button.linha-nome:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--seele-linha-forte);
+  border: 0;
   font-family: var(--seele-display);
-  font-weight: 900;
+  font-weight: 700;
   font-size: 13px;
-  color: var(--seele-osso-apagado);
+  color: var(--seele-laranja-nerv);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent);
 }
 
 .operador-quem:hover .operador-inicial {
@@ -2634,10 +2768,10 @@ button.linha-nome:hover { text-decoration: underline; }
 .linha-barra {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 64px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--seele-linha);
+  gap: 8px 14px;
+  min-height: 0;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--seele-vidro-borda);
   flex: 0 0 auto;
 }
 .linha-nome {
@@ -2655,37 +2789,45 @@ button.linha-nome:hover { text-decoration: underline; }
 .compor {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 8px;
+  padding: 8px;
   border-top: 1px solid var(--seele-linha);
   flex: 0 0 auto;
+  margin: 0 12px 12px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--seele-osso) 6%, transparent);
 }
 .compor-enviar {
   flex: 0 0 auto;
   align-self: end;
-  min-height: 40px;
-  padding: 0 12px;
+  min-height: 44px;
+  padding: 0 20px;
   border: 1px solid var(--seele-laranja-nerv);
-  background: transparent;
-  color: var(--seele-laranja-nerv);
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-tinta-no-acento);
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  letter-spacing: 0.04em;
   cursor: pointer;
-  border-radius: var(--seele-raio);
+  border-radius: var(--seele-raio-pilula);
+  font-weight: 600;
 }
 .telemetria {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   height: auto;
   border-top: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-absoluto);
+  background: var(--seele-vidro);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
-  min-height: 32px;
-  padding: 6px 16px;
-  gap: 16px;
+  min-height: 0;
+  padding: 5px;
+  gap: 6px;
   flex-wrap: wrap;
+  margin: 0 16px 16px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-pilula);
 }
 .telemetria .metrica { font-size: 12px; gap: 8px; }
 .telemetria .rotulo { font-size: 12px; letter-spacing: 0; }
@@ -2693,19 +2835,19 @@ button.linha-nome:hover { text-decoration: underline; }
 
 .pessoas-cartela {
   margin: 0;
-  padding: 16px;
+  padding: 10px 20px;
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  background: var(--seele-negro-absoluto);
-  color: var(--seele-osso-apagado);
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 15px;
-  letter-spacing: .02em;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-tinta-no-acento);
+  font-family: var(--seele-ui);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.1em;
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--seele-linha);
+  border-bottom: 0;
   font-family:var(--seele-mono); font-weight:normal; font-size:14px; line-height:1.5;
 }
 .pessoas-cartela > span { white-space: nowrap; }
@@ -2727,11 +2869,12 @@ button.linha-nome:hover { text-decoration: underline; }
 .mensagem.propria .mensagem-avatar, .mensagem.propria .mensagem-autor { color: var(--seele-osso); border-color: var(--seele-linha-forte); }
 .mensagem {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 14px;
   border-left: 0;
   padding-left: 12px;
   padding-block: 12px;
+  padding: 8px 0;
 }
 
 #form-mensagem .compor-caixa { border-radius: var(--seele-raio); }
@@ -2769,14 +2912,273 @@ button.linha-nome:hover { text-decoration: underline; }
   font-size: 12px;
   letter-spacing: 0;
   color: var(--seele-osso-apagado);
+  font-family: var(--seele-ui);
+  padding: 2px 2px 4px 42px;
 }
 
 /* Condições de composição, após os valores padrão do componente. */
+/* ================= redesign 0.19: a operação em painéis de vidro =================
+
+   Fonte: o canvas «SEELE — novo design», tela `Main` (04, servidor e conversa).
+   Esta seção **vem depois** de todo o desenho anterior desta folha e antes das
+   condições de composição (`@media`), de modo que ganha dele pela ordem — e as
+   condições, que só rearranjam, continuam ganhando de nós onde reorganizam.
+
+   Os nomes, ids e ganchos de comportamento não mudam. O que muda é a pele: a
+   trilha, as salas e canais, a conversa e as pessoas são quatro painéis de vidro
+   de 24px, os controles são pílulas de 44px, a telemetria é uma pílula só.
+   Cores: só tokens, e `color-mix` quando o canvas pede uma mistura. */
+
+#tela-sessao .paineis {
+  grid-template-columns: 72px 264px minmax(0, 1fr) 304px auto;
+  gap: 12px;
+  padding: 4px 16px 12px;
+}
+#tela-sessao .paineis > .painel {
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  overflow: hidden;
+}
+
+/* ---------- a trilha de servidores ---------- */
+#tela-sessao .paineis > .trilha {
+  box-sizing: border-box;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+}
+.trilha .trilha-outros {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.trilha .trilha-outros[hidden] { display: none; }
+.trilha .trilha-outros > li { display: flex; justify-content: center; }
+.trilha-item.trilha-outro:hover, .trilha-item.trilha-outro:focus-visible {
+  border-color: var(--seele-controle-borda);
+  background: var(--seele-controle-hover);
+  color: var(--seele-osso);
+}
+/* O servidor em que se está: o laranja contorna, e a barra do canto diz que é
+   aqui — o mesmo recurso do canvas, sem depender só da cor (há o `aria-current`). */
+.trilha-item.trilha-atual {
+  border-color: var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 12%, transparent);
+  color: var(--seele-laranja-nerv);
+}
+.trilha-item.trilha-atual::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 10px;
+  width: 4px;
+  height: 22px;
+  border-radius: 0 4px 4px 0;
+  background: var(--seele-laranja-nerv);
+}
+.trilha-mais:hover, .trilha-mais:focus-visible {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-osso);
+}
+
+/* ---------- salas de voz, canais e quem opera ---------- */
+.painel-canais { padding: 18px 12px 12px; gap: 16px; }
+.canais-cabeca, .canais-cabeca-linhas {
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px 4px;
+  border: 0;
+}
+.canais-cabeca .painel-titulo {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+.painel-acao:hover { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
+
+.voice_room, .linha { border-left: 0; }
+.voice_room.aberto {
+  border-color: var(--seele-controle-borda);
+  background: linear-gradient(115deg, color-mix(in srgb, var(--seele-osso) 7%, transparent), var(--seele-controle) 60%);
+}
+.voice_room.aberto .voice_room-nome { color: var(--seele-osso); }
+.voice_room-nome::before { content: "\25C9\00a0"; color: var(--seele-laranja-nerv); }
+.voice_room.aberto .voice_room-ocupacao, .voice_room.aberto .voice_room-pessoa { color: var(--seele-osso-apagado); }
+.voice_room .barra { color: var(--seele-linha-forte); }
+.voice_room.aberto .barra { color: var(--seele-fosforo); }
+.voice_room-entrar:hover { background: var(--seele-controle-hover); color: var(--seele-osso); }
+.voice_room-entrar.aqui {
+  background: var(--seele-controle);
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-claro);
+}
+.voice_room-entrar.aqui:hover { opacity: 1; background: var(--seele-controle-hover); }
+.voice_room-apagar, .linha-apagar, .linha-renomear {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+}
+.voice_room-apagar:hover, .linha-apagar:hover, .linha-renomear:hover {
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+}
+.linha-controles > button { height: 28px; }
+.linha-controles > button + button { margin-top: 0; }
+.linha:hover { background: var(--seele-controle); }
+.linha.aberto {
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+  color: var(--seele-osso);
+}
+.linha.aberto .linha-cerquilha { color: var(--seele-laranja-nerv); }
+.operador-glifo, .operador-config {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+}
+.operador-glifo:hover, .operador-config:hover { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
+.operador-glifo[data-ativo="sim"] {
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-tinta-no-acento);
+}
+#voz-estado { background-color: transparent; }
+#operador-sair { background-color: var(--seele-controle); }
+.operador-fileira > button { min-height: 44px; font-size: 13px; padding: 0 14px; }
+/* ---------- a conversa ---------- */
+.linha-barra-cerquilha + .linha-nome { margin-left: -12px; }
+.linha-nome, button.linha-nome {
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
+}
+.linha-buscar:hover, .linha-buscar[aria-expanded="true"] { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
+.mensagem-avatar, .mensagem.propria .mensagem-avatar {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--seele-raio-icone);
+  background-color: var(--seele-controle-hover);
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--seele-osso);
+}
+.mensagem.propria .mensagem-avatar {
+  background-color: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent);
+  color: var(--seele-laranja-nerv);
+}
+.mensagem.propria .mensagem-autor { color: var(--seele-laranja-nerv); }
+.mensagens .envio-acao {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-ui);
+  font-size: 11px;
+}
+.mensagens .envio-acao:hover, .mensagens .envio-acao:focus-visible { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
+.mensagens .envio[data-envio="falhou"] .envio-frase, .mensagens .envio[data-envio="sem-resposta"] .envio-frase { color: var(--seele-vermelho-claro); }
+
+/* O compositor: uma bandeja de vidro e, dentro dela, o campo escuro. */
+.compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
+.compor-anexar:hover { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
+.compor-enviar:hover { background: var(--seele-laranja-hover); border-color: var(--seele-laranja-hover); color: var(--seele-tinta-no-acento); }
+
+/* ---------- as pessoas ---------- */
+.roster-grupo[data-nossa="sim"] .roster-sala { border-left: 0; color: var(--seele-rotulo-painel); }
+.roster-grupo[data-nossa="sim"] .roster-sala-nome { color: var(--seele-osso-apagado); }
+
+.roster .pessoa {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 8px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+}
+.roster .pessoa:hover { background: var(--seele-controle); }
+.roster .pessoa.falando {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 55%, transparent);
+}
+.pessoa-avatar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background-color: var(--seele-controle-hover);
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--seele-osso);
+}
+.pessoa-diagnostico, .roster .pessoa > .volume { grid-column: 1 / -1; }
+.pastilha[data-estado="at"] {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  color: var(--seele-laranja-claro);
+}
+.pastilha[data-estado="fala"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  color: var(--seele-fosforo);
+}
+.pastilha[data-estado="surdo"] {
+  border-color: color-mix(in srgb, var(--seele-padrao-azul) 55%, transparent);
+  background: color-mix(in srgb, var(--seele-azul-fraco) 80%, transparent);
+  color: var(--seele-azul-claro);
+}
+.pastilha[data-estado="escuta"] { background: none; color: var(--seele-osso-apagado); }
+.roster .volume { margin: 0 0 6px; padding: 0 2px 0 42px; box-sizing: border-box; }
+
+/* ---------- a telemetria: uma pílula só ---------- */
+.metrica .rotulo { font-family: var(--seele-mono); font-size: 12px; letter-spacing: 0.04em; text-transform: none; color: var(--seele-rotulo-painel); }
+.telemetria .metrica { gap: 6px; font-family: var(--seele-mono); }
+.telemetria .rotulo { font-size: 12px; letter-spacing: 0.04em; }
+
+@media (max-width: 1240px) { .telemetria { border-radius: var(--seele-raio-painel); } }
+
+/* ---------- os avisos que descem do alto ---------- */
+.veredito, #aviso-fone {
+  margin: 4px 16px 0;
+  padding: 8px 8px 8px 18px;
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  border-radius: var(--seele-raio-cartao);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
+  color: var(--seele-laranja-claro);
+}
+#aviso-fone { color: var(--seele-osso-apagado); min-height: 44px; }
+
 @media (max-width: 1240px) {
   /* `relative` porque a gaveta de pessoas se posiciona contra esta caixa. */
   .paineis {
     position: relative;
-    grid-template-columns: 60px 268px minmax(0, 1fr) auto;
+    grid-template-columns: 72px 264px minmax(0, 1fr) auto;
     grid-template-areas: "trilha canais linha painelmod";
   }
 
@@ -2839,7 +3241,7 @@ button.linha-nome:hover { text-decoration: underline; }
   /* `relative` porque a gaveta se posiciona contra esta caixa. */
   .paineis {
     position: relative;
-    grid-template-columns: 60px minmax(0, 1fr);
+    grid-template-columns: 72px minmax(0, 1fr);
     /* A gaveta de canais sai do fluxo (`position: absolute` logo abaixo), e o
        painel de MOD não cabe como coluna nesta largura: ele se empilha sobre a
        conversa, como a página. */

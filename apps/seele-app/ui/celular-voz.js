@@ -31,6 +31,27 @@
   // ------------------------------------------------------------- as abas
 
   const ABAS = ["servidor", "conversa", "pessoas", "ajustes"];
+  // O ícone de cada aba, em desenho (24 × 24, traço de 1,7): é o do Cel-*.dc. A
+  // aba continua com o nome escrito, e o ícone é decoração.
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const ICONES = {
+    servidor: [["rect", { x: 4, y: 4, width: 16, height: 6, rx: 2 }], ["rect", { x: 4, y: 14, width: 16, height: 6, rx: 2 }]],
+    conversa: [["path", { d: "M4,5h16v11H9l-5,4z" }]],
+    pessoas: [["circle", { cx: 9, cy: 8, r: 3 }], ["path", { d: "M3,20c.8-3,3.2-5,6-5s5.2,2,6,5M16,5a3,3,0,0,1,0,6M18,15c1.6.8,2.6,2.6,3,5" }]],
+    ajustes: [["path", { d: "M4,6h10M18,6h2M4,12h4M12,12h8M4,18h12" }], ["circle", { cx: 16, cy: 6, r: 2 }], ["circle", { cx: 10, cy: 12, r: 2 }], ["circle", { cx: 18, cy: 18, r: 2 }]],
+  };
+  function iconeDaAba(aba) {
+    const desenho = document.createElementNS(SVG_NS, "svg");
+    desenho.setAttribute("class", "cel-aba-icone");
+    desenho.setAttribute("viewBox", "0 0 24 24");
+    desenho.setAttribute("aria-hidden", "true");
+    for (const [tag, atributos] of ICONES[aba]) {
+      const forma = document.createElementNS(SVG_NS, tag);
+      for (const [atributo, valor] of Object.entries(atributos)) forma.setAttribute(atributo, String(valor));
+      desenho.append(forma);
+    }
+    return desenho;
+  }
   const abas = h("nav", { class: "cel-abas", "aria-label": PALAVRAS.secoes },
     ABAS.map((aba) => h("button", {
       id: `cel-aba-${aba}`,
@@ -40,7 +61,7 @@
       // A aba AJUSTES é a saída do tema, e lê o núcleo (spec, §6).
       "data-nucleo": aba === "ajustes",
       onclick: () => abrirAba(aba),
-    }, PALAVRAS.abas[aba])));
+    }, iconeDaAba(aba), PALAVRAS.abas[aba])));
 
   function abrirAba(aba) {
     sessao.dataset.aba = aba;
