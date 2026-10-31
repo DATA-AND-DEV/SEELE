@@ -145,11 +145,14 @@ impl MudancaNoQuintal {
 /// Uma falha aqui **não desliga nada**: o MOD que não compila é dito em voz
 /// alta e o conjunto anterior continua de pé, que é o critério da etapa 4 do
 /// plano — «falha mantém conjunto anterior íntegro».
+///
+/// Devolve `(id, hash)` de cada MOD com metade de máquina que ficou carregado
+/// — é a quem [`acompanhar`] diz `MetadeSubiu` quando o código é novo.
 async fn recarregar_o_conjunto(
     persistence: &std::sync::Arc<tokio::sync::Mutex<crate::persistence::Persistence>>,
     despachante: &Despachante,
     raizes: &crate::RaizesDosMods,
-) {
+) -> Vec<(String, String)> {
     let exigidos: Vec<(String, String)> = {
         let banco = persistence.lock().await;
         // **As permissões que o conjunto novo declara, no mesmo passo.** Só o
@@ -170,7 +173,7 @@ async fn recarregar_o_conjunto(
                 .collect(),
             Err(erro) => {
                 tracing::error!(%erro, "não deu para reler o conjunto de MODs");
-                return;
+                return Vec::new();
             }
         }
     };
@@ -178,10 +181,58 @@ async fn recarregar_o_conjunto(
     for queixa in queixas {
         tracing::error!("MOD exigido e não carregado — {queixa}");
     }
-    if let Some(recusados) = despachante.recarregar(fontes).await {
-        for (id, falha) in recusados {
-            tracing::error!(mod_id = %id, %falha, "MOD recusado ao recarregar; a sala segue sem ele");
-        }
+    let com_maquina: Vec<String> = fontes
+        .iter()
+        .filter(|metade| metade.portas.maquinas)
+        .map(|metade| metade.id.clone())
+        .collect();
+    let Some(recusados) = despachante.recarregar(fontes).await else {
+        return Vec::new();
+    };
+    for (id, falha) in &recusados {
+        tracing::error!(mod_id = %id, %falha, "MOD recusado ao recarregar; a sala segue sem ele");
+    }
+    exigidos
+        .into_iter()
+        .filter(|(id, _)| com_maquina.contains(id) && !recusados.iter().any(|(r, _)| r == id))
+        .collect()
+}
+
+/// **Diz `MetadeSubiu` a cada MOD de máquina cujo código é novo** desde a
+/// última vez (`subidos`, `id → hash`): todos na primeira recarga deste laço
+/// (o servidor subiu), e depois só quem entrou no conjunto ou mudou de
+/// revisão. Vai pelo barramento, como todo momento da máquina, e por isso o
+/// quintal, os avisos e o que ela declarar em `mundo.maquinas` seguem o
+/// caminho de sempre.
+///
+/// Sem isto, a metade de servidor de um servidor que reinicia relia «ligado»
+/// do quintal com o livro vazio: DESLIGAR ia só ao `seele.log`, a passagem
+/// ficava «passando» e a máquina não trocava (e2e da API 8, 31/10, passo 16).
+fn dizer_que_subiu(
+    carregados: Vec<(String, String)>,
+    primeira: bool,
+    subidos: &mut BTreeMap<String, String>,
+    barramento: &tokio::sync::broadcast::WeakSender<crate::server::Event>,
+    servidor: &std::sync::Weak<crate::server::Server>,
+) {
+    let novos: Vec<String> = carregados
+        .iter()
+        .filter(|(id, hash)| subidos.get(id) != Some(hash))
+        .map(|(id, _)| id.clone())
+        .collect();
+    *subidos = carregados.into_iter().collect();
+    let (Some(barramento), Some(server)) = (barramento.upgrade(), servidor.upgrade()) else {
+        return;
+    };
+    for mod_id in novos {
+        let maquinas = server.maquinas().lugares_do_mod(&mod_id);
+        let _ = barramento.send(crate::server::Event::Maquina(
+            crate::maquinas::MudancaDeMaquina::MetadeSubiu {
+                mod_id,
+                motivo: if primeira { "servidor-subiu" } else { "codigo-novo" },
+                maquinas,
+            },
+        ));
     }
 }
 
@@ -453,7 +504,9 @@ pub async fn acompanhar(
     //
     // Custa uma releitura na subida, e é idempotente: carregar o que já está
     // carregado troca o código pelo mesmo código.
-    recarregar_o_conjunto(&persistence, &despachante, &raizes).await;
+    let mut subidos = BTreeMap::new();
+    let carregados = recarregar_o_conjunto(&persistence, &despachante, &raizes).await;
+    dizer_que_subiu(carregados, true, &mut subidos, &barramento, &servidor);
 
     loop {
         let evento = tokio::select! {
@@ -465,7 +518,8 @@ pub async fn acompanhar(
                 if trocou.is_err() {
                     break;
                 }
-                recarregar_o_conjunto(&persistence, &despachante, &raizes).await;
+                let carregados = recarregar_o_conjunto(&persistence, &despachante, &raizes).await;
+                dizer_que_subiu(carregados, false, &mut subidos, &barramento, &servidor);
                 continue;
             }
             recebido = eventos.recv() => match recebido {
@@ -613,7 +667,8 @@ pub fn so_para(evento: &crate::server::Event) -> Option<&str> {
             | MudancaDeMaquina::Recusou { mod_id, .. }
             | MudancaDeMaquina::Parou { mod_id, .. }
             | MudancaDeMaquina::Sumiu { mod_id, .. }
-            | MudancaDeMaquina::Voltou { mod_id, .. },
+            | MudancaDeMaquina::Voltou { mod_id, .. }
+            | MudancaDeMaquina::MetadeSubiu { mod_id, .. },
         ) => Some(mod_id),
         _ => None,
     }
@@ -759,6 +814,28 @@ pub fn momento_de(evento: &crate::server::Event) -> Option<(&'static str, String
                 texto_json(servidor),
                 papel.nome(),
                 quem.0
+            ),
+        ),
+        // A metade de servidor subiu (API 8): com o livro das máquinas dela
+        // agora — vazio num servidor que acabou de subir.
+        Event::Maquina(MudancaDeMaquina::MetadeSubiu {
+            motivo, maquinas, ..
+        }) => (
+            "MetadeSubiu",
+            format!(
+                r#"{{"motivo":{},"maquinas":[{}]}}"#,
+                texto_json(motivo),
+                maquinas
+                    .iter()
+                    .map(|(servidor, papel, quem, aceita)| format!(
+                        r#"{{"servidor":{},"papel":"{}","pessoa":{},"aceita":{}}}"#,
+                        texto_json(servidor),
+                        papel.nome(),
+                        quem.0,
+                        aceita
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
         ),
         // Telemetria e o que mais não está no `api/v1.json`.
@@ -947,6 +1024,21 @@ mod tests {
                 },
                 "MaquinaVoltou",
                 serde_json::json!({ "servidor": "mc-1", "papel": "principal", "pessoa": 4 }),
+            ),
+            (
+                MudancaDeMaquina::MetadeSubiu {
+                    mod_id: "x/jogo".into(),
+                    motivo: "servidor-subiu",
+                    maquinas: vec![
+                        ("mc-1".into(), Papel::Principal, PersonId(4), true),
+                        ("mc-1".into(), Papel::Reserva, PersonId(5), false),
+                    ],
+                },
+                "MetadeSubiu",
+                serde_json::json!({ "motivo": "servidor-subiu", "maquinas": [
+                    { "servidor": "mc-1", "papel": "principal", "pessoa": 4, "aceita": true },
+                    { "servidor": "mc-1", "papel": "reserva", "pessoa": 5, "aceita": false },
+                ] }),
             ),
         ];
         for (mudanca, nome, carga) in casos {

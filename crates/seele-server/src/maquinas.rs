@@ -359,6 +359,22 @@ pub enum MudancaDeMaquina {
         /// Quem voltou.
         quem: PersonId,
     },
+    /// **A metade de servidor de `mod_id` subiu** (API 8, `MetadeSubiu`): o
+    /// servidor SEELE subiu com ela, ou o conjunto trocou o código dela (ela
+    /// entrou, ou mudou de revisão). O estado de módulo dela é novo, e o livro
+    /// das máquinas é o que `maquinas` diz — num servidor que reiniciou,
+    /// nenhum. A metade de servidor que guardou «ligado» no quintal chama de
+    /// novo quem rodava (o pedido igual ao aceito religa a órfã, S2), e o que
+    /// não responder ela diz na tela.
+    MetadeSubiu {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// `servidor-subiu` (a primeira vez desde que o servidor subiu) ou
+        /// `codigo-novo` (o conjunto trocou o código com o servidor de pé).
+        motivo: &'static str,
+        /// [`Maquinas::lugares_do_mod`] agora.
+        maquinas: Vec<(String, Papel, PersonId, bool)>,
+    },
 }
 
 /// O que [`Maquinas::mod_desligado`] tirou do livro.
@@ -1035,6 +1051,31 @@ impl Maquinas {
         self.aceitas
             .get(&chave(mod_id, servidor, papel))
             .map(|a| (a.quem, a.conexao))
+    }
+
+    /// **O que o livro sabe agora das máquinas de `mod_id`**: cada lugar
+    /// `(servidor, papel, quem, aceita)`, aceito ou com um pedido esperando
+    /// resposta, em ordem. É a carga de `MetadeSubiu`: um servidor que acabou
+    /// de subir tem o livro vazio, e a metade de servidor que guardou «ligado»
+    /// no quintal precisa saber que ninguém aqui roda aquilo.
+    #[must_use]
+    pub fn lugares_do_mod(&self, mod_id: &str) -> Vec<(String, Papel, PersonId, bool)> {
+        let mut lugares: Vec<(String, Papel, PersonId, bool)> = self
+            .aceitas
+            .iter()
+            .filter(|((m, _, _), _)| m == mod_id)
+            .map(|((_, s, p), a)| (s.clone(), *p, a.quem, true))
+            .chain(
+                self.pendentes
+                    .iter()
+                    .filter(|((m, s, p), _)| {
+                        m == mod_id && !self.aceitas.contains_key(&chave(m, s, *p))
+                    })
+                    .map(|((_, s, p), pe)| (s.clone(), *p, pe.quem, false)),
+            )
+            .collect();
+        lugares.sort_by(|a, b| (&a.0, a.1.nome()).cmp(&(&b.0, b.1.nome())));
+        lugares
     }
 
     /// Quantos avisos de `mod_id` não saíram por falta de máquina aceita.

@@ -32,6 +32,10 @@
 //!   joga pela malha nunca parou e pede entrada de novo sozinho.
 //! - `o_pedido_a_quem_nao_esta_volta_quando_ela_chega`: chamar quem não está
 //!   não se perde — `MaquinaVoltou` chega quando a pessoa chega.
+//! - `o_servidor_que_reinicia_chama_as_maquinas_sozinho`: o servidor SEELE
+//!   reinicia com a dona rodando; ninguém pede nada, e `MetadeSubiu` faz a
+//!   metade de servidor chamar as duas de volta — a dona é religada, e não
+//!   subida de novo.
 
 #![allow(
     clippy::expect_used,
@@ -128,6 +132,7 @@ globalThis.aoPedir = (contexto, pedido) => {
     return ok();
   }
   if (p.religar) { religar(); return ok(); }
+  if (p.subirSozinha) { dados.subirSozinha = "1"; return ok(); }
   if (p.pedirPara) {
     dados["tuneis:" + p.papel] = JSON.stringify(p.tuneis);
     pedirA(String(p.pedirPara), p.servidor, p.papel, p.tuneis);
@@ -136,7 +141,7 @@ globalThis.aoPedir = (contexto, pedido) => {
   if (p.ler) return ok({ momentos: dados.momentos || "", falas: dados.falas || "",
     perdido: dados.perdido === undefined ? null : JSON.parse(dados.perdido), dona: dona(),
     voltouRodando: Number(dados.voltouRodando || "0"), recebida: dados.recebida || null,
-    religar: dados.religar || "" });
+    religar: dados.religar || "", subiu: dados.subiu || "" });
   if (p.pedir) {
     dados["tuneis:" + p.papel] = JSON.stringify(p.tuneis);
     dados["quem:" + p.papel] = String(c.person);
@@ -152,6 +157,13 @@ globalThis.aoPedir = (contexto, pedido) => {
   return ok();
 };
 globalThis.aoAcontecer = (momento, carga) => {
+  // **A metade de servidor subiu** (o servidor SEELE subiu de novo): o livro
+  // nasceu vazio, e ela chama sozinha quem guardou — ninguém precisa pedir.
+  if (momento === "MetadeSubiu") {
+    anotar("subiu", carga);
+    if (dados.subirSozinha) religar();
+    return;
+  }
   if (momento.indexOf("Maquina") !== 0) return;
   anotar("momentos", momento + " " + carga);
   const k = JSON.parse(carga);
@@ -1159,6 +1171,86 @@ async fn quem_hospeda_volta_e_a_dona_e_a_mesma_religada() -> Result<()> {
     let de_novo = entrar_no_jogo(&joga).await?;
     assert_eq!(de_novo, porta, "a porta de quem joga mudou na volta");
     eco_passa(porta).await?;
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **O servidor SEELE que reinicia chama as máquinas sozinho**
+/// (`MetadeSubiu`; e2e da API 8, 31/10, passo 16). A reserva é a dona e roda
+/// o jogo; o servidor cai e sobe de novo com o mesmo banco. **Ninguém pede
+/// nada**: a metade de servidor ouve `MetadeSubiu` com o livro vazio, chama
+/// de novo quem guardou (quem ainda não voltou ouve o pedido quando voltar,
+/// `MaquinaVoltou`), e a dona é religada — o mesmo processo, o túnel servido
+/// de novo, quem joga pela malha jogando o tempo todo.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_servidor_que_reinicia_chama_as_maquinas_sozinho() -> Result<()> {
+    let (daemon, temp, mut principal, mut reserva, mut joga, endereco, _) = montar(true).await?;
+    let r = pedir_ao_mod(&mut joga, &serde_json::json!({ "subirSozinha": true })).await?;
+    assert_eq!(r, r#"{"ok":true}"#, "{r}");
+    // A primeira subida já disse `MetadeSubiu`, com o livro de antes de
+    // qualquer pedido: nenhuma máquina.
+    let lido: serde_json::Value =
+        serde_json::from_str(&pedir_ao_mod(&mut joga, &serde_json::json!({ "ler": true })).await?)?;
+    assert_eq!(
+        lido["subiu"].as_str().unwrap_or_default().trim(),
+        r#"{"motivo":"servidor-subiu","maquinas":[]}"#,
+        "{lido}"
+    );
+    principal.rodar().await?;
+    principal.escrever_o_mundo("antes de reiniciar");
+    principal.fazer_a_copia().await?;
+    let carga = reserva.esperar_aviso("copia").await?;
+    reserva.receber_a_copia(&carga).await?;
+    let passou = pedir_ao_mod(
+        &mut joga,
+        &serde_json::json!({ "passar": "reserva", "servidor": SERVIDOR }),
+    )
+    .await?;
+    assert_eq!(passou, r#"{"ok":true}"#, "{passou}");
+    reserva.esperar_aviso("assumir").await?;
+    principal.desligar_o_jogo().await?;
+    reserva.rodar().await?;
+    reserva
+        .enlace
+        .servir_tunel(MOD, JOGO, ProtocoloDeTunel::Tcp, reserva.porta_do_jogo)
+        .await
+        .map_err(|r| anyhow::anyhow!("a reserva, dona, não serviu: {r:?}"))?;
+    let porta = entrar_no_jogo(&joga).await?;
+    esperar_o_direto(&mut joga).await?;
+    let mut fluxo = TcpStream::connect(("127.0.0.1", porta)).await?;
+    eco_na(&mut fluxo).await?;
+
+    // **O servidor SEELE reinicia.**
+    daemon.shutdown();
+    drop(daemon);
+    let daemon = maquina_de_jogo::servidor_de_volta(endereco, &temp, true, PRAZO).await?;
+
+    // Sem `{ religar }`: os pedidos chegam sozinhos às duas máquinas.
+    aceitar_de_novo(&mut reserva)
+        .await
+        .map_err(|e| anyhow::anyhow!("o servidor subiu e não chamou a dona de volta: {e}"))?;
+    aceitar_de_novo(&mut principal).await?;
+    let livro = || daemon.server().maquinas();
+    assert_eq!(livro().dona(MOD, SERVIDOR), Papel::Reserva, "a dona mudou na volta");
+    let fim = Instant::now() + PACIENCIA;
+    while livro().quem_opera_como(MOD, SERVIDOR, Papel::Reserva).is_none() {
+        anyhow::ensure!(Instant::now() < fim, "o aceite da reserva não entrou no livro");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    reserva
+        .enlace
+        .servir_tunel(MOD, JOGO, ProtocoloDeTunel::Tcp, reserva.porta_do_jogo)
+        .await
+        .map_err(|r| anyhow::anyhow!("a reserva religada não serviu de novo: {r:?}"))?;
+    assert!(reserva.jogo_vivo().await, "o jogo da dona caiu na volta");
+    assert_eq!(partidas(reserva.raiz()), 1, "o jogo da dona foi subido de novo");
+    eco_na(&mut fluxo)
+        .await
+        .map_err(|e| anyhow::anyhow!("a conexão pela malha caiu na volta: {e}"))?;
+    let lido: serde_json::Value =
+        serde_json::from_str(&pedir_ao_mod(&mut joga, &serde_json::json!({ "ler": true })).await?)?;
+    let religou = lido["religar"].as_str().unwrap_or_default();
+    assert!(religou.contains("reserva") && religou.contains("principal"), "{lido}");
     daemon.shutdown();
     Ok(())
 }

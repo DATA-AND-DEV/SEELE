@@ -844,6 +844,7 @@ mod tests {
             "MaquinaParou",
             "MaquinaSumiu",
             "MaquinaVoltou",
+            "MetadeSubiu",
         ] {
             assert!(momentos.contains(nome), "`{nome}` falta em moments");
         }
