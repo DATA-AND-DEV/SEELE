@@ -890,28 +890,32 @@ impl Daemon {
                 .map(|ligado| (ligado.id, ligado.hash))
                 .collect();
 
-            if !exigidos.is_empty() {
-                let (fontes, queixas) = crate::mods::carregar_do_disco(&pasta_dos_mods, &exigidos);
-                for queixa in queixas {
-                    // Um MOD habilitado que não abre é dito em voz alta. O
-                    // silêncio aqui seria quem hospeda perguntando dias depois
-                    // por que a sala não faz o que ele ligou.
-                    tracing::error!("MOD habilitado e não carregado — {queixa}");
-                }
-                let (despachante, recusados) = crate::mods::despacho::Despachante::iniciar(fontes);
-                for (id, falha) in recusados {
-                    tracing::error!(mod_id = %id, %falha, "MOD recusado ao subir; a sala sobe sem ele");
-                }
-                tokio::spawn(crate::mods::despacho::acompanhar(
-                    server.events.subscribe(),
-                    server.events.downgrade(),
-                    Arc::clone(&server.persistence),
-                    despachante,
-                    pasta_dos_mods.clone(),
-                    Arc::clone(&server.avisador),
-                    Arc::downgrade(&server),
-                ));
+            // **Com a pasta dos MODs, o despachante sobe sempre**, mesmo sem MOD
+            // ligado. Só subia com algum, e o caminho normal do app é o outro:
+            // HOSPEDAR AQUI e depois ligar o MOD. Sem o despachante, o MOD
+            // ligado assim não recebia momento nenhum e as permissões dele nunca
+            // eram gravadas — o CRIAR do Multiplayer desligado para a própria
+            // anfitriã (e2e da API 8, 31/10; `tests/mod_ligado_com_o_servidor_de_pe.rs`).
+            let (fontes, queixas) = crate::mods::carregar_do_disco(&pasta_dos_mods, &exigidos);
+            for queixa in queixas {
+                // Um MOD habilitado que não abre é dito em voz alta. O
+                // silêncio aqui seria quem hospeda perguntando dias depois
+                // por que a sala não faz o que ele ligou.
+                tracing::error!("MOD habilitado e não carregado — {queixa}");
             }
+            let (despachante, recusados) = crate::mods::despacho::Despachante::iniciar(fontes);
+            for (id, falha) in recusados {
+                tracing::error!(mod_id = %id, %falha, "MOD recusado ao subir; a sala sobe sem ele");
+            }
+            tokio::spawn(crate::mods::despacho::acompanhar(
+                server.events.subscribe(),
+                server.events.downgrade(),
+                Arc::clone(&server.persistence),
+                despachante,
+                pasta_dos_mods.clone(),
+                Arc::clone(&server.avisador),
+                Arc::downgrade(&server),
+            ));
         }
 
         // Desligar um MOD fecha os túneis dele, e uma mudança de cargo ou de
