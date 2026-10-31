@@ -163,6 +163,16 @@ const GLIFOS = {
     ["path", { d: "M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
   ],
 
+  // A lixeira: apagar a sala de voz (0.19). Era um × de texto num círculo, e
+  // numa sala que não se pode apagar (a única do servidor) o círculo apagado
+  // parecia vazio — «uma bolinha vazia» —, com a árvore de pessoas pendurada
+  // nele. Desenho, e não caractere: tampa, alça e corpo, traço 1,3 como os
+  // outros contornados.
+  lixeira: [
+    ["path", { d: "M3 4.5h10M6.5 4.5V3h3v1.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }],
+    ["path", { d: "M4.5 4.5l.6 8.5h5.8l.6-8.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linejoin": "round" }],
+  ],
+
   // O lápis: o corpo em diagonal, a ponta embaixo à esquerda e a virola em cima.
   //
   // **Ele existe porque o nome clicável não bastou.** Renomear um canal era

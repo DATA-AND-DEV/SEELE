@@ -1185,7 +1185,15 @@ function desenharCanais(snapshot) {
     // O chip do canvas 0.19: a sala em que esta janela está. É o mesmo dado de
     // `occupied_by_us` que já escolhe o botão VER A CHAMADA, dito também na
     // linha do nome.
-    if (voice_room.occupied_by_us) cabeca.append(elemento("span", "voice_room-aqui", "VOCÊ ESTÁ AQUI"));
+    // Na coluna estreita só «AQUI» cabe na mesma linha do nome, da contagem e
+    // do botão de apagar (`tela-sessao.css`, `.voice_room-aqui-longo`); o resto
+    // da frase aparece quando a coluna tem largura, e fica no `title`.
+    if (voice_room.occupied_by_us) {
+      const aqui = elemento("span", "voice_room-aqui");
+      aqui.title = "você está nesta sala";
+      aqui.append(elemento("span", "voice_room-aqui-longo", "VOCÊ ESTÁ "), "AQUI");
+      cabeca.append(aqui);
+    }
 
     // A última sala de voz vem desabilitada e não escondida: a razão de ela
     // não poder ir embora é coisa que se lê, e uma ausência não se lê.
@@ -1354,14 +1362,10 @@ function desenharOperador(snapshot) {
   // Um nome só (0.19): o exibido do perfil oficial, ou o apelido.
   const exibidoDoOperador = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
   $("operador-nome").textContent = exibidoDoOperador || apelidoApresentado(snapshot.me, snapshot.nickname);
-  // A linha de baixo do nome: onde a voz está. Só descreve o que o snapshot já
-  // diz (a sala em que esta janela está). **Sem sala, nada** (0.19, pedido do
-  // dono): o rótulo «operador» não dizia nada a quem lê o próprio cartão.
-  const salaDoOperador = snapshot.voice_rooms.find((c) => c.occupied_by_us);
-  const rotuloDoOperador = document.querySelector("#tela-sessao .operador-rotulo");
-  const fraseDoOperador = salaDoOperador ? `a voz está aqui · ${salaDoOperador.name}` : "";
-  if (rotuloDoOperador.textContent !== fraseDoOperador) rotuloDoOperador.textContent = fraseDoOperador;
-  rotuloDoOperador.hidden = !salaDoOperador;
+  // **Embaixo do nome, nada** (0.19, pedido do dono): nem «operador» nem «a voz
+  // está aqui · sala». A sala em que se está já vem marcada na lista de salas
+  // (VOCÊ ESTÁ AQUI) e no rodapé (sala …); o cartão é só quem você é.
+  document.querySelector("#tela-sessao .operador-rotulo").hidden = true;
   // O apelido também abre a linha de escrever, como no canvas: `alex ❯`.
   const prompt = document.querySelector("#form-mensagem .prompt");
   const fraseDoPrompt = `${apelidoApresentado(snapshot.me, snapshot.nickname)} \u276f`;

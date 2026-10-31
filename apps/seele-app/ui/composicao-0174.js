@@ -210,31 +210,30 @@
     const vista = document.getElementById("operador-vista");
     const sair = document.getElementById("operador-sair");
     if (mudo && surdo && vista && sair) {
-      const bMudo = comGlifo(null); bMudo.className = "chamada-controle chamada-controle-icone";
+      const bMudo = comGlifo(null); bMudo.className = "chamada-controle";
       bMudo.addEventListener("click", () => mudo.click());
       espelhar(bMudo, mudo, { icone: true });
-      const bSurdo = comGlifo(null); bSurdo.className = "chamada-controle chamada-controle-icone";
+      const bSurdo = comGlifo(null); bSurdo.className = "chamada-controle";
       bSurdo.addEventListener("click", () => surdo.click());
       espelhar(bSurdo, surdo, { icone: true });
-      const bVista = comGlifo("aparencia"); bVista.className = "chamada-controle";
+      // **Todos redondos e só ícone** (0.19, pedido do dono): o mesmo desenho do
+      // cartão do operador — a tela, a porta e o × —, e a palavra no nome
+      // acessível e no `title`. O desenho, o nome, o `aria-disabled` e o porquê
+      // do indisponível vêm do botão original (`espelhar` com `icone`).
+      const bVista = comGlifo(null); bVista.className = "chamada-controle";
       bVista.addEventListener("click", () => vista.click());
-      espelhar(bVista, vista, { rotulo: () => vista.textContent.trim() || vista.getAttribute("aria-label") || "COMPARTILHAR" });
+      espelhar(bVista, vista, { icone: true });
       // SAIR DO SERVIDOR: a mesma função do SAIR do operador fora de sala.
-      const bServidor = comGlifo(null); bServidor.className = "chamada-controle";
-      bServidor.textContent = "SAIR DO SERVIDOR";
+      const bServidor = comGlifo("porta"); bServidor.className = "chamada-controle";
+      bServidor.setAttribute("aria-label", "SAIR DO SERVIDOR");
       bServidor.title = "sair deste servidor e voltar à tela de entrada";
       bServidor.addEventListener("click", () => {
         if (typeof sairDoServidorParaAEntrada === "function") sairDoServidorParaAEntrada();
       });
-      // A saída da sala é o primário laranja: é o «desligar» de uma sala de
-      // servidor. O rótulo e o alvo são os do botão do operador.
-      const bSala = comGlifo("desligar"); bSala.className = "chamada-controle chamada-controle-primario";
+      // SAIR DA SALA: o × do operador, com o rótulo e o alvo dele.
+      const bSala = comGlifo(null); bSala.className = "chamada-controle chamada-controle-sair";
       bSala.addEventListener("click", () => sair.click());
-      espelhar(bSala, sair, {
-        // O botão do operador virou ícone (0.19): a palavra está no nome acessível.
-        rotulo: () => sair.textContent.trim() || sair.getAttribute("aria-label") || "",
-        mostrar: () => sair.dataset.alvo === "sala",
-      });
+      espelhar(bSala, sair, { icone: true, mostrar: () => sair.dataset.alvo === "sala" });
       controles.append(bMudo, bSurdo, bVista, bServidor, bSala);
       chamada.append(controles);
     }

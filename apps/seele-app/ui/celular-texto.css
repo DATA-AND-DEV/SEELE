@@ -591,15 +591,7 @@
 :where(:root[data-casca="celular"]) .chamada-palco-acao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-aperto { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-vazio { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-nome { font-size: calc(16px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-pastilha { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-linha .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-marca { font-size: 11px; }
-:where(:root[data-casca="celular"]) .chamada-cartao-valor { font-size: calc(16px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-barra { font-size: 11px; }
-:where(:root[data-casca="celular"]) .chamada-volume .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-vol-passo { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-vol-valor { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao-nome { font-size: calc(18px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-acao { font-size: inherit; }
 :where(:root[data-casca="celular"]) .chamada-acao-glifo { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-acao-titulo { font-size: calc(16px * var(--cel-escala)); }
@@ -624,10 +616,10 @@
 :where(:root[data-casca="celular"]) .chamada-palco-aperto,
 :where(:root[data-casca="celular"]) .chamada-palco-parada { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-cartao .nota { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-linha .rotulo { font-size: calc(11px * var(--cel-escala)); }
 @media(max-width:900px) {
   :where(:root[data-casca="celular"]) .chamada-acoes-estreitas > button { font-size: calc(12px * var(--cel-escala)); }
 }
+:where(:root[data-casca="celular"]) .chamada-cartao-abrir { font-size: inherit; }
 
 /* pessoal-web.css */
 :where(:root[data-casca="celular"]) .pessoal-web-participante-nome { font-size: calc(18px * var(--cel-escala)); }
@@ -894,7 +886,6 @@
 :where(:root[data-casca="celular"]) #lista-apresentacoes .mods-id { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #lista-apresentacoes .mods-versao { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-radio .mods-estado { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-controle { font-size: calc(14px * var(--cel-escala)); }
 @media (min-width: 1241px) {
   :where(:root[data-casca="celular"]) .pessoas-mini-item { font-size: calc(13px * var(--cel-escala)); }
 }

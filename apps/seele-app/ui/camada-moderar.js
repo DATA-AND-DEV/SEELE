@@ -162,7 +162,10 @@ function botaoDeRemoverMensagem(mensagem, pode) {
  */
 function botaoDeApagarVoiceRoom(voice_room, snapshot, ultimo) {
   if (snapshot.may_delete_rooms !== true) return null;
-  const botao = elemento("button", "voice_room-apagar", "\u00d7");
+  // Um desenho de lixeira, e não um × de texto: o botão desabilitado da única
+  // sala parecia um círculo vazio. O nome vai no `aria-label` e no `title`.
+  const botao = elemento("button", "voice_room-apagar");
+  botao.append(glifo("lixeira"));
   botao.type = "button";
   botao.dataset.apagarVoiceRoom = String(voice_room.id);
   botao.setAttribute("aria-label", `apagar a sala de voz ${voice_room.name}`);

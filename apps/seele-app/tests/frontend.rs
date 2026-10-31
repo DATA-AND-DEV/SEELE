@@ -3287,14 +3287,21 @@ fn the_alert_box_does_not_spend_the_red_reserved_for_a_dropped_link() {
 }
 
 #[test]
-fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
+fn a_person_card_is_simple_and_never_measures_anything_itself() {
     // Two failures in one function, both silent.
     //
-    // The first is the one `crates/seele-ffi/src/types.rs:58-79` argues against
-    // by name: the comp calls `corSync(media)` in the shell, and a shell that
-    // knows "85 is nominal" is a shell that will disagree with the terminal the
-    // day one of the two is updated. The band arrives decided; this card may
-    // only pass it on.
+    // **The card is simple** (0.19, owner: «tem que ficar bem simples o card»):
+    // the background, the avatar and the name. The signal bar, the number and
+    // the band that used to sit there left the card, and this guard says so —
+    // a bar drawn again would be the card getting heavy again, and nobody would
+    // notice in a diff. Where the band is still shown (the footer, the roster)
+    // it arrives decided by the core.
+    //
+    // The first failure is the one `crates/seele-ffi/src/types.rs:58-79` argues
+    // against by name: the comp calls `corSync(media)` in the shell, and a shell
+    // that knows "85 is nominal" is a shell that will disagree with the
+    // terminal the day one of the two is updated. The band arrives decided;
+    // this card does not even pass it on any more.
     //
     // The second is drawing what nobody measured. `Telemetry.input_level` is a
     // scalar and it is *ours* — amplitude per person does not cross — and
@@ -3312,10 +3319,13 @@ fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
         body_of(&script, "function pintarCartao")
     );
 
-    assert!(
-        body.contains("pessoa.sync_band"),
-        "the card no longer reads the band the core decided"
-    );
+    for drawn in ["pessoa.signal", "sync_band", "blocos(", "chamada-cartao-barra"] {
+        assert!(
+            !body.contains(drawn),
+            "the card draws `{drawn}` again: the signal left the card (owner's \
+             decision, «bem simples»)"
+        );
+    }
     for threshold in ["Nominal", "Degraded", "Critical"] {
         assert!(
             !body.contains(threshold),
@@ -3358,89 +3368,58 @@ fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
 #[test]
 fn the_state_of_a_person_is_a_word_and_never_only_a_colour() {
     // `specs/06-clientes-gui.md` forbids information carried by colour alone, and
-    // who is transmitting is information: the comp marks it with an orange halo
-    // around the card and nothing else. A halo is invisible to anybody who does
-    // not see the hue, and this card carries three facts that way — the
-    // microphone, the voice, and the ears.
+    // who is speaking is information: the green ring around the card is
+    // invisible to anybody who does not see the hue, and the card carries three
+    // facts that way — the microphone, the voice, and the ears.
     //
-    // The v3 answer is two registers of the same fact, and this guard is that
-    // both exist: the chip, in one word, and the plain sentence beside the name,
-    // which is what `LEGENDAS SIMPLES` is for.
+    // **The 0.19 card is simple** (owner: no «FALANDO» chip, no signal): the
+    // words left the face of the card, and the guard that cared for them moved
+    // with the purpose. Speaking is the ring and nothing else on the face;
+    // muted and deafened are a cut microphone and a cut headphone on the
+    // avatar's corner; and all three are told in words in the card's accessible
+    // name — «Cria de GRU, falando». This guard is that all of those exist.
     let script = scripts();
     let paint = body_of(&script, "function pintarCartao");
-    let sentence = body_of(&script, "function fraseDoEstado");
+    let words = body_of(&script, "function estadoEmPalavras");
 
-    // The chip, and what it says. Reaching for the element is not enough — an
-    // empty chip is a card marked by paint alone, and it looks fine in a
-    // screenshot taken by somebody who sees the orange. So the statement that
-    // fills it has to branch on the microphone and on the voice, and every
-    // branch has to be a word.
-    let chips: Vec<&str> = paint
-        .split(';')
-        .filter(|statement| statement.contains("pastilha") && statement.contains("textContent"))
-        .collect();
+    // The accessible name is written from the words, per card, on every repaint.
     assert!(
-        !chips.is_empty(),
-        "the card writes no state chip, so the halo is the only thing marking who \
-         is speaking"
-    );
-    // A statement that tells the three states apart in words: it has to look at
-    // the microphone and at the voice, and have a word for each way out.
-    let tells_them_apart = |statement: &str| {
-        statement.contains("muted")
-            && statement.contains("speaking")
-            && statement
-                .split('"')
-                .skip(1)
-                .step_by(2)
-                .filter(|word| !word.trim().is_empty())
-                .count()
-                >= 3
-    };
-
-    // Either the chip is written with the words in place, or it is written from
-    // a local that carries them. Following the local matters: assigning `""` to
-    // the chip while a perfectly good ternary sits unused above it is the exact
-    // shape of "marked by paint alone", and it would read as fine in a diff.
-    let straight = chips.iter().copied().any(tells_them_apart);
-    let through_a_local = paint.split(';').any(|declaration| {
-        tells_them_apart(declaration)
-            && declaration
-                .split('=')
-                .next()
-                .and_then(|left| left.split_whitespace().last())
-                .is_some_and(|name| {
-                    chips.iter().any(|chip| {
-                        chip.split('=')
-                            .nth(1)
-                            .is_some_and(|value| value.contains(name))
-                    })
-                })
-    });
-    assert!(
-        straight || through_a_local,
-        "no state chip on this card is written from a value that branches on both \
-         the microphone and the voice with a word for each. Either a state is \
-         being told apart by paint alone, or two of them come out reading the \
-         same:\n{}",
-        chips.join("\n")
+        paint.contains("aria-label") && paint.contains("estadoEmPalavras("),
+        "the card no longer writes the person's state into its accessible name, \
+         so a screen reader gets the name and none of who is speaking or muted"
     );
 
-    assert!(
-        paint.contains("fraseDoEstado"),
-        "the card no longer writes the state as a sentence beside the name, which \
-         is the half a newcomer reads"
-    );
-
-    // All three facts, in the sentence. The colour version of any one of them
+    // All three facts, in the words. The colour version of any one of them
     // would be a fact only some readers get.
     for fact in ["muted", "speaking", "total_isolation"] {
         assert!(
-            sentence.contains(fact),
-            "the sentence beside the name never mentions `{fact}`, so that state \
-             reaches the screen as paint and nothing else"
+            words.contains(fact),
+            "the state words never mention `{fact}`, so that state reaches the \
+             screen as paint and nothing else"
         );
     }
+    assert!(
+        words.split('"').skip(1).step_by(2).filter(|w| !w.trim().is_empty()).count() >= 4,
+        "the state words do not tell the ways out apart: {words}"
+    );
+
+    // The muted and deafened states keep a drawn form (a cut glyph, not a
+    // colour), only when they are true.
+    assert!(
+        paint.contains("glifoComEstado(") && paint.contains("pessoa.muted")
+            && paint.contains("pessoa.total_isolation"),
+        "mute and deafen are no longer drawn as cut icons on the card"
+    );
+    // The ring: speaking is a data attribute the sheet paints.
+    assert!(
+        paint.contains("dataset.fala"),
+        "the card no longer marks who is speaking, so the ring has nothing to hang from"
+    );
+    // And no word chip came back on the face.
+    assert!(
+        !paint.contains("pastilha"),
+        "the state chip came back to the card, which the owner took off"
+    );
 }
 
 #[test]
@@ -3451,11 +3430,14 @@ fn the_volume_control_does_not_hide_behind_the_pointer() {
     // keyboard, it never appears under touch, and whoever did not sweep the
     // pointer across that row by accident never learned it was there.
     //
-    // Two halves, because either alone passes with the defect present. The
-    // control has to *exist* — minus, plus, and cells that are real buttons —
-    // and no rule of this sheet may use the pointer to bring anything into
-    // being. Highlighting on hover stays legal; that is what `background` and
-    // `border-color` in those rules are.
+    // **0.19: the volume left the call card** (owner: «bem simples»). It lives
+    // in the person's sheet (`#ficha-pessoa`), and the whole card is the button
+    // that opens it. Two halves, because either alone passes with the defect
+    // present: the way there has to *exist* — a real button on every card, wired
+    // to the sheet — and the sheet has to carry an always-visible slider that
+    // sends `set_volume`. And no rule of the call sheet may use the pointer to
+    // bring anything into being. Highlighting on hover stays legal; that is what
+    // `background` and `border-color` in those rules are.
     let script = scripts();
     // Comments stripped, and that is load-bearing rather than tidy: the sheet
     // has to be able to write down *why* nothing here hangs off `:hover`, and
@@ -3463,26 +3445,27 @@ fn the_volume_control_does_not_hide_behind_the_pointer() {
     // broken as a guard a comment can satisfy.
     let sheet = without_comments(&read("ui/tela-chamada.css"));
 
-    let build = body_of(&script, "function controleDeVolume");
-    // U+2212, which the embedded face does have — the inventory measured it
-    // (§5). The ASCII hyphen is a different character and a different width in a
-    // monospaced face, beside a `+` that is ASCII.
+    let build = body_of(&script, "function cartaoDoPersono");
     assert!(
-        build.contains('\u{2212}') && build.contains('+'),
-        "the volume control no longer offers a minus and a plus"
+        build.contains("elemento(\"button\", \"chamada-cartao-abrir\")"),
+        "the call card is no longer a button, so the person's sheet — where the \
+         volume lives — is neither clickable nor reachable by keyboard from the \
+         grid"
     );
+    let grade = without_comments(&read("ui/tela-chamada.js"));
+    let ouvinte = grade
+        .split("$(\"chamada-grade\").addEventListener(\"click\"")
+        .nth(1)
+        .and_then(|resto| resto.split("});").next())
+        .unwrap_or_default();
     assert!(
-        build.contains("CELULAS_DE_VOLUME"),
-        "the volume control no longer draws a row of cells to click"
+        ouvinte.contains("abrirFichaDaPessoa("),
+        "a click on a call card no longer opens the person's sheet:\n{ouvinte}"
     );
+    let ficha = body_of(&script, "function fichaDaPessoa(id)");
     assert!(
-        build
-            .split(';')
-            .any(|statement| statement.contains("elemento(\"button\"")
-                && statement.contains("vol-cela")),
-        "the volume cells are not buttons, so they are neither clickable nor \
-         reachable by keyboard — which is the hidden control again, wearing the \
-         shape of the fix"
+        ficha.contains("ficha-volume") && ficha.contains("range"),
+        "the person's sheet no longer carries the volume slider"
     );
     assert!(
         scripts().contains("set_volume"),
@@ -13834,6 +13817,67 @@ fn o_rodape_do_operador_muda_de_oficio_com_a_sala() {
 }
 
 #[test]
+fn compartilhar_a_tela_tem_uma_porta_so_e_ela_e_a_barra_da_chamada() {
+    // **A U28 pedia duas portas para o mesmo comando** — o rodapé do operador e
+    // um botão dentro do palco vazio — e o dono ficou com uma (0.19: «o
+    // compartilhamento tá redundante em dois lugares, deixe somente na barra»).
+    // O que a U28 protegia continua protegido, e é isto que o guarda cobra:
+    //
+    //   - **alcançável**: a barra da chamada tem o ícone de COMPARTILHAR, que
+    //     aperta o botão do operador (o mesmo comando, `abrirCompartilhar`);
+    //   - **indisponível, e dito**: o ícone herda o `aria-disabled` e o `title`
+    //     do botão do operador, que escreve o porquê (`porQueNaoHaTela`);
+    //   - **uma porta só**: o botão dentro do palco não existe mais, nem no HTML
+    //     nem no script;
+    //   - **sem transmissão, sem caixa**: o palco some quando ninguém compartilha.
+    let html = read("ui/index.html");
+    assert!(
+        !html.contains("id=\"palco-compartilhar\""),
+        "o botão COMPARTILHAR ESTA TELA voltou ao palco: são duas portas de novo"
+    );
+    let chamada = without_comments(&read("ui/tela-chamada.js"));
+    assert!(
+        !chamada.contains("palco-compartilhar"),
+        "o script da chamada ainda fala de um botão de compartilhar no palco"
+    );
+    assert!(
+        chamada.contains("$(\"operador-vista\").addEventListener(\"click\""),
+        "o botão do operador deixou de abrir o compartilhar, e a barra aperta ele"
+    );
+
+    let barra = without_comments(&read("ui/composicao-0174.js"));
+    assert!(
+        barra.contains("espelhar(bVista, vista, { icone: true })"),
+        "a barra da chamada não tem mais o ícone de COMPARTILHAR espelhando o botão do operador"
+    );
+    let espelhar = barra
+        .split("const espelhar = ")
+        .nth(1)
+        .and_then(|resto| resto.split("const comGlifo").next())
+        .unwrap_or_default();
+    assert!(
+        espelhar.contains("aria-disabled") && espelhar.contains("botao.title"),
+        "a barra não repassa o `aria-disabled` e o `title` do operador: o COMPARTILHAR \
+         indisponível ficaria mudo, sem dizer por quê:\n{espelhar}"
+    );
+    let rodape = body_of(&chamada, "function desenharORodapeDoOperador");
+    assert!(
+        rodape.contains("porQueNaoHaTela()") && rodape.contains("aria-disabled"),
+        "o botão do operador não diz mais por que compartilhar está indisponível"
+    );
+
+    let palco = body_of(&chamada, "function desenharPalco(snapshot, voice_room)");
+    assert!(
+        palco.contains("palco.hidden = !(") && palco.contains("palco.hidden = false"),
+        "o palco não some sem transmissão (ou não volta com ela): a caixa preta vazia voltou"
+    );
+    assert!(
+        without_comments(&read("ui/tela-chamada.css")).contains(".chamada-palco[hidden] { display: none; }"),
+        "o `display: flex` do palco vence o `hidden`, e a caixa vazia volta"
+    );
+}
+
+#[test]
 fn sair_do_servidor_nao_pergunta_porque_nada_cai() {
     // **A tarefa 19 da F7 virou este guarda do avesso.** Ele cobrava que o
     // SAIR DO SERVIDOR perguntasse antes de sair, porque um servidor hospedado
@@ -18911,11 +18955,8 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
             "ui/tela-sessao.js",
             "$(\"lista-roster\").addEventListener(\"input\", (evento) => {",
         ),
-        (
-            "o controle da chamada",
-            "ui/tela-chamada.js",
-            "$(\"chamada-grade\").addEventListener(\"click\", (evento) => {",
-        ),
+        // 0.19: o cartão da chamada não escreve volume; ele abre a ficha, e o
+        // deslizante da ficha é conferido logo abaixo.
     ] {
         let corpo = body_of(&without_comments(&read(arquivo)), ouvinte);
         assert!(
@@ -18952,11 +18993,8 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
         ficha.contains("marcarVolume(") && !ficha.contains("volumesLidos.set("),
         "o deslizante da ficha escreve o volume do gesto sem passar por `marcarVolume`:\n{ficha}"
     );
-    assert!(
-        body_of(&scripts, "function pintarVolume(cartao, apelido)")
-            .contains("volumesLidos.get(apelido)"),
-        "o controle de volume da chamada não desenha a leitura do Rust"
-    );
+    // 0.19: o cartão da chamada não tem mais controle de volume; ele abre a
+    // ficha da pessoa, que é o deslizante acima, lido do Rust.
 }
 
 /// **A casca veste a sessão com o que está gravado em disco, logo depois do
@@ -27050,5 +27088,40 @@ function contexto(invoke) {
         "o ANTES DE HOSPEDAR oferece o 4.0.0 ao PERFIS, ou hospeda sem estagiar:\n{}{}",
         String::from_utf8_lossy(&saida.stdout),
         String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+#[test]
+fn the_people_list_does_not_write_transmitindo_but_still_says_it() {
+    // 0.19, owner: «tira o transmitindo da aba de perfis». The speaking and the
+    // resting chip leave the people list's view — the green outline of
+    // `li.pessoa.falando` carries speaking, as on the call card — while MUDO and
+    // ISOLAMENTO TOTAL stay visible, because they are the exception.
+    //
+    // Two halves, both silent if lost. Hidden from view, not deleted: the word
+    // is what a screen reader hears (`specs/06-clientes-gui.md`: never colour
+    // alone), so `estadosDaPessoa` must keep writing it. And the hiding rule
+    // must target exactly fala/escuta: a selector that also caught `at` or
+    // `surdo` would hide that somebody cannot hear you.
+    let css = styles();
+    let seletor = "#lista-roster .pessoa-estados .pastilha:is([data-estado=\"fala\"], [data-estado=\"escuta\"])";
+    let corpo = css
+        .split(seletor)
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("the people list must hide the TRANSMITINDO / EM ESCUTA chip from view");
+    assert!(
+        corpo.contains("clip-path: inset(50%)") && corpo.contains("position: absolute"),
+        "the chip must leave the view and stay in the document, for the screen reader: {corpo}"
+    );
+    assert!(
+        !css.contains("[data-estado=\"at\"]) {") && !css.contains("data-estado=\"surdo\"], [data-estado"),
+        "MUDO and ISOLAMENTO TOTAL must stay visible in the people list"
+    );
+    let script = scripts();
+    let estados = body_of(&script, "function estadosDaPessoa");
+    assert!(
+        estados.contains("\"TRANSMITINDO\"") && estados.contains("dataset.estado"),
+        "the word is still written, for the screen reader and the person's modal"
     );
 }

@@ -494,11 +494,6 @@ const NO_TAMANHO_DO_DESKTOP: &[(&str, &str)] = &[
     (".pessoa .barra", "a mesma barra, na lista de PESSOAS"),
     (".sync-marca", "o pedaço vazio da barra"),
     (
-        ".chamada-cartao-barra",
-        "a barra do sinal no cartão da CHAMADA",
-    ),
-    (".chamada-cartao-marca", "o pedaço vazio dela"),
-    (
         ".server-atualizacao-barra",
         "a barra do progresso da atualização",
     ),

@@ -1583,15 +1583,18 @@
   font-size: calc(18px * var(--cel-escala));
 }
 
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-identidade {
-  flex-direction: column;
+/* O cartão simples (0.19): o cartão inteiro é o botão que abre a folha da
+   pessoa; o retrato em cima, à esquerda, e o nome por inteiro embaixo. */
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-abrir {
   align-items: flex-start;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0;
+  text-align: left;
 }
 
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-quem {
-  gap: 0;
-}
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-nome { text-align: left; text-wrap: wrap; }
 
 :root[data-casca="celular"] #chamada-grade .chamada-cartao-nome {
   font-family: var(--seele-ui);
@@ -1599,48 +1602,6 @@
   font-size: calc(14px * var(--cel-escala));
   letter-spacing: 0;
   text-transform: none;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-estados {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-/* O estado é uma palavra mono pequena, e não a pílula do desktop. */
-:root[data-casca="celular"] #chamada-grade .chamada-pastilha {
-  min-height: 0;
-  padding: 0;
-  font-family: var(--seele-mono);
-  font-size: calc(10px * var(--cel-escala));
-  background: none;
-  border: 0;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-sync {
-  width: 100%;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-volume {
-  display: none;
-}
-
-/* Em duas colunas, a cabeça do cartão quebra: a identidade numa fileira, os
-   estados na outra. Lado a lado, a 360, o nome e a nota ficavam com 3 px. */
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-topo {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  width: 100%;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-quem .nota {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-pastilha[data-estado="escuta"] {
-  color: var(--seele-rotulo-painel);
 }
 
 /* O cartão em três fileiras (Cel-chamada.dc): o avatar, o nome, e numa só o
@@ -1654,40 +1615,10 @@
   padding: 14px;
 }
 
-:root[data-casca="celular"] #chamada-grade .chamada-cartao :is(.chamada-cartao-topo, .chamada-cartao-identidade) {
-  display: contents;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao .chamada-cartao-quem {
-  flex: 0 0 100%;
-}
-
 :root[data-casca="celular"] #chamada-grade .chamada-cartao .chamada-avatar {
   flex: 0 0 44px;
   margin-right: calc(100% - 44px);
   margin-bottom: 6px;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-quem .nota,
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-barra {
-  display: none;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-sync {
-  width: auto;
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-linha {
-  display: inline-flex;
-  gap: 6px;
-  align-items: baseline;
-  font-family: var(--seele-mono);
-  font-size: calc(10px * var(--cel-escala));
-}
-
-:root[data-casca="celular"] #chamada-grade .chamada-cartao-numero {
-  font-size: calc(10px * var(--cel-escala));
-  font-weight: 400;
 }
 
 :root[data-casca="celular"] #chamada-grade .chamada-cartao-nome { font-size: calc(15px * var(--cel-escala)); }
