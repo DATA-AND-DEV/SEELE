@@ -138,11 +138,87 @@ Cada decisão diz o custo, se estiver errada. O MOD de multiplayer tem as dele e
 
 ## As provas dos guardas (revertidos um a um)
 
-(preenchido abaixo)
+Cada guarda foi desfeito sozinho por um script (o trecho trocado, o teste
+rodado, o arquivo restaurado e conferido pelo SHA-256), e o teste caiu:
+
+| # | Guarda revertido | Teste que caiu |
+|---|---|---|
+| G7-C1 | o código da oferta (`iguais`) | `sem_o_codigo_ou_com_outra_copia_nada_sai` |
+| G7-C2 | o sha256 do pacote inteiro antes de virar o destino | `a_copia_que_nao_bate_e_apagada_e_o_destino_fica` |
+| G7-C3 | a retomada (pedir sempre do zero) | `a_ligacao_que_cai_no_meio_continua_de_onde_parou` |
+| G7-C4 | só uma porta de túnel TCP aceita oferece | `a_copia_so_sai_por_uma_porta_de_tunel_aceita` |
+| G7-C5 | links fora do pacote, e contados | `empacotar_nao_segue_link_nem_mora_na_origem` |
+| G7-C6 | o teto de disco ao empacotar | `empacotar_para_no_teto_de_disco_e_nada_fica` |
+| G7-S1 | só a dona serve (`conferir_tunel`) | `a_principal_e_a_reserva_ficam_aceitas_e_so_a_dona_serve` |
+| G7-S2 | o livro chaveado pelo papel (todo papel virou principal) | o mesmo (pedir a reserva dispensou a principal) |
+| G7-S3 | `mesma-pessoa-nas-duas` | `a_mesma_pessoa_nao_e_as_duas` |
+| G7-S4 | o prazo só com o lugar vazio e na mesma vez | `o_prazo_so_vale_com_o_lugar_vazio_e_na_mesma_vez` |
+| G7-S5 | a posse que muda para os túneis da de antes | conformância `a_passagem_avisada_nao_perde_nada` (quem jogava não viu o fim) |
+| G7-S6 | o prazo aberto na saída | conformância `a_queda_de_surpresa_passa_a_posse_depois_do_prazo` |
+| G7-S7 | `MaquinaVoltou` | conformância `a_principal_que_volta_com_o_processo_vivo_o_mata` |
+| G7-S8 | `contexto.maquina.dona` (sempre `true`) | o mesmo (a principal ouviu que era a dona) |
+| G7-A1 | `receberCopia` só pelo túnel TCP da própria oferta | app `a_copia_so_entra_pelo_tunel_tcp_da_oferta` |
+
+No MOD (`node --test test/reserva.test.cjs`): sem cópia não assume (G7-M1),
+a principal sem a posse desliga o jogo (G7-M2), a cópia agendada passa pelo
+salvamento seguro (G7-M4) e a queda com reserva não desliga o servidor de jogo
+(G7-M5) caíram. **G7-M3 (a passagem avisada para o jogo antes da cópia
+final) passou sozinho na primeira volta**: o teste via o `stop`, mas o `stop`
+vinha depois, do «desligar» da posse. O teste passou a ver se o jogo estava de
+pé no momento do pacote (`vivoAoEmpacotar`), e então caiu.
+
+O guia de tipos do prelúdio (`o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade`)
+caiu sozinho com os três tipos novos, como deve, e foi atualizado para 16.
+
+**Provado só por raciocínio:** a posse sair no despejo antes dos avisos da
+mesma chamada (a ordem é a das linhas de `despejar`; a prova da passagem não
+distingue as duas ordens); a espera pela malha no app (`ESPERA_PELA_MALHA`; o
+comando Tauri não sobe num teste — a conformância espera do mesmo jeito e
+mediu `Direto`).
 
 ## As medidas
 
-(preenchido abaixo)
+**Conformância (`reserva.rs`, três `Enlace`s, `127.0.0.1`, prazo de 2 s):**
+a cópia de um mundo de 2 MB (60 633 bytes no `.tar.gz`) pela malha
+(`Direto { par }`) em 7,7 ms; sem a malha, pela `Estrela`. Na queda, a
+reserva ouviu «assumir» 2,00 s depois da queda; o tempo de jogo perdido
+contado foi 1,6 s (jogou-se 1,5 s depois da cópia; a diferença é o servidor ver
+a queda no tempo dele). Sem o anfitrião, por três prazos: nenhum «assumir», a
+dona seguiu de pé.
+
+**O Minecraft de verdade** (`minecraft_pelo_tunel`,
+`a_reserva_liga_com_o_mundo_da_principal`, 31/10, um Mac ARM; plano do MOD em
+`5cfabf8`, `node ferramentas/plano-de-verdade.cjs`): Minecraft 1.21.4 na
+principal, `Done` em 4,9 s; `scoreboard players set prova reserva 42`
+(«Set [reserva] for prova to 42»); `save-off`, `save-all flush` e «Saved the
+game» em 0,20 s; o pacote, 20 arquivos e 476 137 bytes em 336 290 bytes, em
+40 ms; a cópia **pela malha** (`Direto`) em 13,2 ms, 0 retomadas; a reserva
+(outra pasta, o mesmo jogo baixado) abriu o mundo e ligou o Minecraft em
+4,7 s, e `scoreboard players get prova reserva` respondeu **«prova has 42
+[reserva]»** — o mundo da reserva é o da principal; o status pela porta de
+quem joga, pelo túnel da reserva já dona, em 18 ms, com
+`"§bCasa §6pelo túnel"`.
+
+**Não medido:** um mundo de GiB (o mundo novo do 1.21.4 tem 0,5 MB); duas
+casas de verdade; o app inteiro com a metade de máquina do MOD fazendo a
+reserva.
+
+## A suíte
+
+Só os crates tocados: `seele-core` (lib 549; `programa_copia` 8,
+`programa_arquivos` 11, `programa_https` 2, `programa_processo` 12 — 1 falha
+sob a carga da suíte em paralelo, `matar_a_pedido…`, que passou 3 de 3
+sozinho), `seele-ffi` (249), `seele-motor`, `seele-server` (lib 718 e os
+alvos de teste; `fora_do_ar` falha, como a parte 6 já mediu na base),
+`seele-app` (`maquina` 39, e `frontend` o guarda do prelúdio), e as
+conformâncias `reserva` (4, 3 de 3), da máquina, do túnel, da FFI, da API, do
+MOD de referência, do aceite dos MODs e da ponte de pedidos.
+`dois_produtores_de_recusa::outra_linha_diz_a_mesma_versao_e_o_mesmo_mais_nova`
+falha: ele lê a linha do protocolo (`seele-web`, `seele-proto`), que esta
+parte não toca (`git diff` vazio nos dois). `cargo xtask check-api` limpo;
+`clippy --all-targets --all-features -D warnings` limpo nos crates tocados; o
+`rustfmt` só nos arquivos novos e nos que já estavam limpos. No MOD: `npm test`
+175, `npm run build`, `npm run check` e o QuickJS check limpos.
 
 ## Aberto
 
