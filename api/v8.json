@@ -160,6 +160,7 @@
     "mundo.tema": "mundo::valores_do_tema",
     "mundo.maquinas.pedir": "maquina::pedido_da_chamada",
     "mundo.maquinas.avisar": "maquina::aviso_da_chamada",
+    "mundo.maquinas.dona": "maquina::dona_da_chamada",
     "mundo.buscarPack": "pack::buscar"
   },
   "sentido": {
@@ -192,12 +193,15 @@
     "maquina": "No mod.json: o caminho, dentro do pacote, do script da metade de máquina. Fora do pacote é recusado (MaquinaForaDoPacote), e sem poderes também (MaquinaSemPoderes). Ela pede a metade de servidor: sem a chave server o MOD é recusado (MaquinaSemServidor). Declará-la numa API anterior à 8 é recusado (PoderesPedemApiNova).",
     "porta": "O poder porta exige a permissão entrar-no-jogo declarada no próprio manifesto (ACAO_ENTRAR_NO_JOGO); sem ela o MOD é recusado na instalação (PortaSemEntrarNoJogo), porque ninguém poderia abrir o túnel.",
     "capacidades-por-poder": "A capacidade tunel é do poder porta, e não da versão: capacidades_do_manifesto soma tunel a capacidades_da_api quando o manifesto declara a porta, e a lista da API 8 não muda. A metade de máquina não tem tela: o que ela pode chamar vem de capacidades-da-maquina (capacidades_da_maquina), que não soma nenhuma capacidade de capacidades-por-versao.",
-    "mundo.maquinas.pedir": "mundo.maquinas.pedir({ quem, servidor, oferta }) chama quem (o id numérico da pessoa) a rodar a máquina do servidor de jogo; só existe para o MOD cujo manifesto declara maquina (Portas::maquinas). A oferta tem os nomes de campo de OfertaDeMaquina (o protocolo tcp ou udp; o hash como { algoritmo: \"sha256\", hex }; ausentes viram vazio, null ou 0) e é validada na hora: inválida lança com o nome da regra (servidor-invalido, quem-invalido, oferta-invalida:<campo>). Declarativa, como mundo.avisar: o pedido sai pelo despejo (maquina::despejar) só se a chamada terminar e o quintal gravar, como PedidoDeMaquina com o hash do pacote ligado agora; dentro da chamada, o mais novo de cada servidor de jogo, até MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA (pedidos-de-maquina-demais). Quem não está conectado num 12 volta ao MOD como MaquinaRecusou com nao-esta-aqui; um pedido a outra pessoa para o mesmo servidor de jogo dispensa (MaquinaDispensada, OutroPedido) a máquina aceita e o pedido sem resposta de quem tinha sido chamado.",
-    "mundo.maquinas.avisar": "mundo.maquinas.avisar({ servidor, carga }) manda a carga (um valor JSON) à máquina aceita daquele servidor de jogo como AvisoParaMaquina, e a ninguém mais; declarativa como mundo.avisar, com o mesmo teto (TETO_DO_AVISO, aviso-grande-demais) e a mesma taxa por MOD (AVISOS_POR_SEGUNDO, o excedente junto por servidor de jogo, o mais novo), num orçamento à parte do das janelas (Server::avisador_de_maquinas). Até MAX_AVISOS_A_MAQUINA_POR_CHAMADA servidores de jogo por chamada (avisos-a-maquina-demais). Sem máquina aceita nada sai e o retorno da chamada não muda: o seele.log diz sem-maquina e Server::avisos_sem_maquina conta.",
-    "contexto.maquina": "{ servidor } quando quem pede é a máquina aceita daquele servidor de jogo (ClientMessage::PedidoDaMaquina; pedidos::executar_da_maquina), e ausente em todo outro pedido (um MOD da 7 ou da 6 recebe o contexto de sempre); contexto.person é então a pessoa que opera a máquina. Um PedidoDaMaquina de quem não é a máquina aceita não chama o MOD: o servidor responde MaquinaDispensada com SemAceite.",
-    "MaquinaAceitou": "momento { servidor, pessoa } entregue só ao MOD da máquina (despacho::so_para), quando a pessoa aceita a oferta mostrada (MudancaDeMaquina::Aceitou).",
-    "MaquinaRecusou": "momento { servidor, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Recusou): motivo é o nome da recusa da pessoa (pelo-dono, sem-tela, so-no-app, pacote-diferente, oferta-invalida; nome_da_recusa) ou do servidor (nao-esta-aqui, pendentes-demais, maquinas-demais).",
-    "MaquinaParou": "momento { servidor, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Parou): a parada da pessoa (pelo-dono, revogada, app-fechou, metade-falhou; nome_da_parada), a saída dela (saiu) ou a dispensa pelo servidor (mod-desligado, outro-pedido; nome_da_dispensa).",
+    "mundo.maquinas.pedir": "mundo.maquinas.pedir({ quem, servidor, papel, oferta }) chama quem (o id numérico da pessoa) a rodar a máquina do servidor de jogo; só existe para o MOD cujo manifesto declara maquina (Portas::maquinas). A oferta tem os nomes de campo de OfertaDeMaquina (o protocolo tcp ou udp; o hash como { algoritmo: \"sha256\", hex }; ausentes viram vazio, null ou 0) e é validada na hora: inválida lança com o nome da regra (servidor-invalido, quem-invalido, oferta-invalida:<campo>). Declarativa, como mundo.avisar: o pedido sai pelo despejo (maquina::despejar) só se a chamada terminar e o quintal gravar, como PedidoDeMaquina com o hash do pacote ligado agora; dentro da chamada, o mais novo de cada servidor de jogo, até MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA (pedidos-de-maquina-demais). Quem não está conectado num 12 volta ao MOD como MaquinaRecusou com nao-esta-aqui; papel (API 8 parte 7) é principal (o padrão, sem a chave) ou reserva (papel-invalido): cada servidor de jogo tem um lugar de cada, as duas aceitas ao mesmo tempo, e um pedido a outra pessoa para o mesmo servidor de jogo **e papel** dispensa (MaquinaDispensada, OutroPedido) a máquina aceita e o pedido sem resposta de quem tinha sido chamado naquele papel — a do outro papel fica. A mesma pessoa não pode ser as duas: o despejo volta MaquinaRecusou com mesma-pessoa-nas-duas.",
+    "mundo.maquinas.avisar": "mundo.maquinas.avisar({ servidor, papel, carga }) manda a carga (um valor JSON) à máquina aceita daquele servidor de jogo naquele papel (principal sem a chave; papel-invalido) como AvisoParaMaquina, e a ninguém mais; declarativa como mundo.avisar, com o mesmo teto (TETO_DO_AVISO, aviso-grande-demais) e a mesma taxa por MOD (AVISOS_POR_SEGUNDO, o excedente junto por servidor de jogo, o mais novo), num orçamento à parte do das janelas (Server::avisador_de_maquinas). Até MAX_AVISOS_A_MAQUINA_POR_CHAMADA servidores de jogo por chamada (avisos-a-maquina-demais). Sem máquina aceita nada sai e o retorno da chamada não muda: o seele.log diz sem-maquina e Server::avisos_sem_maquina conta.",
+    "mundo.maquinas.dona": "mundo.maquinas.dona({ servidor, papel }) (API 8 parte 7) diz quem é a dona agora daquele servidor de jogo: principal ou reserva, obrigatório (papel-invalido). Só a dona serve túnel: a máquina aceita do outro papel que pede para servir ouve ForaDoAceite (o seele.log diz nao-e-a-dona, e Maquinas::tuneis_de_quem_nao_e_dona conta). Passar a posse **não** pede aceite novo, e para os túneis da dona de antes na hora (MaquinaParou para quem jogava por eles), mesmo com o processo dela vivo. Declarativa como o resto: sai no despejo, **antes** dos pedidos e dos avisos da mesma chamada — o «assuma» à nova dona já a acha dona. Sem chamada nenhuma, a dona é a principal; o servidor guarda a posse na memória, e um servidor que reinicia volta à principal até a metade de servidor dizer de novo. O servidor nunca passa a posse sozinho.",
+    "contexto.maquina": "{ servidor, papel, dona } quando quem pede é uma máquina aceita daquele servidor de jogo (ClientMessage::PedidoDaMaquina; pedidos::executar_da_maquina), e ausente em todo outro pedido (um MOD da 7 ou da 6 recebe o contexto de sempre); contexto.person é então a pessoa que opera a máquina. papel (API 8 parte 7) é principal ou reserva, e dona diz se ela é a dona agora (mundo.maquinas.dona). Um PedidoDaMaquina de quem não é máquina aceita não chama o MOD: o servidor responde MaquinaDispensada com SemAceite.",
+    "MaquinaAceitou": "momento { servidor, papel, pessoa } entregue só ao MOD da máquina (despacho::so_para), quando a pessoa aceita a oferta mostrada (MudancaDeMaquina::Aceitou).",
+    "MaquinaRecusou": "momento { servidor, papel, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Recusou): motivo é o nome da recusa da pessoa (pelo-dono, sem-tela, so-no-app, pacote-diferente, oferta-invalida; nome_da_recusa) ou do servidor (nao-esta-aqui, pendentes-demais, maquinas-demais, mesma-pessoa-nas-duas).",
+    "MaquinaParou": "momento { servidor, papel, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Parou): a parada da pessoa (pelo-dono, revogada, app-fechou, metade-falhou; nome_da_parada), a saída dela (saiu) ou a dispensa pelo servidor (mod-desligado, outro-pedido; nome_da_dispensa).",
+    "MaquinaSumiu": "momento { servidor, papel, pessoa, motivo, segundos } (API 8 parte 7; MudancaDeMaquina::Sumiu), só ao MOD da máquina: a máquina aceita que parou (MaquinaParou com saiu, ou uma parada da pessoa) e cujo lugar segue vazio ServerConfig::prazo_da_maquina_sumida depois (padrão PRAZO_DA_MAQUINA_SUMIDA, 60 s) — ela não voltou nem foi trocada (Maquinas::sumiu_de_vez). É o relógio da reserva: a metade de servidor não acorda sozinha. O servidor não passa a posse; quem decide é ela (mundo.maquinas.dona). segundos é o prazo, e o momento da parada é agora menos ele. Um servidor parado não tem relógio: sem quem hospeda, nada sai, e nada muda de dona.",
+    "MaquinaVoltou": "momento { servidor, papel, pessoa } (API 8 parte 7; MudancaDeMaquina::Voltou), só ao MOD da máquina: quem operava aquele lugar caiu (MaquinaParou com saiu) e uma conexão dela negociou o 12 de novo, com o lugar ainda vazio. A máquina não volta sozinha: a metade de servidor decide se pede de novo (o app aceita sozinho a mesma oferta) e, se outra é a dona, diz isso a ela. Cada lugar é dito uma vez por queda.",
     "maquinas-por-chamada": "MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA e MAX_AVISOS_A_MAQUINA_POR_CHAMADA, em crates/seele-server/src/mods/maquina.rs; acima deles, a chamada lança com o nome.",
     "maquina.programa": "O poder programa dá maquina.programa só à metade de máquina (capacidades-da-maquina.programa), preso ao aceite guardado nesta máquina: a política sai dele (os hosts dos artefatos e as origens, os artefatos desta plataforma com hash e tamanho, o rodar, o disco_maximo e a pasta), e não do que a metade pede. Mudar a versão, o pack ou o comando pede aceite novo, e até lá todo pedido do programa volta aceite-diferente.",
     "artefatos.plataformas": "Opcional em cada artefato da oferta de mundo.maquinas.pedir: os sistemas em que ele serve (PLATAFORMAS_DE_MAQUINA); ausente ou vazio, em todos. A tela do aceite lista e soma só os desta máquina, e diz quantos são de outros; a política recusa baixar os de outros (artefato-de-outro-sistema). Um nome fora da lista é recusado na oferta (oferta-invalida:artefato_plataformas).",
@@ -213,7 +217,9 @@
     "MessageRemoved",
     "MaquinaAceitou",
     "MaquinaRecusou",
-    "MaquinaParou"
+    "MaquinaParou",
+    "MaquinaSumiu",
+    "MaquinaVoltou"
   ],
   "eventos": [
     "campo",
@@ -767,7 +773,9 @@
     "quadros-por-capa": "60 quadros, 10 s",
     "folhas": "3 à vista",
     "medido": "na M3 de 10/10 (docs/evidencias/m3-custo-dos-mods/medidas-api6.json), com cada ponto no teto e todos juntos: nenhum commit de quadro acima de um quadro de 60 Hz, o p95 do commit abaixo de 1 ms, e o jitter da voz no máximo +0,32 ms; cada número vale igual no desktop e no navegador, porque o motor é o mesmo",
-    "maquinas-por-chamada": "4 servidores de jogo pedidos (MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA) e 16 avisados (MAX_AVISOS_A_MAQUINA_POR_CHAMADA) por chamada; o aviso à máquina tem o teto e a taxa do aviso do servidor (TETO_DO_AVISO, AVISOS_POR_SEGUNDO), com orçamento próprio (avisador_de_maquinas)"
+    "maquinas-por-chamada": "4 servidores de jogo pedidos (MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA) e 16 avisados (MAX_AVISOS_A_MAQUINA_POR_CHAMADA) por chamada; o aviso à máquina tem o teto e a taxa do aviso do servidor (TETO_DO_AVISO, AVISOS_POR_SEGUNDO), com orçamento próprio (avisador_de_maquinas)",
+    "maquina-sumida": "ServerConfig::prazo_da_maquina_sumida, padrão PRAZO_DA_MAQUINA_SUMIDA (60 s): quanto uma máquina aceita fica fora antes de MaquinaSumiu (API 8 parte 7)",
+    "copia-do-mundo": "MAX_TENTATIVAS_DA_COPIA (5) ligações por receberCopia, PRAZO_SEM_BYTES_DA_COPIA (30 s) sem byte antes de dar a ligação por caída, 4 ligações de cópia ao mesmo tempo por oferta, e o teto de disco do aceite (o pacote, o parcial e o mundo aberto contam todos)"
   },
   "celular": {
     "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
@@ -869,7 +877,11 @@
       "a mesma recusa do servidor, pedida de novo por um momento dentro de JANELA_DA_RECUSA_REPETIDA (5 s), não volta como MaquinaRecusou: fica no seele.log e em Server::recusas_juntadas (Origem::Momento), para um aoAcontecer que tenta de novo não se alimentar sozinho",
       "um pedido que um momento repete a quem recusou sozinho (sem-tela, so-no-app) dentro de JANELA_DA_RECUSA_REPETIDA não sai: o MOD já leu essa recusa, e o pedido repetido fica no seele.log e em Server::recusas_juntadas (Maquinas::recusa_automatica_recente)",
       "pendentes-demais e maquinas-demais (não lançam: voltam como MaquinaRecusou, pelos tetos do livro, Excesso::PendentesDemais e Excesso::MaquinasDemais)",
-      "sem-maquina (não lança nem volta: o aviso a um servidor de jogo sem máquina aceita não sai, fica no seele.log e no contador Server::avisos_sem_maquina; SEM_MAQUINA)"
+      "sem-maquina (não lança nem volta: o aviso a um servidor de jogo sem máquina aceita não sai, fica no seele.log e no contador Server::avisos_sem_maquina; SEM_MAQUINA)",
+      "papel-invalido (o papel de mundo.maquinas.pedir, avisar ou dona não é principal nem reserva; em dona, ausente também)",
+      "dona-invalida (o argumento de mundo.maquinas.dona não é um objeto)",
+      "donas-demais (mais de MAX_AVISOS_A_MAQUINA_POR_CHAMADA servidores de jogo com a posse declarada numa chamada)",
+      "mesma-pessoa-nas-duas (não lança: volta como MaquinaRecusou, quando quem já é a máquina do outro papel daquele servidor de jogo; Excesso::MesmaPessoaNasDuas)"
     ],
     "programa": [
       "nao-e-https",
@@ -906,7 +918,14 @@
       "nada-sob-a-raiz",
       "sem-pack-aceito",
       "pack-diferente",
-      "nao-e-texto"
+      "nao-e-texto",
+      "nao-e-pasta",
+      "arquivo-dentro-da-origem",
+      "porta-fora-do-aceite",
+      "porta-ocupada",
+      "copia-recusada",
+      "copia-caiu",
+      "copia-nao-bate"
     ],
     "programa-da-cola": [
       "sem-aceite (a metade subiu sem um aceite guardado para este servidor de jogo)",
@@ -915,9 +934,10 @@
       "programa-nao-montou (o cliente HTTPS ou a pasta não montou)",
       "processo-desconhecido (escrever ou matar um processo que já terminou)",
       "pedido-invalido (falta um campo, ou um campo não é do tipo)",
-      "pack-nao-veio (o volume da metade de servidor não devolveu o pack: o texto do servidor em motivo)"
+      "pack-nao-veio (o volume da metade de servidor não devolveu o pack: o texto do servidor em motivo)",
+      "tunel-recusado (receberCopia não entrou no túnel da máquina dona: o nome da recusa do servidor em motivo)"
     ],
-    "programa-como-chega": "a promessa rejeita com um Error: o nome em erro e em message, a frase inteira (com os números) em frase, e os dados em campos: host e aceitos, url, esperado e obtido, usado, pedido e teto, campo, aceito e pedido, origens",
+    "programa-como-chega": "a promessa rejeita com um Error: o nome em erro e em message, a frase inteira (com os números) em frase, e os dados em campos: host e aceitos, url, esperado e obtido, usado, pedido e teto, campo, aceito e pedido, origens; na cópia (parte 7): origem, arquivo, porta e aceitas, motivo, recebidos, tamanho e tentativas, esperado e obtido",
     "pack": [
       "nao-existe",
       "grande-demais (bytes, teto)",
@@ -960,6 +980,9 @@
     "maquina.programa.trazer({pedido, destino})": "capacidade maquina.programa (parte 6): Promise<{destino, tamanho, hash, jaEstava}>. O pack que a metade de servidor guardou: pedido vai ao aoPedir dela (como um pedido de janela, de quem opera a máquina), que autoriza respondendo { ok: true, volume: caminho }; os bytes vêm pelo fluxo de volume (pela estrela), até 64 MiB, e só são gravados em destino se tiverem o hash de oferta.pack (pack-diferente, com algoritmo, esperado e obtido; nada gravado). Sem oferta.pack, sem-pack-aceito. Um destino que já tem o hash aceito volta jaEstava, sem pedir o volume. O volume recusado volta pack-nao-veio, com o texto do servidor em motivo",
     "maquina.programa.ler({arquivo})": "capacidade maquina.programa (parte 6): Promise<texto>. Um arquivo de texto UTF-8 da pasta do servidor de jogo, até 4 MiB (MAX_BYTES_LIDOS; texto-grande-demais, nao-e-texto), pela régua de caminho de escrever: o modrinth.index.json do pack aberto. Não passa pelo aceite",
     "maquina.programa.rodar({comando, argumentos, pasta})": "capacidade maquina.programa: Promise<processo>. Só o comando e os argumentos exatos do aceite — o rodar da oferta ou o instalar dela, cada um com os seus (parte 6) (comando-fora-do-aceito, argumentos-fora-do-aceito); o comando é um caminho dentro da pasta do servidor de jogo (java/bin/java acha java.exe no Windows), nunca procurado no PATH; pasta é relativa a ela, e \"\" é ela mesma. Roda com a conta de quem aceitou",
+    "maquina.programa.empacotar({origem, arquivo})": "capacidade maquina.programa (parte 7, a reserva): Promise<{arquivo, tamanho, sha256, arquivos, bytes, linksPulados}>. Uma pasta da pasta do servidor de jogo (o mundo) num .tar.gz (gzip rápido), com as entradas sob o nome da pasta (world/level.dat), para a outra máquina abrir com desempacotar({ raiz: 'world' }). O pacote fica dentro da pasta do servidor de jogo e fora da origem (arquivo-dentro-da-origem); a origem tem de ser pasta (nao-e-pasta); links não entram (contados em linksPulados); o que se escreve conta no teto de disco (disco-cheio, e nada fica); o pacote de antes de mesmo nome só é trocado com o novo inteiro. Não salva o mundo: o salvamento seguro da receita vem antes (no Minecraft, save-off e save-all flush, que diz «Saved the game»), e o save-on depois.",
+    "maquina.programa.oferecerCopia({arquivo, porta})": "capacidade maquina.programa (parte 7): Promise<{codigo, tamanho, sha256, porta}>. Serve o pacote em 127.0.0.1:porta, onde porta tem de ser a de um túnel TCP da oferta aceita (Politica::portas_de_copia; porta-fora-do-aceite) — a cópia só sai por um túnel que o dono aceitou servir, e anda por ele (direto pela malha, ou pela estrela). A metade serve o túnel com maquina.porta.servir, e só a dona serve. codigo é sorteado a cada oferta (16 bytes) e quem recebe tem de mandá-lo: ele vai à outra máquina só pela metade de servidor. Uma oferta troca a de antes, e encerrar a metade a para. Um pacote que mudou no disco depois da oferta é recusado (copia-mudou). porta-ocupada quando a porta não abre.",
+    "maquina.programa.receberCopia({tunel, codigo, sha256, tamanho, destino, aoProgresso})": "capacidade maquina.programa (parte 7): Promise<{destino, tamanho, sha256, retomadas, jaEstavam, caminho}>. Entra no túnel tunel do MOD (tem de ser um túnel TCP da própria oferta: fora-do-aceite; não entrou: tunel-recusado), espera a ligação direta até 5 s (ESPERA_PELA_MALHA; caminho diz direto ou estrela), recebe pela porta local, e sai do túnel. O que chega fica num parcial que conta no disco; uma ligação que cai é retomada de onde parou até MAX_TENTATIVAS_DA_COPIA (5) vezes (copia-caiu, com recebidos, tamanho e tentativas), e o parcial fica para a próxima vez da mesma cópia. Só o pacote inteiro é conferido, e só com o sha256 anunciado ele vira destino (copia-nao-bate: nada gravado, e o destino de antes fica). copia-recusada quando a dona diz não (motivo: codigo-errado, outra-copia, copia-mudou, alem-do-fim, tamanho-diferente, fala-errada). aoProgresso({recebidos, total}) como em baixar. Não abre o pacote: desempacotar abre, dentro da pasta do servidor de jogo.",
     "processo.numero": "número do processo neste servidor de jogo",
     "processo.pid": "o pid do sistema, ou null",
     "processo.aoLinha(fn(linha, fluxo))": "um ouvinte, o último vence; fluxo é saida ou erro; a linha vem sem o fim de linha, cortada em 16 KiB. As que chegam antes do ouvinte ficam guardadas (até 256) e chegam ao registrá-lo",

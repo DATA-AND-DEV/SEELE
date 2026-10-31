@@ -320,9 +320,22 @@ pub(crate) fn tratar(oferta: &OfertaDeMaquinaFfi, capacidades: &[&str], json: &s
         | "processo-matar"
         | "programa-recusas"
         | "programa-trazer"
-        | "programa-ler")
+        | "programa-ler"
+        | "programa-empacotar"
+        | "programa-oferecer-copia"
+        | "programa-receber-copia")
             if com_programa =>
         {
+            // A cópia do mundo (parte 7) só entra pelo túnel da própria
+            // oferta: o nome tem de ser de um túnel TCP que o dono aceitou.
+            if t == "programa-receber-copia"
+                && !oferta
+                    .tuneis
+                    .iter()
+                    .any(|tunel| tunel.nome == texto("tunel") && tunel.protocolo == "tcp")
+            {
+                return recusar("fora-do-aceite", tipo);
+            }
             debug_assert!(programa::TIPOS.contains(&t));
             match programa::ler(t, &valor) {
                 Ok(pedido) => Acao::Programa { n, pedido },
@@ -405,6 +418,14 @@ pub(crate) trait Fio: Send + Sync {
     /// fluxo de volume de sempre: `payload` vai ao `aoPedir` dela, que
     /// autoriza respondendo o caminho. O erro é o texto do servidor.
     fn ler_volume(&self, mod_id: &str, payload: String) -> Futuro<Result<Vec<u8>, String>>;
+    /// **Entra num túnel do MOD como quem joga** (API 8 parte 7): é por ele
+    /// que a cópia do mundo vem da máquina dona. Devolve a porta local.
+    fn entrar_tunel(&self, mod_id: &str, nome: &str) -> Futuro<Result<u16, &'static str>>;
+    /// Sai do túnel em que [`Fio::entrar_tunel`] entrou.
+    fn sair_tunel(&self, mod_id: &str, nome: &str);
+    /// Se as conexões novas do túnel em que se entrou vão pela ligação direta
+    /// (`Some(true)`), pela estrela (`Some(false)`), ou se não há relatório.
+    fn direto(&self, mod_id: &str, nome: &str) -> Option<bool>;
 }
 
 /// O fio de verdade: a conexão da sessão em que o pedido chegou.
@@ -470,6 +491,29 @@ impl Fio for FioDaConexao {
         let conexao = Arc::clone(&self.0);
         let mod_id = mod_id.to_owned();
         Box::pin(async move { conexao.ler_imagem_mod(mod_id, 0, payload).await })
+    }
+
+    fn entrar_tunel(&self, mod_id: &str, nome: &str) -> Futuro<Result<u16, &'static str>> {
+        let conexao = Arc::clone(&self.0);
+        let (mod_id, nome) = (mod_id.to_owned(), nome.to_owned());
+        Box::pin(async move {
+            conexao
+                .entrar_no_tunel(mod_id, nome)
+                .await
+                .map(|porta| porta.porta)
+        })
+    }
+
+    fn sair_tunel(&self, mod_id: &str, nome: &str) {
+        let _ = self.0.sair_do_tunel(mod_id.to_owned(), nome.to_owned());
+    }
+
+    fn direto(&self, mod_id: &str, nome: &str) -> Option<bool> {
+        self.0
+            .tuneis_abertos()
+            .into_iter()
+            .find(|r| r.mod_id == mod_id && r.nome == nome)
+            .map(|r| matches!(r.caminho, seele_ffi::CaminhoDeTunel::Direto { .. }))
     }
 }
 
@@ -2275,6 +2319,50 @@ mod testes {
         assert!(campos_que_mudaram(&base, &base).is_empty());
     }
 
+    /// **A cópia do mundo entra só pelo túnel da própria oferta** (API 8
+    /// parte 7): `receberCopia` num túnel que o dono não aceitou nem chega ao
+    /// fio; os três tipos da cópia são do poder `programa`, e sem ele não
+    /// existem.
+    #[test]
+    fn a_copia_so_entra_pelo_tunel_tcp_da_oferta() {
+        let mut oferta = oferta();
+        oferta.tuneis.push(tunel("mc-copia", "tcp", 35565));
+        oferta.tuneis.push(tunel("mc-voz", "udp", 24454));
+        let com = ["maquina", "maquina.porta", "maquina.programa"];
+        let receber = |tunel: &str| {
+            format!(
+                r#"{{"tipo":"programa-receber-copia","n":7,"tunel":"{tunel}","codigo":"k","sha256":"{}","tamanho":9,"destino":"copias/r.tar.gz"}}"#,
+                "c".repeat(64)
+            )
+        };
+        assert!(matches!(
+            tratar(&oferta, &com, &receber("mc-copia")),
+            Acao::Programa { n: 7, .. }
+        ));
+        for fora in ["outro", "mc-voz"] {
+            assert_eq!(
+                tratar(&oferta, &com, &receber(fora)),
+                Acao::Recusar {
+                    n: 7,
+                    erro: "fora-do-aceite",
+                    tipo: "programa-receber-copia".to_owned()
+                },
+                "receberCopia entrou no túnel {fora}"
+            );
+        }
+        for tipo in ["programa-empacotar", "programa-oferecer-copia"] {
+            let json = format!(r#"{{"tipo":"{tipo}","n":8,"origem":"world","arquivo":"a.tar.gz","porta":35565}}"#);
+            assert!(matches!(tratar(&oferta, &com, &json), Acao::Programa { n: 8, .. }), "{tipo}");
+            assert!(
+                matches!(
+                    tratar(&oferta, &["maquina", "maquina.porta"], &json),
+                    Acao::Recusar { erro: "tipo-desconhecido", .. }
+                ),
+                "{tipo} sem o poder programa"
+            );
+        }
+    }
+
     #[test]
     fn so_quatro_tipos_existem_e_porta_so_com_o_poder() {
         let oferta = oferta();
@@ -2424,6 +2512,16 @@ mod testes {
             self.anotar(format!("ler-volume {payload}"));
             let bytes = self.volume.lock().unwrap().clone();
             Box::pin(async move { bytes.ok_or_else(|| "leitura recusada pelo MOD".to_owned()) })
+        }
+        fn entrar_tunel(&self, _: &str, nome: &str) -> Futuro<Result<u16, &'static str>> {
+            self.anotar(format!("entrar-tunel {nome}"));
+            Box::pin(async { Err("sem-resposta") })
+        }
+        fn sair_tunel(&self, _: &str, nome: &str) {
+            self.anotar(format!("sair-tunel {nome}"));
+        }
+        fn direto(&self, _: &str, _: &str) -> Option<bool> {
+            None
         }
     }
 
@@ -3381,6 +3479,16 @@ mod testes {
                 .ok_or_else(|| "sem pack no plano".to_owned())
                 .and_then(|c| std::fs::read(c).map_err(|e| e.to_string()));
             Box::pin(async move { lido })
+        }
+        fn entrar_tunel(&self, _: &str, nome: &str) -> Futuro<Result<u16, &'static str>> {
+            self.anotar(format!("entrar-tunel {nome}"));
+            Box::pin(async { Err("sem-resposta") })
+        }
+        fn sair_tunel(&self, _: &str, nome: &str) {
+            self.anotar(format!("sair-tunel {nome}"));
+        }
+        fn direto(&self, _: &str, _: &str) -> Option<bool> {
+            None
         }
     }
 

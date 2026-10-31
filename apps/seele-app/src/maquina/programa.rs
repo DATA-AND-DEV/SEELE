@@ -132,6 +132,24 @@ pub(crate) enum PedidoDoPrograma {
     Ler {
         arquivo: String,
     },
+    /// **A cópia do mundo** (API 8 parte 7): uma pasta num `.tar.gz`.
+    Empacotar {
+        origem: String,
+        arquivo: String,
+    },
+    /// Oferece um pacote na porta de um túnel TCP aceito.
+    OferecerCopia {
+        arquivo: String,
+        porta: u16,
+    },
+    /// Recebe a cópia de quem é a dona, pelo túnel `tunel` da oferta.
+    ReceberCopia {
+        tunel: String,
+        codigo: String,
+        sha256: String,
+        tamanho: u64,
+        destino: String,
+    },
     EscreverNoProcesso {
         processo: u64,
         texto: String,
@@ -153,6 +171,9 @@ pub(crate) const TIPOS: &[&str] = &[
     "programa-recusas",
     "programa-trazer",
     "programa-ler",
+    "programa-empacotar",
+    "programa-oferecer-copia",
+    "programa-receber-copia",
 ];
 
 /// Lê o pedido de um dos [`TIPOS`]; `pedido-invalido` quando falta um campo.
@@ -228,6 +249,23 @@ pub(crate) fn ler(tipo: &str, valor: &serde_json::Value) -> Result<PedidoDoProgr
         "programa-ler" => PedidoDoPrograma::Ler {
             arquivo: texto("arquivo").ok_or(invalido)?,
         },
+        "programa-empacotar" => PedidoDoPrograma::Empacotar {
+            origem: texto("origem").ok_or(invalido)?,
+            arquivo: texto("arquivo").ok_or(invalido)?,
+        },
+        "programa-oferecer-copia" => PedidoDoPrograma::OferecerCopia {
+            arquivo: texto("arquivo").ok_or(invalido)?,
+            porta: numero("porta")
+                .and_then(|p| u16::try_from(p).ok())
+                .ok_or(invalido)?,
+        },
+        "programa-receber-copia" => PedidoDoPrograma::ReceberCopia {
+            tunel: texto("tunel").ok_or(invalido)?,
+            codigo: texto("codigo").ok_or(invalido)?,
+            sha256: texto("sha256").ok_or(invalido)?,
+            tamanho: numero("tamanho").ok_or(invalido)?,
+            destino: texto("destino").ok_or(invalido)?,
+        },
         _ => return Err("tipo-desconhecido"),
     })
 }
@@ -300,6 +338,28 @@ pub(crate) fn resposta_da_recusa(n: u64, recusa: &Recusa) -> serde_json::Value {
         }
         Recusa::NaoETexto { arquivo } => serde_json::json!({ "arquivo": arquivo }),
         Recusa::SemPackAceito { destino } => serde_json::json!({ "destino": destino }),
+        Recusa::NaoEPasta { origem } => serde_json::json!({ "origem": origem }),
+        Recusa::ArquivoDentroDaOrigem { arquivo, origem } => {
+            serde_json::json!({ "arquivo": arquivo, "origem": origem })
+        }
+        Recusa::PortaForaDoAceite { porta, aceitas } => {
+            serde_json::json!({ "porta": porta, "aceitas": aceitas })
+        }
+        Recusa::PortaOcupada { porta, motivo } => {
+            serde_json::json!({ "porta": porta, "motivo": motivo })
+        }
+        Recusa::CopiaRecusada { motivo } => serde_json::json!({ "motivo": motivo }),
+        Recusa::CopiaCaiu {
+            recebidos,
+            tamanho,
+            tentativas,
+            motivo,
+        } => {
+            serde_json::json!({ "recebidos": recebidos, "tamanho": tamanho, "tentativas": tentativas, "motivo": motivo })
+        }
+        Recusa::CopiaNaoBate { esperado, obtido } => {
+            serde_json::json!({ "esperado": esperado, "obtido": obtido })
+        }
         _ => serde_json::Value::Null,
     };
     if let (Some(r), Some(campos)) = (r.as_object_mut(), campos.as_object()) {
@@ -565,6 +625,71 @@ pub(crate) fn atender(viva: &Arc<Viva>, n: u64, pedido: PedidoDoPrograma) {
                 trazer(&dela, n, &programa, pedido, destino).await;
             });
         }
+        PedidoDoPrograma::Empacotar { origem, arquivo } => {
+            let dela = Arc::clone(viva);
+            tauri::async_runtime::spawn(async move {
+                let alvo = arquivo.clone();
+                let feito =
+                    tokio::task::spawn_blocking(move || programa.empacotar(&origem, &alvo)).await;
+                match feito {
+                    Ok(Ok(feito)) => dela.responder(
+                        n,
+                        Ok(serde_json::json!({
+                            "arquivo": arquivo,
+                            "tamanho": feito.tamanho,
+                            "sha256": feito.sha256,
+                            "arquivos": feito.arquivos,
+                            "bytes": feito.bytes,
+                            "linksPulados": feito.links_pulados,
+                        })),
+                    ),
+                    Ok(Err(recusa)) => recusar(&dela, &recusa),
+                    Err(_) => recusar(&dela, &Recusa::Encerrado),
+                }
+            });
+        }
+        PedidoDoPrograma::OferecerCopia { arquivo, porta } => {
+            let dela = Arc::clone(viva);
+            tauri::async_runtime::spawn(async move {
+                match programa.oferecer_copia(&arquivo, porta).await {
+                    Ok(oferta) => dela.responder(
+                        n,
+                        Ok(serde_json::json!({
+                            "codigo": oferta.codigo,
+                            "tamanho": oferta.tamanho,
+                            "sha256": oferta.sha256,
+                            "porta": oferta.porta,
+                        })),
+                    ),
+                    Err(recusa) => recusar(&dela, &recusa),
+                }
+            });
+        }
+        PedidoDoPrograma::ReceberCopia {
+            tunel,
+            codigo,
+            sha256,
+            tamanho,
+            destino,
+        } => {
+            let dela = Arc::clone(viva);
+            tauri::async_runtime::spawn(async move {
+                receber_copia(
+                    &dela,
+                    n,
+                    &programa,
+                    tunel,
+                    seele_ffi::programa::PedidoDeCopia {
+                        porta_local: 0,
+                        codigo,
+                        sha256,
+                        tamanho,
+                        destino,
+                    },
+                )
+                .await;
+            });
+        }
         PedidoDoPrograma::Ler { arquivo } => match programa.ler(&arquivo) {
             Ok(texto) => viva.responder(n, Ok(serde_json::Value::String(texto))),
             Err(recusa) => recusar(viva, &recusa),
@@ -663,6 +788,70 @@ async fn trazer(
         Ok(Ok(trazido)) => viva.responder(n, Ok(pronto(&trazido))),
         Ok(Err(recusa)) => viva.entregar(&resposta_da_recusa(n, &recusa).to_string()),
         Err(_) => viva.entregar(&resposta_da_recusa(n, &Recusa::Encerrado).to_string()),
+    }
+}
+
+/// Quanto a cópia espera a ligação direta antes de começar pela estrela: um
+/// túnel começa na estrela, só as ligações **novas** vão pelo direto, e uma
+/// cópia de GiB que começa na estrela fica nela até o fim.
+pub(crate) const ESPERA_PELA_MALHA: Duration = Duration::from_secs(5);
+
+/// **Recebe a cópia do mundo** (API 8 parte 7): entra no túnel da cópia como
+/// quem joga, espera a malha até [`ESPERA_PELA_MALHA`], recebe pela porta
+/// local (o núcleo confere o sha256 e retoma), e sai do túnel. A recusa de
+/// entrar volta como `tunel-recusado`, com o nome do servidor.
+async fn receber_copia(
+    viva: &Arc<Viva>,
+    n: u64,
+    programa: &Arc<Programa>,
+    tunel: String,
+    mut pedido: seele_ffi::programa::PedidoDeCopia,
+) {
+    let mod_id = viva.chave.mod_id.clone();
+    let porta = match viva.fio.entrar_tunel(&mod_id, &tunel).await {
+        Ok(porta) => porta,
+        Err(motivo) => {
+            viva.recusas_da_cola.contar("tunel-recusado");
+            tracing::warn!(mod_id = %mod_id, servidor = %viva.chave.servidor, tunel = %tunel, motivo, "metade de máquina: a cópia não entrou no túnel da dona");
+            return viva.entregar(
+                &serde_json::json!({
+                    "n": n, "ok": false, "erro": "tunel-recusado",
+                    "frase": format!("não deu para entrar no túnel {tunel} da máquina dona: {motivo}"),
+                    "tunel": tunel, "motivo": motivo,
+                })
+                .to_string(),
+            );
+        }
+    };
+    let ate = std::time::Instant::now() + ESPERA_PELA_MALHA;
+    while viva.fio.direto(&mod_id, &tunel) != Some(true) && std::time::Instant::now() < ate {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let direto = viva.fio.direto(&mod_id, &tunel) == Some(true);
+    pedido.porta_local = porta;
+    let destino = pedido.destino.clone();
+    let dela = Arc::clone(viva);
+    let feito = programa
+        .receber_copia(pedido, move |recebidos, total| {
+            let _ = dela.tentar_entregar(
+                &serde_json::json!({ "tipo": "programa-progresso", "n": n, "recebidos": recebidos, "total": total }).to_string(),
+            );
+        })
+        .await;
+    viva.fio.sair_tunel(&mod_id, &tunel);
+    match feito {
+        Ok(recebida) => viva.responder(
+            n,
+            Ok(serde_json::json!({
+                "destino": destino,
+                "tamanho": recebida.tamanho,
+                "sha256": recebida.sha256,
+                "retomadas": recebida.retomadas,
+                "jaEstavam": recebida.ja_estavam,
+                "caminho": if direto { "direto" } else { "estrela" },
+            })),
+        ),
+        Err(recusa) => viva.entregar(&resposta_da_recusa(n, &recusa).to_string()),
     }
 }
 

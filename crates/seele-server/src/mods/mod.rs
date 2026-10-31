@@ -957,6 +957,29 @@ impl Anfitriao {
                     },
                 )?,
             )?;
+            // A posse (API 8 parte 7): quem é a dona agora de um servidor de
+            // jogo. Declarada como o resto, e levada ao livro no despejo.
+            let declarado = Arc::clone(&self.maquinas);
+            maquinas_js.set(
+                "dona",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          valor: rquickjs::Value<'js>|
+                          -> rquickjs::Result<()> {
+                        let juntado =
+                            maquina::dona_da_chamada(&ctx, valor)?.and_then(|(servidor, papel)| {
+                                declarado
+                                    .lock()
+                                    .map_err(|_| "falhou".to_owned())
+                                    .and_then(|mut d| {
+                                        d.juntar_dona(servidor, papel).map_err(str::to_owned)
+                                    })
+                            });
+                        juntado.map_err(|nome| rquickjs::Exception::throw_message(&ctx, &nome))
+                    },
+                )?,
+            )?;
             mundo_js.set("maquinas", maquinas_js)?;
         }
         ctx.globals().set("mundo", mundo_js)?;

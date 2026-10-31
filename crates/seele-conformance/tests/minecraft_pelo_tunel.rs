@@ -131,6 +131,19 @@ async fn o_jogo_de_pe(
     porta: u16,
     pasta: &std::path::Path,
 ) -> Result<(Programa, seele_core::programa::Processo, String)> {
+    let (programa, mut relatorio) = o_jogo_baixado(plano, porta, pasta, None).await?;
+    let processo = rodar_ate_o_done(&programa, plano, &mut relatorio).await?;
+    Ok((programa, processo, relatorio.join("\n")))
+}
+
+/// O jogo baixado, aberto e configurado, sem rodar. `copia` é a porta em que
+/// esta máquina pode oferecer a cópia do mundo (a reserva, parte 7).
+async fn o_jogo_baixado(
+    plano: &serde_json::Value,
+    porta: u16,
+    pasta: &std::path::Path,
+    copia: Option<u16>,
+) -> Result<(Programa, Vec<String>)> {
     let oferta: seele_ffi::OfertaDeMaquinaFfi = serde_json::from_value(plano["oferta"].clone())?;
     let oferta = oferta
         .para_o_nucleo()
@@ -143,7 +156,8 @@ async fn o_jogo_de_pe(
         "seele/multiplayer",
         TUNEL,
     );
-    let politica = seele_core::programa::politica_do_aceite(&oferta, raiz, plataforma);
+    let mut politica = seele_core::programa::politica_do_aceite(&oferta, raiz, plataforma);
+    politica.portas_de_copia.extend(copia);
     let origem: Arc<dyn seele_core::programa::Origem> =
         Arc::new(seele_core::programa::OrigemHttps::nova().map_err(anyhow::Error::msg)?);
     let programa = Programa::novo(politica, origem)?;
@@ -282,6 +296,15 @@ async fn o_jogo_de_pe(
         "server.properties",
         &format!("server-ip=127.0.0.1\nserver-port={porta}\nmotd=\\u00a7bCasa \\u00a76pelo t\\u00fanel\nonline-mode=true\nmax-players=4\n"),
     )?;
+    Ok((programa, relatorio))
+}
+
+/// Roda o jogo baixado e espera o «Done».
+async fn rodar_ate_o_done(
+    programa: &Programa,
+    plano: &serde_json::Value,
+    relatorio: &mut Vec<String>,
+) -> Result<seele_core::programa::Processo> {
     let rodar = &plano["oferta"]["rodar"];
     let mut processo = programa.rodar(&PedidoDeExecucao {
         comando: rodar["comando"].as_str().unwrap().to_owned(),
@@ -313,7 +336,7 @@ async fn o_jogo_de_pe(
             }
         }
     }
-    Ok((programa, processo, relatorio.join("\n")))
+    Ok(processo)
 }
 
 /// Um caminho do túnel: o servidor SEELE, o aceite, servir, entrar, e o status
@@ -414,5 +437,155 @@ async fn o_status_do_minecraft_volta_pelo_tunel() -> Result<()> {
             .is_err(),
         "o jogo seguiu escutando depois de encerrar_tudo"
     );
+    Ok(())
+}
+
+/// Lê a saída do jogo até uma linha que contenha `trecho`, e a devolve.
+async fn esperar_linha(
+    processo: &mut seele_core::programa::Processo,
+    trecho: &str,
+    prazo: Duration,
+) -> Result<String> {
+    let fim = Instant::now() + prazo;
+    loop {
+        let falta = fim.saturating_duration_since(Instant::now());
+        anyhow::ensure!(!falta.is_zero(), "o jogo não disse «{trecho}»");
+        match tokio::time::timeout(falta, processo.proximo()).await? {
+            Some(EventoDoProcesso::Saida(linha) | EventoDoProcesso::Erro(linha)) => {
+                if linha.contains(trecho) {
+                    return Ok(linha);
+                }
+            }
+            Some(EventoDoProcesso::Terminou(fim)) => anyhow::bail!("o jogo saiu: {fim:?}"),
+            None => anyhow::bail!("o jogo sumiu"),
+        }
+    }
+}
+
+/// **A reserva de verdade** (API 8 parte 7): um Minecraft 1.21.4 na
+/// principal, um placar gravado no mundo, o salvamento seguro da receita
+/// (`save-off`, `save-all flush` até «Saved the game», o pacote, `save-on`),
+/// a cópia pelo túnel de verdade (pela malha) até a reserva — outra pasta,
+/// outro `Programa` —, a posse passada, e a reserva ligando o Minecraft com o
+/// mundo que chegou: o placar está lá, e o status volta pelo túnel dela.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "rede de verdade e ~210 MB: SEELE_MINECRAFT_DE_VERDADE=<plano.json>"]
+async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
+    let Ok(caminho) = std::env::var("SEELE_MINECRAFT_DE_VERDADE") else {
+        eprintln!("pulado: sem SEELE_MINECRAFT_DE_VERDADE");
+        return Ok(());
+    };
+    let plano: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(caminho)?)?;
+    let livre = || -> Result<u16> {
+        let l = std::net::TcpListener::bind("127.0.0.1:0")?;
+        Ok(l.local_addr()?.port())
+    };
+    let (jogo_a, jogo_b) = (livre()?, livre()? + 200);
+    let (copia_a, copia_b) = (jogo_a + 400, jogo_b + 400);
+    const COPIA: &str = "minecraft-1-copia";
+    let (pasta_a, pasta_b) = (tempfile::tempdir()?, tempfile::tempdir()?);
+
+    // A principal: o jogo de pé, e algo no mundo que só ela escreveu.
+    let (principal, mut relatorio) =
+        o_jogo_baixado(&plano, jogo_a, pasta_a.path(), Some(copia_a)).await?;
+    let mut jogo = rodar_ate_o_done(&principal, &plano, &mut relatorio).await?;
+    eprintln!("principal:\n{}", relatorio.join("\n"));
+    jogo.escrever("scoreboard objectives add reserva dummy\n").await?;
+    jogo.escrever("scoreboard players set prova reserva 42\n").await?;
+    let marcou = esperar_linha(&mut jogo, "prova to 42", Duration::from_secs(20)).await?;
+    eprintln!("na principal: {marcou}");
+
+    // O servidor SEELE, as duas máquinas aceitas, e a principal servindo.
+    let (endereco, daemon, conjunto, _temp) = servidor(true, None).await?;
+    let mut ea = enlace(endereco, &conjunto, 1, "principal").await?;
+    let mut eb = enlace(endereco, &conjunto, 2, "reserva").await?;
+    let joga = enlace(endereco, &conjunto, 3, "joga").await?;
+    use maquina_de_jogo::aceitar_no_papel;
+    use seele_server::maquinas::Papel;
+    aceitar_no_papel(&daemon, &mut ea, SERVIDOR_DE_JOGO, Papel::Principal,
+        &[(TUNEL, ProtocoloDeTunel::Tcp, jogo_a), (COPIA, ProtocoloDeTunel::Tcp, copia_a)]).await?;
+    aceitar_no_papel(&daemon, &mut eb, SERVIDOR_DE_JOGO, Papel::Reserva,
+        &[(TUNEL, ProtocoloDeTunel::Tcp, jogo_b), (COPIA, ProtocoloDeTunel::Tcp, copia_b)]).await?;
+    ea.servir_tunel(MOD, TUNEL, ProtocoloDeTunel::Tcp, jogo_a).await.map_err(|r| anyhow::anyhow!("{r:?}"))?;
+
+    // **O salvamento seguro da receita, com o pacote no meio.**
+    let relogio = Instant::now();
+    jogo.escrever("save-off\n").await?;
+    jogo.escrever("save-all flush\n").await?;
+    let salvo = esperar_linha(&mut jogo, "]: Saved the game", Duration::from_secs(60)).await?;
+    let salvou_em = relogio.elapsed();
+    let principal = Arc::new(principal);
+    let p = Arc::clone(&principal);
+    let pacote = tokio::task::spawn_blocking(move || p.empacotar("world", "copias/mundo.tar.gz")).await??;
+    let empacotou_em = relogio.elapsed() - salvou_em;
+    jogo.escrever("save-on\n").await?;
+    eprintln!("salvo em {salvou_em:?} («{salvo}»); pacote: {} arquivos, {} bytes → {} bytes, {} links pulados, em {empacotou_em:?}",
+        pacote.arquivos, pacote.bytes, pacote.tamanho, pacote.links_pulados);
+    let oferta = principal.oferecer_copia("copias/mundo.tar.gz", copia_a).await?;
+    ea.servir_tunel(MOD, COPIA, ProtocoloDeTunel::Tcp, copia_a).await.map_err(|r| anyhow::anyhow!("{r:?}"))?;
+
+    // A reserva: outra pasta, o mesmo jogo baixado, e a cópia pelo túnel.
+    let (reserva, mut relatorio_b) =
+        o_jogo_baixado(&plano, jogo_b, pasta_b.path(), Some(copia_b)).await?;
+    eprintln!("reserva (baixada):\n{}", relatorio_b.join("\n"));
+    let local = eb.entrar_no_tunel(MOD, COPIA).await.map_err(|r| anyhow::anyhow!("{r:?}"))?;
+    let mut caminho = None;
+    let ate = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < ate && !format!("{caminho:?}").contains("Direto") {
+        if let Ok(Aviso::Tunel(r)) = tokio::time::timeout(Duration::from_millis(200), eb.proximo()).await {
+            if r.nome == COPIA {
+                caminho = Some(r.caminho);
+            }
+        }
+    }
+    let relogio = Instant::now();
+    let chegou = reserva
+        .receber_copia(
+            seele_core::programa::PedidoDeCopia {
+                porta_local: local.porta,
+                codigo: oferta.codigo.clone(),
+                sha256: oferta.sha256.clone(),
+                tamanho: oferta.tamanho,
+                destino: "copias/recebida.tar.gz".into(),
+            },
+            |_, _| {},
+        )
+        .await?;
+    eprintln!("cópia: {} bytes por {caminho:?} em {:?}, {} retomadas", chegou.tamanho, relogio.elapsed(), chegou.retomadas);
+    let _ = eb.sair_do_tunel(MOD, COPIA).await;
+    reserva.desempacotar(&PedidoDeDesempacotar {
+        mesclar: false,
+        arquivo: "copias/recebida.tar.gz".into(),
+        destino: "world".into(),
+        raiz: "world".into(),
+    })?;
+
+    // **A passagem**: a principal para (o stop salva), a posse passa, a
+    // reserva liga com o mundo que chegou.
+    jogo.escrever("stop\n").await?;
+    let _ = tokio::time::timeout(Duration::from_secs(60), async {
+        while let Some(e) = jogo.proximo().await {
+            if matches!(e, EventoDoProcesso::Terminou(_)) {
+                break;
+            }
+        }
+    })
+    .await;
+    seele_server::maquinas::passar_a_posse(daemon.server(), MOD, SERVIDOR_DE_JOGO, Papel::Reserva);
+    let relogio = Instant::now();
+    let mut jogo_b_proc = rodar_ate_o_done(&reserva, &plano, &mut relatorio_b).await?;
+    eprintln!("a reserva ligou com o mundo em {:?}", relogio.elapsed());
+    jogo_b_proc.escrever("scoreboard players get prova reserva\n").await?;
+    let placar = esperar_linha(&mut jogo_b_proc, "prova has", Duration::from_secs(20)).await?;
+    eprintln!("o placar na reserva: {placar}");
+    anyhow::ensure!(placar.contains("prova has 42"), "o mundo da reserva não é o da principal: {placar}");
+    eb.servir_tunel(MOD, TUNEL, ProtocoloDeTunel::Tcp, jogo_b).await.map_err(|r| anyhow::anyhow!("a reserva, dona, não serviu: {r:?}"))?;
+    let porta = joga.entrar_no_tunel(MOD, TUNEL).await.map_err(|r| anyhow::anyhow!("{r:?}"))?.porta;
+    let (json, levou) = status(porta).await?;
+    eprintln!("status pela reserva em {levou:?}: {json}");
+    anyhow::ensure!(json.contains("pelo t"), "{json}");
+    reserva.encerrar_tudo().await;
+    principal.encerrar_tudo().await;
+    daemon.shutdown();
     Ok(())
 }

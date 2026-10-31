@@ -58,7 +58,7 @@ const PACIENCIA: Duration = Duration::from_secs(30);
 /// máquina (`contexto.maquina`) só é respondido.
 ///
 /// `aoAcontecer`: cada momento da máquina vira uma linha em `dados.momentos`,
-/// como `MaquinaRecusou {"servidor":…,"pessoa":…,"motivo":…}`. É assim que a
+/// como `MaquinaRecusou {"servidor":…,"papel":…,"pessoa":…,"motivo":…}`. É assim que a
 /// prova vê o que **o MOD** soube, e não o que o servidor achou que disse.
 pub(crate) const METADE: &str = r#"
 globalThis.aoPedir = (contexto, pedido) => {
@@ -67,7 +67,7 @@ globalThis.aoPedir = (contexto, pedido) => {
   if (c.maquina) return JSON.stringify({ ok: true });
   if (p.ler) return JSON.stringify({ ok: true, momentos: dados.momentos || "" });
   if (p.pedir) {
-    mundo.maquinas.pedir({ quem: c.person, servidor: p.servidor, oferta: {
+    mundo.maquinas.pedir({ quem: c.person, servidor: p.servidor, papel: p.papel, oferta: {
       titulo: "Eco", receita: "eco", versao_da_receita: "1.0.0", versao_do_jogo: "1",
       tuneis: p.tuneis } });
   }
@@ -94,6 +94,23 @@ pub(crate) async fn servidor(
     malha_para_tuneis: bool,
     proprietario: Option<String>,
 ) -> Result<Servidor> {
+    servidor_com(
+        malha_para_tuneis,
+        proprietario,
+        METADE,
+        seele_server::PRAZO_DA_MAQUINA_SUMIDA,
+    )
+    .await
+}
+
+/// [`servidor`] com outra metade de servidor e outro prazo da máquina que
+/// sumiu (as provas da reserva, API 8 parte 7).
+pub(crate) async fn servidor_com(
+    malha_para_tuneis: bool,
+    proprietario: Option<String>,
+    metade: &str,
+    prazo_da_maquina_sumida: Duration,
+) -> Result<Servidor> {
     let temp = tempfile::tempdir()?;
     let raizes = seele_server::RaizesDosMods {
         pacotes: temp.path().join("cache"),
@@ -115,7 +132,7 @@ pub(crate) async fn servidor(
         ("mod.json".to_owned(), manifesto),
         ("cliente.js".to_owned(), b"void 0;".to_vec()),
         ("maquina.js".to_owned(), b"void 0;".to_vec()),
-        ("servidor.js".to_owned(), METADE.as_bytes().to_vec()),
+        ("servidor.js".to_owned(), metade.as_bytes().to_vec()),
     ];
     let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut arquivos));
     let pacote = raizes.pacote_de(&hash);
@@ -150,6 +167,7 @@ pub(crate) async fn servidor(
         mods_dir: Some(raizes),
         malha_para_tuneis,
         proprietario,
+        prazo_da_maquina_sumida,
         ..ServerConfig::default()
     };
     // Porta efêmera: não há volta na mesma porta para disputar.
@@ -227,6 +245,76 @@ pub(crate) async fn pedir_ao_mod(
         }
     }
     anyhow::bail!("sem ModReply para o pedido {request}")
+}
+
+/// **O aceite de ponta a ponta, num papel** (API 8 parte 7): como
+/// [`aceitar_como_maquina`], com `papel` no pedido (`{ pedir, servidor,
+/// papel, tuneis }`, que a metade de servidor de quem usa entende), e a espera
+/// pelo livro naquele papel.
+pub(crate) async fn aceitar_no_papel(
+    server: &Daemon,
+    maquina: &mut Enlace,
+    servidor: &str,
+    papel: seele_server::maquinas::Papel,
+    tuneis: &[(&str, ProtocoloDeTunel, u16)],
+) -> Result<String> {
+    maquina.aceitar_pedidos_de_maquina(true);
+    let request = PROXIMO_PEDIDO.fetch_add(1, Ordering::Relaxed);
+    let tuneis: Vec<_> = tuneis.iter().copied().map(tunel_na_oferta).collect();
+    maquina
+        .mod_request(
+            request,
+            MOD.into(),
+            ChannelId(0),
+            serde_json::json!({ "pedir": true, "servidor": servidor, "papel": papel.nome(), "tuneis": tuneis })
+                .to_string(),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("o enlace da máquina já tinha acabado"))?;
+    let resumo = esperar_o_pedido(maquina, servidor).await?;
+    maquina
+        .aceitar_maquina(MOD, servidor, &resumo)
+        .await
+        .map_err(|_| anyhow::anyhow!("o enlace da máquina já tinha acabado"))?;
+    let pessoa = maquina.sessao().person;
+    let fim = Instant::now() + PACIENCIA;
+    while server
+        .server()
+        .maquinas()
+        .quem_opera_como(MOD, servidor, papel)
+        != Some(pessoa)
+    {
+        anyhow::ensure!(
+            Instant::now() < fim,
+            "o aceite não entrou no livro ({papel:?})"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    Ok(resumo)
+}
+
+/// Lê avisos de `maquina` até um `PedidoDeMaquina` de `servidor`, e devolve o
+/// resumo. O que mais chegar é descartado.
+pub(crate) async fn esperar_o_pedido(maquina: &mut Enlace, servidor: &str) -> Result<String> {
+    let fim = Instant::now() + PACIENCIA;
+    while Instant::now() < fim {
+        let Ok(aviso) = tokio::time::timeout(Duration::from_millis(500), maquina.proximo()).await
+        else {
+            continue;
+        };
+        if let Aviso::PedidoDeMaquina {
+            mod_id,
+            servidor: s,
+            resumo,
+            ..
+        } = aviso
+        {
+            if mod_id == MOD && s == servidor {
+                return Ok(resumo);
+            }
+        }
+    }
+    anyhow::bail!("nenhum PedidoDeMaquina de {servidor} chegou")
 }
 
 /// O que a metade de servidor gravou dos momentos da máquina, lido por um

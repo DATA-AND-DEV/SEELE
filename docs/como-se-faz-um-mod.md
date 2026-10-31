@@ -948,9 +948,11 @@ em silêncio.
 
 | momento | quando | `carga` |
 |---|---|---|
-| `MaquinaAceitou` | a pessoa viu a tela e aceitou, e a máquina subiu | `{ "servidor": "mc-1", "pessoa": 4 }` |
-| `MaquinaRecusou` | a pessoa recusou, ou o pedido não pôde ser feito | `{ "servidor": "mc-1", "pessoa": 4, "motivo": "pelo-dono" }` |
-| `MaquinaParou` | a máquina deixou de servir | `{ "servidor": "mc-1", "pessoa": 4, "motivo": "saiu" }` |
+| `MaquinaAceitou` | a pessoa viu a tela e aceitou, e a máquina subiu | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4 }` |
+| `MaquinaRecusou` | a pessoa recusou, ou o pedido não pôde ser feito | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4, "motivo": "pelo-dono" }` |
+| `MaquinaParou` | a máquina deixou de servir | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4, "motivo": "saiu" }` |
+| `MaquinaSumiu` | a máquina parou e o lugar dela segue vazio depois do prazo (60 s) | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4, "motivo": "saiu", "segundos": 60 }` |
+| `MaquinaVoltou` | quem operava caiu (`saiu`) e voltou ao servidor, com o lugar ainda vazio | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4 }` |
 
 `servidor` é o nome do servidor de jogo que **você** deu no pedido, e `pessoa`, o
 número de quem foi chamada. Os `motivo`s de `MaquinaRecusou` são `pelo-dono`,
@@ -958,7 +960,8 @@ número de quem foi chamada. Os `motivo`s de `MaquinaRecusou` são `pelo-dono`,
 `so-no-app` (quem recebeu o pedido era um navegador), `pacote-diferente` (o MOD
 que ela tem não é o que o servidor ligou), `oferta-invalida` (a oferta não passou
 na conferência dela) e três do servidor: `nao-esta-aqui` (a pessoa não está
-conectada), `pendentes-demais` e `maquinas-demais` (os tetos do servidor). Os de
+conectada), `pendentes-demais` e `maquinas-demais` (os tetos do servidor), e
+`mesma-pessoa-nas-duas` (a pessoa já é a máquina do outro papel, abaixo). Os de
 `MaquinaParou` são `pelo-dono`, `revogada`, `app-fechou` e `metade-falhou` (o que
 a máquina informou), `saiu` (a pessoa saiu do servidor), `mod-desligado` e
 `outro-pedido` (o servidor desligou o MOD, ou chamou outra máquina para o mesmo
@@ -1063,6 +1066,9 @@ quem joga: aqui a metade de servidor chama alguém a hospedar o jogo.
 ```js
 mundo.maquinas.pedir({ quem: 4, servidor: "mc-1", oferta: { /* ver «A metade de máquina» */ } });
 mundo.maquinas.avisar({ servidor: "mc-1", carga: { ligar: true } });
+// A reserva (API 8 parte 7): uma segunda máquina, e quem é a dona agora.
+mundo.maquinas.pedir({ quem: 7, servidor: "mc-1", papel: "reserva", oferta: { /* … */ } });
+mundo.maquinas.dona({ servidor: "mc-1", papel: "reserva" });
 ```
 
 - **`pedir({ quem, servidor, oferta })`** chama a pessoa `quem` (o número, ou o
@@ -1079,17 +1085,36 @@ mundo.maquinas.avisar({ servidor: "mc-1", carga: { ligar: true } });
   não um fluxo de comandos**: dois avisos seguidos ao mesmo servidor podem virar
   um só, o último. Sem máquina aceita, nada sai, e a chamada não lança: o
   `seele.log` diz `sem-maquina`.
+- **`papel`** (API 8 parte 7), em `pedir` e em `avisar`: `"principal"` (o
+  padrão, sem a chave) ou `"reserva"`. **Cada servidor de jogo tem um lugar de
+  cada**, e as duas máquinas ficam aceitas ao mesmo tempo: pedir a reserva não
+  dispensa a principal, e um pedido a outra pessoa só dispensa quem tinha
+  **aquele** papel. A mesma pessoa não pode ser as duas (`MaquinaRecusou` com
+  `mesma-pessoa-nas-duas`). O papel vai nos momentos, e `avisar` sem `papel`
+  vai à principal.
+- **`dona({ servidor, papel })`** diz quem é a dona agora — e **só a dona serve
+  túnel**: a outra pede para servir e ouve `fora-do-aceite` (o `seele.log` diz
+  `nao-e-a-dona`, e o servidor conta). Passar a posse não pede aceite novo e
+  para **na hora** os túneis da dona de antes, mesmo com o processo dela vivo.
+  Sai no despejo antes dos pedidos e dos avisos da mesma chamada: o «assuma»
+  que você manda à nova dona já a acha dona. Sem chamada nenhuma a dona é a
+  principal; o servidor a guarda na memória, então diga de novo depois de pedir
+  (um servidor que reiniciou volta à principal). **O servidor nunca passa a
+  posse sozinho**: `MaquinaSumiu` só acorda você, e quem decide é você.
 - **O que lança**, com o nome na mensagem: `pedido-invalido` (o argumento não é
   um objeto), `servidor-invalido`, `quem-invalido`, `oferta-invalida:<campo>`
   (`<campo>` é o da regra que falhou, como `titulo`, `tuneis` ou
   `artefato_hash`, ou a **chave que a oferta não tem**: uma chave desconhecida é
   recusada, e não ignorada, para que `tunels` não vire uma oferta calada sem
   portas), `pedidos-de-maquina-demais`, `aviso-invalido`, `aviso-grande-demais`
-  e `avisos-a-maquina-demais`. São exceções, ao contrário do `mundo.avisar`: um
-  pedido errado deve falhar na chamada que o fez.
-- **`aoPedir` ganha `contexto.maquina`**: `{ "servidor": "mc-1" }` quando quem
-  pede é a **máquina aceita** daquele servidor de jogo (pelo `maquina.pedir`,
-  adiante), e **ausente** em todo outro pedido. Nesse caso `contexto.person` é a
+  e `avisos-a-maquina-demais`; na reserva, `papel-invalido`, `dona-invalida` e
+  `donas-demais`. São exceções, ao contrário do `mundo.avisar`: um pedido
+  errado deve falhar na chamada que o fez.
+- **`aoPedir` ganha `contexto.maquina`**: `{ "servidor": "mc-1", "papel":
+  "principal", "dona": true }` quando quem pede é uma **máquina aceita** daquele
+  servidor de jogo (pelo `maquina.pedir`, adiante), e **ausente** em todo outro
+  pedido. `papel` e `dona` (parte 7) dizem qual das duas fala e se ela é a dona
+  agora. Nesse caso `contexto.person` é a
   pessoa que opera a máquina, e `contexto.channel`, `null`. Quem não é a máquina
   aceita não chega ao MOD: o servidor responde `sem-aceite` sozinho.
 
@@ -1491,6 +1516,61 @@ dos `overrides` e depois dos `server-overrides` em `""`, e `rodar` do
 `instalar`. Quem joga recebe o mesmo pack com `SeeleUI.salvar({ pedido, nome })`,
 de dentro de um clique.
 
+### A reserva: duas máquinas, uma dona, e o mundo de uma para a outra
+
+Um servidor de jogo pode ter uma **principal** e uma **reserva**, as duas
+aceitas (cada uma na máquina dela, com a mesma tela de aceite). Só a dona roda;
+a outra prepara (baixa e confere) e espera. O que o SEELE dá, e o que fica com
+você:
+
+- **a posse** é sua: `mundo.maquinas.dona`. O servidor só garante que a que não
+  é a dona não serve túnel nenhum.
+- **o relógio** é do servidor: `MaquinaSumiu` chega quando uma máquina aceita
+  parou e o lugar dela segue vazio depois do prazo (60 s); `MaquinaVoltou`,
+  quando quem caiu volta. Sem quem hospeda o SEELE não há relógio: nada sai, e
+  nada muda de dona.
+- **a cópia do mundo** é da metade de máquina, pelo túnel. Ponha na oferta um
+  túnel TCP para ela (o MOD de multiplayer usa `<servidor>-copia`, na porta do
+  jogo + 10000); a dona serve esse túnel, e a outra entra nele como quem joga.
+
+```js
+// Na dona, depois do salvamento seguro da receita (no Minecraft: save-off,
+// save-all flush, que diz «Saved the game»), e antes do save-on:
+const p = await maquina.programa.empacotar({ origem: "world", arquivo: "copias/mundo.tar.gz" });
+const o = await maquina.programa.oferecerCopia({ arquivo: "copias/mundo.tar.gz", porta: 35565 });
+await maquina.porta.servir({ nome: "mc-1-copia", protocolo: "tcp", porta: 35565 });
+await maquina.pedir({ op: "copia-pronta", codigo: o.codigo, sha256: o.sha256, tamanho: o.tamanho });
+
+// Na outra (o código vem só pela metade de servidor, num aviso):
+const c = await maquina.programa.receberCopia({ tunel: "mc-1-copia", codigo, sha256, tamanho,
+  destino: "copias/recebida.tar.gz" });
+// …e, quando ela for a dona:
+await maquina.programa.desempacotar({ arquivo: "copias/recebida.tar.gz", destino: "world", raiz: "world" });
+```
+
+- **`empacotar({ origem, arquivo })`** faz o `.tar.gz` de uma pasta da pasta do
+  servidor de jogo, com as entradas sob o nome dela (`world/level.dat`). O
+  pacote fica fora da origem (`arquivo-dentro-da-origem`), links não entram
+  (contados em `linksPulados`), e o que se escreve conta no teto de disco.
+  **Não salva o mundo**: um mundo que o jogo escreve enquanto se empacota sai
+  torto, e o salvamento seguro é seu.
+- **`oferecerCopia({ arquivo, porta })`** serve o pacote em `127.0.0.1:porta`,
+  e `porta` tem de ser a de um túnel TCP da oferta aceita
+  (`porta-fora-do-aceite`): a cópia só sai por um túnel que o dono da máquina
+  aceitou. Devolve `{ codigo, tamanho, sha256, porta }`; o `codigo` é sorteado
+  a cada oferta, e sem ele nada sai (`copia-recusada` com `codigo-errado`) — o
+  túnel é de todo mundo que tem `entrar-no-jogo`, e o mundo não.
+- **`receberCopia({ tunel, codigo, sha256, tamanho, destino })`** entra no túnel
+  (um túnel TCP da **própria** oferta), espera a ligação direta até 5 s,
+  recebe, e sai. Uma ligação que cai continua de onde parou (até 5 vezes; o que
+  chegou fica para a próxima), e só o pacote inteiro com o `sha256` anunciado
+  vira `destino` (`copia-nao-bate`, e o de antes fica). Devolve `{ destino,
+  tamanho, sha256, retomadas, jaEstavam, caminho }`, com `caminho` `direto` ou
+  `estrela`.
+
+O disco da oferta tem de caber o mundo, o pacote e o parcial que chega: três
+vezes o mundo.
+
 ### O que o aceite prende
 
 O que a pessoa viu e aceitou fica preso por um **resumo**: o SHA-256 de quatro
@@ -1532,7 +1612,8 @@ na pasta do servidor de jogo, e não pode sair dela.
 aceites somem quando o servidor SEELE reinicia, e **nenhum `MaquinaParou` é
 dado por eles**: não há quem o dê, porque o processo que lembrava deles acabou.
 A metade de máquina, do lado de quem hospeda, para com `servidor-saiu` quando a
-sessão cai. Então **a metade de servidor não pode supor que a máquina de antes
+sessão cai. (A posse de `mundo.maquinas.dona` também mora na memória, e volta à
+principal: diga de novo depois de pedir.) Então **a metade de servidor não pode supor que a máquina de antes
 continua de pé depois de subir**: ao subir de novo, peça outra vez
 (`mundo.maquinas.pedir`). Quem já aceitou a mesma oferta, com o mesmo pacote, é
 ligado de novo sem tela.

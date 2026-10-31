@@ -807,7 +807,7 @@ pub async fn atender_servir(
     // é recusado. Solto entre os dois, um túnel podia sobrar de uma máquina que
     // já parou. A ordem é a do doc de `Server::maquinas`: `maquinas` antes de
     // `tuneis`, e o banco já lido.
-    let maquinas = server.maquinas();
+    let mut maquinas = server.maquinas();
     if let Err(porque) = maquinas.conferir_tunel(
         maquina,
         id_da_conexao,
@@ -822,9 +822,16 @@ pub async fn atender_servir(
             quem = %maquina,
             protocolo = ?pedido.protocolo,
             porta = pedido.porta,
-            ?porque,
+            porque = porque.nome(),
             "túnel: servir fora do aceite"
         );
+        // A máquina aceita que não é a dona (API 8 parte 7) ouve o mesmo
+        // `ForaDoAceite` no fio, e o servidor conta: é o caso da principal que
+        // volta depois de a reserva assumir.
+        if porque == crate::maquinas::TunelForaDoAceite::NaoEADona {
+            let vezes = maquinas.contar_tunel_de_quem_nao_e_dona(pedido.mod_id);
+            tracing::warn!(mod_id = %pedido.mod_id, tunel = %pedido.nome, quem = %maquina, vezes, "túnel: a máquina pediu para servir sem ser a dona do servidor de jogo; recusado");
+        }
         return Err(RecusaDeTunel::ForaDoAceite);
     }
     let mut livro = server.tuneis();

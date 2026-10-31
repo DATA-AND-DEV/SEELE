@@ -65,6 +65,7 @@ fn programa(nome: &str, argumentos: &[&str]) -> (Pasta, Programa) {
         instalar: None,
         pack: None,
         teto_de_disco: 1 << 30,
+        portas_de_copia: vec![],
         raiz,
     };
     let origem: Arc<dyn Origem> = Arc::new(OrigemHttps::nova().unwrap());
@@ -249,6 +250,7 @@ async fn comando_aceito_com_pai_e_recusado_mesmo_assim() {
         instalar: None,
         pack: None,
         teto_de_disco: 1,
+        portas_de_copia: vec![],
         raiz: p.0.join("jogo"),
     };
     let programa = Programa::novo(politica, Arc::new(OrigemHttps::nova().unwrap())).unwrap();
@@ -458,6 +460,7 @@ async fn o_passo_de_instalar_e_um_segundo_comando_aceito_e_so_ele() {
         }),
         pack: None,
         teto_de_disco: 1 << 30,
+        portas_de_copia: vec![],
         raiz,
     };
     let origem: Arc<dyn Origem> = Arc::new(OrigemHttps::nova().unwrap());

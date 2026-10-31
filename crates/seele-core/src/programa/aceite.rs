@@ -116,6 +116,12 @@ pub fn politica_do_aceite(oferta: &OfertaDeMaquina, raiz: PathBuf, plataforma: &
             hex: h.hex.clone(),
         }),
         teto_de_disco: oferta.disco_maximo,
+        portas_de_copia: oferta
+            .tuneis
+            .iter()
+            .filter(|t| t.protocolo == seele_proto::tunel::ProtocoloDeTunel::Tcp)
+            .map(|t| t.porta)
+            .collect(),
         raiz,
     }
 }

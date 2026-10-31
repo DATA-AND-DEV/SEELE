@@ -622,10 +622,21 @@ async fn conferir(
     // pedido: um MOD da 7 ou da 6 recebe o contexto que sempre recebeu.
     // Como `person`, é o servidor quem diz: o pedido não tem como mandá-la.
     let mut context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod});
+    // `papel` e `dona` (API 8 parte 7): qual das duas máquinas fala, e se ela
+    // é a dona agora — lidos do livro, como o resto do contexto.
     if let (Some(servidor), Some(campos)) = (maquina, context.as_object_mut()) {
+        let (papel, dona) = {
+            let livro = server.maquinas();
+            let papel = livro.papel_da_pessoa(person, id, servidor);
+            (papel, papel.map(|p| livro.dona(id, servidor) == p))
+        };
         campos.insert(
             "maquina".into(),
-            serde_json::json!({ "servidor": servidor }),
+            serde_json::json!({
+                "servidor": servidor,
+                "papel": papel.map(crate::maquinas::Papel::nome),
+                "dona": dona,
+            }),
         );
     }
     let context = context.to_string();
@@ -795,6 +806,7 @@ mod tests {
             tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
             maquinas: std::sync::Mutex::new(crate::maquinas::Maquinas::default()),
             malha_para_tuneis: true,
+            prazo_da_maquina_sumida: crate::PRAZO_DA_MAQUINA_SUMIDA,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,
