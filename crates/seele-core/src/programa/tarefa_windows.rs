@@ -16,6 +16,7 @@
 //! criou e ainda não fechou, ou com a do filho, que o `tokio::process::Child`
 //! segura aberta enquanto a vigia o tem.
 
+#![cfg(windows)]
 #![allow(unsafe_code)]
 
 use std::os::windows::io::RawHandle;
