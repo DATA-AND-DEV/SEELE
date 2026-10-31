@@ -181,6 +181,46 @@ pub async fn receive(
         return refuse(AttachmentRefusal::NotAllowed);
     }
 
+    // **O canal do cabeçalho é conferido como o de `SendMessage` o confere**
+    // (`session.rs`): ele existe, e esta pessoa escreve nele, agora. A
+    // permissão global acima diz «pode anexar», nunca «pode anexar *aqui*» — sem
+    // esta pergunta, um canal com papel mínimo de escrita só era fechado para
+    // quem digitava, e quem anexava escrevia nele pelo outro caminho.
+    //
+    // **E a mensagem respondida tem de ser deste canal.** Um `replies_to` de
+    // outro canal pendura o anexo numa conversa que a pessoa talvez nem leia, e
+    // um que não existe cai na chave estrangeira depois de os bytes terem
+    // subido.
+    //
+    // A recusa é `NotAllowed` nos três casos, inclusive no canal que não
+    // existe: outra palavra diria a quem tenta quais ids existem. Antes do
+    // orçamento de bytes e do teto, para que uma recusa destas não gaste nem
+    // ficha nem reserva.
+    let canal_serve = {
+        let mut guard = server.persistence.lock().await;
+        let escreve = crate::autorizacao::canal_existe(&guard, header.channel).unwrap_or(false)
+            && crate::autorizacao::pode_no_canal(
+                &guard,
+                person,
+                header.channel,
+                crate::autorizacao::Acesso::Escrita,
+            )
+            .unwrap_or(false);
+        escreve
+            && match header.replies_to {
+                None => true,
+                Some(pai) => Messages::new(&mut guard)
+                    .one(pai)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|pai| pai.channel == header.channel),
+            }
+    };
+    if !canal_serve {
+        tracing::info!(%person, channel = %header.channel, "transfer refused: channel");
+        return refuse(AttachmentRefusal::NotAllowed);
+    }
+
     // The byte budget, consulted with the **declared** size and before a byte
     // is read, for the same reason the ceiling is: charging afterwards is
     // charging for something that already happened. ADR 0027 is clear that this

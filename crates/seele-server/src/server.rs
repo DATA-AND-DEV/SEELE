@@ -1102,6 +1102,10 @@ pub fn a_mudanca_de_sala_e_desta_conexao(
 #[derive(Debug, Default)]
 pub struct Occupancy {
     by_voice_room: HashMap<VoiceRoomId, Vec<Occupant>>,
+    /// As senhas erradas de cada pessoa em cada sala. Mora aqui por ser o
+    /// estado de quem entra em sala, e porque este tipo nasce por `Default`: um
+    /// campo novo em `Server` quebraria cada literal dele.
+    pub senhas: crate::taxa::TentativasDeSenha,
 }
 
 /// A sala já tem o tanto de gente que quem hospeda declarou.

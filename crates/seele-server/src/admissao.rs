@@ -298,6 +298,38 @@ pub fn criar_convite(persistence: &mut Persistence, observacao: &str) -> Result<
 /// entra na casa, esta decide quem entra num cômodo. Uma sala de voz sem senha aceita
 /// qualquer membro do servidor, que é o caso normal.
 ///
+/// Lê o banco **e** verifica a senha, de uma vez: serve a quem já tem a
+/// persistência na mão e não está num laço de rede (os testes, o app). A sessão
+/// não a usa — separa [`fechadura_da_sala`] de [`senha_abre`] para não segurar o
+/// banco durante o Argon2. A recusa por banco que não responde está lá.
+#[must_use]
+pub fn voice_room_liberado(
+    persistence: &Persistence,
+    voice_room: VoiceRoomId,
+    senha: Option<&str>,
+) -> bool {
+    senha_abre(&fechadura_da_sala(persistence, voice_room), senha)
+}
+
+/// O que a porta de uma sala de voz exige, lido do banco.
+///
+/// Separado de [`senha_abre`] para que **quem chama não segure o banco enquanto
+/// o Argon2 roda**: ler a linha é microssegundos, e verificar a senha é dezenas
+/// de milissegundos de CPU. Com as duas coisas numa função só, o `Mutex` da
+/// persistência — um só, e de todas as sessões — ficava fechado durante a
+/// conta, e quem errasse senhas em laço parava o servidor inteiro.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fechadura {
+    /// A sala não existe, ou o banco não respondeu: nada abre.
+    Inexistente,
+    /// Sem senha: qualquer membro entra.
+    Aberta,
+    /// O hash Argon2id guardado.
+    ComSenha(String),
+}
+
+/// Lê a [`Fechadura`] da sala. Rápida: só o banco, nenhuma conta.
+///
 /// Recusa quando o banco não responde. É a única resposta segura: uma consulta
 /// que falha não é prova de que a porta pode abrir.
 ///
@@ -308,35 +340,39 @@ pub fn criar_convite(persistence: &mut Persistence, observacao: &str) -> Result<
 /// o banco travou, e as duas pedem ações bem diferentes. Por isso o erro real
 /// vai para o log antes de virar a mesma recusa seguras de sempre.
 #[must_use]
-pub fn voice_room_liberado(
-    persistence: &Persistence,
-    voice_room: VoiceRoomId,
-    senha: Option<&str>,
-) -> bool {
-    let hash: Option<Option<String>> = match persistence.connection().query_row(
+pub fn fechadura_da_sala(persistence: &Persistence, voice_room: VoiceRoomId) -> Fechadura {
+    match persistence.connection().query_row(
         "SELECT password_hash FROM voice_rooms WHERE id = ?1",
         params![i64::from(voice_room.get())],
-        |linha| linha.get(0),
+        |linha| linha.get::<_, Option<String>>(0),
     ) {
-        Ok(hash) => Some(hash),
+        Ok(None) => Fechadura::Aberta,
+        Ok(Some(hash)) => Fechadura::ComSenha(hash),
         // sala de voz inexistente. Recusar aqui evita que um erro de digitação
         // vire uma entrada silenciosa em lugar nenhum. Não é erro de
         // infraestrutura, então não vai para o log como um.
-        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(rusqlite::Error::QueryReturnedNoRows) => Fechadura::Inexistente,
         Err(erro) => {
             tracing::error!(
                 %erro,
                 ?voice_room,
                 "não consegui checar a sala de voz no banco; recusando por segurança"
             );
-            None
+            Fechadura::Inexistente
         }
-    };
+    }
+}
 
-    match hash {
-        None => false,
-        Some(None) => true,
-        Some(Some(hash)) => senha.is_some_and(|senha| verificar_senha(senha, &hash)),
+/// Se esta `senha` abre esta [`Fechadura`].
+///
+/// **Pesada quando há senha** (Argon2id): quem chama de dentro de uma tarefa
+/// assíncrona a põe em `spawn_blocking`, e a recebe já sem o banco na mão.
+#[must_use]
+pub fn senha_abre(fechadura: &Fechadura, senha: Option<&str>) -> bool {
+    match fechadura {
+        Fechadura::Inexistente => false,
+        Fechadura::Aberta => true,
+        Fechadura::ComSenha(hash) => senha.is_some_and(|senha| verificar_senha(senha, hash)),
     }
 }
 

@@ -2755,11 +2755,60 @@ async fn run_session(
                             }).await?;
                             continue;
                         }
-                        if !crate::admissao::voice_room_liberado(
-                            &*server.persistence.lock().await,
-                            id,
-                            password.as_deref(),
-                        ) {
+                        // **O Argon2 roda sem o banco na mão e fora do
+                        // executor.** Conferir a senha custa dezenas de
+                        // milissegundos de CPU: feita com o `Mutex` da
+                        // persistência fechado e numa thread do Tokio, cada
+                        // senha errada parava a escrita de todo mundo e uma
+                        // thread de rede junto. Lê-se o hash, solta-se o
+                        // banco, e a conta vai para `spawn_blocking`.
+                        //
+                        // **E a senha errada tem teto**: cinco por minuto por
+                        // pessoa e sala (`TentativasDeSenha`). Esgotado, a sala
+                        // recusa até a senha certa, sem nem calcular — senão o
+                        // limite seria um oráculo. A ficha é gasta antes da
+                        // conta e volta a quem acerta. Pedir **sem** senha não
+                        // gasta nada: é a pessoa vendo o cadeado, e não custa
+                        // um Argon2.
+                        let fechadura = {
+                            let db = server.persistence.lock().await;
+                            crate::admissao::fechadura_da_sala(&db, id)
+                        };
+                        let liberado = match (&fechadura, &password) {
+                            (crate::admissao::Fechadura::ComSenha(_), Some(_)) => {
+                                let pode_tentar = server
+                                    .occupancy
+                                    .lock()
+                                    .await
+                                    .senhas
+                                    .tentar(session.person, id, Instant::now());
+                                if pode_tentar {
+                                    let (fechadura, senha) = (fechadura.clone(), password.clone());
+                                    let certa = tokio::task::spawn_blocking(move || {
+                                        crate::admissao::senha_abre(&fechadura, senha.as_deref())
+                                    })
+                                    .await
+                                    .unwrap_or(false);
+                                    if certa {
+                                        server
+                                            .occupancy
+                                            .lock()
+                                            .await
+                                            .senhas
+                                            .perdoar(session.person, id, Instant::now());
+                                    }
+                                    certa
+                                } else {
+                                    tracing::warn!(
+                                        person = %session.person, voice_room = %id,
+                                        "senhas erradas demais: a sala recusa até a certa"
+                                    );
+                                    false
+                                }
+                            }
+                            _ => crate::admissao::senha_abre(&fechadura, password.as_deref()),
+                        };
+                        if !liberado {
                             escrever!(&ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomEntryRefused,
@@ -2860,8 +2909,16 @@ async fn run_session(
                         // lá — e a recusa volta identificada, com a chave que
                         // esta pessoa escolheu, em vez de um alerta que não
                         // diz de qual mensagem fala.
+                        //
+                        // **E a mensagem respondida é deste canal** (0.19, como
+                        // no anexo): um `replies_to` de outro canal pendurava a
+                        // resposta numa conversa que a pessoa talvez nem leia,
+                        // e um que não existe só caía na chave estrangeira
+                        // dentro do lote. A recusa é a de permissão, a mesma
+                        // para os dois casos: outra palavra diria quais ids
+                        // existem.
                         let recusa = {
-                            let guarda = server.persistence.lock().await;
+                            let mut guarda = server.persistence.lock().await;
                             if !crate::autorizacao::canal_existe(&guarda, channel)
                                 .unwrap_or(false)
                             {
@@ -2874,6 +2931,14 @@ async fn run_session(
                             )
                             .unwrap_or(false)
                             {
+                                Some(MessageRefusal::PermissionDenied)
+                            } else if replies_to.is_some_and(|pai| {
+                                !Messages::new(&mut guarda)
+                                    .one(pai)
+                                    .ok()
+                                    .flatten()
+                                    .is_some_and(|pai| pai.channel == channel)
+                            }) {
                                 Some(MessageRefusal::PermissionDenied)
                             } else {
                                 None
@@ -3301,7 +3366,26 @@ async fn run_session(
                             continue;
                         };
                         let seu = alvo.author == session.person;
-                        if !seu && !pode(server, session.person, Permission::RemoveMessage).await {
+                        // **Apagar a mensagem de outra pessoa é moderar**, e
+                        // moderar tem duas perguntas além da permissão
+                        // global — as mesmas de `Kick` e `Ban`.
+                        //
+                        // A primeira é o canal: quem não lê o canal da
+                        // mensagem não a vê, e apagá-la às cegas é a
+                        // moderação que a restrição do canal existe para
+                        // impedir. A resposta é a de uma mensagem que não
+                        // existe, a mesma de cima, para que a diferença não
+                        // diga a quem não lê quais ids há lá dentro.
+                        //
+                        // A segunda é a hierarquia (`moderavel`): `RemoveMessage`
+                        // não dá a um Operador a mensagem de quem está acima
+                        // dele. A própria mensagem fica de fora das duas, como
+                        // sempre ficou.
+                        if !seu && !pode_ler_canal(server, session.person, alvo.channel).await {
+                            nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
+                            continue;
+                        }
+                        if !seu && !moderavel(server, session.person, alvo.author, Permission::RemoveMessage).await {
                             recusar(&mut send, session.protocol_version, session.person, "RemoveMessage").await?;
                             continue;
                         }
@@ -3425,10 +3509,20 @@ async fn run_session(
                     // the channel looked to the person about to be asked whether
                     // they mean it.
                     //
-                    // No permission. Answering tells a person how much is in a
-                    // Channel they may already read, and refusing would only mean
+                    // No global permission. Answering tells a person how much is in
+                    // a Channel they may already read, and refusing would only mean
                     // the confirmation they are shown is the vaguer one.
+                    //
+                    // **"They may already read" é a condição, e é conferida.** O
+                    // peso de um canal fechado (quantas mensagens, de quantas
+                    // pessoas, desde quando) é conteúdo dele. Quem não o lê
+                    // recebe a resposta de um canal que não existe — a mesma,
+                    // para que a diferença não diga quais canais há.
                     ClientMessage::WeighChannel { channel: id } => {
+                        if !pode_ler_canal(server, session.person, id).await {
+                            nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(crate::persistence::channels::NoSuchChannel)).await?;
+                            continue;
+                        }
                         let pesado = {
                             let guard = server.persistence.lock().await;
                             Channels::new(&guard).weigh_channel(id)

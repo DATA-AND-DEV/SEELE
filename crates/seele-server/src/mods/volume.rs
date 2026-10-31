@@ -53,6 +53,20 @@ pub const BLOCO: usize = 64 * 1024;
 /// reiniciar.
 pub const PRAZO_MAXIMO: Duration = Duration::from_secs(600);
 
+/// **O teto de bytes de um upload de volume**, valendo para todo fluxo.
+///
+/// O ADR 0048 decidiu que o volume não tem teto *de disco* (a soma de tudo que
+/// um MOD guarda), e isso continua: o teto é **por envio**. Sem ele, quem tem
+/// uma única espera registrada transmitia sem parar para o `.em-obras-*` — o
+/// tipo só era lido depois do último byte. É o mesmo valor que o caminho de
+/// imagem por fluxo já impõe (`PedidoDeImagem::Enviar` recusa `bytes` acima de
+/// `TETO_DE_ARQUIVO`) e que a leitura (`Ler`) recusa ao servir: uma imagem que
+/// o produto não serve de volta não faz sentido o produto aceitar.
+///
+/// A [`Espera`] não declara tamanho máximo (isso mudaria a API publicada do
+/// MOD); quando o envio declara o total, vale o menor dos dois.
+pub const TETO_FIXO: u64 = seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64;
+
 /// Quantas esperas de pé ao mesmo tempo, no servidor inteiro.
 ///
 /// **Isto não é o teto de disco**, que o ADR 0048 decidiu não existir. É o teto
@@ -386,6 +400,163 @@ mod testes {
             Err(NaoEsperou::TokenRepetido)
         );
     }
+
+    // ---- o teto e o tipo valem durante o fluxo (volume sem teto de disco)
+
+    /// Um fluxo que entrega `inicio` e depois `zeros` bytes de zero, em blocos
+    /// de [`BLOCO`], contando quanto foi lido.
+    struct Contada {
+        inicio: Vec<u8>,
+        zeros: u64,
+        lidos: u64,
+    }
+
+    impl Fonte for Contada {
+        async fn ler(&mut self, buf: &mut [u8]) -> Result<Option<usize>, ()> {
+            let n = if self.inicio.is_empty() {
+                let n = usize::try_from(self.zeros.min(buf.len() as u64)).unwrap();
+                buf.get_mut(..n).unwrap().fill(0);
+                self.zeros -= n as u64;
+                n
+            } else {
+                let n = self.inicio.len().min(buf.len());
+                buf.get_mut(..n)
+                    .unwrap()
+                    .copy_from_slice(self.inicio.get(..n).unwrap());
+                self.inicio.drain(..n);
+                n
+            };
+            if n == 0 {
+                return Ok(None);
+            }
+            self.lidos += n as u64;
+            Ok(Some(n))
+        }
+    }
+
+    const PNG: [u8; 12] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+
+    /// Tudo que sobrou em `volume/`, de qualquer nome.
+    fn sobras(raiz: &std::path::Path) -> Vec<String> {
+        let mut achados = Vec::new();
+        let mut pilha = vec![raiz.to_path_buf()];
+        while let Some(pasta) = pilha.pop() {
+            let Ok(entradas) = std::fs::read_dir(&pasta) else {
+                continue;
+            };
+            for e in entradas.flatten() {
+                if e.path().is_dir() {
+                    pilha.push(e.path());
+                } else {
+                    achados.push(e.path().display().to_string());
+                }
+            }
+        }
+        achados
+    }
+
+    /// Roda um fluxo por `gravar_fluxo` com uma espera de `tipos`.
+    async fn gravar(
+        fonte: &mut Contada,
+        tipos: &[&str],
+        tamanho: Option<u64>,
+    ) -> (Result<Chegou, (String, Recusa)>, tempfile::TempDir) {
+        let temp = tempfile::tempdir().unwrap();
+        let raizes = crate::RaizesDosMods {
+            pacotes: temp.path().join("cache"),
+            dados: temp.path().join("dados"),
+        };
+        let esperas = std::sync::Mutex::new(Esperas::default());
+        let agora = Instant::now();
+        esperas
+            .lock()
+            .unwrap()
+            .registrar(
+                PedidoDeEspera {
+                    mod_id: "a/b".to_owned(),
+                    pessoa: pessoa(7),
+                    token: "t1".to_owned(),
+                    caminho: "fotos/um.png".to_owned(),
+                    tipos: tipos.iter().map(|t| (*t).to_owned()).collect(),
+                    prazo: Duration::from_secs(60),
+                },
+                agora,
+            )
+            .unwrap();
+        let cabecalho = seele_proto::volume::VolumeHeader {
+            mod_id: "a/b".to_owned(),
+            token: "t1".to_owned(),
+        };
+        let r = gravar_fluxo(&esperas, Some(&raizes), pessoa(7), fonte, cabecalho, tamanho).await;
+        (r, temp)
+    }
+
+    #[tokio::test]
+    async fn um_fluxo_sem_tamanho_declarado_para_no_teto_e_nao_deixa_arquivo() {
+        // Um PNG de verdade na frente (passa no sniff), e depois muito mais que o teto.
+        let mut fonte = Contada {
+            inicio: PNG.to_vec(),
+            zeros: TETO_FIXO + 8 * BLOCO as u64,
+            lidos: 0,
+        };
+        let (r, temp) = gravar(&mut fonte, &["png"], None).await;
+        let (_, recusa) = r.expect_err("passou do teto e foi aceito");
+        assert_eq!(recusa.motivo, seele_proto::volume::VolumeRefusal::Incompleto);
+        // Parou no bloco que cruzou o teto, e não leu o resto.
+        assert!(
+            fonte.lidos <= TETO_FIXO + BLOCO as u64,
+            "leu {} bytes depois do teto",
+            fonte.lidos
+        );
+        assert_eq!(sobras(temp.path()), Vec::<String>::new(), "sobrou arquivo");
+    }
+
+    #[tokio::test]
+    async fn um_fluxo_que_nao_e_imagem_morre_nos_primeiros_bytes() {
+        let mut fonte = Contada {
+            inicio: b"MZ\x90\x00 isto nao e imagem".to_vec(),
+            zeros: TETO_FIXO,
+            lidos: 0,
+        };
+        let (r, temp) = gravar(&mut fonte, &["png"], None).await;
+        let (_, recusa) = r.expect_err("um executável foi aceito como imagem");
+        assert_eq!(recusa.motivo, seele_proto::volume::VolumeRefusal::TipoRecusado);
+        assert_eq!(recusa.detectado, Detectado::FormatoNenhum);
+        assert!(
+            fonte.lidos <= BLOCO as u64,
+            "leu {} bytes antes de recusar o tipo",
+            fonte.lidos
+        );
+        assert_eq!(sobras(temp.path()), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn um_tipo_conhecido_mas_nao_autorizado_morre_nos_primeiros_bytes() {
+        let mut fonte = Contada {
+            inicio: PNG.to_vec(),
+            zeros: TETO_FIXO,
+            lidos: 0,
+        };
+        let (r, _temp) = gravar(&mut fonte, &["gif"], None).await;
+        let (_, recusa) = r.expect_err("png aceito onde só gif foi autorizado");
+        assert_eq!(recusa.detectado, Detectado::Tipo("png"));
+        assert!(fonte.lidos <= BLOCO as u64, "leu {}", fonte.lidos);
+    }
+
+    #[tokio::test]
+    async fn uma_imagem_dentro_do_teto_continua_chegando_inteira() {
+        let mut fonte = Contada {
+            inicio: PNG.to_vec(),
+            zeros: 3 * BLOCO as u64,
+            lidos: 0,
+        };
+        let (r, temp) = gravar(&mut fonte, &["png"], None).await;
+        let chegou = r.expect("recusou uma imagem válida");
+        assert_eq!(chegou.bytes, 12 + 3 * BLOCO as u64);
+        let gravado = std::fs::read(temp.path().join("dados/a/b/volume/fotos/um.png")).unwrap();
+        assert_eq!(gravado.len() as u64, chegou.bytes);
+        assert_eq!(gravado.get(..12), Some(&PNG[..]));
+    }
 }
 
 // ---------------------------------------------------------------- o recebimento
@@ -513,6 +684,19 @@ pub async fn receber_imagem(
     cabecalho: seele_proto::volume::VolumeHeader,
     tamanho: Option<u64>,
 ) -> Result<Chegou, (String, Recusa)> {
+    gravar_fluxo(esperas, raizes, pessoa, fluxo, cabecalho, tamanho).await
+}
+
+/// O corpo de [`receber_imagem`], sobre qualquer [`Fonte`]: é por aqui que os
+/// testes passam um fluxo contado, sem abrir uma conexão.
+async fn gravar_fluxo(
+    esperas: &std::sync::Mutex<Esperas>,
+    raizes: Option<&crate::RaizesDosMods>,
+    pessoa: PersonId,
+    fluxo: &mut impl Fonte,
+    cabecalho: seele_proto::volume::VolumeHeader,
+    tamanho: Option<u64>,
+) -> Result<Chegou, (String, Recusa)> {
     use seele_proto::volume::VolumeRefusal;
     {
         use seele_proto::control::Validate as _;
@@ -590,12 +774,58 @@ impl Drop for LimparObras {
     }
 }
 
+/// De onde os bytes de um fluxo vêm: o [`crate::transporte::Recebe`] em
+/// produção, e uma fonte contada nos testes, que precisam saber **quanto foi
+/// lido** antes de a recusa sair.
+trait Fonte {
+    /// Lê até `buf.len()` bytes. `None` é o fim do fluxo.
+    async fn ler(&mut self, buf: &mut [u8]) -> Result<Option<usize>, ()>;
+}
+
+impl Fonte for crate::transporte::Recebe {
+    async fn ler(&mut self, buf: &mut [u8]) -> Result<Option<usize>, ()> {
+        self.read(buf).await.map_err(|_| ())
+    }
+}
+
+/// O tipo lido dos bytes, e conferido contra o que o MOD declarou aceitar.
+fn conferir_tipo(
+    comeco: &[u8],
+    espera: &Espera,
+) -> Result<seele_proto::imagem::ImageFormat, Recusa> {
+    use seele_proto::volume::VolumeRefusal;
+    // **O tipo vem dos bytes**, com a mesma tabela de quatro formatos que a
+    // prévia de anexo usa — reúso, e não uma segunda cópia da regra. Decisão 2
+    // do ADR 0048: o MOD não tem como conferir o que ele não vê.
+    let formato = seele_proto::imagem::sniff(comeco).ok_or(Recusa {
+        motivo: VolumeRefusal::TipoRecusado,
+        detectado: Detectado::FormatoNenhum,
+    })?;
+    // O MOD declara os tipos como `png`, `jpeg`, `webp`, `gif` — o sufixo do
+    // tipo de mídia, que é como o `data:` da janela já os escrevia.
+    if !espera.tipos.iter().any(|t| t == formato.sufixo()) {
+        return Err(Recusa {
+            motivo: VolumeRefusal::TipoRecusado,
+            detectado: Detectado::Tipo(formato.sufixo()),
+        });
+    }
+    Ok(formato)
+}
+
 /// Os bytes, em blocos, com o hash somado no caminho.
 ///
 /// Devolve um [`Chegou`] com os campos que só os bytes respondem; quem chama
 /// preenche o resto.
+///
+/// Duas coisas valem **durante** o fluxo, e não depois dele:
+///
+/// - **O teto.** Passou de [`TETO_FIXO`] (ou do total declarado, se menor), a
+///   leitura para ali: um fluxo sem fim não enche o disco de quem hospeda.
+/// - **O tipo.** Os primeiros `SNIFF_LEN` bytes ficam retidos, sem tocar o
+///   disco, até serem conferidos; um fluxo que não é imagem (ou não é de um
+///   tipo autorizado) morre com no máximo um bloco lido e nada gravado.
 async fn escorrer(
-    fluxo: &mut crate::transporte::Recebe,
+    fluxo: &mut impl Fonte,
     obras: &std::path::Path,
     espera: &Espera,
     tamanho: Option<u64>,
@@ -604,6 +834,7 @@ async fn escorrer(
     use seele_proto::volume::VolumeRefusal;
     use tokio::io::AsyncWriteExt;
 
+    let teto = tamanho.map_or(TETO_FIXO, |total| total.min(TETO_FIXO));
     let mut arquivo = tokio::fs::File::create(obras)
         .await
         .map_err(|_| VolumeRefusal::NaoGravei)?;
@@ -611,29 +842,41 @@ async fn escorrer(
     // é o mesmo hash, somado pelo mesmo código.
     let mut soma = ContentDigest::new();
     let mut bytes = 0_u64;
-    // Os primeiros bytes ficam guardados: é neles que o tipo é lido, e ler o
-    // tipo do arquivo depois de escrevê-lo seria ler de novo o que já passou.
-    let mut comeco: Vec<u8> = Vec::with_capacity(16);
+    // Os primeiros bytes ficam retidos: é neles que o tipo é lido, e só depois
+    // de lidos eles (e o resto) vão para o disco.
+    let mut comeco: Vec<u8> = Vec::with_capacity(seele_proto::imagem::SNIFF_LEN);
+    let mut formato = None;
     let mut bloco = vec![0_u8; BLOCO];
 
     loop {
         let lido = fluxo
-            .read(&mut bloco)
+            .ler(&mut bloco)
             .await
-            .map_err(|_| VolumeRefusal::Incompleto)?;
+            .map_err(|()| VolumeRefusal::Incompleto)?;
         let Some(quantos) = lido else { break };
         let pedaco = bloco.get(..quantos).unwrap_or_default();
-        if comeco.len() < seele_proto::imagem::SNIFF_LEN {
-            let falta = seele_proto::imagem::SNIFF_LEN - comeco.len();
-            comeco.extend_from_slice(pedaco.get(..falta).unwrap_or(pedaco));
-        }
         soma.feed(pedaco);
         bytes = bytes.saturating_add(quantos as u64);
-        if tamanho.is_some_and(|total| bytes > total) {
+        if bytes > teto {
             return Err(VolumeRefusal::Incompleto.into());
         }
+        let mut a_gravar = pedaco;
+        if formato.is_none() {
+            let falta = seele_proto::imagem::SNIFF_LEN - comeco.len();
+            let (cabe, resto) = pedaco.split_at(falta.min(pedaco.len()));
+            comeco.extend_from_slice(cabe);
+            if comeco.len() < seele_proto::imagem::SNIFF_LEN {
+                continue;
+            }
+            formato = Some(conferir_tipo(&comeco, espera)?);
+            arquivo
+                .write_all(&comeco)
+                .await
+                .map_err(|_| VolumeRefusal::NaoGravei)?;
+            a_gravar = resto;
+        }
         arquivo
-            .write_all(pedaco)
+            .write_all(a_gravar)
             .await
             .map_err(|_| VolumeRefusal::NaoGravei)?;
     }
@@ -646,21 +889,12 @@ async fn escorrer(
     if tamanho.is_some_and(|total| bytes != total) {
         return Err(VolumeRefusal::Incompleto.into());
     }
-    // **O tipo vem dos bytes**, com a mesma tabela de quatro formatos que a
-    // prévia de anexo usa — reúso, e não uma segunda cópia da regra. Decisão 2
-    // do ADR 0048: o MOD não tem como conferir o que ele não vê.
-    let formato = seele_proto::imagem::sniff(&comeco).ok_or(Recusa {
-        motivo: VolumeRefusal::TipoRecusado,
-        detectado: Detectado::FormatoNenhum,
-    })?;
-    // O MOD declara os tipos como `png`, `jpeg`, `webp`, `gif` — o sufixo do
-    // tipo de mídia, que é como o `data:` da janela já os escrevia.
-    if !espera.tipos.iter().any(|t| t == formato.sufixo()) {
-        return Err(Recusa {
-            motivo: VolumeRefusal::TipoRecusado,
-            detectado: Detectado::Tipo(formato.sufixo()),
-        });
-    }
+    // Um fluxo mais curto que o sniff nunca chegou a conferir: confere agora, e
+    // é isso que o recusa como «formato-desconhecido».
+    let formato = match formato {
+        Some(formato) => formato,
+        None => conferir_tipo(&comeco, espera)?,
+    };
 
     Ok(Chegou {
         mod_id: String::new(),

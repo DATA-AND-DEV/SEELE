@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Instant;
 
-use seele_proto::ids::PersonId;
+use seele_proto::ids::{PersonId, VoiceRoomId};
 
 /// Quantos apertos de mão um mesmo endereço pode fazer em rajada.
 ///
@@ -438,6 +438,77 @@ impl Vazao {
     }
 }
 
+/// Quantas senhas erradas uma pessoa pode dar a uma sala por minuto.
+pub const SENHAS_ERRADAS_POR_MINUTO: u32 = 5;
+
+/// Quantas chaves (pessoa, sala) a [`TentativasDeSenha`] lembra ao mesmo tempo.
+pub const TENTATIVAS_LEMBRADAS: usize = 4096;
+
+/// As senhas erradas de cada pessoa em cada sala de voz.
+///
+/// A senha de uma sala é a única fechadura do servidor que se adivinha **depois
+/// de autenticar**, sem que o aperto de mão a custe de novo: sem isto, uma
+/// conta qualquer testava senhas na velocidade do Argon2. É o [`Balde`] de
+/// sempre, com a unidade de **erro**: cheio de cinco, repõe cinco por minuto, e
+/// só um erro o gasta — quem acerta recebe a ficha de volta, e quem pede sem senha (a pessoa
+/// que acaba de ver o cadeado) também não.
+///
+/// Chave na pessoa **e** na sala: a pessoa que erra a sala A continua entrando
+/// na B, e a conta que erra não passa a outra sala para recomeçar. Na pessoa e
+/// não na conexão, pela razão da [`Vazao`]: reconectar não zera nada.
+///
+/// Esgotado o balde, a sala recusa **inclusive a senha certa** até uma ficha
+/// voltar. É o preço de o limite valer: um que deixasse a certa passar seria
+/// um oráculo, e o atacante só precisaria tentar a seguinte.
+#[derive(Debug, Default)]
+pub struct TentativasDeSenha {
+    baldes: HashMap<(PersonId, VoiceRoomId), Balde>,
+}
+
+impl TentativasDeSenha {
+    /// Pede para tentar uma senha nesta sala, e gasta a ficha **antes** da
+    /// conta.
+    ///
+    /// Antes, e não depois do erro: duas conexões da mesma pessoa tentando ao
+    /// mesmo tempo veriam as duas o balde com ficha e as duas verificariam. Quem
+    /// acerta recebe a ficha de volta em [`Self::perdoar`].
+    pub fn tentar(&mut self, pessoa: PersonId, sala: VoiceRoomId, agora: Instant) -> bool {
+        if !self.baldes.contains_key(&(pessoa, sala)) {
+            if self.baldes.len() >= TENTATIVAS_LEMBRADAS {
+                self.baldes.retain(|_, balde| !balde.cheio(agora));
+            }
+            // A tabela cheia de quem está errando recusa o desconhecido: o lado
+            // fechado, como a [`Vazao`] com a mesma tabela cheia.
+            if self.baldes.len() >= TENTATIVAS_LEMBRADAS {
+                return false;
+            }
+        }
+        self.baldes
+            .entry((pessoa, sala))
+            .or_insert_with(|| {
+                Balde::novo(
+                    SENHAS_ERRADAS_POR_MINUTO,
+                    f64::from(SENHAS_ERRADAS_POR_MINUTO) / 60.0,
+                    agora,
+                )
+            })
+            .gastar(1.0, agora)
+    }
+
+    /// A senha estava certa: a ficha da tentativa volta.
+    pub fn perdoar(&mut self, pessoa: PersonId, sala: VoiceRoomId, agora: Instant) {
+        if let Some(balde) = self.baldes.get_mut(&(pessoa, sala)) {
+            balde.devolver(1.0, agora);
+        }
+    }
+
+    /// Quantas chaves estão sendo lembradas.
+    #[must_use]
+    pub fn lembradas(&self) -> usize {
+        self.baldes.len()
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -824,5 +895,48 @@ mod testes {
                 assert_eq!(vigia.avaliar(quando), Veredito::Passa);
             }
         }
+    }
+
+    #[test]
+    fn cinco_senhas_erradas_fecham_a_sala_para_aquela_pessoa_ate_uma_ficha_voltar() {
+        let inicio = zero();
+        let sala = VoiceRoomId(1);
+        let mut tentativas = TentativasDeSenha::default();
+
+        for _ in 0..SENHAS_ERRADAS_POR_MINUTO {
+            assert!(tentativas.tentar(pessoa(1), sala, inicio));
+        }
+        assert!(
+            !tentativas.tentar(pessoa(1), sala, inicio),
+            "a sexta tentativa devia ser recusada, seja qual for a senha"
+        );
+        // Outra pessoa, e a mesma pessoa em outra sala, seguem livres.
+        assert!(tentativas.tentar(pessoa(2), sala, inicio));
+        assert!(tentativas.tentar(pessoa(1), VoiceRoomId(2), inicio));
+        // Antes de uma ficha voltar (12 s) segue fechado; depois, abre.
+        assert!(!tentativas.tentar(pessoa(1), sala, inicio + Duration::from_secs(5)));
+        assert!(tentativas.tentar(pessoa(1), sala, inicio + Duration::from_secs(13)));
+    }
+
+    #[test]
+    fn quem_acerta_recebe_a_ficha_de_volta() {
+        let inicio = zero();
+        let sala = VoiceRoomId(1);
+        let mut tentativas = TentativasDeSenha::default();
+        for _ in 0..(SENHAS_ERRADAS_POR_MINUTO * 3) {
+            assert!(tentativas.tentar(pessoa(1), sala, inicio));
+            tentativas.perdoar(pessoa(1), sala, inicio);
+        }
+    }
+
+    #[test]
+    fn a_tabela_de_tentativas_cheia_de_quem_erra_recusa_o_desconhecido() {
+        let inicio = zero();
+        let mut tentativas = TentativasDeSenha::default();
+        for n in 0..TENTATIVAS_LEMBRADAS {
+            assert!(tentativas.tentar(pessoa(n as u64 + 1), VoiceRoomId(1), inicio));
+        }
+        assert!(!tentativas.tentar(pessoa(999_999), VoiceRoomId(1), inicio));
+        assert!(tentativas.lembradas() <= TENTATIVAS_LEMBRADAS);
     }
 }
