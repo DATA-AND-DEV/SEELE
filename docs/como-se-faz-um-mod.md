@@ -1295,11 +1295,14 @@ jogar desenha o botão, e **a porta se abre no clique**, e em nenhum outro lugar
 
 ```js
 // cliente/main.js
-const pagina = await SeeleUI.superficies.criar({ id: "jogo", tipo: "pagina", titulo: "Jogo" });
-await pagina.montar([
-  { forma: "botao", chave: "entrar", dentro: "ENTRAR NO JOGO" },
-  { forma: "texto", chave: "t", dentro: "" },
-]);
+let pagina;
+(async () => {
+  pagina = await SeeleUI.superficies.criar({ id: "jogo", tipo: "pagina", titulo: "Jogo" });
+  await pagina.montar([
+    { forma: "botao", chave: "entrar", dentro: "ENTRAR NO JOGO" },
+    { forma: "texto", chave: "t", dentro: "" },
+  ]);
+})();
 
 SeeleUI.aoEvento(async (evento) => {
   if (evento.nome === "botao" && evento.chave === "entrar") {
