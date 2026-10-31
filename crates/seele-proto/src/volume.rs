@@ -217,12 +217,32 @@ pub enum PedidoDeImagem {
     },
 }
 
+/// **O maior envio que o fio de volume leva**: o maior dos tetos por tipo.
+///
+/// Na API 8 parte 6 era o do `.mrpack` (64 MiB), maior que os 10 MiB de
+/// imagem de então. A 0.19 subiu a imagem para 100 MiB
+/// ([`crate::midia_de_mod::TETO_DE_ARQUIVO`]), e a fusão das duas linhas faz
+/// do fio o maior dos dois — sem baixar o pack nem a imagem. O teto de cada
+/// tipo continua sendo do servidor, conferido antes do primeiro byte.
+pub const TETO_DO_FIO_DE_VOLUME: u64 = {
+    let imagem = crate::midia_de_mod::TETO_DE_ARQUIVO as u64;
+    let pack = crate::pack::TETO_DO_PACK;
+    if imagem > pack {
+        imagem
+    } else {
+        pack
+    }
+};
+
 impl crate::control::Validate for PedidoDeImagem {
     fn validate(&self) -> Result<(), crate::control::ControlError> {
         match self {
             Self::Enviar { cabecalho, bytes } => {
                 cabecalho.validate()?;
-                if *bytes == 0 || *bytes > crate::midia_de_mod::TETO_DE_ARQUIVO as u64 {
+                // O teto do fio é o maior dos tipos; o de cada tipo é
+                // conferido pelo servidor contra a espera, antes do primeiro
+                // byte, e de novo quando o tipo é lido.
+                if *bytes == 0 || *bytes > TETO_DO_FIO_DE_VOLUME {
                     return Err(crate::control::ControlError::FieldOutOfRange {
                         field: "volume_bytes",
                     });
@@ -263,8 +283,7 @@ pub struct RespostaDeImagem {
 }
 impl crate::control::Validate for RespostaDeImagem {
     fn validate(&self) -> Result<(), crate::control::ControlError> {
-        if self.bytes > crate::midia_de_mod::TETO_DE_ARQUIVO as u64
-            || self.erro.as_ref().is_some_and(|e| e.len() > 1024)
+        if self.bytes > TETO_DO_FIO_DE_VOLUME || self.erro.as_ref().is_some_and(|e| e.len() > 1024)
         {
             return Err(crate::control::ControlError::FieldOutOfRange {
                 field: "volume_reply",

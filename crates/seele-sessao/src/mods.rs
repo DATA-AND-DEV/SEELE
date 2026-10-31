@@ -38,6 +38,20 @@ pub fn refusal_name(why: &Refused) -> &'static str {
         // Os de cargos (E6, agente F): a frase é do `ui/frases.js`.
         Refused::PermissoesPedemApiNova { .. } => "permissoes-pedem-api-nova",
         Refused::PermissoesInvalidas(_) => "permissoes-invalidas",
+        // As de plataforma (API 8): a frase é do `ui/frases.js`.
+        Refused::PlataformasPedemApiNova { .. } => "plataformas-pedem-api-nova",
+        Refused::PlataformasVazias => "plataformas-vazias",
+        Refused::PlataformaRepetida { .. } => "plataforma-repetida",
+        // Os poderes (API 8): a frase é do `ui/frases.js`.
+        Refused::PoderesPedemApiNova { .. } => "poderes-pedem-api-nova",
+        Refused::PoderesVazios => "poderes-vazios",
+        Refused::PoderRepetido { .. } => "poder-repetido",
+        Refused::PoderesExigemSoOApp => "poderes-exigem-so-o-app",
+        Refused::MaquinaForaDoPacote => "maquina-fora-do-pacote",
+        Refused::MaquinaSemPoderes => "maquina-sem-poderes",
+        Refused::PortaSemEntrarNoJogo => "porta-sem-entrar-no-jogo",
+        Refused::PoderesSemMaquina => "poderes-sem-maquina",
+        Refused::MaquinaSemServidor => "maquina-sem-servidor",
         // Os tetos do `reach` no anúncio da linha 2, conferidos na instalação.
         Refused::AlcancesDemais { .. } => "alcances-demais",
         Refused::AlcanceGrandeDemais { .. } => "alcance-grande-demais",
@@ -96,14 +110,37 @@ pub struct ModInstalado {
     /// `"tema": true`, e a metade de servidor pode pintar a aparência do
     /// servidor inteiro.
     pub tema: bool,
+    /// **As plataformas em que este MOD roda** (API 8): a lista efetiva, que
+    /// já resolveu o «sem a chave, nas duas» (`plataformas_efetivas`). Vazia
+    /// num pacote recusado, que não roda em lugar nenhum. É o que o ato de
+    /// habilitar grava junto com o hash.
+    pub plataformas: Vec<seele_proto::mods::Plataforma>,
+    /// **Os poderes que este MOD declara** (API 8): vazia sem a chave e num
+    /// pacote recusado. A casca lê daqui para saber se o MOD tem túnel, sem
+    /// reabrir o manifesto.
+    pub poderes: Vec<seele_proto::mods::Poder>,
+    /// **O manifesto declara a metade de máquina** (API 8): é o que a casca lê
+    /// para saber se há o que pedir à pessoa dona do computador, sem reabrir o
+    /// manifesto. Falso num pacote recusado.
+    pub maquina: bool,
     /// O nome da recusa, de uma lista fechada, quando houve uma.
     pub refused: Option<String>,
 }
 
 impl ModInstalado {
+    /// **O que este pacote pode chamar**: as capacidades da API dele, mais as
+    /// que os poderes dão (`tunel` para quem declara `porta`). É a lista que o
+    /// executor leva ao prelúdio, pela mesma regra de
+    /// [`seele_proto::mods::capacidades_do_manifesto`].
+    #[must_use]
+    pub fn capacidades(&self) -> Vec<&'static str> {
+        seele_proto::mods::capacidades_de(self.api, &self.poderes)
+    }
+
     /// Um pacote que leu limpo, sob o hash dele em hexadecimal.
     #[must_use]
     pub fn lido(manifest: Manifest, hash: String) -> Self {
+        let plataformas = seele_proto::mods::plataformas_efetivas(&manifest);
         Self {
             id: manifest.id,
             version: manifest.version,
@@ -115,6 +152,9 @@ impl ModInstalado {
             reach: manifest.reach,
             server: manifest.server.is_some(),
             tema: manifest.tema,
+            plataformas,
+            poderes: manifest.poderes,
+            maquina: manifest.maquina.is_some(),
             refused: None,
         }
     }
@@ -145,6 +185,9 @@ impl ModInstalado {
             reach: Vec::new(),
             server: false,
             tema: false,
+            plataformas: Vec::new(),
+            poderes: Vec::new(),
+            maquina: false,
             refused: Some(refusal_name(why).to_owned()),
         }
     }
@@ -368,6 +411,51 @@ mod tests {
     }
 
     use seele_proto::mods::{MOD_API_MINIMA, MOD_API_VERSION};
+
+    /// **Cada recusa dos poderes tem o nome que a casca traduz**, e um pacote
+    /// com a porta declarada chega à lista com os `poderes` que declarou.
+    #[test]
+    fn os_poderes_chegam_a_lista_e_as_recusas_tem_nome() {
+        let base = |extra: &str| {
+            format!(
+                r#"{{"schema":1,"id":"seele/jogo","version":"1.0.0","api":{MOD_API_VERSION},
+                   "repo":"https://x","client":"cliente.js",{extra}"state":1}}"#
+            )
+        };
+        let porta = base(
+            r#""plataformas":["app"],"poderes":["porta"],"maquina":"maquina/main.js","server":"servidor.js",
+               "permissoes":[{"acao":"entrar-no-jogo","nome":"Entrar","todos":true}],"#,
+        );
+        let (manifest, hash) = ler_pacote(&mut pacote(&porta)).expect("a porta lê");
+        let lido = ModInstalado::lido(manifest, hex(&hash));
+        assert_eq!(lido.poderes, vec![seele_proto::mods::Poder::Porta]);
+        assert!(lido.maquina);
+        let sem = ler_pacote(&mut pacote(&base("")))
+            .expect("sem poderes lê")
+            .0;
+        let sem = ModInstalado::lido(sem, String::new());
+        assert!(sem.poderes.is_empty() && !sem.maquina);
+
+        let sem_permissao = base(r#""plataformas":["app"],"poderes":["porta"],"#);
+        let recusa = ler_pacote(&mut pacote(&sem_permissao)).expect_err("recusa");
+        assert_eq!(refusal_name(&recusa), "porta-sem-entrar-no-jogo");
+        let nomes = [
+            (
+                Refused::PoderesPedemApiNova { api: 7, exige: 8 },
+                "poderes-pedem-api-nova",
+            ),
+            (Refused::PoderesVazios, "poderes-vazios"),
+            (Refused::PoderRepetido { posicao: 1 }, "poder-repetido"),
+            (Refused::PoderesExigemSoOApp, "poderes-exigem-so-o-app"),
+            (Refused::MaquinaForaDoPacote, "maquina-fora-do-pacote"),
+            (Refused::MaquinaSemPoderes, "maquina-sem-poderes"),
+            (Refused::PoderesSemMaquina, "poderes-sem-maquina"),
+            (Refused::MaquinaSemServidor, "maquina-sem-servidor"),
+        ];
+        for (recusa, nome) in nomes {
+            assert_eq!(refusal_name(&recusa), nome);
+        }
+    }
 
     /// O manifesto de um pacote, na `api` dada: a deste build lida de
     /// `MOD_API_VERSION`, e nunca escrita (o guarda

@@ -56,7 +56,12 @@ use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,
 };
-use seele_proto::mods::ModAnunciado;
+use seele_proto::maquina::{
+    AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, HashDeArtefato, MotivoDaDispensa,
+    MotivoDaParadaDeMaquina, MotivoDaRecusaDeMaquina, OfertaDeMaquina, TermoOferecido,
+    TunelOferecido,
+};
+use seele_proto::mods::{ModAnunciado, Plataforma, PlataformasDoMod};
 use seele_proto::perfil::{
     CampoDoPerfil, Efeito, ErroDeCampo, ImagemDoPerfil, LadoDoPerfil, MotivoDoCampo, PerfilPublico,
     RecusaDePerfil, TipoDaImagem,
@@ -66,6 +71,10 @@ use seele_proto::screen::{
     TipoDeQuadro, SCREEN_HEADER_VERSION,
 };
 use seele_proto::stream::StreamType;
+use seele_proto::tunel::{
+    AberturaDeTunel, MotivoDoFimDoTunel, ProtocoloDeTunel, RecusaDeTunel, SinalDeTunel,
+    TipoDeCanalDeTunel,
+};
 use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem, VolumeHeader, VolumeRefusal};
 use seele_proto::MediaHeader;
 const FAIXA: seele_proto::version::Faixa = seele_proto::version::Faixa {
@@ -383,6 +392,78 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
                 payload: "{}".into(),
             },
         ),
+        // O protocolo 12: o túnel de jogo.
+        (
+            "ServirTunel",
+            ClientMessage::ServirTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: 25565,
+            },
+        ),
+        (
+            "PararTunel",
+            ClientMessage::PararTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+            },
+        ),
+        (
+            "EntrarNoTunel",
+            ClientMessage::EntrarNoTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+            },
+        ),
+        (
+            "SairDoTunel",
+            ClientMessage::SairDoTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+            },
+        ),
+        (
+            "TunelFalhou",
+            ClientMessage::TunelFalhou {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                motivo: MotivoDeFalhaDePar::CaiuNoMeio,
+            },
+        ),
+        (
+            "AceiteDeMaquina",
+            ClientMessage::AceiteDeMaquina {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                resumo: "3c".repeat(32),
+            },
+        ),
+        (
+            "RecusaDeMaquina",
+            ClientMessage::RecusaDeMaquina {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                motivo: MotivoDaRecusaDeMaquina::PacoteDiferente,
+            },
+        ),
+        (
+            "MaquinaParada",
+            ClientMessage::MaquinaParada {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                motivo: MotivoDaParadaDeMaquina::MetadeFalhou,
+            },
+        ),
+        (
+            "PedidoDaMaquina",
+            ClientMessage::PedidoDaMaquina {
+                request: 7,
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                payload: "{\"cmd\":\"list\"}".into(),
+            },
+        ),
         // O perfil público nativo (0.19, protocolo 12).
         (
             "GravarPerfil",
@@ -422,6 +503,54 @@ fn perfil_publico() -> PerfilPublico {
             bytes: 2048,
         }),
         capa: None,
+    }
+}
+
+/// A oferta com todos os campos preenchidos.
+fn oferta_cheia() -> OfertaDeMaquina {
+    OfertaDeMaquina {
+        titulo: "Minecraft 1.21".into(),
+        receita: "minecraft-java".into(),
+        versao_da_receita: "1.0.0".into(),
+        versao_do_jogo: "1.21.4".into(),
+        tuneis: vec![TunelOferecido {
+            nome: "mc-1".into(),
+            protocolo: ProtocoloDeTunel::Tcp,
+            porta: 25565,
+        }],
+        artefatos: vec![ArtefatoOferecido {
+            nome: "server.jar".into(),
+            url: "https://piston-data.mojang.com/server.jar".into(),
+            tamanho: 51_000_000,
+            hash: HashDeArtefato {
+                algoritmo: AlgoritmoDeHash::Sha1,
+                hex: "ab".repeat(20),
+            },
+            plataformas: vec!["mac-aarch64".into(), "mac-x64".into()],
+        }],
+        pack: Some(HashDeArtefato {
+            algoritmo: AlgoritmoDeHash::Sha512,
+            hex: "cd".repeat(64),
+        }),
+        origens: vec!["piston-data.mojang.com".into()],
+        dominios_do_jogo: vec!["sessionserver.mojang.com".into()],
+        rodar: Some(ComandoOferecido {
+            comando: "java".into(),
+            argumentos: vec!["-jar".into(), "server.jar".into(), "nogui".into()],
+        }),
+        disco_maximo: 4 * 1024 * 1024 * 1024,
+        termos: vec![TermoOferecido {
+            titulo: "EULA".into(),
+            url: "https://aka.ms/MinecraftEULA".into(),
+        }],
+        instalar: Some(ComandoOferecido {
+            comando: "java".into(),
+            argumentos: vec![
+                "-jar".into(),
+                "fabric-installer.jar".into(),
+                "server".into(),
+            ],
+        }),
     }
 }
 
@@ -885,6 +1014,95 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 },
             },
         ),
+        // O protocolo 12: as plataformas antes da entrada e o túnel de jogo.
+        (
+            "PlataformasDosMods",
+            ServerMessage::PlataformasDosMods {
+                mods: vec![PlataformasDoMod {
+                    hash: "ab".repeat(32),
+                    plataformas: vec![Plataforma::App, Plataforma::Navegador],
+                }],
+            },
+        ),
+        (
+            "TunelConcedido",
+            ServerMessage::TunelConcedido {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                protocolo: ProtocoloDeTunel::Udp,
+                porta: 19132,
+            },
+        ),
+        (
+            "TunelRecusado",
+            ServerMessage::TunelRecusado {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                motivo: RecusaDeTunel::SemPermissao,
+            },
+        ),
+        (
+            "SirvaTunelPara",
+            ServerMessage::SirvaTunelPara {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                quem: PersonId(42),
+                enderecos: vec!["203.0.113.5:41234".parse().unwrap()],
+                impressao: IMPRESSAO.into(),
+            },
+        ),
+        (
+            "AlcanceTunelPor",
+            ServerMessage::AlcanceTunelPor {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                quem: PersonId(42),
+                enderecos: vec!["198.51.100.7:41234".parse().unwrap()],
+                impressao: IMPRESSAO.into(),
+            },
+        ),
+        (
+            "TunelEncerrado",
+            ServerMessage::TunelEncerrado {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                motivo: MotivoDoFimDoTunel::SemPermissao,
+            },
+        ),
+        (
+            "TunelRetirado",
+            ServerMessage::TunelRetirado {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                quem: PersonId(42),
+            },
+        ),
+        (
+            "PedidoDeMaquina",
+            ServerMessage::PedidoDeMaquina {
+                mod_id: "seele/mesa".into(),
+                hash: "ab".repeat(32),
+                servidor: "mc-1".into(),
+                pedido_por: PersonId(42),
+                oferta: Box::new(oferta_cheia()),
+            },
+        ),
+        (
+            "AvisoParaMaquina",
+            ServerMessage::AvisoParaMaquina {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                carga: "{\"evento\":\"ola\"}".into(),
+            },
+        ),
+        (
+            "MaquinaDispensada",
+            ServerMessage::MaquinaDispensada {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                motivo: MotivoDaDispensa::OutroPedido,
+            },
+        ),
         // O perfil público nativo (0.19, protocolo 12).
         (
             "Perfis",
@@ -1031,6 +1249,40 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
         })
         .unwrap(),
     ));
+    // O túnel (12): a primeira mensagem de todo canal `t` e `j`, e o que corre
+    // no canal de controle de um túnel UDP.
+    todos.push((
+        "tunel:abertura-tcp".to_owned(),
+        encode_em(
+            12,
+            &AberturaDeTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                fluxo: 1,
+                tipo: TipoDeCanalDeTunel::Tcp,
+                de: None,
+            },
+        )
+        .unwrap(),
+    ));
+    todos.push((
+        "tunel:abertura-udp-pela-estrela".to_owned(),
+        encode_em(
+            12,
+            &AberturaDeTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                fluxo: 7,
+                tipo: TipoDeCanalDeTunel::Udp,
+                de: Some(PersonId(42)),
+            },
+        )
+        .unwrap(),
+    ));
+    todos.push((
+        "tunel:ping".to_owned(),
+        encode_em(12, &SinalDeTunel::Ping { n: 3 }).unwrap(),
+    ));
     todos.push((
         "fluxo:pedido-de-imagem:enviar-ao-perfil".to_owned(),
         encode(&PedidoDeImagem::EnviarAoPerfil {
@@ -1062,6 +1314,8 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
 fn exemplares() -> Vec<(String, Vec<u8>)> {
     let mut todos = Vec::new();
     for (nome, mensagem) in clientes() {
+        // Como os servidores: com o carimbo do número em que a variante nasceu,
+        // que para os verbos do 12 não é o 10.
         todos.push((
             format!("cliente:{nome}"),
             encode_em(
@@ -1244,7 +1498,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
         &'static [&'static str],
     );
 
-    let casos: [Caso; 17] = [
+    let casos: [Caso; 25] = [
         (
             "DisconnectReason",
             variantes::<DisconnectReason>(),
@@ -1420,6 +1674,72 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
             "VolumeRefusal",
             variantes::<VolumeRefusal>(),
             &["SemEspera", "TipoRecusado", "NaoGravei", "Incompleto"],
+        ),
+        (
+            "ProtocoloDeTunel",
+            variantes::<ProtocoloDeTunel>(),
+            &["Tcp", "Udp"],
+        ),
+        (
+            "RecusaDeTunel",
+            variantes::<RecusaDeTunel>(),
+            &[
+                "NaoExiste",
+                "SemPermissao",
+                "AcaoNaoDeclarada",
+                "ModSemPorta",
+                "NomeTomado",
+                "MaquinaSaiu",
+                "TuneisDemais",
+                "CanaisEsgotados",
+                "ServidorAntigo",
+                "PortaLocalOcupada",
+                "SemResposta",
+                "ForaDoAceite",
+            ],
+        ),
+        (
+            "AlgoritmoDeHash",
+            variantes::<AlgoritmoDeHash>(),
+            &["Sha1", "Sha256", "Sha512"],
+        ),
+        (
+            "MotivoDaRecusaDeMaquina",
+            variantes::<MotivoDaRecusaDeMaquina>(),
+            &[
+                "PeloDono",
+                "SemTela",
+                "SoNoApp",
+                "PacoteDiferente",
+                "OfertaInvalida",
+            ],
+        ),
+        (
+            "MotivoDaParadaDeMaquina",
+            variantes::<MotivoDaParadaDeMaquina>(),
+            &["PeloDono", "Revogada", "AppFechou", "MetadeFalhou"],
+        ),
+        (
+            "MotivoDaDispensa",
+            variantes::<MotivoDaDispensa>(),
+            &["ModDesligado", "OutroPedido", "SemAceite"],
+        ),
+        (
+            "MotivoDoFimDoTunel",
+            variantes::<MotivoDoFimDoTunel>(),
+            &[
+                "MaquinaParou",
+                "MaquinaSaiu",
+                "ModDesligado",
+                "SemPermissao",
+                "PessoaSaiu",
+                "AnfitriaoCaiu",
+            ],
+        ),
+        (
+            "TipoDeCanalDeTunel",
+            variantes::<TipoDeCanalDeTunel>(),
+            &["Tcp", "Udp", "Controle"],
         ),
     ];
     let mut errados = Vec::new();

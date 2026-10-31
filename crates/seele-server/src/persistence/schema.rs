@@ -795,10 +795,9 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE people SET nickname_base = nickname;
         "#,
     },
-    // **Número provisório.** Na `entrega/0.19` o PERFIS oficial usa a 20; a API 8
-    // (`desenho/api-8-multiplayer`) também usa a 20. Na fusão (§8 de
-    // `docs/0.19/perfis-oficiais.md`) a da API 8 vira a 21 — só bancos de
-    // desenvolvimento daquela branch chegaram à 20 —, e esta fica como está.
+    // O PERFIS oficial (0.19) é a 20. A API 8 também nasceu na 20, e na fusão
+    // (§8 de `docs/0.19/perfis-oficiais.md`) a dela virou a 21: só bancos de
+    // desenvolvimento da `desenho/api-8-partes` chegaram à 20 de plataformas.
     Migration {
         version: 20,
         description: "perfis oficiais: o perfil público de cada pessoa e o livro da migração do MOD",
@@ -832,6 +831,30 @@ pub const MIGRATIONS: &[Migration] = &[
                 capa           TEXT    NOT NULL,
                 avisada        INTEGER NOT NULL DEFAULT 0
             ) STRICT;
+        "#,
+    },
+    // A API 8 nasceu na 20 da `desenho/api-8-partes`; na fusão com a 0.19 é a
+    // 21 (ver a 20, acima).
+    Migration {
+        version: 21,
+        description: "as plataformas em que cada MOD habilitado roda, para o catálogo dizer antes de baixar",
+        sql: r#"
+            -- API 8: o catálogo diz em que plataformas cada MOD roda, para o
+            -- navegador não oferecer o que só o app executa.
+            --
+            -- Coluna, pela razão das migrações 14 e 16: ela é gravada no mesmo
+            -- ato que grava o `hash`, e o catálogo lê só o banco — o pedido não
+            -- vai ao disco por MOD.
+            --
+            -- **Nula é «não preenchida»**, como a `tema` da 16: uma linha
+            -- gravada antes desta coluna não sabe, e esta migração não inventa
+            -- o que o produto não sabe. Quem a preenche é a subida do servidor,
+            -- na mesma passada e na mesma leitura do `mod.json` que preenchem
+            -- a `api` e o `tema`; quem a regrava é habilitar o MOD. Até lá o
+            -- catálogo diz as duas, que é o que um manifesto sem a chave diz.
+            --
+            -- O texto é o JSON da lista, como o catálogo a leva: `["app"]`.
+            ALTER TABLE mods ADD COLUMN plataformas TEXT;
         "#,
     },
 ];

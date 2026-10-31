@@ -5,9 +5,11 @@
 > revisto pelo [ADR 0049](adr/0049-um-mod-deixa-de-rodar-na-janela-do-produto.md);
 > o indexador, em `indexador-de-mods.md`, no repositório `SEELE-MODS-INDEXER`.
 >
-> **Este guia é da API 6**, a única que o app 0.16 executa (`MOD_API_VERSION`
-> e `APIS_ACEITAS`, em `crates/seele-proto/src/mods.rs`). Servidor 1.0 é o
-> protocolo 1.0 mais a API 6. O contrato é [`api/v6.json`](../api/v6.json). O
+> **Este guia é da API 8** (`MOD_API_VERSION` e `APIS_ACEITAS`, em
+> `crates/seele-proto/src/mods.rs`), que alarga a 7 com a declaração de onde o
+> MOD roda (`plataformas`, abaixo); a 7 e a 6 continuam rodando nesta linha. O
+> contrato é [`api/v8.json`](../api/v8.json); o que a 8 acrescenta está em
+> [`api/README.md`](../api/README.md), «A API 8». **A 0.18 não executa a 8.** O
 > MOD de referência, `apps/seele-app/testes/mod-de-referencia/`, chama tudo o
 > que a API oferece, e a bateria o executa: quando este guia e ele discordarem,
 > vale ele.
@@ -37,13 +39,34 @@ nenhuma é recusado (`empty`). Um MOD que só mostra coisas não precisa de
   "schema": 1,
   "id": "fulano/meu-mod",
   "version": "1.0.0",
-  "api": 6,
+  "api": 8,
   "repo": "https://github.com/fulano/meu-mod",
   "reach": ["superficie", "contribuicao", "pedido"],
   "client": "cliente/main.js",
   "server": "servidor/main.js",
   "arquivos": ["som/toque.wav"],
-  "tema": true
+  "tema": true,
+  "plataformas": ["app", "navegador"]
+}
+```
+
+Um MOD que hospeda um jogo declara mais três chaves (a metade de máquina, adiante,
+explica o porquê de cada uma):
+
+```json
+{
+  "schema": 1,
+  "id": "fulano/jogo",
+  "version": "1.0.0",
+  "api": 8,
+  "repo": "https://github.com/fulano/jogo",
+  "reach": ["tunel"],
+  "client": "cliente/main.js",
+  "server": "servidor/main.js",
+  "maquina": "maquina/main.js",
+  "plataformas": ["app"],
+  "poderes": ["porta"],
+  "permissoes": [{ "acao": "entrar-no-jogo", "nome": "Entrar no jogo", "todos": true }]
 }
 ```
 
@@ -52,19 +75,22 @@ nenhuma é recusado (`empty`). Um MOD que só mostra coisas não precisa de
 | `schema` | formato deste arquivo. Hoje, `1`. |
 | `id` | `autor/nome`. Minúsculas, dígitos e hífen. É ele, e não o nome da pasta, que identifica o MOD: instalado, o pacote mora numa pasta com o hash do conteúdo. |
 | `version` | sua. Nunca é interpretada por nós. |
-| `api` | a versão da API contra a qual você escreveu. Hoje, `6`. |
+| `api` | a versão da API contra a qual você escreveu. Hoje, `8`; a `7` e a `6` continuam aceitas. |
 | `repo` | seu repositório público. Obrigatório. |
-| `reach` | o que você declara alcançar, em palavras suas; o anúncio do servidor leva até 16, de até 48 bytes UTF-8 cada na 0.17 (32 na 0.16), e a 0.17 recusa na instalação o que o anúncio recusaria (`alcances-demais`, `alcance-grande-demais`). A tela de aceite mostra isto antes de baixar. **É declaração, e nada a confere**: o que o MOD alcança de fato é o que a API 6 oferece. |
+| `reach` | o que você declara alcançar, em palavras suas; o anúncio do servidor leva até 16, de até 48 bytes UTF-8 cada na 0.17 (32 na 0.16), e a 0.17 recusa na instalação o que o anúncio recusaria (`alcances-demais`, `alcance-grande-demais`). A tela de aceite mostra isto antes de baixar. **É declaração, e nada a confere**: o que o MOD alcança de fato é o que a API 8 oferece. |
 | `client`, `server` | caminhos das metades, relativos à pasta. |
 | `arquivos` | a mídia que o MOD traz para mostrar ou tocar, relativa à pasta. Até 16, e só o que está nesta lista é servido. O tipo vem dos bytes, nunca da extensão. |
 | `tema` | opcional: `true` abre a porta do tema do servidor, `mundo.tema`, na metade de servidor (ver «O tema»). Sem `server`, o manifesto é recusado (`tema-sem-metade-de-servidor`): sem quem a abra, a porta nunca pintaria nada. |
+| `plataformas` | opcional: onde o MOD roda. Os valores são `"app"` e `"navegador"`. **Ausente quer dizer as duas.** **Declarar exige `"api": 8`**: a chave num manifesto da 7 ou da 6 é recusada (`PlataformasPedemApiNova`, no shell `plataformas-pedem-api-nova`), e não ignorada, mesmo escrita como `[]`, porque o que se confere é a presença da chave. Escrita e vazia é recusada (`PlataformasVazias`, `plataformas-vazias`); repetir um valor também (`PlataformaRepetida { posicao }`, `plataforma-repetida`); um valor desconhecido faz o manifesto inteiro ser recusado como malformado. **O celular é o navegador**: um MOD só `"app"` não carrega nele. Uma casca que não está na lista pula o MOD e diz qual plataforma ele pede («só funciona no app», «só funciona no navegador»). |
+| `poderes` | opcional: o que o MOD pode fazer além de pintar e responder. Hoje, `"porta"`: o túnel de quem joga até o servidor de jogo de outra pessoa (`SeeleUI.tunel`, ver «A metade de máquina»). `"programa"` está **reservado à parte seguinte** e não faz nada nesta: é um nome que o manifesto já lê, e não um poder que o produto exerça. **Declarar exige `"api": 8`** (`PoderesPedemApiNova`, `poderes-pedem-api-nova`), e a chave escrita e vazia é recusada (`PoderesVazios`, `poderes-vazios`), como repetir um valor (`PoderRepetido { posicao }`, `poder-repetido`). **Exige `"plataformas": ["app"]`**: o túnel abre um socket na máquina de quem joga, o navegador não tem como, e um MOD que também rodasse lá (`plataformas` ausente quer dizer as duas) prometeria um poder que não existe (`PoderesExigemSoOApp`, `poderes-exigem-so-o-app`). **Exige a metade de máquina** (`poderes-sem-maquina`): um poder é o que a máquina faz, e sem ela ninguém o exerce. E `porta` exige a permissão `entrar-no-jogo` em `permissoes` (`PortaSemEntrarNoJogo`, `porta-sem-entrar-no-jogo`): uma porta que ninguém pode abrir é recusada na instalação, com o nome, e não calada. |
+| `maquina` | opcional: o caminho, dentro do pacote, do script que roda **na máquina de quem hospeda o jogo** (a metade de máquina, adiante). Fora do pacote é recusado (`MaquinaForaDoPacote`, `maquina-fora-do-pacote`); sem `poderes` também (`MaquinaSemPoderes`, `maquina-sem-poderes`); e sem a chave `server` também (`MaquinaSemServidor`, `maquina-sem-servidor`), porque quem pede ao dono da máquina que aceite é a metade de servidor. Numa API anterior à 8 é recusado como `poderes-pedem-api-nova` (a mesma recusa de `poderes`). |
 | `state` | opcional: a versão do esquema dos seus dados, para as suas migrações. Lida, e ainda não usada pelo produto. |
 
 **Chave desconhecida é recusada, e é de propósito.** `vesion` com um `s` a menos
 instalaria calado um MOD sem versão, e você nunca ficaria sabendo. A recusa é a
 única forma de retorno que este formato te dá.
 
-**Este build executa a API 6, e só ela.** Um `api` mais novo é recusado como
+**O build desta linha (a 2, em desenvolvimento) executa as APIs 8, 7 e 6.** Um `api` mais novo é recusado como
 `api-too-new`. Um `api` de 3 a 5 é recusado como `api-too-old`, e a tela aponta
 o Servidor 0.15 no launcher, que é a linha onde as APIs 3, 4 e 5 continuam
 rodando. A 1 e a 2 rodavam na janela do produto, e isso não volta
@@ -138,7 +164,9 @@ SeeleUI.contribuicoes.registrar({
 | `SeeleUI.tema(valores, { previa: true, superficie })` | a prévia de um tema, só nesta máquina e só enquanto a superfície estiver de pé. O tema que todos veem é o da metade de servidor (ver «O tema»). |
 | `SeeleUI.aoEvento(fn)` | o que a pessoa faz no que o MOD desenhou, o que muda na tela e o aviso da metade de servidor voltam por aqui, sem número e sem resposta. Um ouvinte só, e o último vence. |
 | `SeeleUI.pedaco(arquivo, inicio)` e `SeeleUI.soltar(arquivo)` | leem em pedaços o arquivo que alguém escolheu pela forma `arquivo`, e o devolvem. O MOD recebe identificador, papel e tamanho, e nunca o caminho. |
-| `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor uma imagem escolhida, até 100 MiB (10 MiB antes da 0.19), por um fluxo próprio. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
+| `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor um arquivo escolhido, por um fluxo próprio. **Os tipos, cada um com o seu teto**: imagem (`png`, `jpeg`, `webp`, `gif`) e som (`wav`, `mp3`, `ogg`, `flac`, `m4a`) até 100 MiB (10 MiB antes da 0.19); o **`.mrpack`** do Modrinth (`application/x-modrinth-modpack+zip`: um zip com `modrinth.index.json` na raiz, conferido pelos bytes) até 64 MiB, só quando o `arquivo` pede `tipos: ['pack']` e a espera aceita `mrpack`. Acima do teto, `arquivo-grande-demais` com `tamanho` e `teto`. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
+| `SeeleUI.salvar({ pedido, nome, canal })` | **só para o MOD da API 8 com o poder `porta`**, e só no app, de dentro de um clique (como o túnel). Entrega a quem joga um arquivo que a sua metade de servidor guardou no volume (o `.mrpack`), pelo **diálogo de salvar do sistema**: `pedido` vai ao seu `aoPedir`, que autoriza com `{ ok: true, volume: volume.servir(caminho) }`; `nome` é só a sugestão (limpa: sem barra, sem começar por ponto). Resolve com `{ bytes }`, ou `null` se a pessoa cancelou. **O caminho nunca volta ao MOD.** |
+| `SeeleUI.tunel.entrar(nome)` | **só existe para o MOD da API 8 que declara o poder `porta`**, e só no app. Abre a porta de quem joga até o jogo `nome` e resolve com o **número da porta em `127.0.0.1`** onde o jogo desta pessoa deve ligar (ver «A metade de máquina»). Só vale chamado de dentro do ouvinte de um `botao`, na mesma volta; as recusas que ele dá estão em «Os tetos e as recusas», na metade de máquina. |
 | `SeeleUI.capacidades()` | o que este build oferece ao seu MOD, nesta plataforma. `estilos` e `classes` estão na lista como rótulos: nada pergunta por eles, e o estilo de um nó vale onde a forma dele monta. |
 | `console` | cada chamada vira uma linha no `seele.log` da máquina que roda o MOD (ver «Quando o MOD não faz o que devia»). |
 | `setTimeout`, `setInterval` e os dois `clear` | a fachada do relógio do anfitrião, com até 256 de pé; acima disso devolvem `0`, que é o «não deu». |
@@ -913,6 +941,37 @@ existe.
 
 `carga` é JSON. Sempre. Faça `JSON.parse`.
 
+**Três momentos a mais, só para o MOD que declara `maquina`** e só para **ele**
+(nenhum outro MOD os recebe). São a forma de a metade de servidor saber o que a
+pessoa dona da máquina respondeu, e o servidor sempre diz: um pedido não termina
+em silêncio.
+
+| momento | quando | `carga` |
+|---|---|---|
+| `MaquinaAceitou` | a pessoa viu a tela e aceitou, e a máquina subiu | `{ "servidor": "mc-1", "pessoa": 4 }` |
+| `MaquinaRecusou` | a pessoa recusou, ou o pedido não pôde ser feito | `{ "servidor": "mc-1", "pessoa": 4, "motivo": "pelo-dono" }` |
+| `MaquinaParou` | a máquina deixou de servir | `{ "servidor": "mc-1", "pessoa": 4, "motivo": "saiu" }` |
+
+`servidor` é o nome do servidor de jogo que **você** deu no pedido, e `pessoa`, o
+número de quem foi chamada. Os `motivo`s de `MaquinaRecusou` são `pelo-dono`,
+`sem-tela` (o app daquela pessoa não tinha tela para mostrar a oferta),
+`so-no-app` (quem recebeu o pedido era um navegador), `pacote-diferente` (o MOD
+que ela tem não é o que o servidor ligou), `oferta-invalida` (a oferta não passou
+na conferência dela) e três do servidor: `nao-esta-aqui` (a pessoa não está
+conectada), `pendentes-demais` e `maquinas-demais` (os tetos do servidor). Os de
+`MaquinaParou` são `pelo-dono`, `revogada`, `app-fechou` e `metade-falhou` (o que
+a máquina informou), `saiu` (a pessoa saiu do servidor), `mod-desligado` e
+`outro-pedido` (o servidor desligou o MOD, ou chamou outra máquina para o mesmo
+jogo).
+
+**Um momento que pede de novo a mesma coisa que acaba de ser recusada não gira.**
+Se o seu `aoAcontecer` responde a um `MaquinaRecusou` com outro
+`mundo.maquinas.pedir` à mesma pessoa, a mesma recusa do servidor, ou uma recusa
+automática (`sem-tela`, `so-no-app`) que ela deu sozinha, dentro de **5 s**, não
+volta como momento e não gera um novo pedido: fica no `seele.log`. O MOD já leu
+essa recusa uma vez. Uma recusa que a pessoa dá (`pelo-dono`) é diferente: cada
+pedido seu abre a tela de novo, e isso quem limita é ela.
+
 Um MOD sem `aoAcontecer` não é erro: é um MOD cuja metade de servidor existe
 para outra coisa.
 
@@ -997,6 +1056,43 @@ mundo.tema({ fundo: "#0b1d2a", texto: "#f5f1e6" });           // → { ok } ou {
   `chave`. O servidor guarda o tema, e ele sobrevive ao reinício; `null` o tira.
   O servidor não confere quem pediu: leia `contexto.admin`, se quiser restringir.
 
+**`mundo.maquinas` existe só no MOD cujo manifesto declara `maquina`**; em
+qualquer outro, `typeof mundo.maquinas` é `"undefined"`. É o par da porta de
+quem joga: aqui a metade de servidor chama alguém a hospedar o jogo.
+
+```js
+mundo.maquinas.pedir({ quem: 4, servidor: "mc-1", oferta: { /* ver «A metade de máquina» */ } });
+mundo.maquinas.avisar({ servidor: "mc-1", carga: { ligar: true } });
+```
+
+- **`pedir({ quem, servidor, oferta })`** chama a pessoa `quem` (o número, ou o
+  texto de `contexto.person`) a rodar a máquina do servidor de jogo `servidor`
+  (de 1 a 32 caracteres, `a-z`, `0-9` e `-`, sem `-` nas pontas). Não devolve
+  nada: a resposta vem depois, como momento (`MaquinaAceitou`,
+  `MaquinaRecusou`). É **declarativo, como o `mundo.avisar`**: o pedido só sai
+  se a chamada terminar bem e o quintal gravar. Dentro de uma chamada vale o
+  mais novo de cada `servidor`, e até 4 servidores de jogo.
+- **`avisar({ servidor, carga })`** manda a `carga` (um valor JSON) à máquina
+  aceita daquele `servidor` e **a ninguém mais**. Chega à metade de máquina por
+  `maquina.aoAviso`, como texto. Até 1 KiB, 4 por segundo por MOD e 16 servidores
+  por chamada; o excedente fica, por servidor, só o mais novo. **Isto é estado, e
+  não um fluxo de comandos**: dois avisos seguidos ao mesmo servidor podem virar
+  um só, o último. Sem máquina aceita, nada sai, e a chamada não lança: o
+  `seele.log` diz `sem-maquina`.
+- **O que lança**, com o nome na mensagem: `pedido-invalido` (o argumento não é
+  um objeto), `servidor-invalido`, `quem-invalido`, `oferta-invalida:<campo>`
+  (`<campo>` é o da regra que falhou, como `titulo`, `tuneis` ou
+  `artefato_hash`, ou a **chave que a oferta não tem**: uma chave desconhecida é
+  recusada, e não ignorada, para que `tunels` não vire uma oferta calada sem
+  portas), `pedidos-de-maquina-demais`, `aviso-invalido`, `aviso-grande-demais`
+  e `avisos-a-maquina-demais`. São exceções, ao contrário do `mundo.avisar`: um
+  pedido errado deve falhar na chamada que o fez.
+- **`aoPedir` ganha `contexto.maquina`**: `{ "servidor": "mc-1" }` quando quem
+  pede é a **máquina aceita** daquele servidor de jogo (pelo `maquina.pedir`,
+  adiante), e **ausente** em todo outro pedido. Nesse caso `contexto.person` é a
+  pessoa que opera a máquina, e `contexto.channel`, `null`. Quem não é a máquina
+  aceita não chega ao MOD: o servidor responde `sem-aceite` sozinho.
+
 ### `volume` — imagens grandes
 
 Para a imagem que não cabe numa mensagem: até 100 MiB (10 MiB antes da 0.19), sem passar pelo QuickJS. Mostrar na tela continua limitado ao bolso de mídia da superfície.
@@ -1016,6 +1112,18 @@ volume.apagar("retratos/coelho.png");                               // → true/
 - **Os tipos são `png`, `jpeg`, `webp` e `gif`**, e o que chega é conferido
   pelos bytes, e não pelo nome. Um HEIC rejeita a janela com `tipo-recusado` e
   `detectado: 'heic'`.
+- **E `mrpack`** (API 8 parte 6): o `.mrpack` do Modrinth, conferido pelos
+  bytes (um zip com `modrinth.index.json` na raiz), **até 64 MiB**; a imagem
+  vai até 100 MiB (desde a 0.19). O teto vale **pelo tipo**: antes do primeiro
+  byte, o do maior tipo que a espera aceita; lidos os primeiros bytes, o do
+  tipo que eles são — um `.mrpack` de 80 MiB numa espera de `png` e `mrpack`
+  morre ali, com `arquivo-grande-demais`. A leitura de volta vai até 64 MiB
+  quando os bytes servidos são um `.mrpack`, e até 100 MiB numa imagem.
+- **`volume.pack(caminho)`** (só para o MOD com metade de máquina) devolve
+  `{ ok: true, bytes, sha512, indice }`: o tamanho, o SHA-512 dos bytes e o
+  texto do `modrinth.index.json`, que o produto tira do zip; ou `{ ok: false,
+  erro }` (`nao-existe`, `grande-demais`, `nao-e-pack`, `indice-ilegivel`). As
+  regras do índice são do MOD; o produto só o abre.
 - Do outro lado, a janela manda com `SeeleUI.enviar(arquivo, token)`, e a
   promessa resolve depois da gravação. **Ler de volta**: toda mídia de servidor
   aceita `doServidor: { canal, pedido: { …, transporte: 'volume' }, campo }`
@@ -1040,6 +1148,476 @@ bug que lança em todo evento tira o seu MOD do ar até alguém religá-lo.
 Os 225 ms não são de relógio: são de trabalho. Uma máquina lenta te dá o mesmo
 tanto de operações e demora mais, em vez de te cortar antes.
 
+## A metade de máquina
+
+Um servidor de jogo (um Minecraft, um Terraria) não roda dentro de um MOD, e o
+MOD não pode ser quem decide, sozinho, que o computador de alguém passa a rodar
+um programa e a abrir uma porta. Este é o desenho que cabe nessas duas frases:
+**o MOD pede, a pessoa dona do computador vê o que vai acontecer e decide, e só
+então a metade de máquina do MOD sobe nesse computador.** Quem joga abre a sua
+ponta da porta com um clique.
+
+São três metades trabalhando, e é bom saber qual faz o quê:
+
+| metade | onde roda | o que faz |
+|---|---|---|
+| servidor (`servidor/main.js`) | a máquina de quem hospeda o servidor SEELE | chama alguém a hospedar o jogo (`mundo.maquinas.pedir`), ouve o aceite, avisa a máquina |
+| máquina (`maquina/main.js`) | o computador de quem aceitou, **só no app** | baixa e roda o jogo (`maquina.programa`), abre a porta dele (`maquina.porta.servir`) e para tudo ao parar |
+| cliente (`cliente/main.js`) | o computador de quem joga, **só no app** | mostra o botão; no clique, `SeeleUI.tunel.entrar(nome)` |
+
+### O fluxo inteiro
+
+**1. A metade de servidor pede.** Quem hospeda o servidor SEELE e administra o
+jogo aperta um botão, e a metade de servidor decide quem é chamado (autorize pelo
+`contexto`, como sempre):
+
+```js
+// servidor/main.js
+globalThis.aoPedir = (contexto, pedido) => {
+  const quem = JSON.parse(contexto);
+  const o_que = JSON.parse(pedido);
+
+  if (o_que.op === "hospedar") {
+    if (!quem.admin) return JSON.stringify({ ok: false, erro: "so-admin" });
+    mundo.maquinas.pedir({
+      quem: quem.person,            // o texto de `contexto.person` serve
+      servidor: "mc-1",
+      oferta: {
+        titulo: "Minecraft",
+        receita: "minecraft-java",
+        versao_da_receita: "1.0.0",
+        versao_do_jogo: "1.21.4",
+        tuneis: [{ nome: "mc", protocolo: "tcp", porta: 25565 }],
+        artefatos: [{
+          nome: "server.jar",
+          url: "https://piston-data.mojang.com/server.jar",
+          tamanho: 51000000,
+          hash: { algoritmo: "sha256", hex: "…64 caracteres hexadecimais…" },
+        }],
+        origens: ["piston-data.mojang.com"],
+        rodar: { comando: "java", argumentos: ["-jar", "server.jar", "nogui"] },
+        disco_maximo: 2000000000,
+        termos: [{ titulo: "EULA do Minecraft", url: "https://aka.ms/MinecraftEULA" }],
+      },
+    });
+    return JSON.stringify({ ok: true });
+  }
+
+  // O pedido da própria máquina aceita (ver adiante): `contexto.maquina` existe.
+  if (quem.maquina && o_que.pronto) {
+    mundo.avisar({ carga: { servidor: quem.maquina.servidor, no_ar: true } });
+    return JSON.stringify({ ok: true });
+  }
+  return JSON.stringify({ ok: false, erro: "operacao-desconhecida" });
+};
+```
+
+Um campo ausente vira vazio (`""`, `[]`, `null` ou `0`), mas **nem todo campo
+pode ficar vazio**: `titulo`, `receita`, `versao_da_receita` e `versao_do_jogo`
+são textos não vazios; cada túnel tem `nome` válido, `porta` de 1 a 65535 e
+`protocolo` `"tcp"` ou `"udp"` (outro valor, ou ausente, é `tuneis`); cada
+artefato tem `tamanho` de pelo menos 1 e um `hash` válido (`sha1`, `sha256` ou
+`sha512`, com o `hex` do tamanho dele) e, se quiser, `plataformas`: os
+sistemas em que ele serve (`windows-x64`, `mac-aarch64`, `mac-x64`,
+`linux-x64`, `linux-aarch64`; ausente é em todos). A metade de servidor não sabe
+o sistema da máquina antes do aceite, então um jogo que pede um runtime (o Java)
+manda o de cada sistema, cada um marcado: a tela soma só os da máquina, e o
+`programa` recusa baixar os outros. Uma oferta que não passa **lança na
+hora**, com o nome da regra (`oferta-invalida:titulo`, `oferta-invalida:tuneis`,
+`oferta-invalida:artefato_hash`), e não na máquina da outra pessoa.
+
+**2. O dono vê a tela do produto.** O pedido chega ao app da pessoa chamada, e
+**quem desenha a tela é o SEELE, e não o MOD**: o texto do MOD (o título do jogo,
+os nomes, as URLs) entra nela como texto, nunca como forma, e nenhuma superfície
+do MOD pode cobri-la ou imitá-la. A tela diz, nesta ordem:
+
+- **quem pede, e em que servidor**, e o MOD, com o `id` dele;
+- **o jogo**: o título e a versão, a receita e a versão dela;
+- **a porta**: em qual porta o jogo escuta, e que quem está no servidor a alcança
+  pelo SEELE;
+- **o que vai baixar**: cada arquivo deste computador, com o nome, o host de onde
+  vem e o tamanho, e a soma; quantos são de outros sistemas (e não se baixam
+  aqui); e as `origens`, de onde mais arquivos podem vir, cada um com hash;
+- **o que vai rodar** (o comando e os argumentos), ou que não há programa nenhum;
+- **o disco**: até quanto ocupa, e em que pasta;
+- **de onde o jogo baixa por conta própria**, sem o SEELE conferir, quando a
+  oferta declara `dominios_do_jogo`;
+- **os termos** do jogo: cada um com uma caixa para marcar, e a frase de que
+  quem os aceita é a pessoa, e não o SEELE nem o MOD;
+- o aviso da conta (ver «Avisar e isolar depois») e que ela **desliga quando
+  quiser**, pela faixa no alto da tela.
+
+**ACEITAR E LIGAR fica desligado até todas as caixas dos termos estarem
+marcadas.** Esc é RECUSAR, e o clique fora da tela não responde nada: nada aceita
+por acidente. Se a pessoa
+já aceitou **exatamente isto** antes, o app não pergunta de novo; se algo mudou,
+a tela diz o quê («isto mudou desde o seu aceite: o programa e os argumentos»).
+Quem hospeda não vê a tela, e o MOD não a vê, não a pode ler e não a pode
+calar: ele só fica sabendo o desfecho.
+
+**3. `MaquinaAceitou`.** A metade de servidor recebe o momento (ou
+`MaquinaRecusou`, com o motivo), e é aqui que se atualiza o que as janelas veem:
+
+```js
+globalThis.aoAcontecer = (momento, carga) => {
+  const c = JSON.parse(carga);
+  if (momento === "MaquinaAceitou") {
+    mundo.avisar({ carga: { servidor: c.servidor, aceito: true } });
+  } else if (momento === "MaquinaRecusou") {
+    mundo.registrar(`${c.servidor}: recusado (${c.motivo})`);
+  } else if (momento === "MaquinaParou") {
+    mundo.avisar({ carga: { servidor: c.servidor, no_ar: false, motivo: c.motivo } });
+  }
+};
+```
+
+**4. A metade de máquina sobe e abre a porta.** Depois do aceite, o app lê o
+`maquina/main.js` do pacote **que a pessoa aceitou** (o mesmo hash) e o roda num
+contexto só dele. Aqui existe o objeto `maquina`:
+
+```js
+// maquina/main.js
+const t = maquina.oferta.tuneis[0];           // a oferta que a pessoa aceitou, congelada
+
+maquina.aoAviso((carga) => {                  // o `mundo.maquinas.avisar`
+  const aviso = JSON.parse(carga);
+  console.log(`aviso do servidor: ${carga}`);
+});
+
+maquina.aoParar(async (motivo) => {           // uma vez só; o app espera até 2 s
+  await maquina.porta.parar(t.nome);
+});
+
+maquina.porta.servir({ nome: t.nome, protocolo: t.protocolo, porta: t.porta })
+  .then(() => maquina.pedir({ pronto: true }))   // vai ao `aoPedir`, com `contexto.maquina`
+  .catch((falha) => console.warn(`a porta não abriu: ${falha.erro}`));
+```
+
+- **`maquina.servidor`** é o nome do servidor de jogo. **`maquina.oferta`** é a
+  oferta aceita, com os mesmos campos do pedido, congelada.
+- **`maquina.porta.servir({ nome, protocolo, porta })`** abre a ponta do jogo:
+  anuncia ao servidor que esta máquina serve o jogo `nome`. **Só serve o que a
+  oferta aceita declara**: um nome, um protocolo ou uma porta que não estejam em
+  `maquina.oferta.tuneis` são recusados com `fora-do-aceite`, antes de qualquer
+  coisa ir ao fio. `maquina.porta.parar(nome)` a fecha, e
+  `maquina.porta.quedas(nome)` devolve `[[motivo, quantas], …]`: por que as
+  conexões de quem joga caíram. As três só existem com o poder `porta`.
+- **`maquina.pedir(valor)`** manda `valor` (qualquer JSON) ao `aoPedir` da
+  metade de servidor **como a máquina**: `contexto.maquina` vem como
+  `{ servidor }`. Resolve com a resposta, em texto. É assim que a máquina diz
+  «estou no ar». Rejeita com `sem-aceite`, `sem-resposta` ou `sessao-encerrada`.
+- **`maquina.aoAviso(fn)`** recebe cada `mundo.maquinas.avisar` (o último ouvinte
+  vence). **`maquina.aoParar(fn)`** é chamado uma vez, com o `motivo`, antes de a
+  máquina cair; se devolver uma promessa, o app espera até **2 s** por ela.
+
+**5. Quem joga clica.** Do outro lado, a metade de cliente da pessoa que quer
+jogar desenha o botão, e **a porta se abre no clique**, e em nenhum outro lugar:
+
+```js
+// cliente/main.js
+let pagina;
+(async () => {
+  pagina = await SeeleUI.superficies.criar({ id: "jogo", tipo: "pagina", titulo: "Jogo" });
+  await pagina.montar([
+    { forma: "botao", chave: "entrar", dentro: "ENTRAR NO JOGO" },
+    { forma: "texto", chave: "t", dentro: "" },
+  ]);
+})();
+
+SeeleUI.aoEvento(async (evento) => {
+  if (evento.nome === "botao" && evento.chave === "entrar") {
+    try {
+      const porta = await SeeleUI.tunel.entrar("mc");   // a primeira linha do ouvinte
+      await pagina.atualizar("t", { forma: "texto", chave: "t", dentro: `Jogo em 127.0.0.1:${porta}` });
+    } catch (falha) {
+      await pagina.atualizar("t", { forma: "texto", chave: "t", dentro: `Não abriu: ${falha.erro}` });
+    }
+  }
+});
+```
+
+`SeeleUI.tunel.entrar(nome)` resolve com o número da porta em `127.0.0.1` onde o
+jogo desta pessoa deve se conectar: a do próprio jogo, ou a primeira livre das 64
+seguintes se aquela estiver ocupada. O produto desenha, fora de qualquer
+superfície do MOD, uma faixa com cada porta aberta: a porta, o nome, o MOD, por
+onde o tráfego anda, a latência e a última queda, em frase. **O MOD não a
+desenha, não a cala e não a lê.** O clique que abre a porta é o consentimento
+de quem clicou: por isso o `entrar` leva um **bilhete de gesto** que a casca emite
+junto do evento `botao`, que vale 2 s e se gasta no primeiro uso. Chamá-lo sem
+ele (num temporizador, num `then` de outra coisa, inventado, vencido ou já gasto)
+rejeita com `fora-de-um-clique`, e nada vai ao núcleo. Chame-o na mesma volta do
+ouvinte, **antes de qualquer `await`**.
+
+**6. DESLIGAR, e `MaquinaParou`.** Enquanto a máquina está ligada, o app mostra
+uma **faixa no alto de qualquer tela** (e a lista de aceites, em CONFIGURAÇÕES,
+também tem DESLIGAR e REVOGAR), e ela diz o que está rodando. DESLIGAR chama o
+`aoParar("pelo-dono")` da metade de máquina, fecha as portas, encerra a metade
+e avisa o servidor, e a metade de servidor recebe `MaquinaParou` com o motivo. O
+aceite continua guardado: o próximo pedido idêntico liga sozinho. REVOGAR faz o
+mesmo e **apaga** o aceite, para que o próximo pergunte. A máquina também para,
+sem a pessoa pedir, quando ela sai do servidor (`servidor-saiu`), fecha o app
+(`app-fechou`), o MOD é desligado no servidor (`mod-desligado`), o servidor passa
+o jogo a outra máquina (`outro-pedido`), o servidor deixa de reconhecer o aceite
+(`sem-aceite`), ou a própria metade de máquina falha (`metade-falhou`; aí o
+`aoParar` não é chamado, porque a metade já caiu). A tela da pessoa diz o motivo
+em frase; o `MaquinaParou` que o MOD lê leva o nome da lista da seção
+«aoAcontecer». **Os nomes não são os mesmos nas duas pontas**: o `aoParar(motivo)`
+da metade de máquina recebe os do app (`servidor-saiu`, `sem-aceite`, …), e o
+`MaquinaParou` da metade de servidor diz `saiu` para a mesma causa.
+
+### O poder `programa`: baixar, abrir, escrever e rodar
+
+Com `"poderes": ["programa"]`, a metade de máquina ganha `maquina.programa`.
+**Tudo nele é preso ao aceite guardado neste computador**, e não ao que a metade
+pede: o app monta a política do aceite que o dono deu (os hosts dos artefatos e
+as `origens`, os artefatos deste sistema com o hash e o tamanho mostrados, o
+`rodar`, o `disco_maximo` e a pasta), e `maquina.oferta` é só uma cópia para ler.
+Sem aceite que confira (a oferta, a versão, o pack ou o pacote mudaram e o dono
+ainda não aceitou de novo), todo pedido do `programa` rejeita com `sem-aceite`
+ou `aceite-diferente`.
+
+```js
+// maquina/main.js — o Minecraft, do download ao «Done»
+(async () => {
+  const java = maquina.oferta.artefatos.find((a) => a.plataformas?.includes(maquina.plataforma));
+  const jar = maquina.oferta.artefatos.find((a) => a.nome === "server.jar");
+
+  await maquina.programa.baixar({
+    url: jar.url, sha1: jar.hash.hex, tamanho: jar.tamanho, destino: "server.jar",
+    aoProgresso: ({ recebidos, total }) => console.log(`${recebidos}/${total}`),
+  });
+  await maquina.programa.baixar({ url: java.url, sha256: java.hash.hex, tamanho: java.tamanho, destino: "java.tar.gz" });
+  await maquina.programa.desempacotar({ arquivo: "java.tar.gz", destino: "java", raiz: "jdk-21.0.5+11-jre/Contents/Home" });
+  await maquina.programa.escrever({ destino: "eula.txt", texto: "eula=true\n" });
+  await maquina.programa.escrever({ destino: "server.properties", texto: "server-port=25565\nserver-ip=127.0.0.1\n" });
+
+  const jogo = await maquina.programa.rodar({ comando: "java/bin/java", argumentos: ["-jar", "server.jar", "nogui"], pasta: "" });
+  jogo.aoLinha((linha) => {
+    if (/\]: Done \(/.test(linha)) maquina.porta.servir(maquina.oferta.tuneis[0]);
+  });
+  jogo.aoSair((fim) => maquina.pedir({ caiu: !fim.mortoAPedido, codigo: fim.codigo }));
+
+  maquina.aoParar(async () => {            // com o jogo de pé, o app espera até 20 s
+    await jogo.escrever("stop");
+    await jogo.fim;
+  });
+})().catch((falha) => console.warn(`não ligou: ${falha.erro} ${falha.frase ?? ""}`));
+```
+
+- **`maquina.plataforma`**: o sistema deste computador, no nome das receitas.
+- **`baixar({ url, sha1 | sha256 | sha512, tamanho, destino, aoProgresso })`**
+  resolve com `{ destino, tamanho, algoritmo, hash }` quando o arquivo chegou e
+  bateu. **Já está**: um `destino` que já tem o tamanho e o hash declarados
+  volta com `jaEstava: true`, sem pedir nada à rede (o MOD que sobe a cada
+  partida do app não baixa tudo de novo). Só `https`. **Duas portas**: uma URL que é de um artefato aceito para
+  este computador só baixa com o hash (do mesmo algoritmo) e o tamanho que a
+  tela mostrou (`diferente-do-aceito`); a de um artefato de outro sistema não
+  baixa (`artefato-de-outro-sistema`); qualquer outra URL só baixa de um host das
+  `origens` (`fora-dos-artefatos-aceitos`), com o hash que você declarar. Vale o
+  hash mais forte declarado; um redirecionamento é seguido só dentro dos hosts do
+  aceite (declare o CDN nas `origens`: o GitHub redireciona para
+  `release-assets.githubusercontent.com`). O arquivo só aparece em `destino` se
+  o tamanho e o hash bateram; antes, é um parcial que some em qualquer falha.
+- **`escrever({ destino, texto })`**: um texto de até 64 KiB, trocado de uma vez.
+  É para o que o jogo lê e que não pede aceite novo (a configuração, o
+  `eula.txt` que a pessoa aceitou na tela).
+- **`desempacotar({ arquivo, destino, raiz, mesclar })`** abre um `.tar.gz` ou um `.zip`
+  da pasta em `destino`, com só o que está sob `raiz` dentro do pacote. Links não
+  são criados (`linksPulados`); uma entrada com `..` recusa o pacote inteiro.
+  Sem `mesclar`, o destino inteiro é trocado; **com `mesclar: true`**, o que sai
+  entra por cima, arquivo a arquivo, e o resto fica — é como os `overrides` e
+  os `server-overrides` de um modpack entram na pasta do jogo, onde já moram o
+  mundo e os mods (`destino: ""` é a própria pasta).
+- **`trazer({ pedido, destino })`** (parte 6): o pack que a sua metade de
+  servidor guardou no volume, pelo fluxo de volume (pela estrela): `pedido` vai
+  ao `aoPedir` dela, que autoriza com `{ ok: true, volume }`, e o produto **só
+  grava os bytes se tiverem o hash de `oferta.pack`** (`pack-diferente`, com
+  `esperado` e `obtido`; nada gravado). Um destino que já tem o hash aceito
+  volta `{ jaEstava: true }` sem pedir nada; o volume recusado volta
+  `pack-nao-veio` com o texto do servidor em `motivo`.
+- **`ler({ arquivo })`** (parte 6): um texto UTF-8 da pasta, até 4 MiB — o
+  `modrinth.index.json` do pack aberto.
+- **`rodar({ comando, argumentos, pasta })`**: só o comando e os argumentos
+  **exatos** do aceite — o `rodar` da oferta, ou o `instalar` dela (o passo de
+  instalar, como o instalador do loader de um modpack), cada um com os seus; o comando é um caminho dentro da pasta do servidor de
+  jogo (nunca procurado no `PATH`), e `pasta: ""` é ela mesma. O processo tem
+  `numero`, `pid`, `aoLinha(fn(linha, fluxo))` (`saida` ou `erro`; o que chega
+  antes do ouvinte fica guardado, até 256 linhas), `aoSair(fn(fim))` e `fim` (a
+  mesma saída como promessa: `{ codigo, mortoAPedido, linhasPerdidas,
+  linhasCortadas, linhasNaoOuvidas }`), `escrever(texto)` e `matar()`.
+- **`recusas()`** resolve com `{ nome: vezes }`: cada recusa desde que a metade
+  subiu. Mande-as à metade de servidor por `maquina.pedir` para a tela do MOD.
+
+**Toda recusa rejeita com o nome em `erro`, a frase inteira em `frase`, e os
+dados em campos** (`host` e `aceitos`, `esperado` e `obtido`, `usado`, `pedido` e
+`teto`...), e vai ao `seele.log` de quem aceitou. A lista fechada está em
+`api/v8.json`, `recusas.programa`.
+
+**Nada fica rodando.** Toda parada da metade — DESLIGAR, REVOGAR, o app fechando,
+o MOD desligado, a sessão que acabou, a metade que falhou — chama o `aoParar`
+(com um processo vivo, até 20 s, para o jogo salvar) e depois **mata e espera**
+cada processo e cada download. Soltar o objeto do processo não o mata; quem mata
+é a parada.
+
+**A pasta** é `<config>/jogos/<alvo>/<mod-id>/<servidor>/`, longe da identidade.
+Caminho absoluto e `..` são recusados, e um link que sai dela também.
+
+### Com mods: o `.mrpack`, o instalador e o pack de quem joga
+
+Um modpack do Modrinth chega à metade de servidor de dois jeitos, e os dois
+terminam no mesmo índice:
+
+- **Enviado**: o `arquivo` com `tipos: ['pack']` (até 64 MiB), a espera com
+  `volume.esperar(token, caminho, ['mrpack'], prazo)`, o `SeeleUI.enviar`, e
+  `volume.pack(caminho)` dá o `sha512` e o texto do `modrinth.index.json`.
+- **Pelo link**: `mundo.buscar` lê a API do Modrinth
+  (`/v2/project/<slug>/version`, que dá a URL do `.mrpack` no `cdn.modrinth.com`,
+  o `sha512` e o tamanho), e `mundo.buscarPack({ url, sha512, tamanho })` dá o
+  mesmo objeto de `volume.pack`, pelos tetos de `mundo.buscar` (2 s, 4 MiB; um
+  pack maior vai pelo envio). Nada passa pelo envio: a máquina baixa o `.mrpack`
+  direto do CDN, como artefato da oferta.
+
+A oferta leva `pack: { algoritmo: 'sha512', hex }` (o aceite prende o pack pelo
+hash) e, para o loader, **`instalar: { comando, argumentos }`**: o passo de
+instalar, que a tela mostra ao lado do `rodar` e que `rodar` aceita com os
+argumentos dele. Os domínios de onde o loader baixa sozinho vão em
+`dominios_do_jogo` («o jogo baixa por conta própria de: …»); os de onde os
+arquivos do pack vêm (`cdn.modrinth.com`, `github.com`...), em `origens`.
+
+Na máquina: `programa.trazer` (o enviado) ou `programa.baixar` (o do link),
+`desempacotar` do pack, `programa.ler` do índice, `baixar` de cada arquivo com o
+`sha512` dele (a segunda porta, pelas `origens`), `desempacotar` com `mesclar`
+dos `overrides` e depois dos `server-overrides` em `""`, e `rodar` do
+`instalar`. Quem joga recebe o mesmo pack com `SeeleUI.salvar({ pedido, nome })`,
+de dentro de um clique.
+
+### O que o aceite prende
+
+O que a pessoa viu e aceitou fica preso por um **resumo**: o SHA-256 de quatro
+coisas, nesta ordem.
+
+| entra no resumo | o que muda quando muda |
+|---|---|
+| o `id` do MOD | outro MOD pedindo o mesmo servidor de jogo não herda o aceite |
+| o **hash do pacote** (o conteúdo do MOD, inclusive o `maquina/main.js`) | **uma versão nova do MOD pede o aceite de novo**, mesmo que a oferta seja igual: o código que roda na máquina é outro, e o aceite era do código que a pessoa autorizou |
+| o nome do servidor de jogo (`servidor`) | outro `servidor` é outra máquina |
+| a **oferta inteira**: `titulo`, `receita`, `versao_da_receita`, `versao_do_jogo`, `tuneis`, `artefatos` (nome, URL, tamanho, hash), `pack`, `origens`, `dominios_do_jogo`, `rodar` (comando e argumentos), `disco_maximo`, `termos` | qualquer um destes que mude faz o app perguntar de novo, e a tela diz **qual** |
+
+**Não entra: quem pediu** (`pedido_por`). A mesma máquina, pedida por outra
+pessoa do servidor, é o mesmo aceite. **Nem a configuração do jogo**: ela não é
+campo da oferta, e o que o jogo lê para se configurar é arquivo da pasta dele,
+que a pessoa que hospeda pode mudar sem pedir de novo ao dono da máquina.
+
+**A tela e o resumo não são a mesma lista: o resumo prende mais do que a tela
+mostra, e nunca menos.** A tela mostra o MOD, o jogo e a versão dele, a receita e
+a versão dela, quem pediu e o servidor de jogo, cada porta com o protocolo,
+**cada arquivo deste computador** (nome, host e tamanho) e a soma, quantos são de
+outros sistemas, as `origens`, o comando com os argumentos, os
+`dominios_do_jogo`, o teto de disco com a pasta, e cada termo com a URL. Ela
+**não** mostra o `pack`, nem a URL inteira e o hash de cada arquivo, nem os
+arquivos de outros sistemas um a um — e o resumo prende todos eles. Tudo o que a tela mostra está no resumo, então nada do que a pessoa
+viu muda depois do aceite sem invalidá-lo; e o que ela não viu um a um também
+não muda calado: trocar o hash de um arquivo, ou o `pack`, pede o aceite de
+novo, e a tela diz qual campo mudou (`o que se baixa`, `o pack`). O aceite
+guarda o resumo, e não a oferta.
+
+O `nome` de cada artefato é um nome de arquivo, e só: letras e dígitos ASCII,
+`.`, `-` e `_`, até 256 bytes, e nem `.` nem `..`. Um nome com `/`, `\` ou
+espaço faz a oferta inteira ser recusada (`oferta-invalida`): ele vira caminho
+na pasta do servidor de jogo, e não pode sair dela.
+
+### Quando o servidor SEELE reinicia
+
+**O livro das máquinas do servidor mora na memória.** Os pedidos pendentes e os
+aceites somem quando o servidor SEELE reinicia, e **nenhum `MaquinaParou` é
+dado por eles**: não há quem o dê, porque o processo que lembrava deles acabou.
+A metade de máquina, do lado de quem hospeda, para com `servidor-saiu` quando a
+sessão cai. Então **a metade de servidor não pode supor que a máquina de antes
+continua de pé depois de subir**: ao subir de novo, peça outra vez
+(`mundo.maquinas.pedir`). Quem já aceitou a mesma oferta, com o mesmo pacote, é
+ligado de novo sem tela.
+
+E o pedido de novo, feito de um momento (`aoAcontecer`), pode não sair: por
+5 s depois de uma recusa automática da mesma pessoa para o mesmo servidor de
+jogo (`sem-tela` ou `so-no-app`), o servidor **descarta** o
+pedido que um momento repete — é a trava contra o laço que o `MaquinaRecusou`
+alimentaria sozinho. Ele não fica guardado para depois: fica no log, e o MOD não
+ouve nada. Um pedido legítimo nesse intervalo (logo depois de a sessão de
+alguém sair e voltar, por exemplo) precisa ser feito de novo depois dos 5 s,
+num momento seguinte, e não num laço apertado. Um pedido vindo de um `aoPedir`
+sempre sai.
+
+### O que a metade de máquina não tem
+
+Um contexto só dela, **sem tela e sem servidor**: não existem `SeeleUI`,
+`SeeleMods`, `dados` nem `mundo` (nem `fetch`, nem `localStorage`). O disco e a
+rede que ela tem são os do `maquina.programa`, presos ao aceite. Ela fala por
+três vias, e só: o `maquina`, o `console` (que escreve no `seele.log` de quem a
+roda) e os relógios (`setTimeout`, `setInterval`). Quem quiser rede, estado ou
+tela os pede à metade de servidor, por `maquina.pedir`; é a metade de servidor
+que decide. Os mesmos tetos de memória e de tempo das outras metades valem.
+
+### Os tetos e as recusas
+
+| teto | quanto |
+|---|---|
+| nome do servidor de jogo | 32 caracteres |
+| título | 64 bytes |
+| texto livre (receita, versões, nome de arquivo, comando, argumento, título de termo) | 256 bytes |
+| URL | 512 bytes, `https://` |
+| portas na oferta | 8 (nome válido, porta de 1 a 65535, sem nome repetido) |
+| arquivos a baixar | 16 (tamanho de 1 byte a 64 GiB, hash válido) |
+| `origens` e `dominios_do_jogo` | 16 cada, só o nome do host (sem esquema, sem porta; `*.exemplo.com` vale) |
+| argumentos do comando | 64 |
+| termos | 4, cada um com título e URL `https` |
+| `disco_maximo` | 64 GiB |
+| pedidos por chamada | 4 servidores de jogo |
+| avisos por chamada | 16 servidores de jogo |
+| um aviso | 1 KiB, e 4 por segundo por MOD |
+| pedidos pendentes e máquinas ligadas | tetos do servidor; acima, `MaquinaRecusou` com `pendentes-demais` ou `maquinas-demais` |
+
+Os nomes que o MOD lê, e onde:
+
+- **ao ligar o MOD (manifesto)**: `plataformas-pedem-api-nova`, `plataformas-vazias`,
+  `plataforma-repetida`, `poderes-pedem-api-nova`, `poderes-vazios`,
+  `poder-repetido`, `poderes-exigem-so-o-app`, `porta-sem-entrar-no-jogo`,
+  `poderes-sem-maquina`, `maquina-sem-poderes`, `maquina-fora-do-pacote` e
+  `maquina-sem-servidor`;
+- **na chamada da metade de servidor** (lançados): os de `mundo.maquinas`, acima;
+- **no momento `MaquinaRecusou`**: `pelo-dono`, `sem-tela`, `so-no-app`,
+  `pacote-diferente`, `oferta-invalida`, `nao-esta-aqui`, `pendentes-demais`,
+  `maquinas-demais`;
+- **no momento `MaquinaParou`**: `pelo-dono`, `revogada`, `app-fechou`,
+  `metade-falhou`, `saiu`, `mod-desligado`, `outro-pedido`;
+- **na metade de máquina** (`maquina.pedir` e `maquina.porta.*` rejeitam com
+  `e.erro`): `sem-aceite`, `sem-resposta`, `sessao-encerrada`, `fora-do-aceite`,
+  e os do servidor, como `nome-tomado` (outra máquina já serve esse nome neste
+  MOD) ou `tuneis-demais`;
+- **na metade de cliente** (`SeeleUI.tunel.entrar` rejeita com `e.erro`):
+  `fora-de-um-clique`, `so-no-app`, `nao-existe` (nenhuma máquina serve esse
+  nome), `sem-permissao` (a pessoa não tem a ação `entrar-no-jogo`),
+  `acao-nao-declarada`, `mod-sem-porta`, `nome-tomado`, `maquina-saiu`,
+  `tuneis-demais`, `canais-esgotados`, `servidor-antigo` (o servidor é de uma
+  versão que não leva jogo), `porta-local-ocupada`, `sem-resposta`, e
+  `fora-do-aceite`.
+
+### Avisar e isolar depois
+
+Esta parte **avisa**; não isola. O servidor do jogo roda com a conta de quem
+aceitou, e o que ele lê dentro desse computador não é separado do resto por
+nada que o SEELE faça agora. Por isso a tela do aceite diz, em linha própria e
+**fora da área que rola**, para que ninguém possa aceitar sem tê-la à vista:
+
+> o servidor do jogo roda com a sua conta deste computador, e pode ler o que ela lê.
+
+Escreva o MOD sabendo disso. O que a oferta declara que vai baixar e rodar fica
+preso ao aceite desde já (o `rodar`, os `artefatos`, os `dominios_do_jogo`), mas
+**quem baixa e executa o programa é o poder `programa`**, reservado à parte
+seguinte: nesta, o aceite, a metade de máquina e a porta existem, e o programa
+não. Não prometa a quem hospeda o que o produto ainda não faz, e não peça mais
+do que o jogo precisa: uma oferta com `disco_maximo` e `origens` justos é uma
+oferta que se aceita.
+
 ## No celular e no navegador
 
 A mesma API, o mesmo motor e os mesmos limites. O que muda é a casca, e o MOD
@@ -1057,6 +1635,19 @@ sabe dela por `retrato.onde`, `retrato.regioes` e o evento `lugar`.
   página. Pinça, área de acerto mínima e toque longo não estão na 6.
 - **No navegador, `SeeleUI.enviar` e o seletor de arquivo não existem**, como o
   que a plataforma não tem não existe.
+- **`plataformas` (API 8) diz onde o MOD roda**, e o celular conta como
+  `"navegador"`. Declare só `"app"` se o MOD depende do que só o app tem; o
+  celular e o navegador o pulam. **Um limite, dito como é**: antes de entrar, o
+  anúncio de aceite que o servidor manda não leva as plataformas (mensagem do
+  fio, ADR 0058), então um navegador pode baixar o pacote de um MOD só do app
+  durante o aceite. Ele **nunca o executa**; as plataformas chegam no catálogo
+  depois da entrada, e é aí que a casca o pula. Levá-las antes da entrada fica
+  para o plano seguinte. **`"plataformas": ["app"]` é também o que um MOD com
+  `poderes` tem de declarar**: o túnel e a metade de máquina abrem socket e
+  rodam coisa no computador, e o navegador (o celular com ele) não faz nenhum
+  dos dois; um MOD assim pula nele, e `SeeleUI.tunel.entrar` rejeita com
+  `so-no-app` se algum dia o chamarem lá. Para o que os MODs oficiais fazem no navegador hoje, ver
+  [`docs/evidencias/api-8/mods-oficiais-no-navegador.md`](evidencias/api-8/mods-oficiais-no-navegador.md).
 
 ## Testar antes de publicar
 

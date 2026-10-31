@@ -18,8 +18,8 @@
 //!   sonda de subida lê o que existe ([`crate::caminho::Transporte`]).
 
 pub use seele_enlace::{
-    CertificadoDtls, Conexao, ConfigDoAnfitriao, Discagem, Envio, FalhaAoDiscar, FalhaDoCanal,
-    Leitura, Motivo, Pino, Ponta, Recebe,
+    CanalDeTunel, CertificadoDtls, Conexao, Confiabilidade, ConfigDoAnfitriao, Datagramas,
+    Discagem, Envio, FalhaAoDiscar, FalhaDoCanal, Leitura, Motivo, Pino, Ponta, Recebe, Recusa,
 };
 
 /// O código de fechamento do «ficou para trás», o **mesmo** número do servidor:

@@ -200,6 +200,11 @@ pub enum ConnectError {
         mods: Vec<seele_proto::mods::ModAnunciado>,
         /// A identidade do conjunto, que é o que se guarda ao aceitar.
         conjunto: String,
+        /// Onde cada MOD roda, como o servidor disse **logo antes** do anúncio
+        /// (protocolo 12). `None` é «o servidor não disse» — um servidor 11, que
+        /// não conhece o quadro —, e a casca então baixa tudo, como sempre; `Some`
+        /// deixa o aceite pular o que não roda na plataforma dela.
+        plataformas: Option<Vec<seele_proto::mods::PlataformasDoMod>>,
     },
 
     /// Quem atendeu não é a sala do código para o qual se ligou (ADR 0060).
@@ -451,6 +456,15 @@ fn quarantine(path: &std::path::Path) {
         // guard.
         let _ = path;
     }
+}
+
+/// Por que um verbo do túnel não saiu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NaoSaiu {
+    /// O servidor negociou menos do que o verbo exige; nada foi escrito.
+    ServidorAntigo,
+    /// O fluxo de controle não aceitou a escrita.
+    Escrita(String),
 }
 
 /// A connected, verified client.
@@ -890,6 +904,34 @@ impl Client {
     #[must_use]
     pub fn ponta(&self) -> crate::transporte::PontaDaSessao {
         self.ponta.clone()
+    }
+
+    /// Um punho da conexão com o servidor: a estrela do túnel de jogo.
+    ///
+    /// Barato de clonar. O túnel abre e aceita canais `t`/`j` nela, e é só
+    /// isso que faz com ela: o fluxo de controle continua sendo de quem o lê.
+    #[must_use]
+    pub fn conexao(&self) -> crate::transporte::Conexao {
+        self.connection.clone()
+    }
+
+    /// Escreve um verbo do túnel de jogo (protocolo 12) no fluxo de controle.
+    ///
+    /// **Antes de escrever**, confere o verbo contra o número que o servidor
+    /// carimbou: um servidor 11 leria uma variante que não conhece e o fluxo
+    /// desalinharia. Recusado, nada vai ao fio.
+    ///
+    /// # Errors
+    ///
+    /// [`NaoSaiu::ServidorAntigo`] sem escrever; [`NaoSaiu::Escrita`] se o
+    /// fluxo de controle está fechado.
+    pub async fn enviar_verbo_do_tunel(&mut self, mensagem: &ClientMessage) -> Result<(), NaoSaiu> {
+        if !crate::tunel::verbo_cabe(self.carimbo, mensagem) {
+            return Err(NaoSaiu::ServidorAntigo);
+        }
+        frame::write_em(&mut self.send, self.carimbo, mensagem)
+            .await
+            .map_err(|erro| NaoSaiu::Escrita(erro.to_string()))
     }
 
     /// A fila por onde chegam os fluxos de tela, sem o byte de tipo.
@@ -3379,6 +3421,28 @@ async fn concluir(
     aceito: Option<&str>,
     mut answer: ServerMessage,
 ) -> Result<(SessionInfo, u8), ConnectError> {
+    // **As plataformas dos MODs, quando o servidor as diz** (protocolo 12): vêm
+    // imediatamente antes do anúncio, e só dele. Guardá-las e ler o quadro
+    // seguinte; qualquer coisa que não seja o anúncio ali — a sessão, uma
+    // segunda lista — é violação de protocolo, e não um silêncio que escolheria
+    // uma das listas. Uma lista que chegasse DEPOIS do anúncio cai no
+    // `ProtocolViolation` do fim desta função, no lugar em que se espera a sessão.
+    let mut plataformas = None;
+    if let ServerMessage::PlataformasDosMods { mods } = answer {
+        plataformas = Some(mods);
+        answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+            tracing::warn!(%error, "no announcement came back after the MOD platforms");
+            ConnectError::Unreachable
+        })?;
+        if !matches!(answer, ServerMessage::ModsExigidos { .. }) {
+            tracing::warn!(
+                ?answer,
+                "expected ModsExigidos right after PlataformasDosMods"
+            );
+            return Err(ConnectError::ProtocolViolation);
+        }
+    }
+
     // O anúncio de MODs, quando o servidor exige algum. ADR 0045.
     //
     // # Por que a decisão não é tomada aqui
@@ -3440,7 +3504,11 @@ async fn concluir(
                 quantos = mods.len(),
                 "o servidor exige um conjunto de MODs que esta máquina não aceitou"
             );
-            return Err(ConnectError::ModsNaoAceitos { mods, conjunto });
+            return Err(ConnectError::ModsNaoAceitos {
+                mods,
+                conjunto,
+                plataformas,
+            });
         }
     }
 
@@ -3543,8 +3611,13 @@ impl Transfers {
             "{}",
             resposta.erro.unwrap_or_default()
         );
+        // O teto do fio é o do maior tipo (hoje os 100 MiB de imagem da 0.19,
+        // acima dos 64 MiB do `.mrpack`): o servidor confere o de cada tipo
+        // pelos bytes, antes de servir.
         let lidos = entrada
-            .read_to_end(seele_proto::midia_de_mod::TETO_DE_ARQUIVO)
+            .read_to_end(
+                usize::try_from(seele_proto::volume::TETO_DO_FIO_DE_VOLUME).unwrap_or(usize::MAX),
+            )
             .await?;
         // O nome da lista `recusas.volume`, e não uma frase: ele chega ao MOD
         // em `e.erro` (a auditoria do `v6.json`, B2).

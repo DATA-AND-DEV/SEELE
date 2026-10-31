@@ -469,9 +469,129 @@ pub async fn por_onde(
     }
 }
 
+/// Quanto dura **cada** tentativa de discar, dentro do prazo de
+/// [`cumprir_apresentacao`].
+///
+/// Ver [`cumprir_apresentacao`] para por que são várias e não uma. Meio segundo
+/// é folgado para um aperto de mão em rede local e curto o bastante para
+/// caberem seis tentativas num prazo de três segundos — um par que exista
+/// responde na primeira ou na segunda, e um que não exista custa o mesmo prazo
+/// total de antes.
+const TENTATIVA_DE_PAR: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// O papel de uma ponta numa apresentação do servidor.
+///
+/// É o espelho de `seele_server::pares::Papel`: o ADR 0002 proíbe este crate de
+/// depender do servidor, e o fio não carrega o papel (cada mensagem já o
+/// implica: `SirvaTelaPara`/`SirvaTunelPara` servem, `AssistaTelaPor`/
+/// `AlcanceTunelPor` buscam).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Papel {
+    /// Quem empresta a subida (tela) ou hospeda o jogo (túnel): arma, fura o
+    /// NAT e atende.
+    Serve,
+    /// Quem assiste (tela) ou joga (túnel): disca.
+    Busca,
+}
+
+/// Cumpre uma apresentação do servidor, a da tela ou a do túnel: a metade que
+/// liga a ponta à outra e confere quem é.
+///
+/// # Quem serve atende; quem busca disca
+///
+/// As duas tentativas são simultâneas, e é isso que fura o NAT. Quem **serve**
+/// arma a ponta ([`passar_a_atender`]), fura o NAT para os endereços de quem
+/// vai discar a cada segundo enquanto espera, e atende ([`atender`]) —
+/// conferindo quem chega contra `impressao`. Desarma **sempre** ao fim, sirva
+/// ou não (fix round 3 da Task 5): armada, a ponta criaria estado para todo
+/// Binding que chegasse. Quem **busca** disca em tentativas curtas até o
+/// `prazo`, conferindo quem atendeu contra `impressao`.
+///
+/// # Por que várias tentativas, e não uma
+///
+/// O servidor manda as duas mensagens no mesmo instante, pelo mesmo barramento.
+/// Quem serve só passa a atender quando a mensagem dele chega e a tarefa roda,
+/// e quem busca disca quando a dele chega. Se a segunda vencer a primeira por
+/// um milissegundo, a discagem bate numa porta que ainda não abriu — e uma
+/// tentativa única leria isso como `NaoAlcancou`, que faria o servidor assumir
+/// algo que o par serviria perfeitamente um instante depois.
+///
+/// **`ImpressaoNaoBate` não é retentada.** É evento de segurança — alguém
+/// respondeu no lugar de quem o servidor apresentou —, e insistir contra quem
+/// se faz passar por outro é dar-lhe mais tentativas, não menos.
+///
+/// # Errors
+///
+/// Para quem busca, o último erro de [`ligar`] (ou `ImpressaoNaoBate`, na
+/// hora); [`motivo_de_falha`] o traduz para o que o protocolo leva. Para quem
+/// serve, [`ErroDePar::NaoAlcancou`] quando ninguém chegou a tempo.
+pub async fn cumprir_apresentacao(
+    ponta: &PontaDaSessao,
+    papel: Papel,
+    enderecos: &[std::net::SocketAddr],
+    impressao: String,
+    prazo: std::time::Duration,
+) -> Result<ParLigado, ErroDePar> {
+    match papel {
+        Papel::Serve => servir(ponta, enderecos, &impressao, prazo).await,
+        Papel::Busca => discar_ate_o_prazo(ponta, enderecos, &impressao, prazo).await,
+    }
+}
+
+async fn servir(
+    ponta: &PontaDaSessao,
+    enderecos: &[std::net::SocketAddr],
+    impressao: &str,
+    prazo: std::time::Duration,
+) -> Result<ParLigado, ErroDePar> {
+    passar_a_atender(ponta);
+    let furando = {
+        let ponta = ponta.clone();
+        let enderecos = enderecos.to_vec();
+        tokio::spawn(async move {
+            // Um furo a cada segundo enquanto se espera: a primeira rajada pode
+            // sair antes de quem busca começar a discar, e o NAT de cá fecha o
+            // mapeamento de um destino calado em poucas dezenas de segundos.
+            loop {
+                let furados = ponta.ponta().furar(&enderecos);
+                tracing::debug!(furados, "furando o NAT desta ponta para o par");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        })
+    };
+    let resultado = atender(ponta, impressao, prazo, prazo).await;
+    furando.abort();
+    // **Desarma sempre, sirva ou não sirva** (fix round 3): armada, a ponta
+    // criaria estado para todo Binding que chegasse.
+    parar_de_atender(ponta);
+    resultado.ok_or(ErroDePar::NaoAlcancou)
+}
+
+async fn discar_ate_o_prazo(
+    ponta: &PontaDaSessao,
+    enderecos: &[std::net::SocketAddr],
+    impressao: &str,
+    prazo: std::time::Duration,
+) -> Result<ParLigado, ErroDePar> {
+    let ate = tokio::time::Instant::now() + prazo;
+    let mut ultimo = ErroDePar::NaoAlcancou;
+    while tokio::time::Instant::now() < ate {
+        match ligar(ponta, enderecos, impressao.to_owned(), TENTATIVA_DE_PAR).await {
+            Ok(ligado) => return Ok(ligado),
+            Err(erro @ ErroDePar::ImpressaoNaoBate { .. }) => {
+                tracing::info!(%erro, "o par não veio; alguém respondeu no lugar dele");
+                return Err(erro);
+            }
+            Err(erro) => ultimo = erro,
+        }
+    }
+    tracing::info!(%ultimo, ?prazo, "o prazo do par acabou sem ligação");
+    Err(ultimo)
+}
+
 /// Traduz o motivo detalhado de [`ligar`] para o motivo enumerado que o
 /// protocolo leva ao servidor. Duas traduções exatas, e o resto é rotina.
-fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar {
+pub fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar {
     match erro {
         ErroDePar::ImpressaoNaoBate { .. } => {
             seele_proto::control::MotivoDeFalhaDePar::ImpressaoNaoBate
@@ -634,6 +754,80 @@ mod testes {
         assert_eq!(
             impressao_em_bytes(&impressao(&identidade)),
             Some(identidade.impressao())
+        );
+    }
+
+    /// As duas pontas pelo caminho que o motor e o túnel usam: quem serve arma,
+    /// atende e fura; quem busca disca; e quem serve desarma ao fim.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cumprir_apresentacao_liga_quem_serve_a_quem_busca_e_desarma_ao_fim() {
+        let serve = ponta();
+        let busca = ponta();
+        let impressao_serve = impressao(serve.identidade());
+        let impressao_busca = impressao(busca.identidade());
+        let onde_serve = serve.ponta().local_addr();
+        let onde_busca = busca.ponta().local_addr();
+        let prazo = std::time::Duration::from_secs(5);
+
+        let servindo = {
+            let serve = serve.clone();
+            tokio::spawn(async move {
+                cumprir_apresentacao(&serve, Papel::Serve, &[onde_busca], impressao_busca, prazo)
+                    .await
+            })
+        };
+        let buscando =
+            cumprir_apresentacao(&busca, Papel::Busca, &[onde_serve], impressao_serve, prazo)
+                .await
+                .expect("quem busca não ligou");
+        let servido = servindo
+            .await
+            .expect("a tarefa de quem serve travou")
+            .expect("quem serve não recebeu ninguém");
+        assert!(buscando.conexao.acabou().is_none());
+        assert!(servido.conexao.acabou().is_none());
+        assert!(
+            !serve.armada(),
+            "quem serve devolveu com a ponta ainda armada"
+        );
+    }
+
+    /// A impressão errada não é retentada nem confundida com «não alcancei»:
+    /// é o evento de segurança que o servidor precisa contar.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cumprir_apresentacao_de_quem_busca_nao_retenta_a_impressao_que_nao_bate() {
+        let serve = ponta();
+        passar_a_atender(&serve);
+        let busca = ponta();
+        let impressao_busca = impressao(busca.identidade());
+        let _atendendo = {
+            let serve = serve.clone();
+            tokio::spawn(async move {
+                atender(
+                    &serve,
+                    &impressao_busca,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
+        let erro = cumprir_apresentacao(
+            &busca,
+            Papel::Busca,
+            &[serve.ponta().local_addr()],
+            "f".repeat(64),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(erro, ErroDePar::ImpressaoNaoBate { .. }),
+            "saiu {erro:?}"
+        );
+        assert_eq!(
+            motivo_de_falha(&erro),
+            seele_proto::control::MotivoDeFalhaDePar::ImpressaoNaoBate
         );
     }
 

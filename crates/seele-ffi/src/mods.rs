@@ -20,7 +20,10 @@ use seele_core::mods::{hex, refusal_name, Found};
 /// número custa já está registrado em
 /// `crates/seele-conformance/tests/a_api_dos_mods_nao_diverge.rs`: a primeira
 /// divergência só apareceu no primeiro MOD de verdade.
-pub use seele_core::mods::{capacidades_da_api, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION};
+pub use seele_core::mods::{
+    capacidades_da_api, capacidades_da_maquina, capacidades_de, capacidades_do_manifesto, Poder,
+    APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
+};
 
 /// Ler um arquivo de mídia de um MOD — ver [`seele_core::mods::ler_midia`].
 ///
@@ -84,6 +87,63 @@ pub fn ler_por_hash(pasta: &str, hash: &str) -> Result<ModInstalado, String> {
         seele_core::mods::read_one(&dir).map(|lido| (lido.manifest, lido.hash)),
         hash,
     )
+}
+
+/// **A metade de máquina de um pacote** (API 8 parte 3): o fonte do arquivo
+/// que `manifesto.maquina` nomeia e o que ela pode chamar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadeDeMaquina {
+    /// `autor/nome`, do manifesto dos bytes lidos.
+    pub id: String,
+    /// O texto do arquivo.
+    pub fonte: String,
+    /// [`capacidades_da_maquina`] do mesmo manifesto.
+    pub capacidades: Vec<&'static str>,
+}
+
+/// Lê a metade de máquina do pacote de conteúdo `hash`.
+///
+/// **Só quem aceitou chama isto**, e no instante do aceite: o código da
+/// metade de máquina não é lido antes de o dono da máquina dizer sim. Por
+/// isso ela não passa por [`caminho_declarado`] — esse é o que a janela pode
+/// servir, e a metade de máquina **não** é servida à janela nunca.
+///
+/// O manifesto, o hash e o arquivo saem da mesma leitura da pasta: quem
+/// decide o que ela pode chamar é o mesmo manifesto que provou os bytes.
+///
+/// # Errors
+///
+/// `conteudo-nao-bate` quando o conteúdo não é o que o hash promete, o nome
+/// da recusa do manifesto, `sem-metade-de-maquina`, `maquina-fora-do-pacote`,
+/// `maquina-nao-lida` ou `maquina-nao-e-utf8`.
+pub fn codigo_da_maquina(pasta: &str, hash: &str) -> Result<MetadeDeMaquina, String> {
+    let dir = std::path::Path::new(pasta).join(PACOTES).join(hash);
+    // **Os bytes da metade saem da mesma leitura que deu o hash**: ler o
+    // arquivo de novo depois de conferir seria conferir uns bytes e rodar
+    // outros, se alguém trocasse o arquivo no meio.
+    let (manifest, conteudo, arquivos) =
+        seele_core::mods::read_with_files(&dir).map_err(|why| refusal_name(&why).to_owned())?;
+    if hex(&conteudo) != hash {
+        return Err("conteudo-nao-bate".to_owned());
+    }
+    let Some(caminho) = manifest.maquina.as_deref() else {
+        return Err("sem-metade-de-maquina".to_owned());
+    };
+    // O manifesto já foi recusado se o caminho sai do pacote; conferir de novo
+    // aqui custa uma linha e não depende de que aquela regra continue lá.
+    let relativo = seele_core::mods::inner_path(&caminho.split('/').collect::<Vec<_>>())
+        .ok_or_else(|| "maquina-fora-do-pacote".to_owned())?;
+    let bytes = arquivos
+        .into_iter()
+        .find(|(nome, _)| std::path::Path::new(nome) == relativo.as_path())
+        .map(|(_, bytes)| bytes)
+        .ok_or_else(|| "maquina-nao-lida".to_owned())?;
+    let fonte = String::from_utf8(bytes).map_err(|_| "maquina-nao-e-utf8".to_owned())?;
+    Ok(MetadeDeMaquina {
+        id: manifest.id.clone(),
+        fonte,
+        capacidades: capacidades_da_maquina(&manifest),
+    })
 }
 
 /// Todo MOD instalado nesta máquina, válido ou não.
@@ -258,6 +318,314 @@ pub fn esquecer_aceite(home: &str, alvo: &str) -> Result<(), String> {
         .map_err(|_| "NaoDeuParaGravar".to_owned())
 }
 
+// ------------------------------------------- o aceite de uma máquina de jogo
+//
+// API 8 parte 3. Como o aceite de MODs logo acima: guardar é da casca, que tem
+// a tela; onde se guarda é do núcleo (`seele_core::aceites_de_maquina`), no
+// mesmo diretório da identidade. A chave do servidor sai de
+// `chave_do_servidor`, pelo mesmo motivo: um aceite arquivado sob a forma que a
+// casca digitou seria um sim que ninguém acha.
+
+/// Um aceite de máquina guardado, como a casca o lê e o devolve.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AceiteDeMaquinaGuardado {
+    /// Sob que chave o servidor SEELE está arquivado.
+    pub alvo: String,
+    /// `autor/nome` do MOD.
+    pub mod_id: String,
+    /// O hash do pacote ligado quando a pessoa aceitou.
+    pub hash: String,
+    /// O servidor de jogo.
+    pub servidor: String,
+    /// O resumo do que foi mostrado, como o [`crate::Event::MachineRequest`]
+    /// o trouxe.
+    pub resumo: String,
+    /// A oferta que a pessoa leu.
+    pub oferta: crate::OfertaDeMaquinaFfi,
+    /// O apelido de quem pediu.
+    pub pedido_por: String,
+    /// Quando, em segundos desde a época.
+    pub quando: u64,
+}
+
+impl AceiteDeMaquinaGuardado {
+    fn de(aceite: seele_core::aceites_de_maquina::AceiteDeMaquina) -> Self {
+        Self {
+            oferta: crate::OfertaDeMaquinaFfi::from(&aceite.oferta),
+            alvo: aceite.alvo,
+            mod_id: aceite.mod_id,
+            hash: aceite.hash,
+            servidor: aceite.servidor,
+            resumo: aceite.resumo,
+            pedido_por: aceite.pedido_por,
+            quando: aceite.quando,
+        }
+    }
+}
+
+/// Os aceites de máquina legíveis, e quantas linhas não se leram.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AceitesDeMaquina {
+    /// Os que se leram.
+    pub aceites: Vec<AceiteDeMaquinaGuardado>,
+    /// Quantas linhas foram puladas. Diferente de zero, vai ao log da casca:
+    /// é um aceite que a pessoa deu e que o produto não acha mais.
+    pub ilegiveis: usize,
+}
+
+fn repositorio(home: &str) -> seele_core::aceites_de_maquina::AceitesDeMaquina {
+    seele_core::aceites_de_maquina::AceitesDeMaquina::em(std::path::Path::new(home))
+}
+
+/// Todo aceite de máquina desta instalação.
+///
+/// # Errors
+///
+/// `"NaoDeuParaLer"` quando o arquivo existe e não se lê.
+pub fn aceites_de_maquina(home: &str) -> Result<AceitesDeMaquina, String> {
+    let repositorio = repositorio(home);
+    let aceites = repositorio
+        .listar()
+        .map_err(|_| "NaoDeuParaLer".to_owned())?
+        .into_iter()
+        .map(AceiteDeMaquinaGuardado::de)
+        .collect();
+    Ok(AceitesDeMaquina {
+        aceites,
+        ilegiveis: repositorio.ilegiveis(),
+    })
+}
+
+/// O aceite desta máquina, se houver. `alvo` como a pessoa o digitou.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"` e `"NaoDeuParaLer"`.
+pub fn aceite_de_maquina(
+    home: &str,
+    alvo: &str,
+    mod_id: &str,
+    servidor: &str,
+) -> Result<Option<AceiteDeMaquinaGuardado>, String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    Ok(repositorio(home)
+        .de(&chave, mod_id, servidor)
+        .map_err(|_| "NaoDeuParaLer".to_owned())?
+        .map(AceiteDeMaquinaGuardado::de))
+}
+
+/// Guarda o sim da pessoa, no lugar do anterior da mesma máquina. `quando` é
+/// o relógio desta máquina, e `alvo` vira a chave canônica antes de ir ao
+/// disco — o `alvo` do `aceite` que chega é ignorado.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"`, `"OfertaInvalida"` (uma oferta que o fio recusaria
+/// não vira aceite), `"ResumoNaoConfere"` (o resumo não é o desta oferta, deste
+/// pacote e deste servidor de jogo) e `"NaoDeuParaGravar"`.
+pub fn guardar_aceite_de_maquina(
+    home: &str,
+    alvo: &str,
+    aceite: &AceiteDeMaquinaGuardado,
+) -> Result<(), String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    let oferta = aceite
+        .oferta
+        .para_o_nucleo()
+        .map_err(|_| "OfertaInvalida".to_owned())?;
+    // O resumo é o que a pessoa aceitou; a oferta guardada é o que a parte 4
+    // executa. Se os dois não falam da mesma coisa — uma casca que remontou a
+    // oferta errado, ou juntou a oferta de um pedido ao resumo de outro —, o
+    // disco guardaria permissão para algo que ninguém viu.
+    let resumo = seele_core::maquina::resumo_em_hex(&seele_core::maquina::resumo_da_oferta(
+        &aceite.mod_id,
+        &aceite.hash,
+        &aceite.servidor,
+        &oferta,
+    ));
+    if resumo != aceite.resumo {
+        return Err("ResumoNaoConfere".to_owned());
+    }
+    let quando = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |passou| passou.as_secs());
+    repositorio(home)
+        .guardar(&seele_core::aceites_de_maquina::AceiteDeMaquina {
+            alvo: chave,
+            mod_id: aceite.mod_id.clone(),
+            hash: aceite.hash.clone(),
+            servidor: aceite.servidor.clone(),
+            resumo: aceite.resumo.clone(),
+            oferta,
+            pedido_por: aceite.pedido_por.clone(),
+            quando,
+        })
+        .map_err(|_| "NaoDeuParaGravar".to_owned())
+}
+
+/// Apaga o aceite desta máquina. `true` se havia um.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"` e `"NaoDeuParaGravar"`.
+pub fn revogar_aceite_de_maquina(
+    home: &str,
+    alvo: &str,
+    mod_id: &str,
+    servidor: &str,
+) -> Result<bool, String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    repositorio(home)
+        .revogar(&chave, mod_id, servidor)
+        .map_err(|_| "NaoDeuParaGravar".to_owned())
+}
+
+/// Onde mora a pasta deste servidor de jogo (Desvio 10). Não cria nada.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"`.
+pub fn pasta_do_servidor_de_jogo(
+    home: &str,
+    alvo: &str,
+    mod_id: &str,
+    servidor: &str,
+) -> Result<std::path::PathBuf, String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    Ok(seele_core::aceites_de_maquina::pasta_do_servidor_de_jogo(
+        std::path::Path::new(home),
+        &chave,
+        mod_id,
+        servidor,
+    ))
+}
+
+#[cfg(test)]
+mod tests_do_aceite_de_maquina {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn pasta(nome: &str) -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static QUAL: AtomicUsize = AtomicUsize::new(0);
+        let n = QUAL.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "seele-ffi-maquinas-{nome}-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temporário");
+        dir.to_string_lossy().into_owned()
+    }
+
+    fn aceite() -> AceiteDeMaquinaGuardado {
+        let mut aceite = sem_resumo();
+        aceite.resumo = seele_core::maquina::resumo_em_hex(&seele_core::maquina::resumo_da_oferta(
+            &aceite.mod_id,
+            &aceite.hash,
+            &aceite.servidor,
+            &aceite.oferta.para_o_nucleo().unwrap(),
+        ));
+        aceite
+    }
+
+    fn sem_resumo() -> AceiteDeMaquinaGuardado {
+        AceiteDeMaquinaGuardado {
+            alvo: String::new(),
+            mod_id: "seele/jogo".into(),
+            hash: "ab".repeat(32),
+            servidor: "mundo".into(),
+            resumo: "cd".repeat(32),
+            oferta: crate::OfertaDeMaquinaFfi {
+                titulo: "Minecraft".into(),
+                receita: "minecraft-java".into(),
+                versao_da_receita: "1.0.0".into(),
+                versao_do_jogo: "1.21.4".into(),
+                tuneis: vec![crate::TunelOferecidoFfi {
+                    nome: "mc".into(),
+                    protocolo: "tcp".into(),
+                    porta: 25565,
+                }],
+                artefatos: vec![],
+                pack: None,
+                origens: vec![],
+                dominios_do_jogo: vec![],
+                rodar: None,
+                disco_maximo: 0,
+                termos: vec![],
+                instalar: None,
+            },
+            pedido_por: "marcela".into(),
+            quando: 0,
+        }
+    }
+
+    /// O caminho da casca: guarda pelo endereço digitado, acha pela chave
+    /// canônica, revoga, e a pasta do jogo nunca é a de configuração.
+    #[test]
+    fn a_casca_guarda_acha_e_revoga_pela_chave_do_servidor() {
+        let home = pasta("ciclo");
+        assert_eq!(
+            aceite_de_maquina(&home, "casa", "seele/jogo", "mundo"),
+            Ok(None)
+        );
+        guardar_aceite_de_maquina(&home, "casa", &aceite()).unwrap();
+
+        let achado = aceite_de_maquina(&home, "casa:8383", "seele/jogo", "mundo")
+            .unwrap()
+            .expect("o aceite guardado pelo endereço curto");
+        assert_eq!(achado.alvo, crate::chave_do_servidor("casa").unwrap());
+        assert_eq!(achado.oferta, aceite().oferta);
+        assert!(achado.quando > 0);
+        assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 1);
+
+        let pasta_do_jogo =
+            pasta_do_servidor_de_jogo(&home, "casa", "seele/jogo", "mundo").unwrap();
+        assert_ne!(pasta_do_jogo, std::path::PathBuf::from(&home));
+
+        assert_eq!(
+            revogar_aceite_de_maquina(&home, "casa", "seele/jogo", "mundo"),
+            Ok(true)
+        );
+        assert_eq!(
+            aceite_de_maquina(&home, "casa", "seele/jogo", "mundo"),
+            Ok(None)
+        );
+    }
+
+    /// O resumo guardado é o da oferta guardada: com outra porta, outro
+    /// pacote ou um resumo qualquer, nada vai ao disco.
+    #[test]
+    fn um_resumo_que_nao_e_o_da_oferta_nao_vira_aceite() {
+        let home = pasta("resumo");
+        let mut outra_porta = aceite();
+        outra_porta.oferta.tuneis[0].porta = 25566;
+        let mut outro_pacote = aceite();
+        outro_pacote.hash = "ef".repeat(32);
+        for torto in [sem_resumo(), outra_porta, outro_pacote] {
+            assert_eq!(
+                guardar_aceite_de_maquina(&home, "casa", &torto),
+                Err("ResumoNaoConfere".to_owned())
+            );
+        }
+        assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 0);
+        guardar_aceite_de_maquina(&home, "casa", &aceite()).unwrap();
+    }
+
+    #[test]
+    fn uma_oferta_torta_nao_vira_aceite() {
+        let home = pasta("torta");
+        let mut torta = aceite();
+        torta.oferta.tuneis[0].protocolo = "quic".into();
+        assert_eq!(
+            guardar_aceite_de_maquina(&home, "casa", &torta),
+            Err("OfertaInvalida".to_owned())
+        );
+        assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 0);
+    }
+}
+
 #[cfg(test)]
 mod tests_do_aceite {
     use super::*;
@@ -374,5 +742,58 @@ mod hash_de_pasta {
             "HASH={} ID={} VERSAO={}",
             instalado.hash, instalado.id, instalado.version
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod a_metade_de_maquina_do_pacote {
+    use super::*;
+
+    /// Um pacote da API deste build com metade de máquina, publicado pelo conteúdo como o
+    /// instalador faz. Devolve a pasta de configuração e o hash.
+    fn publicar(nome: &str) -> (String, String) {
+        let raiz =
+            std::env::temp_dir().join(format!("seele-ffi-metade-{nome}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raiz);
+        let dir = raiz.join("em-obras");
+        std::fs::create_dir_all(dir.join("cliente")).unwrap();
+        std::fs::create_dir_all(dir.join("maquina")).unwrap();
+        std::fs::write(
+            dir.join("mod.json"),
+            format!(
+                r#"{{"schema": 1, "id": "x/jogo", "version": "1.0.0", "api": {api},
+                "repo": "https://github.com/x/jogo", "reach": ["dom"], "state": 1,
+                "client": "cliente/main.js", "plataformas": ["app"], "poderes": ["porta"],
+                "maquina": "maquina/main.js", "server": "servidor.js",
+                "permissoes": [{{"acao": "entrar-no-jogo", "nome": "Entrar no jogo", "todos": true}}]}}"#,
+                api = MOD_API_VERSION
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("cliente/main.js"), "// janela").unwrap();
+        std::fs::write(dir.join("maquina/main.js"), "// máquina").unwrap();
+        std::fs::write(dir.join("servidor.js"), "// servidor").unwrap();
+        let hash = ler_pasta(&dir.to_string_lossy())
+            .expect("o pacote é válido")
+            .hash;
+        let destino = raiz.join(PACOTES).join(&hash);
+        std::fs::create_dir_all(destino.parent().unwrap()).unwrap();
+        std::fs::rename(&dir, &destino).unwrap();
+        (raiz.to_string_lossy().into_owned(), hash)
+    }
+
+    /// **O arquivo de `manifesto.maquina`, com as capacidades da máquina** — e
+    /// não as da janela, que dariam a ela um `SeeleUI`.
+    #[test]
+    fn a_metade_de_maquina_sai_do_arquivo_que_o_manifesto_nomeia() {
+        let (pasta, hash) = publicar("le");
+        let metade = codigo_da_maquina(&pasta, &hash).expect("a metade de máquina");
+        assert_eq!(metade.id, "x/jogo");
+        assert_eq!(metade.fonte, "// máquina");
+        assert_eq!(metade.capacidades, vec!["maquina", "maquina.porta"]);
+        // Outro hash é outro conteúdo, e o que não bate não é lido.
+        let outro = "0".repeat(hash.len());
+        assert!(codigo_da_maquina(&pasta, &outro).is_err());
     }
 }

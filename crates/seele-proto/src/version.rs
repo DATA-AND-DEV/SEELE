@@ -152,8 +152,37 @@ use thiserror::Error;
 /// não há transporte em comum — o ADR 0063 diz como as duas pontas ficam
 /// sabendo disso antes de tentar.
 ///
-/// **12 desde 31/10/2026: o perfil público, nativo do produto** (0.19).
+/// **12 desde 29/10/2026: as plataformas antes da entrada e o túnel de jogo,
+/// numa subida só** (API 8, partes 1 e 2).
 ///
+/// Entram `ServerMessage::PlataformasDosMods` (a parte 1 não pôde levar as
+/// plataformas no `ModAnunciado`: campo novo em mensagem que existe é proibido,
+/// ADR 0058) e o vocabulário do túnel de jogo — cinco verbos do cliente
+/// (`ServirTunel`, `PararTunel`, `EntrarNoTunel`, `SairDoTunel`, `TunelFalhou`)
+/// e seis respostas do servidor (`TunelConcedido`, `TunelRecusado`,
+/// `SirvaTunelPara`, `AlcanceTunelPor`, `TunelEncerrado`, `TunelRetirado`), mais os rótulos de
+/// canal `t` e `j`.
+///
+/// **E a máquina, em 30/10/2026, ainda no 12** (API 8 parte 3): o pedido, o
+/// aceite e a parada. Quatro verbos do cliente (`AceiteDeMaquina`,
+/// `RecusaDeMaquina`, `MaquinaParada`, `PedidoDaMaquina`), três respostas do
+/// servidor (`PedidoDeMaquina`, `AvisoParaMaquina`, `MaquinaDispensada`) e a
+/// recusa `ForaDoAceite`. A oferta já carrega o que a parte 4 vai usar, porque
+/// o 12 ainda não saiu e campo novo em mensagem que existe nunca entra. A 11 **está publicada** (v0.18.1, commit `ae0f2715`,
+/// conferido no release em 29/10), então nada pôde pegar carona nela.
+///
+/// **Um par 11 continua entrando** — `PRIMEIRO_DA_LINHA_DOIS` e
+/// [`VERSAO_MINIMA`] seguem 10 — **e não recebe nada disto**:
+/// [`crate::vocabulario::desde`] barra o que o servidor escreve, e
+/// [`crate::vocabulario::desde_do_cliente`] (novo) barra o que um cliente 12
+/// escreveria a um servidor 11.
+///
+/// **E o perfil público, nativo do produto, em 31/10/2026, ainda no 12**
+/// (0.19). As duas linhas de trabalho — a API 8 e a 0.19 — subiram para o 12
+/// cada uma por si, e nenhuma o publicou; a fusão as junta num 12 só, com as
+/// variantes da API 8 **antes** das do perfil em cada lista, como o §8 de
+/// `docs/0.19/perfis-oficiais.md` decidiu (a API 8 chegou ao 12 primeiro); os
+/// bytes-ouro do perfil em `tests/fio_2_0.txt` foram regerados na fusão.
 /// O perfil que era do MOD PERFIS passa a ser mensagem: `GravarPerfil` e
 /// `TirarImagemDoPerfil` do cliente; `Perfis` (a lista, em partes),
 /// `PerfilMudou`, `PerfilRecusado` e `PendenciaDoPerfil` do servidor; e os

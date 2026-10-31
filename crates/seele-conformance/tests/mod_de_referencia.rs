@@ -221,7 +221,7 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // API oferece, e o guarda cobrava do vetor um `.assert(` que a API não
     // oferece. Quem prova o console são os testes do executor, e não este
     // vetor.
-    let api_do_preludio = sem_o_console(preludio);
+    let api_do_preludio = sem_a_metade_de_maquina(&sem_o_console(preludio));
     // **O prelúdio da API deste build, e não o texto inteiro** (P51-28, no
     // corte da API 6). O prelúdio é um só para toda API, e monta cada membro
     // pela capacidade: `...(capacidades.has('X') ? { m: … } : {})` só existe
@@ -472,51 +472,79 @@ fn membros_pela_capacidade(preludio: &str, da_api: &[&str]) -> (Vec<String>, Vec
 /// um console que não fecha onde devia, reprova aqui pelo nome: calado, o
 /// guarda voltaria a cobrar o console do vetor, ou deixaria de cobrar a API.
 fn sem_o_console(preludio: &str) -> String {
-    const ABRE: &str = "globalThis.console = {";
+    sem_o_bloco(preludio, "globalThis.console = {", "};", "o console")
+}
+
+/// O prelúdio sem o bloco `if (daMaquina) { … }`: **a API da metade de máquina
+/// não é API da metade de janela.** O prelúdio é um só para as duas metades, e
+/// o que monta o global `maquina` (`pedir`, `aoAviso`, `aoParar`,
+/// `porta.servir`/`parar`/`quedas`) só existe com a capacidade `maquina`, que a
+/// janela nunca tem. Lido junto, ele cobrava do vetor de janela um `.quedas(`
+/// que a janela não pode chamar, e deixava passar como «exposto» um
+/// `SeeleUI.quedas(…)` que seria `TypeError` no produto. Este vetor não tem
+/// metade de máquina; quem a exercita, no executor de verdade, são os testes de
+/// `apps/seele-app/src/maquina.rs` (`o_aviso_chega_e_as_quedas_voltam_como_pares`).
+fn sem_a_metade_de_maquina(preludio: &str) -> String {
+    sem_o_bloco(preludio, "if (daMaquina) {", "}", "a metade de máquina")
+}
+
+/// O prelúdio sem o bloco que abre na linha `abre` e fecha em `fecha`, no
+/// mesmo recuo.
+///
+/// **Cortado pelo recuo, e não pelo primeiro fechamento.** O bloco é a linha que o
+/// abre e as linhas recuadas além dela; a primeira linha no recuo de quem o
+/// abre tem de ser a que o fecha. Cortar no primeiro `};` depois da abertura erraria
+/// sem dizer onde: um console que fechasse sem o `;`, que o JavaScript aceita,
+/// faria o corte seguir até o `};` de `marcar`, lá embaixo, e levar junto
+/// `SeeleMods` e `SeeleUI` — a API que este guarda existe para cobrar.
+///
+/// **Não achar é falhar.** Um prelúdio sem a linha que abre o bloco, ou com
+/// ele fechado de outro jeito, reprova com o nome do bloco.
+fn sem_o_bloco(preludio: &str, abre: &str, fecha: &str, o_que: &str) -> String {
     let linhas: Vec<&str> = preludio.lines().collect();
-    let abre = linhas
+    let abertura = linhas
         .iter()
-        .position(|linha| linha.trim() == ABRE)
+        .position(|linha| linha.trim() == abre)
         .unwrap_or_else(|| {
             panic!(
-                "o prelúdio do executor não tem mais a linha `{ABRE}`, e o guarda do vetor \
-                 não sabe onde o console começa: sem cortá-lo, ele cobraria do vetor o \
-                 console, que não é API de MOD; ache o console no PRELUDIO de \
-                 crates/seele-motor/src/preludio.rs e conserte `sem_o_console`"
+                "o prelúdio do executor não tem mais a linha `{abre}`, e o guarda do vetor \
+                 não sabe onde {o_que} começa: sem cortá-lo, ele cobraria do vetor o que \
+                 não é API da metade de janela; ache-o no PRELUDIO de \
+                 crates/seele-motor/src/preludio.rs e conserte `sem_o_bloco`"
             )
         });
-    let (antes, desde_a_abertura) = linhas.split_at(abre);
+    let (antes, desde_a_abertura) = linhas.split_at(abertura);
     let (linha_que_abre, depois_da_abertura) = desde_a_abertura
         .split_first()
-        .expect("`position` achou a linha que abre o console");
+        .expect("`position` achou a linha que abre o bloco");
     let recuo = linha_que_abre
         .trim_end()
-        .strip_suffix(ABRE)
-        .expect("a linha que abre o console é recuo e marca");
+        .strip_suffix(abre)
+        .expect("a linha que abre o bloco é recuo e marca");
     let dentro_do_bloco = |linha: &str| {
         linha.trim().is_empty()
             || linha
                 .strip_prefix(recuo)
                 .is_some_and(|resto| resto.starts_with(char::is_whitespace))
     };
-    let fecha = depois_da_abertura
+    let fim = depois_da_abertura
         .iter()
         .position(|linha| !dentro_do_bloco(linha))
         .unwrap_or_else(|| {
             panic!(
-                "o console do prelúdio abre em `{ABRE}` e nenhuma linha depois volta ao \
-                 recuo dele: o guarda do vetor não sabe onde o console termina"
+                "{o_que} do prelúdio abre em `{abre}` e nenhuma linha depois volta ao \
+                 recuo dele: o guarda do vetor não sabe onde o bloco termina"
             )
         });
-    let (_console, desde_o_fechamento) = depois_da_abertura.split_at(fecha);
+    let (_bloco, desde_o_fechamento) = depois_da_abertura.split_at(fim);
     let (linha_que_fecha, depois) = desde_o_fechamento
         .split_first()
-        .expect("`position` achou a linha que fecha o console");
+        .expect("`position` achou a linha que fecha o bloco");
     assert_eq!(
         *linha_que_fecha,
-        format!("{recuo}}};"),
-        "o console do prelúdio não fecha com `}};` no recuo de quem o abre, e o guarda \
-         do vetor não sabe onde ele termina: cortar no próximo `}};` levaria junto a \
+        format!("{recuo}{fecha}"),
+        "{o_que} do prelúdio não fecha com `{fecha}` no recuo de quem o abre, e o guarda \
+         do vetor não sabe onde ele termina: cortar no próximo fechamento levaria junto a \
          API que vem depois dele"
     );
     antes

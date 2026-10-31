@@ -104,3 +104,49 @@ e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
 # atualizar este registro. Reconciliado na 0.17.3 com os mesmos bytes já
 # públicos; contrato executável e versões aceitas não mudam nesta correção.
 d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
+#
+# ## v8 nasceu em 29/10/2026 (API 8, plataformas), e emenda antes da publicação
+#
+# A v8 é a v7 inteira, mais o `plataformas`, o `poderes` e a `maquina` do
+# manifesto (ADR 0058, acréscimo).
+# `MOD_API_VERSION` já está em 8, e por isso ela conta como oferecida. O
+# `check-api` exige a linha dela desde o commit que a cria; até a v8 sair numa
+# release, cada emenda a refaz aqui, na regra da v6 e da v7. Quando sair, ela
+# congela.
+#
+# - Emenda do túnel de jogo (29/10/2026, Task 9 da parte 2): escreveu o que a
+#   entrega da casca trouxe — `SeeleUI.tunel.entrar` e o bilhete de gesto do
+#   `botao` (`sentido`), a faixa do produto, e as recusas do túnel em
+#   `recusas.tunel`. As recusas entram no mesmo commit da entrega: o guarda da
+#   lista fechada amarra a janela ao contrato.
+# - Emenda da revisão final da parte 2 (30/10/2026): o texto do `nome-tomado`
+#   (o nome é de OUTRA máquina), o `compatibilidade.porque` e o protocolo da
+#   `notes` (12, e não 11), e a faixa que diz quantas conexões ainda passam pelo
+#   anfitrião e por que as portas fecham na troca de vista. Conferido em
+#   30/10/2026 no release (`curl` do CLAUDE.md): a v0.18.3 diz que a API 8 não
+#   entrou nela, e a v8 segue sem release.
+# - Emenda do poder programa (31/10/2026, parte 4): a capacidade
+#   maquina.programa em capacidades-da-maquina, o bloco metade-de-maquina
+#   (o global maquina inteiro, com maquina.plataforma, maquina.programa e o
+#   objeto do processo), recusas.programa (a lista fechada de
+#   `seele_core::programa::NOMES_DAS_RECUSAS`, amarrada pelo guarda de
+#   conformidade), as da cola e como chegam, e o sentido de
+#   artefatos.plataformas. Conferido em 31/10/2026 no release (`curl` do
+#   CLAUDE.md): a v0.18.3 (17554c28) sai com o protocolo 11 e sem api/v8.json,
+#   e a v8 segue sem release.
+# - Emenda do modpack (31/10/2026, parte 6): o .mrpack no volume (os tipos de
+#   SeeleUI.enviar por extenso, cada um com o teto: 10 MiB de imagem e som,
+#   64 MiB de pack, e o arquivo-grande-demais com tamanho e teto), SeeleUI.salvar
+#   e a capacidade salvar do poder porta, volume.pack e mundo.buscarPack (o
+#   índice do pack para a metade de servidor) com recusas.pack, o instalar da
+#   oferta, maquina.programa.trazer e .ler, o mesclar do desempacotar, o
+#   jaEstava do baixar, e as recusas novas do programa e da cola. Conferido em
+#   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
+#   v8 segue sem release.
+# - Emenda da fusão com a 0.19 (31/10/2026, `desenho/api-8-sobre-0.19`): a
+#   0.19 subiu o teto por item de MOD de 10 para 100 MiB (5c904d79), e a v8
+#   passa a dizê-lo — imagem e som até 100 MiB, o .mrpack segue em 64 MiB, e o
+#   fio leva o maior dos dois; os tetos continuam por tipo, antes do primeiro
+#   byte. Conferido em 31/10/2026 no release (`curl` do CLAUDE.md): a mais
+#   nova é a v0.18.3, e a v8 segue sem release.
+74e39f320a2ca4e53ab1865a5e020f8f18d34fcb5266d7ac6736331841fee728  v8.json

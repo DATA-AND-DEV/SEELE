@@ -33,11 +33,64 @@ pub const PRELUDIO: &str = r#"
 
   let ouvinte = null;
 
+  // **O bilhete de gesto da volta em curso**: o `gesto` do evento `botao` que o
+  // ouvinte está recebendo agora, e `null` em qualquer outro momento. O MOD de
+  // jogo só abre uma porta de dentro de um clique, e o clique chega aqui como
+  // este bilhete, emitido pela casca; fora do ouvinte (depois de um `await`,
+  // num temporizador) ele não existe, e `SeeleUI.tunel.entrar` sai com
+  // `gesto: null`. Quem confere o bilhete é a casca (prazo de 2 s, uso único);
+  // aqui ele só é carregado, e solto ao fim da volta.
+  let gestoDaVolta = null;
+
+  // **Os dois ouvintes da metade de máquina** (API 8 parte 3), e a marca de
+  // que a parada já foi dada. Só a metade de máquina os registra (`maquina`
+  // existe só com a capacidade `maquina`); na de janela ficam nulos, e uma
+  // mensagem desses tipos que chegasse lá não acharia ninguém.
+  let ouvinteDoAviso = null;
+  let ouvinteDaParada = null;
+  let paradaDada = false;
+
+  // **O que o poder `programa` ouve sem ter pedido** (API 8 parte 4): o
+  // progresso de um download (`programa-progresso`), a linha de um processo
+  // (`processo-linha`) e o fim dele (`processo-fim`). Montado só com a
+  // capacidade `maquina.programa`; sem ela fica nulo, e essas mensagens não
+  // acham ninguém.
+  let aoProgramaChegou = null;
+
   globalThis.aoResponder = (texto) => {
     let m;
     try { m = JSON.parse(texto); } catch { return; }
+    if (m.tipo === 'aviso-maquina') {
+      // O erro de quem ouve fica com quem ouve, e é dito: um `aoAviso` que
+      // lança não pode impedir o próximo aviso de chegar, nem derrubar a
+      // metade inteira por um defeito de um ouvinte.
+      if (!ouvinteDoAviso) return;
+      try { ouvinteDoAviso(m.carga); } catch (erro) { dizerOErro('erro no aoAviso:', erro); }
+      return;
+    }
+    if (m.tipo === 'parar-maquina') {
+      // **Uma vez só**, e a resposta sai quando o `aoParar` acabar — inclusive
+      // o que ele esperou (uma promessa devolvida). É por esta mensagem que o
+      // anfitrião sabe que pode encerrar antes dos 2 s do teto; sem ela, toda
+      // parada custaria o teto inteiro.
+      if (paradaDada) return;
+      paradaDada = true;
+      const quem = ouvinteDaParada;
+      Promise.resolve()
+        .then(() => (quem ? quem(String(m.motivo ?? '')) : undefined))
+        .catch((erro) => { dizerOErro('erro no aoParar:', erro); })
+        .finally(() => { seele.postar(JSON.stringify({ tipo: 'maquina-parada-pronta' })); });
+      return;
+    }
+    if (m.tipo === 'programa-progresso' || m.tipo === 'processo-linha' || m.tipo === 'processo-fim') {
+      if (aoProgramaChegou) aoProgramaChegou(m);
+      return;
+    }
     if (m.tipo === 'evento') {
       if (!ouvinte) return;
+      // Só o `botao` carrega bilhete: um `gesto` num evento de outro nome não é
+      // da casca, e não vale.
+      gestoDaVolta = (m.nome === 'botao' && typeof m.gesto === 'string') ? m.gesto : null;
       // O erro do MOD fica com o MOD: um ouvinte que lança não pode impedir o
       // próximo evento de chegar. A volta inteira falharia, e o anfitrião a
       // relataria como `Falhou` — que é o MOD com defeito, não este.
@@ -48,6 +101,8 @@ pub const PRELUDIO: &str = r#"
       try { ouvinte(m); } catch (erro) {
         dizerOErro('erro num ouvinte de evento:', erro);
         seele.postar(JSON.stringify({ tipo: 'erro-no-evento', erro: String(erro) }));
+      } finally {
+        gestoDaVolta = null;
       }
       return;
     }
@@ -329,7 +384,14 @@ pub const PRELUDIO: &str = r#"
   // projetado por lista branca (rascunho da API 6, §6). Ele saía pela falta da
   // capacidade `retrato`, e um pacote sem ela ainda o ganhava: agora não há
   // caminho que o monte (a limpeza da máquina das APIs 3 a 5, depois do corte).
-  globalThis.SeeleMods = Object.freeze({
+  // **A metade de máquina não tem tela** (API 8 parte 3): com a capacidade
+  // `maquina`, nem `SeeleMods` nem `SeeleUI` existem, e o que existe é o
+  // global `maquina`. Ausentes, e não recusados: um `SeeleUI.superficies` que
+  // existisse e sempre falhasse faria o autor descobrir num `catch`, em
+  // produção, que a metade dele não tem onde desenhar.
+  const daMaquina = capacidades.has('maquina');
+
+  if (!daMaquina) globalThis.SeeleMods = Object.freeze({
     request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
     // **A ação declarada** (API 7, capacidade `acoes`): o `request` que nomeia
     // uma ação do `permissoes` do `mod.json`. Quem confere o MOD ligado, a
@@ -395,7 +457,34 @@ pub const PRELUDIO: &str = r#"
     atualizar: (handle, conteudo) => pedir('atualizar-contribuicao', { handle, conteudo }),
   }));
 
-  globalThis.SeeleUI = Object.freeze({
+  // **O túnel de jogo** (API 8, poder `porta`): ausente para quem não o
+  // declara, como toda capacidade. `entrar` leva o bilhete de gesto da volta em
+  // que foi chamado (`gestoDaVolta`), lido **na hora da chamada**: um `entrar`
+  // depois de um `await` sai com `gesto: null` e a casca o recusa como
+  // `fora-de-um-clique`. Resolve com o número da porta em `127.0.0.1`.
+  const tunel = comCapacidade('tunel', Object.freeze({
+    // `async`, como os membros de `superficies`: o bilhete é lido **agora**, na
+    // chamada, e a promessa é a da resposta.
+    entrar: async (nome) => pedir('tunel-entrar', { nome: String(nome ?? ''), gesto: gestoDaVolta }),
+  }));
+
+  // **`SeeleUI.salvar`** (API 8 parte 6; spec §6), do mesmo poder `porta`:
+  // quem joga recebe um arquivo que a metade de servidor guardou (o
+  // `.mrpack`) pelo diálogo de salvar do sistema. `pedido` vai ao `aoPedir`
+  // dela, que autoriza respondendo `{ ok, volume }`; `nome` é só a sugestão —
+  // o caminho é da pessoa e não volta. Como o túnel, só dentro de um clique
+  // (o bilhete da volta). Resolve com `{ bytes }`, ou `null` se a pessoa
+  // cancelou.
+  const salvar = capacidades.has('salvar')
+    ? async (arquivo) => pedir('salvar', {
+      canal: Number(arquivo?.canal) || 0,
+      pedido: arquivo?.pedido ?? null,
+      nome: String(arquivo?.nome ?? ''),
+      gesto: gestoDaVolta,
+    })
+    : null;
+
+  if (!daMaquina) globalThis.SeeleUI = Object.freeze({
     // **Sem `regiao` e sem `cartoes`** (decisão do dono de 08/10): a região é
     // um ponto de contribuição, e o cartão de uma pessoa é o `pessoa.cartao`.
     // Os dois eram das APIs 3 a 5, que este build não executa, e saíram do
@@ -412,6 +501,8 @@ pub const PRELUDIO: &str = r#"
     ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
+    ...(tunel ? { tunel } : {}),
+    ...(salvar ? { salvar } : {}),
     // A lista, legível pelo próprio MOD: um pacote que queira degradar em vez
     // de falhar precisa poder perguntar, e perguntar a `SeeleUI.superficies`
     // já é a resposta — mas um nome explícito evita o truque.
@@ -447,6 +538,198 @@ pub const PRELUDIO: &str = r#"
       soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
     } : {}),
   });
+
+  // ---- a metade de máquina ----
+  //
+  // **O que foi aceito, e só isso.** O anfitrião põe em `__seeleMaquina` o
+  // servidor de jogo e a oferta que o dono da máquina aceitou (em JSON), e
+  // ela chega aqui congelada até o fundo: a metade lê o que pode servir, e
+  // reescrever a cópia não mudaria nada — quem confere `porta.servir` contra a
+  // oferta é o Rust, com a cópia dele. Lido e apagado, como as capacidades.
+  if (daMaquina) {
+    let dados = {};
+    try { dados = JSON.parse(String(globalThis.__seeleMaquina ?? '{}')) || {}; } catch { dados = {}; }
+    delete globalThis.__seeleMaquina;
+    const congelar = (valor) => {
+      if (valor && typeof valor === 'object') {
+        for (const dentro of Object.values(valor)) congelar(dentro);
+        Object.freeze(valor);
+      }
+      return valor;
+    };
+    // **O poder `porta`, só para quem o declara**: ausente sem ele, como
+    // toda capacidade. As três resolvem com o que o anfitrião respondeu; a
+    // recusa chega com o nome em `erro` (`fora-do-aceite`, ou o de
+    // `RecusaDeTunel` que o servidor disse).
+    const porta = capacidades.has('maquina.porta') ? Object.freeze({
+      servir: async (tunel) => {
+        await pedir('porta-servir', {
+          nome: String(tunel?.nome ?? ''),
+          protocolo: String(tunel?.protocolo ?? ''),
+          porta: Number(tunel?.porta),
+        });
+      },
+      parar: async (nome) => { await pedir('porta-parar', { nome: String(nome ?? '') }); },
+      quedas: (nome) => pedir('porta-quedas', { nome: String(nome ?? '') }),
+    }) : null;
+    // **O poder `programa`, só para quem o declara** (API 8 parte 4). Tudo
+    // aqui é um pedido ao anfitrião, que confere contra o aceite guardado
+    // (a cópia que vale é a do Rust, e não `maquina.oferta`). A recusa chega
+    // como `Error` com o nome em `erro` e os dados dela em campos (`host`,
+    // `aceitos`, `esperado`, `obtido`, `usado`, `teto`...), como toda recusa.
+    const programa = capacidades.has('maquina.programa') ? (() => {
+      // O progresso de cada download, pelo número do pedido que o começou.
+      const progressos = new Map();
+      // Cada processo, pelo número que o anfitrião deu. Uma linha que chega
+      // antes de o objeto existir (a resposta de `rodar` ainda não virou
+      // objeto) ou antes de `aoLinha` fica guardada, até TETO_GUARDADAS; o
+      // que passa disso é contado e dito no fim (`linhasNaoOuvidas`).
+      const processos = new Map();
+      const TETO_GUARDADAS = 256;
+      const doProcesso = (numero) => {
+        let p = processos.get(numero);
+        if (!p) {
+          p = { aoLinha: null, aoSair: null, guardadas: [], naoOuvidas: 0, fim: null, resolverFim: null };
+          p.promessa = new Promise((resolve) => { p.resolverFim = resolve; });
+          processos.set(numero, p);
+        }
+        return p;
+      };
+      const ouvirLinha = (p, linha, fluxo) => {
+        try { p.aoLinha(linha, fluxo); } catch (erro) { dizerOErro('erro no aoLinha:', erro); }
+      };
+      const terminar = (p) => {
+        if (p.aoSair) {
+          try { p.aoSair(p.fim); } catch (erro) { dizerOErro('erro no aoSair:', erro); }
+        }
+        p.resolverFim(p.fim);
+      };
+      aoProgramaChegou = (m) => {
+        if (m.tipo === 'programa-progresso') {
+          const fn = progressos.get(m.n);
+          if (!fn) return;
+          try { fn({ recebidos: Number(m.recebidos), total: Number(m.total) }); } catch (erro) { dizerOErro('erro no aoProgresso:', erro); }
+          return;
+        }
+        const p = doProcesso(Number(m.processo));
+        if (m.tipo === 'processo-linha') {
+          const linha = String(m.linha ?? '');
+          const fluxo = m.fluxo === 'erro' ? 'erro' : 'saida';
+          if (p.aoLinha) ouvirLinha(p, linha, fluxo);
+          else if (p.guardadas.length < TETO_GUARDADAS) p.guardadas.push([linha, fluxo]);
+          else p.naoOuvidas += 1;
+          return;
+        }
+        // processo-fim: uma vez só.
+        if (p.fim) return;
+        p.fim = Object.freeze({
+          codigo: m.codigo ?? null,
+          mortoAPedido: m.mortoAPedido === true,
+          linhasPerdidas: Number(m.linhasPerdidas) || 0,
+          linhasCortadas: Number(m.linhasCortadas) || 0,
+          linhasNaoOuvidas: p.naoOuvidas,
+        });
+        processos.delete(Number(m.processo));
+        terminar(p);
+      };
+      const objetoDoProcesso = (r) => {
+        const numero = Number(r && r.processo);
+        const p = doProcesso(numero);
+        return Object.freeze({
+          numero,
+          pid: (r && r.pid) ?? null,
+          // Um ouvinte de cada, e o último vence, como `aoAviso`. Ao registrar,
+          // o que estava guardado chega primeiro, na ordem.
+          aoLinha: (fn) => {
+            p.aoLinha = typeof fn === 'function' ? fn : null;
+            if (!p.aoLinha) return;
+            const guardadas = p.guardadas.splice(0);
+            for (const [linha, fluxo] of guardadas) ouvirLinha(p, linha, fluxo);
+          },
+          aoSair: (fn) => {
+            p.aoSair = typeof fn === 'function' ? fn : null;
+            // Já tinha saído: o ouvinte novo ouve o fim que passou.
+            if (p.aoSair && p.fim) {
+              try { p.aoSair(p.fim); } catch (erro) { dizerOErro('erro no aoSair:', erro); }
+            }
+          },
+          // A mesma saída, como promessa.
+          fim: p.promessa,
+          escrever: (texto) => pedir('processo-escrever', { processo: numero, texto: String(texto ?? '') }),
+          matar: () => pedir('processo-matar', { processo: numero }),
+        });
+      };
+      const hashes = (pedido) => {
+        const saida = {};
+        for (const algoritmo of ['sha1', 'sha256', 'sha512']) {
+          if (pedido && pedido[algoritmo] !== undefined) saida[algoritmo] = String(pedido[algoritmo]);
+        }
+        return saida;
+      };
+      return Object.freeze({
+        // Resolve quando o arquivo chegou e bateu: `{ destino, tamanho,
+        // algoritmo, hash }`. `aoProgresso({ recebidos, total })` é chamado
+        // enquanto ele corre.
+        baixar: (pedido) => {
+          const n = proximo + 1;
+          if (typeof (pedido && pedido.aoProgresso) === 'function') progressos.set(n, pedido.aoProgresso);
+          return pedir('programa-baixar', {
+            url: String(pedido?.url ?? ''),
+            ...hashes(pedido),
+            tamanho: Number(pedido?.tamanho),
+            destino: String(pedido?.destino ?? ''),
+          }).finally(() => { progressos.delete(n); });
+        },
+        escrever: (pedido) => pedir('programa-escrever', {
+          destino: String(pedido?.destino ?? ''),
+          texto: String(pedido?.texto ?? ''),
+        }),
+        // `mesclar: true` (API 8 parte 6) entra por cima do que já está no
+        // destino, arquivo a arquivo (os `overrides` de um modpack); sem ele,
+        // o destino inteiro é trocado.
+        desempacotar: (pedido) => pedir('programa-desempacotar', {
+          arquivo: String(pedido?.arquivo ?? ''),
+          destino: String(pedido?.destino ?? ''),
+          raiz: String(pedido?.raiz ?? ''),
+          mesclar: pedido?.mesclar === true,
+        }),
+        // **O pack da metade de servidor** (API 8 parte 6): `pedido` vai ao
+        // `aoPedir` dela, que autoriza respondendo `{ ok, volume }`; os bytes
+        // vêm pelo fluxo de volume, e o anfitrião só os grava se tiverem o
+        // hash do pack aceito. Resolve com `{ destino, tamanho, hash,
+        // jaEstava }`.
+        trazer: (pedido) => pedir('programa-trazer', {
+          pedido: pedido?.pedido ?? null,
+          destino: String(pedido?.destino ?? ''),
+        }),
+        // Um texto da pasta do servidor de jogo (o índice do pack), até 4 MiB.
+        ler: (pedido) => pedir('programa-ler', { arquivo: String(pedido?.arquivo ?? '') }),
+        rodar: async (pedido) => objetoDoProcesso(await pedir('programa-rodar', {
+          comando: String(pedido?.comando ?? ''),
+          argumentos: Array.isArray(pedido?.argumentos) ? pedido.argumentos.map(String) : [],
+          pasta: String(pedido?.pasta ?? ''),
+        })),
+        // `{ nome: vezes }`: cada recusa desde que esta metade subiu.
+        recusas: () => pedir('programa-recusas', {}),
+      });
+    })() : null;
+    globalThis.maquina = Object.freeze({
+      servidor: String(dados.servidor ?? ''),
+      oferta: congelar(dados.oferta ?? null),
+      // O sistema desta máquina, no nome das receitas (`mac-aarch64`...): é o
+      // que escolhe, entre os artefatos da oferta, os que esta máquina baixa.
+      plataforma: String(dados.plataforma ?? ''),
+      // À metade de servidor do MOD, pelo servidor; resolve com o texto que
+      // ela respondeu, e rejeita com `sem-aceite` ou `sem-resposta`.
+      pedir: (valor) => pedir('maquina-pedir', { valor }),
+      // Um ouvinte de cada, e o último vence — a mesma regra de
+      // `SeeleUI.aoEvento`, pela mesma razão.
+      aoAviso: (fn) => { ouvinteDoAviso = typeof fn === 'function' ? fn : null; },
+      aoParar: (fn) => { ouvinteDaParada = typeof fn === 'function' ? fn : null; },
+      ...(porta ? { porta } : {}),
+      ...(programa ? { programa } : {}),
+    });
+  }
 
   // ---- tempo ----
   //

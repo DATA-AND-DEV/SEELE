@@ -84,6 +84,21 @@ where
 pub const fn desde(mensagem: &ServerMessage) -> u8 {
     match mensagem {
         ServerMessage::IdentidadeApresentada { .. } => 11,
+        // O protocolo 12 (29/10/2026): as plataformas antes da entrada e o
+        // túnel de jogo. A 11 está publicada (v0.18.1), e um par 11 que
+        // recebesse isto leria uma variante que não conhece e perderia o fluxo
+        // de controle inteiro.
+        ServerMessage::PlataformasDosMods { .. }
+        | ServerMessage::TunelConcedido { .. }
+        | ServerMessage::TunelRecusado { .. }
+        | ServerMessage::SirvaTunelPara { .. }
+        | ServerMessage::AlcanceTunelPor { .. }
+        | ServerMessage::TunelEncerrado { .. }
+        | ServerMessage::TunelRetirado { .. }
+        // A máquina (30/10/2026), ainda no 12.
+        | ServerMessage::PedidoDeMaquina { .. }
+        | ServerMessage::AvisoParaMaquina { .. }
+        | ServerMessage::MaquinaDispensada { .. } => 12,
         // O `Alert` existe desde sempre, e o que pode ser novo é o motivo.
         ServerMessage::Alert { reason, .. } => maior(PRIMEIRO_DA_LINHA_UM, desde_o_alerta(reason)),
         // Puxa o número da razão que leva, como o `Alert` puxa o do motivo: uma
@@ -154,13 +169,31 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
     }
 }
 
+/// Em que número um pedido do fluxo de imagem passou a existir.
+///
+/// O fluxo de imagem não é uma lista de cima, mas carrega o mesmo risco: um
+/// servidor 11 que lê `EnviarAoPerfil` não o conhece e falha o fluxo. Quem
+/// abre o fluxo pergunta isto antes de escrever o pedido.
+#[must_use]
+pub const fn desde_o_pedido_de_imagem(pedido: &PedidoDeImagem) -> u8 {
+    match pedido {
+        PedidoDeImagem::Enviar { .. } | PedidoDeImagem::Ler { .. } => PRIMEIRO_DA_LINHA_DOIS,
+        PedidoDeImagem::EnviarAoPerfil { .. } | PedidoDeImagem::LerDoPerfil { .. } => 12,
+    }
+}
+
 /// Em que número de protocolo um verbo do **cliente** passou a existir.
 ///
 /// A metade que faltava de [`desde`]: o servidor tem o portão de quem manda
 /// (`entende_a_mensagem`), e o cliente precisa do mesmo para **não mandar** a
 /// um servidor que negociou menos o que ele não conhece. Um cliente 12 diante
-/// de um servidor 11 não escreve `GravarPerfil`: o servidor 11 leria uma
-/// variante desconhecida e o fluxo de controle desalinharia.
+/// de um servidor 11 não escreve verbo de túnel nenhum, nem `GravarPerfil` — o
+/// servidor 11 leria uma variante desconhecida e o fluxo de controle
+/// desalinharia.
+///
+/// Também carimba o quadro: os bytes-ouro de `tests/fio_2_0.rs` usam
+/// `desde_do_cliente(..).max(10)` para cada verbo, como já fazem com os do
+/// servidor.
 ///
 /// Sem `_`, de propósito, pelo mesmo motivo de [`desde`]: o guarda
 /// `as_tabelas_tem_um_braco_por_variante` o confere contra a lista do `serde`.
@@ -213,21 +246,20 @@ pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
         | ClientMessage::RevogarCargo { .. }
         | ClientMessage::PedirCargos
         | ClientMessage::AcaoDeMod { .. } => PRIMEIRO_DA_LINHA_DOIS,
-        // O perfil público nativo (0.19).
-        ClientMessage::GravarPerfil { .. } | ClientMessage::TirarImagemDoPerfil { .. } => 12,
-    }
-}
-
-/// Em que número um pedido do fluxo de imagem passou a existir.
-///
-/// O fluxo de imagem não é uma lista de cima, mas carrega o mesmo risco: um
-/// servidor 11 que lê `EnviarAoPerfil` não o conhece e falha o fluxo. Quem
-/// abre o fluxo pergunta isto antes de escrever o pedido.
-#[must_use]
-pub const fn desde_o_pedido_de_imagem(pedido: &PedidoDeImagem) -> u8 {
-    match pedido {
-        PedidoDeImagem::Enviar { .. } | PedidoDeImagem::Ler { .. } => PRIMEIRO_DA_LINHA_DOIS,
-        PedidoDeImagem::EnviarAoPerfil { .. } | PedidoDeImagem::LerDoPerfil { .. } => 12,
+        // O túnel de jogo (29/10/2026).
+        ClientMessage::ServirTunel { .. }
+        | ClientMessage::PararTunel { .. }
+        | ClientMessage::EntrarNoTunel { .. }
+        | ClientMessage::SairDoTunel { .. }
+        | ClientMessage::TunelFalhou { .. }
+        // A máquina (30/10/2026), ainda no 12.
+        | ClientMessage::AceiteDeMaquina { .. }
+        | ClientMessage::RecusaDeMaquina { .. }
+        | ClientMessage::MaquinaParada { .. }
+        | ClientMessage::PedidoDaMaquina { .. }
+        // O perfil público nativo (0.19), no mesmo 12.
+        | ClientMessage::GravarPerfil { .. }
+        | ClientMessage::TirarImagemDoPerfil { .. } => 12,
     }
 }
 
@@ -385,7 +417,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::control::AlertSeverity;
+    use crate::control::{AlertSeverity, ClientMessage};
+    use crate::tunel::{MotivoDoFimDoTunel, ProtocoloDeTunel, RecusaDeTunel};
 
     /// O corpo de uma tabela, lido desta fonte: de `pub const fn {nome}(` até a
     /// próxima função.
@@ -471,6 +504,148 @@ mod tests {
                 "a tabela {tabela} não tem um braço para cada variante de {tipo}"
             );
         }
+    }
+
+    /// As sete mensagens de servidor que nasceram no 12, uma de cada.
+    fn exemplares_do_doze() -> Vec<ServerMessage> {
+        vec![
+            ServerMessage::PlataformasDosMods {
+                mods: vec![crate::mods::PlataformasDoMod {
+                    hash: "ab".repeat(32),
+                    plataformas: vec![crate::mods::Plataforma::App],
+                }],
+            },
+            ServerMessage::TunelConcedido {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: 25565,
+            },
+            ServerMessage::TunelRecusado {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                motivo: RecusaDeTunel::NaoExiste,
+            },
+            ServerMessage::SirvaTunelPara {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                quem: crate::ids::PersonId(2),
+                enderecos: vec![],
+                impressao: "3c".repeat(32),
+            },
+            ServerMessage::AlcanceTunelPor {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                quem: crate::ids::PersonId(2),
+                enderecos: vec![],
+                impressao: "3c".repeat(32),
+            },
+            ServerMessage::TunelEncerrado {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                motivo: MotivoDoFimDoTunel::MaquinaParou,
+            },
+            ServerMessage::TunelRetirado {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                quem: crate::ids::PersonId(2),
+            },
+        ]
+    }
+
+    /// A máquina nasceu no 12, e as sete variantes valem 12 nos dois sentidos.
+    #[test]
+    fn a_maquina_nasceu_no_doze() {
+        use crate::maquina::{MotivoDaDispensa, MotivoDaParadaDeMaquina, MotivoDaRecusaDeMaquina};
+        let servidor = "mc-1".to_owned();
+        let mod_id = "a/b".to_owned();
+        for nova in [
+            ServerMessage::AvisoParaMaquina {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                carga: String::new(),
+            },
+            ServerMessage::MaquinaDispensada {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                motivo: MotivoDaDispensa::SemAceite,
+            },
+        ] {
+            assert_eq!(desde(&nova), 12, "{nova:?}");
+        }
+        for nova in [
+            ClientMessage::AceiteDeMaquina {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                resumo: "0".repeat(64),
+            },
+            ClientMessage::RecusaDeMaquina {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                motivo: MotivoDaRecusaDeMaquina::PeloDono,
+            },
+            ClientMessage::MaquinaParada {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                motivo: MotivoDaParadaDeMaquina::PeloDono,
+            },
+            ClientMessage::PedidoDaMaquina {
+                request: 1,
+                mod_id,
+                servidor,
+                payload: String::new(),
+            },
+        ] {
+            assert_eq!(desde_do_cliente(&nova), 12, "{nova:?}");
+        }
+        // E o pedido, que leva a oferta, é a sétima.
+        let pedido = ServerMessage::PedidoDeMaquina {
+            mod_id: "a/b".into(),
+            hash: "0".repeat(64),
+            servidor: "mc-1".into(),
+            pedido_por: crate::ids::PersonId(1),
+            oferta: Box::new(crate::maquina::OfertaDeMaquina {
+                titulo: "t".into(),
+                receita: "r".into(),
+                versao_da_receita: "1".into(),
+                versao_do_jogo: "1".into(),
+                tuneis: vec![],
+                artefatos: vec![],
+                pack: None,
+                origens: vec![],
+                dominios_do_jogo: vec![],
+                rodar: None,
+                disco_maximo: 0,
+                termos: vec![],
+                instalar: None,
+            }),
+        };
+        assert_eq!(desde(&pedido), 12);
+    }
+
+    /// **Um par 11 não recebe o que nasceu no 12.** O servidor só escreve para
+    /// quem negociou um número igual ou acima do que `desde` diz; se um braço
+    /// novo voltasse o número de antes, o quadro chegaria a um par que não
+    /// conhece a variante e desalinharia o fluxo de controle dele.
+    #[test]
+    fn um_par_onze_nao_recebe_o_que_nasceu_no_doze() {
+        for nova in exemplares_do_doze() {
+            assert_eq!(desde(&nova), 12, "{nova:?}");
+            assert!(desde(&nova) > 11);
+        }
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::EntrarNoTunel {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into()
+            }),
+            12
+        );
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::AceitarMods {
+                conjunto: "0".repeat(64)
+            }),
+            9
+        );
     }
 
     /// Na linha 1, tudo o que existe nasceu, do ponto de vista de quem

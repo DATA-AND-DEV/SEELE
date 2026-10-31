@@ -4,6 +4,7 @@
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
+    clippy::indexing_slicing,
     reason = "num teste, o pânico é o relatório"
 )]
 
@@ -104,6 +105,11 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     )
     .await?;
     let mut chegada = frame::read::<ServerMessage>(&mut recebe).await?;
+    // Este par fala 12: as plataformas dos MODs vêm antes do anúncio, e aqui não
+    // importam.
+    if matches!(chegada, ServerMessage::PlataformasDosMods { .. }) {
+        chegada = frame::read::<ServerMessage>(&mut recebe).await?;
+    }
     if let ServerMessage::ModsExigidos { conjunto, .. } = chegada {
         frame::write(&mut envio, &ClientMessage::AceitarMods { conjunto }).await?;
         chegada = frame::read::<ServerMessage>(&mut recebe).await?;
@@ -226,6 +232,7 @@ async fn dez_mib_em_fluxo_substituicao_e_duas_leituras_sem_fila_de_controle() ->
         server_half: true,
         api: 6,
         tema: false,
+        plataformas: None,
     };
     let (endereco, _daemon) = server(Location::Memory, raizes.clone(), ligado).await?;
     let mut par = abrir(endereco, 1).await?;
@@ -373,5 +380,221 @@ async fn dez_mib_em_fluxo_substituicao_e_duas_leituras_sem_fila_de_controle() ->
         payload: r#"{"op":"asset","path":"foto-antiga"}"#.into(),
     };
     assert!(transferir(&par._conexao, fora, &[]).await.is_err());
+    Ok(())
+}
+
+/// O `.mrpack` mínimo de verdade (zip «stored»): o índice na raiz, se
+/// `com_indice`, e um override de `recheio` bytes.
+fn mrpack(recheio: usize, com_indice: bool) -> Vec<u8> {
+    let indice: &[u8] = br#"{"formatVersion":1,"game":"minecraft","versionId":"1","name":"prova","files":[],"dependencies":{"minecraft":"1.21.4","fabric-loader":"0.16.10"}}"#;
+    let override_ = vec![7_u8; recheio];
+    let mut entradas: Vec<(&str, &[u8])> = vec![("overrides/config/grande.bin", &override_)];
+    if com_indice {
+        entradas.push(("modrinth.index.json", indice));
+    }
+    let mut z = Vec::new();
+    let mut d = Vec::new();
+    for (nome, dados) in &entradas {
+        let local = u32::try_from(z.len()).unwrap();
+        let tam = u32::try_from(dados.len()).unwrap();
+        let n = u16::try_from(nome.len()).unwrap();
+        z.extend_from_slice(&[
+            0x50, 0x4b, 0x03, 0x04, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        z.extend_from_slice(&tam.to_le_bytes());
+        z.extend_from_slice(&tam.to_le_bytes());
+        z.extend_from_slice(&n.to_le_bytes());
+        z.extend_from_slice(&[0, 0]);
+        z.extend_from_slice(nome.as_bytes());
+        z.extend_from_slice(dados);
+        d.extend_from_slice(&[
+            0x50, 0x4b, 0x01, 0x02, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        d.extend_from_slice(&tam.to_le_bytes());
+        d.extend_from_slice(&tam.to_le_bytes());
+        d.extend_from_slice(&n.to_le_bytes());
+        d.extend_from_slice(&[0; 12]);
+        d.extend_from_slice(&local.to_le_bytes());
+        d.extend_from_slice(nome.as_bytes());
+    }
+    let inicio = u32::try_from(z.len()).unwrap();
+    let quantas = u16::try_from(entradas.len()).unwrap();
+    z.extend_from_slice(&d);
+    z.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0]);
+    z.extend_from_slice(&quantas.to_le_bytes());
+    z.extend_from_slice(&quantas.to_le_bytes());
+    z.extend_from_slice(&u32::try_from(d.len()).unwrap().to_le_bytes());
+    z.extend_from_slice(&inicio.to_le_bytes());
+    z.extend_from_slice(&[0, 0]);
+    z
+}
+
+/// Como `transferir`, mas devolve a recusa do servidor como texto.
+async fn transferir_ou_recusa(
+    conexao: &seele_enlace::Conexao,
+    pedido: seele_proto::volume::PedidoDeImagem,
+    bytes: &[u8],
+) -> Result<Result<Vec<u8>, String>> {
+    let (mut envia, mut recebe) = conexao.open_bi().await?;
+    frame::write(&mut envia, &pedido).await?;
+    // Os bytes num lado e a resposta no outro: uma recusa antes do primeiro
+    // byte chega sem o servidor ler o resto, e escrever tudo antes de ler
+    // esperaria crédito para sempre.
+    let bytes = bytes.to_vec();
+    let escrita = tokio::spawn(async move {
+        for bloco in bytes.chunks(65536) {
+            if envia.write_all(bloco).await.is_err() {
+                break;
+            }
+        }
+        let _ = envia.finish();
+        envia
+    });
+    let resposta: seele_proto::volume::RespostaDeImagem =
+        tokio::time::timeout(Duration::from_secs(60), frame::read(&mut recebe)).await??;
+    if resposta.erro.is_some() {
+        escrita.abort();
+    } else {
+        let _ = escrita.await;
+    }
+    if let Some(erro) = resposta.erro {
+        return Ok(Err(erro));
+    }
+    Ok(Ok(recebe.read_to_end(80 * 1024 * 1024).await?))
+}
+
+/// **O `.mrpack` vai ao volume e volta, até 64 MiB** (API 8 parte 6; spec
+/// §8): conferido pelos bytes (um zip com o índice na raiz), com o teto do
+/// tipo que a espera aceita — a mesma espera de imagem não deixa passar 20
+/// MiB, e diz o tamanho e o teto —, e lido de volta pela metade de servidor
+/// (`volume.pack`: o tamanho, o `sha512` e o índice).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn o_mrpack_vai_ao_volume_e_volta_com_o_teto_do_tipo() -> Result<()> {
+    use seele_proto::volume::{PedidoDeImagem, VolumeHeader};
+    let temp = tempfile::tempdir()?;
+    let raizes = seele_server::RaizesDosMods {
+        pacotes: temp.path().join("cache"),
+        dados: temp.path().join("dados"),
+    };
+    let manifest = serde_json::json!({"schema":1,"id":"prova/imagens","version":"1.0.0","api":seele_proto::mods::MOD_API_VERSION,"repo":"https://github.com/prova/imagens","reach":["packs"],"client":"cliente.js","server":"servidor.js","maquina":"maquina.js","plataformas":["app"],"poderes":["programa"]}).to_string().into_bytes();
+    let js = br#"globalThis.aoPedir=(c,p)=>{const r=JSON.parse(p);
+      if(r.op==='start'){if(!volume.esperar(r.token,'packs/'+r.token+'.mrpack',r.tipos,60))throw Error('espera recusada');return '{"ok":true}';}
+      if(r.op==='pack'){return JSON.stringify(volume.pack('packs/'+r.token+'.mrpack'));}
+      if(r.op==='ler'){return JSON.stringify({ok:true,volume:volume.servir('packs/'+r.token+'.mrpack')});}
+      return '{"ok":false}';};"#;
+    let mut files = vec![
+        ("mod.json".into(), manifest.clone()),
+        ("cliente.js".into(), b"void 0;".to_vec()),
+        ("servidor.js".into(), js.to_vec()),
+        ("maquina.js".into(), b"void 0;".to_vec()),
+    ];
+    let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut files));
+    let pacote = raizes.pacote_de(&hash);
+    std::fs::create_dir_all(&pacote)?;
+    for (nome, bytes) in files {
+        std::fs::write(pacote.join(nome), bytes)?;
+    }
+    let ligado = seele_server::persistence::mods::EnabledMod {
+        id: "prova/imagens".into(),
+        version: "1.0.0".into(),
+        hash,
+        repo: "https://github.com/prova/imagens".into(),
+        reach: vec!["packs".into()],
+        server_half: true,
+        api: seele_proto::mods::MOD_API_VERSION,
+        tema: false,
+        plataformas: Some(vec![seele_proto::mods::Plataforma::App]),
+    };
+    let (endereco, _daemon) = server(Location::Memory, raizes.clone(), ligado).await?;
+    let mut par = abrir(endereco, 1).await?;
+    let grande = mrpack(20 * 1024 * 1024, true);
+    let enviar = |token: &str, bytes: u64| PedidoDeImagem::Enviar {
+        cabecalho: VolumeHeader {
+            mod_id: "prova/imagens".into(),
+            token: token.into(),
+        },
+        bytes,
+    };
+
+    // 20 MiB de pack, numa espera de pack: vai, e volta igual.
+    pedido(
+        &mut par,
+        1,
+        serde_json::json!({"op":"start","token":"p1","tipos":["mrpack"]}),
+    )
+    .await?;
+    transferir_ou_recusa(&par._conexao, enviar("p1", grande.len() as u64), &grande)
+        .await?
+        .map_err(|e| anyhow::anyhow!("o pack de 20 MiB foi recusado: {e}"))?;
+    let lido = pedido(&mut par, 2, serde_json::json!({"op":"pack","token":"p1"})).await?;
+    assert_eq!(lido["ok"], true, "{lido}");
+    assert_eq!(lido["bytes"], grande.len() as u64);
+    assert!(
+        lido["indice"].as_str().unwrap().contains("fabric-loader"),
+        "{lido}"
+    );
+    let sha512: String = {
+        use sha2::Digest as _;
+        sha2::Sha512::digest(&grande)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    };
+    assert_eq!(lido["sha512"], sha512);
+    let volta = transferir_ou_recusa(
+        &par._conexao,
+        PedidoDeImagem::Ler {
+            mod_id: "prova/imagens".into(),
+            channel: seele_proto::ids::ChannelId(0),
+            payload: serde_json::json!({"op":"ler","token":"p1"}).to_string(),
+        },
+        &[],
+    )
+    .await?
+    .map_err(|e| anyhow::anyhow!("a leitura do pack de 20 MiB foi recusada: {e}"))?;
+    assert!(volta == grande, "o pack voltou diferente");
+
+    // Os mesmos 20 MiB numa espera de imagem: o teto da imagem é 100 MiB
+    // desde a 0.19, e o que os recusa é o tipo, lido nos primeiros bytes.
+    pedido(
+        &mut par,
+        3,
+        serde_json::json!({"op":"start","token":"p2","tipos":["png"]}),
+    )
+    .await?;
+    let recusa = transferir_ou_recusa(&par._conexao, enviar("p2", grande.len() as u64), &grande)
+        .await?
+        .expect_err("um pack entrou numa espera de imagem");
+    assert_eq!(recusa, "formato-desconhecido");
+
+    // Um pack declarado acima do teto dele (64 MiB, abaixo do fio de 100) numa
+    // espera só de `mrpack`: recusado antes do primeiro byte, com o tamanho e
+    // o teto. (A imagem acima de 100 MiB nem chega: o fio a recusa antes.)
+    pedido(
+        &mut par,
+        6,
+        serde_json::json!({"op":"start","token":"p4","tipos":["mrpack"]}),
+    )
+    .await?;
+    let teto = seele_proto::pack::TETO_DO_PACK;
+    let recusa = transferir_ou_recusa(&par._conexao, enviar("p4", teto + 1), &[0x50, 0x4b, 0x03, 0x04])
+        .await?
+        .expect_err("um pack acima de 64 MiB passou");
+    assert_eq!(recusa, format!("arquivo-grande-demais:{}:{teto}", teto + 1));
+
+    // Um zip sem o índice na raiz não é pack.
+    let sem = mrpack(1024, false);
+    pedido(
+        &mut par,
+        4,
+        serde_json::json!({"op":"start","token":"p3","tipos":["mrpack"]}),
+    )
+    .await?;
+    let recusa = transferir_ou_recusa(&par._conexao, enviar("p3", sem.len() as u64), &sem)
+        .await?
+        .expect_err("um zip sem índice passou como pack");
+    assert_eq!(recusa, "formato-desconhecido");
+    let lido = pedido(&mut par, 5, serde_json::json!({"op":"pack","token":"p3"})).await?;
+    assert_eq!(lido["erro"], "nao-existe", "{lido}");
     Ok(())
 }

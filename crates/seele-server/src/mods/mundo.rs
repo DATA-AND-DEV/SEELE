@@ -40,6 +40,17 @@ pub const TETO_DA_RESPOSTA: usize = 4 * 1024 * 1024;
 /// whoever hosts it, and it has no use for the difference.
 #[must_use]
 pub fn buscar(url: &str) -> Option<String> {
+    // Texto e não bytes, como antes: é o que a API de MOD entrega. Um corpo que
+    // não é UTF-8 lê como ausência, que é a resposta única que esta função dá
+    // para toda falha.
+    String::from_utf8(buscar_bytes(url)?).ok()
+}
+
+/// Os bytes de `url`, com os mesmos tetos e a mesma resposta única para toda
+/// falha de [`buscar`]. O caminho de `mundo.buscarPack` (um `.mrpack` é zip,
+/// e não texto).
+#[must_use]
+pub fn buscar_bytes(url: &str) -> Option<Vec<u8>> {
     // `http` e `https` e mais nada. Sem isto, `file:///…/identity.key` faria
     // pela rede exatamente o que a pasta do MOD existe para impedir no disco.
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -91,10 +102,7 @@ pub fn buscar(url: &str) -> Option<String> {
         }
         bytes.extend_from_slice(pedaco.get(..lidos)?);
     }
-    // Texto e não bytes, como antes: é o que a API de MOD entrega. Um corpo que
-    // não é UTF-8 lê como ausência, que é a resposta única que esta função dá
-    // para toda falha.
-    String::from_utf8(bytes).ok()
+    Some(bytes)
 }
 
 /// Seconds since the Unix epoch.

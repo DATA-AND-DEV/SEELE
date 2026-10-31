@@ -37,6 +37,7 @@ pub mod campainha;
 pub mod cargos;
 pub mod frame;
 pub mod hospedagem;
+pub mod maquinas;
 pub mod mods;
 pub mod pares;
 pub mod perda_de_subida;
@@ -54,6 +55,7 @@ pub mod tela;
 pub mod tls;
 pub mod transfer;
 pub mod transporte;
+pub mod tuneis;
 pub mod voice_room;
 
 /// O vocabulário de fio de um ponto de encontro, e **só** ele.
@@ -300,6 +302,17 @@ pub struct ServerConfig {
     /// nenhum. Com ele, o `listen` é trocado por `127.0.0.1` na mesma porta,
     /// e o `::1` não é atendido (uma ponta, um socket).
     pub modo_local: bool,
+    /// Se o servidor apresenta as pontas de um túnel de jogo uma à outra, para o
+    /// caminho direto (a malha). **Padrão: ligado.**
+    ///
+    /// Desligado, o servidor não apresenta ninguém e todo túnel vai pela
+    /// estrela, repassado por ele: é o que uma prova usa para forçar o caminho
+    /// da estrela, e o que serve a quem hospeda e não quer a malha. A malha é
+    /// alívio, nunca dependência: todo túnel funciona pela estrela.
+    ///
+    /// Quem apresenta as pontas é [`crate::tuneis::apresentar`], que lê a cópia
+    /// guardada em [`crate::server::Server`].
+    pub malha_para_tuneis: bool,
 }
 
 impl Default for ServerConfig {
@@ -340,6 +353,8 @@ impl Default for ServerConfig {
             proprietario: None,
             // A escada sobe, como sempre: o modo local é só de quem o pede.
             modo_local: false,
+            // Ligada: a malha alivia o anfitrião, e a estrela cobre o resto.
+            malha_para_tuneis: true,
         }
     }
 }
@@ -799,6 +814,9 @@ impl Daemon {
             desassentamentos: Arc::new(server::Desassentamentos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
             pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),
+            tuneis: std::sync::Mutex::new(tuneis::Tuneis::default()),
+            maquinas: std::sync::Mutex::new(maquinas::Maquinas::default()),
+            malha_para_tuneis: config.malha_para_tuneis,
             anexos,
             caminho_bps: config.caminho_bps,
             versao_do_anuncio: config.versao_do_anuncio,
@@ -806,6 +824,7 @@ impl Daemon {
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
+            avisador_de_maquinas: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao,
             recepcao,
         });
@@ -880,9 +899,15 @@ impl Daemon {
                     despachante,
                     pasta_dos_mods.clone(),
                     Arc::clone(&server.avisador),
+                    Arc::downgrade(&server),
                 ));
             }
         }
+
+        // Desligar um MOD fecha os túneis dele, e uma mudança de cargo ou de
+        // conjunto confere de novo quem está dentro. Com `Weak`: a tarefa não
+        // segura o servidor de pé.
+        tokio::spawn(tuneis::acompanhar_os_mods(Arc::downgrade(&server)));
 
         // Held seats have to be released even if nobody reconnects, or a server
         // slowly fills with places kept for people who left for good.
@@ -1559,6 +1584,7 @@ mod tests {
                     server_half: false,
                     api,
                     tema: false,
+                    plataformas: None,
                 },
             )
             .expect("ligar o MOD");

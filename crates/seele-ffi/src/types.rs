@@ -187,6 +187,34 @@ pub struct ModExigido {
     /// Se ele pode pintar a aparência do servidor inteiro (D-api-8): a linha
     /// que a tela de aceite diz, porque quem aceita tem de saber.
     pub tema: bool,
+    /// Onde ele roda (`"app"`, `"navegador"`), como o servidor 12 disse antes do
+    /// anúncio. **Ausente**, e não vazia, quando o servidor não disse (um 11): a
+    /// casca lê ausente como «as duas» e baixa tudo, como sempre.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plataformas: Option<Vec<String>>,
+}
+
+impl ModExigido {
+    /// Junta o que o servidor disse sobre onde este MOD roda.
+    #[must_use]
+    pub fn com_plataformas(mut self, dita: Option<&seele_core::mods::PlataformasDoMod>) -> Self {
+        self.plataformas = dita.map(|dita| {
+            dita.plataformas
+                .iter()
+                .map(|p| nome_da_plataforma(*p).to_owned())
+                .collect()
+        });
+        self
+    }
+}
+
+/// O nome da plataforma como a casca o lê, o mesmo do manifesto.
+#[must_use]
+pub fn nome_da_plataforma(plataforma: seele_core::mods::Plataforma) -> &'static str {
+    match plataforma {
+        seele_core::mods::Plataforma::App => "app",
+        seele_core::mods::Plataforma::Navegador => "navegador",
+    }
 }
 
 impl From<seele_core::mods::ModAnunciado> for ModExigido {
@@ -199,6 +227,7 @@ impl From<seele_core::mods::ModAnunciado> for ModExigido {
             reach: anunciado.reach,
             no_servidor: anunciado.no_servidor,
             tema: anunciado.tema,
+            plataformas: None,
         }
     }
 }
@@ -1276,6 +1305,59 @@ pub enum Event {
         /// Qual transmissão.
         screen: u32,
     },
+    /// Um túnel de jogo de quem joga mediu de novo, ou acabou.
+    ///
+    /// Grosso na medida do possível, mas o relatório inteiro vai junto: a faixa
+    /// do produto desenha a porta, o caminho, a latência e as quedas, e uma
+    /// leitura por comando a cada relatório custaria uma travessia por linha
+    /// desenhada. O último relatório de um túnel traz `encerrado: Some(motivo)`.
+    TunnelReport {
+        /// O que o túnel mediu.
+        report: RelatorioDeTunel,
+    },
+    /// O servidor pede a esta pessoa que rode uma máquina de jogo (API 8 parte
+    /// 3). Só chega a uma conexão com tela
+    /// ([`crate::Connection::aceitar_pedidos_de_maquina`]); o mesmo pedido não
+    /// se repete enquanto a casca não responde.
+    ///
+    /// `resumo` é o que se aceita: é ele que volta em
+    /// [`crate::Connection::aceitar_maquina`] e que se guarda em
+    /// [`crate::mods::guardar_aceite_de_maquina`], como veio.
+    MachineRequest {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O hash do pacote ligado, em hex.
+        hash: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// Quem pediu; `0` quando foi um momento do MOD, sem pessoa. A casca o
+        /// troca pelo apelido.
+        pedido_por: u64,
+        /// Tudo o que a pessoa vê antes de aceitar. Numa caixa porque é de
+        /// longe o maior evento, e raro: sem ela, todo `RosterChanged` pagaria
+        /// o tamanho dele na fila.
+        oferta: Box<OfertaDeMaquinaFfi>,
+        /// O resumo da oferta, 64 caracteres em hex.
+        resumo: String,
+    },
+    /// A metade de servidor do MOD avisou a máquina deste servidor de jogo.
+    MachineNotice {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// O que o MOD mandou, sem interpretação aqui.
+        carga: String,
+    },
+    /// O servidor dispensou a máquina. Pode chegar a toda conexão da pessoa.
+    MachineDismissed {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// `mod-desligado`, `outro-pedido` ou `sem-aceite`. A frase é da casca.
+        motivo: &'static str,
+    },
 }
 
 /// Where one file is on its way.
@@ -2008,9 +2090,262 @@ impl std::fmt::Display for ConnectionError {
 
 impl std::error::Error for ConnectionError {}
 
+// ------------------------------------------------------------ o túnel de jogo
+
+/// A porta em que o jogo de quem joga deve ligar (`127.0.0.1:porta`).
+///
+/// O que `tunel_entrar` devolve à casca e, por ela, ao MOD (que recebe só o
+/// número).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct PortaDeTunel {
+    /// A porta em `127.0.0.1` de fato aberta.
+    pub porta: u16,
+    /// Se é a do jogo, e não uma das seguintes.
+    pub preferida: bool,
+    /// A porta do jogo, a que se tentou primeiro; é a que estava ocupada
+    /// quando `preferida` é falso. Zero quando se pediu qualquer uma.
+    pub desejada: u16,
+}
+
+/// Por onde as conexões novas de um túnel andam.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "tipo", rename_all = "kebab-case")]
+pub enum CaminhoDeTunel {
+    /// Ligação direta com a máquina do jogo, sem passar pelo anfitrião.
+    Direto {
+        /// A pessoa da máquina.
+        par: u64,
+        /// O apelido dela na sala, quando o roster a conhece. A casca diz
+        /// «ligação direta com <apelido>», e sem o apelido diz só «direta».
+        apelido: Option<String>,
+    },
+    /// Pelo anfitrião: o caminho que sempre funciona.
+    Estrela,
+}
+
+/// Quantas vezes um motivo acabou algo num túnel.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct QuedaDeTunel {
+    /// O nome do motivo, em kebab-case (`caminho-caiu`, `porta-ocupada`...). A
+    /// frase é da casca.
+    pub motivo: &'static str,
+    /// Quantas vezes, desde que o túnel abriu.
+    pub vezes: u32,
+}
+
+/// O que um túnel de quem joga mediu, como a casca o desenha.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RelatorioDeTunel {
+    /// `autor/nome` do MOD.
+    pub mod_id: String,
+    /// O nome do túnel.
+    pub nome: String,
+    /// A porta em `127.0.0.1` em que o jogo deve ligar; zero quando nenhuma
+    /// coube.
+    pub porta: u16,
+    /// Se `porta` é a do jogo.
+    pub preferida: bool,
+    /// A porta do jogo, a que se tentou primeiro.
+    pub desejada: u16,
+    /// Por onde as conexões novas andam.
+    pub caminho: CaminhoDeTunel,
+    /// A ida e volta de ponta a ponta, em milissegundos; `None` até a primeira
+    /// medida.
+    pub latencia_ms: Option<u64>,
+    /// Bytes por segundo nos dois sentidos somados.
+    pub bytes_por_segundo: u64,
+    /// Bytes por segundo de quem joga para a máquina.
+    pub bytes_por_segundo_ida: u64,
+    /// Bytes por segundo da máquina para quem joga.
+    pub bytes_por_segundo_volta: u64,
+    /// Conexões TCP e fluxos UDP vivos agora (a soma das duas abaixo).
+    pub conexoes: u32,
+    /// As vivas que andam pela ligação direta.
+    pub conexoes_diretas: u32,
+    /// As vivas que andam pelo anfitrião. `caminho` só diz por onde as
+    /// conexões *novas* vão: uma que começou antes do direto segue na estrela,
+    /// e é este número que diz quantas são.
+    pub conexoes_pela_estrela: u32,
+    /// Quantas vezes cada motivo acabou algo, desde que o túnel abriu.
+    pub quedas: Vec<QuedaDeTunel>,
+    /// Datagramas UDP que não saíram, e foram contados.
+    pub udp_descartados: u64,
+    /// `Some` no último relatório do túnel: por que ele acabou.
+    pub encerrado: Option<&'static str>,
+}
+
+/// O nome em kebab-case de um motivo de queda: o que atravessa a ponte.
+///
+/// Exaustivo de propósito: uma queda nova sem nome é erro de compilação aqui, e
+/// não um relatório que a casca lê como vazio.
+#[must_use]
+pub const fn nome_da_queda(queda: seele_core::tunel::Queda) -> &'static str {
+    use seele_core::tunel::Queda;
+    match queda {
+        Queda::PortaOcupada => "porta-ocupada",
+        Queda::CaminhoCaiu => "caminho-caiu",
+        Queda::JogoRecusou => "jogo-recusou",
+        Queda::MaquinaParou => "maquina-parou",
+        Queda::MaquinaSaiu => "maquina-saiu",
+        Queda::SemPermissao => "sem-permissao",
+        Queda::ModDesligado => "mod-desligado",
+        Queda::ServidorSaiu => "servidor-saiu",
+        Queda::Fechado => "fechado",
+        Queda::SemCanais => "sem-canais",
+        Queda::PortaFalhou => "porta-falhou",
+    }
+}
+
+/// O nome em kebab-case de uma recusa de túnel: o que o MOD e a casca leem.
+///
+/// Exaustivo de propósito, como [`nome_da_queda`]. São os nomes da lista
+/// fechada de recusas ao MOD (`api/v8.json`, `recusas.tunel`).
+#[must_use]
+pub const fn nome_da_recusa_do_tunel(recusa: seele_core::tunel::RecusaDeTunel) -> &'static str {
+    use seele_core::tunel::RecusaDeTunel;
+    match recusa {
+        RecusaDeTunel::NaoExiste => "nao-existe",
+        RecusaDeTunel::SemPermissao => "sem-permissao",
+        RecusaDeTunel::AcaoNaoDeclarada => "acao-nao-declarada",
+        RecusaDeTunel::ModSemPorta => "mod-sem-porta",
+        RecusaDeTunel::NomeTomado => "nome-tomado",
+        RecusaDeTunel::MaquinaSaiu => "maquina-saiu",
+        RecusaDeTunel::TuneisDemais => "tuneis-demais",
+        RecusaDeTunel::CanaisEsgotados => "canais-esgotados",
+        RecusaDeTunel::ServidorAntigo => "servidor-antigo",
+        RecusaDeTunel::PortaLocalOcupada => "porta-local-ocupada",
+        RecusaDeTunel::SemResposta => "sem-resposta",
+        RecusaDeTunel::ForaDoAceite => "fora-do-aceite",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **Os nomes do túnel que a casca lê não mudam sem aviso**: a faixa e o
+    /// MOD os recebem em kebab-case, e `api/v8.json` os lista em `recusas.tunel`.
+    /// Um nome renomeado aqui deixaria a janela sem frase para ele.
+    #[test]
+    fn os_nomes_das_recusas_e_das_quedas_do_tunel_sao_os_do_contrato() {
+        use seele_core::tunel::{Queda, RecusaDeTunel};
+        let recusas = [
+            (RecusaDeTunel::NaoExiste, "nao-existe"),
+            (RecusaDeTunel::SemPermissao, "sem-permissao"),
+            (RecusaDeTunel::AcaoNaoDeclarada, "acao-nao-declarada"),
+            (RecusaDeTunel::ModSemPorta, "mod-sem-porta"),
+            (RecusaDeTunel::NomeTomado, "nome-tomado"),
+            (RecusaDeTunel::MaquinaSaiu, "maquina-saiu"),
+            (RecusaDeTunel::TuneisDemais, "tuneis-demais"),
+            (RecusaDeTunel::CanaisEsgotados, "canais-esgotados"),
+            (RecusaDeTunel::ServidorAntigo, "servidor-antigo"),
+            (RecusaDeTunel::PortaLocalOcupada, "porta-local-ocupada"),
+            (RecusaDeTunel::SemResposta, "sem-resposta"),
+        ];
+        for (recusa, nome) in recusas {
+            assert_eq!(nome_da_recusa_do_tunel(recusa), nome);
+        }
+        let quedas = [
+            (Queda::PortaOcupada, "porta-ocupada"),
+            (Queda::CaminhoCaiu, "caminho-caiu"),
+            (Queda::JogoRecusou, "jogo-recusou"),
+            (Queda::MaquinaParou, "maquina-parou"),
+            (Queda::MaquinaSaiu, "maquina-saiu"),
+            (Queda::SemPermissao, "sem-permissao"),
+            (Queda::ModDesligado, "mod-desligado"),
+            (Queda::ServidorSaiu, "servidor-saiu"),
+            (Queda::Fechado, "fechado"),
+            (Queda::SemCanais, "sem-canais"),
+            (Queda::PortaFalhou, "porta-falhou"),
+        ];
+        for (queda, nome) in quedas {
+            assert_eq!(nome_da_queda(queda), nome);
+        }
+    }
+
+    /// **O relatório atravessa para a janela pelos nomes que ela lê**
+    /// (`camada-tuneis.js`): `TunnelReport.report`, o caminho com `tipo`
+    /// (`direto` com `apelido`, ou `estrela`), as quedas como `{ motivo, vezes }`.
+    /// Trocar um nome de um lado só calava a faixa.
+    #[test]
+    fn o_relatorio_do_tunel_atravessa_pelos_nomes_que_a_faixa_le() {
+        let relatorio = |caminho| RelatorioDeTunel {
+            mod_id: "x/jogo".into(),
+            nome: "minecraft-1".into(),
+            porta: 25566,
+            preferida: false,
+            desejada: 25565,
+            caminho,
+            latencia_ms: Some(34),
+            bytes_por_segundo: 120,
+            bytes_por_segundo_ida: 20,
+            bytes_por_segundo_volta: 100,
+            conexoes: 3,
+            conexoes_diretas: 2,
+            conexoes_pela_estrela: 1,
+            quedas: vec![QuedaDeTunel {
+                motivo: "caminho-caiu",
+                vezes: 2,
+            }],
+            udp_descartados: 3,
+            encerrado: Some("maquina-saiu"),
+        };
+        let direto = serde_json::to_value(Event::TunnelReport {
+            report: relatorio(CaminhoDeTunel::Direto {
+                par: 7,
+                apelido: Some("Fulano".into()),
+            }),
+        })
+        .expect("serializa");
+        for (ponteiro, esperado) in [
+            ("/TunnelReport/report/mod_id", serde_json::json!("x/jogo")),
+            ("/TunnelReport/report/porta", serde_json::json!(25566)),
+            ("/TunnelReport/report/preferida", serde_json::json!(false)),
+            ("/TunnelReport/report/desejada", serde_json::json!(25565)),
+            (
+                "/TunnelReport/report/caminho/tipo",
+                serde_json::json!("direto"),
+            ),
+            (
+                "/TunnelReport/report/caminho/apelido",
+                serde_json::json!("Fulano"),
+            ),
+            ("/TunnelReport/report/latencia_ms", serde_json::json!(34)),
+            ("/TunnelReport/report/conexoes", serde_json::json!(3)),
+            (
+                "/TunnelReport/report/conexoes_diretas",
+                serde_json::json!(2),
+            ),
+            (
+                "/TunnelReport/report/conexoes_pela_estrela",
+                serde_json::json!(1),
+            ),
+            (
+                "/TunnelReport/report/bytes_por_segundo",
+                serde_json::json!(120),
+            ),
+            (
+                "/TunnelReport/report/quedas/0/motivo",
+                serde_json::json!("caminho-caiu"),
+            ),
+            ("/TunnelReport/report/quedas/0/vezes", serde_json::json!(2)),
+            (
+                "/TunnelReport/report/encerrado",
+                serde_json::json!("maquina-saiu"),
+            ),
+        ] {
+            assert_eq!(
+                direto.pointer(ponteiro),
+                Some(&esperado),
+                "{ponteiro}: {direto}"
+            );
+        }
+        let estrela = serde_json::to_value(relatorio(CaminhoDeTunel::Estrela)).expect("serializa");
+        assert_eq!(
+            estrela.pointer("/caminho/tipo"),
+            Some(&serde_json::json!("estrela"))
+        );
+    }
 
     #[test]
     fn every_disconnect_reason_the_protocol_has_maps_to_one_here() {
@@ -2418,5 +2753,384 @@ mod tests {
     /// What a field declaration looks like, so a doc channel is not mistaken for one.
     fn known_field_marker() -> &'static str {
         "pub "
+    }
+}
+
+// ------------------------------------------------------- a máquina de jogo
+
+/// Um túnel que a máquina vai servir, como a casca o lê.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TunelOferecidoFfi {
+    /// O nome do túnel.
+    pub nome: String,
+    /// `tcp` ou `udp` ([`nome_do_protocolo`]).
+    pub protocolo: String,
+    /// A porta em que o jogo escuta, em `127.0.0.1`.
+    pub porta: u16,
+}
+
+/// O hash de um artefato.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HashDeArtefatoFfi {
+    /// `sha1`, `sha256` ou `sha512`.
+    pub algoritmo: String,
+    /// Hexadecimal minúsculo.
+    pub hex: String,
+}
+
+/// Um arquivo que a máquina vai baixar.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ArtefatoOferecidoFfi {
+    /// O nome com que ele fica no disco.
+    pub nome: String,
+    /// De onde baixar; sempre `https://`.
+    pub url: String,
+    /// O tamanho esperado, em bytes.
+    pub tamanho: u64,
+    /// O hash esperado.
+    pub hash: HashDeArtefatoFfi,
+    /// Em que sistemas ele serve (`mac-aarch64`...); vazio é em todos.
+    #[serde(default)]
+    pub plataformas: Vec<String>,
+}
+
+/// O comando que a máquina vai executar.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ComandoOferecidoFfi {
+    /// O programa.
+    pub comando: String,
+    /// Os argumentos, um a um.
+    pub argumentos: Vec<String>,
+}
+
+/// Um termo que a pessoa aceita junto.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TermoOferecidoFfi {
+    /// Como ele se chama.
+    pub titulo: String,
+    /// Onde ler.
+    pub url: String,
+}
+
+/// A oferta de uma máquina de jogo, como a casca a desenha e a devolve.
+///
+/// **Espelho de [`seele_core::maquina::OfertaDeMaquina`], campo a campo**, com
+/// os enums trocados por nomes em kebab-case (`tcp`, `sha256`): a casca não
+/// alcança o `seele-proto`, e os nomes que ela lê são os mesmos com que a
+/// metade de máquina pede `maquina.porta.servir({ protocolo: "tcp" })`. Ida e
+/// volta são exatas ([`Self::para_o_nucleo`]), porque o aceite guardado é a
+/// oferta que se mostrou, e uma volta que perdesse um campo guardaria outra.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OfertaDeMaquinaFfi {
+    /// Como a pessoa chama esta máquina.
+    pub titulo: String,
+    /// O nome da receita que a monta.
+    pub receita: String,
+    /// A versão da receita.
+    pub versao_da_receita: String,
+    /// A versão do jogo.
+    pub versao_do_jogo: String,
+    /// Os túneis que ela serve.
+    pub tuneis: Vec<TunelOferecidoFfi>,
+    /// O que ela baixa.
+    pub artefatos: Vec<ArtefatoOferecidoFfi>,
+    /// O hash do pacote de arquivos do jogo, se houver.
+    pub pack: Option<HashDeArtefatoFfi>,
+    /// De onde a máquina pode baixar (hosts).
+    pub origens: Vec<String>,
+    /// Com quem o jogo pode falar (hosts).
+    pub dominios_do_jogo: Vec<String>,
+    /// O que ela executa.
+    pub rodar: Option<ComandoOferecidoFfi>,
+    /// O disco que ela pode ocupar, em bytes.
+    pub disco_maximo: u64,
+    /// O que a pessoa precisa aceitar além da oferta.
+    pub termos: Vec<TermoOferecidoFfi>,
+    /// O passo de instalar, antes de `rodar` (o instalador do loader).
+    #[serde(default)]
+    pub instalar: Option<ComandoOferecidoFfi>,
+}
+
+/// A recusa de máquina de um nome em kebab-case
+/// ([`seele_core::maquina::nome_da_recusa`]).
+#[must_use]
+pub fn recusa_de_maquina_de(nome: &str) -> Option<seele_core::maquina::MotivoDaRecusaDeMaquina> {
+    use seele_core::maquina::MotivoDaRecusaDeMaquina as M;
+    [
+        M::PeloDono,
+        M::SemTela,
+        M::SoNoApp,
+        M::PacoteDiferente,
+        M::OfertaInvalida,
+    ]
+    .into_iter()
+    .find(|motivo| seele_core::maquina::nome_da_recusa(motivo) == nome)
+}
+
+/// A parada de máquina de um nome em kebab-case
+/// ([`seele_core::maquina::nome_da_parada`]).
+#[must_use]
+pub fn parada_de_maquina_de(nome: &str) -> Option<seele_core::maquina::MotivoDaParadaDeMaquina> {
+    use seele_core::maquina::MotivoDaParadaDeMaquina as M;
+    [M::PeloDono, M::Revogada, M::AppFechou, M::MetadeFalhou]
+        .into_iter()
+        .find(|motivo| seele_core::maquina::nome_da_parada(motivo) == nome)
+}
+
+/// `tcp` ou `udp`.
+#[must_use]
+pub const fn nome_do_protocolo(protocolo: seele_core::tunel::ProtocoloDeTunel) -> &'static str {
+    match protocolo {
+        seele_core::tunel::ProtocoloDeTunel::Tcp => "tcp",
+        seele_core::tunel::ProtocoloDeTunel::Udp => "udp",
+    }
+}
+
+/// O protocolo de um nome de [`nome_do_protocolo`].
+#[must_use]
+pub fn protocolo_de(nome: &str) -> Option<seele_core::tunel::ProtocoloDeTunel> {
+    match nome {
+        "tcp" => Some(seele_core::tunel::ProtocoloDeTunel::Tcp),
+        "udp" => Some(seele_core::tunel::ProtocoloDeTunel::Udp),
+        _ => None,
+    }
+}
+
+const fn nome_do_algoritmo(algoritmo: seele_core::maquina::AlgoritmoDeHash) -> &'static str {
+    use seele_core::maquina::AlgoritmoDeHash;
+    match algoritmo {
+        AlgoritmoDeHash::Sha1 => "sha1",
+        AlgoritmoDeHash::Sha256 => "sha256",
+        AlgoritmoDeHash::Sha512 => "sha512",
+    }
+}
+
+fn algoritmo_de(nome: &str) -> Option<seele_core::maquina::AlgoritmoDeHash> {
+    use seele_core::maquina::AlgoritmoDeHash;
+    match nome {
+        "sha1" => Some(AlgoritmoDeHash::Sha1),
+        "sha256" => Some(AlgoritmoDeHash::Sha256),
+        "sha512" => Some(AlgoritmoDeHash::Sha512),
+        _ => None,
+    }
+}
+
+fn hash_ffi(hash: &seele_core::maquina::HashDeArtefato) -> HashDeArtefatoFfi {
+    HashDeArtefatoFfi {
+        algoritmo: nome_do_algoritmo(hash.algoritmo).to_owned(),
+        hex: hash.hex.clone(),
+    }
+}
+
+fn hash_do_nucleo(
+    hash: &HashDeArtefatoFfi,
+) -> Result<seele_core::maquina::HashDeArtefato, &'static str> {
+    Ok(seele_core::maquina::HashDeArtefato {
+        algoritmo: algoritmo_de(&hash.algoritmo).ok_or("oferta-invalida")?,
+        hex: hash.hex.clone(),
+    })
+}
+
+impl From<&seele_core::maquina::OfertaDeMaquina> for OfertaDeMaquinaFfi {
+    fn from(oferta: &seele_core::maquina::OfertaDeMaquina) -> Self {
+        Self {
+            titulo: oferta.titulo.clone(),
+            receita: oferta.receita.clone(),
+            versao_da_receita: oferta.versao_da_receita.clone(),
+            versao_do_jogo: oferta.versao_do_jogo.clone(),
+            tuneis: oferta
+                .tuneis
+                .iter()
+                .map(|t| TunelOferecidoFfi {
+                    nome: t.nome.clone(),
+                    protocolo: nome_do_protocolo(t.protocolo).to_owned(),
+                    porta: t.porta,
+                })
+                .collect(),
+            artefatos: oferta
+                .artefatos
+                .iter()
+                .map(|a| ArtefatoOferecidoFfi {
+                    nome: a.nome.clone(),
+                    url: a.url.clone(),
+                    tamanho: a.tamanho,
+                    hash: hash_ffi(&a.hash),
+                    plataformas: a.plataformas.clone(),
+                })
+                .collect(),
+            pack: oferta.pack.as_ref().map(hash_ffi),
+            origens: oferta.origens.clone(),
+            dominios_do_jogo: oferta.dominios_do_jogo.clone(),
+            rodar: oferta.rodar.as_ref().map(|r| ComandoOferecidoFfi {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
+            disco_maximo: oferta.disco_maximo,
+            termos: oferta
+                .termos
+                .iter()
+                .map(|t| TermoOferecidoFfi {
+                    titulo: t.titulo.clone(),
+                    url: t.url.clone(),
+                })
+                .collect(),
+            instalar: oferta.instalar.as_ref().map(|r| ComandoOferecidoFfi {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
+        }
+    }
+}
+
+impl OfertaDeMaquinaFfi {
+    /// A oferta do núcleo, conferida pela mesma régua do fio.
+    ///
+    /// # Errors
+    ///
+    /// `"oferta-invalida"` com um nome de protocolo ou de algoritmo que não
+    /// existe, ou com qualquer campo que o fio recusaria: uma oferta que a casca
+    /// remontou torta não vira aceite guardado.
+    pub fn para_o_nucleo(&self) -> Result<seele_core::maquina::OfertaDeMaquina, &'static str> {
+        use seele_core::maquina::{
+            ArtefatoOferecido, ComandoOferecido, OfertaDeMaquina, TermoOferecido, TunelOferecido,
+        };
+        use seele_core::Validate as _;
+        let oferta = OfertaDeMaquina {
+            titulo: self.titulo.clone(),
+            receita: self.receita.clone(),
+            versao_da_receita: self.versao_da_receita.clone(),
+            versao_do_jogo: self.versao_do_jogo.clone(),
+            tuneis: self
+                .tuneis
+                .iter()
+                .map(|t| {
+                    Ok(TunelOferecido {
+                        nome: t.nome.clone(),
+                        protocolo: protocolo_de(&t.protocolo).ok_or("oferta-invalida")?,
+                        porta: t.porta,
+                    })
+                })
+                .collect::<Result<_, &'static str>>()?,
+            artefatos: self
+                .artefatos
+                .iter()
+                .map(|a| {
+                    Ok(ArtefatoOferecido {
+                        nome: a.nome.clone(),
+                        url: a.url.clone(),
+                        tamanho: a.tamanho,
+                        hash: hash_do_nucleo(&a.hash)?,
+                        plataformas: a.plataformas.clone(),
+                    })
+                })
+                .collect::<Result<_, &'static str>>()?,
+            pack: self.pack.as_ref().map(hash_do_nucleo).transpose()?,
+            origens: self.origens.clone(),
+            dominios_do_jogo: self.dominios_do_jogo.clone(),
+            rodar: self.rodar.as_ref().map(|r| ComandoOferecido {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
+            disco_maximo: self.disco_maximo,
+            termos: self
+                .termos
+                .iter()
+                .map(|t| TermoOferecido {
+                    titulo: t.titulo.clone(),
+                    url: t.url.clone(),
+                })
+                .collect(),
+            instalar: self.instalar.as_ref().map(|r| ComandoOferecido {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
+        };
+        oferta.validate().map_err(|_| "oferta-invalida")?;
+        Ok(oferta)
+    }
+}
+
+#[cfg(test)]
+mod a_oferta_de_maquina {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use seele_core::maquina::{
+        AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, HashDeArtefato, OfertaDeMaquina,
+        TermoOferecido, TunelOferecido,
+    };
+
+    fn completa() -> OfertaDeMaquina {
+        OfertaDeMaquina {
+            titulo: "Minecraft".into(),
+            receita: "minecraft-java".into(),
+            versao_da_receita: "1.0.0".into(),
+            versao_do_jogo: "1.21.4".into(),
+            tuneis: vec![
+                TunelOferecido {
+                    nome: "mc".into(),
+                    protocolo: seele_core::tunel::ProtocoloDeTunel::Tcp,
+                    porta: 25565,
+                },
+                TunelOferecido {
+                    nome: "voz".into(),
+                    protocolo: seele_core::tunel::ProtocoloDeTunel::Udp,
+                    porta: 24454,
+                },
+            ],
+            artefatos: vec![ArtefatoOferecido {
+                nome: "server.jar".into(),
+                url: "https://piston-data.mojang.com/server.jar".into(),
+                tamanho: 51_000_000,
+                hash: HashDeArtefato {
+                    algoritmo: AlgoritmoDeHash::Sha1,
+                    hex: "a".repeat(40),
+                },
+                plataformas: vec!["mac-aarch64".into()],
+            }],
+            pack: Some(HashDeArtefato {
+                algoritmo: AlgoritmoDeHash::Sha512,
+                hex: "b".repeat(128),
+            }),
+            origens: vec!["piston-data.mojang.com".into()],
+            dominios_do_jogo: vec!["*.mojang.com".into()],
+            rodar: Some(ComandoOferecido {
+                comando: "java".into(),
+                argumentos: vec!["-jar".into(), String::new()],
+            }),
+            disco_maximo: 4 << 30,
+            termos: vec![TermoOferecido {
+                titulo: "EULA".into(),
+                url: "https://aka.ms/MinecraftEULA".into(),
+            }],
+            instalar: Some(ComandoOferecido {
+                comando: "java".into(),
+                argumentos: vec!["-jar".into(), "instalador.jar".into()],
+            }),
+        }
+    }
+
+    /// O aceite guardado é a oferta mostrada: ida e volta pela casca não
+    /// perdem nem mudam campo nenhum — e o resumo, que é sobre a oferta do
+    /// núcleo, continua o mesmo.
+    #[test]
+    fn a_oferta_vai_a_casca_e_volta_igual() {
+        let oferta = completa();
+        let ida = OfertaDeMaquinaFfi::from(&oferta);
+        assert_eq!(ida.tuneis[1].protocolo, "udp");
+        assert_eq!(ida.artefatos[0].hash.algoritmo, "sha1");
+        let json = serde_json::to_string(&ida).unwrap();
+        let volta: OfertaDeMaquinaFfi = serde_json::from_str(&json).unwrap();
+        assert_eq!(volta.para_o_nucleo().unwrap(), oferta);
+    }
+
+    #[test]
+    fn um_nome_que_nao_existe_e_oferta_invalida() {
+        let mut torta = OfertaDeMaquinaFfi::from(&completa());
+        torta.tuneis[0].protocolo = "TCP".into();
+        assert_eq!(torta.para_o_nucleo(), Err("oferta-invalida"));
+        let mut torta = OfertaDeMaquinaFfi::from(&completa());
+        torta.artefatos[0].url = "http://inseguro".into();
+        assert_eq!(torta.para_o_nucleo(), Err("oferta-invalida"));
     }
 }

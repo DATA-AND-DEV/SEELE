@@ -642,7 +642,7 @@ function fecharOQueEDaSessao() {
   $("botao-buscar").setAttribute("aria-expanded", "false");
   if (typeof abandonarModeracao === "function") abandonarModeracao();
   if (typeof fecharAceiteDeMods === "function" && !$("mods-aceite").hidden) fecharAceiteDeMods();
-  if (typeof encerrarOAmbienteDosMods === "function") encerrarOAmbienteDosMods();
+  if (typeof encerrarOAmbienteDosMods === "function") encerrarOAmbienteDosMods("troca-de-vista");
   // O palco: a imagem da sessão que sai da vista não fica na tela da outra,
   // e a ESCOLHA dela (VER, NÃO VER) fica guardada com ela — a sessão continua.
   if (typeof ocultarOPalco === "function") ocultarOPalco(vistaDaJanela.sessao, vistaDaJanela.geracao);

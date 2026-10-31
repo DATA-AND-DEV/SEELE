@@ -40,6 +40,7 @@ pub mod chamada_pessoal;
 pub mod foco;
 pub mod mods;
 pub mod perfis;
+pub mod programa;
 /// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:
 /// para os testes daqui e para a conformidade dos dois produtores de retrato.
 #[cfg(any(test, feature = "conformidade"))]
@@ -71,15 +72,24 @@ use seele_core::{
 };
 
 pub use types::{
-    AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Carimbo, Channel, ChannelWeight,
-    ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
-    EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
+    AberturaDoAudio, ArtefatoOferecidoFfi, Attachment, AttachmentRefusal, CaminhoDeTunel,
+    CaptureDevice, Carimbo, Channel, ChannelWeight, ComandoOferecidoFfi, ConnectionError,
+    ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio, EstadoDoTesteDeMicrofone, Event,
+    ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, HashDeArtefatoFfi, LimitesDeTela,
     LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
-    NotSavedReason, Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person,
-    PlaybackDevice, Preview, PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity,
-    SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer,
-    TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
+    NotSavedReason, Notice, NoticeReason, OfertaDeMaquinaFfi, PermissaoDeMicrofone,
+    PermissaoDeTela, Person, PlaybackDevice, PortaDeTunel, Preview, PreviewRefusal, PreviewRules,
+    QuedaDeTunel, RelatorioDeTunel, SaveDestination, SaveRefused, Severity, SignalBand as Band,
+    Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, TermoOferecidoFfi, Transfer,
+    TransmissaoNaSala, Trust, TunelOferecidoFfi, VoiceMode, VoiceRoom, VoiceRoomSync,
+    VolumeRefusal,
 };
+
+/// Diz que este processo tem tela para pedidos de máquina de jogo: toda
+/// conexão aberta depois disto já nasce aceitando-os. Ver
+/// [`seele_core::enlace::este_processo_tem_tela`] — é o que fecha a corrida com
+/// os pedidos que o servidor manda na chegada. Só o `main` do app chama.
+pub use seele_core::enlace::este_processo_tem_tela;
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
 ///
@@ -1016,12 +1026,78 @@ impl SessaoId {
     }
 }
 
+/// O que a casca decidiu sobre uma máquina, já com o motivo do núcleo.
+enum VerboDaMaquina {
+    Aceitar {
+        mod_id: String,
+        servidor: String,
+        resumo: String,
+    },
+    Recusar {
+        mod_id: String,
+        servidor: String,
+        motivo: seele_core::maquina::MotivoDaRecusaDeMaquina,
+    },
+    Parar {
+        mod_id: String,
+        servidor: String,
+        motivo: seele_core::maquina::MotivoDaParadaDeMaquina,
+    },
+}
+
 /// A command on its way to the driver thread.
 /// Onde a resposta de uma pesagem chega: o peso, ou a causa com que o servidor
 /// recusou a pergunta (`AlertReason::PedidoRecusado`).
 type RespostaDoPeso = tokio::sync::oneshot::Sender<Result<ChannelWeight, types::CausaDaRecusa>>;
 
 enum Command {
+    /// Se esta conexão mostra pedidos de máquina (API 8 parte 3).
+    AceitarPedidosDeMaquina(bool),
+    /// O aceite, a recusa ou a parada de uma máquina.
+    VerboDaMaquina(VerboDaMaquina),
+    /// Um pedido da máquina à metade de servidor; a espera vai para uma
+    /// tarefa, como a do túnel.
+    PedidoDaMaquina {
+        mod_id: String,
+        servidor: String,
+        payload: String,
+        resposta: tokio::sync::oneshot::Sender<Result<String, &'static str>>,
+    },
+    /// A máquina passa a servir um túnel.
+    ServirTunel {
+        mod_id: String,
+        nome: String,
+        protocolo: seele_core::tunel::ProtocoloDeTunel,
+        porta: u16,
+        resposta: tokio::sync::oneshot::Sender<Result<(), &'static str>>,
+    },
+    /// A máquina para de servir um túnel.
+    PararTunel {
+        mod_id: String,
+        nome: String,
+    },
+    /// As quedas de um túnel que esta máquina serve.
+    QuedasDoTunelServido {
+        mod_id: String,
+        nome: String,
+        resposta: tokio::sync::oneshot::Sender<Vec<QuedaDeTunel>>,
+    },
+    /// Quem joga entra num túnel de jogo. A resposta vai por `resposta`, e a
+    /// espera por ela não pode parar este laço (ver `run_command`).
+    EntrarNoTunel {
+        mod_id: String,
+        nome: String,
+        resposta: tokio::sync::oneshot::Sender<Result<PortaDeTunel, &'static str>>,
+    },
+    /// Quem joga deixa um túnel.
+    SairDoTunel {
+        mod_id: String,
+        nome: String,
+    },
+    /// Quem joga deixa todos os túneis de um MOD (ele foi descarregado).
+    SairDosTuneisDoMod {
+        mod_id: String,
+    },
     ImagemDeMod {
         pedido: seele_core::PedidoDeImagem,
         bytes: Vec<u8>,
@@ -1237,6 +1313,15 @@ impl EscolhaDeTela {
     }
 }
 
+/// Os túneis de jogo de quem joga, como `Connection::tuneis_abertos` os lê.
+#[derive(Default)]
+struct TabelaDeTuneis {
+    /// O último relatório de cada túnel que está de pé.
+    abertos: std::collections::BTreeMap<(String, String), RelatorioDeTunel>,
+    /// Quantos relatórios finais (`encerrado`) cada túnel já teve.
+    fins: std::collections::BTreeMap<(String, String), u64>,
+}
+
 /// State the driver thread writes and the shell reads.
 struct Shared {
     /// O caminho de subida que a sonda mediu, em bits por segundo.
@@ -1386,6 +1471,12 @@ struct Shared {
     /// atenderia uma e deixaria a outra esperando para sempre. Aqui as duas
     /// recebem a mesma resposta.
     pending_weights: Mutex<Vec<(ChannelId, RespostaDoPeso)>>,
+    /// **O último relatório de cada túnel de jogo de quem joga**, por MOD e
+    /// nome. A casca que acaba de abrir (ou a faixa que recarregou) lê o que
+    /// está de pé por [`Connection::tuneis_abertos`] em vez de esperar o
+    /// próximo relatório. Sai daqui quando o túnel acaba (`encerrado`), quando
+    /// o MOD é fechado, e com a sessão.
+    tuneis: Mutex<TabelaDeTuneis>,
     /// Os limites que esta sessão pediu para a transmissão de tela dela.
     ///
     /// **Mora aqui porque a janela não sobrevive à transmissão.** O §5 manda
@@ -2141,6 +2232,7 @@ impl Connection {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -2628,6 +2720,235 @@ impl Connection {
             acao,
             payload,
         })
+    }
+
+    /// Quem joga entra num túnel de jogo e espera a porta em `127.0.0.1`.
+    ///
+    /// A casca só chama isto de um clique (o bilhete de gesto é dela). Quem
+    /// confere o MOD ligado, o poder `porta` e a ação `entrar-no-jogo` é o
+    /// servidor, a cada entrada.
+    ///
+    /// # Errors
+    ///
+    /// O nome em kebab-case da recusa (`RecusaDeTunel`: `sem-permissao`,
+    /// `porta-local-ocupada`, `servidor-antigo`...), ou `sessao-encerrada`
+    /// quando a sessão já acabou. Nunca texto livre: a frase é da casca.
+    pub async fn entrar_no_tunel(
+        &self,
+        mod_id: String,
+        nome: String,
+    ) -> Result<PortaDeTunel, &'static str> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::EntrarNoTunel {
+            mod_id,
+            nome,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        // A sessão que acaba no meio larga o remetente: é o mesmo desfecho.
+        caixa.await.map_err(|_| "sessao-encerrada")?
+    }
+
+    /// Quem joga deixa o túnel `nome` do MOD: a porta fecha e os fluxos acabam.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn sair_do_tunel(&self, mod_id: String, nome: String) -> Result<(), ConnectionError> {
+        self.command(Command::SairDoTunel { mod_id, nome })
+    }
+
+    /// Quem joga deixa todos os túneis do MOD: ele foi desligado, descarregado
+    /// ou a janela dele acabou.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn sair_dos_tuneis_do_mod(&self, mod_id: String) -> Result<(), ConnectionError> {
+        // Tirados daqui já: a faixa que lê logo depois não vê o que está
+        // fechando, e o relatório final que chegar volta a pô-los só com
+        // `encerrado`.
+        if let Ok(mut tuneis) = self.shared.tuneis.lock() {
+            tuneis
+                .abertos
+                .retain(|(mod_do_tunel, _), _| *mod_do_tunel != mod_id);
+        }
+        self.command(Command::SairDosTuneisDoMod { mod_id })
+    }
+
+    /// Os túneis de jogo abertos agora, com o último relatório de cada um.
+    #[must_use]
+    pub fn tuneis_abertos(&self) -> Vec<RelatorioDeTunel> {
+        self.shared
+            .tuneis
+            .lock()
+            .map(|tuneis| {
+                tuneis
+                    .abertos
+                    .values()
+                    .filter(|relatorio| relatorio.encerrado.is_none())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    // --------------------------------------------- a máquina de jogo (API 8)
+
+    /// Se esta conexão mostra pedidos de máquina ([`Event::MachineRequest`]).
+    /// Sem isso — e sem [`este_processo_tem_tela`] —, todo pedido é recusado
+    /// no núcleo com `sem-tela` e só o log fica sabendo.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn aceitar_pedidos_de_maquina(&self, sim: bool) -> Result<(), ConnectionError> {
+        self.command(Command::AceitarPedidosDeMaquina(sim))
+    }
+
+    /// A pessoa aceitou a oferta de `resumo`: o do [`Event::MachineRequest`],
+    /// como veio.
+    ///
+    /// # Errors
+    ///
+    /// `sessao-encerrada` quando a sessão já acabou.
+    pub fn aceitar_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        resumo: String,
+    ) -> Result<(), &'static str> {
+        self.command(Command::VerboDaMaquina(VerboDaMaquina::Aceitar {
+            mod_id,
+            servidor,
+            resumo,
+        }))
+        .map_err(|_| "sessao-encerrada")
+    }
+
+    /// A máquina não vai rodar; `motivo` em kebab-case (`pelo-dono`,
+    /// `pacote-diferente`, `oferta-invalida`, ...).
+    ///
+    /// # Errors
+    ///
+    /// `motivo-desconhecido` para um nome que não existe; `sessao-encerrada`.
+    pub fn recusar_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        motivo: &str,
+    ) -> Result<(), &'static str> {
+        let motivo = types::recusa_de_maquina_de(motivo).ok_or("motivo-desconhecido")?;
+        self.command(Command::VerboDaMaquina(VerboDaMaquina::Recusar {
+            mod_id,
+            servidor,
+            motivo,
+        }))
+        .map_err(|_| "sessao-encerrada")
+    }
+
+    /// A máquina parou; `motivo` em kebab-case (`pelo-dono`, `revogada`,
+    /// `app-fechou`, `metade-falhou`).
+    ///
+    /// # Errors
+    ///
+    /// `motivo-desconhecido` para um nome que não existe; `sessao-encerrada`.
+    pub fn parar_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        motivo: &str,
+    ) -> Result<(), &'static str> {
+        let motivo = types::parada_de_maquina_de(motivo).ok_or("motivo-desconhecido")?;
+        self.command(Command::VerboDaMaquina(VerboDaMaquina::Parar {
+            mod_id,
+            servidor,
+            motivo,
+        }))
+        .map_err(|_| "sessao-encerrada")
+    }
+
+    /// Um pedido da máquina à metade de servidor do MOD, e a resposta dela.
+    ///
+    /// # Errors
+    ///
+    /// `sem-aceite` (esta conexão não é a máquina daquele servidor de jogo),
+    /// `sem-resposta` (prazo de 15 s, queda, ou o pedido não saiu — o porquê
+    /// vai ao log), `sessao-encerrada`.
+    pub async fn pedido_da_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        payload: String,
+    ) -> Result<String, &'static str> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::PedidoDaMaquina {
+            mod_id,
+            servidor,
+            payload,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        caixa.await.map_err(|_| "sessao-encerrada")?
+    }
+
+    /// A máquina passa a servir `porta` (a do jogo, em `127.0.0.1`) como o
+    /// túnel `mod_id/nome`; `protocolo` é `tcp` ou `udp`. Quem confere o
+    /// aceite é o servidor (`fora-do-aceite`).
+    ///
+    /// # Errors
+    ///
+    /// O nome em kebab-case da recusa (`RecusaDeTunel`), `protocolo-desconhecido`,
+    /// ou `sessao-encerrada`.
+    pub async fn servir_tunel(
+        &self,
+        mod_id: String,
+        nome: String,
+        protocolo: &str,
+        porta: u16,
+    ) -> Result<(), &'static str> {
+        let protocolo = types::protocolo_de(protocolo).ok_or("protocolo-desconhecido")?;
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::ServirTunel {
+            mod_id,
+            nome,
+            protocolo,
+            porta,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        caixa.await.map_err(|_| "sessao-encerrada")?
+    }
+
+    /// A máquina para de servir o túnel `nome` do MOD.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn parar_tunel(&self, mod_id: String, nome: String) -> Result<(), ConnectionError> {
+        self.command(Command::PararTunel { mod_id, nome })
+    }
+
+    /// Por que as conexões de um túnel que esta máquina serve acabaram,
+    /// contadas por motivo (é aqui que aparece `jogo-recusou`). Vazio para um
+    /// túnel que ela não serve.
+    ///
+    /// # Errors
+    ///
+    /// `sessao-encerrada` quando a sessão já acabou.
+    pub async fn quedas_do_tunel_servido(
+        &self,
+        mod_id: String,
+        nome: String,
+    ) -> Result<Vec<QuedaDeTunel>, &'static str> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::QuedasDoTunelServido {
+            mod_id,
+            nome,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        caixa.await.map_err(|_| "sessao-encerrada")
     }
 
     /// Asks the server to make a voice room.
@@ -5248,6 +5569,57 @@ async fn drive(
                         }
                         shared.notify(&Event::TelemetryChanged);
                     }
+                    // **O relatório de um túnel de jogo vai à casca inteiro**,
+                    // e o último de cada túnel leva o motivo de ele ter
+                    // acabado: sem isto a faixa do produto não teria como saber
+                    // que o fluxo de relatórios parou.
+                    seele_core::enlace::Aviso::Tunel(relatorio) => {
+                        let relatorio = relatorio_para_a_casca(&shared, &relatorio);
+                        guardar_relatorio_de_tunel(&shared, &relatorio);
+                        shared.notify(&Event::TunnelReport { report: relatorio });
+                    }
+                    // **A máquina de jogo** (API 8 parte 3). O núcleo já
+                    // calculou o resumo e já tirou os repetidos; aqui só se
+                    // achata para a casca.
+                    seele_core::enlace::Aviso::PedidoDeMaquina {
+                        mod_id,
+                        hash,
+                        servidor,
+                        pedido_por,
+                        oferta,
+                        resumo,
+                    } => {
+                        shared.notify(&Event::MachineRequest {
+                            mod_id,
+                            hash,
+                            servidor,
+                            pedido_por: pedido_por.0,
+                            oferta: Box::new(OfertaDeMaquinaFfi::from(&*oferta)),
+                            resumo,
+                        });
+                    }
+                    seele_core::enlace::Aviso::AvisoParaMaquina {
+                        mod_id,
+                        servidor,
+                        carga,
+                    } => {
+                        shared.notify(&Event::MachineNotice {
+                            mod_id,
+                            servidor,
+                            carga,
+                        });
+                    }
+                    seele_core::enlace::Aviso::MaquinaDispensada {
+                        mod_id,
+                        servidor,
+                        motivo,
+                    } => {
+                        shared.notify(&Event::MachineDismissed {
+                            mod_id,
+                            servidor,
+                            motivo: seele_core::maquina::nome_da_dispensa(&motivo),
+                        });
+                    }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
                         shared.notify(&Event::Ended {
                             reason: fim_da_sessao(&motivo),
@@ -5369,7 +5741,187 @@ async fn drive(
     if let Ok(mut pending) = shared.pending_weights.lock() {
         pending.clear();
     }
+    // Os túneis acabam com a sessão (o enlace os derruba ao sair); a faixa que
+    // lê depois não os vê de pé.
+    if let Ok(mut tuneis) = shared.tuneis.lock() {
+        tuneis.abertos.clear();
+    }
     client.sair().await;
+}
+
+/// Um relatório do núcleo como a casca o lê: motivos por nome, a latência em
+/// milissegundos e, no caminho direto, o apelido da máquina que o roster
+/// conhece.
+fn relatorio_para_a_casca(
+    shared: &Shared,
+    relatorio: &seele_core::tunel::RelatorioDoTunel,
+) -> RelatorioDeTunel {
+    use seele_core::tunel::Caminho;
+    let caminho = match relatorio.caminho {
+        Caminho::Direto { par } => CaminhoDeTunel::Direto {
+            par: par.0,
+            apelido: shared
+                .room
+                .lock()
+                .ok()
+                .and_then(|room| room.apelido_de(par)),
+        },
+        Caminho::Estrela => CaminhoDeTunel::Estrela,
+    };
+    RelatorioDeTunel {
+        mod_id: relatorio.mod_id.clone(),
+        nome: relatorio.nome.clone(),
+        porta: relatorio.porta_local,
+        preferida: relatorio.preferida,
+        desejada: relatorio.desejada,
+        caminho,
+        latencia_ms: relatorio
+            .latencia
+            .map(|latencia| u64::try_from(latencia.as_millis()).unwrap_or(u64::MAX)),
+        bytes_por_segundo: relatorio
+            .bytes_por_segundo_ida
+            .saturating_add(relatorio.bytes_por_segundo_volta),
+        bytes_por_segundo_ida: relatorio.bytes_por_segundo_ida,
+        bytes_por_segundo_volta: relatorio.bytes_por_segundo_volta,
+        conexoes: relatorio.conexoes,
+        conexoes_diretas: relatorio.conexoes_diretas,
+        conexoes_pela_estrela: relatorio.conexoes_pela_estrela,
+        quedas: relatorio
+            .quedas
+            .iter()
+            .map(|(queda, vezes)| QuedaDeTunel {
+                motivo: types::nome_da_queda(*queda),
+                vezes: *vezes,
+            })
+            .collect(),
+        udp_descartados: relatorio.udp_descartados,
+        encerrado: relatorio.encerrado.map(types::nome_da_queda),
+    }
+}
+
+/// Guarda o último relatório de um túnel. **O que acabou sai da tabela** (a
+/// faixa o recebe no evento, com o motivo, e `tuneis_abertos` não o devolve
+/// mais).
+fn guardar_relatorio_de_tunel(shared: &Shared, relatorio: &RelatorioDeTunel) {
+    let Ok(mut tuneis) = shared.tuneis.lock() else {
+        return;
+    };
+    let chave = (relatorio.mod_id.clone(), relatorio.nome.clone());
+    if let Some(motivo) = relatorio.encerrado {
+        tuneis.abertos.remove(&chave);
+        // Quantos fins este túnel já teve: `guardar_tunel_aberto` compara com
+        // o que viu antes de pedir a entrada.
+        *tuneis.fins.entry(chave).or_insert(0) += 1;
+        tracing::info!(
+            mod_id = %relatorio.mod_id,
+            tunel = %relatorio.nome,
+            motivo,
+            quedas = ?relatorio.quedas,
+            "túnel de jogo acabou"
+        );
+    } else {
+        tuneis.abertos.insert(chave, relatorio.clone());
+    }
+}
+
+/// Quantos fins de relatório este túnel já teve. Lido **antes** de pedir a
+/// entrada, para `guardar_tunel_aberto` saber se o túnel acabou no meio.
+fn fins_do_tunel(shared: &Shared, mod_id: &str, nome: &str) -> u64 {
+    shared.tuneis.lock().map_or(0, |tuneis| {
+        tuneis
+            .fins
+            .get(&(mod_id.to_owned(), nome.to_owned()))
+            .copied()
+            .unwrap_or(0)
+    })
+}
+
+/// A porta que o núcleo abriu, na tabela antes do primeiro relatório: quem lê
+/// `tuneis_abertos` logo depois de entrar já a vê, e o que a casca diz é o que
+/// o núcleo fez. Não sobrescreve um relatório que chegou antes.
+///
+/// **Nem ressuscita um túnel que já acabou.** O relatório final (`encerrado`)
+/// pode chegar antes de a espera da entrada voltar aqui; sem a conferência,
+/// este `or_insert` punha na tabela um túnel fantasma, que `tuneis_abertos`
+/// devolvia para sempre. `fins_antes` é o que `fins_do_tunel` contava antes de
+/// o pedido sair: se mudou, o túnel acabou no meio e nada é guardado.
+fn guardar_tunel_aberto(
+    shared: &Shared,
+    mod_id: &str,
+    nome: &str,
+    aberta: PortaDeTunel,
+    fins_antes: u64,
+) {
+    let Ok(mut tuneis) = shared.tuneis.lock() else {
+        return;
+    };
+    let chave = (mod_id.to_owned(), nome.to_owned());
+    if tuneis.fins.get(&chave).copied().unwrap_or(0) != fins_antes {
+        tracing::info!(mod_id = %mod_id, tunel = %nome, "túnel de jogo: acabou antes de a entrada voltar; nada é guardado");
+        return;
+    }
+    tuneis
+        .abertos
+        .entry(chave)
+        .or_insert_with(|| RelatorioDeTunel {
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+            porta: aberta.porta,
+            preferida: aberta.preferida,
+            desejada: aberta.desejada,
+            caminho: CaminhoDeTunel::Estrela,
+            latencia_ms: None,
+            bytes_por_segundo: 0,
+            bytes_por_segundo_ida: 0,
+            bytes_por_segundo_volta: 0,
+            conexoes: 0,
+            conexoes_diretas: 0,
+            conexoes_pela_estrela: 0,
+            quedas: Vec::new(),
+            udp_descartados: 0,
+            encerrado: None,
+        });
+}
+
+/// Uma recusa a servir um túnel, dita: `fora-do-aceite` é a que a pessoa vai
+/// perguntar, e só o log a guarda.
+fn tunel_servido_recusado_dito(
+    mod_id: &str,
+    nome: &str,
+    porta: u16,
+    recusa: seele_core::tunel::RecusaDeTunel,
+) {
+    tracing::warn!(
+        mod_id = %mod_id,
+        tunel = %nome,
+        porta,
+        motivo = types::nome_da_recusa_do_tunel(recusa),
+        "servir o túnel de jogo foi recusado"
+    );
+}
+
+/// «O produto sabe e não conta»: toda recusa de entrada num túnel vai ao
+/// registro com o MOD e o túnel, no nível que ela merece (uma recusa do
+/// servidor é rotina; a de porta local é uma máquina com problema).
+fn tunel_recusado_dito(mod_id: &str, nome: &str, recusa: seele_core::tunel::RecusaDeTunel) {
+    tracing::warn!(
+        mod_id = %mod_id,
+        tunel = %nome,
+        motivo = types::nome_da_recusa_do_tunel(recusa),
+        "entrar no túnel de jogo foi recusado"
+    );
+}
+
+/// A entrada que deu certo, dita com a porta que de fato abriu.
+fn tunel_aberto_dito(mod_id: &str, nome: &str, aberta: PortaDeTunel) {
+    tracing::info!(
+        mod_id = %mod_id,
+        tunel = %nome,
+        porta = aberta.porta,
+        preferida = aberta.preferida,
+        desejada = aberta.desejada,
+        "porta do túnel de jogo aberta"
+    );
 }
 
 /// Larga a voz da sessão sem segurar quem chama. M-4 do lote V.
@@ -7123,8 +7675,156 @@ fn medir_a_volta(
 /// Runs one command. Returns false when the driver should stop.
 async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) -> bool {
     match command {
+        Command::AceitarPedidosDeMaquina(sim) => {
+            tracing::info!(
+                com_tela = sim,
+                "máquina: esta conexão mostra pedidos de máquina"
+            );
+            client.aceitar_pedidos_de_maquina(sim);
+        }
+        Command::VerboDaMaquina(verbo) => {
+            let saiu = match verbo {
+                VerboDaMaquina::Aceitar {
+                    mod_id,
+                    servidor,
+                    resumo,
+                } => client.aceitar_maquina(&mod_id, &servidor, &resumo).await,
+                VerboDaMaquina::Recusar {
+                    mod_id,
+                    servidor,
+                    motivo,
+                } => client.recusar_maquina(&mod_id, &servidor, motivo).await,
+                VerboDaMaquina::Parar {
+                    mod_id,
+                    servidor,
+                    motivo,
+                } => client.parar_maquina(&mod_id, &servidor, motivo).await,
+            };
+            if saiu.is_err() {
+                return false;
+            }
+        }
+        Command::PedidoDaMaquina {
+            mod_id,
+            servidor,
+            payload,
+            resposta,
+        } => {
+            // O pedido sai agora; a espera (até 15 s) vai para uma tarefa, pela
+            // razão do túnel logo abaixo.
+            match client.pedir_da_maquina(&mod_id, &servidor, payload).await {
+                Err(falha) => {
+                    tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo = falha.nome(), "máquina: o pedido à metade de servidor não saiu");
+                    let _ = resposta.send(Err(falha.nome()));
+                }
+                Ok(espera) => {
+                    tokio::spawn(async move {
+                        let desfecho = espera.aguardar().await.map_err(|falha| {
+                            tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo = falha.nome(), "máquina: o pedido à metade de servidor falhou");
+                            falha.nome()
+                        });
+                        let _ = resposta.send(desfecho);
+                    });
+                }
+            }
+        }
+        Command::ServirTunel {
+            mod_id,
+            nome,
+            protocolo,
+            porta,
+            resposta,
+        } => match client
+            .pedir_servico_de_tunel(&mod_id, &nome, protocolo, porta)
+            .await
+        {
+            Err(recusa) => {
+                tunel_servido_recusado_dito(&mod_id, &nome, porta, recusa);
+                let _ = resposta.send(Err(types::nome_da_recusa_do_tunel(recusa)));
+            }
+            Ok(espera) => {
+                tokio::spawn(async move {
+                    let desfecho = espera.aguardar().await.map_err(|recusa| {
+                        tunel_servido_recusado_dito(&mod_id, &nome, porta, recusa);
+                        types::nome_da_recusa_do_tunel(recusa)
+                    });
+                    if desfecho.is_ok() {
+                        tracing::info!(mod_id = %mod_id, tunel = %nome, porta, "túnel: a máquina serve");
+                    }
+                    let _ = resposta.send(desfecho);
+                });
+            }
+        },
+        Command::PararTunel { mod_id, nome } => {
+            if client.parar_tunel(&mod_id, &nome).await.is_err() {
+                return false;
+            }
+        }
+        Command::QuedasDoTunelServido {
+            mod_id,
+            nome,
+            resposta,
+        } => {
+            let quedas = client
+                .quedas_do_tunel_servido(&mod_id, &nome)
+                .into_iter()
+                .map(|(queda, vezes)| QuedaDeTunel {
+                    motivo: types::nome_da_queda(queda),
+                    vezes,
+                })
+                .collect();
+            let _ = resposta.send(quedas);
+        }
         // O olhar mora no fim da volta do laço de `drive`; aqui só se guarda
         // quem espera por ele.
+        Command::EntrarNoTunel {
+            mod_id,
+            nome,
+            resposta,
+        } => {
+            // O pedido sai agora; a espera (até o prazo do par) vai para uma
+            // tarefa. Parada aqui, ela pararia as teclas e os avisos de quem
+            // usa por até três segundos, a cada recusa.
+            let fins_antes = fins_do_tunel(shared, &mod_id, &nome);
+            match client.pedir_entrada_no_tunel(&mod_id, &nome).await {
+                Err(recusa) => {
+                    tunel_recusado_dito(&mod_id, &nome, recusa);
+                    let _ = resposta.send(Err(types::nome_da_recusa_do_tunel(recusa)));
+                }
+                Ok(espera) => {
+                    let shared = Arc::clone(shared);
+                    tokio::spawn(async move {
+                        let desfecho = match espera.aguardar().await {
+                            Ok(porta) => {
+                                let aberta = PortaDeTunel {
+                                    porta: porta.porta,
+                                    preferida: porta.preferida,
+                                    desejada: porta.desejada,
+                                };
+                                tunel_aberto_dito(&mod_id, &nome, aberta);
+                                guardar_tunel_aberto(&shared, &mod_id, &nome, aberta, fins_antes);
+                                Ok(aberta)
+                            }
+                            Err(recusa) => {
+                                tunel_recusado_dito(&mod_id, &nome, recusa);
+                                Err(types::nome_da_recusa_do_tunel(recusa))
+                            }
+                        };
+                        let _ = resposta.send(desfecho);
+                    });
+                }
+            }
+        }
+        Command::SairDoTunel { mod_id, nome } => {
+            if client.sair_do_tunel(&mod_id, &nome).await.is_err() {
+                return false;
+            }
+        }
+        Command::SairDosTuneisDoMod { mod_id } => {
+            if client.sair_dos_tuneis_do_mod(&mod_id).await.is_err() {
+                return false;
+            }
+        }
         Command::OlharAVoz(resposta) => shared.voice.esperar_o_olhar(resposta),
         Command::LembrarCaminho(bps) => {
             let _ = client.lembrar_o_caminho(bps).await;
@@ -7803,16 +8503,26 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         seele_core::ConnectError::ChaveNaoProvada => ConnectionError::ChaveNaoProvada,
         // Não é uma falha traduzida: é a pergunta do ADR 0045 atravessando
         // inteira, com o que a tela precisa para fazê-la.
-        seele_core::ConnectError::ModsNaoAceitos { mods, conjunto } => {
-            ConnectionError::ModsNaoAceitos {
-                mods: mods
-                    .iter()
-                    .cloned()
-                    .map(crate::types::ModExigido::from)
-                    .collect(),
-                conjunto: conjunto.clone(),
-            }
-        }
+        seele_core::ConnectError::ModsNaoAceitos {
+            mods,
+            conjunto,
+            plataformas,
+        } => ConnectionError::ModsNaoAceitos {
+            mods: mods
+                .iter()
+                .cloned()
+                .map(|anunciado| {
+                    // A marca vem do quadro que o servidor 12 manda antes do
+                    // anúncio, juntada pelo hash; sem o quadro (servidor 11) ou
+                    // sem o hash nele, o campo fica ausente.
+                    let plataformas = plataformas
+                        .as_deref()
+                        .and_then(|lista| lista.iter().find(|p| p.hash == anunciado.hash));
+                    crate::types::ModExigido::from(anunciado).com_plataformas(plataformas)
+                })
+                .collect(),
+            conjunto: conjunto.clone(),
+        },
         seele_core::ConnectError::HandshakeTimeout => ConnectionError::HandshakeTimeout,
         seele_core::ConnectError::SemResposta => ConnectionError::SemResposta,
         seele_core::ConnectError::NatNaoAbriu => ConnectionError::NatNaoAbriu,
@@ -7914,6 +8624,7 @@ mod a_volta_recusada_diz_o_motivo {
                 ConnectError::ModsNaoAceitos {
                     mods: Vec::new(),
                     conjunto: "conjunto".into(),
+                    plataformas: None,
                 },
                 EndReason::ModsMudaram,
             ),
@@ -9157,6 +9868,62 @@ mod tests {
             comeco.elapsed() < teto,
             "`encerrar_e_esperar` esperou o teto por uma thread que já tinha terminado"
         );
+    }
+
+    fn relatorio_de_tunel_de_teste(encerrado: Option<&'static str>) -> RelatorioDeTunel {
+        RelatorioDeTunel {
+            mod_id: "x/jogo".into(),
+            nome: "eco".into(),
+            porta: 25565,
+            preferida: true,
+            desejada: 25565,
+            caminho: CaminhoDeTunel::Estrela,
+            latencia_ms: None,
+            bytes_por_segundo: 0,
+            bytes_por_segundo_ida: 0,
+            bytes_por_segundo_volta: 0,
+            conexoes: 0,
+            conexoes_diretas: 0,
+            conexoes_pela_estrela: 0,
+            quedas: Vec::new(),
+            udp_descartados: 0,
+            encerrado,
+        }
+    }
+
+    /// **M6.** O relatório final de um túnel pode chegar **antes** de a espera
+    /// da entrada voltar a `guardar_tunel_aberto`. Sem a conferência, o
+    /// `or_insert` punha na tabela um túnel que já acabou, e
+    /// `tuneis_abertos` o devolvia para sempre.
+    #[test]
+    fn o_tunel_que_acabou_antes_de_a_entrada_voltar_nao_ressuscita_na_tabela() {
+        let shared = bare_shared();
+        let aberta = PortaDeTunel {
+            porta: 25565,
+            preferida: true,
+            desejada: 25565,
+        };
+        // O caso de sempre: sem fim no meio, a porta entra na tabela.
+        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
+        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
+        assert_eq!(shared.tuneis.lock().unwrap().abertos.len(), 1);
+        guardar_relatorio_de_tunel(&shared, &relatorio_de_tunel_de_teste(Some("fechado")));
+        assert!(shared.tuneis.lock().unwrap().abertos.is_empty());
+
+        // A corrida: o pedido saiu (fins lidos), o relatório final chegou, e só
+        // então a espera voltou.
+        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
+        guardar_relatorio_de_tunel(&shared, &relatorio_de_tunel_de_teste(Some("maquina-saiu")));
+        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
+        assert!(
+            shared.tuneis.lock().unwrap().abertos.is_empty(),
+            "o túnel que acabou no meio voltou à tabela como fantasma"
+        );
+
+        // E uma entrada nova, depois do fim, é um túnel novo e entra.
+        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
+        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
+        assert_eq!(shared.tuneis.lock().unwrap().abertos.len(), 1);
     }
 
     /// A `Shared` with nothing in it, for the folds below. O mesmo da
@@ -10517,6 +11284,7 @@ mod tests {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -10678,6 +11446,7 @@ mod tests {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -13801,6 +14570,7 @@ mod o_audio_segue_a_sala {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(crate::TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(super::EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),

@@ -34,8 +34,9 @@ use seele_proto::mods::read_manifest;
 // precisa destes dois tipos, então esta camada, que é a fronteira, os
 // republica. É a mesma disciplina, não uma brecha nela.
 pub use seele_proto::mods::{
-    capacidades_da_api, como_ele_se_chama, inner_path, ComoEleSeChama, Manifest, ModAnunciado,
-    Refused, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
+    capacidades_da_api, capacidades_da_maquina, capacidades_de, capacidades_do_manifesto,
+    como_ele_se_chama, inner_path, ComoEleSeChama, Manifest, ModAnunciado, Plataforma,
+    PlataformasDoMod, Poder, Refused, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
 };
 
 /// A MOD that read cleanly.
@@ -269,6 +270,33 @@ pub fn read_one(dir: &Path) -> Result<Installed, Refused> {
         hash,
         dir: dir.to_path_buf(),
     })
+}
+
+/// Os arquivos de um pacote: caminho relativo (com `/`) e bytes.
+pub type ArquivosDoPacote = Vec<(String, Vec<u8>)>;
+
+/// **O manifesto, o hash e os bytes de uma pasta, da mesma leitura.**
+///
+/// Para quem precisa de um arquivo do pacote **e** da prova de que ele é o
+/// do hash (a metade de máquina, API 8 parte 3): [`read_one`] lê o manifesto e
+/// os arquivos em duas passadas e devolve só o hash, e ler o arquivo de novo
+/// depois seria conferir uns bytes e usar outros. Aqui o manifesto sai do
+/// `mod.json` que entrou no hash, e quem chama acha o arquivo que quer entre
+/// os mesmos bytes.
+///
+/// # Errors
+///
+/// O [`Refused`] do manifesto (`Malformed` quando não há `mod.json`).
+pub fn read_with_files(dir: &Path) -> Result<(Manifest, [u8; 32], ArquivosDoPacote), Refused> {
+    let mut files = collect(dir, dir);
+    let hash = content_hash(&mut files);
+    let text = files
+        .iter()
+        .find(|(caminho, _)| caminho == "mod.json")
+        .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+        .ok_or(Refused::Malformed { line: 1, column: 1 })?;
+    let manifest = read_manifest(text)?;
+    Ok((manifest, hash, files))
 }
 
 /// O que o manifesto desta pasta diz de si, sem validar nada — U10.

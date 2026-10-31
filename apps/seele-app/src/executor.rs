@@ -58,12 +58,20 @@ pub(crate) use seele_motor::*;
 #[derive(Debug)]
 pub(crate) enum ParaODentro {
     /// O código do MOD, uma vez.
-    /// O fonte do MOD e a API que o manifesto dele declarou.
+    /// O fonte do MOD e o que o manifesto dele pode chamar.
     Codigo {
         /// O que o pacote traz.
         fonte: String,
-        /// O número do manifesto — ver `capacidades_da_api`.
-        api: u32,
+        /// **As capacidades do manifesto**, e não o número da API: o `tunel` é
+        /// do poder `porta`, e dois MODs da mesma API recebem listas
+        /// diferentes. Quem monta a lista é quem lê o pacote
+        /// (`ModInstalado::capacidades`), com a regra de
+        /// `capacidades_do_manifesto`.
+        capacidades: Vec<&'static str>,
+        /// **Só na metade de máquina** (API 8 parte 3): o JSON `{ servidor,
+        /// oferta }` do que o dono aceitou, que o prelúdio expõe em
+        /// `maquina`. `None` é a metade de janela de sempre.
+        maquina: Option<String>,
     },
     /// Uma resposta a um pedido que o MOD fez.
     Resposta(String),
@@ -146,21 +154,64 @@ impl ExecutorQuickJs {
         self.iniciar_com_api(codigo, seele_ffi::mods::MOD_API_VERSION)
     }
 
-    /// Entrega o código do MOD, dizendo **que API ele declarou**.
-    ///
-    /// A versão não é decoração: o prelúdio monta `SeeleUI` a partir dela, e um
-    /// pacote de API 3 recebe um `SeeleUI` sem `superficies` e sem
-    /// `contribuicoes`. Aceitar a API 3 não é dar à API 3 o que a 4 tem — ver
-    /// `seele_ffi::mods::capacidades_da_api`.
+    /// Entrega o código do MOD com as capacidades de uma API **sem poderes**:
+    /// o atalho dos testes que só querem escolher a versão.
     ///
     /// # Errors
     ///
     /// Falha quando a thread já morreu.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn iniciar_com_api(&self, codigo: &str, api: u32) -> Result<(), &'static str> {
+        self.iniciar_com_capacidades(codigo, seele_ffi::mods::capacidades_da_api(api).to_vec())
+    }
+
+    /// Entrega o código do MOD, dizendo **o que ele pode chamar**.
+    ///
+    /// A lista não é decoração: o prelúdio monta `SeeleUI` a partir dela, e um
+    /// pacote de API 3 recebe um `SeeleUI` sem `superficies` e sem
+    /// `contribuicoes`; um da 8 sem o poder `porta` não recebe `tunel`. Aceitar
+    /// a API 3 não é dar à API 3 o que a 4 tem — ver
+    /// `seele_ffi::mods::capacidades_do_manifesto`.
+    ///
+    /// # Errors
+    ///
+    /// Falha quando a thread já morreu.
+    pub(crate) fn iniciar_com_capacidades(
+        &self,
+        codigo: &str,
+        capacidades: Vec<&'static str>,
+    ) -> Result<(), &'static str> {
         self.para_dentro
             .send(ParaODentro::Codigo {
                 fonte: codigo.to_owned(),
-                api,
+                capacidades,
+                maquina: None,
+            })
+            .map_err(|_| "o executor não está de pé")
+    }
+
+    /// Entrega o código de uma **metade de máquina**, com o que o dono aceitou
+    /// (`dados`, o JSON `{ servidor, oferta }`). As capacidades são as de
+    /// `capacidades_da_maquina`, e com elas o prelúdio não monta tela nenhuma.
+    ///
+    /// **O mesmo executor, com os mesmos tetos** (`Limites::default()`) que a
+    /// metade de janela: o que muda é quem lê o canal de saída — uma bomba
+    /// Rust (`maquina.rs`), e não a janela.
+    ///
+    /// # Errors
+    ///
+    /// Falha quando a thread já morreu.
+    pub(crate) fn iniciar_de_maquina(
+        &self,
+        codigo: &str,
+        capacidades: Vec<&'static str>,
+        dados: String,
+    ) -> Result<(), &'static str> {
+        self.para_dentro
+            .send(ParaODentro::Codigo {
+                fonte: codigo.to_owned(),
+                capacidades,
+                maquina: Some(dados),
             })
             .map_err(|_| "o executor não está de pé")
     }
@@ -355,9 +406,14 @@ fn rodar(
         match entrada {
             ParaODentro::Encerrar => break,
             ParaODentro::Diagnostico => motor.diagnostico(),
-            ParaODentro::Codigo { fonte, api } => {
-                motor.codigo(&fonte, seele_ffi::mods::capacidades_da_api(api));
-            }
+            ParaODentro::Codigo {
+                fonte,
+                capacidades,
+                maquina,
+            } => match maquina {
+                Some(dados) => motor.codigo_de_maquina(&fonte, &capacidades, &dados),
+                None => motor.codigo(&fonte, &capacidades),
+            },
             ParaODentro::Resposta(json) => {
                 // O lugar volta **ao tirar da fila**, que é quando ela deixa de
                 // ocupar memória — e é o que a faz voltar a aceitar.
@@ -515,6 +571,110 @@ mod testes {
                 "a API 5 ainda recebe «{saiu}» depois do corte: {cinco}"
             );
         }
+    }
+
+    /// **O `SeeleUI.tunel` é do poder `porta`, e não da versão**: dois MODs da
+    /// API 8 recebem preludios diferentes, e a lista de capacidades que o
+    /// executor leva é a do manifesto (`capacidades_do_manifesto`), montada por
+    /// quem lê o pacote. Um MOD sem o poder não tem nem o nome (`undefined`), e
+    /// o erro acontece na linha que o chama.
+    #[test]
+    fn um_mod_com_porta_ganha_tunel_e_um_sem_nao() {
+        let instalado = |poderes: Vec<seele_ffi::mods::Poder>| seele_ffi::mods::ModInstalado {
+            id: "autor/jogo".to_owned(),
+            version: "1.0.0".to_owned(),
+            api: 8,
+            hash: "0".repeat(64),
+            client: Some("cliente.js".to_owned()),
+            arquivos: Vec::new(),
+            repo: String::new(),
+            reach: Vec::new(),
+            server: false,
+            tema: false,
+            plataformas: Vec::new(),
+            poderes,
+            maquina: false,
+            refused: None,
+        };
+        let o_que_ve = |instalado: &seele_ffi::mods::ModInstalado| {
+            let executor = executor();
+            executor
+                .iniciar_com_capacidades(
+                    "seele.postar(JSON.stringify({\
+                       tunel: typeof SeeleUI.tunel,\
+                       entrar: typeof (SeeleUI.tunel && SeeleUI.tunel.entrar),\
+                       congelado: Object.isFrozen(SeeleUI.tunel),\
+                       capacidades: SeeleUI.capacidades(),\
+                     }));",
+                    instalado.capacidades(),
+                )
+                .expect("código");
+            serde_json::from_str::<serde_json::Value>(&uma_mensagem(&executor))
+                .expect("o MOD posta JSON")
+        };
+
+        let com = o_que_ve(&instalado(vec![seele_ffi::mods::Poder::Porta]));
+        assert_eq!(
+            campo(&com, "tunel"),
+            "object",
+            "o MOD com `porta` sem `SeeleUI.tunel`: {com}"
+        );
+        assert_eq!(campo(&com, "entrar"), "function", "{com}");
+        assert_eq!(campo(&com, "congelado"), true, "{com}");
+        assert!(
+            campo(&com, "capacidades")
+                .as_array()
+                .is_some_and(|c| c.iter().any(|n| n == "tunel")),
+            "`SeeleUI.capacidades()` não lista `tunel`: {com}"
+        );
+
+        let sem = o_que_ve(&instalado(Vec::new()));
+        assert_eq!(
+            campo(&sem, "tunel"),
+            "undefined",
+            "o MOD sem `porta` recebeu `SeeleUI.tunel`: {sem}"
+        );
+        assert_eq!(
+            campo(&sem, "capacidades"),
+            &serde_json::json!(seele_ffi::mods::capacidades_da_api(8)),
+            "o MOD sem `porta` lê outras capacidades que as da API: {sem}"
+        );
+    }
+
+    /// **`entrar` só leva o gesto do evento `botao` que está sendo despachado**:
+    /// o prelúdio guarda o bilhete durante a volta do ouvinte e o solta ao fim,
+    /// e fora dela o pedido sai com `gesto: null`. O bilhete é conferido pela
+    /// casca (a fronteira); aqui se prova só o que o MOD entrega a ela.
+    #[test]
+    fn o_tunel_entrar_leva_o_gesto_da_volta_e_so_dela() {
+        let executor = executor();
+        executor
+            .iniciar_com_capacidades(
+                "SeeleUI.aoEvento(() => { SeeleUI.tunel.entrar('jogo'); });",
+                seele_ffi::mods::capacidades_de(8, &[seele_ffi::mods::Poder::Porta]),
+            )
+            .expect("código");
+        // Dentro de um botão: o gesto vai no pedido.
+        executor
+            .entregar(r#"{"tipo":"evento","nome":"botao","chave":"x","gesto":"abc123"}"#)
+            .expect("entrega");
+        let pedido: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("json");
+        assert_eq!(campo(&pedido, "tipo"), "tunel-entrar", "{pedido}");
+        assert_eq!(campo(&pedido, "nome"), "jogo", "{pedido}");
+        assert_eq!(campo(&pedido, "gesto"), "abc123", "{pedido}");
+
+        // Num evento que não é botão, o gesto não vale, mesmo que venha no JSON.
+        executor
+            .entregar(r#"{"tipo":"evento","nome":"tecla","gesto":"roubado"}"#)
+            .expect("entrega");
+        let pedido: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("json");
+        assert_eq!(
+            campo(&pedido, "gesto"),
+            &serde_json::Value::Null,
+            "{pedido}"
+        );
     }
 
     /// **A recusa chega ao MOD com os campos dela** (o I do PERFIS; rascunho da

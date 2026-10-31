@@ -474,6 +474,130 @@ pub enum Event {
         /// A impressão digital que quem empresta apresenta.
         impressao: String,
     },
+    // A apresentação **geral**, que o túnel de jogo usa: o motivo vai dentro e
+    // `session::translate` o devolve ao fio de cada um. A tela continua nos dois
+    // eventos de cima, de propósito: eles são o que o barramento publica para
+    // quem observa a exposição de endereços (`seele-conformance`,
+    // `tela_por_um_par`), e trocá-los é mudar um contrato que a prova da tela
+    // lê. Quando a tela migrar, é só `apontar_um_par` emitir esta variante com
+    // `MotivoDaApresentacao::Tela` — `translate` já devolve os mesmos bytes.
+    /// O servidor apresentou esta pessoa à outra ponta de um par.
+    Apresentacao {
+        /// Por quê: a tela ou o túnel.
+        motivo: crate::pares::MotivoDaApresentacao,
+        /// A quem entregar.
+        para: PersonId,
+        /// Quem é a outra ponta. A tela não o diz no fio; o
+        /// `SirvaTunelPara` diz quem vai jogar.
+        com: PersonId,
+        /// O papel de `para` nesta ligação.
+        papel: crate::pares::Papel,
+        /// Onde alcançar a outra ponta.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que a outra ponta apresenta.
+        impressao: String,
+    },
+
+    // ---- o túnel de jogo (protocolo 12) ----
+    /// O repasse cortou um canal que esta pessoa abriu (o túnel segue), e ela
+    /// precisa saber por quê.
+    ///
+    /// Endereçado a uma pessoa e entregue a todas, como o [`Self::SirvaTelaPara`]:
+    /// um servidor não tem outra maneira de uma sessão alcançar outra. Quem
+    /// estreita a audiência é `session::translate`.
+    TunelRecusado {
+        /// A quem entregar: quem abriu o canal que o repasse cortou.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Por quê, enumerado.
+        motivo: seele_proto::tunel::RecusaDeTunel,
+    },
+    /// Um túnel acabou, e esta pessoa precisa saber.
+    ///
+    /// Endereçado como o [`Self::TunelRecusado`] acima.
+    TunelEncerrado {
+        /// A quem entregar.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Por quê.
+        motivo: seele_proto::tunel::MotivoDoFimDoTunel,
+    },
+
+    /// A máquina que serve um túnel precisa saber que `quem` deixou de poder
+    /// alcançá-lo (perdeu a ação, saiu ou deixou o túnel).
+    ///
+    /// Endereçado como o [`Self::TunelRecusado`] acima. Vai só à máquina: quem
+    /// perdeu o túnel já recebe o próprio [`Self::TunelEncerrado`].
+    TunelRetirado {
+        /// A máquina que serve.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Quem perdeu o direito.
+        quem: PersonId,
+    },
+
+    // ---- a máquina de jogo (protocolo 12, API 8 parte 3) ----
+    //
+    // Os três primeiros são endereçados a **uma** pessoa e entregues a todas,
+    // como o [`Self::TunelRetirado`] acima: quem estreita a audiência é
+    // `session::translate`, e o corte por versão é de `entende_a_mensagem`.
+    /// O servidor pede a `para` que rode a máquina de um servidor de jogo.
+    PedidoDeMaquina {
+        /// A quem mostrar a oferta.
+        para: PersonId,
+        /// Só esta conexão de `para`, quando o pedido é reenviado a uma sessão
+        /// que chegou depois dele; `None` é toda sessão dela.
+        conexao: Option<u64>,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O hash do pacote ligado.
+        hash: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// Quem pediu.
+        pedido_por: PersonId,
+        /// O que a pessoa vê antes de aceitar. Numa caixa: a oferta é o maior
+        /// valor do barramento, e sem a caixa todo evento pagaria o tamanho
+        /// dela.
+        oferta: Box<seele_proto::maquina::OfertaDeMaquina>,
+    },
+    /// Um aviso da metade de servidor à máquina.
+    AvisoParaMaquina {
+        /// A máquina.
+        para: PersonId,
+        /// A conexão que aceitou: só ela recebe. Outra sessão da mesma pessoa
+        /// (o navegador, digamos) não é a máquina.
+        conexao: u64,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// O que o MOD mandou.
+        carga: String,
+    },
+    /// O servidor dispensou a máquina de `para`.
+    MaquinaDispensada {
+        /// Quem operava.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// Por quê.
+        motivo: seele_proto::maquina::MotivoDaDispensa,
+    },
+    /// O livro das máquinas mudou. Não vai a cliente nenhum: é o que a metade
+    /// de servidor (Task 5) escuta para os momentos dela.
+    Maquina(crate::maquinas::MudancaDeMaquina),
 
     // ---- o bitrate adaptativo do ADR 0036 ----
     /// Quanto da voz de alguém não está chegando.
@@ -1533,6 +1657,22 @@ pub struct Server {
     /// Quem declarou que empresta a subida, e quem serve quem. Ver
     /// [`crate::pares::Pares`].
     pub pares: Arc<Mutex<crate::pares::Pares>>,
+    /// Os túneis de jogo que as máquinas servem e quem está dentro de cada um.
+    /// Ver [`crate::tuneis`].
+    ///
+    /// Um `std::sync::Mutex`, e nunca atravessa um `await`: o que vem de fora
+    /// (o banco, a ocupação) é lido **antes** de tomá-lo, na ordem de
+    /// `session::apontar_um_par`.
+    pub tuneis: std::sync::Mutex<crate::tuneis::Tuneis>,
+    /// As máquinas de jogo pedidas e aceitas. Ver [`crate::maquinas`].
+    ///
+    /// Um `std::sync::Mutex` que nunca atravessa um `await`, tomado **antes**
+    /// de [`Self::tuneis`] quando os dois vão juntos, e nunca com o banco
+    /// aberto.
+    pub maquinas: std::sync::Mutex<crate::maquinas::Maquinas>,
+    /// A cópia de [`crate::ServerConfig::malha_para_tuneis`]: se o servidor
+    /// apresenta as pontas de um túnel para o caminho direto.
+    pub malha_para_tuneis: bool,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
     /// `None` when this server has nowhere to keep blobs, which is the in-memory
@@ -1624,6 +1764,11 @@ pub struct Server {
     /// canal (rascunho da API 6, §7.3). Um só por servidor, porque os pedidos e
     /// os momentos de um MOD dividem a mesma taxa.
     pub avisador: Arc<crate::mods::aviso::Avisador>,
+    /// A mesma taxa e o mesmo teto, para os avisos da metade de servidor à
+    /// máquina (`mundo.maquinas.avisar`), com o excedente junto por servidor de
+    /// jogo. Um orçamento à parte do das janelas: são outros destinatários, e
+    /// uma máquina falante não pode atrasar o «mudou» de uma janela.
+    pub avisador_de_maquinas: Arc<crate::mods::aviso::Avisador<String>>,
     /// A impressão do certificado **de longa duração** deste servidor — a
     /// identidade —, em bytes: o SHA-256 do DER dele, o mesmo cujo hex vai no
     /// `fp=` do link.

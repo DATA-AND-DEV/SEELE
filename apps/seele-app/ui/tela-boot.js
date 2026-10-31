@@ -1034,7 +1034,7 @@ async function desenharSaidasDeQuemHospeda(mods, servidor, opcoesDaTela) {
           elemento(
             "span",
             "antes-linha-sub",
-            `ainda não há versão dele para a API ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" ou ")}`,
+            `ainda não há versão dele para a API ${APIS_ACEITAS_DITAS_OU}`,
           ),
         );
       }

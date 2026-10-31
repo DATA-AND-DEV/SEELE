@@ -33,7 +33,9 @@ pub mod aviso;
 pub mod despacho;
 pub mod incorporados;
 pub mod instalar;
+pub mod maquina;
 pub mod mundo;
+pub mod pack;
 pub mod pedidos;
 pub mod tema;
 pub mod volume;
@@ -450,6 +452,11 @@ fn tamanho_no_registro(c: char) -> usize {
 pub struct Portas {
     /// `"tema": true`: pode chamar `mundo.tema` (rascunho da API 6, §9).
     pub tema: bool,
+    /// `"maquina": "<script>"`: a metade de servidor ganha `mundo.maquinas`
+    /// (API 8, parte 3). Sem metade de máquina, não há a quem pedir uma, e o
+    /// nome nem existe: um MOD que o escreva lê `undefined`, e não um verbo que
+    /// recusa sempre.
+    pub maquinas: bool,
 }
 
 /// A metade de servidor de um MOD, como o disco a entrega ao anfitrião.
@@ -526,6 +533,9 @@ pub struct Anfitriao {
     /// Os avisos declarados na chamada em curso (`mundo.avisar`), o mais novo
     /// de cada canal, que só saem daqui se ela terminar.
     avisos: Arc<std::sync::Mutex<Vec<aviso::AvisoDeclarado>>>,
+    /// O que a chamada em curso declarou em `mundo.maquinas`, que só sai daqui
+    /// se ela terminar. Ver [`maquina`].
+    maquinas: Arc<std::sync::Mutex<maquina::Declarado>>,
 }
 
 impl Anfitriao {
@@ -563,6 +573,7 @@ impl Anfitriao {
             pintor: Arc::new(std::sync::Mutex::new(None)),
             declarado: Arc::new(std::sync::Mutex::new(None)),
             avisos: Arc::new(std::sync::Mutex::new(Vec::new())),
+            maquinas: Arc::new(std::sync::Mutex::new(maquina::Declarado::default())),
         })
     }
 
@@ -742,6 +753,33 @@ impl Anfitriao {
             "apagar",
             Function::new(ctx.clone(), move |nome: String| arquivos::apagar(&p, &nome))?,
         )?;
+        // **O pack enviado** (API 8 parte 6; `mods::pack`): o tamanho, o
+        // `sha512` e o texto do índice de um `.mrpack` do volume, para a
+        // metade de servidor montar a oferta da máquina. Só para quem tem
+        // metade de máquina, como `mundo.maquinas`.
+        if portas.maquinas {
+            let p = pasta.join(volume::PASTA);
+            volume_js.set(
+                "pack",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          nome: String|
+                          -> rquickjs::Result<rquickjs::Value<'js>> {
+                        let lido = arquivos::dentro(&p, &nome)
+                            .ok_or(pack::NaoLido::NaoExiste)
+                            .and_then(|c| pack::ler_do_disco(&c));
+                        let resposta = match lido {
+                            Ok(lido) => serde_json::json!({
+                                "ok": true, "bytes": lido.bytes, "sha512": lido.sha512, "indice": lido.indice,
+                            }),
+                            Err(nao) => nao.resposta(),
+                        };
+                        ctx.json_parse(resposta.to_string())
+                    },
+                )?,
+            )?;
+        }
         let p = pasta.join(volume::PASTA);
         volume_js.set(
             "servir",
@@ -844,6 +882,83 @@ impl Anfitriao {
                 },
             )?,
         )?;
+        // A máquina de jogo (API 8, parte 3), **só** para quem declara a
+        // metade de máquina. Ao contrário de `mundo.avisar`, o que é inválido
+        // **lança**: um pedido mal escrito não é uma condição do momento que o
+        // MOD trate, é um defeito dele, e a exceção diz onde.
+        if portas.maquinas {
+            // **O pack do link do Modrinth** (API 8 parte 6; `mods::pack`):
+            // os bytes com o `sha512` e o tamanho declarados, pelos tetos de
+            // `mundo.buscar`, e o índice tirado do zip. Só para quem tem
+            // metade de máquina: é ela quem roda o pack.
+            mundo_js.set(
+                "buscarPack",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          pedido: rquickjs::Object<'js>|
+                          -> rquickjs::Result<rquickjs::Value<'js>> {
+                        let url: String = pedido.get("url").unwrap_or_default();
+                        let sha512: String = pedido.get("sha512").unwrap_or_default();
+                        let tamanho: f64 = pedido.get("tamanho").unwrap_or(0.0);
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let tamanho = if tamanho.is_finite() && tamanho > 0.0 {
+                            tamanho as u64
+                        } else {
+                            0
+                        };
+                        let resposta = match pack::buscar(&url, &sha512, tamanho) {
+                            Ok(lido) => serde_json::json!({
+                                "ok": true, "bytes": lido.bytes, "sha512": lido.sha512, "indice": lido.indice,
+                            }),
+                            Err(nao) => {
+                                tracing::info!(url = %url, recusa = ?nao, "mundo.buscarPack recusou");
+                                nao.resposta()
+                            }
+                        };
+                        ctx.json_parse(resposta.to_string())
+                    },
+                )?,
+            )?;
+            let maquinas_js = rquickjs::Object::new(ctx.clone())?;
+            let declarado = Arc::clone(&self.maquinas);
+            maquinas_js.set(
+                "pedir",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          valor: rquickjs::Value<'js>|
+                          -> rquickjs::Result<()> {
+                        let juntado = maquina::pedido_da_chamada(&ctx, valor)?.and_then(|p| {
+                            declarado
+                                .lock()
+                                .map_err(|_| "falhou".to_owned())
+                                .and_then(|mut d| d.juntar_pedido(p).map_err(str::to_owned))
+                        });
+                        juntado.map_err(|nome| rquickjs::Exception::throw_message(&ctx, &nome))
+                    },
+                )?,
+            )?;
+            let declarado = Arc::clone(&self.maquinas);
+            maquinas_js.set(
+                "avisar",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          valor: rquickjs::Value<'js>|
+                          -> rquickjs::Result<()> {
+                        let juntado = maquina::aviso_da_chamada(&ctx, valor)?.and_then(|a| {
+                            declarado
+                                .lock()
+                                .map_err(|_| "falhou")
+                                .and_then(|mut d| d.juntar_aviso(a))
+                        });
+                        juntado.map_err(|nome| rquickjs::Exception::throw_message(&ctx, nome))
+                    },
+                )?,
+            )?;
+            mundo_js.set("maquinas", maquinas_js)?;
+        }
         ctx.globals().set("mundo", mundo_js)?;
 
         ctx.eval::<(), _>(fonte)
@@ -1012,14 +1127,29 @@ impl Anfitriao {
             .unwrap_or_default()
     }
 
-    /// Esquece o que a chamada declarou — o tema e os avisos —, no começo de
-    /// cada chamada e quando ela falha.
+    /// O que a última chamada declarou em `mundo.maquinas`, se ela terminou —
+    /// tirado daqui.
+    ///
+    /// Quem chama o leva ao livro com [`maquina::despejar`], depois de gravar o
+    /// quintal. Uma chamada que falhou não deixa nada para tomar.
+    pub fn tomar_maquinas(&mut self) -> maquina::Declarado {
+        self.maquinas
+            .lock()
+            .map(|mut declarado| std::mem::take(&mut *declarado))
+            .unwrap_or_default()
+    }
+
+    /// Esquece o que a chamada declarou — o tema, os avisos e as máquinas —, no
+    /// começo de cada chamada e quando ela falha.
     fn esquecer_o_declarado(&self) {
         if let Ok(mut declarado) = self.declarado.lock() {
             *declarado = None;
         }
         if let Ok(mut avisos) = self.avisos.lock() {
             avisos.clear();
+        }
+        if let Ok(mut maquinas) = self.maquinas.lock() {
+            *maquinas = maquina::Declarado::default();
         }
     }
 
@@ -1138,6 +1268,7 @@ pub fn carregar_do_disco(
         };
         let portas = Portas {
             tema: manifesto.tema,
+            maquinas: manifesto.maquina.is_some(),
         };
         let Some(metade) = manifesto.server else {
             continue;
@@ -1182,12 +1313,18 @@ pub fn api_do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<u32, S
 }
 
 /// O que um pacote instalado declara de si para o anúncio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoPacote {
     /// A API que o manifesto pede.
     pub api: u32,
     /// Se o manifesto declara `"tema": true` (D-api-8). Falso sem a chave.
     pub tema: bool,
+    /// As plataformas em que o MOD roda (API 8): a lista efetiva, que já
+    /// resolveu o «sem a chave, nas duas» (`plataformas_efetivas`). `None` quando
+    /// o manifesto não passa pela leitura completa (uma API que este build não
+    /// roda, por exemplo): a leitura leniente que dá a `api` não diz as
+    /// plataformas, e inventá-las seria o produto afirmando o que não leu.
+    pub plataformas: Option<Vec<seele_proto::mods::Plataforma>>,
 }
 
 /// **A API e o tema de um pacote instalado, numa leitura só** (D-api-8): a
@@ -1210,12 +1347,15 @@ pub fn do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<DoPacote, 
         api => Ok(DoPacote {
             api,
             tema: declarado.tema,
+            plataformas: seele_proto::mods::read_manifest(&texto)
+                .ok()
+                .map(|manifest| seele_proto::mods::plataformas_efetivas(&manifest)),
         }),
     }
 }
 
-/// Preenche a API e o tema das linhas habilitadas que ainda não os têm
-/// (migrações 14 e 16), na mesma passada e na mesma leitura.
+/// Preenche a API, o tema e as plataformas das linhas habilitadas que ainda
+/// não os têm (migrações 14, 16 e 20), na mesma passada e na mesma leitura.
 ///
 /// Lê o `mod.json` da pasta do **hash** que a linha exige — os bytes que a
 /// exigência cobre, e não «o que estiver na pasta do MOD» —, como
@@ -1236,15 +1376,41 @@ pub fn preencher_api_e_tema(
     let mut queixas = Vec::new();
     for (id, hash) in por_preencher {
         match do_pacote(raizes, &hash) {
-            Ok(DoPacote { api, tema }) => {
+            Ok(DoPacote {
+                api,
+                tema,
+                plataformas,
+            }) => {
+                // Sem as plataformas lidas, o pacote ainda dá a API e o tema, e
+                // são eles que a linha precisa para o aperto de mão. As
+                // plataformas ficam as duas — o que o catálogo já diz de uma
+                // linha nula —, e a linha é **nomeada**: em silêncio, seria o
+                // catálogo oferecendo ao navegador o que talvez só o app roda.
+                // Menos a de uma API que este build não roda: essa o servidor já
+                // recusa pelo nome ao subir (`ligados_de_outra_api`).
+                if plataformas.is_none() && seele_proto::mods::APIS_ACEITAS.contains(&api) {
+                    queixas.push(format!(
+                        "{id}: o manifesto não passa pela leitura completa, e as plataformas \
+                         foram gravadas como as duas"
+                    ));
+                }
+                let plataformas = plataformas.unwrap_or_else(|| {
+                    vec![
+                        seele_proto::mods::Plataforma::App,
+                        seele_proto::mods::Plataforma::Navegador,
+                    ]
+                });
                 if let Err(erro) = crate::persistence::mods::preencher_do_pacote(
                     persistence,
                     &id,
                     &hash,
                     api,
                     tema,
+                    &plataformas,
                 ) {
-                    queixas.push(format!("{id}: a API e o tema não foram gravados: {erro}"));
+                    queixas.push(format!(
+                        "{id}: a API, o tema e as plataformas não foram gravados: {erro}"
+                    ));
                 }
             }
             Err(motivo) => {
@@ -1370,7 +1536,8 @@ mod tests {
         pacote_com(raizes, hash, api, "");
     }
 
-    /// Um pacote cujo `mod.json` termina com `resto` — `,"tema":true`, por
+    /// Um pacote (com as duas metades, para passar pela leitura completa
+    /// como um de verdade) cujo `mod.json` termina com `resto` — `,"tema":true`, por
     /// exemplo, ou nada.
     fn pacote_com(raizes: &crate::RaizesDosMods, hash: &str, api: u32, resto: &str) {
         let dir = raizes.pacote_de(hash);
@@ -1378,7 +1545,7 @@ mod tests {
         std::fs::write(
             dir.join("mod.json"),
             format!(
-                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[]{resto}}}"#
+                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[],"client":"cliente/main.js","server":"servidor/main.js"{resto}}}"#
             ),
         )
         .expect("manifesto");
@@ -1408,6 +1575,7 @@ mod tests {
             server_half: true,
             api: 6,
             tema: false,
+            plataformas: None,
         };
         let pinta = "a1".repeat(32);
         let sem_chave = "b2".repeat(32);
@@ -1451,6 +1619,57 @@ mod tests {
         );
     }
 
+    /// **As linhas habilitadas antes da migração 21 ganham as plataformas na
+    /// subida**, lidas do `mod.json` dos bytes do hash e já efetivas: a lista
+    /// declarada, ou as duas quando o manifesto não traz a chave.
+    #[test]
+    fn a_subida_preenche_as_plataformas_das_linhas_antigas() {
+        use crate::persistence::mods::{enable, enabled, EnabledMod};
+        use crate::persistence::{Location, Persistence};
+        use seele_proto::mods::Plataforma;
+
+        let raiz = pasta_de_teste("plataformas-na-subida");
+        let raizes = crate::RaizesDosMods {
+            pacotes: raiz.clone(),
+            dados: raiz.join("mod-data"),
+        };
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let linha = |id: &str, hash: &str| EnabledMod {
+            id: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            hash: hash.to_owned(),
+            repo: String::new(),
+            reach: Vec::new(),
+            server_half: false,
+            api: 8,
+            tema: false,
+            plataformas: None,
+        };
+        let so_app = "a1".repeat(32);
+        let sem_chave = "b2".repeat(32);
+        pacote_com(&raizes, &so_app, 8, r#","plataformas":["app"]"#);
+        pacote_com(&raizes, &sem_chave, 8, "");
+        enable(&banco, &linha("seele/bot", &so_app)).expect("habilitar");
+        enable(&banco, &linha("seele/outro", &sem_chave)).expect("habilitar");
+
+        let queixas = preencher_api_e_tema(&banco, &raizes);
+
+        assert!(queixas.is_empty(), "{queixas:?}");
+        let lista = enabled(&banco).expect("listar");
+        let de = |id: &str| {
+            lista
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.plataformas.clone())
+        };
+        assert_eq!(de("seele/bot"), Some(Some(vec![Plataforma::App])));
+        assert_eq!(
+            de("seele/outro"),
+            Some(Some(vec![Plataforma::App, Plataforma::Navegador])),
+            "sem a chave, a subida grava as duas"
+        );
+    }
+
     /// **As linhas habilitadas antes da coluna ganham a API na subida**, lida
     /// do manifesto dos bytes que o hash cobre (a P7a da F1b). Uma que não se
     /// preenche é dita pelo nome, e não fica zero em silêncio.
@@ -1474,6 +1693,7 @@ mod tests {
             server_half: false,
             api: 0,
             tema: false,
+            plataformas: None,
         };
         let com_pacote = "e5".repeat(32);
         pacote_com_api(&raizes, &com_pacote, 6);
@@ -2607,7 +2827,15 @@ mod tests {
     fn com_a_porta(id: &str, fonte: &str) -> Anfitriao {
         let mut anfitriao = Anfitriao::novo().expect("anfitrião");
         anfitriao
-            .carregar_com_portas(id, fonte, &pasta_de_teste("tema"), Portas { tema: true })
+            .carregar_com_portas(
+                id,
+                fonte,
+                &pasta_de_teste("tema"),
+                Portas {
+                    tema: true,
+                    ..Portas::default()
+                },
+            )
             .expect("carregar");
         anfitriao
     }
@@ -2811,7 +3039,10 @@ mod tests {
                 "seele/estilo",
                 "globalThis.aoAcontecer = () => { mundo.tema({ acento: '#c86b1f' }); };",
                 &pasta_de_teste("tema"),
-                Portas { tema: true },
+                Portas {
+                    tema: true,
+                    ..Portas::default()
+                },
             )
             .expect("carregar");
         anfitriao
@@ -3065,5 +3296,302 @@ mod tests {
             !matches!(falha, Falha::QuintalCheio),
             "a resposta grande saiu como quintal cheio: {falha:?}"
         );
+    }
+
+    // ---- `mundo.maquinas` (API 8, parte 3) ----
+
+    /// Pede o que o `pedido` traz, pela metade de servidor de teste: `pedir`
+    /// ou `avisar` com o argumento dado, e devolve `ok` ou a mensagem do que
+    /// foi lançado.
+    const PEDE_MAQUINA: &str = "globalThis.aoPedir = (contexto, pedido) => { \
+           const p = JSON.parse(pedido); \
+           try { \
+             for (const a of p.args) { mundo.maquinas[p.verbo](a); } \
+             return 'ok'; \
+           } catch (e) { return String(e && e.message); } \
+         }; \
+         globalThis.aoAcontecer = () => { \
+           mundo.maquinas.pedir({ quem: 9, servidor: 'mc-9', oferta: { titulo: 'T', receita: 'r', \
+             versao_da_receita: '1', versao_do_jogo: '1' } }); \
+         };";
+
+    fn com_a_maquina(fonte: &str) -> Anfitriao {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar_com_portas(
+                "x/jogo",
+                fonte,
+                &pasta_de_teste("maquina"),
+                Portas {
+                    maquinas: true,
+                    ..Portas::default()
+                },
+            )
+            .expect("carregar");
+        anfitriao
+    }
+
+    fn pedir_maquina(anfitriao: &mut Anfitriao, verbo: &str, args: &serde_json::Value) -> String {
+        anfitriao
+            .pedir(
+                "x/jogo",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                &serde_json::json!({ "verbo": verbo, "args": args }).to_string(),
+                &mut BTreeMap::new(),
+            )
+            .expect("o pedido falhou")
+    }
+
+    /// Uma oferta válida, no JSON que um MOD escreve: os nomes de campo de
+    /// `OfertaDeMaquina`, o protocolo e o algoritmo em minúsculas.
+    fn oferta_js() -> serde_json::Value {
+        serde_json::json!({
+            "titulo": "Minecraft",
+            "receita": "minecraft-java",
+            "versao_da_receita": "1.0.0",
+            "versao_do_jogo": "1.21.4",
+            "tuneis": [{ "nome": "mc", "protocolo": "tcp", "porta": 25565 }],
+            "artefatos": [{
+                "nome": "server.jar",
+                "url": "https://piston-data.mojang.com/server.jar",
+                "tamanho": 51_000_000,
+                "hash": { "algoritmo": "sha1", "hex": "a".repeat(40) },
+            }],
+            "origens": ["piston-data.mojang.com"],
+            "rodar": { "comando": "java", "argumentos": ["-jar", "server.jar", "nogui"] },
+            "disco_maximo": 2_000_000_000_u64,
+        })
+    }
+
+    /// **`mundo.maquinas` só existe para o MOD que declara a metade de
+    /// máquina** (`Portas::maquinas`, do `"maquina"` do manifesto). Sem ela,
+    /// `typeof` é `undefined`: o MOD que testa a presença do verbo lê a
+    /// verdade, em vez de um verbo que existe e recusa sempre.
+    #[test]
+    fn mundo_maquinas_so_existe_com_a_metade_de_maquina() {
+        let fonte = "globalThis.aoPedir = () => typeof mundo.maquinas + '/' + \
+                     typeof (mundo.maquinas && mundo.maquinas.pedir) + '/' + \
+                     typeof (mundo.maquinas && mundo.maquinas.avisar);";
+        let mut sem = Anfitriao::novo().expect("anfitrião");
+        sem.carregar("x/jogo", fonte, &pasta_de_teste("maquina"))
+            .expect("carregar");
+        assert_eq!(
+            sem.pedir(
+                "x/jogo",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new()
+            )
+            .expect("o pedido"),
+            "undefined/undefined/undefined"
+        );
+        let mut com = com_a_maquina(fonte);
+        assert_eq!(
+            com.pedir(
+                "x/jogo",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new()
+            )
+            .expect("o pedido"),
+            "object/function/function"
+        );
+    }
+
+    /// **Uma oferta inválida lança na hora, com o nome da regra** — e não sai
+    /// depois como um pedido que a pessoa recusaria sem o MOD saber por quê.
+    /// O nome é o campo que a validação do fio (`OfertaDeMaquina::validate`)
+    /// recusaria, para o MOD achar no guia a mesma palavra.
+    #[test]
+    fn uma_oferta_invalida_lanca_com_o_nome() {
+        let mut anfitriao = com_a_maquina(PEDE_MAQUINA);
+        let com = |mudar: &dyn Fn(&mut serde_json::Value)| {
+            let mut oferta = oferta_js();
+            mudar(&mut oferta);
+            serde_json::json!([{ "quem": 3, "servidor": "mc-1", "oferta": oferta }])
+        };
+        let casos: Vec<(serde_json::Value, &str)> = vec![
+            (
+                serde_json::json!([{ "quem": 3, "servidor": "MC 1", "oferta": oferta_js() }]),
+                "servidor-invalido",
+            ),
+            (
+                serde_json::json!([{ "quem": "tres", "servidor": "mc-1", "oferta": oferta_js() }]),
+                "quem-invalido",
+            ),
+            (com(&|o| o["titulo"] = "".into()), "oferta-invalida:titulo"),
+            (
+                com(&|o| o["tuneis"][0]["porta"] = 0.into()),
+                "oferta-invalida:tuneis",
+            ),
+            (
+                com(&|o| o["tuneis"][0]["protocolo"] = "sctp".into()),
+                "oferta-invalida:tuneis",
+            ),
+            (
+                com(&|o| o["artefatos"][0]["hash"]["hex"] = "AB".into()),
+                "oferta-invalida:artefato_hash",
+            ),
+            (
+                com(&|o| o["artefatos"][0]["url"] = "http://x".into()),
+                "oferta-invalida:artefato_url",
+            ),
+            (
+                com(&|o| o["disco_maximo"] = (-1).into()),
+                "oferta-invalida:disco_maximo",
+            ),
+            // Uma chave que não existe é um erro de escrita, e não um campo
+            // vazio: `tunels` viraria uma oferta sem túnel nenhum, calada.
+            (
+                com(&|o| o["tunels"] = serde_json::json!([])),
+                "oferta-invalida:tunels",
+            ),
+            (
+                serde_json::json!([{ "quem": 3, "servidor": "mc-1" }]),
+                "oferta-invalida:oferta",
+            ),
+        ];
+        for (args, esperado) in casos {
+            assert_eq!(
+                pedir_maquina(&mut anfitriao, "pedir", &args),
+                esperado,
+                "{args}"
+            );
+            assert!(
+                anfitriao.tomar_maquinas().pedidos.is_empty(),
+                "o pedido inválido ficou declarado: {args}"
+            );
+        }
+
+        // A válida não lança, e fica declarada com a oferta como o fio a leva.
+        // `quem` vale como número ou como o texto de `contexto.person`.
+        assert_eq!(
+            pedir_maquina(
+                &mut anfitriao,
+                "pedir",
+                &serde_json::json!([{ "quem": "3", "servidor": "mc-1", "oferta": oferta_js() }])
+            ),
+            "ok"
+        );
+        let declarado = anfitriao.tomar_maquinas();
+        let [pedido] = declarado.pedidos.as_slice() else {
+            panic!("esperava um pedido: {declarado:?}");
+        };
+        assert_eq!(pedido.quem, seele_proto::ids::PersonId(3));
+        assert_eq!(pedido.servidor, "mc-1");
+        let o = &pedido.oferta;
+        assert_eq!(
+            (o.titulo.as_str(), o.tuneis.len(), o.disco_maximo),
+            ("Minecraft", 1, 2_000_000_000)
+        );
+        assert_eq!(
+            o.tuneis[0].protocolo,
+            seele_proto::tunel::ProtocoloDeTunel::Tcp
+        );
+        assert_eq!(
+            o.artefatos[0].hash.algoritmo,
+            seele_proto::maquina::AlgoritmoDeHash::Sha1
+        );
+        assert_eq!(o.rodar.as_ref().map(|r| r.argumentos.len()), Some(3));
+        assert!(o.pack.is_none() && o.termos.is_empty() && o.dominios_do_jogo.is_empty());
+        seele_proto::control::Validate::validate(o).expect("a oferta declarada passa no fio");
+    }
+
+    /// **Os tetos por chamada lançam com o nome**: quatro servidores de jogo
+    /// pedidos, dezesseis avisados. O mesmo servidor de jogo de novo não conta
+    /// — fica o mais novo, como o canal de `mundo.avisar`.
+    #[test]
+    fn os_tetos_de_uma_chamada_lancam_com_o_nome() {
+        let mut anfitriao = com_a_maquina(PEDE_MAQUINA);
+        let pedido = |servidor: String| serde_json::json!({ "quem": 3, "servidor": servidor, "oferta": oferta_js() });
+        let mut args: Vec<serde_json::Value> = (0..maquina::MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA)
+            .map(|n| pedido(format!("mc-{n}")))
+            .collect();
+        args.push(pedido("mc-0".to_owned()));
+        assert_eq!(
+            pedir_maquina(
+                &mut anfitriao,
+                "pedir",
+                &serde_json::Value::from(args.clone())
+            ),
+            "ok",
+            "o mesmo servidor de jogo de novo contou como mais um"
+        );
+        assert_eq!(
+            anfitriao.tomar_maquinas().pedidos.len(),
+            maquina::MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA
+        );
+        args.push(pedido("mc-extra".to_owned()));
+        assert_eq!(
+            pedir_maquina(&mut anfitriao, "pedir", &serde_json::Value::from(args)),
+            "pedidos-de-maquina-demais"
+        );
+        // O MOD apanhou a exceção e a chamada terminou: os quatro de antes
+        // valem, e o quinto não entrou.
+        let declarados = anfitriao.tomar_maquinas().pedidos;
+        assert_eq!(
+            declarados.len(),
+            maquina::MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA
+        );
+        assert!(
+            declarados.iter().all(|p| p.servidor != "mc-extra"),
+            "o pedido além do teto entrou"
+        );
+
+        let avisos: Vec<serde_json::Value> = (0..=maquina::MAX_AVISOS_A_MAQUINA_POR_CHAMADA)
+            .map(|n| serde_json::json!({ "servidor": format!("mc-{n}"), "carga": n }))
+            .collect();
+        assert_eq!(
+            pedir_maquina(
+                &mut anfitriao,
+                "avisar",
+                &serde_json::Value::from(
+                    avisos[..maquina::MAX_AVISOS_A_MAQUINA_POR_CHAMADA].to_vec()
+                )
+            ),
+            "ok"
+        );
+        assert_eq!(
+            anfitriao.tomar_maquinas().avisos.len(),
+            maquina::MAX_AVISOS_A_MAQUINA_POR_CHAMADA
+        );
+        assert_eq!(
+            pedir_maquina(&mut anfitriao, "avisar", &serde_json::Value::from(avisos)),
+            "avisos-a-maquina-demais"
+        );
+        // E o aviso sem carga, grande demais, ou para um servidor de jogo que
+        // não se escreve.
+        for (aviso, nome) in [
+            (serde_json::json!({ "servidor": "mc-1" }), "aviso-invalido"),
+            (
+                serde_json::json!({ "servidor": "mc-1", "carga": "a".repeat(aviso::TETO_DO_AVISO) }),
+                "aviso-grande-demais",
+            ),
+            (
+                serde_json::json!({ "servidor": "", "carga": 1 }),
+                "servidor-invalido",
+            ),
+        ] {
+            assert_eq!(
+                pedir_maquina(&mut anfitriao, "avisar", &serde_json::json!([aviso])),
+                nome
+            );
+        }
+    }
+
+    /// Um momento também declara, e o que ele declara fica para quem rodou o
+    /// momento tomar.
+    #[test]
+    fn um_momento_tambem_pede_maquina() {
+        let mut anfitriao = com_a_maquina(PEDE_MAQUINA);
+        anfitriao
+            .chamar("x/jogo", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect("o momento");
+        let declarado = anfitriao.tomar_maquinas();
+        assert_eq!(declarado.pedidos.len(), 1, "{declarado:?}");
+        assert_eq!(declarado.pedidos[0].servidor, "mc-9");
     }
 }

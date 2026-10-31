@@ -298,6 +298,70 @@ e não «aplicado».** O servidor confere a forma — as chaves, os valores, o
 conhece a paleta do produto e as cores que deriva dela, e cada uma conta ao MOD
 pelo evento `tema`: `aplicado`, ou `recusado` com os pares e a região.
 
+## A API 8
+
+**A 8 é um alargamento da 7** (ADR 0058, acréscimo): a v7 inteira, mais a
+declaração de onde o MOD roda e do que ele pode fazer além do que a API dá. A `api/v8.json` é escrita por inteiro, sem
+`extends`, como a v6 e a v7. **A linha dela já está em `congeladas.sha256`**
+(o `check-api` a exige desde o commit que cria a versão) e é refeita a cada
+emenda da v8, até a release: só então ela congela, como a v7 fez.
+
+- **`manifesto.plataformas`** (`Manifest::plataformas`, `Plataforma`):
+  `["app", "navegador"]`.
+  - **Ausente quer dizer as duas** (`plataformas_efetivas`). Escrita e vazia é
+    recusada (`PlataformasVazias`), e repetir uma plataforma também
+    (`PlataformaRepetida`).
+  - Declarar exige `"api": 8`. Um manifesto da 7 ou da 6 com a chave é recusado
+    com `PlataformasPedemApiNova`, e não ignorado.
+  - **O celular é navegador.** Um MOD só do `app` não carrega nele.
+  - Existe para o MOD de servidor de jogo, que só faz sentido onde há um
+    servidor para hospedá-lo.
+- **`manifesto.poderes`** (`Manifest::poderes`, `Poder`): `["porta"]`, o túnel
+  de quem joga até o servidor de jogo de outra pessoa.
+  - **Ausente quer dizer nenhum.** Escrita e vazia é recusada (`PoderesVazios`),
+    e repetir um poder também (`PoderRepetido`); um valor desconhecido faz o
+    manifesto inteiro ser recusado (`Malformed`).
+  - Declarar exige `"api": 8` (`PoderesPedemApiNova`) e `"plataformas": ["app"]`
+    (`PoderesExigemSoOApp`): sem `plataformas` o MOD roda nas duas, e o navegador
+    não abre socket na máquina.
+  - **A `porta` exige a permissão `entrar-no-jogo`** declarada no manifesto
+    (`PortaSemEntrarNoJogo`): um túnel que ninguém pode abrir é recusado na
+    instalação, com o nome.
+- **`manifesto.maquina`** (`Manifest::maquina`): o caminho, dentro do pacote, da
+  metade de máquina. Fora do pacote é `MaquinaForaDoPacote`, sem `poderes` é
+  `MaquinaSemPoderes`, e numa API anterior à 8 é `PoderesPedemApiNova`.
+- **As capacidades da 8 são as da 7** (`capacidades_da_api(8)`): nada novo que o
+  MOD chame, só o que o manifesto declara. **`tunel` é do poder, e não da
+  versão**: `capacidades_do_manifesto` soma `tunel` à lista da API quando o
+  manifesto declara a `porta` (`compatibilidade.capacidades-por-poder`).
+- **A metade de servidor chama a máquina** (`mundo.maquinas`, só para o MOD
+  que declara `maquina`; `Portas::maquinas`). `mundo.maquinas.pedir({ quem,
+  servidor, oferta })` mostra a oferta a `quem`, e `mundo.maquinas.avisar({
+  servidor, carga })` fala com a máquina aceita. As duas **declaram**, como
+  `mundo.avisar`: o que a chamada pediu sai depois que ela termina e o quintal
+  grava (`maquina::despejar`), e o que é inválido **lança** com o nome da regra
+  (`oferta-invalida:<campo>`, `servidor-invalido`, os tetos por chamada). O MOD
+  sempre fica sabendo do destino do pedido, pelos três momentos que só ele
+  recebe — `MaquinaAceitou`, `MaquinaRecusou` (inclusive `nao-esta-aqui`, para
+  quem não está num 12) e `MaquinaParou` —; um aviso sem máquina aceita não sai,
+  e fica no `seele.log` (`sem-maquina`) e no contador
+  `Server::avisos_sem_maquina`. A máquina responde por `PedidoDaMaquina`, que
+  chega ao `aoPedir` com `contexto.maquina = { servidor }`; de quem não é a
+  máquina aceita, o MOD nem é chamado (`MaquinaDispensada`, `SemAceite`).
+
+O que fica:
+
+- **Entra na linha `2`**, ao lado da 7 e da 6: `APIS_POR_LINHA` é
+  `("2", [8, 7, 6])`. As linhas `1` e `0.15` não mudam.
+- **A 0.18 não roda a 8**, e a recusa não é a mesma nos dois casos, como foi
+  com a 7: um manifesto da 8 **com** `plataformas`, `poderes` ou `maquina` é recusado como `Malformed`
+  (`deny_unknown_fields`), e **sem** ela como `ApiTooNew`. O catálogo não pode
+  oferecer a uma 0.18 uma versão da 8; o indexador tem de escrever a `api` que o
+  `mod.json` declara.
+- **O indexador** (repositório `SEELE-MODS-INDEXER`) precisa aceitar a 8 antes
+  de um MOD da 8 ser publicado. A cópia do número dele neste repositório é
+  `apps/seele-app/testes/api-do-indexador.json`.
+
 ## Os quatro blocos
 
 - **`reads`** — o que um MOD lê do domínio.

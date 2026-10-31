@@ -151,3 +151,24 @@ pub fn pausar_a_proxima_entrega(conexao: &Conexao) -> Pausa {
         solta: solta_tx,
     }
 }
+
+/// O que o DCEP trouxe da configuração de um canal `j`, como este lado a leu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfigDoJogo {
+    /// O canal entrega em ordem.
+    pub ordenado: bool,
+    /// O canal não retransmite (`MaxRetransmits { retransmits: 0 }`).
+    pub sem_retransmissao: bool,
+}
+
+/// A configuração com que o `j` chegou a este lado: é como um teste prova que o
+/// canal nasce sem ordem e sem retransmissão, e não só que os datagramas passam
+/// (em loopback nada se perde, então um `j` confiável também passaria).
+#[must_use]
+pub fn configuracao_do_jogo(canal: &crate::Datagramas) -> ConfigDoJogo {
+    let lida = canal.config_lida();
+    ConfigDoJogo {
+        ordenado: lida.ordenado,
+        sem_retransmissao: lida.sem_retransmissao,
+    }
+}

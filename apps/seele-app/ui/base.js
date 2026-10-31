@@ -98,7 +98,12 @@ const COMANDOS_DA_SESSAO = new Set([
 ]);
 
 /** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */
-const SEM_CARIMBO_DA_VISTA = new Set(["connect", "sessoes", "foco_de_voz"]);
+// A máquina de jogo é do computador, e não da sessão que a janela mostra: o pedido
+// de um servidor que não está na vista também precisa ser respondido.
+const SEM_CARIMBO_DA_VISTA = new Set([
+  "connect", "sessoes", "foco_de_voz",
+  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas",
+]);
 
 /** A vista passa a ser esta sessão (a resposta de `connect` ou `ver_sessao`). */
 function porNaVista(carimbo) {
@@ -1035,6 +1040,8 @@ function entrarNaGeracao(numero) {
   const anterior = geracaoDaSessao;
   geracaoDaSessao = Number(numero) || 0;
   if (geracaoDaSessao && geracaoDaSessao !== anterior) queueMicrotask(pedirCargaDosMods);
+  // A faixa dos túneis relê o que está de pé nesta sessão.
+  if (geracaoDaSessao && geracaoDaSessao !== anterior) globalThis.dispatchEvent(new CustomEvent("seele-tuneis-reler"));
 }
 
 /** Esta geração ainda é a de pé? */
@@ -1217,6 +1224,8 @@ async function montarOMod(mod) {
   // estado.
   instancia.estado = ESTADOS_DE_MOD.ativa;
   modsCarregados.set(mod.id, instancia);
+  // Os túneis de jogo saem com a instância (desligado, sessão nova, saída).
+  ligarOFechoDosTuneis(mod, instancia);
 
   await executor.iniciar(
     codigo,
@@ -1291,6 +1300,11 @@ function donoDaRegiao(mod, instancia) {
     podeFalar: meu,
     /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
     recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
+    /**
+     * O bilhete de gesto de um clique em botão, ou `null`: só o MOD com o poder
+     * `porta` o recebe, e o evento dos outros sai como sempre saiu.
+     */
+    emitirGesto: () => (temOPoderPorta(mod) ? emitirGesto(instancia) : null),
     // Uma superfície deste MOD fechou: a prévia do tema que era dela sai (17g).
     aoFecharASuperficie: (chave) => aoFecharASuperficieDaPrevia(mod.id, chave),
     // A API do pacote: as superfícies que ele tem dependem dela — a `folha` na
@@ -3401,6 +3415,12 @@ const CAPACIDADES_POR_API = Object.freeze({
     "superficies", "contribuicoes", "estilos", "classes", "volume",
     "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor", "acoes",
   ]),
+  // A API 8 (`api/v8.json`, `capacidades_da_api(8)`): a mesma lista da 7. O que
+  // a 8 acrescenta é do manifesto (`plataformas`), e não algo que o MOD chame.
+  8: Object.freeze([
+    "superficies", "contribuicoes", "estilos", "classes", "volume",
+    "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor", "acoes",
+  ]),
   // As 3, 4 e 5 saíram no corte (tarefa 13 do plano da F3), como os braços
   // delas em `capacidades_da_api`: este app não as executa, e quem as roda é a
   // linha do Servidor 0.15. Um pacote delas é recusado ao carregar.
@@ -3428,6 +3448,11 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "atualizar-contribuicao": "contribuicoes",
   retrato: "retrato",
   acao: "acoes",
+  // O túnel de jogo (API 8): a capacidade é do poder `porta` do manifesto, e
+  // não da versão. `podePedir` a soma quando o MOD declara o poder.
+  "tunel-entrar": "tunel",
+  // `SeeleUI.salvar` (API 8 parte 6): do mesmo poder `porta`.
+  salvar: "salvar",
 });
 
 /**
@@ -3442,11 +3467,141 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
  * barrava. O manifesto dele já é recusado ao carregar; esta é a segunda porta.
  */
 function podePedir(mod, tipo) {
-  const tem = CAPACIDADES_POR_API[Number(mod?.api)];
-  if (!tem) return false;
+  const daApi = CAPACIDADES_POR_API[Number(mod?.api)];
+  if (!daApi) return false;
   const exigida = CAPACIDADE_DA_MENSAGEM[tipo];
   if (!exigida) return true;
+  // **O `tunel` é do poder, e não da versão** (API 8): dois MODs da 8 têm
+  // listas diferentes, e a lista por API continua a mesma. `poderes` vem de
+  // `mods_instalados`, lido do manifesto do pacote cujo hash esta janela
+  // conferiu — e nunca de um campo da mensagem.
+  const tem = temOPoderPorta(mod) ? [...daApi, "tunel", "salvar"] : daApi;
   return tem.includes(exigida);
+}
+
+/**
+ * **O bilhete de gesto** (API 8, `SeeleUI.tunel.entrar`): a prova de que uma
+ * pessoa clicou, emitida pela casca no evento `botao` e conferida por ela antes
+ * de qualquer `invoke`. O prelúdio apenas o carrega; o MOD que o guarde e use
+ * depois, ou duas vezes, é recusado aqui — a fronteira é a casca, e não o
+ * prelúdio, que o MOD alcança.
+ *
+ * Um só por instância: o clique mais novo vale, e o anterior deixa de valer.
+ * Aleatório e de vida curta (2 s) porque o que ele autoriza é abrir uma porta
+ * na máquina de quem clicou.
+ *
+ * @returns {string} O bilhete, para ir no evento.
+ */
+function emitirGesto(instancia) {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const valor = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  instancia.gesto = { valor, ate: performance.now() + 2000 };
+  return valor;
+}
+
+/**
+ * Gasta o bilhete: **uso único** e dentro do prazo. Um bilhete que não é o
+ * emitido não gasta o que está de pé (um MOD que erra o valor não derruba o
+ * clique de quem usa); o certo, vencido ou não, é gasto.
+ */
+function gastarGesto(instancia, gesto) {
+  const bilhete = instancia?.gesto;
+  if (!bilhete || typeof gesto !== "string" || gesto !== bilhete.valor) return false;
+  instancia.gesto = null;
+  return performance.now() <= bilhete.ate;
+}
+
+/**
+ * Este MOD declara o poder `porta`? Só ele recebe bilhetes e fecha túneis. Os
+ * poderes nascem na API 8: um manifesto de API anterior com `poderes` é recusado
+ * ao instalar, e aqui o número também é conferido — a segunda porta.
+ */
+function temOPoderPorta(mod) {
+  return Number(mod?.api) >= 8 && Array.isArray(mod?.poderes) && mod.poderes.includes("porta");
+}
+
+/**
+ * **A regra de `seele_proto::tunel::nome_valido`**: `[a-z0-9-]`, de 1 a 32, sem
+ * `-` nas pontas. O nome vem do MOD e vai à faixa do produto e ao registro;
+ * conferido aqui, antes de qualquer um dos dois, o que ele escreve é limitado.
+ */
+function nomeDeTunelValido(nome) {
+  return typeof nome === "string" && /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(nome);
+}
+
+/**
+ * O carimbo da sessão a que a instância pertence, tirado **quando ela subiu**:
+ * é por ele que os comandos de túnel se endereçam, e não pela vista de quando
+ * rodam (na troca de vista a de agora é outra sessão). `null` sem vista.
+ */
+function carimboDaInstancia(instancia) {
+  return instancia?.carimbo ?? null;
+}
+
+/**
+ * O motivo de uma falha de `tunel_entrar` em kebab-case, para a faixa e o
+ * registro: a recusa nomeada do Rust (`{ Recusado: { motivo } }`), o nome de
+ * uma recusa da casca (`recusa`), ou `falhou`.
+ */
+function motivoDoTunel(falha) {
+  if (typeof falha?.Recusado?.motivo === "string") return falha.Recusado.motivo;
+  if (typeof falha?.recusa === "string") return falha.recusa;
+  return "falhou";
+}
+
+/**
+ * Diz à faixa do produto que uma entrada num túnel foi recusada, e por quê.
+ * **A recusa chega a quem joga**, e não só ao MOD: a pessoa clicou em JOGAR e
+ * está diante de um jogo sem porta; quem sabe o motivo é a casca, e calar seria
+ * o defeito que este repositório mais paga.
+ */
+function dizerARecusaDoTunel(mod, nome, motivo) {
+  globalThis.dispatchEvent(new CustomEvent("seele-tunel-recusado", {
+    detail: { modId: mod.id, nome, motivo },
+  }));
+}
+
+/**
+ * Fecha os túneis de um MOD que saiu (desligado, sessão nova, saída). A
+ * recusa `sessao-encerrada` é a esperada de uma sessão que já acabou — o
+ * enlace derrubou os túneis ao sair —, e as outras vão ao `seele.log` e à
+ * faixa, que **continua mostrando** o que não conseguiu fechar.
+ */
+function fecharOsTuneisDoMod(modId, carimbo) {
+  const aviso = (detail) => globalThis.dispatchEvent(new CustomEvent("seele-tunel-mod-saiu", { detail }));
+  // **Pelo carimbo da sessão do MOD**, explícito: `invoke` só põe o da vista
+  // quando não há um, e na troca de vista o da vista é de outra sessão.
+  invoke("tunel_sair_do_mod", { id: modId, ...(carimbo ? { carimbo } : {}) }).then(
+    () => aviso({ modId, fechou: true }),
+    (falha) => {
+      const motivo = motivoDoTunel(falha);
+      registrarNoAnfitriao(
+        "tunel",
+        `${modId}: não consegui fechar os túneis do MOD — ${motivo}`,
+        // `sessao-encerrada` é a sessão do MOD que de fato acabou (o enlace
+        // derrubou os túneis ao sair); qualquer outra recusa é um defeito.
+        motivo === "sessao-encerrada" ? "info" : "aviso",
+        modId,
+      );
+      aviso({ modId, fechou: false, motivo });
+    },
+  );
+}
+
+/**
+ * Registra, na instância, o fecho dos túneis dela: sair da instância (pelo ciclo
+ * único de `encerrar`) chama `tunel_sair_do_mod`. Só para o MOD com o poder
+ * `porta`: os outros não têm túnel, e o comando seria ruído.
+ */
+function ligarOFechoDosTuneis(mod, instancia) {
+  if (!temOPoderPorta(mod)) return;
+  if (typeof vistaDaJanela?.sessao === "number") {
+    instancia.carimbo = { sessao: vistaDaJanela.sessao, geracao: vistaDaJanela.geracao };
+  }
+  instancia.registrar(`${mod.id}: os túneis de jogo`, () => {
+    fecharOsTuneisDoMod(mod.id, carimboDaInstancia(instancia));
+  });
 }
 
 /**
@@ -3904,6 +4059,23 @@ const RECUSAS_AO_MOD = Object.freeze([
   "teto-de-alvos",
   "contribuicao-ja-existe",
   "contribuicao-de-outro-mod",
+  // O túnel de jogo (`recusas.tunel`, API 8): as da casca (`fora-de-um-clique`,
+  // `so-no-app`) e as de `RecusaDeTunel` em kebab-case. `tipo-desconhecido` é o
+  // do MOD que não declara o poder `porta`, e já está na lista da ponte.
+  "fora-de-um-clique",
+  "so-no-app",
+  "sem-permissao",
+  "acao-nao-declarada",
+  "nao-existe",
+  "servidor-antigo",
+  "mod-sem-porta",
+  "nome-tomado",
+  "maquina-saiu",
+  "tuneis-demais",
+  "canais-esgotados",
+  "porta-local-ocupada",
+  "sem-resposta",
+  "fora-do-aceite",
 ]);
 
 /**
@@ -3960,6 +4132,12 @@ function recusaParaOMod(mod, falha) {
   if (campos && typeof campos === "object") return { ...campos, erro: nome };
   const corte = nome.indexOf(":");
   const base = corte < 0 ? nome : nome.slice(0, corte);
+  // **O tamanho e o teto** (API 8 parte 6): `arquivo-grande-demais:<t>:<teto>`
+  // chega como `{ erro, tamanho, teto }`, e a tela do MOD diz os dois.
+  if (base === "arquivo-grande-demais" && corte >= 0) {
+    const [tamanho, teto] = nome.slice(corte + 1).split(":").map(Number);
+    return { erro: base, tamanho, teto };
+  }
   const campo = SUFIXOS[base];
   if (corte < 0 || !campo) return { erro: nome };
   return { erro: base, [campo]: nome.slice(corte + 1) };
@@ -4265,6 +4443,71 @@ async function atenderOMod(mod, instancia, m) {
           valor: contribuicoesDosMods.atualizar(m.handle, { id: mod.id, instancia }, m.conteudo),
         });
         break;
+      // ---- o túnel de jogo (API 8, poder `porta`) ----
+      case "tunel-entrar": {
+        // **O nome é conferido antes de tudo**, pela regra do fio: o que o MOD
+        // escolhe não vai à faixa nem ao registro sem caber nela. É o que o
+        // servidor diria (`nao-existe`), dito aqui sem sair da casca.
+        if (!nomeDeTunelValido(m.nome)) {
+          throw recusaAoMod("nao-existe", `${mod.id}: tunel-entrar com um nome que não é [a-z0-9-] de 1 a 32`);
+        }
+        const nome = m.nome;
+        // **O bilhete é conferido aqui, antes do `invoke`**: sem clique (ou com
+        // o clique vencido, ou já gasto), nada vai ao Rust. O prelúdio só o
+        // carrega. A recusa vai ao MOD e ao registro (o `catch` de baixo), e
+        // **não à faixa**: sem clique, quem joga não pediu nada, e a faixa não é
+        // um lugar onde um MOD escreve à vontade.
+        if (!gastarGesto(instancia, m.gesto)) {
+          throw recusaAoMod(
+            "fora-de-um-clique",
+            `${mod.id}: tunel-entrar sem o bilhete de um clique (sem ele, vencido ou já gasto)`,
+          );
+        }
+        let aberta;
+        try {
+          aberta = await invoke("tunel_entrar", {
+            geracao: instancia.geracao,
+            id: mod.id,
+            nome,
+            ...(carimboDaInstancia(instancia) ? { carimbo: carimboDaInstancia(instancia) } : {}),
+          });
+        } catch (falha) {
+          dizerARecusaDoTunel(mod, nome, motivoDoTunel(falha));
+          throw falha;
+        }
+        if (!meu()) {
+          // Entrou enquanto o MOD saía: o fecho dele já passou, e a porta que
+          // acabou de abrir não tem mais dono.
+          fecharOsTuneisDoMod(mod.id, carimboDaInstancia(instancia));
+        } else {
+          globalThis.dispatchEvent(new CustomEvent("seele-tunel-aberto", {
+            detail: { modId: mod.id, nome, ...aberta },
+          }));
+        }
+        responder(true, { valor: aberta.porta });
+        break;
+      }
+      case "salvar": {
+        // **`SeeleUI.salvar`** (API 8 parte 6; spec §6): como o túnel, só
+        // dentro de um clique — o diálogo de salvar do sistema não abre sem a
+        // pessoa ter pedido. O caminho fica com ela; o MOD recebe `{ bytes }`
+        // ou `null` (cancelou).
+        if (!gastarGesto(instancia, m.gesto)) {
+          throw recusaAoMod(
+            "fora-de-um-clique",
+            `${mod.id}: salvar sem o bilhete de um clique (sem ele, vencido ou já gasto)`,
+          );
+        }
+        const salvo = await invoke("salvar_do_mod", {
+          geracao: instancia.geracao,
+          id: mod.id,
+          channel: Number(m.canal) || 0,
+          payload: JSON.stringify(m.pedido ?? null),
+          nome: String(m.nome ?? ""),
+        });
+        responder(true, { valor: salvo ?? null });
+        break;
+      }
       default:
         // **Recusado e nomeado.** Uma mensagem que a API não conhece não pode
         // ser ignorada: quem escreveu o MOD ficaria esperando para sempre uma
@@ -4408,6 +4651,27 @@ function anotarEstadoDoMod(id, fase, detalhe = "") {
   estadoDosMods.set(id, { fase, detalhe });
   globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
 }
+/**
+ * Em que lugar esta casca roda, no vocabulário do manifesto (`plataformas`, API 8).
+ * O `invoke("plataforma")` responde `"web"` no navegador (`ponte-web.js`) e
+ * `"macos"`, `"windows"` ou `"outro"` no app: tudo o que não é web é o app.
+ */
+function plataformaDaCasca(respostaDoInvoke) {
+  return respostaDoInvoke === "web" ? "navegador" : "app";
+}
+/**
+ * Este MOD do catálogo roda neste lugar? Sem `plataformas` — um servidor 0.18,
+ * que não conhece a chave — é «roda nos dois», como sempre foi. Sem saber onde
+ * estamos (`aqui` vazio) também não se recusa nada: recusar por não saber seria
+ * tirar do jogo um MOD que talvez rode.
+ */
+function rodaAqui(modDoCatalogo, aqui) {
+  const plataformas = modDoCatalogo?.plataformas;
+  // `[]` lê-se como a chave ausente (as duas): o servidor não a grava, mas a
+  // lista vazia dita «não roda em lugar nenhum» tiraria o MOD do jogo.
+  if (!Array.isArray(plataformas) || plataformas.length === 0 || !aqui) return true;
+  return plataformas.includes(aqui);
+}
 // A entrada não precisa esperar o relógio de quatro segundos. Se a consulta
 // anterior ainda está em voo, termina com as guardas de geração de sempre e
 // uma única nova conferência atende a vista atual.
@@ -4450,6 +4714,14 @@ async function carregarMods() {
     if (desistir()) return;
     instalados = await invoke("mods_instalados");
     if (desistir()) return;
+    // Onde esta casca roda, perguntado uma vez por conferência. Quem não
+    // responde fica sem lugar (`null`), e `rodaAqui` não recusa nada por isso.
+    let aqui = null;
+    try { aqui = plataformaDaCasca(await invoke("plataforma")); } catch (falha) {
+      // Sem lugar nada é recusado, mas o motivo não morre calado.
+      console.warn("plataforma:", falha);
+    }
+    if (desistir()) return;
     // Pelo caminho de dentro, e não pela API dos MODs: o `id` vazio é o
     // catálogo do próprio servidor, e não um MOD pedindo alguma coisa. Enquanto
     // isto passava por `globalThis.SeeleMods`, o produto dependia do objeto que
@@ -4462,24 +4734,40 @@ async function carregarMods() {
       estadoDosMods.delete("");
       globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
     }
+    // **Dois grupos, antes de qualquer conta de «o que falta».** O MOD que não
+    // roda neste lugar continua exigido pelo servidor (entra em `modsExigidos`
+    // e no aceite do conjunto), mas não está ausente: não há o que baixar nem
+    // carregar, e dizer «sem pacote» mandaria instalar o que não serve aqui.
+    const daqui = catalogo.mods.filter(m => rodaAqui(m, aqui));
+    const deFora = catalogo.mods.filter(m => !rodaAqui(m, aqui));
     for (const [id, instancia] of modsCarregados) {
-      if (!catalogo.mods.some(m => m.id === id)) {
+      if (!daqui.some(m => m.id === id)) {
         // Pelo ciclo único: `encerrar` põe a instância em `encerrando` antes de
         // qualquer espera, pede ao executor que pare, espera ele confirmar, e
         // só então descarta os recursos dela — a região entre eles.
         instancia?.encerrar().catch(() => {});
         modsCarregados.delete(id);
-        anotarEstadoDoMod(id, "descarregado");
+        // O que o host trocou para fora deste lugar sai pelo mesmo caminho,
+        // mas a frase é a da plataforma, e não a de «deixou de exigir».
+        if (!deFora.some(m => m.id === id)) anotarEstadoDoMod(id, "descarregado");
       }
     }
     // E o que voltou a bater deixa de ser notícia ruim: sem isto, um MOD que
     // aparecia como «outra versão» continuaria assim depois de instalado.
-    for (const m of catalogo.mods) {
-      if (["sem-pacote", "outra-versao"].includes(estadoDosMods.get(m.id)?.fase)
-          && instalados.some(i => i.id === m.id && i.hash === m.hash)) {
+    for (const m of daqui) {
+      const fase = estadoDosMods.get(m.id)?.fase;
+      // «Só noutra plataforma» também passa: se o host mudou a marca, ou esta
+      // casca é outra, a frase velha não pode ficar na tela.
+      if (fase === "so-noutra-plataforma"
+          || (["sem-pacote", "outra-versao"].includes(fase)
+              && instalados.some(i => i.id === m.id && i.hash === m.hash))) {
         estadoDosMods.delete(m.id);
         globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
       }
+    }
+    for (const m of deFora) {
+      const onde = m.plataformas.includes("app") ? "app" : "navegador";
+      anotarEstadoDoMod(m.id, "so-noutra-plataforma", `só funciona no ${onde}`);
     }
     // O conjunto exigido por este destino, como ele acabou de ser anunciado.
     // Reescrito por inteiro a cada volta: um MOD que saiu da exigência tem de
@@ -4488,7 +4776,7 @@ async function carregarMods() {
     modsExigidos.clear();
     for (const m of catalogo.mods) modsExigidos.set(m.id, m.hash);
 
-    const ausentes = catalogo.mods.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
+    const ausentes = daqui.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
     for (const m of ausentes) {
       // **Duas causas, duas frases.** Ter o id e não ter o hash é versão
       // diferente da exigida — e mandar «instale» quem já instalou é mandar
@@ -4517,7 +4805,7 @@ async function carregarMods() {
 
     const diagnostico = ausentes.map(m => m.id).join(", ");
     ultimoErroDeMods = diagnostico;
-    instalados = instalados.filter(m => catalogo.mods.some(active => active.id === m.id && active.hash === m.hash));
+    instalados = instalados.filter(m => daqui.some(active => active.id === m.id && active.hash === m.hash));
   } catch (erro) {
     // **Antes de qualquer efeito**, até do `modsExigidos.clear()` logo abaixo:
     // erro tardio da sessão anterior não toca no estado da nova. A volta de
@@ -4543,6 +4831,7 @@ async function carregarMods() {
 
   for (const mod of instalados) {
     if (!mod.client || modsCarregados.has(mod.id)) continue;
+    if (estadoDosMods.get(mod.id)?.fase === "so-noutra-plataforma") continue;
     // Marcado **antes** do `await`: o laço roda a cada quatro segundos, e sem
     // isto dois tiques sobrepostos criariam dois workers do mesmo MOD.
     modsCarregados.set(mod.id, null);
@@ -4576,7 +4865,7 @@ setInterval(carregarMods, 4000);
  * expulsão. Chamar duas vezes é seguro e é o ponto — quem sai não precisa saber
  * se o outro lado também vai avisar.
  */
-function encerrarOAmbienteDosMods() {
+function encerrarOAmbienteDosMods(motivo = "sessao") {
   // **Revogar primeiro** — §5 do contrato, passo 1. A janela deixa de admitir
   // efeito em nome desta sessão **antes** de começar a desmontar: entre a
   // primeira linha e a última há mensagens de worker em voo, `await`s voltando
@@ -4627,6 +4916,13 @@ function encerrarOAmbienteDosMods() {
     instancia?.encerrar().catch(() => {});
   }
   modsCarregados.clear();
+  // Os MODs desta vista saem (fim da sessão ou troca de vista): a faixa limpa o
+  // que mostrava, e relê o que está de pé na vista seguinte quando ela entra
+  // (`entrarNaGeracao`). Não diz que a sessão acabou — na troca ela segue viva, e
+  // os túneis dela fecham pelo descarregar dos MODs, pelo carimbo dela.
+  // `motivo` diz à faixa por que as portas fecham: na troca de vista a sessão
+  // segue viva e a faixa explica, em vez de a linha sumir calada.
+  globalThis.dispatchEvent(new CustomEvent("seele-tuneis-limpar", { detail: { motivo } }));
   // A exigência é de um destino, e o destino acabou. Esperar o tique seguinte
   // deixaria a gestão dizendo «exigido por este servidor» por até quatro
   // segundos depois de a sessão ter terminado.

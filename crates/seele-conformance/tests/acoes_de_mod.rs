@@ -229,6 +229,7 @@ async fn a_acao_declarada_passa_com_o_cargo_e_e_recusada_sem_ele_ou_sem_declarac
                 server_half: true,
                 api: 7,
                 tema: false,
+                plataformas: None,
             },
         )?;
         // O que o arranque faz com cada MOD ligado: as permissões do mod.json

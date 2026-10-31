@@ -121,8 +121,8 @@ fn outra_linha_diz_a_mesma_versao_e_o_mesmo_mais_nova() {
     }
 }
 
-#[test]
-fn os_mods_nao_aceitos_levam_a_mesma_lista() {
+/// Os dois MODs do anúncio de prova, com o conjunto deles.
+fn mods_de_prova() -> (Vec<ModAnunciado>, String) {
     let mut mods = vec![
         ModAnunciado {
             id: "seele/enquete".into(),
@@ -146,16 +146,65 @@ fn os_mods_nao_aceitos_levam_a_mesma_lista() {
         },
     ];
     let conjunto = seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut mods));
+    (mods, conjunto)
+}
+
+#[test]
+fn os_mods_nao_aceitos_levam_a_mesma_lista() {
+    let (mods, conjunto) = mods_de_prova();
     let navegador = recusada(depois_da_prova().chegou(&do_servidor(
         &ServerMessage::ModsExigidos {
             mods: mods.clone(),
             conjunto: conjunto.clone(),
         },
     )));
+    // Um servidor 11 não diz onde os MODs rodam: nos dois lados, sem o campo.
     assert_eq!(
         navegador,
-        do_desktop(&ConnectError::ModsNaoAceitos { mods, conjunto })
+        do_desktop(&ConnectError::ModsNaoAceitos {
+            mods,
+            conjunto,
+            plataformas: None
+        })
     );
+}
+
+/// **As plataformas do servidor 12 chegam iguais aos dois lados**: o quadro
+/// antes do anúncio, juntado pelo hash, vira o mesmo `plataformas` no JSON do
+/// `ModExigido` — e só nos MODs que o quadro nomeou.
+#[test]
+fn os_mods_nao_aceitos_levam_as_mesmas_plataformas() {
+    use seele_proto::mods::{Plataforma, PlataformasDoMod};
+    let (mods, conjunto) = mods_de_prova();
+    let ditas = vec![PlataformasDoMod {
+        hash: "a".repeat(64),
+        plataformas: vec![Plataforma::App],
+    }];
+    let mut ligacao = depois_da_prova();
+    assert!(ligacao
+        .chegou(&do_servidor(&ServerMessage::PlataformasDosMods {
+            mods: ditas.clone(),
+        }))
+        .is_empty());
+    let navegador = recusada(ligacao.chegou(&do_servidor(&ServerMessage::ModsExigidos {
+        mods: mods.clone(),
+        conjunto: conjunto.clone(),
+    })));
+    assert_eq!(
+        navegador,
+        do_desktop(&ConnectError::ModsNaoAceitos {
+            mods,
+            conjunto,
+            plataformas: Some(ditas)
+        })
+    );
+    let enquete = navegador["ModsNaoAceitos"]["mods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == "seele/enquete")
+        .unwrap();
+    assert_eq!(enquete["plataformas"], serde_json::json!(["app"]));
 }
 
 #[test]

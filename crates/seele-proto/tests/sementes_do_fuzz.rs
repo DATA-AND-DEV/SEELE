@@ -168,6 +168,76 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             tag: "A001".into(),
         }),
     );
+    // O protocolo 12: um quadro de cada sentido, para o fuzz já partir de uma
+    // variante que o analisador antigo não conhecia.
+    controle.insert(
+        "servidor-plataformas-dos-mods".to_owned(),
+        quadro(&ServerMessage::PlataformasDosMods {
+            mods: vec![seele_proto::mods::PlataformasDoMod {
+                hash: "ab".repeat(32),
+                plataformas: vec![
+                    seele_proto::mods::Plataforma::App,
+                    seele_proto::mods::Plataforma::Navegador,
+                ],
+            }],
+        }),
+    );
+    controle.insert(
+        "cliente-entrar-no-tunel".to_owned(),
+        quadro(&ClientMessage::EntrarNoTunel {
+            mod_id: "autor/nome".to_owned(),
+            nome: "mc-1".to_owned(),
+        }),
+    );
+    // A máquina: a oferta é o quadro mais largo do 12, e o aceite o mais curto.
+    controle.insert(
+        "servidor-pedido-de-maquina".to_owned(),
+        quadro(&ServerMessage::PedidoDeMaquina {
+            mod_id: "autor/nome".to_owned(),
+            hash: "ab".repeat(32),
+            servidor: "mc-1".to_owned(),
+            pedido_por: seele_proto::ids::PersonId(1),
+            oferta: Box::new(seele_proto::maquina::OfertaDeMaquina {
+                titulo: "Minecraft".to_owned(),
+                receita: "minecraft-java".to_owned(),
+                versao_da_receita: "1.0.0".to_owned(),
+                versao_do_jogo: "1.21.4".to_owned(),
+                tuneis: vec![seele_proto::maquina::TunelOferecido {
+                    nome: "mc-1".to_owned(),
+                    protocolo: seele_proto::tunel::ProtocoloDeTunel::Tcp,
+                    porta: 25565,
+                }],
+                artefatos: vec![seele_proto::maquina::ArtefatoOferecido {
+                    nome: "server.jar".to_owned(),
+                    url: "https://exemplo.com/server.jar".to_owned(),
+                    tamanho: 1024,
+                    hash: seele_proto::maquina::HashDeArtefato {
+                        algoritmo: seele_proto::maquina::AlgoritmoDeHash::Sha1,
+                        hex: "ab".repeat(20),
+                    },
+                    plataformas: vec![],
+                }],
+                pack: None,
+                origens: vec!["exemplo.com".to_owned()],
+                dominios_do_jogo: vec![],
+                rodar: Some(seele_proto::maquina::ComandoOferecido {
+                    comando: "java".to_owned(),
+                    argumentos: vec!["-jar".to_owned(), "server.jar".to_owned()],
+                }),
+                disco_maximo: 1 << 30,
+                termos: vec![],
+                instalar: None,
+            }),
+        }),
+    );
+    controle.insert(
+        "cliente-aceite-de-maquina".to_owned(),
+        quadro(&ClientMessage::AceiteDeMaquina {
+            mod_id: "autor/nome".to_owned(),
+            servidor: "mc-1".to_owned(),
+            resumo: "3c".repeat(32),
+        }),
+    );
     todas.insert("control_frame", controle);
 
     let mut midia = DoAlvo::new();

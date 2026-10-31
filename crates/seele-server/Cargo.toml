@@ -72,6 +72,12 @@ reqwest = { version = "0.13", default-features = false, features = [
     "rustls-no-provider",
 ] }
 seele-proto = { path = "../seele-proto" }
+# O índice de um `.mrpack` (API 8 parte 6, `mods::pack`): o deflate do zip.
+# **0 crates novas**: o `seele-core` já traz esta versão e o `miniz_oxide`
+# (Rust puro) pelo `desempacotar` do Java. O SHA-512 do pack, pelo `sha2` que
+# o `seele-proto` já usa.
+flate2 = "1"
+sha2 = "0.11.0"
 # O transporte da 0.17 (contrato da fase 2, D1): WebRTC sobre um socket UDP só,
 # o mesmo do nativo e do navegador. Substitui o `quinn` e o `wtransport`, que
 # saíram inteiros: a 0.17 não fala QUIC, e não há transporte duplo.

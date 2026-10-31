@@ -704,6 +704,24 @@ const APIS_DO_SERVIDOR_0_15 = Object.freeze([3, 4, 5]);
 /** As mesmas, como as frases as dizem: «3 a 5». */
 const APIS_DO_SERVIDOR_0_15_DITAS = `${APIS_DO_SERVIDOR_0_15[0]} a ${APIS_DO_SERVIDOR_0_15.at(-1)}`;
 
+/**
+ * As APIs de MOD que este aplicativo roda (`seele_proto::mods::APIS_ACEITAS`).
+ * Mora aqui, antes das frases, porque elas a dizem e são montadas no
+ * carregamento; a `API_DESTE_APLICATIVO` (a mais nova) fica na `camada-mods.js`.
+ */
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = Object.freeze([8, 7, 6]);
+
+/** Uma lista dita em português: «6, 7 e 8» / «6, 7 ou 8»; uma só, ela mesma. */
+function dizerLista(itens, conjuncao) {
+  const textos = itens.map(String);
+  if (textos.length < 2) return textos.join("");
+  return `${textos.slice(0, -1).join(", ")} ${conjuncao} ${textos.at(-1)}`;
+}
+const APIS_ACEITAS_ORDENADAS = [...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort((a, b) => a - b);
+/** «6, 7 e 8», «6, 7 ou 8»: derivadas da constante, e não escritas à mão. */
+const APIS_ACEITAS_DITAS_E = dizerLista(APIS_ACEITAS_ORDENADAS, "e");
+const APIS_ACEITAS_DITAS_OU = dizerLista(APIS_ACEITAS_ORDENADAS, "ou");
+
 const RECUSAS_DE_PACOTE = {
   "malformed": "o mod.json dele não é um JSON que este app lê, ou tem uma chave que ele não conhece",
   "schema-too-new": "o mod.json dele é de um formato mais novo que este app; atualize o aplicativo",
@@ -714,7 +732,35 @@ const RECUSAS_DE_PACOTE = {
     "ele declara permissões de cargos, mas diz ser de uma API anterior à 7; quem publica precisa declarar a API 7",
   "permissoes-invalidas":
     "a lista de permissões que ele declara é inválida (nome repetido, vazio ou fora do formato); quem publica precisa corrigi-la",
-  "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API 6 ou 7, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
+  // A API 8 (`Refused::PlataformasPedemApiNova`, `PlataformasVazias` e
+  // `PlataformaRepetida`, `refusal_name` no seele-sessao): onde o MOD roda.
+  "plataformas-pedem-api-nova":
+    "ele declara em que plataformas roda, o que só existe a partir da API 8, mas diz ser de uma API anterior; quem publica precisa declarar a API 8",
+  "plataformas-vazias":
+    "a lista de plataformas que ele declara está vazia, e assim ele não roda em lugar nenhum; quem publica precisa listar app, navegador ou as duas, ou tirar a chave",
+  "plataforma-repetida":
+    "a lista de plataformas que ele declara repete uma plataforma; quem publica precisa corrigi-la",
+  // Os poderes da API 8 (`Refused::PoderesPedemApiNova` e as que vêm com ela,
+  // `refusal_name` no seele-sessao): o que o MOD pode fazer além de pintar.
+  "poderes-pedem-api-nova":
+    "ele declara poderes ou uma metade de máquina, que só existem a partir da API 8, mas diz ser de uma API anterior; quem publica precisa declarar a API 8",
+  "poderes-vazios":
+    "a lista de poderes que ele declara está vazia, e assim ele não pede poder nenhum; quem publica precisa listar o poder que quer ou tirar a chave",
+  "poder-repetido":
+    "a lista de poderes que ele declara repete um poder; quem publica precisa corrigi-la",
+  "poderes-exigem-so-o-app":
+    "ele declara poderes, que abrem conexões na máquina de quem usa, mas não diz que roda só no app; quem publica precisa declarar plataformas como [\"app\"], porque o navegador não tem como",
+  "maquina-fora-do-pacote":
+    "a metade de máquina que ele declara aponta para fora da pasta do pacote; quem publica precisa apontar para um arquivo de dentro dela",
+  "maquina-sem-poderes":
+    "ele declara uma metade de máquina, mas nenhum poder para ela usar; quem publica precisa declarar o poder ou tirar a metade",
+  "porta-sem-entrar-no-jogo":
+    "ele declara a porta do jogo, mas não a permissão entrar-no-jogo que decide quem pode usá-la, e assim ninguém conseguiria abrir o túnel; quem publica precisa declarar a permissão",
+  "poderes-sem-maquina":
+    "ele declara poderes, mas não a metade de máquina que os exerceria, e assim a porta nunca abriria; quem publica precisa declarar a metade de máquina ou tirar os poderes",
+  "maquina-sem-servidor":
+    "ele declara uma metade de máquina, mas não a metade de servidor que a liga e a oferece a quem hospeda; quem publica precisa declarar a metade de servidor",
+  "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU}, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
   "tema-sem-metade-de-servidor": "ele declara a porta do tema sem a metade de servidor, que é quem pinta a aparência: o tema nunca apareceria",
@@ -855,7 +901,7 @@ function fraseDeErro(erro, apelido, deOnde) {
         "ESTE SERVIDOR TEM MOD QUE ESTE APP NÃO RODA.\n" +
         ditos.join("\n") +
         (algumComApi
-          ? "\nAtualize o MOD para a versão da API 6 ou 7; " +
+          ? `\nAtualize o MOD para a versão da API ${APIS_ACEITAS_DITAS_OU}; ` +
             (algumDo015 ? "ou hospede pelo Servidor 0.15, no launcher; " : "") +
             "ou desligue o MOD e hospede sem ele — os dados dele ficam."
           : "")
@@ -1646,6 +1692,157 @@ const FRASES_DO_CATALOGO = Object.freeze({
     `${id} ${versao} está nesta máquina, e nenhum servidor mudou. Um servidor guardado que já usa este MOD continua ` +
     "com a versão que tinha: hospede-o e atualize aqui com ele no ar — ou, se ele recusar subir por este MOD, " +
     "escolha ATUALIZAR na tela ANTES DE HOSPEDAR, que aplica junto da subida.",
+});
+
+/**
+ * **O túnel de jogo** (API 8, `SeeleUI.tunel`): o que a faixa das portas abertas
+ * (`camada-tuneis.js`) diz de cada recusa e de cada queda. Os nomes são os do
+ * Rust, em kebab-case (`nome_da_recusa_do_tunel` e `nome_da_queda`, em
+ * `seele-ffi/src/types.rs`); a frase é daqui, como em toda fronteira.
+ *
+ * **`caminho-caiu` não acusa a rede.** É o que quem joga vê tanto quando a
+ * ligação caiu quanto quando o jogo da máquina recusou a conexão (`JogoRecusou`
+ * só é visto na máquina): a frase diz o que é certo nos dois casos, a conexão
+ * com o jogo.
+ */
+const FRASES_DO_TUNEL = Object.freeze({
+  recusas: Object.freeze({
+    // As da casca, antes do Rust.
+    "fora-de-um-clique":
+      "a porta só abre com um clique seu, e o MOD tentou abri-la sem ele (ou com um clique velho)",
+    "so-no-app": "abrir a porta de um jogo só funciona no aplicativo",
+    "tipo-desconhecido": "este MOD não declara o poder de abrir a porta de um jogo",
+    "sessao-encerrada": "a sessão acabou antes de a porta abrir",
+    "falhou": "a porta não abriu, e o motivo está no seele.log",
+    // As de `RecusaDeTunel`.
+    "nao-existe": "nenhuma máquina serve esse jogo agora",
+    "sem-permissao": "você não tem a permissão de entrar no jogo",
+    "acao-nao-declarada": "o MOD não declara a permissão de entrar no jogo, e ninguém poderia usar a porta",
+    "mod-sem-porta": "o MOD não está ligado neste servidor, ou não declara o poder de abrir a porta",
+    "nome-tomado": "outra máquina já serve um jogo com esse nome neste MOD",
+    "maquina-saiu": "a máquina do jogo saiu do servidor enquanto o pedido andava",
+    "tuneis-demais": "o servidor já tem portas de jogo demais abertas",
+    "canais-esgotados": "não há mais canais livres para o seu jogo neste servidor",
+    "servidor-antigo": "este servidor é de uma versão que não leva jogo; peça a quem hospeda para atualizá-lo",
+    "porta-local-ocupada":
+      "nenhuma das portas perto da do jogo está livre neste computador; feche o que as usa e tente de novo",
+    "sem-resposta": "o servidor não respondeu a tempo",
+    "fora-do-aceite": "este computador não aceitou servir este jogo, ou a porta não é a que foi aceita",
+  }),
+  quedas: Object.freeze({
+    "porta-ocupada": "nenhuma porta livre neste computador para o jogo ligar",
+    "caminho-caiu": "a conexão com o jogo caiu",
+    "jogo-recusou": "o jogo da máquina recusou a conexão",
+    "maquina-parou": "a máquina parou de servir este jogo",
+    "maquina-saiu": "a máquina do jogo saiu do servidor",
+    "sem-permissao": "você perdeu a permissão de entrar no jogo",
+    "mod-desligado": "o MOD foi desligado neste servidor",
+    "servidor-saiu": "a sessão com o servidor acabou",
+    "fechado": "a conexão foi fechada",
+    "sem-canais": "o servidor não tinha mais canais livres para o seu jogo e cortou uma conexão",
+    "porta-falhou": "este computador não conseguiu aceitar a conexão do jogo na porta (talvez falte arquivo aberto livre); feche programas e tente de novo",
+  }),
+  // **O fim de um túnel inteiro** (`encerrado` do último relatório). Quase todo
+  // motivo diz a mesma coisa que diz como queda; `fechado` aqui é o túnel que
+  // quem o abriu fechou (ou que o MOD fechou ao sair), e não uma conexão que
+  // acabou como devia.
+  fins: Object.freeze({
+    "fechado": "a porta foi fechada, por você ou pelo MOD ao sair",
+    // A vista saiu da sessão (outro servidor na janela): os MODs dela saem, e
+    // com eles a porta. A sessão segue viva lá; voltar a ela e jogar abre outra.
+    "troca-de-vista": "a porta foi fechada porque você trocou de servidor; volte a ele e abra de novo",
+  }),
+  // O caminho **direto** só vale para as conexões novas: as que começaram antes
+  // seguem pelo anfitrião até acabar, e a faixa não pode dizer «direto» sem
+  // dizer quantas ainda passam por ele.
+  aindaPeloAnfitriao: (n) =>
+    n === 1 ? "1 conexão ainda pelo anfitrião" : `${n} conexões ainda pelo anfitrião`,
+});
+
+/**
+ * **A máquina de jogo** (API 8, parte 3): o que a tela do aceite mostra antes de
+ * este computador rodar o servidor de um jogo, a faixa das máquinas ligadas e a
+ * lista de aceites com REVOGAR (`camada-maquina.js`).
+ *
+ * Maiúsculas só no título e nos botões, como a casca faz. `suaConta` é o aviso
+ * que fica à vista sem rolar: o servidor de um jogo roda com a conta de quem
+ * aceitou, e dizer isso só depois de uma rolagem seria não dizer.
+ *
+ * Os nomes de `paradas` e de `campos` são os do Rust (`maquina-estado.motivo` e
+ * `maquina-pedido.mudou`); a frase é daqui, como em toda fronteira. O que o Rust
+ * dirá e a lista não tiver aparece com o próprio nome, e o fato vai ao registro.
+ */
+const FRASES_DA_MAQUINA = Object.freeze({
+  titulo: (quem) => `${quem} PEDE PARA RODAR UM SERVIDOR DE JOGO NESTE COMPUTADOR`,
+  mod: (nome, id) => `MOD: ${nome} (${id})`,
+  jogo: (titulo, versao) => versao ? `jogo: ${titulo}, versão ${versao}` : `jogo: ${titulo}`,
+  receita: (nome, versao) => `receita: ${nome} ${versao}`,
+  pedidoPor: (quem, servidor) => `pedido por ${quem}, no servidor ${servidor}`,
+  porta: (porta, protocolo) => `o jogo escuta na porta ${porta} (${protocolo}); quem está no servidor alcança essa porta pelo SEELE`,
+  baixar: (n, total) => `vai baixar ${n === 1 ? "1 arquivo" : `${n} arquivos`}, ${total} no total:`,
+  artefato: (nome, origem, tamanho) => `· ${nome}, de ${origem}, ${tamanho}`,
+  deOutrosSistemas: (n) => `${n === 1 ? "1 arquivo é" : `${n} arquivos são`} de outros sistemas, e este computador não ${n === 1 ? "o" : "os"} baixa`,
+  podeBaixarDe: (origens) => `e pode baixar outros arquivos, cada um com o hash conferido, de ${origens}`,
+  nadaABaixar: "nada para baixar neste pedido",
+  rodar: (linha) => `vai rodar: ${linha}`,
+  // O passo de instalar (API 8 parte 6): o instalador do loader, uma vez, antes
+  // do servidor. Os dois comandos são aceitos, e só eles.
+  instalar: (linha) => `antes, para instalar, vai rodar: ${linha}`,
+  // O pack do modpack, pelo hash: o que chega à máquina tem de ter este hash.
+  pack: (algoritmo, inicio) => `o pack do modpack, conferido pelo ${algoritmo} ${inicio}…`,
+  nadaARodar: "nenhum programa: este pedido só abre a porta do jogo",
+  disco: (teto, pasta) => `ocupa até ${teto} de disco, em ${pasta}`,
+  oJogoBaixaSozinho: (dominios) => `o jogo baixa por conta própria de ${dominios}, sem o SEELE conferir`,
+  suaConta: "o servidor do jogo roda com a sua conta deste computador, e pode ler o que ela lê.",
+  termo: (titulo) => `li e aceito: ${titulo}`,
+  quemAceitaEVoce: "quem aceita os termos do jogo é você, e não o SEELE nem o MOD",
+  podeDesligar: "você desliga quando quiser, pela faixa no alto da tela",
+  mudou: (campos) => `isto mudou desde o seu aceite: ${campos}. Por isso o SEELE pergunta de novo.`,
+  aceitar: "ACEITAR E LIGAR",
+  recusar: "RECUSAR",
+  faixa: (titulo, mod) => `este computador serve ${titulo} (${mod})`,
+  desligar: "DESLIGAR",
+  revogar: "REVOGAR",
+  paradas: Object.freeze({ "pelo-dono": "desligado por você", "revogada": "aceite revogado por você", "app-fechou": "o app fechou",
+    "metade-falhou": "a metade de máquina do MOD falhou; veja o registro", "mod-desligado": "o MOD foi desligado no servidor",
+    "outro-pedido": "o servidor passou este jogo para outra máquina", "sem-aceite": "o servidor não reconhece mais o seu aceite",
+    "servidor-saiu": "você saiu do servidor",
+    "dispensa-desconhecida": "o servidor parou esta máquina por um motivo que este app não conhece; veja o registro",
+    "pacote-diferente": "o pacote do MOD não confere com o que você aceitou" }),
+  campos: Object.freeze({ titulo: "o nome do jogo", receita: "a receita", versao_da_receita: "a versão da receita",
+    versao_do_jogo: "a versão do jogo", tuneis: "as portas", artefatos: "o que se baixa", pack: "o pack",
+    origens: "de onde se baixa", dominios_do_jogo: "de onde o jogo baixa sozinho", rodar: "o programa e os argumentos",
+    disco_maximo: "o teto de disco", termos: "os termos", pacote: "a versão do MOD",
+    instalar: "o instalador e os argumentos dele" }),
+
+  // O que a brevidade do texto acima não cobre: a leitura dos termos, a lista de
+  // aceites e a falha de cada verbo, dita em frase em vez do nome cru.
+  ler: "LER",
+  dispensar: "DISPENSAR",
+  quemSemNome: "alguém deste servidor",
+  listaVazia: "VOCÊ AINDA NÃO ACEITOU RODAR NENHUM JOGO",
+  listaLigada: "ligada agora",
+  listaDesligada: "desligada",
+  listaLinha: (titulo, mod, servidor) => `${titulo} (${mod}) · servidor ${servidor}`,
+  listaPedidoPor: (quem) => `pedido por ${quem}`,
+  listaPortas: (portas) => `portas: ${portas}`,
+  erros: Object.freeze({
+    "sem-pedido": "este pedido não existe mais",
+    "pedido-velho": "o servidor já mandou um pedido mais novo; a tela vai mostrá-lo",
+    "sem-conexao": "a conexão com o servidor acabou",
+    "sem-sessao": "a sessão com o servidor acabou",
+    "sessao-encerrada": "a sessão com o servidor acabou",
+    "conteudo-nao-bate": "o pacote do MOD não confere com o que o servidor anunciou; nada foi ligado",
+    "sem-metade-de-maquina": "este MOD não tem a metade que roda na máquina; nada foi ligado",
+    "conteudo-de-outro-mod": "o pacote lido é de outro MOD; nada foi ligado",
+    "executor-nao-subiu": "o SEELE não conseguiu preparar a execução; nada foi ligado",
+    "executor-nao-aceitou-o-codigo": "o código do MOD não passou na conferência do SEELE; nada foi ligado",
+    "nao-esta-ligada": "esta máquina já não estava ligada",
+    "sem-aceite": "não havia aceite guardado para revogar",
+    "so-no-app": "rodar um servidor de jogo só funciona no aplicativo",
+  }),
+  falhou: (frase) => `não deu certo: ${frase}`,
+  falhouSemFrase: (codigo) => `não deu certo (${codigo}); o motivo está no seele.log`,
 });
 
 /**

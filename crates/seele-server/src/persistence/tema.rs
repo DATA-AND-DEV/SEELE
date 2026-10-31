@@ -191,6 +191,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("habilitar");

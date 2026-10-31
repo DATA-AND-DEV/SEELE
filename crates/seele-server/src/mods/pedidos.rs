@@ -51,7 +51,44 @@ pub async fn executar(
     id: &str,
     payload: &str,
 ) -> String {
-    executar_com(server, person, channel, id, None, payload).await
+    executar_com(server, person, channel, id, None, None, payload).await
+}
+
+/// **Um pedido da máquina aceita à metade de servidor do MOD dela**
+/// (`ClientMessage::PedidoDaMaquina`, API 8 parte 3).
+///
+/// Quem chama — o braço da sessão — já conferiu que `person`, por `conexao`, é
+/// a máquina aceita de `(id, servidor)`: quem não é nem chega aqui, e o MOD
+/// não é chamado. A mesma estrada de [`executar`], no escopo de servidor
+/// (canal zero), com `contexto.maquina = { servidor }`; e uma conferência a
+/// mais **antes dos efeitos**: a máquina pode ter sido dispensada enquanto o
+/// pedido esperava a vez do MOD, e aí o que o MOD respondeu e declarou é
+/// descartado (`sem-aceite`).
+pub async fn executar_da_maquina(
+    server: &Arc<Server>,
+    person: PersonId,
+    conexao: u64,
+    id: &str,
+    servidor: &str,
+    payload: &str,
+) -> String {
+    executar_com(
+        server,
+        person,
+        ChannelId(0),
+        id,
+        None,
+        Some(DaMaquina { servidor, conexao }),
+        payload,
+    )
+    .await
+}
+
+/// O pedido vem da máquina aceita de `servidor`, pela conexão `conexao`.
+#[derive(Clone, Copy)]
+struct DaMaquina<'a> {
+    servidor: &'a str,
+    conexao: u64,
 }
 
 /// **Uma ação declarada de MOD** (`ClientMessage::AcaoDeMod`, ADR 0064).
@@ -69,7 +106,7 @@ pub async fn executar_acao(
     acao: &str,
     payload: &str,
 ) -> String {
-    executar_com(server, person, channel, id, Some(acao), payload).await
+    executar_com(server, person, channel, id, Some(acao), None, payload).await
 }
 
 async fn executar_com(
@@ -78,9 +115,10 @@ async fn executar_com(
     channel: ChannelId,
     id: &str,
     acao: Option<&str>,
+    maquina: Option<DaMaquina<'_>>,
     payload: &str,
 ) -> String {
-    match executar_inner(server, person, channel, id, acao, payload).await {
+    match executar_inner(server, person, channel, id, acao, maquina, payload).await {
         Ok(text) => text,
         Err(error) => {
             // O pedido do catálogo (id vazio) não é de MOD nenhum, e um
@@ -170,6 +208,7 @@ async fn executar_inner(
     channel: ChannelId,
     id: &str,
     acao: Option<&str>,
+    maquina: Option<DaMaquina<'_>>,
     payload: &str,
 ) -> anyhow::Result<String> {
     // **O banco é lido e soltado.** Não levado ao trabalhador.
@@ -209,13 +248,29 @@ async fn executar_inner(
         return Ok(serde_json::json!({
             "ok": true,
             "conjunto": identidade,
-            "mods": enabled.iter().map(|m| serde_json::json!({"id":m.id,"hash":m.hash,"version":m.version})).collect::<Vec<_>>(),
+            "mods": enabled.iter().map(|m| serde_json::json!({
+                "id": m.id,
+                "hash": m.hash,
+                "version": m.version,
+                // **Sempre a lista, nunca a chave ausente** (API 8): o navegador
+                // decide o que oferecer por ela. Uma linha ainda não preenchida
+                // diz as duas, que é o que um manifesto sem a chave diz.
+                "plataformas": m.plataformas
+                    .clone()
+                    .unwrap_or_else(|| vec![
+                        seele_proto::mods::Plataforma::App,
+                        seele_proto::mods::Plataforma::Navegador,
+                    ]),
+            })).collect::<Vec<_>>(),
         })
         .to_string());
     }
     // **A primeira conferência**, antes da fila do MOD: recusa barato o que
     // já não pode, sem esperar o turno de ninguém.
-    if let Conferencia::Recusada(recusa) = conferir(server, person, channel, id, acao).await? {
+    let servidor_da_maquina = maquina.map(|m| m.servidor);
+    if let Conferencia::Recusada(recusa) =
+        conferir(server, person, channel, id, acao, servidor_da_maquina).await?
+    {
         return Ok(recusa);
     }
     let id = id.to_owned();
@@ -251,7 +306,7 @@ async fn executar_inner(
     let Conferido {
         hash,
         contexto: context,
-    } = match conferir(server, person, channel, &id, acao).await? {
+    } = match conferir(server, person, channel, &id, acao, servidor_da_maquina).await? {
         Conferencia::Recusada(recusa) => return Ok(recusa),
         Conferencia::Vale(conferido) => conferido,
     };
@@ -306,6 +361,7 @@ async fn executar_inner(
                             std::fs::read_to_string(raiz.join(relative))?,
                             super::Portas {
                                 tema: manifest.tema,
+                                maquinas: manifest.maquina.is_some(),
                             },
                         ))
                     },
@@ -345,6 +401,7 @@ async fn executar_inner(
         quintal: data,
         tema,
         avisos,
+        maquinas,
     } = tokio::task::spawn_blocking(move || -> anyhow::Result<DoPedido> {
         let mut host = super::Anfitriao::novo()?;
         // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
@@ -359,6 +416,7 @@ async fn executar_inner(
             quintal: data,
             tema: host.tomar_tema_declarado(),
             avisos: host.tomar_avisos(),
+            maquinas: host.tomar_maquinas(),
         })
     })
     .await??;
@@ -376,12 +434,18 @@ async fn executar_inner(
     // uma revogação (ou um MOD desligado ou trocado) no meio dele não pode
     // deixar gravar o quintal, publicar o tema nem avisar ninguém. O que o MOD
     // respondeu é descartado, e quem pediu lê a recusa.
-    match conferir(server, person, channel, &id, acao).await? {
+    match conferir(server, person, channel, &id, acao, servidor_da_maquina).await? {
         Conferencia::Recusada(recusa) => return Ok(recusa),
         Conferencia::Vale(agora) if agora.hash != hash => {
             anyhow::bail!("package changed");
         }
         Conferencia::Vale(_) => {}
+    }
+    if let Some(DaMaquina { servidor, conexao }) = maquina {
+        if !server.maquinas().maquina_de(person, conexao, &id, servidor) {
+            tracing::info!(mod_id = %id_seguro(&id), servidor = %servidor, quem = %person, motivo = "sem-aceite", "máquina: dispensada enquanto o pedido dela rodava; o que o MOD respondeu e declarou é descartado");
+            return Ok(r#"{"ok":false,"error":"sem-aceite"}"#.into());
+        }
     }
     if data != before || tema.is_some() {
         let mut db = server.persistence.lock().await;
@@ -405,6 +469,16 @@ async fn executar_inner(
             });
         });
     }
+    // E o que a chamada declarou em `mundo.maquinas`, pela mesma regra: só
+    // depois do quintal gravado. Fora de qualquer cadeado: o despejo lê o banco
+    // e toma o livro na ordem de `Server::maquinas`.
+    super::maquina::despejar(
+        server,
+        &id,
+        super::maquina::Origem::Pedido(person),
+        maquinas,
+    )
+    .await;
     Ok(response)
 }
 
@@ -438,6 +512,7 @@ async fn conferir(
     channel: ChannelId,
     id: &str,
     acao: Option<&str>,
+    maquina: Option<&str>,
 ) -> anyhow::Result<Conferencia> {
     let (enabled, pode_ler) = {
         let db = server.persistence.lock().await;
@@ -542,7 +617,18 @@ async fn conferir(
     // `null` num `ModRequest`. `permissoes`: as ações deste MOD que a pessoa
     // tem agora, para a metade de servidor decidir o que mostrar; não é o
     // bloqueio (o bloqueio é o portão acima).
-    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod}).to_string();
+    // `maquina`: `{ servidor }` quando quem pede é a máquina aceita daquele
+    // servidor de jogo (`executar_da_maquina`), e **ausente** em todo outro
+    // pedido: um MOD da 7 ou da 6 recebe o contexto que sempre recebeu.
+    // Como `person`, é o servidor quem diz: o pedido não tem como mandá-la.
+    let mut context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod});
+    if let (Some(servidor), Some(campos)) = (maquina, context.as_object_mut()) {
+        campos.insert(
+            "maquina".into(),
+            serde_json::json!({ "servidor": servidor }),
+        );
+    }
+    let context = context.to_string();
     Ok(Conferencia::Vale(Conferido {
         hash: active.hash.clone(),
         contexto: context,
@@ -613,6 +699,7 @@ struct DoPedido {
     quintal: BTreeMap<String, String>,
     tema: Option<super::TemaDeclarado>,
     avisos: Vec<super::aviso::AvisoDeclarado>,
+    maquinas: super::maquina::Declarado,
 }
 
 /// Splits only at character boundaries, keeping each wire frame under its ceiling.
@@ -690,6 +777,7 @@ mod tests {
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
+            avisador_de_maquinas: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
             recepcao: None,
             persistence,
@@ -704,6 +792,9 @@ mod tests {
             desconhecidas: Arc::new(crate::server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
+            tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
+            maquinas: std::sync::Mutex::new(crate::maquinas::Maquinas::default()),
+            malha_para_tuneis: true,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,
@@ -942,6 +1033,7 @@ mod tests {
                     server_half: true,
                     api: seele_proto::mods::MOD_API_VERSION,
                     tema: false,
+                    plataformas: None,
                 },
             )
             .expect("ligar o MOD");
@@ -955,6 +1047,55 @@ mod tests {
                 .id
         };
         (servidor, pessoa)
+    }
+
+    /// **O catálogo diz as plataformas de cada MOD, sempre como lista** (API 8;
+    /// migração 21). Um MOD de `["app"]` diz `["app"]`; um MOD cuja linha ainda
+    /// não foi preenchida (o `prova/eco`, ligado com a coluna nula) diz as
+    /// duas — e nenhum omite a chave, que o navegador lê para decidir o que
+    /// oferecer.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_catalogo_diz_as_plataformas_de_cada_mod_e_nunca_omite_a_chave() {
+        let pasta = tempfile::tempdir().expect("a pasta");
+        let (servidor, pessoa) = servidor_com_o_mod(pasta.path(), "").await;
+        {
+            let db = servidor.persistence.lock().await;
+            crate::persistence::mods::enable(
+                &db,
+                &crate::persistence::mods::EnabledMod {
+                    id: "prova/so-app".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    hash: "ab".repeat(32),
+                    repo: "https://example.invalid/so-app".to_owned(),
+                    reach: Vec::new(),
+                    server_half: false,
+                    api: seele_proto::mods::MOD_API_VERSION,
+                    tema: false,
+                    plataformas: Some(vec![seele_proto::mods::Plataforma::App]),
+                },
+            )
+            .expect("ligar o MOD");
+        }
+
+        let resposta =
+            super::executar(&servidor, pessoa, seele_proto::ids::ChannelId(0), "", "{}").await;
+        let catalogo: serde_json::Value = serde_json::from_str(&resposta).expect("JSON");
+        let plataformas_de = |id: &str| {
+            catalogo["mods"]
+                .as_array()
+                .and_then(|mods| mods.iter().find(|m| m["id"] == id))
+                .map(|m| m["plataformas"].clone())
+        };
+        assert_eq!(
+            plataformas_de("prova/so-app"),
+            Some(serde_json::json!(["app"])),
+            "{catalogo}"
+        );
+        assert_eq!(
+            plataformas_de("prova/eco"),
+            Some(serde_json::json!(["app", "navegador"])),
+            "{catalogo}"
+        );
     }
 
     /// Grava um papel mínimo no canal 1, como nenhum caminho do produto grava
@@ -1212,6 +1353,12 @@ mod tests {
             assert_eq!(
                 resposta["contexto"]["admin"], administra,
                 "o MOD leu o `admin` errado de {quem:?}: {resposta}"
+            );
+            // Fora de um pedido da máquina, a chave nem existe: um MOD da 7 ou
+            // da 6 recebe o contexto que sempre recebeu.
+            assert!(
+                resposta["contexto"].get("maquina").is_none(),
+                "`maquina` apareceu no contexto de um pedido comum: {resposta}"
             );
         }
     }

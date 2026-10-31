@@ -316,6 +316,23 @@
   :where(:root[data-casca="celular"]) #bateria-conta { font-size: calc(56px * var(--cel-escala)); }
 }
 
+/* camada-tuneis.css */
+:where(:root[data-casca="celular"]) .tunel-bloco { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .tunel-dispensar { font-size: inherit; }
+
+/* camada-maquina.css */
+:where(:root[data-casca="celular"]) .maquina-bloco { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-desligar,
+:where(:root[data-casca="celular"]) .maquina-dispensar { font-size: inherit; }
+:where(:root[data-casca="celular"]) .maquina-titulo { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-sua-conta { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-mudou { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-detalhe,
+:where(:root[data-casca="celular"]) .maquina-garantia { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-termo-rotulo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-termo-url { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-ler { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+
 /* camada-portaria.css */
 :where(:root[data-casca="celular"]) .portaria-eyebrow { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .portaria-chip { font-size: calc(11px * var(--cel-escala)); }

@@ -154,6 +154,7 @@ impl Cenario {
                     server_half: true,
                     api,
                     tema: false,
+                    plataformas: None,
                 },
             )
             .unwrap();
@@ -902,6 +903,7 @@ async fn gerar_a_fixture() -> Result<()> {
         server_half: true,
         api: 7,
         tema: false,
+        plataformas: None,
     };
     // A linha antes do quintal (a chave estrangeira). A subida a desliga — o
     // PERFIS é incorporado na 0.19 —, e ela é religada logo abaixo: o gerador

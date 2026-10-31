@@ -508,7 +508,7 @@ async function desenharOsMods(geracao) {
   $("antes-mods-frase").textContent = FRASES_ANTES_DE_HOSPEDAR.modsPendentes;
   // As APIs, para quem quer saber por quê: no «mais», e não na linha.
   repovoar($("antes-mods-apis"), mods.map(([id, api]) => elemento("li", null,
-    FRASES_ANTES_DE_HOSPEDAR.modApi(id, api, [...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" e "), APIS_DO_SERVIDOR_0_15.includes(api) ? APIS_DO_SERVIDOR_0_15_DITAS : null))));
+    FRASES_ANTES_DE_HOSPEDAR.modApi(id, api, APIS_ACEITAS_DITAS_E, APIS_DO_SERVIDOR_0_15.includes(api) ? APIS_DO_SERVIDOR_0_15_DITAS : null))));
   mais.hidden = false;
   // **As escolhas ficam na tela até o botão do fim** (P1 do Codex): nada vai ao
   // banco agora. O estado do bloco diz «escolhido, a aplicar», e não «feito».

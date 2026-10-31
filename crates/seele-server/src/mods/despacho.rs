@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{aviso, Anfitriao, Falha, MetadeDeServidor, TemaDeclarado};
+use super::{aviso, maquina, Anfitriao, Falha, MetadeDeServidor, TemaDeclarado};
 
 /// One MOD's yard, as it crosses to the thread and back.
 pub type Quintal = BTreeMap<String, String>;
@@ -37,6 +37,9 @@ enum Pedido {
     Momento {
         momento: String,
         carga: String,
+        /// Só este MOD, se dito: os momentos da máquina são do MOD que a pediu
+        /// ([`so_para`]).
+        so_para: Option<String>,
         quintais: BTreeMap<String, Quintal>,
         /// Quem pinta o servidor agora, lido do banco com os quintais.
         pintor: Option<String>,
@@ -88,6 +91,10 @@ pub struct Resposta {
     /// §7.3), de quem terminou a chamada. Quem os entrega ao avisador é o
     /// [`acompanhar`], depois dos quintais.
     pub avisos: BTreeMap<String, Vec<aviso::AvisoDeclarado>>,
+    /// O que cada MOD declarou em `mundo.maquinas` neste momento, de quem
+    /// terminou a chamada. Quem o leva ao livro é o [`acompanhar`], depois dos
+    /// quintais.
+    pub maquinas: BTreeMap<String, maquina::Declarado>,
 }
 
 /// O que um MOD mudou no quintal dele, por chave.
@@ -236,6 +243,7 @@ impl Despachante {
                         Pedido::Momento {
                             momento,
                             carga,
+                            so_para,
                             quintais: entrada,
                             pintor,
                             resposta,
@@ -244,8 +252,15 @@ impl Despachante {
                             let mut falharam = Vec::new();
                             let mut temas = BTreeMap::new();
                             let mut avisos = BTreeMap::new();
+                            let mut maquinas = BTreeMap::new();
                             anfitriao.saber_quem_pinta(pintor);
 
+                            // Um momento de um MOD só não chega aos outros:
+                            // a máquina de um MOD é assunto dele, e um vizinho
+                            // que a visse saberia quem roda o quê.
+                            let entrada = entrada
+                                .into_iter()
+                                .filter(|(id, _)| so_para.as_deref().is_none_or(|alvo| alvo == id));
                             for (id, mut quintal) in entrada {
                                 let antes = quintal.clone();
                                 match anfitriao.chamar(&id, &momento, &carga, &mut quintal) {
@@ -256,6 +271,10 @@ impl Despachante {
                                         let declarados = anfitriao.tomar_avisos();
                                         if !declarados.is_empty() {
                                             avisos.insert(id.clone(), declarados);
+                                        }
+                                        let de_maquina = anfitriao.tomar_maquinas();
+                                        if !de_maquina.vazio() {
+                                            maquinas.insert(id.clone(), de_maquina);
                                         }
                                         let mudanca = MudancaNoQuintal::entre(&antes, &quintal);
                                         if !mudanca.vazia() {
@@ -271,6 +290,7 @@ impl Despachante {
                                 falharam,
                                 temas,
                                 avisos,
+                                maquinas,
                             });
                         }
                     }
@@ -333,11 +353,25 @@ impl Despachante {
         quintais: BTreeMap<String, Quintal>,
         pintor: Option<String>,
     ) -> Option<Resposta> {
+        self.entregar_a(momento, carga, None, quintais, pintor)
+            .await
+    }
+
+    /// [`Self::entregar_com_tema`], e só a `so_para` quando dito.
+    pub async fn entregar_a(
+        &self,
+        momento: &str,
+        carga: &str,
+        so_para: Option<String>,
+        quintais: BTreeMap<String, Quintal>,
+        pintor: Option<String>,
+    ) -> Option<Resposta> {
         let (responder, esperar) = oneshot::channel();
         self.fila
             .send(Pedido::Momento {
                 momento: momento.to_owned(),
                 carga: carga.to_owned(),
+                so_para,
                 quintais,
                 pintor,
                 resposta: responder,
@@ -377,6 +411,11 @@ pub async fn acompanhar(
     despachante: Despachante,
     raizes: crate::RaizesDosMods,
     avisador: std::sync::Arc<aviso::Avisador>,
+    // **Fraco**, pela mesma razão do barramento: o despejo do que um momento
+    // declarou em `mundo.maquinas` precisa do livro e da taxa das máquinas, e
+    // um `Arc` aqui seguraria o servidor de pé. Sem servidor (os testes que
+    // montam só o despachante), o declarado é dito no log e não sai.
+    servidor: std::sync::Weak<crate::server::Server>,
 ) {
     // **O mesmo sinal que o anúncio observa.** Quem muda o conjunto — o SALVAR
     // da tela de gestão — o bumpa uma vez, na transação. Sem observá-lo, este
@@ -432,6 +471,7 @@ pub async fn acompanhar(
         let Some((momento, carga)) = momento_de(&evento) else {
             continue;
         };
+        let alvo = so_para(&evento).map(str::to_owned);
 
         // Carregar e soltar o cadeado **antes** de entregar: um MOD lento não
         // pode segurar o banco de quem está conversando.
@@ -456,7 +496,7 @@ pub async fn acompanhar(
         }
 
         let Some(resposta) = despachante
-            .entregar_com_tema(momento, &carga, quintais, pintor)
+            .entregar_a(momento, &carga, alvo, quintais, pintor)
             .await
         else {
             // A thread dos MODs sumiu. Não há o que reiniciar aqui: o servidor
@@ -528,6 +568,41 @@ pub async fn acompanhar(
                 tracing::error!(%erro, mod_id = %id, "não deu para desabilitar o MOD que falhou");
             }
         }
+        // O banco solto antes do despejo: ele relê o banco e toma o livro das
+        // máquinas, na ordem de `Server::maquinas`.
+        drop(banco);
+        if resposta.maquinas.is_empty() {
+            continue;
+        }
+        let Some(server) = servidor.upgrade() else {
+            for (id, declarado) in &resposta.maquinas {
+                tracing::warn!(mod_id = %id, pedidos = declarado.pedidos.len(), avisos = declarado.avisos.len(), %momento, "máquina: um momento declarou em mundo.maquinas sem servidor que o leve ao livro; não sai");
+            }
+            continue;
+        };
+        for (id, declarado) in resposta.maquinas {
+            // Num momento ninguém pediu, e uma recusa repetida não volta como
+            // momento: ver `maquina::Origem`.
+            maquina::despejar(&server, &id, maquina::Origem::Momento, declarado).await;
+        }
+    }
+}
+
+/// O único MOD a quem um evento chega, quando ele é de um MOD só: os momentos
+/// da máquina (`Event::Maquina`) vão ao MOD que a pediu, e a nenhum outro.
+/// `None` é todo MOD ligado, como sempre.
+#[must_use]
+pub fn so_para(evento: &crate::server::Event) -> Option<&str> {
+    use crate::maquinas::MudancaDeMaquina;
+    use crate::server::Event;
+
+    match evento {
+        Event::Maquina(
+            MudancaDeMaquina::Aceitou { mod_id, .. }
+            | MudancaDeMaquina::Recusou { mod_id, .. }
+            | MudancaDeMaquina::Parou { mod_id, .. },
+        ) => Some(mod_id),
+        _ => None,
     }
 }
 
@@ -545,6 +620,7 @@ pub async fn acompanhar(
 /// list them, and this is where that list is enforced.
 #[must_use]
 pub fn momento_de(evento: &crate::server::Event) -> Option<(&'static str, String)> {
+    use crate::maquinas::MudancaDeMaquina;
     use crate::server::Event;
 
     let (nome, carga) = match evento {
@@ -589,6 +665,44 @@ pub fn momento_de(evento: &crate::server::Event) -> Option<(&'static str, String
         Event::MessageRemoved { channel, id } => (
             "MessageRemoved",
             format!(r#"{{"canal":{},"mensagem":{}}}"#, channel.0, id.0),
+        ),
+        // A máquina de jogo (API 8, parte 3): só ao MOD que a pediu, por
+        // `so_para`. `motivo` é o nome em kebab-case.
+        Event::Maquina(MudancaDeMaquina::Aceitou { servidor, quem, .. }) => (
+            "MaquinaAceitou",
+            format!(
+                r#"{{"servidor":{},"pessoa":{}}}"#,
+                texto_json(servidor),
+                quem.0
+            ),
+        ),
+        Event::Maquina(MudancaDeMaquina::Recusou {
+            servidor,
+            quem,
+            motivo,
+            ..
+        }) => (
+            "MaquinaRecusou",
+            format!(
+                r#"{{"servidor":{},"pessoa":{},"motivo":{}}}"#,
+                texto_json(servidor),
+                quem.0,
+                texto_json(motivo)
+            ),
+        ),
+        Event::Maquina(MudancaDeMaquina::Parou {
+            servidor,
+            quem,
+            motivo,
+            ..
+        }) => (
+            "MaquinaParou",
+            format!(
+                r#"{{"servidor":{},"pessoa":{},"motivo":{}}}"#,
+                texto_json(servidor),
+                quem.0,
+                texto_json(motivo)
+            ),
         ),
         // Telemetria e o que mais não está no `api/v1.json`.
         _ => return None,
@@ -712,6 +826,64 @@ mod tests {
         }
     }
 
+    /// **Os três momentos da máquina saem do evento dela, com a carga, e só
+    /// para o MOD dela.** O `check-api` acha os braços pelo texto; aqui a carga
+    /// é lida como JSON (com um servidor de jogo que só o escape mantém de
+    /// pé), e `so_para` diz o MOD — sem ele, `None`, todo MOD ligado.
+    #[test]
+    fn os_momentos_da_maquina_saem_com_a_carga_e_so_para_o_mod_dela() {
+        use crate::maquinas::MudancaDeMaquina;
+        use crate::server::Event;
+        use seele_proto::ids::PersonId;
+
+        let casos = [
+            (
+                MudancaDeMaquina::Aceitou {
+                    mod_id: "x/jogo".into(),
+                    servidor: "mc-1".into(),
+                    quem: PersonId(4),
+                },
+                "MaquinaAceitou",
+                serde_json::json!({ "servidor": "mc-1", "pessoa": 4 }),
+            ),
+            (
+                MudancaDeMaquina::Recusou {
+                    mod_id: "x/jogo".into(),
+                    servidor: "mc-1".into(),
+                    quem: PersonId(4),
+                    motivo: "nao-esta-aqui",
+                },
+                "MaquinaRecusou",
+                serde_json::json!({ "servidor": "mc-1", "pessoa": 4, "motivo": "nao-esta-aqui" }),
+            ),
+            (
+                MudancaDeMaquina::Parou {
+                    mod_id: "x/jogo".into(),
+                    servidor: "a\"b".into(),
+                    quem: PersonId(4),
+                    motivo: "saiu",
+                },
+                "MaquinaParou",
+                serde_json::json!({ "servidor": "a\"b", "pessoa": 4, "motivo": "saiu" }),
+            ),
+        ];
+        for (mudanca, nome, carga) in casos {
+            let evento = Event::Maquina(mudanca);
+            let (saiu, texto) = momento_de(&evento).expect("o momento da máquina não saiu");
+            assert_eq!(saiu, nome);
+            let lido: serde_json::Value = serde_json::from_str(&texto).expect("a carga é JSON");
+            assert_eq!(lido, carga);
+            assert_eq!(so_para(&evento), Some("x/jogo"), "{nome} iria a todo MOD");
+        }
+        assert_eq!(
+            so_para(&Event::MessageRemoved {
+                channel: seele_proto::ids::ChannelId(1),
+                id: seele_proto::ids::MessageId(1),
+            }),
+            None
+        );
+    }
+
     fn pasta(nome: &str) -> std::path::PathBuf {
         let dir =
             std::env::temp_dir().join(format!("seele-despacho-{nome}-{}", std::process::id()));
@@ -742,6 +914,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -771,6 +944,7 @@ mod tests {
                 dados: std::path::PathBuf::from("sem-dados-neste-teste"),
             },
             std::sync::Arc::new(super::super::aviso::Avisador::default()),
+            std::sync::Weak::new(),
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -822,6 +996,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -832,7 +1007,10 @@ mod tests {
             fonte: "globalThis.aoAcontecer = () => { mundo.tema({ acento: '#c86b1f' }); };"
                 .to_owned(),
             pasta: pasta("tema-no-momento"),
-            portas: super::super::Portas { tema: true },
+            portas: super::super::Portas {
+                tema: true,
+                ..super::super::Portas::default()
+            },
         }]);
 
         let (bus, receptor) = tokio::sync::broadcast::channel(16);
@@ -847,6 +1025,7 @@ mod tests {
                 dados: std::path::PathBuf::from("sem-dados-neste-teste"),
             },
             std::sync::Arc::new(super::super::aviso::Avisador::default()),
+            std::sync::Weak::new(),
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -898,6 +1077,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -922,6 +1102,7 @@ mod tests {
                 dados: std::path::PathBuf::from("sem-dados-neste-teste"),
             },
             std::sync::Arc::new(super::super::aviso::Avisador::default()),
+            std::sync::Weak::new(),
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -979,6 +1160,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -1003,6 +1185,7 @@ mod tests {
                 dados: std::path::PathBuf::from("sem-dados-neste-teste"),
             },
             std::sync::Arc::new(super::super::aviso::Avisador::default()),
+            std::sync::Weak::new(),
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -1423,6 +1606,7 @@ mod tests {
                 dados: raiz.join("mod-data"),
             },
             std::sync::Arc::new(super::super::aviso::Avisador::default()),
+            std::sync::Weak::new(),
         ));
 
         // E o MOD é ligado depois, como o SALVAR da tela faz.
@@ -1439,6 +1623,7 @@ mod tests {
                     server_half: true,
                     api: 6,
                     tema: false,
+                    plataformas: None,
                 },
             )
             .expect("ligar");
@@ -1518,6 +1703,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -1535,6 +1721,7 @@ mod tests {
                 dados: raiz.join("mod-data"),
             },
             std::sync::Arc::new(super::super::aviso::Avisador::default()),
+            std::sync::Weak::new(),
         ));
 
         for _ in 0..5 {

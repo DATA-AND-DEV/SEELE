@@ -54,6 +54,15 @@ pub const LABEL_CTL: &str = "ctl";
 /// O label do canal de voz (id 1, negociado fora de banda, sem ordem e sem retransmissão).
 pub const LABEL_VOZ: &str = "voz";
 
+/// O label do canal de túnel TCP (uma conexão do jogo por canal, protocolo 12).
+///
+/// Um par 11 recusa este label ao chegar, e por isso só se abre entre pontas
+/// que negociaram 12.
+pub const LABEL_TUNEL: &str = "t";
+
+/// O label do canal de túnel UDP (um fluxo do jogo por canal, protocolo 12).
+pub const LABEL_JOGO: &str = "j";
+
 /// O código do fechamento (`close`, que vai como `0x02 codigo` no `ctl`) de
 /// uma sessão que ficou para trás (`DisconnectReason::FellBehind`).
 ///

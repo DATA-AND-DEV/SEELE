@@ -34,9 +34,78 @@ pub const PEDACO_DO_ESCOLHIDO: usize = 65535;
 
 /// As extensões que o seletor oferece, entre as que o MOD pedir: o que os
 /// bytes podem provar ser (as imagens e os sons do `seele_proto`).
-pub const EXTENSOES_CONHECIDAS: [&str; 10] = [
-    "png", "jpg", "jpeg", "webp", "gif", "wav", "mp3", "ogg", "flac", "m4a",
+pub const EXTENSOES_CONHECIDAS: [&str; 11] = [
+    "png", "jpg", "jpeg", "webp", "gif", "wav", "mp3", "ogg", "flac", "m4a", "mrpack",
 ];
+
+/// **O papel do `.mrpack`** (API 8 parte 6; spec §8): um MOD que o pede em
+/// `papeis` aceita um zip com `modrinth.index.json` na raiz, até
+/// [`seele_proto::pack::TETO_DO_PACK`]. Sem pedi-lo, o teto e os tipos são os
+/// de sempre: um MOD de retrato não passa a receber 64 MiB de zip.
+pub const PAPEL_DO_PACK: &str = "pack";
+
+/// Se o MOD pediu o papel do pack.
+#[must_use]
+pub fn pede_pack(papeis: Option<&[String]>) -> bool {
+    papeis.is_some_and(|p| p.iter().any(|p| p == PAPEL_DO_PACK))
+}
+
+/// **A recusa de um arquivo acima do teto, com os dois números**:
+/// `arquivo-grande-demais:<tamanho>:<teto>`. A casca faz deles os campos
+/// `tamanho` e `teto`, e a tela do MOD os diz (e sugere o link do Modrinth
+/// para o pack).
+#[must_use]
+pub fn grande_demais(tamanho: usize, teto: usize) -> String {
+    format!("arquivo-grande-demais:{tamanho}:{teto}")
+}
+
+/// O teto deste pedido de escolha, contando o papel do pack: 64 MiB se o MOD
+/// pediu **só** o pack; o maior dos dois (os 100 MiB de imagem e som da 0.19)
+/// se pediu o pack e outro papel, porque o tipo ainda não foi lido; e o de
+/// [`teto_do_escolhido`] no resto. O teto de cada tipo é conferido depois, nos
+/// bytes, por [`tipo_do_escolhido_para`].
+#[must_use]
+pub fn teto_do_pedido(limite_de_bytes: Option<usize>, papeis: Option<&[String]>) -> usize {
+    if pede_pack(papeis) {
+        let pack = usize::try_from(seele_proto::pack::TETO_DO_PACK).unwrap_or(usize::MAX);
+        let outro = papeis.is_some_and(|p| p.iter().any(|p| p != PAPEL_DO_PACK));
+        let teto = if outro {
+            pack.max(TETO_DO_ESCOLHIDO)
+        } else {
+            pack
+        };
+        limite_de_bytes
+            .filter(|n| *n > 0)
+            .map_or(teto, |n| n.min(teto))
+    } else {
+        teto_do_escolhido(limite_de_bytes)
+    }
+}
+
+/// **O tipo de um arquivo escolhido, contando o pack**: um `.mrpack` (pelos
+/// bytes) só quando o MOD pediu o papel; e uma imagem ou um som acima do teto
+/// deles é recusado com os números, mesmo num pedido que aceitava o pack.
+///
+/// # Errors
+///
+/// Os de [`tipo_do_escolhido`] e `arquivo-grande-demais:<tamanho>:<teto>`.
+pub fn tipo_do_escolhido_para(bytes: &[u8], papeis: Option<&[String]>) -> Result<TipoLido, String> {
+    if pede_pack(papeis) && seele_proto::pack::e_pack(bytes) {
+        let teto = usize::try_from(seele_proto::pack::TETO_DO_PACK).unwrap_or(usize::MAX);
+        if bytes.len() > teto {
+            return Err(grande_demais(bytes.len(), teto));
+        }
+        return Ok(TipoLido {
+            media_type: seele_proto::pack::TIPO_DO_PACK,
+            papel: PAPEL_DO_PACK,
+        });
+    }
+    let lido = tipo_do_escolhido(bytes)?;
+    if bytes.len() > TETO_DO_ESCOLHIDO {
+        return Err(grande_demais(bytes.len(), TETO_DO_ESCOLHIDO));
+    }
+    Ok(lido)
+}
 
 /// O título do seletor: a finalidade que o MOD deu, sem controle e com no
 /// máximo 120 caracteres, ou a frase do produto.
@@ -257,6 +326,77 @@ impl<B> Escolhidos<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Um zip «stored» mínimo com estas entradas vazias.
+    fn zip_com(nomes: &[&str]) -> Vec<u8> {
+        let mut z = Vec::new();
+        let mut d = Vec::new();
+        for nome in nomes {
+            let local = z.len() as u32;
+            let n = nome.len() as u16;
+            z.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
+            z.extend_from_slice(&[0; 22]);
+            z.extend_from_slice(&n.to_le_bytes());
+            z.extend_from_slice(&[0, 0]);
+            z.extend_from_slice(nome.as_bytes());
+            d.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
+            d.extend_from_slice(&[0; 24]);
+            d.extend_from_slice(&n.to_le_bytes());
+            d.extend_from_slice(&[0; 12]);
+            d.extend_from_slice(&local.to_le_bytes());
+            d.extend_from_slice(nome.as_bytes());
+        }
+        let inicio = z.len() as u32;
+        z.extend_from_slice(&d);
+        z.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0]);
+        z.extend_from_slice(&(nomes.len() as u16).to_le_bytes());
+        z.extend_from_slice(&(nomes.len() as u16).to_le_bytes());
+        z.extend_from_slice(&(d.len() as u32).to_le_bytes());
+        z.extend_from_slice(&inicio.to_le_bytes());
+        z.extend_from_slice(&[0, 0]);
+        z
+    }
+
+    /// **O pack só para quem o pede** (API 8 parte 6): pelos bytes, com o
+    /// teto de 64 MiB; sem o papel, um `.mrpack` é um formato desconhecido, e
+    /// uma imagem acima de 100 MiB (a 0.19) é recusada com os números mesmo num pedido
+    /// que aceita o pack.
+    #[test]
+    fn o_pack_so_para_quem_o_pede_e_com_o_teto_dele() {
+        let pack = zip_com(&["overrides/a", "modrinth.index.json"]);
+        let com = Some(&["pack".to_owned()][..]);
+        assert_eq!(
+            tipo_do_escolhido_para(&pack, com).unwrap(),
+            TipoLido {
+                media_type: "application/x-modrinth-modpack+zip",
+                papel: "pack"
+            }
+        );
+        assert_eq!(
+            tipo_do_escolhido_para(&pack, None),
+            Err("formato-desconhecido".to_owned())
+        );
+        assert_eq!(
+            tipo_do_escolhido_para(&zip_com(&["overrides/a"]), com),
+            Err("formato-desconhecido".to_owned())
+        );
+        assert_eq!(teto_do_pedido(None, com), 64 * 1024 * 1024);
+        assert_eq!(teto_do_pedido(None, None), TETO_DO_ESCOLHIDO);
+        assert_eq!(teto_do_pedido(Some(1024), com), 1024);
+        // O pack e outro papel: o maior dos dois até o tipo ser lido.
+        let com_retrato = Some(&["pack".to_owned(), "retrato".to_owned()][..]);
+        assert_eq!(teto_do_pedido(None, com_retrato), TETO_DO_ESCOLHIDO);
+        let mut png = vec![0_u8; TETO_DO_ESCOLHIDO + 1];
+        png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        assert_eq!(
+            tipo_do_escolhido_para(&png, com),
+            Err(format!(
+                "arquivo-grande-demais:{}:{}",
+                TETO_DO_ESCOLHIDO + 1,
+                TETO_DO_ESCOLHIDO
+            ))
+        );
+    }
 
     fn escolhido(de_quem: &str, geracao: u64, tamanho: usize) -> Escolhido<()> {
         Escolhido {

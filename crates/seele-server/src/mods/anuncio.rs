@@ -26,7 +26,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use seele_proto::control::{ServerMessage, Validate};
-use seele_proto::mods::{e_hash_de_conteudo, hex, identidade_do_conjunto, ModAnunciado};
+use seele_proto::mods::{
+    e_hash_de_conteudo, hex, identidade_do_conjunto, ModAnunciado, Plataforma, PlataformasDoMod,
+};
 
 use crate::persistence::Persistence;
 
@@ -40,6 +42,13 @@ pub struct Conjunto {
     /// É contra ela que o aceite de quem entra é conferido, e é ela que muda
     /// quando o servidor troca de MOD.
     pub identidade: String,
+    /// Onde cada MOD roda, pelo hash e **na ordem de `mods`** (a canônica).
+    ///
+    /// Viaja num quadro à parte, logo antes do anúncio, porque campo novo em
+    /// mensagem que existe é proibido (ADR 0058) e o `ModAnunciado` já saiu na
+    /// 11. Uma coluna nula vira as duas plataformas: é a regra «sem a chave,
+    /// nas duas», que a tabela guarda como nula e o fio diz por extenso.
+    pub plataformas: Vec<PlataformasDoMod>,
 }
 
 impl Conjunto {
@@ -59,6 +68,16 @@ impl Conjunto {
         ServerMessage::ModsExigidos {
             mods: self.mods.clone(),
             conjunto: self.identidade.clone(),
+        }
+    }
+
+    /// O quadro que vai **imediatamente antes** do anúncio, só para quem
+    /// negociou a versão em que ele nasceu (`vocabulario::desde`). Um par 11 que
+    /// o recebesse leria uma variante que não conhece e perderia o fluxo.
+    #[must_use]
+    pub fn plataformas(&self) -> ServerMessage {
+        ServerMessage::PlataformasDosMods {
+            mods: self.plataformas.clone(),
         }
     }
 }
@@ -112,6 +131,8 @@ pub fn conjunto_exigido(persistence: &Persistence) -> Result<Conjunto, NaoDaPara
     })?;
 
     let mut mods: Vec<ModAnunciado> = Vec::with_capacity(ligados.len());
+    let mut plataformas_por_hash: Vec<(String, Vec<Plataforma>)> =
+        Vec::with_capacity(ligados.len());
     for ligado in ligados {
         // **Antes de montar, e nomeando o MOD.** O protocolo recusaria o quadro
         // inteiro adiante, e a recusa dele diz «um hash está errado» sem dizer
@@ -119,6 +140,15 @@ pub fn conjunto_exigido(persistence: &Persistence) -> Result<Conjunto, NaoDaPara
         if !e_hash_de_conteudo(&ligado.hash) {
             return Err(NaoDaParaAnunciar::HashQueNaoEHash { id: ligado.id });
         }
+        plataformas_por_hash.push((
+            ligado.hash.clone(),
+            // Nula é «sem a chave»: as duas. Uma lista guardada vazia não deveria
+            // existir (o manifesto a recusa), e se existisse o quadro não passaria
+            // na conferência abaixo, nomeando o problema em vez de escondê-lo.
+            ligado
+                .plataformas
+                .unwrap_or_else(|| vec![Plataforma::App, Plataforma::Navegador]),
+        ));
         mods.push(ModAnunciado {
             id: ligado.id,
             version: ligado.version,
@@ -141,14 +171,35 @@ pub fn conjunto_exigido(persistence: &Persistence) -> Result<Conjunto, NaoDaPara
     // a ordem em que ela sai daqui é a ordem canônica, então o que vai no fio e
     // o que foi somado são a mesma coisa.
     let identidade = hex(&identidade_do_conjunto(&mut mods));
-    let conjunto = Conjunto { mods, identidade };
+    // Na ordem em que `mods` ficou depois de ordenada: o par lê os dois quadros
+    // lado a lado, e a mesma ordem torna a junção pelo hash uma conferência, e
+    // não uma busca.
+    let plataformas = mods
+        .iter()
+        .filter_map(|anunciado| {
+            plataformas_por_hash
+                .iter()
+                .find(|(hash, _)| hash == &anunciado.hash)
+                .map(|(hash, lista)| PlataformasDoMod {
+                    hash: hash.clone(),
+                    plataformas: lista.clone(),
+                })
+        })
+        .collect();
+    let conjunto = Conjunto {
+        mods,
+        identidade,
+        plataformas,
+    };
 
     // A mesma conferência que `encode` faria adiante, feita aqui para que a
     // falha tenha nome antes de virar um quadro que não sai.
-    if let Err(erro) = conjunto.anuncio().validate() {
-        return Err(NaoDaParaAnunciar::NaoPassaNoQuadro {
-            erro: erro.to_string(),
-        });
+    for quadro in [conjunto.anuncio(), conjunto.plataformas()] {
+        if let Err(erro) = quadro.validate() {
+            return Err(NaoDaParaAnunciar::NaoPassaNoQuadro {
+                erro: erro.to_string(),
+            });
+        }
     }
     Ok(conjunto)
 }
@@ -295,6 +346,7 @@ mod tests {
             server_half: false,
             api: 6,
             tema: false,
+            plataformas: None,
         }
     }
 

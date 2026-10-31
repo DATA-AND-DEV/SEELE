@@ -422,7 +422,15 @@ async function obterOConjunto(mods) {
 
   const temOExato = (m) =>
     instalados.some((i) => i.id === m.id && i.hash === m.hash);
-  const faltando = mods.filter((m) => !temOExato(m));
+  // O que não roda neste lugar não se baixa: não serve aqui. A marca vem do
+  // anúncio do servidor 12 (`plataformas`, juntada pelo hash); um anúncio sem
+  // ela — um anfitrião 11 — é «as duas», e baixa tudo, como sempre. O de fora
+  // continua exigido pelo servidor do mesmo jeito: a casca só o pula, e a gestão
+  // de MODs o mostra, dizendo por quê.
+  let aqui = null;
+  try { aqui = plataformaDaCasca(await invoke("plataforma")); } catch { /* sem lugar: nada é pulado */ }
+  const daqui = mods.filter((m) => rodaAqui(m, aqui));
+  const faltando = daqui.filter((m) => !temOExato(m));
   if (faltando.length === 0) return true;
 
   for (const [quantos, m] of faltando.entries()) {
@@ -455,7 +463,7 @@ async function obterOConjunto(mods) {
     dizer(`não consegui conferir o que chegou: ${fraseDeErro(falha)}`);
     return false;
   }
-  const errados = mods.filter((m) => !temOExato(m));
+  const errados = daqui.filter((m) => !temOExato(m));
   if (errados.length > 0) {
     dizer(
       `o que chegou não é o que o servidor exige: ${errados
@@ -719,8 +727,9 @@ function linhaDeModInstalado(mod, hospedando) {
     const frase = FASES_DO_MOD[estado.fase];
     if (frase) {
       // Só o que deu certo fica com a cor de nota; o resto é recusa, e recusa
-      // tem cor própria nesta casca.
-      const tranquilo = ["carregado", "carregando"].includes(estado.fase);
+      // tem cor própria nesta casca. «Só noutra plataforma» não é falha (o MOD
+      // está certo, só não é daqui) e fica com a cor de nota também.
+      const tranquilo = ["carregado", "carregando", "so-noutra-plataforma"].includes(estado.fase);
       const classe = tranquilo ? "mods-versao" : "mods-recusado";
       texto.append(
         elemento("span", classe, estado.detalhe ? `${frase} — ${estado.detalhe}` : frase),
@@ -823,10 +832,13 @@ function linhaDeModQueFalta(id, hash) {
 
   const estado = estadoDosMods.get(id);
   const frase = FASES_DO_MOD[estado?.fase];
+  // Pela mesma razão da lista de cima: não estar nesta plataforma não é uma
+  // falha, e não leva a cor de erro.
+  const classe = estado?.fase === "so-noutra-plataforma" ? "mods-versao" : "mods-recusado";
   texto.append(
     elemento(
       "span",
-      "mods-recusado",
+      classe,
       frase && estado.detalhe
         ? `${frase} — ${estado.detalhe}`
         : (frase ??
@@ -864,6 +876,8 @@ const FASES_DO_MOD = {
   "sem-pacote": "o servidor exige este MOD e ele não está instalado aqui",
   "outra-versao": "o que está instalado aqui não é o que o servidor exige",
   descarregado: "descarregado: o servidor deixou de exigi-lo",
+  // O servidor o exige, e ele não roda neste lugar: o detalhe diz onde roda.
+  "so-noutra-plataforma": "o servidor exige este MOD, mas ele não roda aqui",
 };
 
 // ------------------------------------------------- o rascunho do conjunto
@@ -2173,6 +2187,8 @@ async function desenharMods() {
   catalogoJaRedesenhou = true;
   await desenharOCache();
   await desenharAceites();
+  // O que o computador aceitou rodar é do produto, e mora em `camada-maquina.js`.
+  await desenharMaquinasAceitas();
 }
 
 // ------------------------------------------------------- a manutenção local
@@ -2194,9 +2210,9 @@ async function desenharMods() {
  * problema está no aplicativo ou no pacote.
  */
 // Na 0.17 a API 7 entra (as permissões de MOD dos cargos, ADR 0063), e a 6
-// continua rodando: `seele_proto::mods::{MOD_API_VERSION, APIS_ACEITAS}`.
-const API_DESTE_APLICATIVO = 7;
-const APIS_QUE_ESTE_APLICATIVO_ACEITA = [7, 6];
+// continua rodando: `seele_proto::mods::{MOD_API_VERSION, APIS_ACEITAS}`. A 8
+// (`plataformas` no manifesto) entra na linha 2 ao lado delas.
+const API_DESTE_APLICATIVO = 8;
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
@@ -2323,15 +2339,15 @@ function linhaDePacoteNoCache(pacote) {
         // roda como sempre rodou.
         : APIS_DO_SERVIDOR_0_15.includes(dele)
           ? `este pacote foi feito para a API ${dele}, que roda no Servidor `
-            + `0.15, e este SEELE roda as APIs ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" e ")}. `
-            + "Procure a versão dele para a API 6 ou 7 no catálogo do servidor, ou "
+            + `0.15, e este SEELE roda as APIs ${APIS_ACEITAS_DITAS_E}. `
+            + `Procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU} no catálogo do servidor, ou `
             + "use o Servidor 0.15 pelo launcher, que roda o pacote como está."
           // Uma mais velha que essas, como as do layout antigo, nenhum
           // servidor de hoje roda (lote 58-1, rodada 2): só a versão nova serve.
           : `este pacote foi feito para a API ${dele}, que nenhum servidor de hoje `
-            + `roda: este SEELE roda as APIs ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" e ")}, e o `
+            + `roda: este SEELE roda as APIs ${APIS_ACEITAS_DITAS_E}, e o `
             + `Servidor 0.15, as ${APIS_DO_SERVIDOR_0_15_DITAS}. `
-            + "Procure a versão dele para a API 6 ou 7 no catálogo do servidor.";
+            + `Procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU} no catálogo do servidor.`;
     texto.append(elemento("span", "mods-recusado", explicacao));
   }
   caixa.append(texto);

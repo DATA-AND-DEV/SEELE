@@ -258,3 +258,104 @@ fn procurar(caminho: &std::path::Path, fonte: &str, achados: &mut Vec<String>) {
         }
     }
 }
+
+/// **As capacidades por poder da `api/v8.json` são as do código** (a pendência
+/// T3 da parte 2). O arquivo é o que o guia e quem escreve MOD leem; o código é
+/// o que o prelúdio entrega. Sem este teste, uma capacidade nova podia entrar
+/// numa e não na outra, e a documentação mentia só até alguém reclamar.
+///
+/// Os dois lados são conferidos para cada poder que o código conhece: um poder
+/// novo sem entrada no JSON reprova aqui com o nome dele.
+#[test]
+fn as_capacidades_por_poder_da_v8_sao_as_do_codigo() {
+    use seele_proto::mods::{
+        capacidades_da_api, capacidades_da_maquina, capacidades_de, read_manifest, Poder,
+    };
+
+    let v8: serde_json::Value =
+        serde_json::from_str(include_str!("../../../api/v8.json")).expect("a api/v8.json é JSON");
+    // `get` em vez de índice: uma chave que some vira lista vazia, e a
+    // comparação abaixo reprova com o nome dela em vez de um pânico mudo.
+    let lista = |caminho: &[&str]| -> Vec<String> {
+        caminho
+            .iter()
+            .try_fold(&v8, |v, chave| v.get(*chave))
+            .and_then(serde_json::Value::as_array)
+            .map(|itens| {
+                itens
+                    .iter()
+                    .filter_map(|i| i.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // `serde(rename_all = "lowercase")`: o nome do poder no JSON é o do manifesto.
+    for (poder, nome) in [(Poder::Porta, "porta"), (Poder::Programa, "programa")] {
+        let api = capacidades_da_api(8);
+        let mut a_mais: Vec<String> = capacidades_de(8, &[poder])
+            .into_iter()
+            .filter(|c| !api.contains(c))
+            .map(str::to_owned)
+            .collect();
+        a_mais.sort();
+        let mut no_json = lista(&["compatibilidade", "capacidades-por-poder", nome]);
+        no_json.sort();
+        assert_eq!(
+            a_mais, no_json,
+            "capacidades-por-poder.{nome} da api/v8.json diverge de `capacidades_de`"
+        );
+
+        let manifesto = format!(
+            r#"{{"schema": 1, "id": "x/jogo", "version": "1.0.0",
+                "api": {api_v}, "repo": "https://github.com/x/jogo", "reach": [],
+                "plataformas": ["app"], "poderes": ["{nome}"],
+                "maquina": "maquina/main.js", "server": "servidor.js",
+                "permissoes": [{{"acao": "entrar-no-jogo", "nome": "Entrar", "todos": true}}]}}"#,
+            api_v = seele_proto::mods::MOD_API_VERSION
+        );
+        let m = read_manifest(&manifesto).expect("o manifesto do teste lê");
+        let da_maquina = capacidades_da_maquina(&m);
+        let mut a_mais: Vec<String> = da_maquina
+            .iter()
+            .filter(|c| **c != "maquina")
+            .map(|c| (*c).to_owned())
+            .collect();
+        a_mais.sort();
+        let mut no_json = lista(&["compatibilidade", "capacidades-da-maquina", nome]);
+        no_json.sort();
+        assert_eq!(
+            a_mais, no_json,
+            "capacidades-da-maquina.{nome} da api/v8.json diverge de `capacidades_da_maquina`"
+        );
+    }
+
+    // A base é a mesma para todo manifesto, e nenhuma capacidade de tela a toca.
+    assert_eq!(
+        lista(&["compatibilidade", "capacidades-da-maquina", "base"]),
+        vec!["maquina".to_owned()],
+        "capacidades-da-maquina.base da api/v8.json diverge do código"
+    );
+}
+
+/// **As recusas do `programa` da `api/v8.json` são as do núcleo** (API 8
+/// parte 4): `recusas.programa` é a lista fechada que a metade de máquina lê
+/// num `catch`, e `NOMES_DAS_RECUSAS` é a que `Recusa::nome` dá. Um nome novo
+/// no núcleo sem linha no contrato, ou uma linha que o núcleo não dá mais,
+/// reprova aqui com o nome.
+#[test]
+fn as_recusas_do_programa_da_v8_sao_as_do_nucleo() {
+    let v8: serde_json::Value =
+        serde_json::from_str(include_str!("../../../api/v8.json")).expect("a api/v8.json é JSON");
+    let no_json: Vec<&str> = v8
+        .get("recusas")
+        .and_then(|r| r.get("programa"))
+        .and_then(serde_json::Value::as_array)
+        .map(|l| l.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        no_json,
+        seele_core::programa::NOMES_DAS_RECUSAS,
+        "recusas.programa da api/v8.json diverge de `NOMES_DAS_RECUSAS`"
+    );
+}

@@ -50,6 +50,7 @@ mod executor;
 mod firewall;
 mod icone;
 mod ligar;
+mod maquina;
 mod mods;
 // A redução de imagem de MOD mora no `seele-sessao` desde a Tarefa 2.6 da F4.
 use seele_ffi::reducao;
@@ -151,6 +152,11 @@ struct Session {
     /// **Aqui e não na janela** porque o runtime é nativo: quem o desmonta tem
     /// de ser quem o criou, e a janela pode desaparecer antes de pedir.
     mods_nativos: Mutex<ModsNativos>,
+    /// **As metades de máquina** (API 8 parte 3): as que o dono desta máquina
+    /// aceitou e estão de pé, e os pedidos que a tela ainda não respondeu.
+    /// Aqui e não na janela pelo mesmo motivo dos MODs nativos: o runtime é
+    /// nativo, e quem o desmonta tem de ser quem o criou. Ver [`maquina`].
+    maquinas: maquina::Maquinas,
     /// O último motivo por que cada MOD não carregou, como o `seele.log` o
     /// disse. É o que faz uma recusa repetida a cada quatro segundos sair uma
     /// vez: ver [`recusa_de_carga_dita`]. Esvaziada a cada sessão que fecha
@@ -652,11 +658,14 @@ struct InstanciaNativa {
     geracao: u64,
     /// O conteúdo exato que subiu.
     hash: String,
-    /// A API que o manifesto deste pacote declara.
-    ///
-    /// Guardada com a instância e não relida na ativação: quem decide o que
-    /// este MOD pode chamar tem de ser a mesma leitura que provou o hash dele.
-    api_declarada: u32,
+    /// **O que o manifesto deste pacote deixa o MOD chamar**: as capacidades da
+    /// API dele mais as que os poderes dão (`tunel` para quem declara
+    /// `porta`). Guardadas com a instância e não relidas na ativação: quem
+    /// decide o que este MOD pode chamar tem de ser a mesma leitura que provou
+    /// o hash dele — e é por aqui que o
+    /// prelúdio monta `SeeleUI`, e que `tunel_entrar` confere o poder antes de
+    /// falar com o servidor.
+    capacidades: Vec<&'static str>,
     /// Em que ponto do ciclo ela está.
     estado: EstadoNativo,
     /// O executor.
@@ -844,6 +853,20 @@ impl ModsNativos {
         numero
     }
 
+    /// Este MOD está de pé nesta geração, e o manifesto dele deixa chamar
+    /// `capacidade`? É a segunda porta do que o prelúdio só omite (a primeira é
+    /// `podePedir`, na janela): um comando que abre algo na máquina de quem usa
+    /// confere o poder aqui, com o que o Rust leu do pacote, e não com o que a
+    /// janela diz.
+    fn pode(&self, geracao: u64, id: &str, capacidade: &str) -> bool {
+        self.vivos.values().any(|instancia| {
+            instancia.geracao == geracao
+                && instancia.id == id
+                && instancia.estado == EstadoNativo::Ativa
+                && instancia.capacidades.contains(&capacidade)
+        })
+    }
+
     /// Acha uma instância, viva ou encerrando.
     fn achar_mut(&mut self, numero: u64) -> Option<&mut InstanciaNativa> {
         self.vivos
@@ -1016,6 +1039,10 @@ struct Bridge<R: tauri::Runtime = tauri::Wry> {
     /// A tentativa da janela que pediu esta entrada, quando ela disse qual.
     /// Vai em cada etapa da chegada ([`carga_do_evento`]).
     tentativa: Option<u64>,
+    /// **Por onde esta sessão entrou**: o servidor SEELE de um pedido de
+    /// máquina. Na ponte, e não lido do registro, porque o servidor reenvia os
+    /// pedidos pendentes durante o `connect` — antes de a sessão estar lá.
+    alvo: String,
 }
 
 /// O canal do sinal «a lista de sessões mudou» ([`MudancaNaSessao`]).
@@ -1141,6 +1168,19 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
         if !self.marcas.viva.load(Ordering::Acquire) || carimbo.sessao != self.marcas.sessao {
             self.marcas.descartados.fetch_add(1, Ordering::Relaxed);
             self.descartados.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        // **Os eventos da máquina não vão crus à janela** (API 8 parte 3): o
+        // pedido vai como `maquina-pedido`, com o apelido no lugar do número, e
+        // o aviso é da metade de máquina e de mais ninguém. O fim da sessão
+        // passa por aqui também (para as metades dela) e segue para a janela.
+        if maquina::ao_evento(
+            &self.app,
+            carimbo.sessao,
+            carimbo.geracao,
+            &self.alvo,
+            &event,
+        ) {
             return;
         }
         let na_vista = self.vista.load(Ordering::Acquire) == self.marcas.sessao;
@@ -1708,6 +1748,7 @@ async fn connect<R: tauri::Runtime>(
         de_pe: Arc::clone(&session.geracao),
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
         tentativa,
+        alvo: alvo.clone(),
     }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
     // **O CANCELAR desta tentativa** (tarefa 28 da F7): a vaga fica na sessão
@@ -1890,6 +1931,9 @@ async fn connect<R: tauri::Runtime>(
             session.por_na_vista_com(&mut slot, Some(&nova));
             drop(slot);
             avisar_a_trilha(&app, sessao_id, "entrou");
+            // Os pedidos de máquina que chegaram durante o `connect` agora têm
+            // conexão e lista de pessoas.
+            maquina::sessao_entrou(&app, sessao_id);
             None
         }
         Ok(_) => Some(connection),
@@ -2096,6 +2140,7 @@ fn soltar_a_entrada_em(session: &Session, geracao: u64) -> bool {
             // não uma sessão a mais esquecida no fundo.
             if let Some(vista) = session.sessoes.vista() {
                 session.sessoes.tirar(vista);
+                maquina::sessao_saiu_sem_tela(&session.maquinas, vista);
             }
             let solta = slot.take();
             session.por_na_vista_com(&mut slot, None);
@@ -5819,6 +5864,9 @@ fn desmontar_o_cliente<R: tauri::Runtime>(
     }
 
     let saindo = session.sessoes.tirar(sessao);
+    // As metades de máquina desta sessão param com `servidor-saiu`; o aceite
+    // guardado fica.
+    maquina::sessao_saiu(app, sessao);
     if na_vista {
         session.por_na_vista(None);
     }
@@ -6009,6 +6057,7 @@ mod o_mod_do_guardado_continua_respondendo {
                     server_half: manifesto.server.is_some(),
                     api: manifesto.api,
                     tema: manifesto.tema,
+                    plataformas: None,
                 },
             )
             .expect("o MOD de referência não ligou");
@@ -6523,6 +6572,7 @@ fn recusado(motivo: String) -> FalhaNoMod {
 
 /// O teto deste pedido de escolha — ver
 /// [`seele_ffi::escolhidos::teto_do_escolhido`].
+#[cfg(test)]
 fn teto_do_escolhido(limite_de_bytes: Option<usize>) -> usize {
     seele_ffi::escolhidos::teto_do_escolhido(limite_de_bytes)
 }
@@ -6877,6 +6927,379 @@ fn mod_request(
         pedido_recusado_na_saida_dito(&id, request, erro);
     }
     saiu
+}
+
+/// **Entra num túnel de jogo** (API 8, `SeeleUI.tunel.entrar`): abre a porta em
+/// `127.0.0.1` em que o jogo de quem joga deve ligar, e devolve o número dela.
+///
+/// **Só a janela chama, e só depois de gastar o bilhete de gesto** (um clique,
+/// 2 s, uso único; `base.js`). O Rust não confere o clique, que é da janela, mas
+/// confere o que é dele: a geração, e que este MOD está de pé nela com o poder
+/// `porta` no manifesto que o pacote provou. Quem confere o MOD ligado no
+/// servidor, a ação `entrar-no-jogo` e a máquina que serve é o servidor, a cada
+/// entrada.
+///
+/// A recusa é sempre `Recusado { motivo }`, com o nome em kebab-case de
+/// `RecusaDeTunel` (ou `mod-sem-porta` e `sessao-encerrada`, daqui): a frase é
+/// da janela.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`], como descrito.
+#[tauri::command]
+async fn tunel_entrar(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    geracao: u64,
+    id: String,
+    nome: String,
+) -> Result<seele_ffi::PortaDeTunel, FalhaNoMod> {
+    entrar_no_tunel_do_mod(&session, carimbo, geracao, &id, nome).await
+}
+
+/// **O dono da máquina aceitou** o pedido de máquina pendente de `resumo`
+/// (API 8 parte 3): o aceite é guardado, a metade de máquina é lida do pacote
+/// agora e ligada, e o `AceiteDeMaquina` sai. Ver [`maquina::aceitar`].
+///
+/// # Errors
+///
+/// `sem-pedido`, `pedido-velho` (o resumo não é o do pedido pendente),
+/// `sem-conexao`, ou o nome da recusa da leitura do pacote ou do aceite.
+#[tauri::command]
+async fn maquina_aceitar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+    resumo: String,
+) -> Result<seele_ffi::mods::AceiteDeMaquinaGuardado, String> {
+    // Numa thread de bloqueio: subir a metade pode esperar até 2 s a anterior
+    // da mesma chave parar.
+    tauri::async_runtime::spawn_blocking(move || {
+        maquina::aceitar(&app, &alvo, &mod_id, &servidor, &resumo)
+    })
+    .await
+    .unwrap_or_else(|_| Err("falhou".to_owned()))
+}
+
+/// O dono recusou o pedido de máquina: `RecusaDeMaquina { PeloDono }`.
+///
+/// # Errors
+///
+/// `sem-pedido`, `sem-conexao`, `sessao-encerrada`.
+#[tauri::command]
+fn maquina_recusar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+) -> Result<(), String> {
+    maquina::recusar(&app, &alvo, &mod_id, &servidor)
+}
+
+/// **DESLIGAR**: `aoParar("pelo-dono")`, os túneis dela caem, o executor
+/// para e o servidor recebe `MaquinaParada { PeloDono }`. O aceite fica.
+///
+/// # Errors
+///
+/// `nao-esta-ligada`.
+#[tauri::command]
+async fn maquina_desligar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        maquina::desligar(&app, &alvo, &mod_id, &servidor, maquina::Fim::PeloDono)
+    })
+    .await
+    .unwrap_or_else(|_| Err("falhou".to_owned()))
+}
+
+/// **REVOGAR**: o mesmo que DESLIGAR com `revogada`, e o aceite guardado é
+/// apagado — o próximo pedido pergunta de novo.
+///
+/// # Errors
+///
+/// `sem-aceite` (nada ligado nem guardado), ou o nome da recusa do arquivo.
+#[tauri::command]
+async fn maquina_revogar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        maquina::desligar(&app, &alvo, &mod_id, &servidor, maquina::Fim::Revogada)
+    })
+    .await
+    .unwrap_or_else(|_| Err("falhou".to_owned()))
+}
+
+/// Os aceites de máquina guardados nesta máquina, com quais estão de pé.
+///
+/// # Errors
+///
+/// `NaoDeuParaLer`.
+#[tauri::command]
+fn maquinas_aceitas(app: AppHandle) -> Result<Vec<maquina::MaquinaAceita>, String> {
+    maquina::aceitas(&app)
+}
+
+/// A recusa de um comando de túnel que não achou a sessão do carimbo: ela
+/// acabou (`sessao-encerrada`), ou é outra a razão (`falhou`, dita no registro).
+fn recusa_da_sessao_do_tunel(erro: &ConnectionError) -> FalhaNoMod {
+    let motivo = if matches!(erro, ConnectionError::NotConnected) {
+        "sessao-encerrada"
+    } else {
+        tracing::warn!(
+            ?erro,
+            "comando de túnel recusado pela conferência do carimbo"
+        );
+        "falhou"
+    };
+    FalhaNoMod::Recusado {
+        motivo: motivo.to_owned(),
+    }
+}
+
+/// O que a janela recebe quando quem joga salvou um arquivo do MOD.
+#[derive(serde::Serialize)]
+struct SalvoParaOMod {
+    /// Quantos bytes foram gravados. **O caminho não volta**: ele é da pessoa.
+    bytes: usize,
+}
+
+/// **O nome que o diálogo sugere**, do que o MOD propôs: só letras, números,
+/// espaço, `.`, `-`, `_` e parênteses, até 80 caracteres, sem começar por `.`
+/// (nada de arquivo escondido), e `arquivo` quando não sobra nada. O MOD
+/// sugere; quem escolhe o nome e a pasta é a pessoa, no diálogo do sistema.
+fn nome_sugerido_ao_salvar(nome: &str) -> String {
+    let limpo: String = nome
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '.' | '-' | '_' | '(' | ')'))
+        .take(80)
+        .collect();
+    let limpo = limpo.trim().trim_start_matches('.').trim();
+    if limpo.is_empty() {
+        "arquivo".to_owned()
+    } else {
+        limpo.to_owned()
+    }
+}
+
+/// Grava `bytes` em `destino` **de uma vez**: num parcial ao lado, renomeado
+/// no fim. Um salvamento que cai no meio não deixa meio `.mrpack` com o nome
+/// que a pessoa escolheu.
+fn gravar_o_salvo(destino: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut parcial = destino.as_os_str().to_owned();
+    parcial.push(".seele-parcial");
+    let parcial = std::path::PathBuf::from(parcial);
+    let gravado = std::fs::write(&parcial, bytes).and_then(|()| std::fs::rename(&parcial, destino));
+    if gravado.is_err() {
+        let _ = std::fs::remove_file(&parcial);
+    }
+    gravado
+}
+
+/// **`SeeleUI.salvar`** (API 8 parte 6; spec §6): quem joga recebe um arquivo
+/// que a metade de servidor guardou (o `.mrpack`), pelo diálogo de salvar do
+/// sistema. **O MOD nunca escolhe o caminho**: ele sugere um nome, e o caminho
+/// fica com a pessoa e não volta a ele.
+///
+/// Só para o MOD de pé com o poder `porta` (a capacidade `salvar`, conferida
+/// aqui com o que o Rust leu do pacote); o clique é conferido pela janela,
+/// como o do túnel. Os bytes vêm pelo fluxo de volume de sempre: `payload` vai
+/// ao `aoPedir` da metade de servidor, que autoriza respondendo o caminho.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] com `mod-sem-porta`, `sessao-encerrada`, o texto
+/// do servidor (`arquivo-grande-demais:<t>:<teto>`, a recusa do MOD), ou
+/// `nao-gravei` quando o disco recusou o caminho escolhido.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn salvar_do_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    channel: u32,
+    payload: String,
+    nome: String,
+) -> Result<Option<SalvoParaOMod>, FalhaNoMod> {
+    use tauri_plugin_dialog::DialogExt as _;
+    session.recusar_se_morta(geracao)?;
+    let pode = session
+        .mods_nativos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+        .pode(geracao, &id, "salvar");
+    if !pode {
+        tracing::warn!(mod_id = %id_no_registro(&id), geracao, "o MOD pediu para salvar um arquivo e não está de pé com o poder porta");
+        return Err(FalhaNoMod::Recusado {
+            motivo: "mod-sem-porta".to_owned(),
+        });
+    }
+    let sugerido = nome_sugerido_ao_salvar(&nome);
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title("Salvar o arquivo que este MOD oferece")
+        .set_file_name(&sugerido)
+        .save_file(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+    // **Cancelar é uma resposta**: `null`, e o MOD sabe.
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(None);
+    };
+    let Ok(destino) = escolha.into_path() else {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "caminho-invalido".to_owned(),
+        });
+    };
+    session.recusar_se_morta(geracao)?;
+    let conexao = session.connection().map_err(|_| FalhaNoMod::Recusado {
+        motivo: "sessao-encerrada".to_owned(),
+    })?;
+    let bytes = conexao
+        .ler_imagem_mod(id.clone(), channel, payload)
+        .await
+        .map_err(|motivo| {
+            tracing::warn!(mod_id = %id_no_registro(&id), motivo = %motivo, "salvar: o servidor recusou o arquivo");
+            FalhaNoMod::Recusado { motivo }
+        })?;
+    let quantos = bytes.len();
+    let gravado = tauri::async_runtime::spawn_blocking(move || gravar_o_salvo(&destino, &bytes))
+        .await
+        .map_err(|_| FalhaNoMod::Recusado {
+            motivo: "nao-gravei".to_owned(),
+        })?;
+    if let Err(erro) = gravado {
+        tracing::warn!(mod_id = %id_no_registro(&id), %erro, "salvar: o disco recusou o caminho escolhido");
+        return Err(FalhaNoMod::Recusado {
+            motivo: "nao-gravei".to_owned(),
+        });
+    }
+    tracing::info!(mod_id = %id_no_registro(&id), geracao, bytes = quantos, "arquivo de MOD salvo pela pessoa");
+    Ok(Some(SalvoParaOMod { bytes: quantos }))
+}
+
+#[cfg(test)]
+mod salvar_testes {
+    #![allow(clippy::unwrap_used)]
+
+    /// O MOD sugere, e o produto limpa: sem barra (nada de caminho), sem
+    /// arquivo escondido, com teto.
+    #[test]
+    fn o_nome_sugerido_nao_vira_caminho() {
+        assert_eq!(
+            super::nome_sugerido_ao_salvar("Casa do SEELE.mrpack"),
+            "Casa do SEELE.mrpack"
+        );
+        assert_eq!(super::nome_sugerido_ao_salvar("../../.zshrc"), "zshrc");
+        assert_eq!(
+            super::nome_sugerido_ao_salvar("a/b\\c.mrpack"),
+            "abc.mrpack"
+        );
+        assert_eq!(super::nome_sugerido_ao_salvar("..."), "arquivo");
+        assert_eq!(super::nome_sugerido_ao_salvar(&"x".repeat(200)).len(), 80);
+    }
+
+    #[test]
+    fn o_salvo_entra_de_uma_vez_e_sem_parcial() {
+        let pasta = std::env::temp_dir().join(format!("seele-salvar-{}", std::process::id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let destino = pasta.join("pack.mrpack");
+        super::gravar_o_salvo(&destino, b"PK pack").unwrap();
+        assert_eq!(std::fs::read(&destino).unwrap(), b"PK pack");
+        assert!(!pasta.join("pack.mrpack.seele-parcial").exists());
+        assert!(super::gravar_o_salvo(&pasta.join("nao/existe/x"), b"x").is_err());
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+}
+
+/// O corpo de [`tunel_entrar`], sem o `State`: é o que deixa um teste chamá-lo
+/// com uma `Session` à mão.
+async fn entrar_no_tunel_do_mod(
+    session: &Session,
+    carimbo: sessoes::CarimboDaJanela,
+    geracao: u64,
+    id: &str,
+    nome: String,
+) -> Result<seele_ffi::PortaDeTunel, FalhaNoMod> {
+    // Antes do efeito, como todo comando de MOD.
+    session.recusar_se_morta(geracao)?;
+    let pode = session
+        .mods_nativos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+        .pode(geracao, id, "tunel");
+    if !pode {
+        // Dito: um MOD que pede uma porta sem ter o poder é um defeito dele, e
+        // a recusa chega a quem hospeda além de chegar a ele.
+        tracing::warn!(
+            mod_id = %id_no_registro(id),
+            geracao,
+            "o MOD pediu uma porta de jogo e não está de pé com o poder porta"
+        );
+        return Err(FalhaNoMod::Recusado {
+            motivo: "mod-sem-porta".to_owned(),
+        });
+    }
+    // **A sessão do MOD pelo carimbo que ele trouxe**, e não a da vista: um
+    // comando de sessão nunca se endereça pela vista (`Session::conexao`).
+    let conexao = session
+        .conexao(carimbo)
+        .map_err(|erro| recusa_da_sessao_do_tunel(&erro))?;
+    conexao
+        .entrar_no_tunel(id.to_owned(), nome)
+        .await
+        .map_err(|motivo| FalhaNoMod::Recusado {
+            motivo: motivo.to_owned(),
+        })
+}
+
+/// **Fecha os túneis de jogo de um MOD** que saiu (desligado, descarregado,
+/// sessão nova, troca de vista): a porta fecha e os fluxos acabam. Fechar o que
+/// não existe não é erro.
+///
+/// **Endereçado pelo carimbo da sessão a que o MOD pertencia**, e não pela
+/// vista nem pela geração dos MODs: na troca de vista a geração velha já não
+/// vale e a sessão de antes continua viva em segundo plano — era ali que a
+/// porta ficava aberta, sem MOD e sem ninguém ver. Fechar é sempre permitido.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] com `sessao-encerrada` só quando a sessão do carimbo
+/// de fato acabou (o enlace já derrubou os túneis ao sair).
+#[tauri::command]
+fn tunel_sair_do_mod(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    id: String,
+) -> Result<(), FalhaNoMod> {
+    session
+        .conexao(carimbo)
+        .and_then(|conexao| conexao.sair_dos_tuneis_do_mod(id))
+        .map_err(|erro| recusa_da_sessao_do_tunel(&erro))
+}
+
+/// Os túneis de jogo abertos agora **na sessão do carimbo**, com o último
+/// relatório de cada um: o que a faixa do produto lê ao carregar e quando a
+/// vista muda. Sem a sessão, lista vazia — e é a resposta certa: ela acabou, e
+/// não há porta aberta.
+#[tauri::command]
+fn tuneis_abertos(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Vec<seele_ffi::RelatorioDeTunel> {
+    session
+        .conexao(carimbo)
+        .map(|conexao| conexao.tuneis_abertos())
+        .unwrap_or_default()
 }
 
 /// **O id de um pedido de MOD como as linhas de [`mod_request`] o levam**:
@@ -8136,7 +8559,11 @@ fn reservar_no_executor(
     // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
     // de identidade mora lá, e um segundo caminho seria uma segunda regra. Lido
     // agora para que a ativação não possa falhar por causa do disco.
-    let (codigo, api_declarada) = ler_codigo_do_mod(app, session, geracao, id, &hash)?;
+    let CodigoDoMod {
+        fonte: codigo,
+        capacidades,
+        ..
+    } = ler_codigo_do_mod(app, session, geracao, id, &hash)?;
 
     let mut executor =
         executor::ExecutorQuickJs::novo(executor::Limites::default()).map_err(|_| {
@@ -8174,7 +8601,7 @@ fn reservar_no_executor(
             avisos_perdidos: 0,
             parou: false,
             codigo: Some(codigo),
-            api_declarada,
+            capacidades,
             avisado: false,
         },
     )?;
@@ -8344,9 +8771,10 @@ fn liberar_reserva(
     let codigo = alvo.codigo.take().ok_or(FalhaNoMod::Recusado {
         motivo: "nada-reservado".to_owned(),
     })?;
-    let api = alvo.api_declarada;
+    // As capacidades do manifesto, e não o número da API: o `tunel` é do poder.
+    let capacidades = alvo.capacidades.clone();
     alvo.executor
-        .iniciar_com_api(&codigo, api)
+        .iniciar_com_capacidades(&codigo, capacidades)
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "executor-nao-aceitou-o-codigo".to_owned(),
         })?;
@@ -8749,6 +9177,68 @@ fn habilitado_de(
         server_half: instalado.server,
         api: instalado.api,
         tema: instalado.tema,
+        // Gravadas no mesmo ato que o hash (migração 20): as do manifesto dos
+        // bytes, já efetivas.
+        plataformas: Some(instalado.plataformas),
+    }
+}
+
+#[cfg(test)]
+mod habilitar_grava_as_plataformas_do_manifesto {
+    use super::habilitado_de;
+    use seele_server::persistence::mods::{enable, enabled};
+    use seele_server::persistence::{Location, Persistence};
+
+    /// Um pacote de verdade numa pasta, lido pelo caminho da casca
+    /// (`seele_ffi::mods::ler_pasta`) — a casca não nomeia o protocolo.
+    fn instalado(resto: &str, conteudo: &str) -> seele_ffi::mods::ModInstalado {
+        let pasta = tempfile::tempdir().expect("pasta");
+        std::fs::create_dir_all(pasta.path().join("cliente")).expect("cliente");
+        std::fs::write(pasta.path().join("cliente/main.js"), conteudo).expect("script");
+        std::fs::write(
+            pasta.path().join("mod.json"),
+            format!(
+                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{},"repo":"https://github.com/seele/bot","reach":[],"client":"cliente/main.js"{resto}}}"#,
+                seele_ffi::mods::MOD_API_VERSION
+            ),
+        )
+        .expect("manifesto");
+        seele_ffi::mods::ler_pasta(&pasta.path().to_string_lossy()).expect("pacote válido")
+    }
+
+    /// **Habilitar grava as plataformas do manifesto no mesmo ato que o hash**,
+    /// e habilitar de novo, com outros bytes, as regrava. Com `None` aqui, um
+    /// MOD `["app"]` seria anunciado nas duas até a próxima subida.
+    #[test]
+    fn habilitar_grava_e_regrava_as_plataformas() {
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let so_app = instalado(r#","plataformas":["app"]"#, "1");
+        enable(&banco, &habilitado_de(so_app.clone())).expect("habilitar");
+        let gravada = enabled(&banco)
+            .expect("listar")
+            .first()
+            .expect("o habilitado está na lista")
+            .plataformas
+            .clone();
+        assert_eq!(
+            serde_json::to_value(gravada).expect("json"),
+            serde_json::json!(["app"])
+        );
+
+        let sem_chave = instalado("", "2");
+        assert_ne!(so_app.hash, sem_chave.hash);
+        enable(&banco, &habilitado_de(sem_chave)).expect("habilitar");
+        let gravada = enabled(&banco)
+            .expect("listar")
+            .first()
+            .expect("o habilitado está na lista")
+            .plataformas
+            .clone();
+        assert_eq!(
+            serde_json::to_value(gravada).expect("json"),
+            serde_json::json!(["app", "navegador"]),
+            "sem a chave, as duas, regravadas com os bytes novos"
+        );
     }
 }
 
@@ -8940,6 +9430,7 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
             server_half: false,
             api: seele_ffi::mods::MOD_API_VERSION,
             tema: false,
+            plataformas: None,
         }
     }
 
@@ -9633,7 +10124,7 @@ fn codigo_do_mod(
     geracao: u64,
     id: String,
     hash: String,
-) -> Result<(String, u32), FalhaNoMod> {
+) -> Result<CodigoDoMod, FalhaNoMod> {
     // **Dita no registro, uma vez por motivo** ([`recusa_de_carga_dita`]). A
     // carga só é dada por aceita quando a reserva sobe, em
     // [`mod_nativo_reservar`]: o código lido aqui ainda não é um MOD de pé.
@@ -9650,7 +10141,7 @@ fn ler_codigo_do_mod(
     geracao: u64,
     id: &str,
     hash: &str,
-) -> Result<(String, u32), FalhaNoMod> {
+) -> Result<CodigoDoMod, FalhaNoMod> {
     // O código de um MOD é o começo de uma montagem, e uma montagem pertence a
     // uma sessão. Entregá-lo para uma geração morta seria pôr um worker de pé
     // depois de a sessão dele ter acabado — a corrida que o roteiro da E2 chama
@@ -9666,6 +10157,11 @@ fn ler_codigo_do_mod(
             motivo: "conteudo-de-outro-mod".to_owned(),
         });
     }
+    // **As capacidades saem da mesma leitura**: os poderes que o manifesto
+    // declara decidem se o MOD tem `SeeleUI.tunel`, e uma segunda leitura do
+    // pacote seria uma segunda chance de discordar da que provou o hash.
+    let capacidades = pacote.capacidades();
+    let api = pacote.api;
     let Some(cliente) = pacote.client else {
         return Err(FalhaNoMod::Recusado {
             motivo: "sem-metade-de-cliente".to_owned(),
@@ -9681,11 +10177,34 @@ fn ler_codigo_do_mod(
     // leitura do manifesto: duas leituras são duas oportunidades de discordar,
     // e a que decide o que o MOD pode chamar tem de ser a mesma que provou o
     // hash dele.
-    let api = pacote.api;
     let fonte = String::from_utf8(bytes).map_err(|_| FalhaNoMod::Recusado {
         motivo: "cliente-nao-e-utf8".to_owned(),
     })?;
-    Ok((fonte, api))
+    Ok(CodigoDoMod {
+        fonte,
+        api,
+        capacidades,
+    })
+}
+
+/// O código de um MOD lido do disco, com o que o manifesto dele deixa chamar.
+///
+/// Para a janela é o par `[fonte, api]` de sempre (a serialização é a de uma
+/// tupla): as capacidades são do lado do Rust, e é ele quem monta o prelúdio.
+#[derive(Debug)]
+struct CodigoDoMod {
+    /// O que o pacote traz.
+    fonte: String,
+    /// A API que o manifesto declara.
+    api: u32,
+    /// As capacidades da API mais as dos poderes.
+    capacidades: Vec<&'static str>,
+}
+
+impl serde::Serialize for CodigoDoMod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (&self.fonte, self.api).serialize(serializer)
+    }
 }
 
 /// Um arquivo de mídia de um MOD, pronto para a janela montar.
@@ -10443,6 +10962,7 @@ fn imagem_lida_dita(
 /// `tipo-recusado:heic` (rascunho da API 6, §7.1), no molde do
 /// `papel-nao-serve:<papel>`; o resto que não é um dos formatos é
 /// `formato-desconhecido`.
+#[cfg(test)]
 fn tipo_do_escolhido(bytes: &[u8]) -> Result<seele_ffi::mods::TipoLido, FalhaNoMod> {
     seele_ffi::escolhidos::tipo_do_escolhido(bytes).map_err(recusado)
 }
@@ -10536,10 +11056,13 @@ async fn escolher_para_o_mod(
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "arquivo-ilegivel".to_owned(),
         })?;
-    // O teto do produto vale sempre; o que o MOD declarou só o aperta.
-    if tamanho > teto_do_escolhido(limite_de_bytes) {
+    // O teto do produto vale sempre; o que o MOD declarou só o aperta. O do
+    // `.mrpack` (64 MiB, API 8 parte 6) só para o MOD que pediu o papel
+    // `pack`; a recusa diz o tamanho e o teto.
+    let teto = seele_ffi::escolhidos::teto_do_pedido(limite_de_bytes, papeis.as_deref());
+    if tamanho > teto {
         return Err(FalhaNoMod::Recusado {
-            motivo: "arquivo-grande-demais".to_owned(),
+            motivo: seele_ffi::escolhidos::grande_demais(tamanho, teto),
         });
     }
     let bytes = std::fs::read(&caminho).map_err(|_| FalhaNoMod::Recusado {
@@ -10548,7 +11071,8 @@ async fn escolher_para_o_mod(
 
     // **O tipo sai dos bytes**, como o da mídia do pacote. A extensão que a
     // pessoa tem no disco é texto, e texto não escolhe decodificador.
-    let lida = tipo_do_escolhido(&bytes)?;
+    let lida = seele_ffi::escolhidos::tipo_do_escolhido_para(&bytes, papeis.as_deref())
+        .map_err(recusado)?;
 
     // **E o papel provado é conferido contra o que o MOD pediu.** Sem isto, um
     // MOD que precisa de retrato recebia um som e só descobria ao tentar usá-lo
@@ -11093,6 +11617,7 @@ mod so_a_gestao_reaplica_no_servidor_hospedado {
             server_half: false,
             api: seele_ffi::mods::MOD_API_VERSION,
             tema: false,
+            plataformas: None,
         }
     }
 
@@ -14444,6 +14969,15 @@ fn main() {
     // e um pânico antes disto não teria onde cair além da saída de erro.
     instalar_gancho_de_panico();
 
+    // **Este processo tem tela** (API 8 parte 3): toda conexão dele mostra
+    // pedidos de máquina, em vez de o núcleo os recusar sozinho com
+    // `sem-tela`. Aqui, uma vez, antes de qualquer conexão — inclusive a
+    // automática do arranque —, porque o servidor reenvia os pedidos pendentes
+    // logo depois do `Session`, antes de um comando por conexão poder chegar.
+    // **Nunca num ajudante que os testes usam**: o valor é do processo, e um
+    // binário de teste que o ligasse mudaria o padrão de todos os testes dele.
+    seele_ffi::este_processo_tem_tela(true);
+
     // A window that cannot open is not a case with a graceful path: there is
     // nowhere left to show the reason. It goes to the log and to the exit code.
     // Qual criptografia o `reqwest` usa, dito de fora.
@@ -14648,6 +15182,7 @@ fn main() {
             som_do_mod,
             enviar_imagem_mod,
             ler_imagem_mod,
+            salvar_do_mod,
             escolher_para_o_mod,
             pedaco_do_escolhido,
             soltar_escolhido,
@@ -14762,6 +15297,14 @@ fn main() {
             tirar_icone_do_server,
             mods_instalados,
             mod_request,
+            tunel_entrar,
+            maquina_aceitar,
+            maquina_recusar,
+            maquina_desligar,
+            maquina_revogar,
+            maquinas_aceitas,
+            tunel_sair_do_mod,
+            tuneis_abertos,
             aceite_de_mods,
             aceitar_mods,
             esquecer_aceite_de_mods,
@@ -14897,6 +15440,12 @@ fn main() {
                     .await;
                     saida.exit(0);
                 });
+                // **As portas de jogo fecham aqui**: `despedir_se` encerra cada
+                // sessão (`encerrar_e_esperar`), e o enlace derruba os túneis de
+                // quem joga ao sair — a porta em `127.0.0.1` não sobrevive ao
+                // app. Provado em `tunel_pela_ffi.rs` (conformidade),
+                // `encerrar_a_sessao_fecha_a_porta`: a mesma chamada, com a porta
+                // aberta de verdade.
                 despedir_se(handle);
             }
             // **E quem sai sem fechar a janela** (tarefa 21 da F7): o Sair do
@@ -14932,6 +15481,10 @@ fn main() {
 fn despedir_se(handle: &tauri::AppHandle) {
     use tauri::Manager as _;
 
+    // **As metades de máquina primeiro**, todas ao mesmo tempo, com
+    // `aoParar("app-fechou")` e o `MaquinaParada { AppFechou }`: depois da linha
+    // de baixo a conexão já se despediu, e o servidor saberia só pela queda.
+    maquina::parar_todas_na_saida(&handle.state::<Session>().maquinas);
     despedir_da_sessao(&handle.state::<Session>(), ESPERA_DOS_MODS_NA_SAIDA);
 }
 
@@ -15521,6 +16074,9 @@ mod a_tela_le_o_que_o_rust_manda {
                 reach: vec!["dom".to_owned()],
                 server: true,
                 tema: true,
+                plataformas: Vec::new(),
+                poderes: Vec::new(),
+                maquina: false,
                 refused: None,
             },
             enabled: false,
@@ -15573,6 +16129,46 @@ mod a_tela_le_o_que_o_rust_manda {
         assert!(
             !pinta_o_servidor(true, None, "seele/estilo"),
             "sem escolhido, ninguém pinta"
+        );
+    }
+
+    /// **`mods_instalados` diz os `poderes` de cada MOD**, como lista de nomes
+    /// no topo do objeto (o `flatten` apaga o invólucro): vazia sem a chave, e
+    /// `["porta"]` para quem a declara. É o que a casca lê para saber se o MOD
+    /// tem túnel, sem abrir o manifesto.
+    #[test]
+    fn mods_instalados_diz_os_poderes_de_cada_mod() {
+        let tela = |poderes: Vec<seele_ffi::mods::Poder>| {
+            let mut v = serde_json::to_value(ModNaTela {
+                instalado: ModInstalado {
+                    id: "autor/nome".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    api: seele_ffi::mods::MOD_API_VERSION,
+                    hash: "0".repeat(64),
+                    client: None,
+                    arquivos: Vec::new(),
+                    repo: String::new(),
+                    reach: Vec::new(),
+                    server: true,
+                    tema: false,
+                    plataformas: Vec::new(),
+                    poderes,
+                    maquina: false,
+                    refused: None,
+                },
+                enabled: false,
+                pinta: false,
+                exigencia_vale_na_rede: true,
+            })
+            .expect("serializa");
+            v.get_mut("poderes")
+                .map(serde_json::Value::take)
+                .unwrap_or_default()
+        };
+        assert_eq!(tela(Vec::new()), serde_json::json!([]));
+        assert_eq!(
+            tela(vec![seele_ffi::mods::Poder::Porta]),
+            serde_json::json!(["porta"])
         );
     }
 
@@ -16165,7 +16761,8 @@ mod a_supervisao_dos_mods_nativos {
             id: "prova/mod".to_owned(),
             geracao,
             hash: "a".repeat(64),
-            api_declarada: seele_ffi::mods::MOD_API_VERSION,
+            capacidades: seele_ffi::mods::capacidades_da_api(seele_ffi::mods::MOD_API_VERSION)
+                .to_vec(),
             estado: EstadoNativo::Ativa,
             executor: ExecutorQuickJs::novo(Limites::default()).expect("motor"),
             pendentes: std::collections::VecDeque::new(),
@@ -16757,12 +17354,14 @@ mod a_supervisao_dos_mods_nativos {
             ("fn mod_nativo_colher(", 1),
             ("fn mod_nativo_entregar(", 1),
             ("fn ler_codigo_do_mod(", 1),
+            ("async fn entrar_no_tunel_do_mod(", 1),
             ("fn reservar_no_executor(", 1),
             ("fn midia_do_mod(", 1),
             ("fn som_do_mod(", 1),
             ("fn midia_em_bytes(", 1),
             ("async fn enviar_imagem_mod(", 2),
             ("async fn ler_imagem_mod(", 2),
+            ("async fn salvar_do_mod(", 2),
             ("async fn escolher_para_o_mod(", 2),
             ("fn pedaco_do_escolhido(", 1),
         ] {
@@ -22426,6 +23025,146 @@ mod a_api_do_mod_habilitado {
         assert!(
             lista.contains("pacote_no_cache_de(") && !lista.contains(concat!("PacoteNoCache", " {")),
             "`pacotes_no_cache` deixou de montar a lista pela construção que leva a API do manifesto"
+        );
+    }
+}
+
+/// **O comando `tunel_entrar` confere o que é do Rust** (API 8, parte 2): a
+/// geração, e que o MOD está de pé nela com o poder `porta` no manifesto que o
+/// pacote provou. O bilhete de gesto é da janela (`bancada/tunel-de-jogador.cjs`);
+/// quem confere o servidor, a ação e a máquina é o servidor (conformidade).
+///
+/// A recusa é sempre um nome da lista fechada, nunca a variante de um erro de
+/// conexão: é o que o MOD e a faixa leem.
+#[cfg(test)]
+mod o_tunel_de_jogo_pelo_app {
+    use super::{entrar_no_tunel_do_mod, EstadoNativo, FalhaNoMod, InstanciaNativa, Session};
+    use crate::executor::{ExecutorQuickJs, Limites};
+
+    const SEM_SESSAO: crate::sessoes::CarimboDaJanela = crate::sessoes::CarimboDaJanela {
+        sessao: 0,
+        geracao: 0,
+    };
+
+    fn motivo(falha: &FalhaNoMod) -> &str {
+        match falha {
+            FalhaNoMod::Recusado { motivo } => motivo,
+            outra => panic!("esperava `Recusado`, veio {outra:?}"),
+        }
+    }
+
+    /// Uma sessão viva (geração 1) com um MOD de pé que pode chamar `capacidades`.
+    fn sessao_com(id: &str, capacidades: Vec<&'static str>) -> (Session, u64) {
+        let sessao = Session::default();
+        let geracao = sessao.revogar();
+        let instancia = InstanciaNativa {
+            id: id.to_owned(),
+            geracao,
+            hash: "a".repeat(64),
+            capacidades,
+            estado: EstadoNativo::Ativa,
+            executor: ExecutorQuickJs::novo(Limites::default()).expect("motor"),
+            pendentes: std::collections::VecDeque::new(),
+            bytes_pendentes: 0,
+            avisos: std::collections::VecDeque::new(),
+            avisos_perdidos: 0,
+            parou: false,
+            codigo: None,
+            avisado: false,
+        };
+        sessao
+            .mods_nativos
+            .lock()
+            .expect("tabela")
+            .guardar(instancia);
+        (sessao, geracao)
+    }
+
+    fn rodar<T>(futuro: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(futuro)
+    }
+
+    #[test]
+    fn a_sessao_que_acabou_e_recusada_antes_de_olhar_o_mod() {
+        let sessao = Session::default();
+        // Geração 0 nunca vale; e uma morta (1, depois revogada) também não.
+        let viva = sessao.revogar();
+        sessao.revogar();
+        for geracao in [0, viva] {
+            let falha = rodar(entrar_no_tunel_do_mod(
+                &sessao,
+                SEM_SESSAO,
+                geracao,
+                "x/jogo",
+                "n".into(),
+            ))
+            .expect_err("uma geração morta não entra");
+            assert_eq!(motivo(&falha), "sessao-encerrada", "geração {geracao}");
+        }
+    }
+
+    #[test]
+    fn um_mod_sem_o_poder_porta_e_recusado_com_o_nome() {
+        // De pé, na geração viva, mas com as capacidades da API e sem `tunel`.
+        let (sessao, geracao) = sessao_com(
+            "x/sem-porta",
+            seele_ffi::mods::capacidades_da_api(seele_ffi::mods::MOD_API_VERSION).to_vec(),
+        );
+        let falha = rodar(entrar_no_tunel_do_mod(
+            &sessao,
+            SEM_SESSAO,
+            geracao,
+            "x/sem-porta",
+            "n".into(),
+        ))
+        .expect_err("sem o poder porta não entra");
+        assert_eq!(motivo(&falha), "mod-sem-porta");
+        // Um MOD que não está de pé tampouco.
+        let falha = rodar(entrar_no_tunel_do_mod(
+            &sessao,
+            SEM_SESSAO,
+            geracao,
+            "x/ninguem",
+            "n".into(),
+        ))
+        .expect_err("quem não está de pé não entra");
+        assert_eq!(motivo(&falha), "mod-sem-porta");
+    }
+
+    #[test]
+    fn o_poder_porta_passa_o_portao_e_so_para_na_falta_de_sessao() {
+        // `tunel` nas capacidades: passa pelo portão do Rust, e a recusa que
+        // sobra é a da conexão — que esta sessão de teste não tem. A diferença
+        // para `mod-sem-porta` é o que prova que o portão deixou passar.
+        let (sessao, geracao) = sessao_com("x/jogo", vec!["tunel"]);
+        let falha = rodar(entrar_no_tunel_do_mod(
+            &sessao,
+            SEM_SESSAO,
+            geracao,
+            "x/jogo",
+            "n".into(),
+        ))
+        .expect_err("sem conexão não há porta");
+        assert_eq!(motivo(&falha), "sessao-encerrada");
+    }
+
+    #[test]
+    fn o_poder_de_outra_geracao_ou_de_outro_mod_nao_vale() {
+        let (sessao, geracao) = sessao_com("x/jogo", vec!["tunel"]);
+        let tabela = sessao.mods_nativos.lock().expect("tabela");
+        assert!(tabela.pode(geracao, "x/jogo", "tunel"));
+        assert!(
+            !tabela.pode(geracao + 1, "x/jogo", "tunel"),
+            "outra geração"
+        );
+        assert!(!tabela.pode(geracao, "x/outro", "tunel"), "outro MOD");
+        assert!(
+            !tabela.pode(geracao, "x/jogo", "retrato"),
+            "outra capacidade"
         );
     }
 }
