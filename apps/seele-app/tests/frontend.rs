@@ -25842,3 +25842,36 @@ fn tunel_o_botao_leva_o_bilhete_e_a_faixa_e_do_produto() {
         "a faixa dos túneis engole uma falha em silêncio"
     );
 }
+
+/// **Este processo tem tela, e diz isso antes de qualquer conexão** (API 8
+/// parte 3). Sem a linha, o núcleo recusa todo pedido de máquina sozinho com
+/// `sem-tela` e só o log fica sabendo; num ajudante, ou depois do `Builder`,
+/// a conexão automática do arranque já pode ter recebido o pedido que o
+/// servidor reenvia logo depois do `Session`. Nenhum teste roda o `main`,
+/// então é o texto que se confere.
+#[test]
+fn o_app_diz_que_tem_tela_no_main_antes_de_qualquer_conexao() {
+    let fonte = read("src/main.rs");
+    let corpo = fonte
+        .split_once("\nfn main() {")
+        .map(|(_, resto)| resto)
+        .expect("`fn main` sumiu de main.rs");
+    let construtor = corpo
+        .find("tauri::Builder::default()")
+        .expect("o `tauri::Builder` sumiu do `main`");
+    let linha = corpo
+        .find("seele_ffi::este_processo_tem_tela(true);")
+        .expect(
+        "o `main` não diz `este_processo_tem_tela(true)`: todo pedido de máquina vira `sem-tela`",
+    );
+    assert!(
+        linha < construtor,
+        "`este_processo_tem_tela(true)` vem depois do `tauri::Builder`: a conexão do arranque pode \
+         chegar antes"
+    );
+    assert_eq!(
+        fonte.matches("este_processo_tem_tela(").count(),
+        1,
+        "`este_processo_tem_tela` é chamado em mais de um lugar de main.rs; só o `main` pode"
+    );
+}

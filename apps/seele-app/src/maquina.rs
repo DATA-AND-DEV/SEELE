@@ -642,7 +642,14 @@ impl Viva {
     /// bloqueio. Devolve `false` quando o fim já tinha sido pedido — pedir de
     /// novo é o desfecho de quem apertou duas vezes, e não repete nada.
     pub(crate) fn encerrar(&self, fim: Fim) -> bool {
-        if self.parando.swap(true, Ordering::AcqRel) {
+        // **Sob o cadeado dos túneis**: um `servir` que volta do fio confere
+        // `de_pe()` com o mesmo cadeado na mão. Ou ele entra no conjunto antes
+        // desta marca (e a tomada de baixo o derruba), ou vê a marca e se
+        // derruba sozinho — nunca entra num conjunto que já foi tomado.
+        let tuneis_trancados = self.tuneis.lock().unwrap_or_else(PoisonError::into_inner);
+        let ja_parando = self.parando.swap(true, Ordering::AcqRel);
+        drop(tuneis_trancados);
+        if ja_parando {
             return false;
         }
         let (mod_id, servidor) = (&self.chave.mod_id, &self.chave.servidor);
@@ -793,10 +800,24 @@ fn atender(viva: &Arc<Viva>, acao: Acao) {
             tauri::async_runtime::spawn(async move {
                 match futuro.await {
                     Ok(()) => {
-                        dela.tuneis
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner)
-                            .insert(nome.clone());
+                        // **O fim pode ter sido pedido enquanto o servir estava
+                        // no fio.** Conferido com o cadeado dos túneis na mão,
+                        // o mesmo sob que `encerrar` marca o fim e toma o
+                        // conjunto: sem isto, o túnel entrava num conjunto já
+                        // tomado e ficava servido sem dono até a sessão acabar
+                        // — o DESLIGAR do dono sem desligar.
+                        let mut tuneis = dela.tuneis.lock().unwrap_or_else(PoisonError::into_inner);
+                        if !dela.de_pe() {
+                            drop(tuneis);
+                            tracing::info!(mod_id = %dela.chave.mod_id, servidor = %dela.chave.servidor, tunel = %nome, porta, "metade de máquina: servir voltou depois do fim pedido; o túnel é parado já");
+                            if let Err(motivo) = dela.fio.parar_tunel(&dela.chave.mod_id, &nome) {
+                                tracing::warn!(mod_id = %dela.chave.mod_id, servidor = %dela.chave.servidor, tunel = %nome, motivo, "metade de máquina: o túnel servido tarde não foi parado no fio");
+                            }
+                            dela.responder(n, Err("sem-aceite"));
+                            return;
+                        }
+                        tuneis.insert(nome.clone());
+                        drop(tuneis);
                         tracing::info!(mod_id = %dela.chave.mod_id, servidor = %dela.chave.servidor, tunel = %nome, porta, "metade de máquina: túnel servido");
                         dela.responder(n, Ok(serde_json::Value::Null));
                     }
@@ -953,7 +974,7 @@ fn emitir_estado<R: tauri::Runtime>(
     ligada: bool,
     motivo: Option<&'static str>,
 ) {
-    let _ = app.emit(
+    let emitido = app.emit(
         EVENTO_DO_ESTADO,
         EstadoNaTela {
             alvo: chave.alvo.clone(),
@@ -963,6 +984,9 @@ fn emitir_estado<R: tauri::Runtime>(
             motivo,
         },
     );
+    if let Err(erro) = emitido {
+        tracing::warn!(mod_id = %chave.mod_id, servidor = %chave.servidor, ligada, motivo, %erro, "maquina-estado não chegou à janela");
+    }
 }
 
 /// O apelido de quem pediu, pela lista de pessoas da sessão.
@@ -1285,8 +1309,11 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
                 pasta,
                 mudou,
             };
+            let chave_do_log = chave.clone();
             estado.maquinas.estado().pendentes.insert(chave, pedido);
-            let _ = app.emit(EVENTO_DO_PEDIDO, na_tela);
+            if let Err(erro) = app.emit(EVENTO_DO_PEDIDO, na_tela) {
+                tracing::warn!(mod_id = %chave_do_log.mod_id, servidor = %chave_do_log.servidor, %erro, "maquina-pedido não chegou à janela");
+            }
         }
     }
 }
@@ -1516,6 +1543,13 @@ pub(crate) fn recusar<R: tauri::Runtime>(
 ) -> Result<(), String> {
     let chave = Chave::de(alvo, mod_id, servidor);
     let estado = sessoes(app).ok_or("sem-sessao")?;
+    // A mesma vez de `aceitar` e de `processar_pedido`: sem ela, um aceite em
+    // curso com uma cópia do pendente e esta recusa saíam os dois.
+    let _vez = estado
+        .maquinas
+        .vez
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     let pedido = estado
         .maquinas
         .estado()
@@ -1546,6 +1580,15 @@ pub(crate) fn desligar<R: tauri::Runtime>(
 ) -> Result<(), String> {
     let chave = Chave::de(alvo, mod_id, servidor);
     let estado = sessoes(app).ok_or("sem-sessao")?;
+    // **A mesma vez de `processar_pedido`**, que segura «ler o aceite → ligar»
+    // (até 2 s). Sem ela, um REVOGAR no meio de um aceite sozinho depois de uma
+    // reconexão não achava nada ligado, apagava o aceite, dizia «feito» — e o
+    // `ligar` em curso punha a metade de pé sem aceite guardado.
+    let _vez = estado
+        .maquinas
+        .vez
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     let vivas = estado.maquinas.tirar_ligadas(|c, _| *c == chave);
     let havia = !vivas.is_empty();
     for viva in vivas {
@@ -1866,6 +1909,8 @@ mod testes {
     #[derive(Default)]
     struct FioDeMentira {
         anotado: Mutex<Vec<String>>,
+        /// Quanto o `servir` demora no fio.
+        atraso_do_servir: Duration,
     }
 
     impl FioDeMentira {
@@ -1902,7 +1947,13 @@ mod testes {
             porta: u16,
         ) -> Futuro<Result<(), &'static str>> {
             self.anotar(format!("servir {nome} {protocolo} {porta}"));
-            Box::pin(async { Ok(()) })
+            let atraso = self.atraso_do_servir;
+            Box::pin(async move {
+                // Dormir na thread do runtime basta num teste: é o servir que
+                // ainda está no fio quando o fim é pedido.
+                std::thread::sleep(atraso);
+                Ok(())
+            })
         }
         fn parar_tunel(&self, _: &str, nome: &str) -> Result<(), &'static str> {
             self.anotar(format!("parar-tunel {nome}"));
@@ -2000,6 +2051,38 @@ mod testes {
                 "parar-tunel mc".to_owned(),
                 "parar-maquina pelo-dono".to_owned(),
             ]
+        );
+    }
+
+    /// **Um servir que volta do fio depois do fim não deixa túnel sem dono.**
+    /// O servir sai, o fim é pedido enquanto ele está no fio (aqui sem
+    /// `aoParar`, a janela mais larga), e quando ele volta `Ok` o túnel é parado
+    /// na hora, em vez de entrar num conjunto que a parada já tomou.
+    #[test]
+    fn um_servir_que_volta_depois_do_fim_e_parado() {
+        let fio = Arc::new(FioDeMentira {
+            atraso_do_servir: Duration::from_millis(300),
+            ..FioDeMentira::default()
+        });
+        let viva = subir_com(
+            &fio,
+            "maquina.porta.servir({ nome: 'mc', protocolo: 'tcp', porta: 25565 }).catch(() => {});",
+            Arc::default(),
+        );
+        fio.esperar("servir mc");
+        assert!(viva.encerrar(Fim::MetadeFalhou));
+        let anotado = fio.esperar("parar-tunel mc");
+        assert_eq!(
+            anotado,
+            vec![
+                "servir mc tcp 25565".to_owned(),
+                "parar-maquina metade-falhou".to_owned(),
+                "parar-tunel mc".to_owned(),
+            ]
+        );
+        assert!(
+            viva.tuneis_servidos().is_empty(),
+            "o túnel tardio entrou no conjunto"
         );
     }
 

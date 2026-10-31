@@ -272,6 +272,33 @@ pub fn read_one(dir: &Path) -> Result<Installed, Refused> {
     })
 }
 
+/// Os arquivos de um pacote: caminho relativo (com `/`) e bytes.
+pub type ArquivosDoPacote = Vec<(String, Vec<u8>)>;
+
+/// **O manifesto, o hash e os bytes de uma pasta, da mesma leitura.**
+///
+/// Para quem precisa de um arquivo do pacote **e** da prova de que ele é o
+/// do hash (a metade de máquina, API 8 parte 3): [`read_one`] lê o manifesto e
+/// os arquivos em duas passadas e devolve só o hash, e ler o arquivo de novo
+/// depois seria conferir uns bytes e usar outros. Aqui o manifesto sai do
+/// `mod.json` que entrou no hash, e quem chama acha o arquivo que quer entre
+/// os mesmos bytes.
+///
+/// # Errors
+///
+/// O [`Refused`] do manifesto (`Malformed` quando não há `mod.json`).
+pub fn read_with_files(dir: &Path) -> Result<(Manifest, [u8; 32], ArquivosDoPacote), Refused> {
+    let mut files = collect(dir, dir);
+    let hash = content_hash(&mut files);
+    let text = files
+        .iter()
+        .find(|(caminho, _)| caminho == "mod.json")
+        .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+        .ok_or(Refused::Malformed { line: 1, column: 1 })?;
+    let manifest = read_manifest(text)?;
+    Ok((manifest, hash, files))
+}
+
 /// O que o manifesto desta pasta diz de si, sem validar nada — U10.
 ///
 /// Nunca falha: uma pasta sem `mod.json`, ou com um JSON quebrado, devolve os

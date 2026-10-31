@@ -118,23 +118,31 @@ pub struct MetadeDeMaquina {
 /// `maquina-nao-lida` ou `maquina-nao-e-utf8`.
 pub fn codigo_da_maquina(pasta: &str, hash: &str) -> Result<MetadeDeMaquina, String> {
     let dir = std::path::Path::new(pasta).join(PACOTES).join(hash);
-    let lido = seele_core::mods::read_one(&dir).map_err(|why| refusal_name(&why).to_owned())?;
-    if hex(&lido.hash) != hash {
+    // **Os bytes da metade saem da mesma leitura que deu o hash**: ler o
+    // arquivo de novo depois de conferir seria conferir uns bytes e rodar
+    // outros, se alguém trocasse o arquivo no meio.
+    let (manifest, conteudo, arquivos) =
+        seele_core::mods::read_with_files(&dir).map_err(|why| refusal_name(&why).to_owned())?;
+    if hex(&conteudo) != hash {
         return Err("conteudo-nao-bate".to_owned());
     }
-    let Some(caminho) = lido.manifest.maquina.as_deref() else {
+    let Some(caminho) = manifest.maquina.as_deref() else {
         return Err("sem-metade-de-maquina".to_owned());
     };
     // O manifesto já foi recusado se o caminho sai do pacote; conferir de novo
     // aqui custa uma linha e não depende de que aquela regra continue lá.
     let relativo = seele_core::mods::inner_path(&caminho.split('/').collect::<Vec<_>>())
         .ok_or_else(|| "maquina-fora-do-pacote".to_owned())?;
-    let bytes = std::fs::read(dir.join(relativo)).map_err(|_| "maquina-nao-lida".to_owned())?;
+    let bytes = arquivos
+        .into_iter()
+        .find(|(nome, _)| std::path::Path::new(nome) == relativo.as_path())
+        .map(|(_, bytes)| bytes)
+        .ok_or_else(|| "maquina-nao-lida".to_owned())?;
     let fonte = String::from_utf8(bytes).map_err(|_| "maquina-nao-e-utf8".to_owned())?;
     Ok(MetadeDeMaquina {
-        id: lido.manifest.id.clone(),
+        id: manifest.id.clone(),
         fonte,
-        capacidades: capacidades_da_maquina(&lido.manifest),
+        capacidades: capacidades_da_maquina(&manifest),
     })
 }
 
@@ -744,10 +752,8 @@ mod a_metade_de_maquina_do_pacote {
     /// Um pacote de API 8 com metade de máquina, publicado pelo conteúdo como o
     /// instalador faz. Devolve a pasta de configuração e o hash.
     fn publicar(nome: &str) -> (String, String) {
-        let raiz = std::env::temp_dir().join(format!(
-            "seele-ffi-metade-{nome}-{}",
-            std::process::id()
-        ));
+        let raiz =
+            std::env::temp_dir().join(format!("seele-ffi-metade-{nome}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&raiz);
         let dir = raiz.join("em-obras");
         std::fs::create_dir_all(dir.join("cliente")).unwrap();
@@ -764,7 +770,9 @@ mod a_metade_de_maquina_do_pacote {
         std::fs::write(dir.join("cliente/main.js"), "// janela").unwrap();
         std::fs::write(dir.join("maquina/main.js"), "// máquina").unwrap();
         std::fs::write(dir.join("servidor.js"), "// servidor").unwrap();
-        let hash = ler_pasta(&dir.to_string_lossy()).expect("o pacote é válido").hash;
+        let hash = ler_pasta(&dir.to_string_lossy())
+            .expect("o pacote é válido")
+            .hash;
         let destino = raiz.join(PACOTES).join(&hash);
         std::fs::create_dir_all(destino.parent().unwrap()).unwrap();
         std::fs::rename(&dir, &destino).unwrap();
