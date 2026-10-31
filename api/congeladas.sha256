@@ -177,4 +177,11 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   `travados`, o arquivo que o jogo trava (o `session.lock` no Windows). Conferido em
 #   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
 #   v8 segue sem release.
-1d78b04f4582dd5c81ad7347e60485d2c0c81fadcc678d0a36e9e126cfe31759  v8.json
+# - Emenda do servidor que reinicia (31/10/2026, `desenho/api-8-mod-religar`):
+#   o momento MetadeSubiu ({ motivo, maquinas }), só ao MOD que declara
+#   maquina — a metade de servidor subiu (o servidor SEELE subiu, ou o código
+#   dela mudou), com o que o livro das máquinas tem dela agora, para ela
+#   chamar de volta quem o quintal diz que rodava (e2e da API 8, passo 16).
+#   Acréscimo: nenhum nome mudou. Conferido em 31/10/2026 no release (`curl`
+#   do CLAUDE.md): a mais nova é a v0.18.3, e a v8 segue sem release.
+3da6947f30d7791de78efc2f769d7ebe1760341becfb51003f7ed383d7c4eb8e  v8.json

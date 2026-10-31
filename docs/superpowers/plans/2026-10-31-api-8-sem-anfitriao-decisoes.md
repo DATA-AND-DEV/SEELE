@@ -120,6 +120,25 @@ v0.18.3. Nem o protocolo 12 nem a API 8 saíram; a v8 segue emendável.
   chamada, a órfã para em 10 min (S4) e a metade de servidor liga de novo pelo
   caminho de sempre, com o jogo subindo outra vez.
 
+- **S12. O servidor que sobe diz à metade de servidor que subiu** (`MetadeSubiu`;
+  e2e da API 8, 31/10, passo 16, que fecha a S11). O despachante, ao recarregar
+  o conjunto (`despacho::dizer_que_subiu`), manda pelo barramento
+  `MudancaDeMaquina::MetadeSubiu { motivo, maquinas }` a cada MOD que declara
+  `maquina` e cujo código é novo desde a última recarga daquele laço: todos na
+  primeira (`servidor-subiu`), e depois só quem entrou no conjunto ou mudou de
+  revisão (`codigo-novo`). `maquinas` é `Maquinas::lugares_do_mod` naquele
+  instante (aceitas e pendentes) — vazio num servidor que reiniciou. A metade de
+  servidor chama de novo quem o quintal diz que rodava, com o pedido igual ao
+  aceito (S2 religa a órfã), e quem ainda não reconectou volta pelo S10.
+  Acréscimo na v8 (momento novo, nada renomeado; a v8 segue sem release,
+  conferido no `curl` do CLAUDE.md em 31/10). Vai pelo barramento, e não por uma
+  chamada direta, para o quintal, os avisos e o que ela declarar em
+  `mundo.maquinas` seguirem o caminho de todo momento; e só ao MOD de máquina,
+  para um MOD de API anterior não ouvir um nome que o contrato dele não tem.
+  *Custo se errada:* um conjunto salvo que só troca outro MOD não repete o
+  momento (o hash do de máquina não mudou); um MOD de máquina que volte a ser
+  ligado depois de desligado ouve `codigo-novo`, e não `servidor-subiu`.
+
 ## As provas dos guardas (revertidos um a um)
 
 Cada guarda foi desfeito sozinho por um script
@@ -144,6 +163,7 @@ arquivo restaurado e conferido pelo SHA-256), e o teste caiu:
 | GA-4 | o prazo é o da orfandade de agora | `a_orfa_que_ninguem_chama_de_volta_para_com_o_motivo` |
 | GA-5 | sair da sessão não para as órfãs | `sair_da_sessao_nao_para_as_orfas` |
 | GA-6 | o prelúdio entrega o `aoReconectar` | `a_principal_que_volta_sem_a_posse_mata_o_jogo_e_diz` |
+| GS-3 | o despachante diz `MetadeSubiu` ao subir (o envio desligado; a asserção da primeira subida também tirada, para cair na parte do reinício) | conformância `o_servidor_que_reinicia_chama_as_maquinas_sozinho` («o servidor subiu e não chamou a dona de volta: nenhum PedidoDeMaquina de mundo-1 chegou») |
 
 No MOD (`node --test test/reserva.test.cjs`): a religada serve de novo o túnel
 (GM-1), a religada que esperava o aceite termina no aviso (GM-2), o
@@ -182,13 +202,9 @@ o app inteiro com a faixa laranja; a órfã de 10 min de verdade; Windows.
 
 ## Aberto
 
-- **O MOD de multiplayer não chama as máquinas sozinho quando o servidor SEELE
-  reinicia** (S11). O módulo da metade de servidor é avaliado de novo a cada
-  chamada (o estado de módulo não dura, medido na prova), e não há momento de
-  «subiu»: um gatilho pede um momento novo na API 8, ou a metade de servidor
-  chamando quem guardou no primeiro pedido de alguém (com o risco de chamar de
-  novo a cada pedido). Hoje a volta funciona quando o servidor seguiu de pé (a
-  rede de quem hospeda caiu): o livro lembra, e `MaquinaVoltou` chama.
+- ~~O MOD de multiplayer não chama as máquinas sozinho quando o servidor SEELE
+  reinicia (S11).~~ Fechado pela S12 (`MetadeSubiu`) e pelo MOD (`DECISOES.md`,
+  «O servidor SEELE que reinicia»).
 - O relatório do túnel direto não diz «sem quem hospeda» (S6).
 - Quem hospeda fechando o app corta quem estava na malha (S9).
 - A faixa laranja da órfã e a frase de `sem-volta` não foram retratadas nem
