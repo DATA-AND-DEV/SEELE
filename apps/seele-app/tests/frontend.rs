@@ -4826,7 +4826,13 @@ fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead()
     // As outras cinco ficam. Se uma delas ganhar verbo, o conserto é o mesmo
     // desta linha — tirá-la daqui, dizendo onde o verbo está — e nunca apagar a
     // asserção.
-    for absent in ["TEMA", "GANHO", "VOLUME", "GERAR", "COPIAR"] {
+    //
+    // **`VOLUME` saiu desta lista em 0.19, pelo mesmo motivo.** O controle novo
+    // é o `VOLUME DOS ALERTAS`, e ele tem o que carregar: `alertasSonoros.definir`
+    // grava `seele.alertas.v1` e muda o ganho do contexto dos alertas
+    // (`alertas-sonoros.js`; as preferências têm guarda próprio, `as_preferencias_dos_alertas...`). O que
+    // continua sem existir é um volume de **saída da voz** nesta tela.
+    for absent in ["TEMA", "GANHO", "GERAR", "COPIAR"] {
         assert!(
             !names(&server, absent),
             "the settings screen draws `{absent}`, which nothing in this product \
@@ -25417,4 +25423,442 @@ for (const r of [tardio, primeiroTardio, fechado, repetido, terceiro, icePrecoce
   confere("excedeu três POSTs", r.posts.length <= 3);
 }
 "##));
+}
+
+// ---------------------------------------------------------------------------
+// Os alertas sonoros (0.19): `ui/alertas-sonoros.js`
+// ---------------------------------------------------------------------------
+//
+// O que se confere é o que dá para conferir sem ouvido: **quantos osciladores
+// nasceram, quando e com que altura**, num `AudioContext` de mentira com relógio
+// próprio. Que o som seja agradável não é coisa de teste, e não está aqui.
+
+/// O mundo dos alertas: `AudioContext` e relógio de mentira, `localStorage`
+/// que pode quebrar, e o `document`/`window` que guardam os ouvintes.
+const ALERTAS_NODE: &str = r##"
+const montarAlertas = ({ guardado = {}, quebrado = false, estado = "running", saida = null, semAudio = false } = {}) => {
+  let agora = 0, ids = 1;
+  const timers = new Map();
+  const iniciados = [], infos = [], sinks = [];
+  const conta = { resume: 0 };
+  const avancar = (ms) => {
+    const fimDoPasso = agora + ms;
+    for (;;) {
+      let prox = null;
+      for (const t of timers.values()) if (t.em <= fimDoPasso && (!prox || t.em < prox.em || (t.em === prox.em && t.id < prox.id))) prox = t;
+      if (!prox) break;
+      timers.delete(prox.id); agora = prox.em; prox.f();
+    }
+    agora = fimDoPasso;
+  };
+  class Param { constructor(dono) { this.dono = dono; this.value = 1; } setValueAtTime(v) { if (this.dono) this.dono.hz = v; } linearRampToValueAtTime() {} cancelScheduledValues() {} }
+  class Oscilador {
+    constructor() { this.frequency = new Param(this); this.type = "sine"; this.hz = 0; }
+    connect(x) { return x; } addEventListener() {} start(t) { iniciados.push({ hz: this.hz, tipo: this.type, em: t }); } stop() {}
+  }
+  class Ganho { constructor() { this.gain = new Param(null); } connect(x) { return x; } }
+  const contextos = [];
+  class Contexto {
+    constructor() { this.state = estado; this.destination = {}; contextos.push(this); }
+    get currentTime() { return agora / 1000; }
+    createOscillator() { return new Oscilador(); }
+    createGain() { return new Ganho(); }
+    async resume() { conta.resume += 1; }
+    async setSinkId(id) { sinks.push(id); }
+  }
+  const armazem = { ...guardado };
+  const localStorage = {
+    getItem: (k) => { if (quebrado) throw new Error("sem armazenamento"); return Object.hasOwn(armazem, k) ? armazem[k] : null; },
+    setItem: (k, v) => { if (quebrado) throw new Error("cota"); armazem[k] = String(v); },
+  };
+  const escuta = (dono) => ({
+    addEventListener: (t, f, capt) => { (dono.ouvintes ??= {})[t] = [...(dono.ouvintes?.[t] ?? []), f]; },
+    removeEventListener: (t, f) => { dono.ouvintes[t] = (dono.ouvintes?.[t] ?? []).filter((x) => x !== f); },
+  });
+  const documento = {}, janela = {};
+  const sandbox = {
+    console: { info: (...a) => infos.push(a.join(" ")), log: console.log, warn() {} },
+    setTimeout: (f, ms) => { const id = ids++; timers.set(id, { f, em: agora + ms, id }); return id; },
+    clearTimeout: (id) => timers.delete(id),
+    localStorage, Promise, Object, Math, JSON, Number, Set, Map, Error, Array,
+    document: Object.assign(documento, escuta(documento)),
+    window: Object.assign(janela, escuta(janela)),
+  };
+  if (!semAudio) sandbox.AudioContext = Contexto;
+  if (saida !== null) { sandbox.guardadoNaOrigem = (c) => (c === "seele.saida" ? saida : null); sandbox.CHAVES_DA_ORIGEM = { saida: "seele.saida" }; }
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(ler("alertas-sonoros.js"), ctx, { filename: "alertas-sonoros.js" });
+  const a = vm.runInContext("alertasSonoros", ctx);
+  return {
+    a, ctx, iniciados, infos, sinks, armazem, conta, contextos, avancar, timers,
+    agora: () => agora,
+    ouvintes: (alvo, tipo) => ((alvo === "window" ? janela : documento).ouvintes?.[tipo] ?? []),
+    dispara: (alvo, tipo) => ((alvo === "window" ? janela : documento).ouvintes?.[tipo] ?? []).slice().forEach((f) => f({ type: tipo })),
+  };
+};
+const CHAVE_ALERTAS = "seele.alertas.v1";
+"##;
+
+#[test]
+fn as_preferencias_dos_alertas_tem_padrao_e_sobrevivem_a_um_armazenamento_quebrado() {
+    rodar_node(
+        "as preferências dos alertas",
+        &format!("{ALERTAS_NODE}\n{}", r##"
+// Sem nada guardado: ligado, 0,6, todos os grupos.
+const limpo = montarAlertas();
+const p0 = limpo.a.preferencias();
+confere("o padrão não é ligado/0,6/cinco grupos: " + JSON.stringify(p0),
+  p0.ligado === true && p0.volume === 0.6 && JSON.stringify(Object.keys(p0.grupos)) === JSON.stringify(["ligacoes", "sala", "conexao", "porta", "mensagens"]) && Object.values(p0.grupos).every((v) => v === true));
+
+// Persiste na chave certa, e uma página nova lê de volta.
+limpo.a.definir({ volume: 0.3, grupos: { porta: false } });
+confere("a escolha não foi gravada em seele.alertas.v1: " + limpo.armazem[CHAVE_ALERTAS], !!limpo.armazem[CHAVE_ALERTAS]);
+const volta = montarAlertas({ guardado: { [CHAVE_ALERTAS]: limpo.armazem[CHAVE_ALERTAS] } }).a.preferencias();
+confere("a página nova não leu o que ficou: " + JSON.stringify(volta), volta.volume === 0.3 && volta.grupos.porta === false && volta.grupos.sala === true && volta.ligado === true);
+
+// Lixo no disco: padrão; o que presta do objeto é aproveitado, o resto não.
+for (const lixo of ["{{{", "null", "42", "\"x\"", ""]) {
+  const p = montarAlertas({ guardado: { [CHAVE_ALERTAS]: lixo } }).a.preferencias();
+  confere("o lixo " + JSON.stringify(lixo) + " não deu o padrão: " + JSON.stringify(p), p.ligado === true && p.volume === 0.6);
+}
+const meio = montarAlertas({ guardado: { [CHAVE_ALERTAS]: JSON.stringify({ ligado: "sim", volume: 7, grupos: { sala: "não", porta: false, intruso: false } }) } }).a.preferencias();
+confere("o valor fora de forma não foi saneado: " + JSON.stringify(meio), meio.ligado === true && meio.volume === 1 && meio.grupos.sala === true && meio.grupos.porta === false && !("intruso" in meio.grupos));
+confere("o volume negativo não parou em 0", montarAlertas({ guardado: { [CHAVE_ALERTAS]: JSON.stringify({ volume: -3 }) } }).a.preferencias().volume === 0);
+
+// O armazenamento quebra na leitura e na gravação: nada estoura, e a escolha vale na página.
+const doente = montarAlertas({ quebrado: true });
+let estourou = null;
+let depois;
+try { confere("o armazenamento quebrado não deu o padrão", doente.a.preferencias().volume === 0.6); depois = doente.a.definir({ ligado: false }); } catch (e) { estourou = e; }
+confere("o armazenamento quebrado estourou: " + estourou, estourou === null);
+confere("a escolha não valeu na página: " + JSON.stringify(depois), depois && depois.ligado === false && doente.a.preferencias().ligado === false);
+"##),
+    );
+}
+
+#[test]
+fn interruptor_ou_grupo_desligado_nao_toca_e_o_teste_toca_sempre() {
+    rodar_node(
+        "o interruptor e os grupos dos alertas",
+        &format!("{ALERTAS_NODE}\n{}", r##"
+const m = montarAlertas();
+confere("ligado, o conectou não tocou", m.a.tocar("conectou") === true && m.iniciados.length === 2);
+
+// Um grupo desligado cala os dele e só os dele.
+const g = montarAlertas();
+g.a.definir({ grupos: { ligacoes: false } });
+confere("o grupo desligado tocou", g.a.tocar("conectou") === false && g.a.tocar("encerrou") === false && g.iniciados.length === 0);
+confere("o grupo desligado calou o das mensagens", g.a.tocar("mensagem") === true && g.iniciados.length === 1);
+// O laço do grupo desligado vive (devolve handle) e fica mudo.
+const laco = g.a.repetir("chamando");
+g.avancar(9000);
+confere("o laço do grupo desligado soou: " + g.iniciados.length, g.iniciados.length === 1 && typeof laco.parar === "function");
+laco.parar();
+
+// O interruptor geral cala tudo.
+const t = montarAlertas();
+t.a.definir({ ligado: false });
+const l = t.a.repetir("ligacao-chegando");
+t.avancar(5000);
+for (const nome of t.a.SONS) t.a.tocar(nome);
+confere("o interruptor geral deixou passar " + t.iniciados.length + " osciladores", t.iniciados.length === 0);
+l.parar();
+
+// Ligar no meio do toque o faz soar no ciclo seguinte; desligar o cala no seguinte.
+const meio = montarAlertas();
+meio.a.definir({ ligado: false });
+const h = meio.a.repetir("chamando");
+meio.avancar(5000);
+confere("mudo, o laço soou", meio.iniciados.length === 0);
+meio.a.definir({ ligado: true });
+meio.avancar(4000);
+confere("ligado de novo, o laço não voltou a soar: " + meio.iniciados.length, meio.iniciados.length === 1);
+h.parar();
+
+// O TESTAR ignora interruptor e grupo (um teste mudo diria que quebrou).
+const teste = montarAlertas();
+teste.a.definir({ ligado: false, grupos: { ligacoes: false } });
+confere("o teste mudo", teste.a.tocar("conectou", { teste: true }) === true && teste.iniciados.length === 2);
+confere("um som desconhecido tocou", teste.a.tocar("nao-existe", { teste: true }) === false);
+"##),
+    );
+}
+
+#[test]
+fn repetir_duas_vezes_mantem_um_laco_e_parar_o_cala_para_sempre() {
+    rodar_node(
+        "os laços dos alertas",
+        &format!("{ALERTAS_NODE}\n{}", r##"
+const m = montarAlertas();
+const um = m.a.repetir("chamando");
+const dois = m.a.repetir("chamando");
+confere("o mesmo laço começado duas vezes devolveu dois", um === dois);
+m.avancar(9000);   // ciclos em 0, 4000 e 8000: uma nota cada
+confere("dois laços soaram juntos: " + m.iniciados.length + " osciladores em 9 s (esperado 3)", m.iniciados.length === 3);
+confere("o tom do «chamando» não é o de 440 Hz: " + m.iniciados[0].hz, m.iniciados[0].hz === 440 && m.iniciados[0].tipo === "sine");
+
+um.parar();
+const parados = m.iniciados.length;
+m.avancar(30000);
+confere("o laço parado continuou soando: " + (m.iniciados.length - parados), m.iniciados.length === parados);
+confere("o laço parado deixou timer vivo: " + m.timers.size, m.timers.size === 0);
+let estourou = null;
+try { um.parar(); dois.parar(); m.a.parar("chamando"); m.a.parar("nunca-houve"); } catch (e) { estourou = e; }
+confere("parar de novo não é idempotente: " + estourou, estourou === null);
+
+// Um laço novo, depois do velho parado, soa de novo (e o `parar` velho não o cala).
+const novo = m.a.repetir("chamando");
+confere("o laço novo é o velho", novo !== um);
+um.parar();
+m.avancar(100);
+confere("o laço novo não soou: " + (m.iniciados.length - parados), m.iniciados.length === parados + 1);
+confere("o `parar` do laço velho tirou o novo do registro: repetir devolveu outro laço", m.a.repetir("chamando") === novo);
+m.a.pararTudo();
+const depois = m.iniciados.length;
+m.avancar(20000);
+confere("o pararTudo não parou o laço: " + (m.iniciados.length - depois), m.iniciados.length === depois);
+
+// Dois donos do mesmo toque (a sala pessoal e a conversa por link): um que para não cala o outro.
+const d = montarAlertas();
+d.a.manter("ligacao-chegando", true, "toque");
+d.a.manter("ligacao-chegando", true, "link");
+d.a.manter("ligacao-chegando", false, "link");
+const comUm = d.iniciados.length;
+d.avancar(2500);
+confere("um dono que parou calou o toque do outro: " + (d.iniciados.length - comUm), d.iniciados.length > comUm);
+d.a.manter("ligacao-chegando", false, "toque");
+const semNinguem = d.iniciados.length;
+d.avancar(10000);
+confere("o toque seguiu sem dono nenhum: " + (d.iniciados.length - semNinguem), d.iniciados.length === semNinguem);
+
+// Só os sons com laço repetem.
+let recusou = null;
+try { m.a.repetir("conectou"); } catch (e) { recusou = e; }
+confere("repetir um som sem laço não foi recusado", recusou !== null);
+
+// A conversa: as fases ligam e desligam os laços, e a transição (não a fase) toca o resto.
+const c = montarAlertas();
+const nomes = () => c.iniciados.map((o) => o.hz);
+c.a.notarFase("livre", "tocando");
+c.a.notarFase("tocando", "tocando");
+c.avancar(100);
+confere("tocando não começou o toque de chegada: " + nomes(), nomes().join() === "783.99,659.25,783.99,659.25");
+c.a.notarFase("tocando", "conectando");
+const aoParar = c.iniciados.length;
+c.avancar(10000);
+confere("sair de «tocando» não parou o toque", c.iniciados.length === aoParar && c.timers.size === 0);
+c.a.notarFase("conectando", "dentro");
+confere("entrar em «dentro» não tocou o conectou", c.iniciados.length === aoParar + 2 && c.iniciados[aoParar].hz === 523.25);
+const antes = c.iniciados.length;
+c.a.notarFase("dentro", "encerrada");
+confere("dentro → encerrada não tocou o encerrou", c.iniciados.length === antes + 2 && c.iniciados[antes].hz === 587.33);
+const antes2 = c.iniciados.length;
+c.a.notarFase("encerrada", "encerrada");
+c.a.notarFase("tocando", "encerrada");   // uma chamada perdida não é um «encerrou»
+confere("uma chamada que não chegou a existir tocou o encerrou", c.iniciados.length === antes2);
+c.a.notarFase("livre", "chamando");
+c.a.notarFase("chamando", "encerrada");
+confere("chamando → encerrada não tocou o encerrou, ou deixou o laço vivo", c.iniciados.length === antes2 + 1 + 2 && c.timers.size === 0);
+"##),
+    );
+}
+
+#[test]
+fn o_toque_para_no_teto_de_45_e_60_segundos() {
+    rodar_node(
+        "o teto dos toques",
+        &format!("{ALERTAS_NODE}\n{}", r##"
+// Chegando: quatro notas a cada 2 s, ciclos de 0 a 44 s (23), e o teto em 45 s.
+const m = montarAlertas();
+m.a.repetir("ligacao-chegando");
+m.avancar(44999);
+const ate45 = m.iniciados.length;
+confere("a ligação chegando não soou 23 ciclos de 4 notas até o teto: " + ate45, ate45 === 92);
+m.avancar(200000);
+confere("a ligação chegando passou do teto de 45 s: " + m.iniciados.length, m.iniciados.length === 92);
+confere("o teto deixou timer vivo: " + m.timers.size, m.timers.size === 0);
+confere("o teto não deixou a linha no console: " + m.infos.join(" | "), m.infos.some((l) => /ligacao-chegando.*teto de 45/.test(l)));
+confere("a frase da ligação não é de duas alturas: " + [...new Set(m.iniciados.map((o) => o.hz))], [...new Set(m.iniciados.map((o) => o.hz))].join() === "783.99,659.25");
+confere("depois do teto, repetir de novo não recomeça o toque", (() => { const h = m.a.repetir("ligacao-chegando"); m.avancar(100); h.parar(); return m.iniciados.length === 92 + 4; })());
+
+// Chamando: um tom a cada 4 s, ciclos de 0 a 56 s (15), e o teto em 60 s.
+const c = montarAlertas();
+c.a.repetir("chamando");
+c.avancar(300000);
+confere("o «chamando» não parou nos 60 s: " + c.iniciados.length, c.iniciados.length === 15);
+"##),
+    );
+}
+
+#[test]
+fn sem_gesto_o_alerta_deixa_uma_linha_e_o_primeiro_toque_acorda_o_audio() {
+    rodar_node(
+        "o autoplay dos alertas",
+        &format!("{ALERTAS_NODE}\n{}", r##"
+const m = montarAlertas({ estado: "suspended" });
+let estourou = null, tocou;
+try { tocou = m.a.tocar("mensagem"); m.a.tocar("conectou"); m.avancar(2000); m.a.tocar("mensagem"); } catch (e) { estourou = e; }
+confere("o áudio suspenso estourou: " + estourou, estourou === null);
+confere("o áudio suspenso disse que tocou", tocou === false && m.iniciados.length === 0);
+const linhas = m.infos.filter((l) => /mensagem/.test(l));
+confere("o silêncio não deixou exatamente uma linha por som: " + m.infos.join(" | "), linhas.length === 1 && /suspended/.test(linhas[0]) && m.infos.filter((l) => /conectou/.test(l)).length === 1);
+confere("pedir som com o áudio suspenso não tentou retomá-lo", m.conta.resume >= 1);
+
+// O primeiro toque ou tecla acorda (captura), uma vez só.
+confere("faltam os ouvintes do primeiro gesto: " + m.ouvintes("document", "pointerdown").length + "/" + m.ouvintes("document", "keydown").length, m.ouvintes("document", "pointerdown").length === 1 && m.ouvintes("document", "keydown").length === 1);
+const antes = m.conta.resume;
+m.dispara("document", "pointerdown");
+confere("o primeiro toque não retomou o áudio", m.conta.resume === antes + 1);
+confere("o gesto não soltou os dois ouvintes", m.ouvintes("document", "pointerdown").length === 0 && m.ouvintes("document", "keydown").length === 0);
+
+// Com o contexto acordado, o som sai; e um laço que começou calado passa a soar sozinho.
+const laco = m.a.repetir("chamando");
+m.avancar(100);
+confere("o laço soou com o áudio ainda suspenso", m.iniciados.length === 0);
+m.contextos[0].state = "running";
+m.avancar(4000);
+confere("o laço não passou a soar quando o áudio acordou: " + m.iniciados.length, m.iniciados.length === 1);
+laco.parar();
+confere("o som avulso não soou com o áudio rodando", m.a.tocar("conexao-caiu") === true && m.iniciados.length === 3);
+
+// Sem Web Audio nenhum: não estoura, e diz.
+const nada = montarAlertas({ semAudio: true });
+confere("sem Web Audio, tocou", nada.a.tocar("conectou") === false && nada.infos.some((l) => /conectou/.test(l) && /Web Audio/.test(l)));
+
+// A saída escolhida para a voz vale para os alertas, quando o navegador deixa; sem escolha, o padrão.
+const sai = montarAlertas({ saida: "alto-falante-7" });
+sai.a.tocar("mensagem");
+confere("a saída escolhida não foi aplicada ao contexto: " + JSON.stringify(sai.sinks), sai.sinks.join() === "alto-falante-7");
+sai.avancar(2000); sai.a.tocar("mensagem");
+confere("a saída foi reaplicada a cada som: " + JSON.stringify(sai.sinks), sai.sinks.length === 1);
+const padrao = montarAlertas({ saida: null });
+padrao.a.tocar("mensagem");
+confere("sem saída escolhida, o contexto foi mexido: " + JSON.stringify(padrao.sinks), padrao.sinks.length === 0);
+"##),
+    );
+}
+
+#[test]
+fn a_pagina_indo_embora_nao_comeca_som_e_cala_o_que_toca() {
+    rodar_node(
+        "o pagehide dos alertas",
+        &format!("{ALERTAS_NODE}\n{}", r##"
+const m = montarAlertas();
+m.a.repetir("ligacao-chegando");
+m.avancar(100);
+const tocando = m.iniciados.length;
+m.dispara("window", "pagehide");
+m.avancar(30000);
+confere("o laço seguiu depois do pagehide: " + (m.iniciados.length - tocando), m.iniciados.length === tocando && m.timers.size === 0);
+confere("tocou com a página indo embora", m.a.tocar("conectou") === false && m.a.tocar("mensagem") === false);
+m.dispara("window", "pageshow");   // voltou do bfcache
+confere("a página de volta não toca", m.a.tocar("conectou") === true);
+"##),
+    );
+}
+
+#[test]
+fn a_sala_so_avisa_de_quem_entra_e_sai_na_mesma_sala_e_nunca_de_mim() {
+    rodar_node(
+        "a presença na sala de voz",
+        &format!("{ALERTAS_NODE}\n{}", r##"
+const eu = { id: 1, nickname: "Alex", is_self: true };
+const lia = { id: 2, nickname: "Lia", is_self: false };
+const rafa = { id: 3, nickname: "Rafa", is_self: false };
+const sala = (id, gente, meu = true) => ({ id, name: "s" + id, occupied_by_us: meu, people: gente });
+const quadro = (...salas) => ({ voice_rooms: salas });
+const vozes = (m) => m.iniciados.map((o) => o.hz);
+
+const m = montarAlertas();
+const ENTROU = 520, SAIU = 700;
+
+// O primeiro quadro (nada antes) e o quadro depois de entrar (antes, eu fora da sala) não são ninguém entrando.
+m.a.notarSala(null, quadro(sala(1, [eu, lia, rafa])));
+confere("o primeiro quadro tocou: " + vozes(m), m.iniciados.length === 0);
+m.a.notarSala(quadro(sala(1, [lia], false)), quadro(sala(1, [eu, lia])));
+confere("entrar na sala tocou: " + vozes(m), m.iniciados.length === 0);
+
+// Trocar de sala também não: a outra tem outra gente.
+m.a.notarSala(quadro(sala(1, [eu, lia]), sala(2, [rafa], false)), quadro(sala(1, [lia], false), sala(2, [eu, rafa])));
+confere("trocar de sala tocou: " + vozes(m), m.iniciados.length === 0);
+
+// Eu mesmo aparecendo ou sumindo na lista da minha sala não é ninguém.
+m.a.notarSala(quadro(sala(1, [lia])), quadro(sala(1, [eu, lia])));
+m.a.notarSala(quadro(sala(1, [eu, lia])), quadro(sala(1, [lia])));
+confere("eu entrando na lista tocou: " + vozes(m), m.iniciados.length === 0);
+
+// Gente numa sala que não é a minha não é comigo.
+m.a.notarSala(quadro(sala(2, [], false), sala(1, [eu])), quadro(sala(2, [lia], false), sala(1, [eu])));
+confere("a outra sala tocou: " + vozes(m), m.iniciados.length === 0);
+
+// Quem chega à MINHA sala: o sopro que sobe, uma vez, mesmo com duas pessoas de uma vez.
+m.a.notarSala(quadro(sala(1, [eu])), quadro(sala(1, [eu, lia, rafa])));
+confere("quem entrou não tocou uma vez: " + vozes(m), vozes(m).join() === String(ENTROU));
+// Quem sai: o que desce.
+m.avancar(1000);
+m.a.notarSala(quadro(sala(1, [eu, lia, rafa])), quadro(sala(1, [eu, rafa])));
+confere("quem saiu não tocou o sopro que desce: " + vozes(m), vozes(m).join() === ENTROU + "," + SAIU);
+// Sem mudança, nada; e sem sala minha nos dois, nada.
+m.a.notarSala(quadro(sala(1, [eu, rafa])), quadro(sala(1, [eu, rafa])));
+m.a.notarSala(quadro(sala(1, [rafa], false)), quadro(sala(1, [], false)));
+m.a.notarSala(undefined, undefined);
+confere("o quadro igual ou sem sala tocou: " + vozes(m), m.iniciados.length === 2);
+
+// A sala desligada em «sala»: nada.
+const mudo = montarAlertas();
+mudo.a.definir({ grupos: { sala: false } });
+mudo.a.notarSala(quadro(sala(1, [eu])), quadro(sala(1, [eu, lia])));
+confere("o grupo «Sala de voz» desligado tocou", mudo.iniciados.length === 0);
+
+// A conexão: cai uma vez por queda, volta uma vez por recuperação, e a faixa contando não repete.
+const e = montarAlertas();
+const bateria = (n) => ({ link: { InternalBattery: { remaining_seconds: 200 - n, attempts: n } } });
+const on = { link: "Online" };
+e.a.notarEnlace(null, bateria(0));
+confere("o primeiro quadro já caído tocou", e.iniciados.length === 0);
+e.a.notarEnlace(on, on);
+confere("online → online tocou", e.iniciados.length === 0);
+e.a.notarEnlace(on, bateria(0));
+confere("a queda não tocou o conexao-caiu (196 Hz): " + vozes(e), vozes(e).join() === "196,146.83");
+e.a.notarEnlace(bateria(0), bateria(1));
+e.a.notarEnlace(bateria(1), bateria(2));
+confere("a faixa contando repetiu o aviso: " + vozes(e), e.iniciados.length === 2);
+e.a.notarEnlace(bateria(2), on);
+confere("a volta não tocou o conexao-voltou: " + vozes(e), vozes(e).slice(2).join() === "587.33,880");
+e.a.notarEnlace(on, on);
+confere("depois da volta, nada", e.iniciados.length === 4);
+"##),
+    );
+}
+
+/// **O motor carrega antes de quem o chama.** Um `alertasSonoros.tocar` numa
+/// camada que carrega antes dele é um `ReferenceError` dentro do desenho da
+/// tela, e o desenho é o que o pagina inteiro espera.
+#[test]
+fn os_alertas_sonoros_carregam_antes_de_quem_os_chama() {
+    let page = read("ui/index.html");
+    let loaded = linked_assets(&page, "src");
+    let posicao = |nome: &str| {
+        loaded
+            .iter()
+            .position(|f| f == nome)
+            .unwrap_or_else(|| panic!("index.html não carrega {nome}"))
+    };
+    let motor = posicao("alertas-sonoros.js");
+    for quem in [
+        "tela-sessao.js",
+        "camada-toque.js",
+        "camada-portaria.js",
+        "tela-server.js",
+        "pessoal-web-entrada.js",
+    ] {
+        assert!(
+            motor < posicao(quem),
+            "alertas-sonoros.js carrega depois de {quem}, que o chama"
+        );
+        assert!(
+            read(&format!("ui/{quem}")).contains("alertasSonoros."),
+            "{quem} deixou de usar o motor dos alertas: o gancho sumiu"
+        );
+    }
 }

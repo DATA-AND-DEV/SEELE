@@ -83,6 +83,9 @@ async function desenharToque() {
   const atender = $("toque-atender");
   const recusar = $("toque-recusar");
   const tocando = quemNaFaixa();
+  // O som segue a faixa: toca enquanto alguém ainda chama e a ligação não foi
+  // atendida, e para quando a faixa esvazia, o ATENDER entra ou ela vira falha.
+  alertasSonoros.manter("ligacao-chegando", Boolean(tocando) && !atendendo && !atendimentoFalho && !ligacaoEncerrada, "toque");
 
   let frase;
   let rotuloDoAtender = "ATENDER";

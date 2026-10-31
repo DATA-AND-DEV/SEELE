@@ -593,6 +593,11 @@ function desenhar(snapshot) {
   // sala o desmonta, e é este desenho que vê a sala mudar (`tela-chamada.js`).
   if (typeof desenharOPalcoDosMods === "function") desenharOPalcoDosMods(snapshot);
 
+  // Os alertas da sala e da conexão comparam este quadro com o de antes, e por
+  // isso vêm antes de `desenhado` ser trocado: o primeiro quadro da sessão (e
+  // o seguinte à troca de sessão, que zera `desenhado`) não têm anterior.
+  alertasSonoros.notarSala(desenhado, snapshot);
+  alertasSonoros.notarEnlace(desenhado, snapshot);
   desenhado = snapshot;
   // Com os nós de MOD já recolocados: o som do que saiu da tela — a pessoa que
   // saiu da sala, o canal que sumiu — para, como o `<audio>` parava. Ver

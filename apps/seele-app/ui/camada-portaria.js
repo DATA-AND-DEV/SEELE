@@ -702,6 +702,7 @@ function avisarQueBatem(pendentes) {
   // escondida: é a transição que merece uma frase, não o estado.
   if (mostrar && faixa.hidden) {
     anunciar(`${frase}. Abra a porta do servidor para decidir.`);
+    alertasSonoros.tocar("bateu-a-porta");
   }
   faixa.hidden = !mostrar;
 }

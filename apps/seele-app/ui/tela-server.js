@@ -2113,6 +2113,51 @@ if (typeof MutationObserver === "function" && $("lista-mods")) {
 }
 
 
+/**
+ * Os alertas sonoros desta máquina (0.19): o interruptor, o volume, o TESTAR e
+ * uma caixa por grupo. O motor (`alertas-sonoros.js`) é o dono das
+ * preferências e as grava; aqui só se desenha o que ele diz e se devolve o que
+ * a pessoa mexeu. Com o interruptor desligado, a régua e as caixas ficam
+ * apagadas **com o valor que tinham**: ligar de novo não pergunta tudo outra vez.
+ */
+function ligarOsAlertasSonoros() {
+  const ligado = $("alertas-ligado");
+  const volume = $("alertas-volume");
+  const valor = $("alertas-volume-valor");
+  const caixas = [...document.querySelectorAll("#alertas-bloco input[data-grupo]")];
+  function desenhar() {
+    const prefs = alertasSonoros.preferencias();
+    ligado.checked = prefs.ligado;
+    const percentual = Math.round(prefs.volume * 100);
+    volume.value = String(percentual);
+    valor.textContent = `${percentual}%`;
+    volume.setAttribute("aria-valuetext", `${percentual} por cento`);
+    for (const caixa of caixas) caixa.checked = prefs.grupos[caixa.dataset.grupo] === true;
+    volume.disabled = !prefs.ligado;
+    for (const caixa of caixas) caixa.disabled = !prefs.ligado;
+    $("alertas-bloco").dataset.desligado = prefs.ligado ? "nao" : "sim";
+  }
+  ligado.addEventListener("change", () => {
+    alertasSonoros.definir({ ligado: ligado.checked });
+    // Desligar cala o que estiver tocando agora (uma ligação que chega).
+    if (!ligado.checked) alertasSonoros.pararTudo();
+    desenhar();
+  });
+  volume.addEventListener("input", () => {
+    alertasSonoros.definir({ volume: Number(volume.value) / 100 });
+    desenhar();
+  });
+  for (const caixa of caixas) {
+    caixa.addEventListener("change", () => {
+      alertasSonoros.definir({ grupos: { [caixa.dataset.grupo]: caixa.checked } });
+      desenhar();
+    });
+  }
+  $("alertas-testar").addEventListener("click", () => alertasSonoros.tocar("conectou", { teste: true }));
+  desenhar();
+}
+ligarOsAlertasSonoros();
+
 // O botão SEÇÕES (só no celular, dentro de uma seção): volta ao índice e põe o foco na seção que estava aberta.
 $("server-ao-indice").addEventListener("click", () => {
   // Voltar ao índice sai da seção: o teste do microfone, se houver, para (só ele).

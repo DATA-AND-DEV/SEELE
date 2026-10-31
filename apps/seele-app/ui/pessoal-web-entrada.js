@@ -200,6 +200,7 @@ function instalarConversasPessoaisWeb() {
     else servico?.encerrar();
     // A caixa pessoal continua alcançável enquanto a página está aberta.
     if (recebendoCodigo && servico) {
+      alertasSonoros.notarFase(fase, "encerrada");
       fase = "encerrada"; vista.estado({ estado: fase });
       return;
     }
@@ -207,6 +208,7 @@ function instalarConversasPessoaisWeb() {
     // de sair. Os callbacks da geração antiga deixam de alcançar esta tela.
     ++geracao;
     servico?.destruir(); servico = null; preparando = null;
+    alertasSonoros.notarFase(fase, "encerrada");
     fase = "encerrada"; vista.estado({ estado: fase });
     entrada.textContent = "CONVERSAR POR LINK";
   }
@@ -255,13 +257,19 @@ function instalarConversasPessoaisWeb() {
       aoEstado(estado) {
         if (vez !== geracao || (estado.estado === "recebendo" && !criandoLink)) return;
         if (fase === "encerrada" && ["tocando", "chamando"].includes(estado.estado)) vista.limpar();
+        alertasSonoros.notarFase(fase, estado.estado);
         fase = estado.estado; vista.estado(estado);
         if (fase === "tocando") vista.abrir({ apelido: nomeLocal() });
         entrada.textContent = viva() ? "VOLTAR À CONVERSA" : "CONVERSAR POR LINK";
         if (fase === "encerrada") { soltarMidia(); if (servico) void prepararVoz(servico).catch(() => {}); }
         if (fase === "tocando" && servico) void prepararVoz(servico).catch(() => {});
       },
-      aoTexto(texto) { if (vez === geracao) vista.texto(texto); },
+      aoTexto(texto) {
+        if (vez !== geracao) return;
+        vista.texto(texto);
+        // Com a aba escondida a mensagem do par não tem outro jeito de chamar.
+        if (texto?.de === "par" && document.hidden) alertasSonoros.tocar("mensagem");
+      },
       aoPar(enlace, meta) {
         if (vez !== geracao) { enlace?.abortar(); return; }
         void receberPar(enlace, meta, vez).catch(() => {

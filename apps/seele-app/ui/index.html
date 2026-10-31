@@ -3267,6 +3267,70 @@
             </div>
           </div>
 
+          <!--
+            **ALERTAS SONOROS** (0.19). Sons curtos e macios para o que acontece
+            fora do olhar: a ligação que chega, quem entra na sala, a conexão
+            que cai, a batida na porta. São desta máquina (`seele.alertas.v1`),
+            e o motor (`alertas-sonoros.js`) é quem os toca.
+
+            O interruptor desliga tudo e deixa o resto à vista, apagado com o
+            valor que tinha: ligar de novo devolve a pessoa ao que escolheu. O
+            TESTAR toca mesmo com tudo desligado, porque o botão existe para
+            ouvir o volume.
+          -->
+          <div class="server-bloco" id="alertas-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">ALERTAS SONOROS</h3>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <h4 class="rotulo">ALERTAS</h4>
+                <label class="server-marcar alertas-chave" for="alertas-ligado">
+                  <input id="alertas-ligado" type="checkbox" role="switch" checked>
+                  <span>tocar alertas sonoros</span>
+                </label>
+                <p class="nota">Sons curtos para ligação, sala, conexão, porta e mensagens. Valem só neste aparelho.</p>
+              </div>
+
+              <div class="server-campo">
+                <h4 id="alertas-volume-rotulo" class="rotulo">VOLUME DOS ALERTAS</h4>
+                <div class="server-regua">
+                  <input id="alertas-volume" type="range" min="0" max="100" step="5" value="60"
+                         aria-labelledby="alertas-volume-rotulo"
+                         aria-describedby="alertas-volume-valor">
+                  <span id="alertas-volume-valor" class="server-regua-valor">60%</span>
+                  <button id="alertas-testar" class="server-lista-acao" type="button">TESTAR</button>
+                </div>
+              </div>
+
+              <div class="server-campo">
+                <h4 id="alertas-grupos-rotulo" class="rotulo">QUAIS ALERTAS</h4>
+                <div class="alertas-grupos" role="group" aria-labelledby="alertas-grupos-rotulo">
+                  <label class="server-marcar" for="alertas-grupo-ligacoes">
+                    <input id="alertas-grupo-ligacoes" type="checkbox" data-grupo="ligacoes" checked>
+                    <span>Ligações</span>
+                  </label>
+                  <label class="server-marcar" for="alertas-grupo-sala">
+                    <input id="alertas-grupo-sala" type="checkbox" data-grupo="sala" checked>
+                    <span>Sala de voz</span>
+                  </label>
+                  <label class="server-marcar" for="alertas-grupo-conexao">
+                    <input id="alertas-grupo-conexao" type="checkbox" data-grupo="conexao" checked>
+                    <span>Conexão</span>
+                  </label>
+                  <label class="server-marcar" for="alertas-grupo-porta">
+                    <input id="alertas-grupo-porta" type="checkbox" data-grupo="porta" checked>
+                    <span>Porta</span>
+                  </label>
+                  <label class="server-marcar" for="alertas-grupo-mensagens">
+                    <input id="alertas-grupo-mensagens" type="checkbox" data-grupo="mensagens" checked>
+                    <span>Mensagens</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </section>
 
         <!-- ------------------------------------------------------- ATALHOS -->
@@ -5145,6 +5209,13 @@
   O worklet dela (`voz-worklet.js`) não entra aqui: é ela quem o carrega.
 -->
 <script src="voz-web.js"></script>
+<!--
+  Os alertas sonoros (0.19): o toque, a sala, a queda, a porta. Sintetizados
+  com Web Audio, num contexto só deles, separado do da voz. Antes de quem os
+  chama (a sessão, o toque, a portaria, a conversa por link); na carga só
+  declara e espera o primeiro toque ou tecla para acordar o áudio.
+-->
+<script src="alertas-sonoros.js"></script>
 <!--
   O enlace WebRTC da página (0.17, D1–D9; do browser-signaling): o
   `RTCPeerConnection` contra o anfitrião ICE-lite, o certificado DTLS efêmero e
