@@ -37,6 +37,8 @@ mod hash;
 mod ler;
 mod reservado;
 mod rodar;
+#[cfg(windows)]
+mod tarefa_windows;
 mod trazer;
 
 use std::collections::{BTreeMap, HashMap};

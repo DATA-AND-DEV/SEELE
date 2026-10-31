@@ -1796,6 +1796,8 @@ const FRASES_DA_MAQUINA = Object.freeze({
   // O passo de instalar (API 8 parte 6): o instalador do loader, uma vez, antes
   // do servidor. Os dois comandos são aceitos, e só eles.
   instalar: (linha) => `antes, para instalar, vai rodar: ${linha}`,
+  comandosDeOutrosSistemas: (n) =>
+    n === 1 ? "outro sistema tem comandos próprios, que não rodam aqui" : `${n} outros sistemas têm comandos próprios, que não rodam aqui`,
   // O pack do modpack, pelo hash: o que chega à máquina tem de ter este hash.
   pack: (algoritmo, inicio) => `o pack do modpack, conferido pelo ${algoritmo} ${inicio}…`,
   nadaARodar: "nenhum programa: este pedido só abre a porta do jogo",
@@ -1823,7 +1825,7 @@ const FRASES_DA_MAQUINA = Object.freeze({
     versao_do_jogo: "a versão do jogo", tuneis: "as portas", artefatos: "o que se baixa", pack: "o pack",
     origens: "de onde se baixa", dominios_do_jogo: "de onde o jogo baixa sozinho", rodar: "o programa e os argumentos",
     disco_maximo: "o teto de disco", termos: "os termos", pacote: "a versão do MOD",
-    instalar: "o instalador e os argumentos dele" }),
+    instalar: "o instalador e os argumentos dele", por_sistema: "os comandos de cada sistema" }),
 
   // O que a brevidade do texto acima não cobre: a leitura dos termos, a lista de
   // aceites e a falha de cada verbo, dita em frase em vez do nome cru.

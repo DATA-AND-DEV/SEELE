@@ -125,6 +125,26 @@ async fn status(porta: u16) -> Result<(String, Duration)> {
     Ok((lido, relogio.elapsed()))
 }
 
+/// **O par de comandos desta máquina** (decisão W1 do Windows): o da entrada
+/// de `por_sistema` deste sistema, ou o de cima — o que a política aceita, pela
+/// mesma `comandos_para`. `(rodar, instalar)`, como os pedidos do `programa`.
+fn par_desta_maquina(
+    plano: &serde_json::Value,
+) -> (Option<PedidoDeExecucao>, Option<PedidoDeExecucao>) {
+    let oferta: seele_ffi::OfertaDeMaquinaFfi =
+        serde_json::from_value(plano["oferta"].clone()).expect("a oferta do plano");
+    let oferta = oferta.para_o_nucleo().expect("a oferta do MOD passa");
+    let plataforma =
+        seele_core::programa::plataforma_desta_maquina().expect("um sistema de receita");
+    let c = seele_core::maquina::comandos_para(&oferta, plataforma);
+    let pedido = |r: &seele_core::maquina::ComandoOferecido| PedidoDeExecucao {
+        comando: r.comando.clone(),
+        argumentos: r.argumentos.clone(),
+        pasta: String::new(),
+    };
+    (c.rodar.map(pedido), c.instalar.map(pedido))
+}
+
 /// O jogo de pé pelo `programa`: baixa, abre, escreve, roda e espera o «Done».
 async fn o_jogo_de_pe(
     plano: &serde_json::Value,
@@ -265,17 +285,15 @@ async fn o_jogo_baixado(
                 Err(e) => return Err(e.into()),
             }
         }
-        let instalar = &plano["oferta"]["instalar"];
-        let mut instalador = programa.rodar(&PedidoDeExecucao {
-            comando: instalar["comando"].as_str().unwrap().to_owned(),
-            argumentos: instalar["argumentos"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|a| a.as_str().unwrap().to_owned())
-                .collect(),
-            pasta: String::new(),
-        })?;
+        let instalar = par_desta_maquina(plano)
+            .1
+            .ok_or_else(|| anyhow::anyhow!("a oferta com pack não tem instalar aqui"))?;
+        relatorio.push(format!(
+            "instalar: {} {}",
+            instalar.comando,
+            instalar.argumentos.join(" ")
+        ));
+        let mut instalador = programa.rodar(&instalar)?;
         let fim = loop {
             match tokio::time::timeout(Duration::from_secs(300), instalador.proximo()).await? {
                 Some(EventoDoProcesso::Terminou(fim)) => break fim,
@@ -317,17 +335,15 @@ async fn rodar_ate_o_done(
     plano: &serde_json::Value,
     relatorio: &mut Vec<String>,
 ) -> Result<seele_core::programa::Processo> {
-    let rodar = &plano["oferta"]["rodar"];
-    let mut processo = programa.rodar(&PedidoDeExecucao {
-        comando: rodar["comando"].as_str().unwrap().to_owned(),
-        argumentos: rodar["argumentos"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|a| a.as_str().unwrap().to_owned())
-            .collect(),
-        pasta: String::new(),
-    })?;
+    let rodar = par_desta_maquina(plano)
+        .0
+        .ok_or_else(|| anyhow::anyhow!("a oferta não tem rodar aqui"))?;
+    relatorio.push(format!(
+        "rodar: {} {}",
+        rodar.comando,
+        rodar.argumentos.join(" ")
+    ));
+    let mut processo = programa.rodar(&rodar)?;
     let relogio = Instant::now();
     loop {
         let evento = tokio::time::timeout(Duration::from_secs(300), processo.proximo())

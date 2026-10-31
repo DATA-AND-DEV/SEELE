@@ -57,9 +57,9 @@ use seele_proto::ids::{
     Ssrc, VoiceRoomId,
 };
 use seele_proto::maquina::{
-    AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, HashDeArtefato, MotivoDaDispensa,
-    MotivoDaParadaDeMaquina, MotivoDaRecusaDeMaquina, OfertaDeMaquina, TermoOferecido,
-    TunelOferecido,
+    AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, ComandosDoSistema, HashDeArtefato,
+    MotivoDaDispensa, MotivoDaParadaDeMaquina, MotivoDaRecusaDeMaquina, OfertaDeMaquina,
+    TermoOferecido, TunelOferecido,
 };
 use seele_proto::mods::{ModAnunciado, Plataforma, PlataformasDoMod};
 use seele_proto::perfil::{
@@ -551,6 +551,14 @@ fn oferta_cheia() -> OfertaDeMaquina {
                 "server".into(),
             ],
         }),
+        por_sistema: vec![ComandosDoSistema {
+            plataformas: vec!["windows-x64".into()],
+            rodar: Some(ComandoOferecido {
+                comando: "java/bin/java.exe".into(),
+                argumentos: vec!["@libraries/x/win_args.txt".into(), "nogui".into()],
+            }),
+            instalar: None,
+        }],
     }
 }
 

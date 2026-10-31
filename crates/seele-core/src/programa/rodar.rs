@@ -26,10 +26,10 @@
 //!
 //! Todo filho nasce com `kill_on_drop`, e uma tarefa vigia cada um: ela o mata
 //! quando pedem ([`Processo::matar`]), quando o [`Programa`] é encerrado ou
-//! solto. O que **não** está coberto: um neto que o jogo crie por conta
-//! própria. Matar a árvore pede grupo de processos no Unix e *job object* no
-//! Windows, e os dois são FFI que este workspace proíbe (`unsafe_code =
-//! "forbid"`); fica registrado como aberto.
+//! solto. **E a árvore inteira morre junto** (revisão final, I9): no Unix o
+//! filho nasce num grupo de processos próprio e parar mata o grupo (decisão
+//! R8); no Windows ele entra num *Job Object* com `KILL_ON_JOB_CLOSE`
+//! ([`super::tarefa_windows`], decisão W3), e parar mata a tarefa.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -281,7 +281,7 @@ impl Programa {
         let pid = filho.id();
         // Daqui em diante, soltar o grupo mata o grupo: vale para a recusa logo
         // abaixo, para a vigia que acaba e para a vigia que o runtime solta.
-        let grupo = Grupo { pid };
+        let grupo = Grupo::do_filho(&filho, pid);
         let (tx, rx) = mpsc::channel(MAX_LINHAS_NA_FILA);
         let contas = Arc::new(Contas {
             perdidas: AtomicU64::new(0),
@@ -395,13 +395,46 @@ impl Programa {
 }
 
 /// **O grupo de processos de um filho** (I9): soltá-lo mata o grupo inteiro,
-/// o filho e os netos (no Unix; no Windows, só o filho — decisão R8).
+/// o filho e os netos — no Unix pelo grupo de processos (decisão R8), no
+/// Windows pelo *Job Object* (decisão W3).
 struct Grupo {
+    #[cfg_attr(not(unix), allow(dead_code))]
     pid: Option<u32>,
+    /// A tarefa do Windows; `None` se o Windows não pôs o filho nela (dito no
+    /// log: então só o filho morre, como antes).
+    #[cfg(windows)]
+    tarefa: Option<super::tarefa_windows::Tarefa>,
 }
 
 impl Grupo {
+    #[cfg_attr(not(windows), allow(clippy::missing_const_for_fn))]
+    fn do_filho(filho: &tokio::process::Child, pid: Option<u32>) -> Self {
+        #[cfg(not(windows))]
+        let _ = filho;
+        Self {
+            pid,
+            // **Logo depois de nascer** (decisão W3): o filho é o `java`, que
+            // leva centenas de milissegundos para subir antes de criar o
+            // primeiro processo; o que ele cria depois de entrar nasce dentro.
+            #[cfg(windows)]
+            tarefa: match filho.raw_handle() {
+                Some(alca) => match super::tarefa_windows::Tarefa::com(alca) {
+                    Ok(tarefa) => Some(tarefa),
+                    Err(erro) => {
+                        tracing::warn!(pid, %erro, "programa: o processo não entrou numa tarefa do Windows; parar mata só ele, e não os netos");
+                        None
+                    }
+                },
+                None => None,
+            },
+        }
+    }
+
     fn matar(&self) {
+        #[cfg(windows)]
+        if let Some(tarefa) = &self.tarefa {
+            tarefa.matar();
+        }
         #[cfg(unix)]
         if let Some(pid) = self
             .pid

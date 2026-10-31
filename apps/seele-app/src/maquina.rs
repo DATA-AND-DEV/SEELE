@@ -188,6 +188,7 @@ pub(crate) fn campos_que_mudaram(
         disco_maximo,
         termos,
         instalar,
+        por_sistema,
     } = antes;
     let mut mudou = Vec::new();
     let mut se = |diferente: bool, nome: &'static str| {
@@ -214,6 +215,7 @@ pub(crate) fn campos_que_mudaram(
     se(*disco_maximo != agora.disco_maximo, "disco_maximo");
     se(*termos != agora.termos, "termos");
     se(*instalar != agora.instalar, "instalar");
+    se(*por_sistema != agora.por_sistema, "por_sistema");
     mudou
 }
 
@@ -1393,6 +1395,15 @@ pub(crate) struct PedidoNaTela {
     pub(crate) artefatos_daqui: Vec<seele_ffi::ArtefatoOferecidoFfi>,
     /// Quantos artefatos da oferta são de outros sistemas.
     pub(crate) de_outros_sistemas: usize,
+    /// **Os comandos que este computador roda** (decisão W1), pela regra da
+    /// política (`seele_ffi::programa::comandos_desta_maquina`): o par da
+    /// entrada de `por_sistema` deste sistema, ou o de cima. A tela mostra
+    /// estes, e não os da oferta crua.
+    pub(crate) rodar_daqui: Option<seele_ffi::ComandoOferecidoFfi>,
+    /// O passo de instalar deste computador.
+    pub(crate) instalar_daqui: Option<seele_ffi::ComandoOferecidoFfi>,
+    /// Quantos outros sistemas têm comandos próprios na oferta.
+    pub(crate) sistemas_com_outros_comandos: usize,
 }
 
 /// `maquina-estado`, como a casca o lê.
@@ -1891,6 +1902,15 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
             .unwrap_or_default();
             let (artefatos_daqui, de_outros_sistemas) =
                 seele_ffi::programa::artefatos_desta_maquina(&pedido.oferta);
+            // A oferta já passou na régua do fio ao chegar; se não voltar ao
+            // núcleo aqui, a tela mostra o par de cima, e o log diz.
+            let (rodar_daqui, instalar_daqui, sistemas_com_outros_comandos) =
+                seele_ffi::programa::comandos_desta_maquina(&pedido.oferta).unwrap_or_else(
+                    |motivo| {
+                        tracing::warn!(mod_id = %chave.mod_id, servidor = %chave.servidor, motivo, "a oferta não voltou ao núcleo; a tela mostra os comandos de cima");
+                        (pedido.oferta.rodar.clone(), pedido.oferta.instalar.clone(), 0)
+                    },
+                );
             let na_tela = PedidoNaTela {
                 alvo: chave.alvo.clone(),
                 mod_id: chave.mod_id.clone(),
@@ -1903,6 +1923,9 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
                 mudou,
                 artefatos_daqui,
                 de_outros_sistemas,
+                rodar_daqui,
+                instalar_daqui,
+                sistemas_com_outros_comandos,
             };
             let mostrou = estado.maquinas.guardar_pendente_se_vale(pedido, || {
                 if let Err(erro) = app.emit(EVENTO_DO_PEDIDO, na_tela) {
@@ -2353,6 +2376,7 @@ mod testes {
             disco_maximo: 2_000_000_000,
             termos: Vec::new(),
             instalar: None,
+            por_sistema: vec![],
         }
     }
 
@@ -3972,6 +3996,38 @@ mod testes {
         }
     }
 
+    /// A lista de processos do sistema: `(pid, pai, linha de comando)`. No
+    /// Unix pelo `ps`; no Windows pelo `Win32_Process` do PowerShell (não há
+    /// `ps`, e o `tasklist` não diz o pai).
+    fn processos_do_sistema() -> Vec<(u32, u32, String)> {
+        #[cfg(unix)]
+        let saida = std::process::Command::new("ps")
+            .args(["-axo", "pid=,ppid=,command="])
+            .output();
+        #[cfg(windows)]
+        let saida = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $($_.CommandLine)\" }",
+            ])
+            .output();
+        let Ok(saida) = saida else {
+            return Vec::new();
+        };
+        String::from_utf8_lossy(&saida.stdout)
+            .lines()
+            .filter_map(|l| {
+                let mut p = l.split_whitespace();
+                Some((
+                    p.next()?.parse().ok()?,
+                    p.next()?.parse().ok()?,
+                    p.collect::<Vec<_>>().join(" "),
+                ))
+            })
+            .collect()
+    }
+
     /// **Um Minecraft Vanilla de verdade pela metade de máquina de verdade**
     /// (API 8 parte 4, «Como provar que funciona»): o executor QuickJS do app
     /// com a metade de máquina do MOD de multiplayer, o `programa` montado de
@@ -4036,29 +4092,20 @@ mod testes {
             let (ligada, vistos, raiz) = (
                 Arc::clone(&vigia_ligada),
                 Arc::clone(&vistos),
-                raiz.display().to_string(),
+                // Sem o `\\?\` do caminho canônico do Windows, e sem caixa: a
+                // linha de comando de um `java.exe` traz a pasta como foi dada.
+                raiz.display()
+                    .to_string()
+                    .trim_start_matches(r"\\?\")
+                    .to_lowercase(),
             );
             std::thread::spawn(move || {
                 while ligada.load(Ordering::Relaxed) {
-                    if let Ok(saida) = std::process::Command::new("ps")
-                        .args(["-axo", "pid=,ppid=,command="])
-                        .output()
                     {
-                        let texto = String::from_utf8_lossy(&saida.stdout).into_owned();
-                        let linhas: Vec<(u32, u32, String)> = texto
-                            .lines()
-                            .filter_map(|l| {
-                                let mut p = l.split_whitespace();
-                                Some((
-                                    p.next()?.parse().ok()?,
-                                    p.next()?.parse().ok()?,
-                                    p.collect::<Vec<_>>().join(" "),
-                                ))
-                            })
-                            .collect();
+                        let linhas = processos_do_sistema();
                         let do_jogo: Vec<u32> = linhas
                             .iter()
-                            .filter(|(_, _, c)| c.contains(&raiz))
+                            .filter(|(_, _, c)| c.to_lowercase().contains(&raiz))
                             .map(|(p, _, _)| *p)
                             .collect();
                         let mut v = vistos.lock().unwrap();
@@ -4179,13 +4226,25 @@ mod testes {
         eprintln!("netos (filhos de um processo da pasta): {netos:?}");
         // Algum sobreviveu à parada?
         std::thread::sleep(Duration::from_millis(500));
+        // **Nenhum processo da árvore fica** (I9; no Windows pela tarefa,
+        // decisão W3): o que a amostra viu da pasta do jogo, e os filhos.
+        let vivos_agora: Vec<u32> = processos_do_sistema().iter().map(|(p, _, _)| *p).collect();
+        let mut sobreviventes = Vec::new();
         for (pid, (_, cmd)) in &vistos {
-            let vivo = std::process::Command::new("ps")
-                .args(["-p", &pid.to_string()])
-                .output()
-                .is_ok_and(|o| o.status.success());
+            let vivo = vivos_agora.contains(pid);
             eprintln!("  depois da parada, pid {pid} vivo: {vivo} ({cmd})");
+            if vivo {
+                sobreviventes.push((*pid, cmd.clone()));
+            }
         }
+        assert!(
+            vistos.is_empty() || !vivos_agora.is_empty(),
+            "a lista de processos do sistema veio vazia: a amostra não mede nada"
+        );
+        assert!(
+            sobreviventes.is_empty(),
+            "processos da árvore do jogo seguiram vivos depois da parada: {sobreviventes:?}"
+        );
         let porta_fechada = std::net::TcpStream::connect(("127.0.0.1", porta)).is_err();
         eprintln!(
             "medidas: baixando {:?}, pronto {:?}, ligando {:?}, servir {:?}, a parada pelo dono levou {levou:?}, a porta do jogo fechou: {porta_fechada}",

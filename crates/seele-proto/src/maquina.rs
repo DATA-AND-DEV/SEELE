@@ -231,6 +231,83 @@ pub struct OfertaDeMaquina {
     /// fio é regerado só na linha da oferta.
     #[serde(default)]
     pub instalar: Option<ComandoOferecido>,
+    /// **Os comandos de alguns sistemas** (o Windows do Forge e do NeoForge):
+    /// cada entrada nomeia sistemas de [`PLATAFORMAS_DE_MAQUINA`] e traz o par
+    /// `rodar`/`instalar` deles, que **substitui o par de cima inteiro** numa
+    /// máquina desses sistemas ([`comandos_para`]). Vazio é «o mesmo par em
+    /// todos», como antes.
+    ///
+    /// O Forge e o NeoForge rodam por um `@arquivo` de argumentos que o
+    /// instalador escreve duas vezes: `unix_args.txt`, com o classpath
+    /// separado por `:`, e `win_args.txt`, por `;`. Um `rodar` só servia a um
+    /// dos dois. Como os artefatos já se marcam por sistema, o par também.
+    ///
+    /// O resumo amarra **todas** as entradas (a oferta inteira entra nele),
+    /// a tela mostra só o par desta máquina, e a política aceita só esse par.
+    /// Nasceu no 12, neste ramo, e nunca saiu: entra no fim da struct pelo
+    /// precedente do `plataformas` e do `instalar`, e o ouro do fio é regerado
+    /// só na linha da oferta.
+    #[serde(default)]
+    pub por_sistema: Vec<ComandosDoSistema>,
+}
+
+/// O par de comandos de alguns sistemas ([`OfertaDeMaquina::por_sistema`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ComandosDoSistema {
+    /// Os sistemas desta entrada: nomes de [`PLATAFORMAS_DE_MAQUINA`], ao
+    /// menos um, cada um numa entrada só da oferta.
+    pub plataformas: Vec<String>,
+    /// O servidor, nesses sistemas. `None`: nada a rodar neles.
+    pub rodar: Option<ComandoOferecido>,
+    /// O passo de instalar, nesses sistemas. `None`: nenhum neles — o
+    /// `instalar` de cima **não** vale aqui (o par é substituído inteiro).
+    pub instalar: Option<ComandoOferecido>,
+}
+
+/// O par de comandos que uma máquina de um sistema roda.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComandosDaMaquina<'a> {
+    /// O servidor.
+    pub rodar: Option<&'a ComandoOferecido>,
+    /// O passo de instalar.
+    pub instalar: Option<&'a ComandoOferecido>,
+    /// Se o par veio de uma entrada de [`OfertaDeMaquina::por_sistema`], e
+    /// não do par de cima.
+    pub do_sistema: bool,
+    /// Quantos sistemas **outros** têm uma entrada própria na oferta: a tela
+    /// diz que há comandos que não rodam aqui.
+    pub sistemas_com_outros_comandos: usize,
+}
+
+/// **O par de comandos de uma máquina de `plataforma`**: o da entrada de
+/// [`OfertaDeMaquina::por_sistema`] que a nomeia, ou o de cima. Uma regra
+/// só: a tela do aceite e a política do `programa` escolhem por aqui.
+#[must_use]
+pub fn comandos_para<'a>(oferta: &'a OfertaDeMaquina, plataforma: &str) -> ComandosDaMaquina<'a> {
+    let outros = oferta
+        .por_sistema
+        .iter()
+        .flat_map(|e| e.plataformas.iter())
+        .filter(|p| p.as_str() != plataforma)
+        .count();
+    match oferta
+        .por_sistema
+        .iter()
+        .find(|e| e.plataformas.iter().any(|p| p == plataforma))
+    {
+        Some(entrada) => ComandosDaMaquina {
+            rodar: entrada.rodar.as_ref(),
+            instalar: entrada.instalar.as_ref(),
+            do_sistema: true,
+            sistemas_com_outros_comandos: outros,
+        },
+        None => ComandosDaMaquina {
+            rodar: oferta.rodar.as_ref(),
+            instalar: oferta.instalar.as_ref(),
+            do_sistema: false,
+            sistemas_com_outros_comandos: outros,
+        },
+    }
 }
 
 fn fora(field: &'static str) -> ControlError {
@@ -353,9 +430,49 @@ impl Validate for OfertaDeMaquina {
             host("dominios_do_jogo", d)?;
         }
 
+        // Os comandos de cada sistema: um sistema numa entrada só (senão a
+        // máquina dele teria dois pares, e a escolha seria pela ordem), ao
+        // menos um por entrada, todos da lista.
+        check_bounds(
+            "por_sistema",
+            self.por_sistema.len(),
+            PLATAFORMAS_DE_MAQUINA.len(),
+        )?;
+        for (i, entrada) in self.por_sistema.iter().enumerate() {
+            check_bounds(
+                "por_sistema_plataformas",
+                entrada.plataformas.len(),
+                PLATAFORMAS_DE_MAQUINA.len(),
+            )?;
+            if entrada.plataformas.is_empty() {
+                return Err(fora("por_sistema_plataformas"));
+            }
+            for (j, p) in entrada.plataformas.iter().enumerate() {
+                let repetida = entrada.plataformas.iter().take(j).any(|antes| antes == p)
+                    || self
+                        .por_sistema
+                        .iter()
+                        .take(i)
+                        .any(|antes| antes.plataformas.contains(p));
+                if !PLATAFORMAS_DE_MAQUINA.contains(&p.as_str()) || repetida {
+                    return Err(fora("por_sistema_plataformas"));
+                }
+            }
+        }
+
         // O passo de instalar segue a régua do `rodar`: um comando é um
-        // comando, e o aceite prende os dois do mesmo jeito.
-        for rodar in self.rodar.iter().chain(self.instalar.iter()) {
+        // comando, e o aceite prende os dois do mesmo jeito — os de cada
+        // sistema também.
+        let dos_sistemas = self
+            .por_sistema
+            .iter()
+            .flat_map(|e| e.rodar.iter().chain(e.instalar.iter()));
+        for rodar in self
+            .rodar
+            .iter()
+            .chain(self.instalar.iter())
+            .chain(dos_sistemas)
+        {
             texto("comando", &rodar.comando, MAX_TEXTO)?;
             check_bounds("argumentos", rodar.argumentos.len(), MAX_ARGUMENTOS)?;
             for argumento in &rodar.argumentos {
@@ -564,7 +681,47 @@ mod tests {
                     "server".into(),
                 ],
             }),
+            por_sistema: vec![ComandosDoSistema {
+                plataformas: vec!["windows-x64".into()],
+                rodar: Some(ComandoOferecido {
+                    comando: "java/bin/java.exe".into(),
+                    argumentos: vec!["@libraries/x/win_args.txt".into(), "nogui".into()],
+                }),
+                instalar: Some(ComandoOferecido {
+                    comando: "java/bin/java.exe".into(),
+                    argumentos: vec!["-jar".into(), "forge-installer.jar".into()],
+                }),
+            }],
         }
+    }
+
+    /// **Cada máquina roda o par do sistema dela**: a entrada que a nomeia
+    /// substitui o par de cima inteiro; sem entrada, vale o de cima.
+    #[test]
+    fn cada_maquina_roda_os_comandos_do_sistema_dela() {
+        let o = oferta_de_exemplo();
+        let win = comandos_para(&o, "windows-x64");
+        assert!(win.do_sistema);
+        assert_eq!(
+            win.rodar.map(|r| r.argumentos[0].as_str()),
+            Some("@libraries/x/win_args.txt")
+        );
+        assert_eq!(
+            win.instalar.map(|r| r.comando.as_str()),
+            Some("java/bin/java.exe")
+        );
+        assert_eq!(win.sistemas_com_outros_comandos, 0);
+        for mac in ["mac-aarch64", "linux-x64"] {
+            let c = comandos_para(&o, mac);
+            assert!(!c.do_sistema);
+            assert_eq!(c.rodar, o.rodar.as_ref());
+            assert_eq!(c.instalar, o.instalar.as_ref());
+            assert_eq!(c.sistemas_com_outros_comandos, 1);
+        }
+        // A entrada sem `instalar` não herda o de cima: o par é inteiro.
+        let mut sem = o.clone();
+        sem.por_sistema[0].instalar = None;
+        assert_eq!(comandos_para(&sem, "windows-x64").instalar, None);
     }
 
     /// **Só os artefatos desta máquina contam**: sem marca, em todas; com
@@ -613,7 +770,19 @@ mod tests {
         assert_eq!(r, resumo_da_oferta("x/jogo", HASH_A, "mc-1", &base.clone()));
 
         type Mexe = fn(&mut OfertaDeMaquina);
-        let casos: [(&str, Mexe); 26] = [
+        let casos: [(&str, Mexe); 30] = [
+            // **Toda entrada de cada sistema entra no resumo**, e não só a da
+            // máquina que aceita: o aceite no Mac vale a oferta inteira.
+            ("por_sistema", |o| o.por_sistema.clear()),
+            ("por_sistema.plataformas", |o| {
+                o.por_sistema[0].plataformas = vec!["linux-x64".into()];
+            }),
+            ("por_sistema.rodar", |o| {
+                if let Some(r) = o.por_sistema[0].rodar.as_mut() {
+                    r.argumentos[0] = "@libraries/x/unix_args.txt".into();
+                }
+            }),
+            ("por_sistema.instalar", |o| o.por_sistema[0].instalar = None),
             ("instalar", |o| o.instalar = None),
             ("instalar.comando", |o| {
                 if let Some(i) = o.instalar.as_mut() {
@@ -774,6 +943,40 @@ mod tests {
             ("comando vazio", |o| {
                 if let Some(r) = o.rodar.as_mut() {
                     r.comando.clear();
+                }
+            }),
+            ("sistema sem plataformas", |o| {
+                o.por_sistema[0].plataformas.clear()
+            }),
+            ("sistema fora da lista", |o| {
+                o.por_sistema[0].plataformas = vec!["windows-arm64".into()];
+            }),
+            ("sistema repetido na entrada", |o| {
+                o.por_sistema[0].plataformas = vec!["windows-x64".into(), "windows-x64".into()];
+            }),
+            ("sistema em duas entradas", |o| {
+                let e = o.por_sistema[0].clone();
+                o.por_sistema.push(e);
+            }),
+            ("entradas demais", |o| {
+                o.por_sistema = PLATAFORMAS_DE_MAQUINA
+                    .iter()
+                    .chain(["windows-x64"].iter())
+                    .map(|p| ComandosDoSistema {
+                        plataformas: vec![(*p).to_owned()],
+                        rodar: None,
+                        instalar: None,
+                    })
+                    .collect();
+            }),
+            ("comando do sistema vazio", |o| {
+                if let Some(r) = o.por_sistema[0].rodar.as_mut() {
+                    r.comando.clear();
+                }
+            }),
+            ("argumento do sistema com controle", |o| {
+                if let Some(r) = o.por_sistema[0].instalar.as_mut() {
+                    r.argumentos[0] = "a\nb".into();
                 }
             }),
             ("comando de instalar vazio", |o| {

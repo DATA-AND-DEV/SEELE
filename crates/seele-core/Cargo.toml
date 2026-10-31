@@ -109,6 +109,21 @@ aparelho-de-mentira = ["seele-audio/aparelho-de-mentira"]
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", default-features = false, features = ["signal"] }
 
+# **E no Windows, pela tarefa** (decisão W3 de
+# `2026-10-31-api-8-windows-decisoes.md`): o filho entra num *Job Object* com
+# `KILL_ON_JOB_CLOSE`, e parar mata a tarefa. **Zero crate novo no
+# `Cargo.lock`**: o `windows` 0.62 já vem pelo `seele-audio` e pelo
+# `seele-video` (os dois são dependências deste crate); entram as features
+# das tarefas (`Win32_System_JobObjects`, e `Win32_Security` e
+# `Win32_System_Threading`, que os tipos dela pedem).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 # O relógio virtual do tokio, e nada além dele.
 #
@@ -128,5 +143,22 @@ tokio = { version = "1.53.1", features = ["test-util"] }
 rcgen = "0.14.8"
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "logging", "tls12"] }
 
-[lints]
-workspace = true
+# **A folha do workspace, com uma troca só: `unsafe_code` em `deny`, e não em
+# `forbid`** (decisão W3). O `forbid` não se derruba com `allow`, e a árvore
+# do processo do jogo no Windows só morre por um *Job Object*, que é FFI do
+# `kernel32` sem invólucro seguro nas dependências. O `allow` vive num módulo
+# só, `programa/tarefa_windows.rs`, compilado só no Windows; em qualquer outro
+# arquivo deste crate o compilador continua recusando `unsafe` — a mesma
+# régua do `seele-video` (ADR 0041). O resto é copiado do workspace, e não
+# herdado em parte: `[lints]` é tudo ou nada.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+indexing_slicing = "warn"

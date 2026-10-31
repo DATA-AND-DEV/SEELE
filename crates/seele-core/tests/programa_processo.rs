@@ -515,9 +515,10 @@ async fn o_passo_de_instalar_e_um_segundo_comando_aceito_e_so_ele() {
 /// **Parar mata os netos** (revisão final, I9; spec §5, «o produto encerra
 /// todo processo do MOD»). O filho sobe um neto que bate num arquivo e segue
 /// rodando; `matar`, `encerrar_tudo` e soltar o `Programa` param o neto
-/// também, e um filho que sai sozinho não deixa o neto para trás. Só no Unix,
-/// onde o grupo de processos existe (no Windows, decisão R8).
-#[cfg(unix)]
+/// também, e um filho que sai sozinho não deixa o neto para trás. Nos dois
+/// sistemas: no Unix pelo grupo de processos (decisão R8), no Windows pela
+/// tarefa (*Job Object*, decisão W3) — o programa de teste sobe o neto pela
+/// `std`, sem `sh`.
 #[tokio::test]
 async fn parar_mata_os_netos_por_todos_os_caminhos() {
     for caminho in ["matar", "encerrar", "soltar", "sai-sozinho"] {

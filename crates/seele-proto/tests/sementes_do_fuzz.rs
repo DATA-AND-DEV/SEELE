@@ -227,6 +227,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
                 disco_maximo: 1 << 30,
                 termos: vec![],
                 instalar: None,
+                por_sistema: vec![],
             }),
         }),
     );

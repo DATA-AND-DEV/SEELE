@@ -6140,6 +6140,7 @@ mod o_vocabulario_e_a_versao {
             disco_maximo: 0,
             termos: vec![],
             instalar: None,
+            por_sistema: vec![],
         };
         let pedido = |hash: String, oferta: crate::maquina::OfertaDeMaquina| {
             ServerMessage::PedidoDeMaquina {

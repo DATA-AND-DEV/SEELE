@@ -346,6 +346,7 @@ mod tests {
             disco_maximo: 1024,
             termos: vec![],
             instalar: None,
+            por_sistema: vec![],
         }
     }
 

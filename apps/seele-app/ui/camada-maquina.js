@@ -142,14 +142,22 @@ function linhasDoPedido(pedido) {
     linhas.push(F.pack(String(oferta.pack.algoritmo), String(oferta.pack.hex).slice(0, 16)));
   }
   // **Os dois comandos** (API 8 parte 6): o instalador do loader e o servidor.
-  if (oferta.instalar) {
-    linhas.push(F.instalar([oferta.instalar.comando, ...(oferta.instalar.argumentos ?? [])].join(" ")));
+  // **Os deste computador** (decisão W1): o Rust escolhe, pela regra da
+  // política, o par da entrada de `por_sistema` deste sistema ou o de cima
+  // (`rodar_daqui`, `instalar_daqui`). Mostrar o `rodar` cru da oferta era
+  // dizer `unix_args.txt` no Windows, que roda o `win_args.txt`.
+  const instalar = "instalar_daqui" in pedido ? pedido.instalar_daqui : oferta.instalar;
+  const rodar = "rodar_daqui" in pedido ? pedido.rodar_daqui : oferta.rodar;
+  if (instalar) {
+    linhas.push(F.instalar([instalar.comando, ...(instalar.argumentos ?? [])].join(" ")));
   }
-  if (oferta.rodar) {
-    linhas.push(F.rodar([oferta.rodar.comando, ...(oferta.rodar.argumentos ?? [])].join(" ")));
+  if (rodar) {
+    linhas.push(F.rodar([rodar.comando, ...(rodar.argumentos ?? [])].join(" ")));
   } else {
     linhas.push(F.nadaARodar);
   }
+  const outrosSistemas = Number(pedido.sistemas_com_outros_comandos) || 0;
+  if (outrosSistemas > 0) linhas.push(F.comandosDeOutrosSistemas(outrosSistemas));
   if ((oferta.dominios_do_jogo ?? []).length > 0) {
     linhas.push(F.oJogoBaixaSozinho(oferta.dominios_do_jogo.join(", ")));
   }

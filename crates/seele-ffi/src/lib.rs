@@ -73,16 +73,16 @@ use seele_core::{
 
 pub use types::{
     AberturaDoAudio, ArtefatoOferecidoFfi, Attachment, AttachmentRefusal, CaminhoDeTunel,
-    CaptureDevice, Carimbo, Channel, ChannelWeight, ComandoOferecidoFfi, ConnectionError,
-    ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio, EstadoDoTesteDeMicrofone, Event,
-    ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, HashDeArtefatoFfi, LimitesDeTela,
-    LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
-    NotSavedReason, Notice, NoticeReason, OfertaDeMaquinaFfi, PermissaoDeMicrofone,
-    PermissaoDeTela, Person, PlaybackDevice, PortaDeTunel, Preview, PreviewRefusal, PreviewRules,
-    QuedaDeTunel, RelatorioDeTunel, SaveDestination, SaveRefused, Severity, SignalBand as Band,
-    Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, TermoOferecidoFfi, Transfer,
-    TransmissaoNaSala, Trust, TunelOferecidoFfi, VoiceMode, VoiceRoom, VoiceRoomSync,
-    VolumeRefusal,
+    CaptureDevice, Carimbo, Channel, ChannelWeight, ComandoOferecidoFfi, ComandosDoSistemaFfi,
+    ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
+    EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela,
+    HashDeArtefatoFfi, LimitesDeTela, LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr,
+    Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason, OfertaDeMaquinaFfi,
+    PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, PortaDeTunel, Preview,
+    PreviewRefusal, PreviewRules, QuedaDeTunel, RelatorioDeTunel, SaveDestination, SaveRefused,
+    Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao,
+    TermoOferecidoFfi, Transfer, TransmissaoNaSala, Trust, TunelOferecidoFfi, VoiceMode, VoiceRoom,
+    VoiceRoomSync, VolumeRefusal,
 };
 
 /// Diz que este processo tem tela para pedidos de máquina de jogo: toda

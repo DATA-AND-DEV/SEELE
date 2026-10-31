@@ -41,6 +41,8 @@
 //     os domínios de onde o loader baixa sozinho.
 // 17. (revisão final, M9) a falha de `maquinas_aceitas` aparece na lista, em
 //     frase; e (M2, no caso 1) cada porta vem com o nome do túnel.
+// 18. (Windows, W1) só os comandos deste computador, pelo `por_sistema`, e
+//     quantos outros sistemas têm comandos próprios.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/aceite-da-maquina.cjs
 
@@ -114,10 +116,20 @@ async function caso(motor, numero, prova) {
               ...oferta,
             };
             const daqui = o.artefatos.filter((a) => !(a.plataformas ?? []).length || a.plataformas.includes("mac-aarch64"));
+            // E os comandos como o Rust os escolhe (`comandos_desta_maquina`):
+            // a entrada de `por_sistema` deste sistema, ou o par de cima.
+            const sistemas = o.por_sistema ?? [];
+            const doSistema = sistemas.find((e) => e.plataformas.includes("mac-aarch64"));
+            const comandos = {
+              rodar_daqui: doSistema ? doSistema.rodar ?? null : o.rodar ?? null,
+              instalar_daqui: doSistema ? doSistema.instalar ?? null : o.instalar ?? null,
+              sistemas_com_outros_comandos: sistemas.flatMap((e) => e.plataformas).filter((p) => p !== "mac-aarch64").length,
+            };
             return {
               alvo: "127.0.0.1:7000", mod_id: "x/jogo", mod_nome: "x/jogo", servidor: "srv-1",
               pedido_por: "Fulano", resumo: "resumo-1", pasta: "/home/eu/seele/jogos/x-jogo", mudou: null,
               oferta: o, artefatos_daqui: daqui, de_outros_sistemas: o.artefatos.length - daqui.length,
+              ...comandos,
               ...extra,
             };
           };
@@ -544,6 +556,42 @@ async function caso(motor, numero, prova) {
           ], `${motor}: 16 · ${linhas.join(" | ")}`);
         });
 
+        // 18. (Windows, decisão W1) a oferta do Forge traz o `unix_args.txt`
+        //     em cima e o `win_args.txt` na entrada do Windows: a tela mostra
+        //     só o par deste computador (o Rust escolhe; a bancada, como um
+        //     Mac ARM e depois como um Windows), e diz que outro sistema tem
+        //     comandos próprios. O `rodar` cru da oferta não aparece.
+        await caso(motor, "18", async () => {
+          const unix = { comando: "java/bin/java", argumentos: ["@libraries/net/minecraftforge/forge/1.20.1-47.4.28/unix_args.txt", "nogui"] };
+          const win = { comando: "java/bin/java.exe", argumentos: ["@libraries/net/minecraftforge/forge/1.20.1-47.4.28/win_args.txt", "nogui"] };
+          const instalarWin = { comando: "java/bin/java.exe", argumentos: ["-jar", "forge-installer.jar", "--installServer"] };
+          const oferta = {
+            rodar: unix,
+            instalar: { comando: "java/bin/java", argumentos: ["-jar", "forge-installer.jar", "--installServer"] },
+            por_sistema: [{ plataformas: ["windows-x64"], rodar: win, instalar: instalarWin }],
+          };
+          const ler = async () => pagina.evaluate(() => [...$("maquina-detalhes").children].map((li) => li.innerText));
+          await zerar();
+          await emitirPedido({}, oferta);
+          await esperarTela("Fulano");
+          let linhas = await ler();
+          assert.deepEqual(linhas.filter((l) => /vai rodar/.test(l)), [
+            "antes, para instalar, vai rodar: java/bin/java -jar forge-installer.jar --installServer",
+            "vai rodar: java/bin/java @libraries/net/minecraftforge/forge/1.20.1-47.4.28/unix_args.txt nogui",
+          ], `${motor}: 18 · no Mac: ${linhas.join(" | ")}`);
+          assert.ok(linhas.includes("outro sistema tem comandos próprios, que não rodam aqui"), `${motor}: 18 · ${linhas.join(" | ")}`);
+          await zerar();
+          await emitirPedido({ rodar_daqui: win, instalar_daqui: instalarWin, sistemas_com_outros_comandos: 0 }, oferta);
+          await esperarTela("Fulano");
+          linhas = await ler();
+          assert.deepEqual(linhas.filter((l) => /vai rodar/.test(l)), [
+            "antes, para instalar, vai rodar: java/bin/java.exe -jar forge-installer.jar --installServer",
+            "vai rodar: java/bin/java.exe @libraries/net/minecraftforge/forge/1.20.1-47.4.28/win_args.txt nogui",
+          ], `${motor}: 18 · no Windows: ${linhas.join(" | ")}`);
+          assert.ok(!linhas.some((l) => l.includes("unix_args")), `${motor}: 18 · o unix_args apareceu no Windows`);
+          assert.ok(!linhas.some((l) => /comandos próprios/.test(l)), `${motor}: 18 · ${linhas.join(" | ")}`);
+        });
+
         // 17. (revisão final, M9) `maquinas_aceitas` que falha: a lista diz
         //     a falha em frase, em vez de ficar vazia e calada.
         await caso(motor, "17", async () => {
@@ -560,7 +608,7 @@ async function caso(motor, numero, prova) {
         });
 
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 18, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 19, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

@@ -26,8 +26,8 @@ use std::sync::Arc;
 use seele_proto::control::Validate as _;
 use seele_proto::ids::PersonId;
 use seele_proto::maquina::{
-    AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, HashDeArtefato, OfertaDeMaquina,
-    TermoOferecido, TunelOferecido,
+    AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, ComandosDoSistema, HashDeArtefato,
+    OfertaDeMaquina, TermoOferecido, TunelOferecido,
 };
 use seele_proto::tunel::ProtocoloDeTunel;
 use serde_json::{Map, Value};
@@ -398,6 +398,7 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
             "disco_maximo",
             "termos",
             "instalar",
+            "por_sistema",
         ],
     )?;
     let tuneis = lista(o, "tuneis", "tuneis")?
@@ -442,22 +443,37 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
         None | Some(Value::Null) => None,
         Some(h) => Some(hash(h, "pack")?),
     };
-    let comando = |campo: &str| -> Result<Option<ComandoOferecido>, String> {
-        match o.get(campo) {
-            None | Some(Value::Null) => Ok(None),
-            Some(r) => {
-                let r = objeto(r, campo)?;
-                so_as_chaves(r, &["comando", "argumentos"])?;
-                Ok(Some(ComandoOferecido {
-                    comando: texto(r, "comando", "comando")?,
-                    argumentos: textos(r, "argumentos", "argumentos")?,
-                }))
+    let comando_de =
+        |o: &Map<String, Value>, campo: &str| -> Result<Option<ComandoOferecido>, String> {
+            match o.get(campo) {
+                None | Some(Value::Null) => Ok(None),
+                Some(r) => {
+                    let r = objeto(r, campo)?;
+                    so_as_chaves(r, &["comando", "argumentos"])?;
+                    Ok(Some(ComandoOferecido {
+                        comando: texto(r, "comando", "comando")?,
+                        argumentos: textos(r, "argumentos", "argumentos")?,
+                    }))
+                }
             }
-        }
-    };
-    let rodar = comando("rodar")?;
+        };
+    let rodar = comando_de(o, "rodar")?;
     // O passo de instalar (API 8 parte 6), opcional, com a forma do `rodar`.
-    let instalar = comando("instalar")?;
+    let instalar = comando_de(o, "instalar")?;
+    // Os comandos de alguns sistemas (decisão W1), opcionais: cada entrada
+    // com `plataformas` e o par `rodar`/`instalar` deles.
+    let por_sistema = lista(o, "por_sistema", "por_sistema")?
+        .iter()
+        .map(|e| {
+            let e = objeto(e, "por_sistema")?;
+            so_as_chaves(e, &["plataformas", "rodar", "instalar"])?;
+            Ok(ComandosDoSistema {
+                plataformas: textos(e, "plataformas", "por_sistema_plataformas")?,
+                rodar: comando_de(e, "rodar")?,
+                instalar: comando_de(e, "instalar")?,
+            })
+        })
+        .collect::<Result<_, String>>()?;
     let termos = lista(o, "termos", "termos")?
         .iter()
         .map(|t| {
@@ -483,6 +499,7 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
         disco_maximo: numero(o, "disco_maximo", "disco_maximo")?,
         termos,
         instalar,
+        por_sistema,
     };
     oferta.validate().map_err(|erro| match erro {
         seele_proto::control::ControlError::FieldTooLong { field, .. }
@@ -737,6 +754,55 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    /// **Os comandos de cada sistema chegam do MOD como o fio os leva**
+    /// (decisão W1): a entrada do Windows com o par dela, e a forma e a regra
+    /// recusadas com o nome do campo.
+    #[test]
+    fn a_oferta_traz_os_comandos_de_cada_sistema() {
+        let base = serde_json::json!({
+            "titulo": "Minecraft", "receita": "minecraft", "versao_da_receita": "1",
+            "versao_do_jogo": "1.20.1",
+            "rodar": { "comando": "java/bin/java", "argumentos": ["@libraries/a/unix_args.txt"] },
+            "por_sistema": [{
+                "plataformas": ["windows-x64"],
+                "rodar": { "comando": "java/bin/java.exe", "argumentos": ["@libraries/a/win_args.txt"] },
+                "instalar": { "comando": "java/bin/java.exe", "argumentos": ["-jar", "i.jar"] },
+            }],
+        });
+        let o = oferta_do_json(base.as_object().unwrap()).unwrap();
+        assert_eq!(o.por_sistema.len(), 1);
+        let win = seele_proto::maquina::comandos_para(&o, "windows-x64");
+        assert_eq!(
+            win.rodar.map(|r| r.argumentos[0].as_str()),
+            Some("@libraries/a/win_args.txt")
+        );
+        assert_eq!(
+            win.instalar.map(|r| r.argumentos[1].as_str()),
+            Some("i.jar")
+        );
+        let mexer = |f: fn(&mut serde_json::Value)| {
+            let mut v = base.clone();
+            f(&mut v);
+            oferta_do_json(v.as_object().unwrap()).unwrap_err()
+        };
+        assert_eq!(
+            mexer(|v| v["por_sistema"][0]["sistema"] = "x".into()),
+            "sistema"
+        );
+        assert_eq!(
+            mexer(|v| v["por_sistema"][0]["plataformas"] = serde_json::json!(["windows-arm64"])),
+            "por_sistema_plataformas"
+        );
+        assert_eq!(
+            mexer(|v| v["por_sistema"][0]["plataformas"] = serde_json::json!([])),
+            "por_sistema_plataformas"
+        );
+        assert_eq!(
+            mexer(|v| v["por_sistema"] = "windows".into()),
+            "por_sistema"
+        );
+    }
 
     /// **Os números e os nomes da `v8.json` são os do código** — os tetos por
     /// chamada em `limites`, e o motivo `nao-esta-aqui` e o `sem-maquina` em

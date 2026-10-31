@@ -7,7 +7,9 @@
 
 use std::path::PathBuf;
 
-use seele_proto::maquina::{artefatos_para, AlgoritmoDeHash as AlgoritmoDoFio, OfertaDeMaquina};
+use seele_proto::maquina::{
+    artefatos_para, comandos_para, AlgoritmoDeHash as AlgoritmoDoFio, OfertaDeMaquina,
+};
 
 use super::{AlgoritmoDeHash, ArtefatoAceito, ComandoAceito, HashDeclarado, Politica};
 
@@ -58,8 +60,10 @@ fn host_de(url: &str) -> Option<String> {
 ///   hash e ao tamanho mostrados; os de outros sistemas, em
 ///   `de_outros_sistemas`, recusados pelo nome;
 /// - `origens`: as da oferta, de onde vale uma URL que não é artefato;
-/// - `comando`: o `rodar` da oferta, com os argumentos exatos;
-/// - `instalar`: o passo de instalar da oferta, com os argumentos exatos;
+/// - `comando`: o `rodar` **desta máquina** ([`comandos_para`]: o da entrada
+///   de `por_sistema` que nomeia `plataforma`, ou o de cima), com os
+///   argumentos exatos — o de outro sistema não roda aqui;
+/// - `instalar`: o passo de instalar desta máquina, pela mesma regra;
 /// - `pack`: o hash do pack, que `trazer` exige dos bytes;
 /// - `teto_de_disco`: o `disco_maximo`;
 /// - `raiz`: a pasta do servidor de jogo, que quem chama tira de
@@ -98,16 +102,20 @@ pub fn politica_do_aceite(oferta: &OfertaDeMaquina, raiz: PathBuf, plataforma: &
         // e outro, igual, para outro) é deste: o aceito vale.
         .filter(|url| !artefatos.iter().any(|a| a.url == *url))
         .collect();
+    // **O par desta máquina, e só ele** (Windows, decisão W1): o `rodar` de
+    // outro sistema não é aceito aqui, e o que o aceite prende (R1) é o do
+    // par que roda — `@…/win_args.txt` no Windows, `@…/unix_args.txt` no Mac.
+    let daqui = comandos_para(oferta, plataforma);
     Politica {
         dominios,
         artefatos,
         de_outros_sistemas,
         origens: oferta.origens.clone(),
-        comando: oferta.rodar.as_ref().map(|r| ComandoAceito {
+        comando: daqui.rodar.map(|r| ComandoAceito {
             comando: r.comando.clone(),
             argumentos: r.argumentos.clone(),
         }),
-        instalar: oferta.instalar.as_ref().map(|r| ComandoAceito {
+        instalar: daqui.instalar.map(|r| ComandoAceito {
             comando: r.comando.clone(),
             argumentos: r.argumentos.clone(),
         }),
@@ -177,6 +185,7 @@ mod tests {
                 comando: "java/bin/java".into(),
                 argumentos: vec!["-jar".into(), "fabric-installer.jar".into()],
             }),
+            por_sistema: vec![],
         };
         let p = politica_do_aceite(&oferta, PathBuf::from("/r"), "mac-aarch64");
         assert_eq!(
@@ -230,6 +239,101 @@ mod tests {
         assert_eq!(p.raiz, PathBuf::from("/r"));
         // Os domínios do jogo são do jogo, e não do `programa`.
         assert!(!p.dominios.iter().any(|d| d.contains("sessionserver")));
+    }
+
+    /// **O par que roda é o desta máquina, e é ele que o aceite prende**
+    /// (decisão W1): a oferta do Forge traz o `unix_args.txt` em cima e o
+    /// `win_args.txt` na entrada do Windows. No Windows, a política aceita e
+    /// prende o do Windows (pela caixa e pela barra do Windows também); no
+    /// Mac, o de cima. O `@arquivo` do outro sistema não é aceito em nenhum.
+    #[test]
+    fn a_politica_aceita_e_prende_o_par_deste_sistema() {
+        use crate::programa::caminho::{dentro_da_raiz, tests::tempfile_simples::Pasta};
+        use crate::programa::reservado::{Escrita, Presos};
+        use crate::programa::Recusa;
+        use seele_proto::maquina::ComandosDoSistema;
+
+        const UNIX: &str = "@libraries/net/minecraftforge/forge/1.20.1-47.4.28/unix_args.txt";
+        const WIN: &str = "@libraries/net/minecraftforge/forge/1.20.1-47.4.28/win_args.txt";
+        let comando = |c: &str, args: &[&str]| ComandoOferecido {
+            comando: c.into(),
+            argumentos: args.iter().map(|a| (*a).to_owned()).collect(),
+        };
+        let oferta = OfertaDeMaquina {
+            titulo: "Minecraft com mods".into(),
+            receita: "minecraft".into(),
+            versao_da_receita: "1".into(),
+            versao_do_jogo: "1.20.1".into(),
+            tuneis: vec![],
+            artefatos: vec![],
+            pack: None,
+            origens: vec![],
+            dominios_do_jogo: vec![],
+            rodar: Some(comando("java/bin/java", &["-Xmx2G", UNIX, "nogui"])),
+            disco_maximo: 0,
+            termos: vec![],
+            instalar: Some(comando(
+                "java/bin/java",
+                &["-jar", "forge-installer.jar", "--installServer"],
+            )),
+            por_sistema: vec![ComandosDoSistema {
+                plataformas: vec!["windows-x64".into()],
+                rodar: Some(comando("java/bin/java.exe", &["-Xmx2G", WIN, "nogui"])),
+                instalar: Some(comando(
+                    "java/bin/java.exe",
+                    &["-jar", "forge-installer.jar", "--installServer"],
+                )),
+            }],
+        };
+        let pasta = Pasta::nova("par-do-sistema");
+        let raiz = std::fs::canonicalize(pasta.caminho()).unwrap();
+
+        let win = politica_do_aceite(&oferta, raiz.clone(), "windows-x64");
+        let args = |p: &Politica| p.comando.as_ref().map(|c| c.argumentos.clone());
+        assert_eq!(
+            win.comando.as_ref().map(|c| c.comando.as_str()),
+            Some("java/bin/java.exe")
+        );
+        assert!(args(&win).unwrap().contains(&WIN.to_owned()));
+        assert!(!args(&win).unwrap().contains(&UNIX.to_owned()));
+        assert_eq!(
+            win.instalar.as_ref().map(|c| c.comando.as_str()),
+            Some("java/bin/java.exe")
+        );
+        let presos = Presos::da_politica(&win);
+        let conferir = |presos: &Presos, texto: &str| {
+            let alvo = dentro_da_raiz(&raiz, texto, false).unwrap();
+            presos.conferir(&raiz, &alvo, texto, Escrita::Troca)
+        };
+        for texto in [
+            "libraries/net/minecraftforge/forge/1.20.1-47.4.28/win_args.txt",
+            "LIBRARIES\\net\\MinecraftForge\\forge\\1.20.1-47.4.28\\WIN_ARGS.TXT",
+            "libraries/net/minecraftforge/forge/1.20.1-47.4.28/win_args.txt. ",
+            "java\\bin\\java.exe",
+        ] {
+            assert!(
+                matches!(
+                    conferir(&presos, texto),
+                    Err(Recusa::ReservadoAoAceite { .. })
+                ),
+                "{texto} passou no Windows"
+            );
+        }
+
+        let mac = politica_do_aceite(&oferta, raiz.clone(), "mac-aarch64");
+        assert_eq!(
+            mac.comando.as_ref().map(|c| c.comando.as_str()),
+            Some("java/bin/java")
+        );
+        assert!(args(&mac).unwrap().contains(&UNIX.to_owned()));
+        assert!(!args(&mac).unwrap().contains(&WIN.to_owned()));
+        assert!(matches!(
+            conferir(
+                &Presos::da_politica(&mac),
+                "libraries/net/minecraftforge/forge/1.20.1-47.4.28/unix_args.txt"
+            ),
+            Err(Recusa::ReservadoAoAceite { .. })
+        ));
     }
 
     #[test]

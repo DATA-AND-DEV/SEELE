@@ -169,4 +169,10 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   o rodar só na pasta do servidor de jogo, e os campos caminho, reservado e
 #   pasta). Conferido em 31/10/2026 no release (`curl` do CLAUDE.md): a mais
 #   nova é a v0.18.3, e a v8 segue sem release.
-ea14781f19cdcf9fa7e67f2b38a9933ea59da7d69357619656d57aa8426e9b10  v8.json
+# - Emenda do Windows (31/10/2026, `desenho/api-8-sobre-0.19`): a oferta pode
+#   trazer `por_sistema` — o par rodar/instalar de alguns sistemas, que
+#   substitui o de cima numa máquina deles (o `win_args.txt` do Forge e do
+#   NeoForge) —, e o `programa.rodar` aceita o par desta máquina. Conferido em
+#   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
+#   v8 segue sem release.
+3be08cca56e3f34ae21d8a8d88cb0a7a2545c0b9e16a3c5d219e67761c4133c5  v8.json

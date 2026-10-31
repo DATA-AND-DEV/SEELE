@@ -22,7 +22,7 @@ pub use seele_core::programa::{
 };
 
 use crate::mods::AceiteDeMaquinaGuardado;
-use crate::{ArtefatoOferecidoFfi, OfertaDeMaquinaFfi};
+use crate::{ArtefatoOferecidoFfi, ComandoOferecidoFfi, OfertaDeMaquinaFfi};
 
 /// O sistema desta máquina, ou `"desconhecida"` num que nenhuma receita
 /// conhece (e então nenhum artefato marcado serve aqui).
@@ -44,6 +44,37 @@ pub fn artefatos_desta_maquina(oferta: &OfertaDeMaquinaFfi) -> (Vec<ArtefatoOfer
         .collect();
     let outros = oferta.artefatos.len() - daqui.len();
     (daqui, outros)
+}
+
+/// **Os comandos que esta máquina roda** (decisão W1): o par da entrada de
+/// `por_sistema` que nomeia este sistema, ou o de cima, e quantos outros
+/// sistemas têm um par próprio. A tela mostra só este par, pela mesma regra
+/// da política ([`seele_core::maquina::comandos_para`]).
+///
+/// # Errors
+///
+/// `"oferta-invalida"`, a oferta que não volta ao núcleo.
+pub fn comandos_desta_maquina(
+    oferta: &OfertaDeMaquinaFfi,
+) -> Result<
+    (
+        Option<ComandoOferecidoFfi>,
+        Option<ComandoOferecidoFfi>,
+        usize,
+    ),
+    &'static str,
+> {
+    let nucleo = oferta.para_o_nucleo()?;
+    let c = seele_core::maquina::comandos_para(&nucleo, esta_plataforma());
+    let ffi = |r: &seele_core::maquina::ComandoOferecido| ComandoOferecidoFfi {
+        comando: r.comando.clone(),
+        argumentos: r.argumentos.clone(),
+    };
+    Ok((
+        c.rodar.map(ffi),
+        c.instalar.map(ffi),
+        c.sistemas_com_outros_comandos,
+    ))
 }
 
 /// **A política do aceite guardado**, na pasta do servidor de jogo dele

@@ -2805,6 +2805,17 @@ pub struct ComandoOferecidoFfi {
     pub argumentos: Vec<String>,
 }
 
+/// O par de comandos de alguns sistemas.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ComandosDoSistemaFfi {
+    /// Os sistemas, no nome das receitas.
+    pub plataformas: Vec<String>,
+    /// O servidor, nesses sistemas.
+    pub rodar: Option<ComandoOferecidoFfi>,
+    /// O passo de instalar, nesses sistemas.
+    pub instalar: Option<ComandoOferecidoFfi>,
+}
+
 /// Um termo que a pessoa aceita junto.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TermoOferecidoFfi {
@@ -2851,6 +2862,11 @@ pub struct OfertaDeMaquinaFfi {
     /// O passo de instalar, antes de `rodar` (o instalador do loader).
     #[serde(default)]
     pub instalar: Option<ComandoOferecidoFfi>,
+    /// Os comandos de alguns sistemas (`OfertaDeMaquina::por_sistema`): o
+    /// par de uma entrada substitui o de cima nos sistemas dela. Ausente num
+    /// aceite guardado antes do campo: nenhum.
+    #[serde(default)]
+    pub por_sistema: Vec<ComandosDoSistemaFfi>,
 }
 
 /// A recusa de máquina de um nome em kebab-case
@@ -2980,7 +2996,30 @@ impl From<&seele_core::maquina::OfertaDeMaquina> for OfertaDeMaquinaFfi {
                 comando: r.comando.clone(),
                 argumentos: r.argumentos.clone(),
             }),
+            por_sistema: oferta
+                .por_sistema
+                .iter()
+                .map(|e| ComandosDoSistemaFfi {
+                    plataformas: e.plataformas.clone(),
+                    rodar: e.rodar.as_ref().map(comando_ffi),
+                    instalar: e.instalar.as_ref().map(comando_ffi),
+                })
+                .collect(),
         }
+    }
+}
+
+fn comando_ffi(r: &seele_core::maquina::ComandoOferecido) -> ComandoOferecidoFfi {
+    ComandoOferecidoFfi {
+        comando: r.comando.clone(),
+        argumentos: r.argumentos.clone(),
+    }
+}
+
+fn comando_do_nucleo(r: &ComandoOferecidoFfi) -> seele_core::maquina::ComandoOferecido {
+    seele_core::maquina::ComandoOferecido {
+        comando: r.comando.clone(),
+        argumentos: r.argumentos.clone(),
     }
 }
 
@@ -3046,6 +3085,15 @@ impl OfertaDeMaquinaFfi {
                 comando: r.comando.clone(),
                 argumentos: r.argumentos.clone(),
             }),
+            por_sistema: self
+                .por_sistema
+                .iter()
+                .map(|e| seele_core::maquina::ComandosDoSistema {
+                    plataformas: e.plataformas.clone(),
+                    rodar: e.rodar.as_ref().map(comando_do_nucleo),
+                    instalar: e.instalar.as_ref().map(comando_do_nucleo),
+                })
+                .collect(),
         };
         oferta.validate().map_err(|_| "oferta-invalida")?;
         Ok(oferta)
@@ -3109,6 +3157,14 @@ mod a_oferta_de_maquina {
                 comando: "java".into(),
                 argumentos: vec!["-jar".into(), "instalador.jar".into()],
             }),
+            por_sistema: vec![seele_core::maquina::ComandosDoSistema {
+                plataformas: vec!["windows-x64".into()],
+                rodar: Some(ComandoOferecido {
+                    comando: "java/bin/java.exe".into(),
+                    argumentos: vec!["@libraries/x/win_args.txt".into()],
+                }),
+                instalar: None,
+            }],
         }
     }
 
@@ -3124,6 +3180,11 @@ mod a_oferta_de_maquina {
         let json = serde_json::to_string(&ida).unwrap();
         let volta: OfertaDeMaquinaFfi = serde_json::from_str(&json).unwrap();
         assert_eq!(volta.para_o_nucleo().unwrap(), oferta);
+        // Um aceite guardado antes do `por_sistema` se lê, sem par nenhum.
+        let mut antigo: serde_json::Value = serde_json::from_str(&json).unwrap();
+        antigo.as_object_mut().unwrap().remove("por_sistema");
+        let antigo: OfertaDeMaquinaFfi = serde_json::from_value(antigo).unwrap();
+        assert!(antigo.por_sistema.is_empty());
     }
 
     #[test]
