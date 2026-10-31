@@ -14,6 +14,8 @@
   if (document.documentElement.dataset.casca !== "larga") return;
   // A marca para quem monta a entrada depois (`composicao-0174.js`), sem ler a da raiz.
   globalThis.CASCA_LARGA = true;
+  // A espera da portaria volta pela lista deste navegador (`camada-sair-da-espera.js`).
+  CASCA.esperaNoAparelho = true;
 
   // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
   // arquivo não escreve nenhuma.

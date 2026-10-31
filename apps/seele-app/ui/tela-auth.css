@@ -354,6 +354,12 @@
   color: var(--seele-osso-apagado);
   font-family: var(--seele-ui);
 }
+/* «Esperar é normal» (0.19): a primeira coisa que quem espera lê, e a que
+   responde se deu errado. Em osso, e não no apagado das outras. */
+.auth-espera-normal {
+  color: var(--seele-osso);
+  font-weight: 600;
+}
 
 .auth-servidor-cabecalho {
   margin: 0;

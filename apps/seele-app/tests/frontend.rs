@@ -27895,3 +27895,128 @@ fn the_people_list_does_not_write_transmitindo_but_still_says_it() {
         "the word is still written, for the screen reader and the person's modal"
     );
 }
+
+/// **Do clique em HOSPEDAR até a sessão, a janela diz o que está fazendo** (0.19;
+/// pedido do dono: «tela de loading quando clicar em hospedar um server»).
+///
+/// O `hospedar` do Rust leva segundos (a cópia, o servidor e a escada da porta,
+/// com prazos de 1 a 3 s por degrau), e a entrada ficava parada e calada durante
+/// eles. Quatro metades, cada uma calada se se perde: a caixa abre **antes** do
+/// `invoke("hospedar")`; um segundo `hospedar()` volta antes de abrir outra (o
+/// HOSPEDAR do fim da tela ANTES DE HOSPEDAR, a lista e o lançador também
+/// chegam aqui); o primeiro passo fecha com o que o Rust devolveu; e a falha é
+/// dita na caixa, com o que ficou no ar perguntado ao `meu_servidor`. O
+/// comportamento é medido em `bancada/espera-e-carregando.cjs`.
+#[test]
+fn hospedar_diz_cada_passo_e_a_falha_de_cada_um_e_um_por_vez() {
+    let boot = read("ui/tela-boot.js");
+    let corpo = js_function(&boot, "async function hospedar(");
+    let abre = corpo.find("abrirHospedando()").expect("hospedar() não abre a caixa de hospedando");
+    let sobe = corpo.find("invoke(\"hospedar\"").expect("hospedar() não chama o Rust");
+    assert!(abre < sobe, "a caixa abre depois de o servidor subir, e a espera continua calada");
+    let um = corpo.find("if (hospedandoAgora)").expect("hospedar() não se recusa a correr duas vezes");
+    assert!(um < abre, "a recusa do segundo hospedar() vem depois de ele abrir a caixa");
+    let marca = corpo.find("hospedandoAgora = true").expect("hospedar() não marca que está em curso");
+    assert!(um < marca && marca < sobe);
+    let desmarca = corpo.rfind("hospedandoAgora = false").expect("hospedar() nunca devolve a vez");
+    assert!(corpo[..desmarca].contains("finally"), "a vez só volta no `finally`, ou uma falha a prende");
+    let subiu = corpo.find("servidorDeHospedarSubiu(").expect("o passo 1 nunca fecha");
+    assert!(sobe < subiu, "o passo 1 fecha antes de o Rust responder");
+    let falha = corpo.find("catch (falha)").expect("hospedar() perdeu o catch");
+    let dita = &corpo[falha..];
+    assert!(
+        dita.contains("invoke(\"meu_servidor\")") && dita.contains("hospedagemFalhou("),
+        "a falha de hospedar não chega à caixa, ou chega dizendo o que ficou no ar sem perguntar"
+    );
+    assert!(
+        corpo.contains("hospedagemFalhou(\"entrar\""),
+        "a entrada que parou depois de o servidor subir não é dita na caixa"
+    );
+
+    // A caixa não é diálogo de fechar apertando fora: sairia com o servidor
+    // subindo por baixo. E ela tranca o que está atrás.
+    let pagina = read("ui/index.html");
+    let caixa = tag_with_id(&pagina, "hospedando");
+    assert!(!caixa.contains("role=\"dialog\""), "a caixa de hospedando virou diálogo: {caixa}");
+    let camada = read("ui/camada-hospedando.js");
+    assert!(
+        js_function(&camada, "function abrirHospedando(").contains("$(\"tela-boot\").inert = true"),
+        "a entrada continua clicável por baixo da caixa de hospedando"
+    );
+    assert!(
+        js_function(&camada, "function fecharHospedando(").contains("$(\"tela-boot\").inert = false"),
+        "fechar a caixa deixa a entrada inerte"
+    );
+}
+
+/// **Sair de uma espera pendente pergunta antes** (0.19; pedido do dono: «um
+/// aviso quando uma pessoa tentar sair da tela de espera quando aguarda
+/// aprovação, para ela não pensar que deu errado»).
+///
+/// Os caminhos de saída de cada casca passam pela pergunta: o VOLTAR À ENTRADA
+/// e o Esc da `#tela-auth`, e o AGORA NÃO e o ‹ VOLTAR da «ENTRAR EM» do
+/// celular. O padrão é ficar (o foco nasce no CONTINUAR ESPERANDO), a caixa diz
+/// que nada deu errado, e a espera do celular deixou de vestir o vermelho do
+/// erro. A tela de espera diz, ela mesma, que esperar é normal.
+#[test]
+fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
+    let auth = without_comments(&read("ui/tela-auth.js"));
+    assert!(
+        auth.contains("$(\"auth-voltar\").addEventListener(\"click\", sairDaEspera);"),
+        "o VOLTAR À ENTRADA sai da espera sem perguntar"
+    );
+    let sair = js_function(&auth, "function sairDaEspera(");
+    assert!(
+        sair.contains("esperaPendenteNaTela()") && sair.contains("perguntarAntesDeSairDaEspera(\"sair\", voltarParaAEntrada)"),
+        "sair da espera não pergunta antes: {sair}"
+    );
+    let pendente = js_function(&auth, "function esperaPendenteNaTela(");
+    assert!(
+        pendente.contains("dataset.espera === \"pendente\""),
+        "a pergunta vale para toda espera, e diria «nada deu errado» com o servidor fora do ar: {pendente}"
+    );
+    let levar = js_function(&auth, "function levarParaAEspera(");
+    assert!(
+        levar.contains("tela.dataset.espera = recusado ? \"recusada\" : esperandoMesmo ? \"pendente\" : \"tentando\""),
+        "a espera não diz mais em que estado está, e a pergunta não sabe quando vale"
+    );
+
+    let caixa = read("ui/camada-sair-da-espera.js");
+    let perguntar = js_function(&caixa, "function perguntarAntesDeSairDaEspera(");
+    assert!(
+        perguntar.contains("$(\"sair-da-espera-ficar\").focus()") && perguntar.contains("f.nadaErrado"),
+        "a pergunta não nasce em CONTINUAR ESPERANDO, ou não diz que nada deu errado"
+    );
+    let scripts = scripts();
+    assert!(scripts.contains("fecharAoClicarFora(\"sair-da-espera\", continuarEsperando)"));
+
+    let celular = without_comments(&read("ui/celular-entrada.js"));
+    let entrar_em = js_function(&celular, "function entrarEm(");
+    assert!(
+        entrar_em.contains("const sair = naPortaria ? () => perguntarAntesDeSairDaEspera(\"aparelho\", agoraNao) : agoraNao;")
+            && entrar_em.contains("erro: !naPortaria"),
+        "a espera do celular sai sem perguntar, ou volta a vestir o vermelho do erro"
+    );
+    // Só a falha do armazenamento sai direto pelo AGORA NÃO: toda outra saída da
+    // «ENTRAR EM» passa pela pergunta quando há pedido na porta.
+    assert_eq!(
+        entrar_em.matches("agoraNao, \"botao-fantasma\"").count(),
+        1,
+        "um caminho novo da «ENTRAR EM» sai da espera sem perguntar"
+    );
+    assert!(entrar_em.contains("onclick: sair"), "o ‹ VOLTAR do celular sai da espera sem perguntar");
+
+    let frases = read("ui/frases.js");
+    let espera = js_const(&frases, "FRASES_DA_ESPERA");
+    for chave in ["normal:", "nadaErrado:", "sair:", "voltar:", "sairCelular:", "voltarCelular:", "ficar:", "sairMesmo:"] {
+        assert!(espera.contains(chave), "FRASES_DA_ESPERA perdeu `{chave}`");
+    }
+    assert!(
+        espera.to_lowercase().contains("nada deu errado") && espera.contains("não cancela o pedido"),
+        "a pergunta deixou de dizer que nada deu errado e que sair não cancela o pedido"
+    );
+    assert!(
+        auth.contains("$(\"auth-espera-normal\").textContent = FRASES_DA_ESPERA.normal;"),
+        "a tela de espera não diz mais que esperar é normal"
+    );
+}

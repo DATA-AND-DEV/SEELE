@@ -489,6 +489,10 @@ async function passaDoTeto(campo, texto) {
 //     o `li` e veste a mesma sala sempre do mesmo jeito: a reconciliação casa
 //     os filhos pela etiqueta e pela primeira classe, e um feitio que mudasse a
 //     cada quadro trocaria os nós. Uma chamada só, e no desktop não faz nada.
+//   - `esperaNoAparelho`: a sala de espera da portaria volta pela lista do
+//     aparelho (as cascas do navegador, onde o endereço sozinho não abre
+//     conexão), e não pelo link ou endereço neste computador. Só muda a frase
+//     de `perguntarAntesDeSairDaEspera` (0.19).
 //   (O `detalhesNaLinha` saiu na 0.19: a linha da pessoa não mostra mais o
 //   `pessoa.detalhes` em casca nenhuma; o lugar dele é a ficha da pessoa,
 //   `fichaDaPessoa` no tela-sessao.js, nas duas.)
@@ -504,6 +508,7 @@ const CASCA = Object.seal({
   entradaDireta: (_veredito, _deOnde) => null,
   oferecerLinkDoNavegador: null,
   vestirASala: (_item, _sala, _snapshot) => {},
+  esperaNoAparelho: false,
 });
 
 // --------------------------------------------------------------- o snapshot

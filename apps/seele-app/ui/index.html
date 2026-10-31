@@ -55,6 +55,8 @@
 <link rel="stylesheet" href="camada-toque.css">
 <link rel="stylesheet" href="camada-sala.css">
 <link rel="stylesheet" href="camada-hospedagem.css">
+<link rel="stylesheet" href="camada-hospedando.css">
+<link rel="stylesheet" href="camada-sair-da-espera.css">
 <link rel="stylesheet" href="camada-moderar.css">
 <!-- cargos (cargos-ui) -->
 <link rel="stylesheet" href="cargos.css">
@@ -2529,6 +2531,7 @@
         <div id="auth-espera" class="auth-espera">
           <p id="auth-espera-frase" class="auth-espera-frase"></p>
           <ul class="auth-espera-fatos">
+            <li id="auth-espera-normal" class="auth-espera-normal"></li>
             <li>Esta tela verifica a aprovação automaticamente enquanto estiver aberta.</li>
             <li>Seu pedido fica guardado. Você pode voltar mais tarde ou avisar quem hospeda por outro canal.</li>
           </ul>
@@ -5141,6 +5144,65 @@
   </div>
 </div>
 
+<!--
+  **Hospedando** (0.19; `camada-hospedando.js`). Do clique em HOSPEDAR até a
+  sessão aparecer, a janela dizia nada: a entrada ficava parada, com o HOSPEDAR
+  AQUI apagado, durante o `hospedar` inteiro (cópia, servidor e a porta do
+  roteador, segundos). Esta caixa diz o que está acontecendo, em dois passos —
+  os dois que a janela vê fechar —, e vira a falha dita quando um deles falha.
+
+  Não é diálogo: não há o que responder enquanto anda, e apertar fora não a
+  fecha (ela sairia com o servidor subindo por baixo). Abaixo da porta (25), do
+  nome (26) e do aceite dos MODs (27), que podem abrir no meio da entrada e
+  são perguntas: elas passam por cima. O que está atrás fica `inert`.
+-->
+<div id="hospedando" class="camada-hospedando" hidden>
+  <div id="hospedando-caixa" class="hospedando-caixa" role="group" tabindex="-1" aria-labelledby="hospedando-titulo" aria-busy="true">
+    <div class="hospedando-cabeca">
+      <svg class="hospedando-logo" viewBox="0 0 96 96" width="24" height="24" aria-hidden="true" focusable="false"><rect class="hospedando-logo-cheio" x="12" y="12" width="24" height="24"/><rect class="hospedando-logo-vazio" x="62" y="62" width="20" height="20"/><path class="hospedando-logo-traco" d="M34 34L62 62"/></svg>
+      <span id="hospedando-rotulo" class="hospedando-rotulo"></span>
+    </div>
+    <h2 id="hospedando-titulo" class="hospedando-titulo"></h2>
+    <ol id="hospedando-passos" class="hospedando-passos" role="status" aria-live="polite">
+      <li id="hospedando-subir" class="hospedando-passo" data-estado="andando">
+        <span id="hospedando-subir-nome" class="hospedando-passo-nome"></span>
+        <span id="hospedando-subir-detalhe" class="hospedando-passo-detalhe"></span>
+      </li>
+      <li id="hospedando-entrar" class="hospedando-passo" data-estado="antes">
+        <span id="hospedando-entrar-nome" class="hospedando-passo-nome"></span>
+        <span id="hospedando-entrar-detalhe" class="hospedando-passo-detalhe"></span>
+      </li>
+    </ol>
+    <p id="hospedando-erro" class="hospedando-erro" role="alert" hidden></p>
+    <p id="hospedando-nota" class="hospedando-nota"></p>
+    <div class="hospedando-acoes">
+      <button id="hospedando-fechar" type="button" class="botao" hidden></button>
+    </div>
+  </div>
+</div>
+
+<!--
+  **Sair da sala de espera** (0.19; `camada-sair-da-espera.js`). Quem espera a
+  aprovação de quem hospeda e aperta para sair lê, antes, que nada deu errado e
+  o que sair faz com o pedido (não o cancela: ADR 0030). O foco nasce no
+  CONTINUAR ESPERANDO; Esc e apertar fora também continuam esperando.
+-->
+<div id="sair-da-espera" class="camada-sair-da-espera" role="alertdialog" aria-modal="true"
+     aria-labelledby="sair-da-espera-titulo" aria-describedby="sair-da-espera-itens" hidden>
+  <div class="sair-espera-caixa">
+    <div class="sair-espera-cabeca">
+      <svg class="sair-espera-logo" viewBox="0 0 96 96" width="24" height="24" aria-hidden="true" focusable="false"><rect class="sair-espera-logo-cheio" x="12" y="12" width="24" height="24"/><rect class="sair-espera-logo-vazio" x="62" y="62" width="20" height="20"/><path class="sair-espera-logo-traco" d="M34 34L62 62"/></svg>
+      <span id="sair-da-espera-rotulo" class="sair-espera-rotulo"></span>
+    </div>
+    <h2 id="sair-da-espera-titulo" class="sair-espera-titulo"></h2>
+    <ul id="sair-da-espera-itens" class="sair-espera-itens"></ul>
+    <div class="sair-espera-acoes">
+      <button id="sair-da-espera-sair" type="button" class="botao botao-secundario"></button>
+      <button id="sair-da-espera-ficar" type="button" class="botao"></button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirmações também são abertas nas configurações, sem sessão visível.
      A camada é global para não herdar hidden da conversa. -->
 <div id="moderar" class="camada-moderar" role="dialog" aria-modal="true"
@@ -5501,6 +5563,8 @@
 <script src="camada-toque.js"></script>
 <script src="camada-sala.js"></script>
 <script src="camada-hospedagem.js"></script>
+<script src="camada-hospedando.js"></script>
+<script src="camada-sair-da-espera.js"></script>
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>

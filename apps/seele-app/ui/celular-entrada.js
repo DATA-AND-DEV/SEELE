@@ -278,8 +278,14 @@
       iniciar();
     });
 
+    // **Uma batida na portaria não é erro** (0.19): o pedido está na porta do
+    // servidor, e esperar é o caminho de toda pessoa nova. O aviso é o laranja
+    // do que se lê, e não o vermelho da falha — e sair dele pergunta antes,
+    // dizendo que o pedido continua (`camada-sair-da-espera.js`).
+    const naPortaria = desfecho?.erro === "espera-de-admissao";
+    const sair = naPortaria ? () => perguntarAntesDeSairDaEspera("aparelho", agoraNao) : agoraNao;
     const avisoDoDesfecho = desfecho && desfecho.erro && aviso(fraseDoDesfecho(desfecho), {
-      erro: true,
+      erro: !naPortaria,
       extra: desfecho.erro === "recusado" && desfecho.razao !== AINDA_NAO_NO_NAVEGADOR && desfecho.razao
         && h("p", { class: "cel-entrada-razao", text: MOTIVOS[desfecho.razao] ?? desfecho.razao }),
     });
@@ -308,16 +314,16 @@
         corpo.append(nota);
       }, "botao botao-secundario"));
       if (lido.podeInstalar) acoes.push(botao(e.instalar, () => identidade.instalar(), "botao botao-secundario"));
-      acoes.push(botao(f.agoraNao, agoraNao, "botao-fantasma"));
+      acoes.push(botao(f.agoraNao, sair, "botao-fantasma"));
     } else if (podeEntrar) {
       acoes.push(botao(f.entrar, iniciar));
-      acoes.push(botao(f.agoraNao, agoraNao, "botao-fantasma"));
+      acoes.push(botao(f.agoraNao, sair, "botao-fantasma"));
     } else {
-      acoes.push(botao(f.servidores, agoraNao, "botao-fantasma"));
+      acoes.push(botao(f.servidores, sair, "botao-fantasma"));
     }
 
     mostrar([
-      h("button", { class: "cel-entrada-voltar", type: "button", onclick: agoraNao }, h("span", { "aria-hidden": "true", text: "‹ " }), h("span", { text: FRASES_DAS_SESSOES.voltar })),
+      h("button", { class: "cel-entrada-voltar", type: "button", onclick: sair }, h("span", { "aria-hidden": "true", text: "‹ " }), h("span", { text: FRASES_DAS_SESSOES.voltar })),
       titulo(f.titulo, " ", h("span", { class: "cel-entrada-endereco", text: lido.endereco ? `${lido.endereco}?` : "" })),
       avisoDoDesfecho,
       avisoDoEstado,
@@ -547,6 +553,8 @@
   // O registro da conexão (DETALHES DA CONEXÃO, um `<details>` fechado no
   // desktop) fica aberto na entrada direta: é nele que o `inserirPlug` escreve
   // a falha, e sem o aperto não há outro lugar na tela onde ela apareça.
+  // A espera da portaria volta pela lista deste aparelho (`camada-sair-da-espera.js`).
+  CASCA.esperaNoAparelho = true;
   CASCA.entradaDireta = (veredito) => {
     if (!(veredito === "Known" || veredito?.FirstContactVerified)) return null;
     document.querySelector("#tela-auth .auth-aperto").open = true;

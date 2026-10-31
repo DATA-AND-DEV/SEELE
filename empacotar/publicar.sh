@@ -1427,6 +1427,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/aviso-antes-de-atualizar.cjs
     uma_bancada node apps/seele-app/bancada/copia-antes-de-converter.cjs
     uma_bancada node apps/seele-app/bancada/hospedar-com-servidor-no-ar.cjs
+    uma_bancada node apps/seele-app/bancada/espera-e-carregando.cjs
     uma_bancada node apps/seele-app/bancada/diagnostico-0151.cjs
     uma_bancada node apps/seele-app/bancada/estado-por-sessao.cjs
     uma_bancada node apps/seele-app/bancada/palco-na-troca-de-vista.cjs
