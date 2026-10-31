@@ -353,7 +353,7 @@ const REGIOES = [
       const achar = () => document.querySelector('li.pessoa-apresentada[data-apresentada-por="mod/linha"]');
       // 0.19: a linha não expande; o apelido verificável e o MODERAR moram na
       // ficha da pessoa, que o «⋯» do produto abre.
-      const apelidoDe = () => document.querySelector("#ficha-pessoa :is(.ficha-nome, .perfil-cartao-apelido)");
+      const apelidoDe = () => document.querySelector("#ficha-pessoa :is(#ficha-pessoa-titulo, .ficha-nome, .perfil-cartao-apelido)");
       const recolhido = !achar()?.querySelector("details");
       achar().querySelector("button[data-ficha-pessoa]").click();
       await quadro();
