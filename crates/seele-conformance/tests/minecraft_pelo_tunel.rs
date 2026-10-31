@@ -252,12 +252,18 @@ async fn o_jogo_baixado(
             baixados.push(format!("{} ({} bytes)", f["path"], feito.tamanho));
         }
         for raiz in ["overrides", "server-overrides"] {
-            programa.desempacotar(&PedidoDeDesempacotar {
+            // Um pack sem a pasta não tem o que aplicar (como o MOD:
+            // `nada-sob-a-raiz` não é falha) — o Create Live 5 e o Create
+            // OneBlock não trazem server-overrides.
+            match programa.desempacotar(&PedidoDeDesempacotar {
                 mesclar: true,
                 arquivo: "pack.mrpack".into(),
                 destino: String::new(),
                 raiz: raiz.into(),
-            })?;
+            }) {
+                Ok(_) | Err(seele_core::programa::Recusa::NadaSobARaiz { .. }) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
         let instalar = &plano["oferta"]["instalar"];
         let mut instalador = programa.rodar(&PedidoDeExecucao {
@@ -277,10 +283,7 @@ async fn o_jogo_baixado(
                 None => anyhow::bail!("o instalador sumiu sem fim"),
             }
         };
-        anyhow::ensure!(
-            fim.codigo == Some(0),
-            "o instalador do Fabric saiu com {fim:?}"
-        );
+        anyhow::ensure!(fim.codigo == Some(0), "o instalador saiu com {fim:?}");
         relatorio.push(format!(
             "pack: trazido {} bytes (sha512 {}…), {} arquivo(s) do servidor: {}; overrides e server-overrides; instalador {:?} em {:?}",
             trazido.tamanho,
@@ -292,10 +295,19 @@ async fn o_jogo_baixado(
         ));
     }
     programa.escrever("eula.txt", "eula=true\n")?;
-    programa.escrever(
-        "server.properties",
-        &format!("server-ip=127.0.0.1\nserver-port={porta}\nmotd=\\u00a7bCasa \\u00a76pelo t\\u00fanel\nonline-mode=true\nmax-players=4\n"),
-    )?;
+    let propriedades = format!("server-ip=127.0.0.1\nserver-port={porta}\nmotd=\\u00a7bCasa \\u00a76pelo t\\u00fanel\nonline-mode=true\nmax-players=4\n");
+    programa.escrever("server.properties", &propriedades)?;
+    // Como a metade de máquina do MOD (`configuracoesDoPack`): um pack com o
+    // mod Default Server Properties (o Create Live 5, Forge) troca o
+    // server.properties pelo `default-server.properties` dele na primeira
+    // subida; as chaves desta prova vão nele também (a última vale no Java).
+    if let Ok(deles) = programa.ler("default-server.properties") {
+        programa.escrever(
+            "default-server.properties",
+            &format!("{deles}\n{propriedades}"),
+        )?;
+        relatorio.push("default-server.properties do pack: as chaves da prova por cima".into());
+    }
     Ok((programa, relatorio))
 }
 
