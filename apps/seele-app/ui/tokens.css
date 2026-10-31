@@ -1,19 +1,22 @@
-/* SEELE — tokens de design (direção visual 0.17.4)
-   Fonte: comp v2. Ver ADR 0014 e docs/tokens-achados.md.
+/* SEELE — tokens de design (redesign 0.19)
+   Fonte: o canvas «SEELE — novo design» (claude.ai/artifact/Ttg4Rdvze1WaVMyrHA1Rij).
+   Antes: comp v2, ADR 0014 e docs/tokens-achados.md.
    Célula de terminal: 8px × 16px. Todo espaçamento é múltiplo de célula.
-   Raio de 6px. Sem sombra decorativa. */
+   A 0.19 troca o canto reto por painéis de vidro arredondados (24px), controles
+   em pílula e campos de 16px, sobre um negro quente com grade de pontos. Sem
+   sombra decorativa. Os NOMES ficam: a API de tema dos MODs os lê. */
 
 :root {
   /* ---- cor ----
      O índice ANSI 256 ao lado de cada cor é o mesmo do seele-tokens.json e é o
      que a TUI usa ao degradar de truecolor. Calculado por vizinho mais próximo
      em CIELAB, restrito a 16–255. Contraste medido sobre --seele-negro-painel. */
-  --seele-negro-absoluto: #000000; /* ansi 16 · fundo do app */
-  --seele-negro-painel:   #000000; /* ansi 16 · superfície de painel */
-  --seele-linha:          #252525; /* ansi 235 · borda 1px padrão */
-  --seele-linha-forte:    #626262; /* ansi 241 · painel ativo, réguas, marcas de escala */
-  --seele-osso:           #EAEAEA; /* ansi 255 · texto corrido */
-  --seele-osso-apagado:   #B0B0B0; /* ansi 145 · rótulo secundário, log inativo */
+  --seele-negro-absoluto: #050403; /* ansi 16 · fundo do app, negro quente */
+  --seele-negro-painel:   #0D0C0A; /* ansi 232 · painel opaco (o vidro sobre o fundo) */
+  --seele-linha:          #201E1B; /* ansi 234 · borda 1px padrão */
+  --seele-linha-forte:    #3D3934; /* ansi 237 · controle, painel ativo, réguas */
+  --seele-osso:           #EAE3CF; /* ansi 254 · texto corrido, creme */
+  --seele-osso-apagado:   #A39D92; /* ansi 247 · texto secundário */
   --seele-laranja-nerv:   #F47732; /* ansi 166 · acento primário institucional */
   --seele-laranja-fraco:  #331704; /* ansi 234 · preenchimento laranja */
   --seele-vermelho-alerta:#FF6262; /* ansi 203 · EXCLUSIVO alerta e queda de conexão */
@@ -54,7 +57,7 @@
      custa de contraste"): sob o véu isto entrega 4,97:1, e dentro da faixa que
      desce, 4,81:1. Uma cor escolhida para bater 4,5:1 no vácuo chegaria à tela
      abaixo de AA nas duas condições em que a tela de fato é vista. */
-  --seele-rotulo-painel:  #8A8A8A;   /* ansi 102 · rótulo miúdo 9–10px · 5,52:1 AA */
+  --seele-rotulo-painel:  #8A847A;   /* ansi 102 · rótulo miúdo · 5,1:1 AA sobre o painel */
 
   /* O mesmo papel, uma camada acima — V02 da validação visual de 20/09/2026:
      «texto secundário pequeno e fraco».
@@ -71,7 +74,7 @@
      mudaria também o rótulo sob a varredura, que é justamente onde o número
      foi escolhido. Dois papéis parecidos em duas condições diferentes são dois
      tokens. */
-  --seele-rotulo-claro:   #B0B0B0;   /* ansi 144 · rótulo miúdo em camada · 6,82:1 AA */
+  --seele-rotulo-claro:   #A39D92;   /* ansi 247 · rótulo miúdo em camada · 7,1:1 AA */
 
   /* Preenchimento de bloco em carga — o polígono MAGI que ainda não acendeu.
      `#2B0F05`, e não `laranja-fraco #331704`: o comp v2 escureceu este valor
@@ -91,23 +94,23 @@
   --seele-sync-critico:   var(--seele-vermelho-alerta);/* < 60  */
 
   /* ---- tipografia ---- */
-  --seele-display: "Saira Condensed", "Arial Narrow", sans-serif; /* cartelas, cabeçalhos */
+  --seele-display: "Inter Tight", "Inter", "Helvetica Neue", Arial, sans-serif; /* títulos */
   --seele-mono: var(--seele-pilha-mono); /* todo dado */
 
   /* As duas pilhas que existem, nomeadas para poderem ser escolhidas.
      A API de tema deixa um MOD trocar `--seele-mono` entre elas, na sessão e
      só nela: escolha, e não família livre — a escala de tipo daqui é medida, e
      uma família qualquer move tamanho, entrelinha e contraste de uma vez. */
-  --seele-pilha-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --seele-pilha-sans: "Saira Condensed", "Helvetica Neue", Arial, sans-serif;
+  --seele-pilha-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --seele-pilha-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
   --seele-jp: "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif; /* acento em kanji */
 
   --seele-cartela: 700;   /* peso de cartela */
-  --seele-tracking-cartela: 0.02em;
-  --seele-tracking-rotulo: 0.04em;
+  --seele-tracking-cartela: -0.045em; /* Inter Tight fechada, como no canvas */
+  --seele-tracking-rotulo: 0.12em;
 
   --seele-t-cartela: 56px;
-  --seele-t-titulo: 28px;
+  --seele-t-titulo: 34px;
   --seele-t-secao: 18px;
   --seele-t-corpo: 15px;
   --seele-t-dado: 14px;
@@ -142,8 +145,31 @@
   /* ---- borda ---- */
   --seele-b: 1px;
   --seele-b-forte: 2px;
-  --seele-raio: 6px;
+  --seele-raio: 16px;          /* campo, cartão pequeno, caixa de código */
+  --seele-raio-painel: 24px;   /* painel de vidro */
+  --seele-raio-cartao: 18px;   /* linha de lista em cartão */
+  --seele-raio-icone: 12px;    /* avatar quadrado, ícone de servidor */
+  --seele-raio-miudo: 8px;     /* tecla, selo pequeno */
+  --seele-raio-pilula: 999px;  /* botão, chip, aba */
   --seele-sombra: none;
+
+  /* ---- vidro (0.19) ----
+     O painel do canvas é branco a 3% sobre o negro, com borda a 7%: a grade
+     de pontos aparece por trás. Translúcidos de propósito; quem precisa de
+     opaco (o contraste medido) usa `negro-painel`. */
+  --seele-vidro:            rgba(255, 255, 255, 0.03);
+  --seele-vidro-borda:      rgba(255, 255, 255, 0.07);
+  --seele-controle:         rgba(255, 255, 255, 0.04);
+  --seele-controle-borda:   rgba(255, 255, 255, 0.12);
+  --seele-controle-hover:   rgba(255, 255, 255, 0.08);
+  --seele-campo:            rgba(0, 0, 0, 0.55);
+  --seele-campo-borda:      rgba(255, 255, 255, 0.14);
+  --seele-grade-pontos:     rgba(255, 255, 255, 0.045);
+  --seele-tinta-no-acento:  #1A0A04; /* texto sobre o laranja cheio */
+  --seele-laranja-claro:    #FFB48A; /* texto de chip laranja */
+  --seele-laranja-hover:    #FFA070;
+  --seele-azul-claro:       #9CCBF5; /* texto de chip azul */
+  --seele-vermelho-claro:   #FFC9C9; /* texto de botão de perigo */
 }
 
 /* specs/07: movimento é diagnóstico, nunca decorativo. */
@@ -164,7 +190,8 @@
   --seele-border: var(--seele-linha);
   --seele-control-border: var(--seele-linha-forte);
   --seele-accent: var(--seele-laranja-nerv);
-  --seele-selected: #101010;
+  --seele-selected: #1A1814;
+  --seele-ui: var(--seele-pilha-sans); /* texto de interface (0.19) */
   --seele-alert: var(--seele-vermelho-alerta);
   --seele-radius: var(--seele-raio);
   --seele-header-height: 64px;

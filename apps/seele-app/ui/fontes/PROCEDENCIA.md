@@ -1,65 +1,96 @@
-# Procedência das três faces
+# Procedência das quatro faces
 
 O ADR 0019 recusou npm para não carregar uma árvore de dependências que ninguém
 auditou. Fonte que chega à mão obedece à mesma regra: cada arquivo aqui tem
 origem nomeada, versão, licença lida e resumo conferível. Nada veio de CDN, e
 nada veio de "o que o Google Fonts servia naquele dia".
 
-As três são **SIL Open Font License 1.1**. Não foi presumido: o texto de licença
-de cada pacote baixado está ao lado, e o registro `name` ID 13 de cada `.woff2`
-publicado repete a mesma frase.
+A 0.19 trocou Saira Condensed e IBM Plex Mono (registradas nas versões
+anteriores deste arquivo, no histórico do git) por Inter, Inter Tight e
+JetBrains Mono. Noto Sans JP ficou: `base.css` ainda tem `.kanji` e `tokens.css`
+ainda declara `--seele-jp`.
 
-## Saira Condensed — 500, 700, 900
+As quatro são **SIL Open Font License 1.1**. Não foi presumido: o texto de
+licença de cada pacote baixado está ao lado, e o registro `name` ID 13 de cada
+`.woff2` publicado repete a mesma frase.
 
-| | |
-|---|---|
-| Origem | <https://github.com/Omnibus-Type/Saira> |
-| Commit | `1916f2a575479b626238d9842126e63aa208eebf` ("generated fonts 1.101") |
-| Versão da face | `Version 1.101; ttfautohint (v1.8.3)` |
-| Licença | SIL OFL 1.1 · `LICENCA-saira-condensed.txt` |
-| Direitos | Copyright 2020 The Saira Project Authors, com Reserved Font Name "Saira" |
-
-O repositório não publica *release* nem *tag*: o que existe de nomeado é o
-commit de build, cuja mensagem é a própria versão (`1.101`), e é o que a tabela
-`name` das faces confirma. Baixado por caminho fixo no commit, nunca por `master`:
-
-```
-https://raw.githubusercontent.com/Omnibus-Type/Saira/1916f2a575479b626238d9842126e63aa208eebf/Saira/fonts/ttf/SairaCondensed-{Medium,Bold,Black}.ttf
-https://raw.githubusercontent.com/Omnibus-Type/Saira/1916f2a575479b626238d9842126e63aa208eebf/OFL.txt
-```
-
-SHA-256 do que foi baixado:
-
-```
-9aced533b166bdeb432764f9231a58bcaf4b4db14ba4c525d0af8f8663c08c75  SairaCondensed-Medium.ttf
-647c3a2f6183d1d4908c0edf8fff4f5e0c4a1854f2303f4d93f1cc3dd2a1c0d3  SairaCondensed-Bold.ttf
-15e16fff1dd71a1b7de193d5f017cccdac0b5c416b9e5ecc905bca3aae4a3f9e  SairaCondensed-Black.ttf
-f2665d4718b452b3818a877191355ac884a6b9b419d35408fe7ee487e9e8f30f  OFL.txt
-```
-
-## IBM Plex Mono — 400, 500, 600
+## Inter — 400, 500, 600
 
 | | |
 |---|---|
-| Origem | <https://github.com/IBM/plex/releases/tag/%40ibm%2Fplex-mono%402.5.0> |
-| Release | `@ibm/plex-mono@2.5.0`, ativo `ibm-plex-mono.zip` |
-| Versão da face | `Version 2.005` |
-| Licença | SIL OFL 1.1 · `LICENCA-ibm-plex-mono.txt` |
-| Direitos | Copyright © 2017 IBM Corp., com Reserved Font Name "Plex" |
-
-Sobre a troca de licença que se atribui ao Plex: **não foi confirmada nesta
-família**. O `LICENSE.txt` do pacote 2.5.0 e o do 1.1.0 são a mesma OFL 1.1, com
-o mesmo cabeçalho de 2017 — a versão anterior foi baixada e lida só para isso.
-Quem for revisar o histórico completo do IBM/plex deve fazê-lo antes de repetir a
-afirmação; aqui vale o que está no arquivo ao lado.
+| Origem | <https://github.com/rsms/inter/releases/tag/v4.1> |
+| Release | `v4.1`, ativo `Inter-4.1.zip` |
+| Versão da face | `Version 4.001;git-9221beed3` |
+| Licença | SIL OFL 1.1 · `LICENCA-inter.txt` (o `LICENSE.txt` do pacote) |
+| Direitos | Copyright 2016 The Inter Project Authors (<https://github.com/rsms/inter>) |
 
 ```
-https://github.com/IBM/plex/releases/download/@ibm/plex-mono@2.5.0/ibm-plex-mono.zip
-6d23f01257663d8cc49a0d64c22ced630b79e0e2a0ac08a0da86e9a38bbc481c  ibm-plex-mono.zip
+https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e  Inter-4.1.zip
 ```
 
-As faces vieram de `ibm-plex-mono/fonts/complete/otf/IBMPlexMono-{Regular,Medium,SemiBold}.otf`
-dentro desse arquivo.
+As faces vieram dos `.woff2` estáticos do próprio pacote, `web/Inter-{Regular,Medium,SemiBold}.woff2`
+(texto, não a variante `Display`):
+
+```
+e06f6b1bc553aaea4e4668023ed0ab0a147129c3107f511bc7d03d361b0ae085  web/Inter-Regular.woff2
+0ff3e94614e1493eb556314fd247ae6c4a85a7783b4cc86be539940cf83f2a48  web/Inter-Medium.woff2
+5cb7103e4e605989afebc03d989c79201e54b21b5183db33981f70db9178a301  web/Inter-SemiBold.woff2
+262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a  LICENSE.txt
+```
+
+## Inter Tight — 600, 700
+
+| | |
+|---|---|
+| Origem | <https://github.com/google/fonts/tree/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/intertight> |
+| Commit | `6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec` do repositório `google/fonts` (`ofl/intertight`) |
+| Fonte declarada | `METADATA.pb` do mesmo commit aponta <https://github.com/rsms/inter-gf-tight> no commit `c194f94c60b569b47876811321f5ef1f0c2614a2` |
+| Versão da face | `Version 3.004` |
+| Licença | SIL OFL 1.1 · `LICENCA-inter-tight.txt` |
+| Direitos | Copyright 2022 The Inter Project Authors (<https://github.com/rsms/inter-tight>) |
+
+O repositório de origem (`rsms/inter-gf-tight`) tem um único commit e nenhuma
+*release*; o que há de nomeado é a versão `3.004` que o Google Fonts incorporou.
+Por isso o download é por caminho fixo no commit do `google/fonts`, nunca por
+`main`. O Google Fonts publica só a fonte **variável**; não existe `.woff2`
+estático de Inter Tight a baixar, então os dois pesos foram instanciados (ver
+Recorte).
+
+```
+https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/intertight/InterTight%5Bwght%5D.ttf
+https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/intertight/OFL.txt
+```
+
+```
+b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f  InterTight[wght].ttf
+50240ab035cf1b6b3307940235481d515c4b6de3ab1fa843dbe59e7892cb9d58  OFL.txt
+```
+
+## JetBrains Mono — 400, 500, 700
+
+| | |
+|---|---|
+| Origem | <https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304> |
+| Release | `v2.304`, ativo `JetBrainsMono-2.304.zip` |
+| Versão da face | `Version 2.304; ttfautohint (v1.8.4.7-5d5b)` |
+| Licença | SIL OFL 1.1 · `LICENCA-jetbrains-mono.txt` (o `OFL.txt` do pacote) |
+| Direitos | Copyright 2020 The JetBrains Mono Project Authors (<https://github.com/JetBrains/JetBrainsMono>) |
+
+```
+https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf  JetBrainsMono-2.304.zip
+```
+
+As faces vieram dos `.woff2` estáticos do pacote,
+`fonts/webfonts/JetBrainsMono-{Regular,Medium,Bold}.woff2`:
+
+```
+a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2  fonts/webfonts/JetBrainsMono-Regular.woff2
+086c48dfbea9ddaff1320f7e09399b8e2924e88ce67453721255db3bdbb5a353  fonts/webfonts/JetBrainsMono-Medium.woff2
+c503cc5ec5f8b2c7666b7ecda1adf44bd45f2e6579b2eba0fc292150416588a2  fonts/webfonts/JetBrainsMono-Bold.woff2
+30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad  OFL.txt
+```
 
 ## Noto Sans JP — 700, 900
 
@@ -83,71 +114,70 @@ https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/16_NotoSansJP.
 
 ## Recorte
 
-`fonttools` 4.63.0. Cada face foi recortada para o que o produto desenha, nunca
-para "o alfabeto todo por via das dúvidas". Comando comum a todas:
+`fonttools` 4.63.0 (com `brotli`). Cada face foi recortada para o que o produto
+desenha, nunca para "o alfabeto todo por via das dúvidas". Comando comum a todas
+as faces novas:
 
 ```
 python -m fontTools.subset <origem> --output-file=<destino> --flavor=woff2 \
-  --name-IDs=0,1,2,3,4,5,6,13,14 --layout-features='*' --desubroutinize <recorte>
+  --name-IDs=0,1,2,3,4,5,6,13,14 --layout-features='*' --desubroutinize \
+  --unicodes='U+0020-007E,U+00A0-00FF,U+0100-017F,U+0394,U+03B1,U+2000-206F,U+2190-21FF,U+2212,U+2248,U+2260,U+2264-2265,U+2318,U+2500-257F,U+2580-259F,U+25A0-25FF'
 ```
 
 `--name-IDs` preserva direitos (0), licença (13) e URL da licença (14): um
-recorte que apaga a licença de dentro do arquivo é um recorte que perde a
-procedência que este documento existe para guardar. `--layout-features='*'`
-mantém `tnum`, que `seele.css` usa em toda métrica.
+recorte que apaga a licença de dentro do arquivo perde a procedência que este
+documento existe para guardar. `--layout-features='*'` mantém `tnum` em Inter e
+Inter Tight (que `seele.css` usa em toda métrica); a JetBrains Mono não tem
+`tnum` porque é monoespaçada, e todo algarismo já é tabular.
 
-### Saira Condensed
+A faixa é a mesma para as três: Latino básico, Latin-1, Latin Extended-A
+(quem escreve não é o produto: apelido, mensagem e endereço são texto de
+terceiros), Pontuação Geral inteira (`U+2000-206F`), setas, traços de caixa,
+blocos e formas geométricas. O resto saiu de leitura: `ui/*.html`, `ui/*.js` e
+`ui/*.css` foram varridos caractere a caractere e o que apareceu fora do ASCII
+foi `§ « ° ± µ · º » × ÷ Δ α – — ‖ • … ‹ › ← ↑ → ↓ ↻ − ≈ ≥ ⋯ ⌕ ⌘ ⌨ ⏻ ─ ┌ ┐ └ ┘ ├ ┤ ┬ █
+░ ▒ ▤ ▶ ▸ ▼ ◂ ○ ◍ ● ◧ ⚙ ⚿ ⤓` mais os acentos do português e o kanji. O kanji é da
+Noto Sans JP, abaixo.
+
+**Nem tudo que a interface desenha existe nas faces** (conferido no `cmap` dos
+arquivos baixados, não no recorte). Caem na fonte do sistema:
+
+| face | caracteres ausentes da própria face |
+|---|---|
+| Inter e Inter Tight | `⋯ ⌕ ⌨ ⏻ ─ ┌ ┐ └ ┘ ├ ┤ ┬ █ ░ ▒ ▤ ▸ ◂ ◍ ◧ ⚙ ⚿` (Inter Tight também `⤓`) |
+| JetBrains Mono | `↻ ⌕ ▤ ◍ ⚙ ⚿ ⤓` |
+
+Os traços de caixa e blocos existem na JetBrains Mono, que é onde o comp os
+desenha (terminal-safe). `⌕ ▤ ◍ ⚙ ⚿ ⤓` não existem em nenhuma das três: qual
+glifo a interface desenha é decisão de desenho, não de empacotamento.
+
+### Inter
+
+Sem instanciação: os três `.woff2` estáticos foram só recortados. O nome interno
+de 500 e 600 é `Inter Medium` / `Inter SemiBold` (como no pacote), irrelevante
+para o CSS, que usa o rótulo do `@font-face`.
+
+### Inter Tight
+
+`InterTight[wght].ttf` (eixo `wght` 100–900) foi instanciado e depois recortado:
 
 ```
---unicodes='U+0020-007E,U+00A0-00FF,U+2013-2014,U+2018-201D,U+2022,U+2026,U+2039-203A,U+2212'
+python -m fontTools.varLib.instancer "InterTight[wght].ttf" wght=600 -o InterTight-600.ttf
+python -m fontTools.varLib.instancer "InterTight[wght].ttf" wght=700 -o InterTight-700.ttf
 ```
 
-Latino básico, Suplemento Latin-1 e a pontuação tipográfica. Nada de blocos,
-setas ou traços de caixa: a face de cartela nunca desenha nenhum deles — e, mais
-importante, **nunca desenha texto de terceiros**. Ela aparece em `.marca`,
-`.boot-marca.fim` e nos números de cartela, todos texto do produto, em
-português. Latin Extended-A ficaria 3 KB por peso mais pesado sem cobrir
-nenhuma tela.
-
-### IBM Plex Mono
-
 ```
---unicodes='U+0020-007E,U+00A0-00FF,U+0100-017F,U+2013-2014,U+2018-201D,U+2022,U+2026,U+2039-203A,U+2212,U+2190-2193,U+2260,U+2264-2265,U+2500-257F,U+2580-259F,U+25A0-25CF'
+105d8676b06529c93acbb794fdf144a4e36cf14c8290964b7c585a02c28874a8  InterTight-600.ttf
+acef01bb3f69abef5b2ffcb022e43726427d6e954090c78f215ca66186e01a77  InterTight-700.ttf
 ```
 
-Esta é a face que carrega o que **a pessoa digita**: corpo de mensagem, apelido,
-endereço de Server, link de convite. Por isso o recorte é generoso onde o da
-Saira é apertado — Latin Extended-A entra porque quem escreve não é o produto.
-O resto saiu de leitura, não de palpite: `ui/index.html`, `ui/seele.css`,
-`ui/seele.js` e `comp v2` foram varridos caractere a
-caractere, e o que apareceu fora do ASCII alfanumérico foi `·  —  –  …  •  →  ←
-↑  ↓  ≥  ≤  −  ×  █  ▓  ▒  ░  ▁▂▃▄▅▆▇  ─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ═ ╞ ╡ ╪  ▸ ◂ ▶ ◀
-▼ ⌘ ● ○ ≡`, mais os acentos do português. Os blocos e os traços de caixa vêm da
-variante terminal-safe do comp, que é desenhada em mono.
+O instanciador fixa `OS/2.usWeightClass` (600, 700) mas **não reescreve o nome**:
+os dois arquivos ainda dizem `Inter Tight` / `Regular` na tabela `name`. É só
+rótulo interno; o peso real é o do `@font-face`.
 
-**Nem tudo que se pediu existe na face.** A faixa `U+25A0-25CF` foi pedida
-inteira e devolveu **um** glifo: `▸ ◂ ▶ ◀ ▼ ▴ ▾ ● ○` não estão no `cmap` do IBM
-Plex Mono. `≡` e `⌘` também não. Isso é ausência **na face**, não recorte do
-subconjunto: o `IBMPlexMono-Regular.otf` 2.005 de onde estas saíram tem 1049
-entradas de `cmap` e exatamente um glifo em `U+25A0-25CF`. Prova pelo contrário:
-`█ ▓ ▒ ░ ─ → · —` foram pedidos pela mesma linha, existem na face e viajam
-embarcados.
+### JetBrains Mono
 
-Seis caracteres, em seis lugares, caem na monoespaçada do sistema — **hoje e
-depois deste commit**:
-
-| caractere | onde | o que desenha |
-|---|---|---|
-| `▸` | `ui/index.html:234` | o prompt de composição |
-| `◂` | `ui/index.html:228` | busca: ocorrência anterior |
-| `▸` | `ui/index.html:230` | busca: próxima ocorrência |
-| `▼` / `▶` | `ui/seele.js:299` | VoiceRoom aberto / fechado |
-| `●` / `○` | `ui/seele.js:311` | pessoa falando / calado |
-| `⌘` | `ui/seele.js:956` | a dica de cópia do convite |
-
-Embarcar a face não conserta nada disto; só trocar o caractere, ou desenhar o
-triângulo, conserta. E qual glifo a interface desenha é decisão de desenho — o
-comp usa estes —, então fica com quem desenha, não com quem empacota a fonte.
+Sem instanciação: três `.woff2` estáticos recortados.
 
 ### Noto Sans JP
 
@@ -176,36 +206,37 @@ máquina tiver à mão.
 
 | arquivo | bytes |
 |---|---|
-| `saira-condensed-500.woff2` | 20 476 |
-| `saira-condensed-700.woff2` | 20 600 |
-| `saira-condensed-900.woff2` | 20 280 |
-| `ibm-plex-mono-400.woff2` | 22 512 |
-| `ibm-plex-mono-500.woff2` | 23 436 |
-| `ibm-plex-mono-600.woff2` | 23 464 |
+| `inter-400.woff2` | 34 044 |
+| `inter-500.woff2` | 34 748 |
+| `inter-600.woff2` | 34 684 |
+| `inter-tight-600.woff2` | 30 572 |
+| `inter-tight-700.woff2` | 30 796 |
+| `jetbrains-mono-400.woff2` | 44 736 |
+| `jetbrains-mono-500.woff2` | 45 608 |
+| `jetbrains-mono-700.woff2` | 46 124 |
 | `noto-sans-jp-700.woff2` | 7 600 |
 | `noto-sans-jp-900.woff2` | 7 656 |
-| **soma das faces** | **146 024** |
-| licenças (3 arquivos) | 13 143 |
+| **soma das faces** | **316 568** |
+| licenças (4 arquivos) | 17 463 |
 
 SHA-256 do que é servido:
 
 ```
-07ae5e4d1fb0d82501d11b4aaff256d870f9f6f815455c62442927de04300f31  saira-condensed-500.woff2
-336e94df8c3b99481a3d0dd9e09f46dfd11872bb5ed0c6de84fc82aa0f514a58  saira-condensed-700.woff2
-6d32b0c617d96e279887ddce0ba72a7ce1324fec372c7b0cd08a4934df6f4c32  saira-condensed-900.woff2
-0d5717a9356bdd3a80def42e110bb9848ce1cb03e06334ba89044025f399f091  ibm-plex-mono-400.woff2
-e297ea941fa09127c597742254f496700bc17bb23794bbc2617f48e7faa0f3c8  ibm-plex-mono-500.woff2
-393dca5c0ef0d22a64995f7e4e5caae0df630473993c51af147c51b5cc6015fb  ibm-plex-mono-600.woff2
+219546bbf0f86b0b617b8de97f957951f01384875bc782bb949df5f0ab0e79b5  inter-400.woff2
+d005f6d5f53e50e6eac71dbda968bfabd9fdf0e4f959b2d2a903d1b111e4ac12  inter-500.woff2
+81bfcbab8bad92d3fe1f8df97e8a1453bac743f0835f6b1f8c9295c6b9e63b34  inter-600.woff2
+cc4cc66612cc0cea97c43078d56b3faa3038d64eb78aeef56b6e2847b29a9d55  inter-tight-600.woff2
+3d0297ab5a8c83cedeadea6e1be4f62cdd249225a79ec98d6b98c7f5924ab73e  inter-tight-700.woff2
+014fb3f5868e907b6f29066ac761edce0e9a374d82c79a11572d30b5fb2ddba9  jetbrains-mono-400.woff2
+4bcc75d5d0f0622921d78e4f8b0cbd7e3a3f7f0c54f3badd5525c0e6174d5dc2  jetbrains-mono-500.woff2
+641880b0fce87c6f335aa4380fed9af040789c2c46eec2fffab42f863e40857e  jetbrains-mono-700.woff2
 4733c5c0a2f39e53ba99838bcbea21ccded48b5e267840e920341c007253e0d4  noto-sans-jp-700.woff2
 b906a1dfda03d82d8b9ca8c37b9701aa264d035b49dbb890aa5ef4c5746a996b  noto-sans-jp-900.woff2
 ```
 
 ## Nome reservado
 
-As três licenças trazem Reserved Font Name, e recortar é tecnicamente produzir
-uma Modified Version. O nome interno foi mantido, que é o que o próprio Google
-Fonts faz ao servir estas mesmas famílias recortadas por faixa. O que importa
-para o CSS é outro nome: o `font-family` de um `@font-face` é rótulo local, e
-`fontes.css` poderia chamá-las de qualquer coisa. Se algum dia isso incomodar,
-o conserto é de uma linha por regra — e nenhuma face foi redesenhada, só teve
-glifos removidos.
+As licenças de Inter, Inter Tight e JetBrains Mono não declaram Reserved Font Name na linha de direitos (conferido); a da Noto Sans JP é a de antes. Recortar e instanciar é tecnicamente
+produzir uma Modified Version, e o nome interno foi mantido. O que importa para o
+CSS é outro nome: o `font-family` de um `@font-face` é rótulo local. Nenhuma face
+foi redesenhada, só teve glifos removidos (e, na Inter Tight, o eixo fixado).

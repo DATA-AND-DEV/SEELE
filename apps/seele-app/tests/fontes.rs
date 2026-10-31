@@ -175,13 +175,13 @@ fn no_shipped_face_file_is_left_unserved() {
 
 #[test]
 fn every_face_carries_the_licence_it_was_given_under() {
-    // All three are SIL OFL 1.1, and the OFL is a licence with a redistribution
+    // All four are SIL OFL 1.1 (the 0.19 faces and the kanji accent), and the OFL is a licence with a redistribution
     // condition: the notice travels with the software. A font is not an asset
     // that arrives without paperwork just because it is binary — ADR 0019
     // refused npm over precisely that reflex.
     let directory = app_dir().join("ui").join("fontes");
 
-    for face in ["saira-condensed", "ibm-plex-mono", "noto-sans-jp"] {
+    for face in ["inter", "inter-tight", "jetbrains-mono", "noto-sans-jp"] {
         let licence = directory.join(format!("LICENCA-{face}.txt"));
         let Ok(text) = std::fs::read_to_string(&licence) else {
             panic!("{face} ships with no licence beside it: {licence:?}");
@@ -195,7 +195,7 @@ fn every_face_carries_the_licence_it_was_given_under() {
 
     let provenance = std::fs::read_to_string(directory.join("PROCEDENCIA.md"))
         .unwrap_or_else(|error| panic!("fontes/PROCEDENCIA.md: {error}"));
-    for face in ["Saira Condensed", "IBM Plex Mono", "Noto Sans JP"] {
+    for face in ["Inter", "Inter Tight", "JetBrains Mono", "Noto Sans JP"] {
         assert!(
             provenance.contains(face),
             "fontes/PROCEDENCIA.md does not record where {face} came from"
