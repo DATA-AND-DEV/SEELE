@@ -1786,6 +1786,7 @@ const FRASES_DA_MAQUINA = Object.freeze({
     "metade-falhou": "a metade de máquina do MOD falhou; veja o registro", "mod-desligado": "o MOD foi desligado no servidor",
     "outro-pedido": "o servidor passou este jogo para outra máquina", "sem-aceite": "o servidor não reconhece mais o seu aceite",
     "servidor-saiu": "você saiu do servidor",
+    "dispensa-desconhecida": "o servidor parou esta máquina por um motivo que este app não conhece; veja o registro",
     "pacote-diferente": "o pacote do MOD não confere com o que você aceitou" }),
   campos: Object.freeze({ titulo: "o nome do jogo", receita: "a receita", versao_da_receita: "a versão da receita",
     versao_do_jogo: "a versão do jogo", tuneis: "as portas", artefatos: "o que se baixa", pack: "o pack",

@@ -1174,7 +1174,7 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
         // pedido vai como `maquina-pedido`, com o apelido no lugar do número, e
         // o aviso é da metade de máquina e de mais ninguém. O fim da sessão
         // passa por aqui também (para as metades dela) e segue para a janela.
-        if maquina::ao_evento(&self.app, carimbo.sessao, &self.alvo, &event) {
+        if maquina::ao_evento(&self.app, carimbo.sessao, carimbo.geracao, &self.alvo, &event) {
             return;
         }
         let na_vista = self.vista.load(Ordering::Acquire) == self.marcas.sessao;
@@ -9041,7 +9041,12 @@ mod habilitar_grava_as_plataformas_do_manifesto {
         let banco = Persistence::open(&Location::Memory).expect("banco");
         let so_app = instalado(r#","plataformas":["app"]"#, "1");
         enable(&banco, &habilitado_de(so_app.clone())).expect("habilitar");
-        let gravada = enabled(&banco).expect("listar")[0].plataformas.clone();
+        let gravada = enabled(&banco)
+            .expect("listar")
+            .first()
+            .expect("o habilitado está na lista")
+            .plataformas
+            .clone();
         assert_eq!(
             serde_json::to_value(gravada).expect("json"),
             serde_json::json!(["app"])
@@ -9050,7 +9055,12 @@ mod habilitar_grava_as_plataformas_do_manifesto {
         let sem_chave = instalado("", "2");
         assert_ne!(so_app.hash, sem_chave.hash);
         enable(&banco, &habilitado_de(sem_chave)).expect("habilitar");
-        let gravada = enabled(&banco).expect("listar")[0].plataformas.clone();
+        let gravada = enabled(&banco)
+            .expect("listar")
+            .first()
+            .expect("o habilitado está na lista")
+            .plataformas
+            .clone();
         assert_eq!(
             serde_json::to_value(gravada).expect("json"),
             serde_json::json!(["app", "navegador"]),
@@ -15700,7 +15710,7 @@ mod a_tela_le_o_que_o_rust_manda {
                 exigencia_vale_na_rede: true,
             })
             .expect("serializa");
-            v["poderes"].take()
+            v.get_mut("poderes").map(serde_json::Value::take).unwrap_or_default()
         };
         assert_eq!(tela(Vec::new()), serde_json::json!([]));
         assert_eq!(

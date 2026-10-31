@@ -1360,10 +1360,46 @@ coisas, nesta ordem.
 **Não entra: quem pediu** (`pedido_por`). A mesma máquina, pedida por outra
 pessoa do servidor, é o mesmo aceite. **Nem a configuração do jogo**: ela não é
 campo da oferta, e o que o jogo lê para se configurar é arquivo da pasta dele,
-que a pessoa que hospeda pode mudar sem pedir de novo ao dono da máquina. O que
-a tela mostra e o que o resumo prende são a mesma lista de propósito: o que a
-tela mostrasse e o resumo não prendesse poderia mudar depois do aceite sem
-invalidá-lo. O aceite guarda o resumo, e não a oferta.
+que a pessoa que hospeda pode mudar sem pedir de novo ao dono da máquina.
+
+**A tela e o resumo não são a mesma lista: o resumo prende mais do que a tela
+mostra, e nunca menos.** A tela mostra o MOD, o jogo e a versão dele, a receita e
+a versão dela, quem pediu e o servidor de jogo, cada porta com o protocolo,
+**quantos** arquivos se baixam, o tamanho somado e de onde (as `origens`, ou os
+hosts das URLs), o comando com os argumentos, os `dominios_do_jogo`, o teto de
+disco com a pasta, e cada termo com a URL. Ela **não** mostra o `pack`, nem o
+nome, a URL, o tamanho e o hash de cada arquivo um a um — e o resumo prende
+todos eles. Tudo o que a tela mostra está no resumo, então nada do que a pessoa
+viu muda depois do aceite sem invalidá-lo; e o que ela não viu um a um também
+não muda calado: trocar o hash de um arquivo, ou o `pack`, pede o aceite de
+novo, e a tela diz qual campo mudou (`o que se baixa`, `o pack`). O aceite
+guarda o resumo, e não a oferta.
+
+O `nome` de cada artefato é um nome de arquivo, e só: letras e dígitos ASCII,
+`.`, `-` e `_`, até 256 bytes, e nem `.` nem `..`. Um nome com `/`, `\` ou
+espaço faz a oferta inteira ser recusada (`oferta-invalida`): ele vira caminho
+na pasta do servidor de jogo, e não pode sair dela.
+
+### Quando o servidor SEELE reinicia
+
+**O livro das máquinas do servidor mora na memória.** Os pedidos pendentes e os
+aceites somem quando o servidor SEELE reinicia, e **nenhum `MaquinaParou` é
+dado por eles**: não há quem o dê, porque o processo que lembrava deles acabou.
+A metade de máquina, do lado de quem hospeda, para com `servidor-saiu` quando a
+sessão cai. Então **a metade de servidor não pode supor que a máquina de antes
+continua de pé depois de subir**: ao subir de novo, peça outra vez
+(`mundo.maquinas.pedir`). Quem já aceitou a mesma oferta, com o mesmo pacote, é
+ligado de novo sem tela.
+
+E o pedido de novo, feito de um momento (`aoAcontecer`), pode não sair: por
+5 s depois de uma recusa automática da mesma pessoa para o mesmo servidor de
+jogo (`sem-tela` ou `so-no-app`), o servidor **descarta** o
+pedido que um momento repete — é a trava contra o laço que o `MaquinaRecusou`
+alimentaria sozinho. Ele não fica guardado para depois: fica no log, e o MOD não
+ouve nada. Um pedido legítimo nesse intervalo (logo depois de a sessão de
+alguém sair e voltar, por exemplo) precisa ser feito de novo depois dos 5 s,
+num momento seguinte, e não num laço apertado. Um pedido vindo de um `aoPedir`
+sempre sai.
 
 ### O que a metade de máquina não tem
 

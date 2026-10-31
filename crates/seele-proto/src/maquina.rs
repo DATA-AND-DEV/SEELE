@@ -214,6 +214,24 @@ fn host(field: &'static str, s: &str) -> Result<(), ControlError> {
     Ok(())
 }
 
+/// **O nome de um artefato é um nome de arquivo, e só.** Ele vira caminho no
+/// disco da máquina (na pasta do servidor de jogo): `/`, `\` ou `..` deixariam
+/// a oferta escrever fora dela. Apertado agora, enquanto o 12 não saiu:
+/// apertar depois seria recusar no fio ofertas que um servidor já manda.
+fn nome_de_arquivo(field: &'static str, s: &str) -> Result<(), ControlError> {
+    check_bounds(field, s.len(), MAX_TEXTO)?;
+    if s.is_empty()
+        || s == "."
+        || s == ".."
+        || !s
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_')
+    {
+        return Err(fora(field));
+    }
+    Ok(())
+}
+
 fn hash(field: &'static str, h: &HashDeArtefato) -> Result<(), ControlError> {
     if h.e_valido() {
         Ok(())
@@ -241,7 +259,7 @@ impl Validate for OfertaDeMaquina {
 
         check_bounds("artefatos", self.artefatos.len(), MAX_ARTEFATOS)?;
         for a in &self.artefatos {
-            texto("artefato_nome", &a.nome, MAX_TEXTO)?;
+            nome_de_arquivo("artefato_nome", &a.nome)?;
             url("artefato_url", &a.url)?;
             if a.tamanho == 0 || a.tamanho > MAX_DISCO {
                 return Err(fora("artefato_tamanho"));
@@ -307,8 +325,12 @@ pub fn resumo_da_oferta(
 ) -> [u8; 32] {
     const ROTULO: &[u8] = b"seele/oferta-de-maquina/1\0";
     let corpo = (mod_id, hash_do_pacote, servidor, oferta);
-    // `to_extend` num `Vec` só falha por falta de memória, que aborta antes.
-    let bytes = postcard::to_extend(&corpo, ROTULO.to_vec()).unwrap_or_default();
+    // Falhar aqui não pode virar um resumo: com `unwrap_or_default` toda oferta
+    // resumia os mesmos bytes vazios, e um aceite valia para qualquer outra.
+    // Um `Vec` como destino só falha sem memória, e então é melhor cair.
+    #[allow(clippy::expect_used)]
+    let bytes = postcard::to_extend(&corpo, ROTULO.to_vec())
+        .expect("codificar a oferta num Vec só falha sem memória; resumir vazio aceitaria qualquer oferta");
     Sha256::digest(&bytes).into()
 }
 
@@ -639,6 +661,39 @@ mod tests {
             mexe(&mut o);
             assert!(o.validate().is_err(), "{nome} passou");
         }
+    }
+
+    /// **O nome do artefato é um nome de arquivo**: nada que saia da pasta do
+    /// servidor de jogo, nem vazio, nem `.`/`..`, nem acima do teto.
+    #[test]
+    fn o_nome_do_artefato_nao_sai_da_pasta() {
+        let com_nome = |nome: &str| {
+            let mut o = oferta_de_exemplo();
+            if let Some(a) = o.artefatos.first_mut() {
+                a.nome = nome.to_owned();
+            }
+            o.validate()
+        };
+        for ruim in [
+            "",
+            ".",
+            "..",
+            "../server.jar",
+            "mods/a.jar",
+            "/etc/passwd",
+            "a\\b.jar",
+            "C:server.jar",
+            "server jar",
+            "servér.jar",
+            "a\u{0}b",
+        ] {
+            assert!(com_nome(ruim).is_err(), "o nome «{ruim}» passou");
+        }
+        let teto = "a".repeat(MAX_TEXTO);
+        for bom in ["server.jar", "fabric-api_0.1.jar", "..a", ".config", teto.as_str()] {
+            assert!(com_nome(bom).is_ok(), "o nome «{bom}» foi recusado");
+        }
+        assert!(com_nome(&"a".repeat(MAX_TEXTO + 1)).is_err());
     }
 
     #[test]

@@ -5143,7 +5143,7 @@ impl Motor {
                     hash,
                     servidor,
                     pedido_por,
-                    oferta: Box::new(oferta),
+                    oferta,
                     resumo,
                 });
                 None
@@ -11642,7 +11642,7 @@ mod a_maquina {
             hash: hash(),
             servidor: SERVIDOR.into(),
             pedido_por: PersonId(3),
-            oferta: oferta(),
+            oferta: Box::new(oferta()),
         }
     }
 

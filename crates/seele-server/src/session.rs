@@ -2906,10 +2906,14 @@ async fn run_session(
                     // `crate::maquinas`; aqui se confere quem fala e se avisa a
                     // metade de servidor pelo barramento (`Event::Maquina`).
                     //
-                    // O aceite inválido **não tem resposta**: quem aceita é quem
-                    // foi chamado, e um aceite sem pedido, de outra pessoa ou de
-                    // outra oferta não tem a quem responder. Fica no log, em
-                    // WARN, porque um cliente honesto nunca o manda.
+                    // O aceite inválido **volta como `MaquinaDispensada {
+                    // SemAceite }`** a esta conexão. Sem resposta, o app — que
+                    // liga a metade de máquina no mesmo ato em que manda o
+                    // aceite — mostrava «servindo» e cada `servir` voltava
+                    // fora-do-aceite, sem dizer por quê. A exceção é o aceite
+                    // repetido do que já vale nesta conexão: dispensá-lo
+                    // derrubaria uma metade que o livro diz aceita. Fica no log,
+                    // em WARN, porque um cliente honesto quase nunca o manda.
                     ClientMessage::AceiteDeMaquina { mod_id, servidor, resumo } => {
                         let aceite = server.maquinas().aceitar(
                             session.person,
@@ -2931,7 +2935,26 @@ async fn run_session(
                                 crate::maquinas::parar_tuneis(server, session.person, &mod_id, &aceita.a_parar);
                             }
                             Err(motivo) => {
-                                tracing::warn!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, ?motivo, "máquina: aceite inválido; nada muda");
+                                let repetido = server.maquinas().ja_aceita_igual(
+                                    session.person,
+                                    connection.stable_id() as u64,
+                                    &mod_id,
+                                    &servidor,
+                                    &resumo,
+                                );
+                                if repetido {
+                                    tracing::warn!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, ?motivo, "máquina: aceite repetido do que já vale nesta conexão; nada muda");
+                                } else {
+                                    tracing::warn!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, ?motivo, "máquina: aceite inválido; dispensada com sem-aceite");
+                                    let resposta = ServerMessage::MaquinaDispensada {
+                                        mod_id,
+                                        servidor,
+                                        motivo: seele_proto::maquina::MotivoDaDispensa::SemAceite,
+                                    };
+                                    if entende_a_mensagem(&resposta, session.protocol_version) {
+                                        escrever!(&resposta).await?;
+                                    }
+                                }
                             }
                         }
                     }
@@ -6463,7 +6486,7 @@ fn translate(
             hash: hash.clone(),
             servidor: servidor.clone(),
             pedido_por: *pedido_por,
-            oferta: (**oferta).clone(),
+            oferta: oferta.clone(),
         }),
         Event::AvisoParaMaquina {
             para,

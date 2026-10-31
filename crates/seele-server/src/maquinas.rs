@@ -243,6 +243,11 @@ pub struct Desligado {
     /// `(quem, servidor)` de cada pedido que esperava resposta: a tela de aceite
     /// de quem foi chamado tem de fechar.
     pub pendentes: Vec<(PersonId, String)>,
+    /// Os túneis de cada máquina que saiu e que nenhuma que ficou cobre.
+    pub a_parar: Vec<(PersonId, Vec<String>)>,
+    /// Ficou máquina aceita do MOD (feita contra o pacote ligado agora): os
+    /// túneis do MOD não podem cair todos de uma vez.
+    pub restam_aceitas: bool,
 }
 
 /// O livro das máquinas.
@@ -516,27 +521,49 @@ impl Maquinas {
         sairam
     }
 
-    /// O MOD foi desligado (ou trocou de pacote): todo pendente e toda máquina
-    /// dele saem. Volta `(quem, servidor)` de cada máquina que operava e de cada
-    /// pedido que esperava resposta, para a dispensa.
-    pub fn mod_desligado(&mut self, mod_id: &str) -> Desligado {
+    /// O MOD foi desligado (`ligado = None`) ou trocou de pacote (`ligado` é o
+    /// hash de agora): todo pendente e toda máquina dele **feitos contra outro
+    /// pacote** saem. Volta `(quem, servidor)` de cada máquina que operava e de
+    /// cada pedido que esperava resposta, para a dispensa.
+    ///
+    /// **O que já foi feito contra o pacote novo fica.** A vigia que chama isto
+    /// vê o conjunto de MODs depois da troca, e entre a troca e ela a metade de
+    /// servidor nova pode já ter pedido — e alguém aceitado. Varrer o MOD
+    /// inteiro por haver uma entrada velha levava também essas, e a pessoa que
+    /// acabou de aceitar o pacote novo era dispensada com `mod-desligado`.
+    pub fn mod_desligado(&mut self, mod_id: &str, ligado: Option<&str>) -> Desligado {
         let mut desligado = Desligado::default();
+        let sai = |m: &String, hash: &String| m == mod_id && Some(hash.as_str()) != ligado;
         self.pendentes.retain(|(m, servidor), p| {
-            if m == mod_id {
+            if sai(m, &p.hash) {
                 desligado.pendentes.push((p.quem, servidor.clone()));
                 false
             } else {
                 true
             }
         });
+        let mut sairam = Vec::new();
         self.aceitas.retain(|(m, servidor), a| {
-            if m == mod_id {
+            if sai(m, &a.hash) {
                 desligado.maquinas.push((a.quem, servidor.clone()));
+                sairam.push(Aceitada {
+                    quem: a.quem,
+                    conexao: a.conexao,
+                    hash: a.hash.clone(),
+                    resumo_hex: a.resumo_hex.clone(),
+                    tuneis: a.tuneis.clone(),
+                });
                 false
             } else {
                 true
             }
         });
+        desligado.restam_aceitas = self.aceitas.keys().any(|(m, _)| m == mod_id);
+        desligado.a_parar = sairam
+            .iter()
+            .map(|a| (a.quem, self.so_desta(a, mod_id)))
+            .filter(|(_, nomes)| !nomes.is_empty())
+            .collect();
         // Quem operava e tinha um pedido novo pendente para o mesmo servidor
         // de jogo recebe uma dispensa só, a da máquina.
         desligado
@@ -749,6 +776,25 @@ impl Maquinas {
         self.aceitas
             .get(&chave(mod_id, servidor))
             .is_some_and(|a| a.quem == quem && a.conexao == conexao)
+    }
+
+    /// `conexao` de `quem` já é a máquina aceita de `(mod_id, servidor)` com
+    /// este mesmo `resumo_hex`: um aceite repetido, que não muda nada.
+    ///
+    /// É o único aceite inválido que não volta como `SemAceite`: dispensar aqui
+    /// derrubaria, no app, a metade que o livro diz valer.
+    #[must_use]
+    pub fn ja_aceita_igual(
+        &self,
+        quem: PersonId,
+        conexao: u64,
+        mod_id: &str,
+        servidor: &str,
+        resumo_hex: &str,
+    ) -> bool {
+        self.aceitas
+            .get(&chave(mod_id, servidor))
+            .is_some_and(|a| a.quem == quem && a.conexao == conexao && a.resumo_hex == resumo_hex)
     }
 
     /// Quem opera a máquina aceita de `(mod_id, servidor)`, se alguém.
@@ -1035,7 +1081,8 @@ pub async fn fechar_as_que_nao_valem_mais(server: &Server) {
         .collect();
     a_desligar.dedup();
     for mod_id in a_desligar {
-        let desligado = server.maquinas().mod_desligado(&mod_id);
+        let ligado = ligados.get(&mod_id).map(String::as_str);
+        let desligado = server.maquinas().mod_desligado(&mod_id, ligado);
         for (quem, servidor) in desligado.pendentes {
             dispensar_o_pendente(
                 server,
@@ -1062,9 +1109,17 @@ pub async fn fechar_as_que_nao_valem_mais(server: &Server) {
         }
         // Desligado, a vigia dos túneis o fecharia de qualquer jeito; trocado de
         // pacote com a porta ainda declarada, não — e o túnel servido pelo
-        // aceite do pacote velho não pode seguir de pé.
-        let fim = server.tuneis().mod_desligado(&mod_id);
-        crate::tuneis::anunciar(server, fim);
+        // aceite do pacote velho não pode seguir de pé. Com máquina do pacote
+        // novo de pé, só caem os túneis das que saíram: os dela são do aceite
+        // que vale.
+        if desligado.restam_aceitas {
+            for (quem, nomes) in &desligado.a_parar {
+                parar_tuneis(server, *quem, &mod_id, nomes);
+            }
+        } else {
+            let fim = server.tuneis().mod_desligado(&mod_id);
+            crate::tuneis::anunciar(server, fim);
+        }
     }
 }
 
@@ -1311,10 +1366,56 @@ mod tests {
         m.aceitar(B, 20, MOD, "mc-1", &resumo("mc-1", &o))
             .expect("B aceita");
         let _ = m.pedir(MOD, HASH, "mc-1", B, GESTORA, &oferta(25566));
-        let mut desligado = m.mod_desligado(MOD);
+        let mut desligado = m.mod_desligado(MOD, None);
         desligado.pendentes.sort();
         assert_eq!(desligado.pendentes, vec![(A, "mc-2".to_owned())]);
         assert_eq!(desligado.maquinas, vec![(B, "mc-1".to_owned())]);
+    }
+
+    /// **A troca de pacote leva só o que foi feito contra o pacote velho.** A
+    /// vigia vê a troca depois de a metade de servidor nova já ter pedido (e
+    /// alguém aceitado): essas entradas são do pacote ligado e ficam, com os
+    /// túneis delas.
+    #[test]
+    fn trocar_de_pacote_nao_leva_o_que_ja_e_do_pacote_novo() {
+        const NOVO: &str = "bb00000000000000000000000000000000000000000000000000000000000000";
+        let resumo_de = |hash: &str, servidor: &str, o: &OfertaDeMaquina| {
+            seele_proto::maquina::resumo_em_hex(&seele_proto::maquina::resumo_da_oferta(
+                MOD, hash, servidor, o,
+            ))
+        };
+        let mut m = Maquinas::default();
+        let velha = oferta(25565);
+        let nova = oferta(25566);
+        // A aceitou mc-1 no pacote velho; B aceitou mc-2 no novo; A tem um
+        // pedido do pacote novo pendente para mc-3, e B um do velho para mc-4.
+        let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &velha);
+        m.aceitar(A, 10, MOD, "mc-1", &resumo_de(HASH, "mc-1", &velha))
+            .expect("A aceita no pacote velho");
+        let _ = m.pedir(MOD, NOVO, "mc-2", B, GESTORA, &nova);
+        m.aceitar(B, 20, MOD, "mc-2", &resumo_de(NOVO, "mc-2", &nova))
+            .expect("B aceita no pacote novo");
+        let _ = m.pedir(MOD, NOVO, "mc-3", A, GESTORA, &nova);
+        let _ = m.pedir(MOD, HASH, "mc-4", B, GESTORA, &velha);
+
+        let desligado = m.mod_desligado(MOD, Some(NOVO));
+        assert_eq!(desligado.maquinas, vec![(A, "mc-1".to_owned())]);
+        assert_eq!(desligado.pendentes, vec![(B, "mc-4".to_owned())]);
+        assert!(desligado.restam_aceitas);
+        assert_eq!(desligado.a_parar, vec![(A, vec!["mc".to_owned()])]);
+        assert_eq!(m.quem_opera(MOD, "mc-2"), Some(B), "a máquina do pacote novo saiu");
+        assert_eq!(
+            m.hashes(),
+            vec![(MOD.to_owned(), NOVO.to_owned())],
+            "o pendente do pacote novo saiu, ou um do velho ficou"
+        );
+
+        // Desligado de vez, tudo sai.
+        let desligado = m.mod_desligado(MOD, None);
+        assert_eq!(desligado.maquinas, vec![(B, "mc-2".to_owned())]);
+        assert_eq!(desligado.pendentes, vec![(A, "mc-3".to_owned())]);
+        assert!(!desligado.restam_aceitas);
+        assert!(m.hashes().is_empty());
     }
 
     /// Quem pode ser chamado é quem tem uma conexão no 12 aberta, e deixa de

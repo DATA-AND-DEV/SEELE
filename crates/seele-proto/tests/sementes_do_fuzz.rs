@@ -197,7 +197,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             hash: "ab".repeat(32),
             servidor: "mc-1".to_owned(),
             pedido_por: seele_proto::ids::PersonId(1),
-            oferta: seele_proto::maquina::OfertaDeMaquina {
+            oferta: Box::new(seele_proto::maquina::OfertaDeMaquina {
                 titulo: "Minecraft".to_owned(),
                 receita: "minecraft-java".to_owned(),
                 versao_da_receita: "1.0.0".to_owned(),
@@ -225,7 +225,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
                 }),
                 disco_maximo: 1 << 30,
                 termos: vec![],
-            },
+            }),
         }),
     );
     controle.insert(

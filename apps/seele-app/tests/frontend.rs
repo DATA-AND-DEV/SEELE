@@ -17137,7 +17137,10 @@ fn plataforma_o_laco_de_carga_pula_o_mod_marcado_como_de_outro_lugar() {
         .split("for (const mod of instalados)")
         .nth(1)
         .expect("o laço de carga de `carregarMods` sumiu");
-    let antes_de_montar = laco.split("montarOMod(").next().unwrap();
+    let antes_de_montar = laco
+        .split("montarOMod(")
+        .next()
+        .expect("`split` sempre dá ao menos um pedaço");
     assert!(
         antes_de_montar.contains("\"so-noutra-plataforma\"")
             && antes_de_montar.contains("continue"),
@@ -25935,7 +25938,10 @@ fn maquina_a_saida_do_pedido_e_dita_e_a_faixa_e_de_toda_tela() {
         .map(|(corpo, _)| corpo.to_owned())
         .expect("a dispensa sumiu de maquina.rs");
     assert!(
-        dispensa.contains("dizer_pedidos_desfeitos(app, &desfeitos, fim)"),
+        // O que a dispensa tira sai de `Maquinas::dispensar` (que sabe quais
+        // motivos levam o pedido), e o que ela tirou vai à tela.
+        dispensa.contains("estado.maquinas.dispensar(&chave, sessao, motivo)")
+            && dispensa.contains("dizer_pedidos_desfeitos(app, &dispensa.desfeitos, dispensa.fim)"),
         "a dispensa tira o pedido pendente e não diz à tela"
     );
     let saiu = rust

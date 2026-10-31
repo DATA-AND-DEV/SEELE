@@ -575,7 +575,7 @@ mod tests {
             hash: "0".repeat(64),
             servidor: "mc-1".into(),
             pedido_por: crate::ids::PersonId(1),
-            oferta: crate::maquina::OfertaDeMaquina {
+            oferta: Box::new(crate::maquina::OfertaDeMaquina {
                 titulo: "t".into(),
                 receita: "r".into(),
                 versao_da_receita: "1".into(),
@@ -588,7 +588,7 @@ mod tests {
                 rodar: None,
                 disco_maximo: 0,
                 termos: vec![],
-            },
+            }),
         };
         assert_eq!(desde(&pedido), 12);
     }

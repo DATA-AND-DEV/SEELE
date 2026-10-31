@@ -2062,10 +2062,6 @@ pub enum ClientMessage {
 }
 
 /// Server to client.
-// `PedidoDeMaquina` carrega a oferta inteira (centenas de bytes) e é rara, uma
-// por pedido; encaixotá-la mudaria a forma que o servidor e o núcleo a
-// constroem para poupar bytes numa mensagem que quase nunca está na pilha.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ServerMessage {
     /// Asks the client to prove who it is.
@@ -2984,7 +2980,11 @@ pub enum ServerMessage {
         /// Quem pediu.
         pedido_por: PersonId,
         /// Tudo o que a pessoa vê antes de aceitar.
-        oferta: crate::maquina::OfertaDeMaquina,
+        // Na caixa porque a oferta tem centenas de bytes e esta mensagem é
+        // rara: por valor, ela inflaria toda `ServerMessage` (e todo evento
+        // que carrega uma). O postcard codifica `Box<T>` igual a `T`, então o
+        // fio não muda.
+        oferta: Box<crate::maquina::OfertaDeMaquina>,
     },
     /// Um aviso da metade de servidor do MOD à máquina. O mesmo teto do
     /// [`Self::ModAviso`].
@@ -6039,12 +6039,12 @@ mod o_vocabulario_e_a_versao {
             disco_maximo: 0,
             termos: vec![],
         };
-        let pedido = |hash: String, oferta| ServerMessage::PedidoDeMaquina {
+        let pedido = |hash: String, oferta: crate::maquina::OfertaDeMaquina| ServerMessage::PedidoDeMaquina {
             mod_id: "a/b".into(),
             hash,
             servidor: "mc-1".into(),
             pedido_por: PersonId(1),
-            oferta,
+            oferta: Box::new(oferta),
         };
         let crua = |m: &ServerMessage| {
             let mut quadro = vec![PROTOCOL_VERSION];

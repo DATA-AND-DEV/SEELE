@@ -274,10 +274,13 @@ fn as_capacidades_por_poder_da_v8_sao_as_do_codigo() {
 
     let v8: serde_json::Value = serde_json::from_str(include_str!("../../../api/v8.json"))
         .expect("a api/v8.json é JSON");
-    let compat = &v8["compatibilidade"];
-    let lista = |valor: &serde_json::Value| -> Vec<String> {
-        valor
-            .as_array()
+    // `get` em vez de índice: uma chave que some vira lista vazia, e a
+    // comparação abaixo reprova com o nome dela em vez de um pânico mudo.
+    let lista = |caminho: &[&str]| -> Vec<String> {
+        caminho
+            .iter()
+            .try_fold(&v8, |v, chave| v.get(*chave))
+            .and_then(serde_json::Value::as_array)
             .map(|itens| {
                 itens
                     .iter()
@@ -296,7 +299,7 @@ fn as_capacidades_por_poder_da_v8_sao_as_do_codigo() {
             .map(str::to_owned)
             .collect();
         a_mais.sort();
-        let mut no_json = lista(&compat["capacidades-por-poder"][nome]);
+        let mut no_json = lista(&["compatibilidade", "capacidades-por-poder", nome]);
         no_json.sort();
         assert_eq!(
             a_mais, no_json,
@@ -319,7 +322,7 @@ fn as_capacidades_por_poder_da_v8_sao_as_do_codigo() {
             .map(|c| (*c).to_owned())
             .collect();
         a_mais.sort();
-        let mut no_json = lista(&compat["capacidades-da-maquina"][nome]);
+        let mut no_json = lista(&["compatibilidade", "capacidades-da-maquina", nome]);
         no_json.sort();
         assert_eq!(
             a_mais, no_json,
@@ -329,7 +332,7 @@ fn as_capacidades_por_poder_da_v8_sao_as_do_codigo() {
 
     // A base é a mesma para todo manifesto, e nenhuma capacidade de tela a toca.
     assert_eq!(
-        lista(&compat["capacidades-da-maquina"]["base"]),
+        lista(&["compatibilidade", "capacidades-da-maquina", "base"]),
         vec!["maquina".to_owned()],
         "capacidades-da-maquina.base da api/v8.json diverge do código"
     );

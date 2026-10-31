@@ -1442,7 +1442,7 @@ mod tests {
             hash: "ab".repeat(32),
             servidor: "mundo".into(),
             pedido_por: PersonId(3),
-            oferta: OfertaDeMaquina {
+            oferta: Box::new(OfertaDeMaquina {
                 titulo: "Minecraft".into(),
                 receita: "minecraft-java".into(),
                 versao_da_receita: "1.0.0".into(),
@@ -1455,7 +1455,7 @@ mod tests {
                 rodar: None,
                 disco_maximo: 0,
                 termos: vec![],
-            },
+            }),
         };
 
         let passos = ligacao.chegou(&do_servidor(&pedido));

@@ -749,7 +749,7 @@ mod hash_de_pasta {
 mod a_metade_de_maquina_do_pacote {
     use super::*;
 
-    /// Um pacote de API 8 com metade de máquina, publicado pelo conteúdo como o
+    /// Um pacote da API deste build com metade de máquina, publicado pelo conteúdo como o
     /// instalador faz. Devolve a pasta de configuração e o hash.
     fn publicar(nome: &str) -> (String, String) {
         let raiz =
@@ -760,11 +760,14 @@ mod a_metade_de_maquina_do_pacote {
         std::fs::create_dir_all(dir.join("maquina")).unwrap();
         std::fs::write(
             dir.join("mod.json"),
-            r#"{"schema": 1, "id": "x/jogo", "version": "1.0.0", "api": 8,
+            format!(
+                r#"{{"schema": 1, "id": "x/jogo", "version": "1.0.0", "api": {api},
                 "repo": "https://github.com/x/jogo", "reach": ["dom"], "state": 1,
                 "client": "cliente/main.js", "plataformas": ["app"], "poderes": ["porta"],
                 "maquina": "maquina/main.js", "server": "servidor.js",
-                "permissoes": [{"acao": "entrar-no-jogo", "nome": "Entrar no jogo", "todos": true}]}"#,
+                "permissoes": [{{"acao": "entrar-no-jogo", "nome": "Entrar no jogo", "todos": true}}]}}"#,
+                api = MOD_API_VERSION
+            ),
         )
         .unwrap();
         std::fs::write(dir.join("cliente/main.js"), "// janela").unwrap();

@@ -105,6 +105,9 @@ pub(crate) struct PedidoRecebido {
     pub(crate) pedido_por: String,
     /// De qual sessão cliente ele veio.
     pub(crate) sessao: u64,
+    /// A ordem de chegada ([`Estado::numerar`]): o que diz, a quem o atende
+    /// numa thread, se ele ainda é o último da chave ou se já foi dispensado.
+    pub(crate) numero: u64,
 }
 
 /// O que fazer com um pedido.
@@ -430,6 +433,10 @@ pub(crate) enum Fim {
     ServidorSaiu,
     /// A metade lançou sem pegar, ou o executor dela morreu.
     MetadeFalhou,
+    /// O servidor dispensou com um motivo que este app não conhece (um
+    /// servidor mais novo). Parar é o lado seguro: seguir servindo seria
+    /// supor que o motivo novo não diz «pare».
+    DispensaDesconhecida,
 }
 
 impl Fim {
@@ -444,6 +451,7 @@ impl Fim {
             Self::SemAceite => "sem-aceite",
             Self::ServidorSaiu => "servidor-saiu",
             Self::MetadeFalhou => "metade-falhou",
+            Self::DispensaDesconhecida => "dispensa-desconhecida",
         }
     }
 
@@ -467,7 +475,11 @@ impl Fim {
             Self::Revogada => Some("revogada"),
             Self::AppFechou => Some("app-fechou"),
             Self::MetadeFalhou => Some("metade-falhou"),
-            Self::ModDesligado | Self::OutroPedido | Self::SemAceite | Self::ServidorSaiu => None,
+            Self::ModDesligado
+            | Self::OutroPedido
+            | Self::SemAceite
+            | Self::ServidorSaiu
+            | Self::DispensaDesconhecida => None,
         }
     }
 
@@ -575,6 +587,21 @@ impl Viva {
             .unwrap_or_else(PoisonError::into_inner)
             .iniciar_de_maquina(fonte, self.capacidades.clone(), dados)
             .map_err(|_| "executor-nao-aceitou-o-codigo")
+    }
+
+    /// **Encerra sem falar com ninguém**: a metade subiu mas o aceite dela
+    /// nunca saiu (ou saiu e foi dispensado antes do código entrar). Sem
+    /// `aoParar` — não há código para ouvi-lo — e sem `MaquinaParada`, porque o
+    /// servidor nunca a teve como máquina.
+    fn descartar(&self) {
+        if self.parando.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        self.executor
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pedir_encerramento();
+        tracing::debug!(mod_id = %self.chave.mod_id, servidor = %self.chave.servidor, instancia = self.numero, "metade de máquina descartada antes de ligar");
     }
 
     /// Ainda não se pediu o fim dela.
@@ -878,6 +905,8 @@ struct ChegadoCedo {
     pedido_por: u64,
     oferta: OfertaDeMaquinaFfi,
     resumo: String,
+    /// A ordem de chegada, dada na thread do enlace ([`Estado::numerar`]).
+    numero: u64,
 }
 
 #[derive(Default)]
@@ -886,6 +915,62 @@ struct Estado {
     chegados_cedo: Vec<ChegadoCedo>,
     ligadas: BTreeMap<Chave, Ligada>,
     proxima: u64,
+    /// **A ordem dos pedidos, dada na thread do enlace.** Cada chegada é
+    /// atendida numa thread (decidir lê o disco), e a `vez` serializa as
+    /// threads mas não as ordena: um pedido mais velho podia escrever por cima
+    /// do diálogo do mais novo, e uma dispensa que chegou depois de um pedido
+    /// podia rodar antes dele — e o diálogo abria para um pedido que já tinha
+    /// acabado. O número é dado aqui, na ordem do fio, e conferido onde o
+    /// pedido vira diálogo ou metade.
+    numero_do_pedido: u64,
+    /// O último pedido de cada chave: `(número, sessão)`.
+    ultimos: BTreeMap<Chave, (u64, u64)>,
+    /// Por `(chave, sessão)`: todo pedido de número menor foi dispensado.
+    cortes: BTreeMap<(Chave, u64), u64>,
+}
+
+impl Estado {
+    /// Um pedido chegou do fio: ele passa a ser o último da chave.
+    fn numerar(&mut self, chave: &Chave, sessao: u64) -> u64 {
+        self.numero_do_pedido = self.numero_do_pedido.saturating_add(1);
+        let numero = self.numero_do_pedido;
+        self.ultimos.insert(chave.clone(), (numero, sessao));
+        numero
+    }
+
+    /// Uma dispensa da chave nesta sessão: os pedidos dela que já chegaram e
+    /// ainda estão numa thread não viram nem diálogo nem metade.
+    fn cortar(&mut self, chave: &Chave, sessao: u64) {
+        let ate = self.numero_do_pedido.saturating_add(1);
+        self.cortes.insert((chave.clone(), sessao), ate);
+    }
+
+    /// O pedido `numero` da chave foi dispensado depois de chegar.
+    fn cortado(&self, chave: &Chave, sessao: u64, numero: u64) -> bool {
+        self.cortes
+            .get(&(chave.clone(), sessao))
+            .is_some_and(|ate| numero < *ate)
+    }
+
+    /// O pedido ainda é o que a chave espera: nenhum mais novo chegou e
+    /// nenhuma dispensa o cortou. Só ele vira diálogo.
+    fn e_o_ultimo(&self, chave: &Chave, sessao: u64, numero: u64) -> bool {
+        self.ultimos.get(chave) == Some(&(numero, sessao)) && !self.cortado(chave, sessao, numero)
+    }
+
+    /// A sessão acabou: a ordem dela não vale mais nada.
+    fn esquecer_sessao(&mut self, sessao: u64) {
+        self.ultimos.retain(|_, (_, s)| *s != sessao);
+        self.cortes.retain(|(_, s), _| *s != sessao);
+    }
+}
+
+/// O que uma `MachineDispensed` tira do registro.
+struct Dispensa {
+    fim: Fim,
+    /// Os pedidos que esperavam a tela, com o resumo de cada um.
+    desfeitos: Vec<(Chave, String)>,
+    vivas: Vec<Arc<Viva>>,
 }
 
 /// **As metades de máquina deste app**: as ligadas e os pedidos que a tela
@@ -951,6 +1036,70 @@ impl Maquinas {
     /// Esta chave está ligada agora?
     fn ligada(&self, chave: &Chave) -> bool {
         self.estado().ligadas.contains_key(chave)
+    }
+
+    /// **O que uma dispensa do servidor tira**, para encerrar e dizer fora do
+    /// cadeado.
+    ///
+    /// `sem-aceite` fala só de uma metade de pé: é a resposta a um aceite que
+    /// o livro não tomou, ou a um pedido de quem não é a máquina, e nunca de
+    /// um pedido pendente — fechar o diálogo aberto de outro pedido da mesma
+    /// chave seria tirar da tela uma pergunta que ainda vale. Um motivo que
+    /// este app não conhece também para a metade (e só ela): seguir servindo
+    /// seria supor que ele não diz «pare». Os outros motivos levam os pedidos
+    /// da chave nesta sessão, inclusive os que ainda estão numa thread.
+    fn dispensar(&self, chave: &Chave, sessao: u64, motivo: &str) -> Dispensa {
+        let conhecido = Fim::da_dispensa(motivo);
+        let fim = conhecido.unwrap_or(Fim::DispensaDesconhecida);
+        let leva_os_pedidos = conhecido.is_some_and(|f| f != Fim::SemAceite);
+        let desfeitos = if leva_os_pedidos {
+            self.estado().cortar(chave, sessao);
+            self.tirar_pendentes(|c, p| c == chave && p.sessao == sessao)
+        } else {
+            Vec::new()
+        };
+        let vivas = self.tirar_ligadas(|c, l| c == chave && l.sessao == sessao);
+        Dispensa {
+            fim,
+            desfeitos,
+            vivas,
+        }
+    }
+
+    /// **O pedido vira o diálogo — se ainda for o último da chave.** A
+    /// conferência, a entrada nos pendentes e o `mostrar` (o `maquina-pedido`)
+    /// acontecem sob o mesmo cadeado que a dispensa toma: ou a dispensa vem
+    /// antes e o diálogo não abre, ou vem depois e acha o pendente para fechar.
+    fn guardar_pendente_se_vale(&self, pedido: PedidoRecebido, mostrar: impl FnOnce()) -> bool {
+        let mut estado = self.estado();
+        if !estado.e_o_ultimo(&pedido.chave, pedido.sessao, pedido.numero) {
+            return false;
+        }
+        estado.pendentes.insert(pedido.chave.clone(), pedido);
+        mostrar();
+        true
+    }
+
+    /// **A metade entra no registro — se o pedido dela não foi dispensado.**
+    /// Antes do `AceiteDeMaquina` sair: a resposta a ele (um `sem-aceite`) pode
+    /// voltar antes de quem liga chegar à linha seguinte, e precisa achar a
+    /// metade aqui para pará-la.
+    fn registrar_se_vale(&self, chave: &Chave, numero: u64, ligada: Ligada) -> bool {
+        let mut estado = self.estado();
+        if estado.cortado(chave, ligada.sessao, numero) {
+            return false;
+        }
+        estado.ligadas.insert(chave.clone(), ligada);
+        true
+    }
+
+    /// **As metades desta sessão de antes de uma reconexão do enlace.** O
+    /// servidor, ao ver a conexão velha cair, tirou o aceite delas do livro
+    /// (`maquinas::saiu`): de pé aqui, a faixa dizia «servindo» e cada
+    /// `servir` voltava fora-do-aceite. O pedido que o servidor reenvia na
+    /// conexão nova, igual ao aceito, liga de novo sem tela.
+    fn tirar_de_geracao_velha(&self, sessao: u64, geracao: u64) -> Vec<Arc<Viva>> {
+        self.tirar_ligadas(|_, l| l.sessao == sessao && l.geracao < geracao)
     }
 }
 
@@ -1069,9 +1218,19 @@ fn sessoes<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<tauri::State<'_, cra
 pub(crate) fn ao_evento<R: tauri::Runtime>(
     app: &AppHandle<R>,
     sessao: u64,
+    geracao: u64,
     alvo: &str,
     evento: &Event,
 ) -> bool {
+    // Todo evento traz a geração do enlace: o primeiro de uma volta nova diz
+    // que a conexão velha caiu, e com ela o aceite das metades de antes.
+    if let Some(estado) = sessoes(app) {
+        let velhas = estado.maquinas.tirar_de_geracao_velha(sessao, geracao);
+        if !velhas.is_empty() {
+            tracing::info!(sessao, geracao, quantas = velhas.len(), "o enlace voltou de uma queda: as metades de máquina de antes param com servidor-saiu");
+            encerrar_e_dizer(app, velhas, Fim::ServidorSaiu);
+        }
+    }
     match evento {
         Event::MachineRequest {
             mod_id,
@@ -1081,16 +1240,6 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
             oferta,
             resumo,
         } => {
-            let chegado = ChegadoCedo {
-                sessao,
-                alvo: alvo.to_owned(),
-                mod_id: mod_id.clone(),
-                hash: hash.clone(),
-                servidor: servidor.clone(),
-                pedido_por: *pedido_por,
-                oferta: (**oferta).clone(),
-                resumo: resumo.clone(),
-            };
             let Some(estado) = sessoes(app) else {
                 return true;
             };
@@ -1101,6 +1250,20 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
             // antes de ela ser esvaziada — nunca depois, onde ficaria para
             // sempre.
             let mut maquinas = estado.maquinas.estado();
+            // O número sai aqui, na thread do enlace e na ordem do fio: é ele
+            // que a thread que atende confere antes de mostrar ou ligar.
+            let numero = maquinas.numerar(&Chave::de(alvo, mod_id, servidor), sessao);
+            let chegado = ChegadoCedo {
+                sessao,
+                alvo: alvo.to_owned(),
+                mod_id: mod_id.clone(),
+                hash: hash.clone(),
+                servidor: servidor.clone(),
+                pedido_por: *pedido_por,
+                oferta: (**oferta).clone(),
+                resumo: resumo.clone(),
+                numero,
+            };
             if estado.sessoes.buscar(sessao).is_some() {
                 drop(maquinas);
                 // Fora da thread do enlace: decidir lê o disco, e aceitar
@@ -1145,24 +1308,19 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
             // **Só a instância que ela nomeia**: a dispensa pode chegar a toda
             // sessão da pessoa, e só a desta sessão é a que o servidor dispensou.
             let chave = Chave::de(alvo, mod_id, servidor);
-            let Some(fim) = Fim::da_dispensa(motivo) else {
-                tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo, "dispensa de máquina com motivo desconhecido: ignorada");
-                return true;
-            };
-            tracing::info!(mod_id = %mod_id, servidor = %servidor, motivo, "o servidor dispensou a máquina");
             let Some(estado) = sessoes(app) else {
                 return true;
             };
+            let dispensa = estado.maquinas.dispensar(&chave, sessao, motivo);
+            if dispensa.fim == Fim::DispensaDesconhecida {
+                tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo, metades = dispensa.vivas.len(), "dispensa de máquina com motivo desconhecido: a metade para assim mesmo");
+            } else {
+                tracing::info!(mod_id = %mod_id, servidor = %servidor, motivo, pedidos = dispensa.desfeitos.len(), metades = dispensa.vivas.len(), "o servidor dispensou a máquina");
+            }
             // O diálogo aberto para este pedido não sabe que ele acabou: o
             // `maquina-estado` é o que o fecha.
-            let desfeitos = estado
-                .maquinas
-                .tirar_pendentes(|c, p| *c == chave && p.sessao == sessao);
-            dizer_pedidos_desfeitos(app, &desfeitos, fim);
-            let vivas = estado
-                .maquinas
-                .tirar_ligadas(|c, l| *c == chave && l.sessao == sessao);
-            encerrar_e_dizer(app, vivas, fim);
+            dizer_pedidos_desfeitos(app, &dispensa.desfeitos, dispensa.fim);
+            encerrar_e_dizer(app, dispensa.vivas, dispensa.fim);
             true
         }
         Event::Ended { .. } => {
@@ -1226,11 +1384,11 @@ pub(crate) fn sessao_saiu<R: tauri::Runtime>(app: &AppHandle<R>, sessao: u64) {
         return;
     };
     let desfeitos = estado.maquinas.tirar_pendentes(|_, p| p.sessao == sessao);
-    estado
-        .maquinas
-        .estado()
-        .chegados_cedo
-        .retain(|c| c.sessao != sessao);
+    {
+        let mut maquinas = estado.maquinas.estado();
+        maquinas.chegados_cedo.retain(|c| c.sessao != sessao);
+        maquinas.esquecer_sessao(sessao);
+    }
     dizer_pedidos_desfeitos(app, &desfeitos, Fim::ServidorSaiu);
     let vivas = estado.maquinas.tirar_ligadas(|_, l| l.sessao == sessao);
     encerrar_e_dizer(app, vivas, Fim::ServidorSaiu);
@@ -1243,6 +1401,7 @@ pub(crate) fn sessao_saiu_sem_tela(maquinas: &Maquinas, sessao: u64) {
         let mut estado = maquinas.estado();
         estado.pendentes.retain(|_, p| p.sessao != sessao);
         estado.chegados_cedo.retain(|c| c.sessao != sessao);
+        estado.esquecer_sessao(sessao);
     }
     for viva in maquinas.tirar_ligadas(|_, l| l.sessao == sessao) {
         std::thread::spawn(move || viva.encerrar(Fim::ServidorSaiu));
@@ -1286,6 +1445,16 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
     };
     let conexao = Arc::clone(&cliente.conexao);
     let chave = Chave::de(&chegado.alvo, &chegado.mod_id, &chegado.servidor);
+    // Um pedido mais novo da chave, ou uma dispensa, chegou depois deste: quem
+    // atende é o mais novo, e o dispensado não abre diálogo nem liga.
+    if !estado
+        .maquinas
+        .estado()
+        .e_o_ultimo(&chave, chegado.sessao, chegado.numero)
+    {
+        tracing::info!(mod_id = %chegado.mod_id, servidor = %chegado.servidor, numero = chegado.numero, "pedido de máquina passado por um mais novo ou dispensado antes de ser atendido: descartado");
+        return;
+    }
     let pedido = PedidoRecebido {
         chave: chave.clone(),
         hash: chegado.hash,
@@ -1293,6 +1462,7 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
         resumo: chegado.resumo,
         pedido_por: apelido_de(&conexao, chegado.pedido_por),
         sessao: chegado.sessao,
+        numero: chegado.numero,
     };
 
     // **O mesmo pedido duas vezes** (o servidor pode mandá-lo de novo antes de
@@ -1363,10 +1533,13 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
                 pasta,
                 mudou,
             };
-            let chave_do_log = chave.clone();
-            estado.maquinas.estado().pendentes.insert(chave, pedido);
-            if let Err(erro) = app.emit(EVENTO_DO_PEDIDO, na_tela) {
-                tracing::warn!(mod_id = %chave_do_log.mod_id, servidor = %chave_do_log.servidor, %erro, "maquina-pedido não chegou à janela");
+            let mostrou = estado.maquinas.guardar_pendente_se_vale(pedido, || {
+                if let Err(erro) = app.emit(EVENTO_DO_PEDIDO, na_tela) {
+                    tracing::warn!(mod_id = %chave.mod_id, servidor = %chave.servidor, %erro, "maquina-pedido não chegou à janela");
+                }
+            });
+            if !mostrou {
+                tracing::info!(mod_id = %chave.mod_id, servidor = %chave.servidor, "pedido de máquina passado por um mais novo ou dispensado enquanto o disco era lido: sem diálogo");
             }
         }
     }
@@ -1429,7 +1602,7 @@ fn ligar<R: tauri::Runtime>(
     // O motivo que o `aoParar` dela lê: a mesma sessão e o mesmo enlace é a
     // metade de servidor pedindo outra coisa; outra sessão, ou o enlace que
     // voltou de uma queda, é a sessão dela que acabou.
-    let geracao = conexao.carimbo().geracao;
+    let geracao_agora = conexao.carimbo().geracao;
     let fim_da_anterior =
         estado
             .maquinas
@@ -1437,7 +1610,7 @@ fn ligar<R: tauri::Runtime>(
             .ligadas
             .get(chave)
             .map_or(Fim::OutroPedido, |l| {
-                if l.sessao == pedido.sessao && l.geracao == geracao {
+                if l.sessao == pedido.sessao && l.geracao == geracao_agora {
                     Fim::OutroPedido
                 } else {
                     Fim::ServidorSaiu
@@ -1447,13 +1620,6 @@ fn ligar<R: tauri::Runtime>(
     for anterior in anteriores {
         anterior.encerrar(fim_da_anterior);
     }
-
-    conexao
-        .aceitar_maquina(mod_id.clone(), servidor.clone(), pedido.resumo.clone())
-        .map_err(|motivo| {
-            tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo, "o AceiteDeMaquina não saiu");
-            motivo.to_owned()
-        })?;
 
     let numero = {
         let mut maquinas = estado.maquinas.estado();
@@ -1479,26 +1645,45 @@ fn ligar<R: tauri::Runtime>(
             }
         });
     });
-    let falhou = |motivo: &'static str| {
-        tracing::error!(mod_id = %mod_id, servidor = %servidor, motivo, "metade de máquina não subiu");
-        if let Err(erro) = conexao.parar_maquina(mod_id.clone(), servidor.clone(), "metade-falhou")
-        {
-            tracing::info!(mod_id = %mod_id, servidor = %servidor, motivo = erro, "MaquinaParada não saiu");
-        }
-        emitir_estado(app, chave, false, Some(Fim::MetadeFalhou.nome()));
-        motivo.to_owned()
+    let aceitar_no_fio = || {
+        conexao
+            .aceitar_maquina(mod_id.clone(), servidor.clone(), pedido.resumo.clone())
+            .map_err(|motivo| {
+                tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo, "o AceiteDeMaquina não saiu");
+                motivo.to_owned()
+            })
     };
-    let viva = Viva::subir(
+    let viva = match Viva::subir(
         chave.clone(),
         numero,
         pedido.oferta.clone(),
         metade.capacidades,
         Arc::new(FioDaConexao(Arc::clone(conexao))),
         ao_falhar,
-    )
-    .map_err(&falhou)?;
-    estado.maquinas.estado().ligadas.insert(
-        chave.clone(),
+    ) {
+        Ok(viva) => viva,
+        Err(motivo) => {
+            // O aceite sai e a parada logo atrás: é o par que diz ao MOD «a
+            // máquina aceitou e falhou», o mesmo que ele ouvia quando a
+            // metade subia depois do aceite.
+            tracing::error!(mod_id = %mod_id, servidor = %servidor, motivo, "metade de máquina não subiu");
+            aceitar_no_fio()?;
+            if let Err(erro) =
+                conexao.parar_maquina(mod_id.clone(), servidor.clone(), "metade-falhou")
+            {
+                tracing::info!(mod_id = %mod_id, servidor = %servidor, motivo = erro, "MaquinaParada não saiu");
+            }
+            emitir_estado(app, chave, false, Some(Fim::MetadeFalhou.nome()));
+            return Err(motivo.to_owned());
+        }
+    };
+    // **No registro antes de o aceite sair** (e com a geração de agora, a da
+    // conexão que o leva): o `sem-aceite` que volta de um aceite que o livro
+    // não tomou pode chegar antes da linha seguinte, e precisa achá-la aqui.
+    let geracao = conexao.carimbo().geracao;
+    let registrada = estado.maquinas.registrar_se_vale(
+        chave,
+        pedido.numero,
         Ligada {
             viva: Arc::clone(&viva),
             sessao: pedido.sessao,
@@ -1507,19 +1692,54 @@ fn ligar<R: tauri::Runtime>(
             resumo: pedido.resumo.clone(),
         },
     );
-    if let Err(motivo) = viva.iniciar(&metade.fonte) {
+    if !registrada {
+        // O servidor dispensou este pedido enquanto ele era atendido: nada
+        // saiu, e a dispensa já disse à tela o que acabou.
+        tracing::info!(mod_id = %mod_id, servidor = %servidor, "pedido de máquina dispensado antes de ligar: a metade não sobe");
+        viva.descartar();
+        return Err("sem-pedido".to_owned());
+    }
+    if let Err(motivo) = aceitar_no_fio() {
         estado
             .maquinas
             .tirar_ligadas(|c, l| c == chave && l.viva.numero == numero);
-        // `encerrar` já manda o `MaquinaParada { MetadeFalhou }`: o `falhou`
-        // de cima o mandaria de novo.
+        viva.descartar();
+        return Err(motivo);
+    }
+    // Uma dispensa pode já ter tirado a metade do registro e pedido o fim
+    // dela: o código não entra numa metade que está parando.
+    let iniciada = if viva.de_pe() {
+        viva.iniciar(&metade.fonte)
+    } else {
+        Ok(())
+    };
+    if let Err(motivo) = iniciada {
+        let ainda_minha = !estado
+            .maquinas
+            .tirar_ligadas(|c, l| c == chave && l.viva.numero == numero)
+            .is_empty();
+        // `encerrar` já manda o `MaquinaParada { MetadeFalhou }`.
         tracing::error!(mod_id = %mod_id, servidor = %servidor, motivo, "metade de máquina não subiu");
-        viva.encerrar(Fim::MetadeFalhou);
-        emitir_estado(app, chave, false, Some(Fim::MetadeFalhou.nome()));
+        if ainda_minha && viva.encerrar(Fim::MetadeFalhou) {
+            emitir_estado(app, chave, false, Some(Fim::MetadeFalhou.nome()));
+        }
         return Err(motivo.to_owned());
     }
-    tracing::info!(mod_id = %mod_id, servidor = %servidor, instancia = numero, "metade de máquina ligada");
-    emitir_estado(app, chave, true, None);
+    // **«Ligada» só se ela ainda está no registro**, e dito sob o cadeado: a
+    // dispensa que a tira toma o mesmo cadeado, então o «desligada» dela vem
+    // sempre depois deste — nunca a faixa acesa por cima de um fim já dito.
+    let maquinas = estado.maquinas.estado();
+    if maquinas
+        .ligadas
+        .get(chave)
+        .is_some_and(|l| l.viva.numero == numero)
+    {
+        tracing::info!(mod_id = %mod_id, servidor = %servidor, instancia = numero, "metade de máquina ligada");
+        emitir_estado(app, chave, true, None);
+    } else {
+        tracing::info!(mod_id = %mod_id, servidor = %servidor, instancia = numero, "metade de máquina dispensada antes de acabar de ligar");
+    }
+    drop(maquinas);
     Ok(())
 }
 
@@ -1746,6 +1966,7 @@ mod testes {
             resumo: resumo.to_owned(),
             pedido_por: "ana".to_owned(),
             sessao: 1,
+            numero: 0,
         }
     }
 
@@ -2079,6 +2300,165 @@ mod testes {
         .expect("a metade sobe");
         viva.iniciar(fonte).expect("o código entra");
         viva
+    }
+
+    // ------------------------------------------- o registro, na ordem do fio
+
+    /// Uma metade de pé no registro, de `sessao` e na `geracao` do enlace.
+    fn ligada_de(sessao: u64, geracao: u64) -> Ligada {
+        let fio = Arc::new(FioDeMentira::default());
+        Ligada {
+            viva: subir_com(&fio, "", Arc::default()),
+            sessao,
+            geracao,
+            hash: "h1".to_owned(),
+            resumo: "aaaa".to_owned(),
+        }
+    }
+
+    fn com_pedido_e_metade(chave: &Chave) -> Maquinas {
+        let maquinas = Maquinas::default();
+        {
+            let mut estado = maquinas.estado();
+            let mut pendente = pedido(oferta(), "bbbb", "h1");
+            pendente.chave = chave.clone();
+            estado.pendentes.insert(chave.clone(), pendente);
+            estado.ligadas.insert(chave.clone(), ligada_de(1, 1));
+        }
+        maquinas
+    }
+
+    fn parar_todas(vivas: Vec<Arc<Viva>>) {
+        for viva in vivas {
+            viva.descartar();
+        }
+    }
+
+    /// **`sem-aceite` para a metade de pé e não fecha o diálogo.** Ele é a
+    /// resposta a um aceite que o livro não tomou (ou a um pedido de quem não
+    /// é a máquina) e nunca fala de um pedido pendente: o diálogo aberto da
+    /// mesma chave é outra pergunta, que ainda vale.
+    #[test]
+    fn sem_aceite_para_a_metade_e_nao_fecha_o_pedido() {
+        let chave = Chave::de("casa", "x/jogo", "mundo");
+        let maquinas = com_pedido_e_metade(&chave);
+        let dispensa = maquinas.dispensar(&chave, 1, "sem-aceite");
+        assert_eq!(dispensa.fim, Fim::SemAceite);
+        assert!(dispensa.desfeitos.is_empty(), "sem-aceite fechou um pedido pendente");
+        assert_eq!(dispensa.vivas.len(), 1, "sem-aceite não parou a metade de pé");
+        assert!(maquinas.estado().pendentes.contains_key(&chave));
+        assert!(!maquinas.ligada(&chave));
+        parar_todas(dispensa.vivas);
+
+        // Os outros motivos levam os dois.
+        let maquinas = com_pedido_e_metade(&chave);
+        let dispensa = maquinas.dispensar(&chave, 1, "outro-pedido");
+        assert_eq!(dispensa.desfeitos, vec![(chave.clone(), "bbbb".to_owned())]);
+        assert_eq!(dispensa.vivas.len(), 1);
+        parar_todas(dispensa.vivas);
+    }
+
+    /// **Um motivo de dispensa que este app não conhece para a metade.** Antes
+    /// ele era ignorado e a metade seguia servindo: o servidor dizia «pare»
+    /// numa palavra nova e o app não ouvia.
+    #[test]
+    fn uma_dispensa_de_motivo_desconhecido_para_a_metade() {
+        let chave = Chave::de("casa", "x/jogo", "mundo");
+        let maquinas = com_pedido_e_metade(&chave);
+        let dispensa = maquinas.dispensar(&chave, 1, "um-motivo-do-futuro");
+        assert_eq!(dispensa.fim, Fim::DispensaDesconhecida);
+        assert_eq!(dispensa.vivas.len(), 1, "o motivo desconhecido deixou a metade de pé");
+        assert!(dispensa.desfeitos.is_empty());
+        assert_eq!(dispensa.fim.parada_no_fio(), None, "quem decidiu foi o servidor");
+        parar_todas(dispensa.vivas);
+    }
+
+    /// **O pedido mais velho não escreve por cima do diálogo do mais novo.**
+    /// Cada chegada é atendida numa thread, e a ordem em que elas chegam ao
+    /// registro não é a do fio: o número dado na chegada é o que decide.
+    #[test]
+    fn o_pedido_mais_velho_nao_escreve_por_cima_do_mais_novo() {
+        let maquinas = Maquinas::default();
+        let chave = Chave::de("casa", "x/jogo", "mundo");
+        let mut r1 = pedido(oferta(), "r1", "h1");
+        let mut r2 = pedido(oferta(), "r2", "h1");
+        r1.numero = maquinas.estado().numerar(&chave, 1);
+        r2.numero = maquinas.estado().numerar(&chave, 1);
+
+        // A thread do R2 chega primeiro; a do R1, atrasada no disco, depois.
+        let mut mostrados = Vec::new();
+        assert!(maquinas.guardar_pendente_se_vale(r2, || mostrados.push("r2")));
+        assert!(!maquinas.guardar_pendente_se_vale(r1, || mostrados.push("r1")));
+        assert_eq!(mostrados, vec!["r2"], "o pedido velho abriu diálogo");
+        assert_eq!(
+            maquinas.estado().pendentes.get(&chave).map(|p| p.resumo.clone()),
+            Some("r2".to_owned())
+        );
+    }
+
+    /// **A dispensa que chega depois do pedido vale contra ele**, mesmo que a
+    /// thread do pedido só chegue ao registro depois: nem diálogo, nem metade.
+    /// A dispensa de outra sessão não corta este.
+    #[test]
+    fn a_dispensa_que_chega_depois_do_pedido_vale_contra_ele() {
+        let maquinas = Maquinas::default();
+        let chave = Chave::de("casa", "x/jogo", "mundo");
+        let mut r = pedido(oferta(), "r", "h1");
+        r.numero = maquinas.estado().numerar(&chave, 1);
+
+        let de_outra = maquinas.dispensar(&chave, 2, "mod-desligado");
+        assert!(de_outra.desfeitos.is_empty() && de_outra.vivas.is_empty());
+        assert!(maquinas.estado().e_o_ultimo(&chave, 1, r.numero));
+
+        let dispensa = maquinas.dispensar(&chave, 1, "mod-desligado");
+        assert!(dispensa.desfeitos.is_empty(), "ainda não havia pendente");
+        let mut mostrou = false;
+        assert!(!maquinas.guardar_pendente_se_vale(r.clone(), || mostrou = true));
+        assert!(!mostrou, "o diálogo abriu para um pedido já dispensado");
+        let ligada = ligada_de(1, 1);
+        let viva = Arc::clone(&ligada.viva);
+        assert!(
+            !maquinas.registrar_se_vale(&chave, r.numero, ligada),
+            "a metade de um pedido dispensado entrou no registro"
+        );
+        assert!(!maquinas.ligada(&chave));
+        viva.descartar();
+
+        // Um pedido que chega depois da dispensa vale normalmente.
+        let mut novo = pedido(oferta(), "novo", "h1");
+        novo.numero = maquinas.estado().numerar(&chave, 1);
+        assert!(maquinas.guardar_pendente_se_vale(novo, || ()));
+
+        // `sem-aceite` não corta pedido nenhum.
+        let mut outro = pedido(oferta(), "outro", "h1");
+        outro.numero = maquinas.estado().numerar(&chave, 1);
+        let _ = maquinas.dispensar(&chave, 1, "sem-aceite");
+        assert!(maquinas.guardar_pendente_se_vale(outro, || ()));
+    }
+
+    /// **A reconexão do enlace para as metades de antes dela**, e só as desta
+    /// sessão: o servidor tirou o aceite delas do livro quando a conexão velha
+    /// caiu. A metade ligada já na geração nova fica.
+    #[test]
+    fn a_reconexao_para_as_metades_de_antes() {
+        let maquinas = Maquinas::default();
+        let velha = Chave::de("casa", "x/jogo", "velha");
+        let nova = Chave::de("casa", "x/jogo", "nova");
+        let de_outra = Chave::de("casa", "x/jogo", "outra");
+        {
+            let mut estado = maquinas.estado();
+            estado.ligadas.insert(velha.clone(), ligada_de(1, 1));
+            estado.ligadas.insert(nova.clone(), ligada_de(1, 2));
+            estado.ligadas.insert(de_outra.clone(), ligada_de(2, 1));
+        }
+        assert!(maquinas.tirar_de_geracao_velha(1, 1).is_empty(), "a mesma geração não é queda");
+        let paradas = maquinas.tirar_de_geracao_velha(1, 2);
+        assert_eq!(paradas.len(), 1, "a queda não parou só a metade de antes");
+        assert!(!maquinas.ligada(&velha));
+        assert!(maquinas.ligada(&nova));
+        assert!(maquinas.ligada(&de_outra));
+        parar_todas(paradas);
+        parar_todas(maquinas.tirar_ligadas(|_, _| true));
     }
 
     /// **O túnel fora da oferta não chega ao fio**, pelo caminho inteiro: a

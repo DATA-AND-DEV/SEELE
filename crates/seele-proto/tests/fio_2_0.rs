@@ -1032,7 +1032,7 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 hash: "ab".repeat(32),
                 servidor: "mc-1".into(),
                 pedido_por: PersonId(42),
-                oferta: oferta_cheia(),
+                oferta: Box::new(oferta_cheia()),
             },
         ),
         (

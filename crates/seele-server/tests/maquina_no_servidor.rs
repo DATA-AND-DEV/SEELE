@@ -402,6 +402,65 @@ async fn servir_sem_aceite_e_fora_do_aceite() -> Result<()> {
     Ok(())
 }
 
+/// Lê até uma `MaquinaDispensada` de `(MOD, SERVIDOR)` e devolve o motivo.
+async fn dispensa(par: &mut Par) -> Option<MotivoDaDispensa> {
+    esperar(&mut par.ligado.recebe, |q| match q {
+        ServerMessage::MaquinaDispensada { mod_id, servidor, motivo }
+            if mod_id == MOD && servidor == SERVIDOR =>
+        {
+            Some(*motivo)
+        }
+        _ => None,
+    })
+    .await
+}
+
+/// **Um aceite que o livro não toma volta como `SemAceite`.** Sem resposta, o
+/// app — que liga a metade de máquina ao mandar o aceite — dizia «servindo» e
+/// todo `servir` voltava fora-do-aceite sem explicação.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_aceite_com_o_resumo_errado_volta_como_sem_aceite() -> Result<()> {
+    let m = montar().await?;
+    let gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut alice = entrar(m.endereco, ALICE, 12).await?;
+    let resumo = pedir(&m, alice.pessoa, gestora.pessoa);
+    let veio = esperar(&mut alice.ligado.recebe, |q| {
+        matches!(q, ServerMessage::PedidoDeMaquina { .. }).then_some(())
+    })
+    .await;
+    assert!(veio.is_some(), "quem foi chamado não recebeu o pedido");
+
+    frame::write(&mut alice.ligado.envio, &aceite(&"0".repeat(64))).await?;
+    assert_eq!(dispensa(&mut alice).await, Some(MotivoDaDispensa::SemAceite));
+    assert_eq!(m.daemon.server().maquinas().quem_opera(MOD, SERVIDOR), None);
+
+    // O pedido segue pendente: o aceite certo ainda vale, e repeti-lo não
+    // dispensa a metade que o livro acabou de aceitar.
+    frame::write(&mut alice.ligado.envio, &aceite(&resumo)).await?;
+    let ate = Instant::now() + PRAZO;
+    while m.daemon.server().maquinas().quem_opera(MOD, SERVIDOR) != Some(alice.pessoa) {
+        assert!(Instant::now() < ate, "o aceite certo não entrou no livro");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    frame::write(&mut alice.ligado.envio, &aceite(&resumo)).await?;
+    frame::write(&mut alice.ligado.envio, &servir()).await?;
+    let mut dispensada = None;
+    let porta = esperar(&mut alice.ligado.recebe, |q| match q {
+        ServerMessage::MaquinaDispensada { motivo, .. } => {
+            dispensada = Some(*motivo);
+            None
+        }
+        ServerMessage::TunelConcedido { porta, .. } => Some(Ok(*porta)),
+        ServerMessage::TunelRecusado { motivo, .. } => Some(Err(*motivo)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(dispensada, None, "o aceite repetido dispensou a metade aceita");
+    assert_eq!(porta, Some(Ok(PORTA)));
+    m.daemon.shutdown();
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn outra_pessoa_nao_toma_o_nome() -> Result<()> {
     let m = montar().await?;
@@ -666,7 +725,7 @@ async fn aceitar_o_que_chegou(m: &Montado, par: &mut Par, pedido_por: PersonId) 
             hash.clone(),
             servidor.clone(),
             *pedido_por,
-            oferta.clone(),
+            (**oferta).clone(),
         )),
         _ => None,
     })
