@@ -926,7 +926,10 @@ impl Maquinas {
     /// Quem tira é quem avisa: a tela só sabe que um pedido deixou de existir se
     /// alguém lhe disser (`maquina-estado`), e só os que estavam aqui merecem o
     /// aviso — uma chave sem pedido não tem diálogo aberto.
-    fn tirar_pendentes(&self, qual: impl Fn(&Chave, &PedidoRecebido) -> bool) -> Vec<Chave> {
+    fn tirar_pendentes(
+        &self,
+        qual: impl Fn(&Chave, &PedidoRecebido) -> bool,
+    ) -> Vec<(Chave, String)> {
         let mut estado = self.estado();
         let chaves: Vec<Chave> = estado
             .pendentes
@@ -934,10 +937,15 @@ impl Maquinas {
             .filter(|(chave, pedido)| qual(chave, pedido))
             .map(|(chave, _)| chave.clone())
             .collect();
-        for chave in &chaves {
-            estado.pendentes.remove(chave);
-        }
         chaves
+            .into_iter()
+            .filter_map(|chave| {
+                estado
+                    .pendentes
+                    .remove(&chave)
+                    .map(|pedido| (chave, pedido.resumo))
+            })
+            .collect()
     }
 
     /// Esta chave está ligada agora?
@@ -972,6 +980,11 @@ pub(crate) struct EstadoNaTela {
     pub(crate) ligada: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) motivo: Option<&'static str>,
+    /// **De que pedido o aviso fala**, só quando é o fim de um pedido pendente.
+    /// Sem ele (a máquina que estava de pé), a tela não fecha diálogo nenhum:
+    /// um pedido novo da mesma chave não é o que acabou.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) resumo: Option<String>,
 }
 
 /// Uma linha de `maquinas_aceitas`.
@@ -993,6 +1006,16 @@ fn emitir_estado<R: tauri::Runtime>(
     ligada: bool,
     motivo: Option<&'static str>,
 ) {
+    emitir_estado_de_pedido(app, chave, ligada, motivo, None);
+}
+
+fn emitir_estado_de_pedido<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    chave: &Chave,
+    ligada: bool,
+    motivo: Option<&'static str>,
+    resumo: Option<String>,
+) {
     let emitido = app.emit(
         EVENTO_DO_ESTADO,
         EstadoNaTela {
@@ -1001,6 +1024,7 @@ fn emitir_estado<R: tauri::Runtime>(
             servidor: chave.servidor.clone(),
             ligada,
             motivo,
+            resumo,
         },
     );
     if let Err(erro) = emitido {
@@ -1163,9 +1187,14 @@ fn encerrar_e_dizer<R: tauri::Runtime>(app: &AppHandle<R>, vivas: Vec<Arc<Viva>>
 
 /// **Diz à tela que estes pedidos acabaram**: `maquina-estado` desligada, com o
 /// motivo da dispensa (ou `servidor-saiu`), para cada chave que ainda esperava.
-fn dizer_pedidos_desfeitos<R: tauri::Runtime>(app: &AppHandle<R>, chaves: &[Chave], fim: Fim) {
-    for chave in chaves {
-        emitir_estado(app, chave, false, Some(fim.nome()));
+/// O `resumo` vai junto: é o que diz à tela QUAL pedido acabou.
+fn dizer_pedidos_desfeitos<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    desfeitos: &[(Chave, String)],
+    fim: Fim,
+) {
+    for (chave, resumo) in desfeitos {
+        emitir_estado_de_pedido(app, chave, false, Some(fim.nome()), Some(resumo.clone()));
     }
 }
 
@@ -1751,7 +1780,8 @@ mod testes {
         let chave = daqui.chave.clone();
         // A dispensa nomeia uma chave e uma sessão: só ela sai e é anunciada.
         let desfeitos = maquinas.tirar_pendentes(|c, p| *c == chave && p.sessao == 1);
-        assert_eq!(desfeitos, vec![chave.clone()]);
+        // O resumo do pedido vai junto: é ele que diz à tela qual pedido acabou.
+        assert_eq!(desfeitos, vec![(chave.clone(), "aaaa".to_owned())]);
         assert!(!maquinas.estado().pendentes.contains_key(&chave));
         assert!(maquinas
             .estado()
@@ -1763,7 +1793,10 @@ mod testes {
             .is_empty());
         // O fim da sessão leva os pedidos dela, todos, e diz cada um.
         let desfeitos = maquinas.tirar_pendentes(|_, p| p.sessao == 2);
-        assert_eq!(desfeitos, vec![de_outra_sessao.chave.clone()]);
+        assert_eq!(
+            desfeitos,
+            vec![(de_outra_sessao.chave.clone(), "aaaa".to_owned())]
+        );
         // O motivo que vai à tela é o nome da dispensa, ou `servidor-saiu`.
         assert_eq!(Fim::da_dispensa("outro-pedido").map(Fim::nome), Some("outro-pedido"));
         assert_eq!(Fim::ServidorSaiu.nome(), "servidor-saiu");

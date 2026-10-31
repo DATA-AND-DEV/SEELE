@@ -421,12 +421,21 @@ function aplicarOEstadoDaMaquina(estado) {
   }
 
   if (!entrada.ligada && MOTIVOS_QUE_DISPENSAM_O_PEDIDO.has(entrada.motivo)) {
-    // O pedido deste servidor para esta máquina não existe mais: aceitá-lo daria
-    // `sem-pedido`. Sai da fila e da tela, e a faixa acima diz por quê.
-    for (let i = filaDeMaquinas.length - 1; i >= 0; i--) {
-      if (chaveDoEvento(filaDeMaquinas[i]) === chave) filaDeMaquinas.splice(i, 1);
+    // **Só o pedido que o aviso nomeia** (`resumo`): um aviso sem ele é o de uma
+    // máquina que estava de pé, e um pedido NOVO da mesma chave, na tela ou na
+    // fila, não é o que acabou. O pedido que acabou não existe mais: aceitá-lo
+    // daria `sem-pedido`. Sai da fila e da tela, e a faixa acima diz por quê.
+    if (typeof estado.resumo === "string") {
+      for (let i = filaDeMaquinas.length - 1; i >= 0; i--) {
+        if (chaveDoEvento(filaDeMaquinas[i]) === chave && filaDeMaquinas[i].resumo === estado.resumo) {
+          filaDeMaquinas.splice(i, 1);
+        }
+      }
+      if (maquinaNaTela && chaveDoEvento(maquinaNaTela.pedido) === chave
+          && maquinaNaTela.pedido.resumo === estado.resumo) {
+        passarAoProximoPedido();
+      }
     }
-    if (maquinaNaTela && chaveDoEvento(maquinaNaTela.pedido) === chave) passarAoProximoPedido();
   }
   if (!entrada.ligada && entrada.motivo === "pacote-diferente" && maquinaNaTela
       && chaveDoEvento(maquinaNaTela.pedido) === chave && !maquinaNaTela.enviando) {

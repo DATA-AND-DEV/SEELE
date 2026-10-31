@@ -29,6 +29,8 @@
 // 12. um pedido que o servidor desfez sai da tela, e a faixa diz por quê, com o
 //     payload exato que o Rust emite (`EstadoNaTela`: alvo, mod_id, servidor,
 //     ligada:false, motivo), e o mesmo para `outro-pedido`;
+// 12b. o aviso sem `resumo` (máquina que estava de pé) não fecha o diálogo de um
+//     pedido novo da mesma chave; só o que nomeia o resumo dele fecha;
 // 13. a máquina ligada continua com DESLIGAR à vista e clicável quando a janela
 //     está na tela de entrada, e não só na da sessão;
 // 14. na lista de aceites, uma máquina ligada tem DESLIGAR ao lado de REVOGAR.
@@ -381,11 +383,25 @@ async function caso(motor, numero, prova) {
             await esperarTela("FULANO");
             await pagina.evaluate((m) => {
               titulosDeMaquinas.set(chaveDaMaquina("127.0.0.1:7000", "x/jogo", "srv-1"), "Minecraft");
-              emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: m });
+              emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: m, resumo: "resumo-1" });
             }, motivo);
             await esperarFechada();
             assert.match(await pagina.evaluate(() => faixaDeMaquinas()), frase, `${motor}: 12 · ${motivo}: a faixa não diz por quê`);
           }
+        });
+
+        // 12b. O aviso de uma máquina que estava de pé (sem `resumo`) não fecha o
+        // diálogo de um pedido NOVO da mesma chave; o que nomeia o resumo, fecha.
+        await caso(motor, "12b", async () => {
+          await zerar();
+          await emitirPedido({ resumo: "R2" });
+          await esperarTela("FULANO");
+          await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "outro-pedido" }));
+          assert.equal(await aberta(), true, `${motor}: 12b · um aviso sem resumo fechou o diálogo do pedido novo`);
+          await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "outro-pedido", resumo: "R1" }));
+          assert.equal(await aberta(), true, `${motor}: 12b · o resumo de outro pedido fechou o diálogo`);
+          await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "outro-pedido", resumo: "R2" }));
+          await esperarFechada();
         });
 
         // 13. A faixa é global: na tela de entrada, DESLIGAR segue à vista e funciona.
@@ -436,7 +452,7 @@ async function caso(motor, numero, prova) {
         });
 
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 14, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 15, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();
