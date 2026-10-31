@@ -1197,19 +1197,113 @@ async fn quem_operava_com_um_pedido_novo_recebe_uma_dispensa_so() -> Result<()> 
         &outra_oferta,
     );
     let _ = pedir(&m, PersonId(77), gestora.pessoa);
+    // **Quem lê é uma tarefa só, que nunca é cancelada** (revisão final,
+    // M13b): um `timeout` em volta de `frame::read` cancelava a leitura no
+    // meio de um quadro partido em duas mensagens, e o resto do fluxo vinha
+    // desalinhado — uma falha falsa. O prazo fica na fila.
+    let mut recebe = alice.ligado.recebe;
+    let (quadros, mut chegaram) = tokio::sync::mpsc::unbounded_channel();
+    let leitor = tokio::spawn(async move {
+        while let Ok(quadro) = frame::read::<ServerMessage>(&mut recebe).await {
+            if quadros.send(quadro).is_err() {
+                break;
+            }
+        }
+    });
     let mut dispensas = 0;
     let fim = Instant::now() + Duration::from_millis(800);
     while Instant::now() < fim {
-        if let Ok(Ok(ServerMessage::MaquinaDispensada { .. })) = tokio::time::timeout(
-            Duration::from_millis(100),
-            frame::read::<ServerMessage>(&mut alice.ligado.recebe),
-        )
-        .await
+        if let Ok(Some(ServerMessage::MaquinaDispensada { .. })) =
+            tokio::time::timeout(Duration::from_millis(100), chegaram.recv()).await
         {
             dispensas += 1;
         }
     }
+    leitor.abort();
     assert_eq!(dispensas, 1, "Alice recebeu {dispensas} dispensas");
+    m.daemon.shutdown();
+    Ok(())
+}
+
+/// **Quem volta antes de a conexão velha morrer ainda é dito** (revisão
+/// final, I7): Alice opera pela conexão 1 e abre a 2 (o app que piscou)
+/// antes de a 1 cair. Quando a 1 cai, a metade de servidor ouve `Parou` **e**
+/// `Voltou` — antes, só `Parou`, e `MaquinaSumiu` vinha no prazo para quem
+/// estava ali.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_volta_antes_da_conexao_velha_morrer_e_dito() -> Result<()> {
+    use seele_server::maquinas::MudancaDeMaquina;
+    use seele_server::server::Event;
+    let m = montar().await?;
+    let gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut alice = entrar(m.endereco, ALICE, 12).await?;
+    let resumo = pedir(&m, alice.pessoa, gestora.pessoa);
+    aceitar(&m, &mut alice, &resumo).await?;
+    let _alice_de_novo = entrar(m.endereco, ALICE, 12).await?;
+    let alice_id = alice.pessoa;
+    let mut eventos = m.daemon.server().events.subscribe();
+    drop(alice);
+    let mut parou = false;
+    let mut voltou = false;
+    let fim = Instant::now() + PRAZO;
+    while Instant::now() < fim && !voltou {
+        match tokio::time::timeout(Duration::from_millis(200), eventos.recv()).await {
+            Ok(Ok(Event::Maquina(MudancaDeMaquina::Parou { quem, .. }))) if quem == alice_id => {
+                parou = true;
+            }
+            Ok(Ok(Event::Maquina(MudancaDeMaquina::Voltou { quem, .. }))) if quem == alice_id => {
+                assert!(parou, "o Voltou veio antes do Parou");
+                voltou = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(parou, "a conexão velha caiu e o Parou não saiu");
+    assert!(voltou, "Alice segue aqui por outra conexão e o Voltou não saiu");
+    m.daemon.shutdown();
+    Ok(())
+}
+
+/// **O servidor que para o túnel diz à máquina** (revisão final, I4): um
+/// pedido a outra pessoa dispensa Alice e para o túnel que ela servia; quem jogava ouve
+/// `MaquinaParou`, **e Alice também** — sem isso a máquina dela seguia
+/// aceitando as ligações diretas de quem já tinha sido apresentado.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_tunel_parado_pelo_servidor_chega_a_maquina() -> Result<()> {
+    let m = montar().await?;
+    let gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut alice = entrar(m.endereco, ALICE, 12).await?;
+    let mut carla = entrar(m.endereco, CARLA, 12).await?;
+    let resumo = pedir(&m, alice.pessoa, gestora.pessoa);
+    aceitar(&m, &mut alice, &resumo).await?;
+    frame::write(&mut alice.ligado.envio, &servir()).await?;
+    assert_eq!(resposta_de_tunel(&mut alice).await?, Ok(PORTA));
+    frame::write(
+        &mut carla.ligado.envio,
+        &ClientMessage::EntrarNoTunel {
+            mod_id: MOD.into(),
+            nome: TUNEL.into(),
+        },
+    )
+    .await?;
+    assert_eq!(resposta_de_tunel(&mut carla).await?, Ok(PORTA));
+
+    // O MOD chama outra pessoa para o mesmo servidor de jogo: Alice é
+    // dispensada (`OutroPedido`), e o túnel dela para.
+    let _ = pedir(&m, PersonId(77), gestora.pessoa);
+    let para_alice = esperar(&mut alice.ligado.recebe, |q| match q {
+        ServerMessage::TunelEncerrado { motivo, nome, .. } if nome == TUNEL => Some(*motivo),
+        _ => None,
+    })
+    .await;
+    assert_eq!(para_alice, Some(MotivoDoFimDoTunel::MaquinaParou));
+    let para_carla = esperar(&mut carla.ligado.recebe, |q| match q {
+        ServerMessage::TunelEncerrado { motivo, .. } => Some(*motivo),
+        _ => None,
+    })
+    .await;
+    assert_eq!(para_carla, Some(MotivoDoFimDoTunel::MaquinaParou));
+    assert!(!m.daemon.server().tuneis().existe(MOD, TUNEL));
     m.daemon.shutdown();
     Ok(())
 }

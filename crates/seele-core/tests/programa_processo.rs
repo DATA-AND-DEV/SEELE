@@ -98,10 +98,18 @@ async fn esperar_o_fim(processo: &mut Processo) -> (Vec<EventoDoProcesso>, FimDo
 }
 
 fn batimento(arquivo: &Path) -> u64 {
-    std::fs::read_to_string(arquivo)
-        .ok()
-        .and_then(|t| t.trim().parse().ok())
-        .unwrap_or(0)
+    // O programa de teste reescreve o arquivo (`fs::write` trunca antes de
+    // escrever): uma leitura no meio vê o arquivo vazio, e isso não é «parou».
+    for _ in 0..20 {
+        if let Some(n) = std::fs::read_to_string(arquivo)
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+        {
+            return n;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    0
 }
 
 /// Espera o batimento começar, e devolve se ele anda.
@@ -124,7 +132,7 @@ async fn esperar_o_primeiro_batimento(arquivo: &Path) {
 #[tokio::test]
 async fn le_a_saida_e_o_erro_escreve_na_entrada_e_diz_o_codigo() {
     let (_p, programa) = programa("eco", &["eco"]);
-    let mut processo = programa.rodar(&pedido(&["eco"], "server")).unwrap();
+    let mut processo = programa.rodar(&pedido(&["eco"], "")).unwrap();
     assert!(processo.pid().is_some());
 
     let mut vistos = vec![proximo(&mut processo).await, proximo(&mut processo).await];
@@ -227,6 +235,10 @@ async fn pasta_fora_da_raiz_e_recusada() {
         ("server/../..", "caminho-com-pai"),
         ("/tmp", "caminho-absoluto"),
         ("C:\\Windows", "caminho-absoluto"),
+        // E uma pasta dentro da raiz também: o comando aceito roda na raiz
+        // (revisão final, I1).
+        ("server", "pasta-fora-do-aceite"),
+        ("server/mundo/", "pasta-fora-do-aceite"),
     ] {
         let recusa = programa.rodar(&pedido(&["eco"], pasta)).unwrap_err();
         assert_eq!(recusa.nome(), nome, "{pasta}: {recusa:?}");
@@ -476,7 +488,7 @@ async fn o_passo_de_instalar_e_um_segundo_comando_aceito_e_so_ele() {
         vec![EventoDoProcesso::Saida("instalado".to_owned())]
     );
 
-    let mut servidor = programa.rodar(&pedido(&["eco"], "server")).unwrap();
+    let mut servidor = programa.rodar(&pedido(&["eco"], "")).unwrap();
     servidor.escrever("sair 0").await.unwrap();
     let _ = esperar_o_fim(&mut servidor).await;
 
@@ -498,4 +510,56 @@ async fn o_passo_de_instalar_e_um_segundo_comando_aceito_e_so_ele() {
         "comando-fora-do-aceito"
     );
     assert_eq!(programa.processos_vivos(), 0);
+}
+
+/// **Parar mata os netos** (revisão final, I9; spec §5, «o produto encerra
+/// todo processo do MOD»). O filho sobe um neto que bate num arquivo e segue
+/// rodando; `matar`, `encerrar_tudo` e soltar o `Programa` param o neto
+/// também, e um filho que sai sozinho não deixa o neto para trás. Só no Unix,
+/// onde o grupo de processos existe (no Windows, decisão R8).
+#[cfg(unix)]
+#[tokio::test]
+async fn parar_mata_os_netos_por_todos_os_caminhos() {
+    for caminho in ["matar", "encerrar", "soltar", "sai-sozinho"] {
+        let p = pasta(&format!("neto-{caminho}"));
+        let arquivo = p.0.join("batimento-do-neto");
+        let argumento = arquivo.to_string_lossy().into_owned();
+        let modo = if caminho == "sai-sozinho" {
+            "neto-e-sai"
+        } else {
+            "neto"
+        };
+        let (_q, programa) = programa(&format!("neto-{caminho}-jogo"), &[modo, &argumento]);
+        let mut processo = programa.rodar(&pedido(&[modo, &argumento], "")).unwrap();
+        // O neto começou (o filho que sai sozinho só sai depois disso).
+        esperar_o_primeiro_batimento(&arquivo).await;
+        if caminho != "sai-sozinho" {
+            assert!(esta_vivo(&arquivo).await, "{caminho}: o neto não bate");
+        }
+        match caminho {
+            "matar" => {
+                processo.matar();
+                let _ = esperar_o_fim(&mut processo).await;
+            }
+            "encerrar" => {
+                assert_eq!(programa.encerrar_tudo().await, 1);
+            }
+            "soltar" => drop(programa),
+            _ => {
+                let (_, fim) = esperar_o_fim(&mut processo).await;
+                assert_eq!(fim.codigo, Some(0), "{caminho}");
+            }
+        }
+        let mut morreu = false;
+        for _ in 0..50 {
+            if !esta_vivo(&arquivo).await {
+                morreu = true;
+                break;
+            }
+        }
+        assert!(
+            morreu,
+            "{caminho}: o neto seguiu batendo depois de o filho parar"
+        );
+    }
 }

@@ -5332,7 +5332,8 @@ impl Motor {
         resposta: tokio::sync::oneshot::Sender<Result<(), RecusaDeTunel>>,
     ) {
         let chave = (mod_id.clone(), nome.clone());
-        self.tuneis.pedir_servico(chave.clone(), resposta);
+        self.tuneis
+            .pedir_servico(chave.clone(), protocolo, porta, resposta);
         if let Err(recusa) = self
             .mandar_verbo_de_tunel(ClientMessage::ServirTunel {
                 mod_id,

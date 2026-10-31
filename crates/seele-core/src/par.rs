@@ -126,7 +126,99 @@ pub fn impressao(identidade: &Identidade) -> String {
 /// Não muda a porta nem abre socket: é a mesma ponta que fala com o servidor,
 /// e naquela porta o mapeamento de NAT já está vivo (§3.1 da spec de 05/09).
 pub fn passar_a_atender(ponta: &PontaDaSessao) {
+    let mut armados = ponta
+        .balcao()
+        .armados
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *armados += 1;
     ponta.armar();
+}
+
+/// **Quem espera um par nesta ponta** (revisão final, I6).
+///
+/// Uma máquina apresentada a dois jogadores ao mesmo tempo (ou a um jogador
+/// enquanto empresta a tela) roda dois [`atender`] na mesma ponta: uma fila
+/// de chegadas e um portão. Antes, o primeiro pegava a ligação do segundo,
+/// fechava-a com um aviso falso de impostor, e ao terminar desarmava a ponta
+/// com o segundo ainda esperando. Agora o portão conta quem o armou e só
+/// fecha com o último, e a ligação de outra impressão vai a quem a espera.
+#[derive(Default)]
+pub struct Balcao {
+    /// Quantos [`passar_a_atender`] ainda não tiveram o seu
+    /// [`parar_de_atender`].
+    armados: std::sync::Mutex<usize>,
+    /// Por impressão esperada, a caixa de quem a espera.
+    esperando: std::sync::Mutex<std::collections::HashMap<[u8; 32], Vec<Caixa>>>,
+    proximo: std::sync::atomic::AtomicU64,
+}
+
+/// A caixa de um [`atender`] que espera uma impressão, com o número dele.
+type Caixa = (u64, tokio::sync::mpsc::UnboundedSender<Conexao>);
+
+/// A vez de um [`atender`] no [`Balcao`]: sai ao ser solta.
+struct NoBalcao<'a> {
+    balcao: &'a Balcao,
+    impressao: [u8; 32],
+    id: u64,
+}
+
+impl Drop for NoBalcao<'_> {
+    fn drop(&mut self) {
+        let mut esperando = self
+            .balcao
+            .esperando
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(caixas) = esperando.get_mut(&self.impressao) {
+            caixas.retain(|(id, _)| *id != self.id);
+            if caixas.is_empty() {
+                esperando.remove(&self.impressao);
+            }
+        }
+    }
+}
+
+impl Balcao {
+    fn entrar(
+        &self,
+        impressao: [u8; 32],
+    ) -> (NoBalcao<'_>, tokio::sync::mpsc::UnboundedReceiver<Conexao>) {
+        let id = self
+            .proximo
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (caixa, recebe) = tokio::sync::mpsc::unbounded_channel();
+        self.esperando
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(impressao)
+            .or_default()
+            .push((id, caixa));
+        (
+            NoBalcao {
+                balcao: self,
+                impressao,
+                id,
+            },
+            recebe,
+        )
+    }
+
+    /// Entrega `conexao` a quem espera `impressao`; devolve-a se ninguém espera.
+    fn entregar(&self, impressao: [u8; 32], conexao: Conexao) -> Option<Conexao> {
+        let esperando = self
+            .esperando
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut conexao = conexao;
+        for (_, caixa) in esperando.get(&impressao).into_iter().flatten() {
+            match caixa.send(conexao) {
+                Ok(()) => return None,
+                Err(tokio::sync::mpsc::error::SendError(devolvida)) => conexao = devolvida,
+            }
+        }
+        Some(conexao)
+    }
 }
 
 /// Desarma o que [`passar_a_atender`] armou.
@@ -136,7 +228,16 @@ pub fn passar_a_atender(ponta: &PontaDaSessao) {
 /// criar qualquer coisa. Chame depois que [`atender`] devolver, sirva ele ou
 /// não sirva. A conexão de controle desta mesma ponta não é afetada.
 pub fn parar_de_atender(ponta: &PontaDaSessao) {
-    ponta.desarmar();
+    let mut armados = ponta
+        .balcao()
+        .armados
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *armados = armados.saturating_sub(1);
+    // Só o último fecha: os outros que atendem nesta ponta seguem esperando.
+    if *armados == 0 {
+        ponta.desarmar();
+    }
 }
 
 /// Como a ligação com um par foi conseguida.
@@ -301,13 +402,26 @@ pub async fn atender(
 ) -> Option<ParLigado> {
     let esperada = impressao_em_bytes(&impressao_de_quem_vem.to_ascii_lowercase())?;
     let ate = tokio::time::Instant::now() + prazo;
+    let balcao = ponta.balcao();
+    let (_vez, mut caixa) = balcao.entrar(esperada);
     loop {
-        let conexao = tokio::time::timeout_at(ate, ponta.ponta().aceitar())
-            .await
-            .ok()??;
+        let chegou = tokio::time::timeout_at(ate, async {
+            tokio::select! {
+                // A ligação que outro `atender` desta ponta pegou e era nossa.
+                Some(conexao) = caixa.recv() => Some(conexao),
+                conexao = ponta.ponta().aceitar() => conexao,
+            }
+        });
+        let conexao = chegou.await.ok()??;
         let remoto = conexao.remote_address();
         let veio = conexao.impressao_dtls_do_par();
         if veio != esperada {
+            // **De outro que atende nesta ponta** (I6): vai a ele, e não é
+            // impostor.
+            let Some(conexao) = balcao.entregar(veio, conexao) else {
+                tracing::debug!(par = %remoto, "um par de outra apresentação desta ponta chegou; foi a quem o espera");
+                continue;
+            };
             tracing::warn!(
                 par = %remoto,
                 esperada = %impressao_de_quem_vem,
@@ -696,6 +810,50 @@ mod testes {
     fn ponta() -> PontaDaSessao {
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         crate::transporte::abrir_ponta(Some(socket)).unwrap()
+    }
+
+    /// **Duas apresentações ao mesmo tempo numa ponta** (revisão final, I6):
+    /// a máquina serve B e C juntos. Cada um chega ao `servir` que o espera —
+    /// nenhum é derrubado como impostor por pegar a fila do outro —, e o
+    /// primeiro que termina não desarma a ponta com o outro ainda esperando.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn duas_apresentacoes_na_mesma_ponta_ligam_as_duas() {
+        let a = ponta();
+        let endereco_a = a.ponta().local_addr();
+        let impressao_a = impressao(a.identidade());
+        let b = ponta();
+        let c = ponta();
+        let servir_a = |quem: &PontaDaSessao| {
+            let a = a.clone();
+            let esperada = impressao(quem.identidade());
+            tokio::spawn(async move {
+                cumprir_apresentacao(&a, Papel::Serve, &[], esperada, PRAZO_NO_TESTE)
+                    .await
+                    .map(|ligado| ligado.conexao.impressao_dtls_do_par())
+            })
+        };
+        // C primeiro, e sozinho até estar esperando: é ele quem segura a fila
+        // de chegadas (o cadeado dela é justo), e é ele quem pega a ligação
+        // de B.
+        let para_c = servir_a(&c);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let para_b = servir_a(&b);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let ligado_b = ligar(&b, &[endereco_a], impressao_a.clone(), PRAZO_NO_TESTE)
+            .await
+            .expect("B não ligou");
+        let veio_b = para_b.await.unwrap().expect("B não foi atendido");
+        assert_eq!(veio_b, b.identidade().impressao());
+        // B terminou e o `servir` dele desarmou: C ainda espera, e a ponta
+        // segue armada para ele.
+        assert!(a.armada(), "o primeiro que terminou desarmou a ponta");
+        let ligado_c = ligar(&c, &[endereco_a], impressao_a, PRAZO_NO_TESTE)
+            .await
+            .expect("C não ligou");
+        let veio_c = para_c.await.unwrap().expect("C não foi atendido");
+        assert_eq!(veio_c, c.identidade().impressao());
+        assert!(!a.armada(), "o último desarma");
+        drop((ligado_b, ligado_c));
     }
 
     /// Liga duas pontas de par: `a` atende `b`. Devolve a conexão do lado de

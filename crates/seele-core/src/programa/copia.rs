@@ -325,7 +325,14 @@ impl Programa {
         let vagas = Arc::new(tokio::sync::Semaphore::new(MAX_LIGACOES));
         let servindo = Arc::clone(&oferecido);
         let tarefa = tokio::spawn(async move {
+            // **As ligações moram na escuta** (revisão final, M3): parar a
+            // escuta (outra oferta, `encerrar_tudo`, REVOGAR) solta este
+            // `JoinSet`, e cada transferência em andamento acaba junto — antes,
+            // cada `atender` era uma tarefa solta, e uma cópia seguia saindo
+            // depois de a autorização cair.
+            let mut ligacoes = tokio::task::JoinSet::<()>::new();
             while let Ok((fluxo, _)) = escuta.accept().await {
+                while ligacoes.try_join_next().is_some() {}
                 let Ok(vaga) = Arc::clone(&vagas).try_acquire_owned() else {
                     tracing::warn!(
                         teto = MAX_LIGACOES,
@@ -334,7 +341,7 @@ impl Programa {
                     continue;
                 };
                 let oferecido = Arc::clone(&servindo);
-                tokio::spawn(async move {
+                ligacoes.spawn(async move {
                     atender(fluxo, oferecido).await;
                     drop(vaga);
                 });
@@ -342,6 +349,12 @@ impl Programa {
         });
         if let Ok(mut copia) = interior.copia.lock() {
             *copia = Some(tarefa.abort_handle());
+        }
+        // Encerrado durante o sha256 ou o `bind`: quem encerrou já passou por
+        // `parar_de_oferecer`, e esta escuta escaparia dele.
+        if interior.encerrado.load(Ordering::SeqCst) {
+            parar_de_oferecer(&interior);
+            return Err(Recusa::Encerrado);
         }
         tracing::info!(arquivo = %caminho.display(), porta, tamanho = meta.len(), sha256 = %sha256, "cópia do mundo: oferecida");
         Ok(CopiaOferecida {
@@ -527,6 +540,13 @@ async fn receber(
         ..pedido
     };
     let alvo = caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, false)?;
+    // A cópia do mundo não é um artefato aceito (I1).
+    interior.presos.conferir(
+        &interior.raiz,
+        &alvo,
+        &pedido.destino,
+        super::reservado::Escrita::Troca,
+    )?;
     let pasta = alvo.parent().unwrap_or(&interior.raiz).to_path_buf();
     std::fs::create_dir_all(&pasta).map_err(|erro| Recusa::Disco {
         caminho: pasta.clone(),
@@ -561,8 +581,8 @@ async fn receber(
     // que esta cópia substitui contado de volta.
     {
         let reservado = interior.reservado.lock().map_or(0, |r| *r);
-        let usado =
-            caminho::ocupado(&interior.raiz, &super::baixar::e_parcial).saturating_add(reservado);
+        let usado = caminho::ocupado(&interior.raiz, &|c| interior.parcial_vivo(c))
+            .saturating_add(reservado);
         let substitui = std::fs::symlink_metadata(&alvo)
             .ok()
             .filter(std::fs::Metadata::is_file)

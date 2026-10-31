@@ -339,6 +339,41 @@ impl Tuneis {
         Self::encerrar_para_quem_joga(&entrada, mod_id, nome, MotivoDoFimDoTunel::MaquinaParou)
     }
 
+    /// **O servidor para o túnel de uma máquina** (a reserva assumiu a
+    /// posse, o aceite mudou os túneis, outro pedido): o mesmo que
+    /// [`Self::parar`], e **a máquina também ouve** `MaquinaParou` (revisão
+    /// final, I4). Sem isto, ela seguia aceitando as ligações diretas de quem
+    /// já tinha sido apresentado — dois mundos com uma dona só no livro — e a
+    /// metade dela seguia dizendo que servia.
+    pub fn parar_pelo_servidor(
+        &mut self,
+        maquina: PersonId,
+        mod_id: &str,
+        nome: &str,
+    ) -> Vec<Encerramento> {
+        let k = chave(mod_id, nome);
+        match self.servidos.get(&k) {
+            Some(entrada) if entrada.maquina == maquina => {}
+            _ => return Vec::new(),
+        }
+        let Some(entrada) = self.servidos.remove(&k) else {
+            return Vec::new();
+        };
+        let mut fim = vec![Encerramento {
+            para: entrada.maquina,
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+            motivo: MotivoDoFimDoTunel::MaquinaParou,
+        }];
+        fim.extend(Self::encerrar_para_quem_joga(
+            &entrada,
+            mod_id,
+            nome,
+            MotivoDoFimDoTunel::MaquinaParou,
+        ));
+        fim
+    }
+
     fn encerrar_para_quem_joga(
         entrada: &Entrada,
         mod_id: &str,
@@ -1707,6 +1742,30 @@ mod tests {
         let fim = t.parar(MAQUINA, "x/jogo", "eco");
         assert_eq!(fim.len(), 1);
         assert_eq!(fim[0].motivo, MotivoDoFimDoTunel::MaquinaParou);
+    }
+
+    /// **Quando o servidor para o túnel, a máquina ouve** (revisão final,
+    /// I4): a reserva que assume a posse, o aceite que muda os túneis e o
+    /// outro pedido passam por [`Tuneis::parar_pelo_servidor`], e a máquina
+    /// recebe `MaquinaParou` ao lado de quem jogava — sem isso ela seguia
+    /// servindo as ligações diretas. Só a dona do nome.
+    #[test]
+    fn parar_pelo_servidor_diz_a_maquina_e_a_quem_joga() {
+        let mut t = com_tunel();
+        t.entrar(JOGA, 3, "x/jogo", "eco").expect("entra");
+        assert!(t
+            .parar_pelo_servidor(PersonId(9), "x/jogo", "eco")
+            .is_empty());
+        let mut fim = t.parar_pelo_servidor(MAQUINA, "x/jogo", "eco");
+        fim.sort_by_key(|e| e.para.0);
+        let para: Vec<PersonId> = fim.iter().map(|e| e.para).collect();
+        let mut esperado = vec![MAQUINA, JOGA];
+        esperado.sort_by_key(|p| p.0);
+        assert_eq!(para, esperado);
+        assert!(fim
+            .iter()
+            .all(|e| e.motivo == MotivoDoFimDoTunel::MaquinaParou));
+        assert!(!t.existe("x/jogo", "eco"));
     }
 
     #[test]

@@ -1871,6 +1871,14 @@ impl Maquina {
 
     /// Passa a servir `mod_id/nome`: as aberturas que o nomearem ligam em
     /// `127.0.0.1:porta`.
+    ///
+    /// **Servir de novo o que já se serve não deixa órfão** (revisão final,
+    /// I5). É o caminho da volta de quem hospeda (`aoReconectar` serve de
+    /// novo): as ligações diretas que seguiram sem ele seguram o `Servido` de
+    /// antes, e trocá-lo calado fazia o `parar` seguinte parar só o novo — as
+    /// velhas seguiam levando ao jogo, e as quedas delas iam a medidas que
+    /// ninguém lê. O mesmo protocolo e a mesma porta, ainda de pé: fica o de
+    /// antes. Outro: o de antes para (`MaquinaParou`) antes de sair.
     pub(crate) fn registrar(
         &mut self,
         mod_id: &str,
@@ -1878,20 +1886,33 @@ impl Maquina {
         protocolo: ProtocoloDeTunel,
         porta: u16,
     ) {
-        let (parada, _) = watch::channel(None);
-        self.estado
+        let chave = (mod_id.to_owned(), nome.to_owned());
+        let mut servidos = self
+            .estado
             .servidos
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(
-                (mod_id.to_owned(), nome.to_owned()),
-                Arc::new(Servido {
-                    protocolo,
-                    porta,
-                    medidas: Medidas::nova(None),
-                    parada,
-                }),
-            );
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(velho) = servidos.get(&chave) {
+            let de_pe = velho.parada.borrow().is_none();
+            if de_pe && velho.protocolo == protocolo && velho.porta == porta {
+                tracing::info!(%mod_id, tunel = %nome, porta, "túnel: servido de novo; as ligações de antes seguem no mesmo");
+                return;
+            }
+            if de_pe {
+                velho.parada.send_replace(Some(Queda::MaquinaParou));
+                tracing::info!(%mod_id, tunel = %nome, antes = velho.porta, agora = porta, "túnel: servido de novo com outra porta; as ligações de antes acabam");
+            }
+        }
+        let (parada, _) = watch::channel(None);
+        servidos.insert(
+            chave,
+            Arc::new(Servido {
+                protocolo,
+                porta,
+                medidas: Medidas::nova(None),
+                parada,
+            }),
+        );
     }
 
     /// Deixa de servir: as conexões vivas acabam com `queda`.
@@ -2436,6 +2457,13 @@ pub(crate) fn fim_pela_recusa(motivo: RecusaDeTunel) -> Option<Queda> {
     }
 }
 
+/// Um pedido para servir em andamento: o que a máquina pediu, e quem espera.
+pub(crate) struct Servico {
+    protocolo: ProtocoloDeTunel,
+    porta: u16,
+    resposta: oneshot::Sender<Result<(), RecusaDeTunel>>,
+}
+
 /// Os pedidos em andamento e os túneis vivos de um enlace.
 pub(crate) struct Tuneis {
     jogando: HashMap<Chave, TunelDeJogador>,
@@ -2443,7 +2471,11 @@ pub(crate) struct Tuneis {
     /// Quem espera a porta de um túnel. Mais de um quando a pessoa clica de novo
     /// antes de o servidor responder: o verbo sai uma vez só.
     entrando: HashMap<Chave, Vec<oneshot::Sender<Result<PortaLocal, RecusaDeTunel>>>>,
-    servindo: HashMap<Chave, oneshot::Sender<Result<(), RecusaDeTunel>>>,
+    /// Os pedidos para servir, **com o que a máquina pediu** (revisão final,
+    /// I3): a concessão é registrada com este protocolo e esta porta, e não
+    /// com os do `TunelConcedido` — um servidor hostil não leva a máquina a
+    /// discar outra porta local dela.
+    servindo: HashMap<Chave, Servico>,
     /// Os túneis que seguiram pela malha sem quem hospeda e que, na volta
     /// dele, pediram entrada de novo ([`Self::reentrar`]): a concessão que
     /// chega troca a estrela deles, e não abre outra porta.
@@ -2541,9 +2573,18 @@ impl Tuneis {
     pub(crate) fn pedir_servico(
         &mut self,
         chave: Chave,
+        protocolo: ProtocoloDeTunel,
+        porta: u16,
         resposta: oneshot::Sender<Result<(), RecusaDeTunel>>,
     ) {
-        self.servindo.insert(chave, resposta);
+        self.servindo.insert(
+            chave,
+            Servico {
+                protocolo,
+                porta,
+                resposta,
+            },
+        );
     }
 
     /// Responde `recusa` a um pedido cujo verbo não saiu (ou foi recusado).
@@ -2551,8 +2592,8 @@ impl Tuneis {
         for resposta in self.entrando.remove(chave).into_iter().flatten() {
             let _ = resposta.send(Err(recusa));
         }
-        if let Some(resposta) = self.servindo.remove(chave) {
-            let _ = resposta.send(Err(recusa));
+        if let Some(servico) = self.servindo.remove(chave) {
+            let _ = servico.resposta.send(Err(recusa));
         }
     }
 
@@ -2730,8 +2771,31 @@ impl Tuneis {
         enviar: &Enviar,
     ) {
         let chave = (mod_id.to_owned(), nome.to_owned());
-        if let Some(resposta) = self.servindo.remove(&chave) {
-            self.maquina.registrar(mod_id, nome, protocolo, porta);
+        if let Some(servico) = self.servindo.remove(&chave) {
+            // **A porta é a que esta máquina pediu** (I3). Uma concessão com
+            // outra porta ou outro protocolo não é a do pedido: não se
+            // registra, o servidor ouve que a máquina não serve, e quem pediu
+            // ouve `fora-do-aceite`, com os dois no log.
+            if (servico.protocolo, servico.porta) != (protocolo, porta) {
+                tracing::warn!(
+                    %mod_id,
+                    tunel = %nome,
+                    pedida = servico.porta,
+                    concedida = porta,
+                    protocolo_pedido = ?servico.protocolo,
+                    protocolo_concedido = ?protocolo,
+                    "túnel: a concessão traz outra porta ou outro protocolo que o pedido; a máquina não serve"
+                );
+                enviar(ClientMessage::PararTunel {
+                    mod_id: mod_id.to_owned(),
+                    nome: nome.to_owned(),
+                });
+                let _ = servico.resposta.send(Err(RecusaDeTunel::ForaDoAceite));
+                return;
+            }
+            let resposta = servico.resposta;
+            self.maquina
+                .registrar(mod_id, nome, servico.protocolo, servico.porta);
             if let Some(estrela) = estrela {
                 self.maquina
                     .aceitar_pela_estrela(Via::nova(estrela.clone()));
@@ -2859,7 +2923,7 @@ impl Tuneis {
             }
             return;
         }
-        if let Some(resposta) = self.servindo.remove(&chave) {
+        if let Some(Servico { resposta, .. }) = self.servindo.remove(&chave) {
             let _ = resposta.send(Err(motivo));
             return;
         }
@@ -4191,6 +4255,97 @@ mod testes {
         assert!(tuneis.jogando.is_empty());
     }
 
+    /// **Servir de novo não deixa órfão o servido de antes** (revisão final,
+    /// I5): a ligação direta que segurava o `Servido` antes da volta de quem
+    /// hospeda é parada pelo `parar` de depois; e servir com outra porta
+    /// para as de antes na hora.
+    #[test]
+    fn servir_de_novo_nao_deixa_orfao_o_servido_de_antes() {
+        let mut maquina = Maquina::nova();
+        let chave = (MOD.to_owned(), NOME.to_owned());
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25565);
+        // O que uma ligação direta viva segura.
+        let segurado = maquina.estado.servido(&chave).expect("servido");
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25565);
+        assert!(maquina.parar(MOD, NOME, Queda::MaquinaParou));
+        assert_eq!(*segurado.parada.borrow(), Some(Queda::MaquinaParou));
+
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25565);
+        let segurado = maquina.estado.servido(&chave).expect("servido de novo");
+        assert!(segurado.parada.borrow().is_none());
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25566);
+        assert_eq!(*segurado.parada.borrow(), Some(Queda::MaquinaParou));
+        assert!(maquina.serve(MOD, NOME));
+    }
+
+    /// **A máquina serve a porta que ela pediu** (revisão final, I3): um
+    /// servidor hostil que concede outra (a 22 desta máquina) não a faz discar
+    /// `127.0.0.1:22` a cada canal. A concessão é recusada, dita ao servidor
+    /// (`PararTunel`) e a quem pediu (`fora-do-aceite`), e nada é registrado;
+    /// a concessão certa, depois, serve a porta pedida.
+    #[tokio::test]
+    async fn a_concessao_com_outra_porta_nao_e_servida() {
+        let par = par_em_loopback().await;
+        let (avisos, _recebidos) = mpsc::unbounded_channel();
+        let mut tuneis = Tuneis::nova(avisos);
+        let mandados = Arc::new(Mutex::new(Vec::new()));
+        let enviar: Enviar = {
+            let mandados = Arc::clone(&mandados);
+            Arc::new(move |m| mandados.lock().unwrap().push(m))
+        };
+        let concessao = |protocolo, porta| ServerMessage::TunelConcedido {
+            mod_id: MOD.into(),
+            nome: NOME.into(),
+            protocolo,
+            porta,
+        };
+        for (protocolo, porta) in [(ProtocoloDeTunel::Tcp, 22), (ProtocoloDeTunel::Udp, 25565)] {
+            let (servir, servida) = oneshot::channel();
+            tuneis.pedir_servico(
+                (MOD.to_owned(), NOME.to_owned()),
+                ProtocoloDeTunel::Tcp,
+                25565,
+                servir,
+            );
+            tuneis.tratar(
+                &concessao(protocolo, porta),
+                Some(&par.anfitriao),
+                None,
+                &enviar,
+                Duration::from_secs(1),
+            );
+            assert_eq!(
+                servida.await.unwrap(),
+                Err(RecusaDeTunel::ForaDoAceite),
+                "{protocolo:?} {porta}"
+            );
+            assert!(!tuneis.maquina.serve(MOD, NOME), "{protocolo:?} {porta}");
+        }
+        assert!(matches!(
+            mandados.lock().unwrap().as_slice(),
+            [
+                ClientMessage::PararTunel { .. },
+                ClientMessage::PararTunel { .. }
+            ]
+        ));
+        let (servir, servida) = oneshot::channel();
+        tuneis.pedir_servico(
+            (MOD.to_owned(), NOME.to_owned()),
+            ProtocoloDeTunel::Tcp,
+            25565,
+            servir,
+        );
+        tuneis.tratar(
+            &concessao(ProtocoloDeTunel::Tcp, 25565),
+            Some(&par.anfitriao),
+            None,
+            &enviar,
+            Duration::from_secs(1),
+        );
+        servida.await.unwrap().unwrap();
+        assert!(tuneis.maquina.serve(MOD, NOME));
+    }
+
     #[tokio::test]
     async fn quem_desistiu_do_pedido_nao_deixa_concessao_orfa() {
         let par = par_em_loopback().await;
@@ -4371,7 +4526,12 @@ mod testes {
         let enviar = sem_enviar();
         // A máquina serve; quem joga entra no mesmo nome (pelo mesmo par).
         let (servir, servida) = oneshot::channel();
-        tuneis.pedir_servico((MOD.to_owned(), NOME.to_owned()), servir);
+        tuneis.pedir_servico(
+            (MOD.to_owned(), NOME.to_owned()),
+            ProtocoloDeTunel::Tcp,
+            jogo,
+            servir,
+        );
         tuneis.tratar(
             &ServerMessage::TunelConcedido {
                 mod_id: MOD.into(),

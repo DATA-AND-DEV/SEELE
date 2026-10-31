@@ -126,6 +126,12 @@ impl Programa {
         }
         let pasta_de_origem = caminho::dentro_da_raiz(&interior.raiz, origem, false)?;
         let alvo = caminho::dentro_da_raiz(&interior.raiz, arquivo, false)?;
+        interior.presos.conferir(
+            &interior.raiz,
+            &alvo,
+            arquivo,
+            super::reservado::Escrita::Troca,
+        )?;
         if !std::fs::symlink_metadata(&pasta_de_origem).is_ok_and(|m| m.is_dir()) {
             return Err(Recusa::NaoEPasta {
                 origem: origem.to_owned(),
@@ -148,7 +154,7 @@ impl Programa {
         // o pacote velho de mesmo nome contado de volta: ele sai no fim.
         let livre = {
             let reservado = interior.reservado.lock().map_or(0, |r| *r);
-            let usado = caminho::ocupado(&interior.raiz, &super::baixar::e_parcial)
+            let usado = caminho::ocupado(&interior.raiz, &|c| interior.parcial_vivo(c))
                 .saturating_add(reservado);
             let substitui = std::fs::symlink_metadata(&alvo)
                 .ok()

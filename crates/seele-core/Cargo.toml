@@ -100,6 +100,15 @@ reducao = ["seele-sessao/reducao"]
 # recusa (`compile_error!`) o recurso num build otimizado, e a cadeia herda.
 aparelho-de-mentira = ["seele-audio/aparelho-de-mentira"]
 
+# **O processo do MOD morre com os netos** (revisão final da API 8, I9): o
+# filho de `programa.rodar` nasce num grupo de processos próprio, e parar mata
+# o grupo (`killpg`). O `std` cria o grupo (`process_group`), mas não manda
+# sinal a um grupo, e o workspace proíbe `unsafe`. **Zero crate novo no
+# `Cargo.lock`**: o `nix` 0.29 já está na árvore (pelo `mac_address` e pelo
+# `termwiz`); entra uma aresta, só com `signal`.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["signal"] }
+
 [dev-dependencies]
 # O relógio virtual do tokio, e nada além dele.
 #

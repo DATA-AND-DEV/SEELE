@@ -35,6 +35,7 @@ mod empacotar;
 mod escrever;
 mod hash;
 mod ler;
+mod reservado;
 mod rodar;
 mod trazer;
 
@@ -459,12 +460,33 @@ pub enum Recusa {
         motivo: String,
     },
     /// A cópia inteira chegou e o sha256 não é o anunciado. Nada foi gravado.
-    #[error("a cópia chegou com o sha256 {obtido}, e o anunciado era {esperado}; nada foi gravado")]
+    #[error(
+        "a cópia chegou com o sha256 {obtido}, e o anunciado era {esperado}; nada foi gravado"
+    )]
     CopiaNaoBate {
         /// O sha256 anunciado.
         esperado: String,
         /// O sha256 do que chegou.
         obtido: String,
+    },
+    /// **A escrita cairia sobre o que o aceite roda** (revisão final, I1):
+    /// o comando aceito (a pasta dele inteira, `java/`), ou um argumento que é
+    /// caminho (`server.jar`). Só os bytes de um artefato aceito escrevem ali.
+    #[error("{caminho} cairia sobre {reservado}, que o aceite prende: só um artefato aceito escreve ali")]
+    ReservadoAoAceite {
+        /// O caminho pedido.
+        caminho: String,
+        /// O caminho preso que ele tocaria, como a política o escreve.
+        reservado: String,
+    },
+    /// **O comando aceito roda na pasta do servidor de jogo**, e só nela
+    /// (revisão final, I1): os argumentos aceitos (`-jar server.jar`) se leem
+    /// a partir da pasta, e uma pasta escolhida pelo MOD rodaria outro
+    /// `server.jar`.
+    #[error("o aceite roda o comando na pasta do servidor de jogo, e o pedido pede {pasta}")]
+    PastaForaDoAceite {
+        /// A pasta pedida.
+        pasta: String,
     },
 }
 
@@ -513,6 +535,8 @@ pub const NOMES_DAS_RECUSAS: &[&str] = &[
     "copia-recusada",
     "copia-caiu",
     "copia-nao-bate",
+    "reservado-ao-aceite",
+    "pasta-fora-do-aceite",
 ];
 
 impl Recusa {
@@ -562,6 +586,8 @@ impl Recusa {
             Self::CopiaRecusada { .. } => "copia-recusada",
             Self::CopiaCaiu { .. } => "copia-caiu",
             Self::CopiaNaoBate { .. } => "copia-nao-bate",
+            Self::ReservadoAoAceite { .. } => "reservado-ao-aceite",
+            Self::PastaForaDoAceite { .. } => "pasta-fora-do-aceite",
         }
     }
 }
@@ -590,12 +616,20 @@ pub fn host_aceito(host: &str, dominios: &[String]) -> bool {
 /// O estado de um [`Programa`], dividido com as tarefas que ele começou.
 pub(crate) struct Interior {
     pub(crate) politica: Politica,
+    /// **O que o aceite prende** (I1): os caminhos que só os bytes de um
+    /// artefato aceito escrevem. Sai da política, uma vez.
+    pub(crate) presos: reservado::Presos,
     /// A raiz, canônica: é contra ela que um link é comparado.
     pub(crate) raiz: PathBuf,
     pub(crate) origem: Arc<dyn Origem>,
     recusas: Mutex<BTreeMap<&'static str, u64>>,
     /// Bytes declarados dos downloads em andamento, ainda não no disco.
     pub(crate) reservado: Mutex<u64>,
+    /// **Os parciais dos downloads em andamento** (revisão final, I8): só
+    /// estes ficam fora da conta do disco, porque a reserva já os conta pelo
+    /// tamanho declarado. Antes, todo `*.seele-parcial` ficava fora — e um
+    /// `destino: "a.seele-parcial"` passava do teto que o dono aceitou.
+    pub(crate) parciais: Mutex<std::collections::HashSet<PathBuf>>,
     pub(crate) encerrado: AtomicBool,
     proximo: AtomicU64,
     /// Os downloads em andamento, para encerrar.
@@ -619,6 +653,12 @@ impl Interior {
             *contagem.entry(recusa.nome()).or_default() += 1;
         }
         recusa
+    }
+
+    /// Se `caminho` é o parcial de um download em andamento, que a reserva
+    /// já conta: o que [`caminho::ocupado`] deixa de fora.
+    pub(crate) fn parcial_vivo(&self, caminho: &Path) -> bool {
+        self.parciais.lock().is_ok_and(|p| p.contains(caminho))
     }
 
     pub(crate) fn proximo_numero(&self) -> u64 {
@@ -660,11 +700,13 @@ impl Programa {
         let raiz = std::fs::canonicalize(&politica.raiz).map_err(disco)?;
         Ok(Self {
             interior: Arc::new(Interior {
+                presos: reservado::Presos::da_politica(&politica),
                 politica,
                 raiz,
                 origem,
                 recusas: Mutex::new(BTreeMap::new()),
                 reservado: Mutex::new(0),
+                parciais: Mutex::new(std::collections::HashSet::new()),
                 encerrado: AtomicBool::new(false),
                 proximo: AtomicU64::new(1),
                 downloads: Mutex::new(HashMap::new()),
@@ -900,6 +942,11 @@ mod tests {
                 esperado: s(),
                 obtido: s(),
             },
+            Recusa::ReservadoAoAceite {
+                caminho: s(),
+                reservado: s(),
+            },
+            Recusa::PastaForaDoAceite { pasta: s() },
         ];
         let nomes: Vec<&str> = todas.iter().map(Recusa::nome).collect();
         assert_eq!(nomes, NOMES_DAS_RECUSAS);

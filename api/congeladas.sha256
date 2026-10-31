@@ -164,4 +164,9 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   MaquinaVoltou também para o lugar pedido a quem não estava. Conferido em
 #   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
 #   v8 segue sem release.
-812ac6bdf80834e9f0297d7089ccd82ab2accb894f9d091caa40c791df60673f  v8.json
+# - Emenda da revisão final (31/10/2026, `desenho/api-8-revisao`): o que o
+#   aceite roda é preso (as recusas reservado-ao-aceite e pasta-fora-do-aceite,
+#   o rodar só na pasta do servidor de jogo, e os campos caminho, reservado e
+#   pasta). Conferido em 31/10/2026 no release (`curl` do CLAUDE.md): a mais
+#   nova é a v0.18.3, e a v8 segue sem release.
+ea14781f19cdcf9fa7e67f2b38a9933ea59da7d69357619656d57aa8426e9b10  v8.json

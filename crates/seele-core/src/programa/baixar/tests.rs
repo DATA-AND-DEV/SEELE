@@ -916,3 +916,242 @@ async fn o_arquivo_que_esta_mas_nao_bate_e_baixado() {
         bytes
     );
 }
+
+// ------------------------------------------------- I1: o que roda é o aceito
+
+/// Um `.tar.gz` com `entradas` (nome, conteúdo).
+fn tar_gz(entradas: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut construtor = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::fast(),
+    ));
+    for (nome, conteudo) in entradas {
+        let mut cabecalho = tar::Header::new_gnu();
+        cabecalho.set_size(conteudo.len() as u64);
+        cabecalho.set_mode(0o755);
+        cabecalho.set_cksum();
+        construtor
+            .append_data(&mut cabecalho, nome, *conteudo)
+            .unwrap();
+    }
+    construtor.into_inner().unwrap().finish().unwrap()
+}
+
+const URL_DO_JAVA: &str = "https://github.com/adoptium/jre.tar.gz";
+
+/// A bancada da receita do Minecraft: `java/bin/java -jar server.jar nogui`
+/// aceito, o `server.jar` e o Java como artefatos, e `github.com` nas origens
+/// (o CDN da Adoptium, como o MOD de referência).
+fn bancada_do_minecraft(origem: Mentira, server_jar: &[u8], java: &[u8]) -> Bancada {
+    let pasta = Pasta::nova("presos");
+    let origem = Arc::new(origem);
+    let programa = Programa::novo(
+        Politica {
+            dominios: vec!["piston-data.mojang.com".to_owned(), "github.com".to_owned()],
+            artefatos: vec![
+                super::super::ArtefatoAceito {
+                    url: URL.to_owned(),
+                    hash: sha256(server_jar),
+                    tamanho: server_jar.len() as u64,
+                },
+                super::super::ArtefatoAceito {
+                    url: URL_DO_JAVA.to_owned(),
+                    hash: sha256(java),
+                    tamanho: java.len() as u64,
+                },
+            ],
+            de_outros_sistemas: vec![],
+            origens: vec!["github.com".to_owned()],
+            comando: Some(ComandoAceito {
+                comando: "java/bin/java".to_owned(),
+                argumentos: ["-Xmx2G", "-jar", "server.jar", "nogui"]
+                    .map(str::to_owned)
+                    .to_vec(),
+            }),
+            instalar: None,
+            pack: None,
+            teto_de_disco: 1 << 20,
+            portas_de_copia: vec![],
+            raiz: pasta.caminho().join("jogo"),
+        },
+        Arc::clone(&origem) as Arc<dyn Origem>,
+    )
+    .unwrap();
+    Bancada {
+        _pasta: pasta,
+        programa,
+        origem,
+    }
+}
+
+/// **O que roda é o que foi aceito** (revisão final, I1). Com `github.com`
+/// nas origens, um binário qualquer de lá não cai sobre `java/bin/java` (nem
+/// sobre nada em `java/`), nem sobre o `server.jar` dos argumentos, por
+/// nenhuma porta: `baixar`, `escrever` e `desempacotar`, por cima ou não. Os
+/// bytes aceitos chegam lá, e o que não é preso segue livre.
+#[tokio::test]
+async fn so_os_bytes_aceitos_caem_sobre_o_que_o_aceite_roda() {
+    let server_jar = b"o server.jar mostrado";
+    let java = tar_gz(&[("jre/bin/java", b"o java mostrado")]);
+    let mau = b"um binario que o dono nunca viu";
+    let url_ma = "https://github.com/qualquer-um/mau";
+    let b = bancada_do_minecraft(
+        Mentira::default()
+            .com(url_ma, corpo(mau))
+            .com(URL, corpo(server_jar))
+            .com(URL_DO_JAVA, corpo(&java)),
+        server_jar,
+        &java,
+    );
+    let raiz = b.programa.raiz().to_path_buf();
+    let livre = |destino: &str| PedidoDeDownload {
+        url: url_ma.to_owned(),
+        hashes: vec![sha256(mau)],
+        tamanho: mau.len() as u64,
+        destino: destino.to_owned(),
+    };
+    for destino in [
+        "java/bin/java",
+        "Java/BIN/java",
+        "java/lib/libjvm.dylib",
+        "java",
+        "server.jar",
+        "SERVER.JAR",
+    ] {
+        match b.programa.baixar(livre(destino)) {
+            Err(Recusa::ReservadoAoAceite { caminho, .. }) => assert_eq!(caminho, destino),
+            outro => panic!("{destino}: um download livre caiu sobre o aceito: {outro:?}"),
+        }
+    }
+    assert_eq!(b.origem.pedidos.load(Ordering::SeqCst), 0, "pediu à origem");
+    assert!(matches!(
+        b.programa.escrever("server.jar", "x"),
+        Err(Recusa::ReservadoAoAceite { .. })
+    ));
+
+    // Um pacote livre não troca `java/`, nem entra por cima nele.
+    let pacote_mau = tar_gz(&[("bin/java", mau), ("lib/x", mau)]);
+    std::fs::write(raiz.join("mau.tar.gz"), &pacote_mau).unwrap();
+    let abrir = |destino: &str, mesclar: bool| super::super::PedidoDeDesempacotar {
+        arquivo: "mau.tar.gz".to_owned(),
+        destino: destino.to_owned(),
+        raiz: String::new(),
+        mesclar,
+    };
+    for (destino, mesclar) in [("java", false), ("java", true), ("java/bin", true)] {
+        assert!(
+            matches!(
+                b.programa.desempacotar(&abrir(destino, mesclar)),
+                Err(Recusa::ReservadoAoAceite { .. })
+            ),
+            "{destino} mesclar={mesclar}"
+        );
+    }
+    // Por cima da raiz, um `overrides` com um `server.jar` é recusado inteiro,
+    // antes de qualquer entrada entrar.
+    std::fs::write(
+        raiz.join("pack.tar.gz"),
+        tar_gz(&[("config/a.txt", b"a"), ("server.jar", mau)]),
+    )
+    .unwrap();
+    assert!(matches!(
+        b.programa
+            .desempacotar(&super::super::PedidoDeDesempacotar {
+                arquivo: "pack.tar.gz".to_owned(),
+                destino: String::new(),
+                raiz: String::new(),
+                mesclar: true,
+            }),
+        Err(Recusa::ReservadoAoAceite { .. })
+    ));
+    assert!(!raiz.join("config/a.txt").exists(), "metade do pack entrou");
+
+    // Os bytes aceitos chegam: o `server.jar` pela URL dele, o Java pelo
+    // pacote aceito aberto em `java/`.
+    b.programa
+        .baixar(pedido(server_jar, "server.jar"))
+        .unwrap()
+        .terminar()
+        .await
+        .unwrap();
+    b.programa
+        .baixar(PedidoDeDownload {
+            url: URL_DO_JAVA.to_owned(),
+            hashes: vec![sha256(&java)],
+            tamanho: java.len() as u64,
+            destino: "pacotes/java.tar.gz".to_owned(),
+        })
+        .unwrap()
+        .terminar()
+        .await
+        .unwrap();
+    b.programa
+        .desempacotar(&super::super::PedidoDeDesempacotar {
+            arquivo: "pacotes/java.tar.gz".to_owned(),
+            destino: "java".to_owned(),
+            raiz: "jre".to_owned(),
+            mesclar: false,
+        })
+        .unwrap();
+    assert_eq!(
+        std::fs::read(raiz.join("java/bin/java")).unwrap(),
+        b"o java mostrado"
+    );
+    assert_eq!(std::fs::read(raiz.join("server.jar")).unwrap(), server_jar);
+    // E o pacote aceito trocado por outro no disco deixa de ser aceito.
+    std::fs::write(raiz.join("pacotes/java.tar.gz"), &pacote_mau).unwrap();
+    assert!(matches!(
+        b.programa
+            .desempacotar(&super::super::PedidoDeDesempacotar {
+                arquivo: "pacotes/java.tar.gz".to_owned(),
+                destino: "java".to_owned(),
+                raiz: String::new(),
+                mesclar: false,
+            }),
+        Err(Recusa::ReservadoAoAceite { .. })
+    ));
+    assert_eq!(
+        std::fs::read(raiz.join("java/bin/java")).unwrap(),
+        b"o java mostrado"
+    );
+
+    // O que não é preso segue livre (os mods de um pack).
+    b.programa
+        .baixar(livre("mods/x.jar"))
+        .unwrap()
+        .terminar()
+        .await
+        .unwrap();
+    assert_eq!(b.programa.recusas().get("reservado-ao-aceite"), Some(&12));
+}
+
+/// **O teto de disco vê todo arquivo que a metade grava** (revisão final,
+/// I8): antes, todo `*.seele-parcial` ficava fora da conta, e um destino com
+/// esse nome passava do teto que o dono aceitou. Só o parcial de um download
+/// em andamento fica fora (a reserva já o conta).
+#[tokio::test]
+async fn um_destino_com_nome_de_parcial_conta_no_disco() {
+    let bytes = [7_u8; 60];
+    let b = bancada(Mentira::default().com(URL, corpo(&bytes)), 100);
+    b.programa
+        .baixar(pedido(&bytes, "a.seele-parcial"))
+        .unwrap()
+        .terminar()
+        .await
+        .unwrap();
+    match b
+        .programa
+        .baixar(pedido(&bytes, "b.seele-parcial"))
+        .unwrap()
+        .terminar()
+        .await
+    {
+        Err(Recusa::DiscoCheio { usado, .. }) => assert_eq!(usado, 60),
+        outro => panic!("o segundo passou do teto: {outro:?}"),
+    }
+    let escrito = "x".repeat(50);
+    assert!(matches!(
+        b.programa.escrever("c.seele-parcial", &escrito),
+        Err(Recusa::DiscoCheio { .. })
+    ));
+}

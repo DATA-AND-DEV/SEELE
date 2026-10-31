@@ -163,8 +163,26 @@ impl AceitesDeMaquina {
             .into_iter()
             .filter(|velho| !velho.e_de(&aceite.alvo, &aceite.mod_id, &aceite.servidor))
             .collect();
+        self.dizer_as_ilegiveis_que_saem("guardar");
         aceites.push(aceite.clone());
         self.escrever(&aceites)
+    }
+
+    /// **As linhas ilegíveis que a regravação vai tirar, no log** (revisão
+    /// final, M6): `guardar` e `revogar` reescrevem o arquivo só com o que se
+    /// leu, e a contagem de [`Self::ilegiveis`] ficava só no contador — que
+    /// ninguém lia nesses dois caminhos. Quem procura um aceite que sumiu acha
+    /// aqui quantas linhas saíram, e de onde.
+    fn dizer_as_ilegiveis_que_saem(&self, onde: &str) {
+        let ilegiveis = self.ilegiveis();
+        if ilegiveis > 0 {
+            tracing::warn!(
+                arquivo = %self.arquivo.display(),
+                ilegiveis,
+                onde,
+                "aceites de máquina: linhas que não se leem saem do arquivo ao regravar"
+            );
+        }
     }
 
     /// Apaga o aceite desta máquina. `true` se havia um.
@@ -183,6 +201,7 @@ impl AceitesDeMaquina {
         if depois.len() == total {
             return Ok(false);
         }
+        self.dizer_as_ilegiveis_que_saem("revogar");
         self.escrever(&depois)?;
         Ok(true)
     }
@@ -421,6 +440,36 @@ mod tests {
         assert_eq!(lidos.len(), 1);
         assert_eq!(lidos[0].alvo, "casa:8383");
         assert_eq!(aceites.ilegiveis(), 2);
+    }
+
+    /// **Regravar tira as ilegíveis, e o log diz quantas** (revisão final,
+    /// M6): `guardar` e `revogar` deixam um `WARN` com a contagem.
+    #[test]
+    fn as_ilegiveis_que_a_regravacao_tira_vao_ao_log() {
+        let dir = pasta("ilegivel-no-log");
+        let aceites = AceitesDeMaquina::em(&dir);
+        let boa = serde_json::to_string(&aceite("casa:8383", "mundo", 1)).unwrap();
+        std::fs::write(dir.join(ARQUIVO), format!("{{quebrada\n{boa}\n")).unwrap();
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        aceites.guardar(&aceite("casa:8383", "outro", 2)).unwrap();
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|l| l.contains("saem do arquivo")
+                && l.contains("ilegiveis=1")
+                && l.contains("guardar")),
+            "{linhas:?}"
+        );
+        std::fs::write(dir.join(ARQUIVO), format!("{{quebrada\n{boa}\n")).unwrap();
+        assert!(aceites.revogar("casa:8383", "seele/jogo", "mundo").unwrap());
+        assert!(
+            rastro
+                .linhas()
+                .iter()
+                .any(|l| l.contains("ilegiveis=1") && l.contains("revogar")),
+            "{:?}",
+            rastro.linhas()
+        );
     }
 
     /// A pasta onde o jogo vai morar nunca é a de configuração, nem a contém:

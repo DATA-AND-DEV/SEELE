@@ -1783,7 +1783,10 @@ const FRASES_DA_MAQUINA = Object.freeze({
   jogo: (titulo, versao) => versao ? `jogo: ${titulo}, versão ${versao}` : `jogo: ${titulo}`,
   receita: (nome, versao) => `receita: ${nome} ${versao}`,
   pedidoPor: (quem, servidor) => `pedido por ${quem}, no servidor ${servidor}`,
-  porta: (porta, protocolo) => `o jogo escuta na porta ${porta} (${protocolo}); quem está no servidor alcança essa porta pelo SEELE`,
+  // O nome do túnel, como o MOD o chama (revisão final, M2): um túnel de
+  // cópia do mundo (`<servidor>-copia`) leva o mundo inteiro entre membros, e
+  // a tela dizia só «o jogo escuta», como se fosse mais uma porta do jogo.
+  porta: (nome, porta, protocolo) => `o túnel «${nome}» escuta na porta ${porta} (${protocolo}); quem está no servidor alcança essa porta pelo SEELE`,
   baixar: (n, total) => `vai baixar ${n === 1 ? "1 arquivo" : `${n} arquivos`}, ${total} no total:`,
   artefato: (nome, origem, tamanho) => `· ${nome}, de ${origem}, ${tamanho}`,
   deOutrosSistemas: (n) => `${n === 1 ? "1 arquivo é" : `${n} arquivos são`} de outros sistemas, e este computador não ${n === 1 ? "o" : "os"} baixa`,

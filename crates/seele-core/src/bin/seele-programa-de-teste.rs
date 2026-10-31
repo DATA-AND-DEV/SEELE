@@ -10,6 +10,10 @@
 //! - `argumentos …`: escreve cada argumento numa linha e sai com 0.
 //! - `batimento ARQUIVO`: escreve um contador crescente no arquivo a cada
 //!   20 ms, para sempre — é como o teste vê que o processo morreu.
+//! - `neto ARQUIVO`: sobe um neto (`batimento ARQUIVO`), diz `neto PID` e
+//!   espera a entrada fechar — o servidor de jogo que relança o `java`.
+//! - `neto-e-sai ARQUIVO`: sobe o mesmo neto, espera ele bater e sai com 0 —
+//!   o instalador que deixa um ajudante para trás.
 
 use std::io::{BufRead as _, Write as _};
 
@@ -31,6 +35,39 @@ fn main() {
                 n += 1;
                 let _ = std::fs::write(arquivo, n.to_string());
                 std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+        Some(modo @ ("neto" | "neto-e-sai")) => {
+            let Some(arquivo) = argumentos.get(1) else {
+                std::process::exit(2);
+            };
+            let Ok(eu) = std::env::current_exe() else {
+                std::process::exit(3);
+            };
+            let Ok(neto) = std::process::Command::new(eu)
+                .args(["batimento", arquivo])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            else {
+                std::process::exit(4);
+            };
+            println!("neto {}", neto.id());
+            let _ = std::io::stdout().flush();
+            // Sai só depois de o neto começar a bater: é o neto que fica
+            // para trás que o teste procura.
+            if modo == "neto-e-sai" {
+                while std::fs::read_to_string(arquivo).map_or(true, |t| t.trim().is_empty()) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            if modo == "neto" {
+                for linha in std::io::stdin().lock().lines() {
+                    if linha.is_err() {
+                        break;
+                    }
+                }
             }
         }
         _ => std::process::exit(2),

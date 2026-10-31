@@ -5291,6 +5291,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "if-addrs",
+ "nix",
  "rand 0.10.2",
  "rcgen",
  "reqwest",
