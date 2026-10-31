@@ -766,7 +766,7 @@ async fn trazer(
         Ok(None) => {}
         Err(recusa) => return viva.entregar(&resposta_da_recusa(n, &recusa).to_string()),
     }
-    let bytes = match viva.fio.ler_volume(&viva.chave.mod_id, pedido).await {
+    let bytes = match viva.fio().ler_volume(&viva.chave.mod_id, pedido).await {
         Ok(bytes) => bytes,
         Err(motivo) => {
             viva.recusas_da_cola.contar("pack-nao-veio");
@@ -808,7 +808,7 @@ async fn receber_copia(
     mut pedido: seele_ffi::programa::PedidoDeCopia,
 ) {
     let mod_id = viva.chave.mod_id.clone();
-    let porta = match viva.fio.entrar_tunel(&mod_id, &tunel).await {
+    let porta = match viva.fio().entrar_tunel(&mod_id, &tunel).await {
         Ok(porta) => porta,
         Err(motivo) => {
             viva.recusas_da_cola.contar("tunel-recusado");
@@ -824,10 +824,10 @@ async fn receber_copia(
         }
     };
     let ate = std::time::Instant::now() + ESPERA_PELA_MALHA;
-    while viva.fio.direto(&mod_id, &tunel) != Some(true) && std::time::Instant::now() < ate {
+    while viva.fio().direto(&mod_id, &tunel) != Some(true) && std::time::Instant::now() < ate {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let direto = viva.fio.direto(&mod_id, &tunel) == Some(true);
+    let direto = viva.fio().direto(&mod_id, &tunel) == Some(true);
     pedido.porta_local = porta;
     let destino = pedido.destino.clone();
     let dela = Arc::clone(viva);
@@ -838,7 +838,7 @@ async fn receber_copia(
             );
         })
         .await;
-    viva.fio.sair_tunel(&mod_id, &tunel);
+    viva.fio().sair_tunel(&mod_id, &tunel);
     match feito {
         Ok(recebida) => viva.responder(
             n,

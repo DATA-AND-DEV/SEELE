@@ -157,4 +157,11 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   limites maquina-sumida e copia-do-mundo. Conferido em 31/10/2026 no
 #   release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a v8 segue sem
 #   release.
-185af9ca79a24b5254500bfe51da1e96eea38d4c98ff776292f341397b799770  v8.json
+# - Emenda de «sem quem hospeda» (31/10/2026, `desenho/api-8-sobre-0.19`):
+#   maquina.aoReconectar({ fora }) — a metade de máquina segue rodando sem
+#   quem hospeda e é religada pelo pedido igual ao aceito, sem subir de novo —,
+#   o motivo sem-volta no aoParar (a órfã que ninguém chamou de volta), e o
+#   MaquinaVoltou também para o lugar pedido a quem não estava. Conferido em
+#   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
+#   v8 segue sem release.
+812ac6bdf80834e9f0297d7089ccd82ab2accb894f9d091caa40c791df60673f  v8.json

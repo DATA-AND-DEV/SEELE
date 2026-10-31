@@ -371,8 +371,9 @@ function desenharUmaMaquina(entrada) {
   const bloco = elemento("div", "maquina-bloco");
   bloco.dataset.estado = entrada.ligada ? "ligada" : "parada";
   bloco.dataset.mod = entrada.modId;
-  // O motivo da parada pinta a faixa: a que ninguém pediu sai vermelha.
-  if (!entrada.ligada && entrada.motivo) bloco.dataset.motivo = entrada.motivo;
+  // O motivo da parada pinta a faixa: a que ninguém pediu sai vermelha. De pé,
+  // o único motivo é seguir sem quem hospeda (`sem-anfitriao`): laranja.
+  if (entrada.motivo) bloco.dataset.motivo = entrada.motivo;
   const linha = elemento("p", "maquina-linha");
   if (entrada.ligada) {
     linha.append(elemento("span", "maquina-marca", F.faixa(entrada.titulo, entrada.modId)));
@@ -383,6 +384,8 @@ function desenharUmaMaquina(entrada) {
     );
   }
   bloco.append(linha);
+  // **Sem quem hospeda, a máquina segue rodando** e diz até quando espera.
+  if (entrada.ligada && entrada.motivo === "sem-anfitriao") bloco.append(elemento("p", "maquina-sem-anfitriao", F.semAnfitriao));
   if (entrada.falha) bloco.append(elemento("p", "maquina-nota", entrada.falha));
 
   const botao = elemento("button", entrada.ligada ? "maquina-desligar" : "maquina-dispensar", entrada.ligada ? F.desligar : F.dispensar);

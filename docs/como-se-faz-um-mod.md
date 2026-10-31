@@ -952,7 +952,7 @@ em silêncio.
 | `MaquinaRecusou` | a pessoa recusou, ou o pedido não pôde ser feito | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4, "motivo": "pelo-dono" }` |
 | `MaquinaParou` | a máquina deixou de servir | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4, "motivo": "saiu" }` |
 | `MaquinaSumiu` | a máquina parou e o lugar dela segue vazio depois do prazo (60 s) | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4, "motivo": "saiu", "segundos": 60 }` |
-| `MaquinaVoltou` | quem operava caiu (`saiu`) e voltou ao servidor, com o lugar ainda vazio | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4 }` |
+| `MaquinaVoltou` | quem operava caiu (`saiu`) e voltou ao servidor, com o lugar ainda vazio — ou foi chamada quando não estava (`MaquinaRecusou` com `nao-esta-aqui`) e chegou depois | `{ "servidor": "mc-1", "papel": "principal", "pessoa": 4 }` |
 
 `servidor` é o nome do servidor de jogo que **você** deu no pedido, e `pessoa`, o
 número de quem foi chamada. Os `motivo`s de `MaquinaRecusou` são `pelo-dono`,
@@ -1334,6 +1334,8 @@ maquina.porta.servir({ nome: t.nome, protocolo: t.protocolo, porta: t.porta })
 - **`maquina.aoAviso(fn)`** recebe cada `mundo.maquinas.avisar` (o último ouvinte
   vence). **`maquina.aoParar(fn)`** é chamado uma vez, com o `motivo`, antes de a
   máquina cair; se devolver uma promessa, o app espera até **2 s** por ela.
+- **`maquina.aoReconectar(fn)`** (o último ouvinte vence) é a volta de quem
+  hospeda: veja «Sem quem hospeda», abaixo.
 
 **5. Quem joga clica.** Do outro lado, a metade de cliente da pessoa que quer
 jogar desenha o botão, e **a porta se abre no clique**, e em nenhum outro lugar:
@@ -1380,7 +1382,8 @@ também tem DESLIGAR e REVOGAR), e ela diz o que está rodando. DESLIGAR chama o
 e avisa o servidor, e a metade de servidor recebe `MaquinaParou` com o motivo. O
 aceite continua guardado: o próximo pedido idêntico liga sozinho. REVOGAR faz o
 mesmo e **apaga** o aceite, para que o próximo pergunte. A máquina também para,
-sem a pessoa pedir, quando ela sai do servidor (`servidor-saiu`), fecha o app
+sem a pessoa pedir, quando ela sai do servidor (`servidor-saiu`), quando quem
+hospeda não a chama de volta em 10 minutos depois de cair (`sem-volta`), fecha o app
 (`app-fechou`), o MOD é desligado no servidor (`mod-desligado`), o servidor passa
 o jogo a outra máquina (`outro-pedido`), o servidor deixa de reconhecer o aceite
 (`sem-aceite`), ou a própria metade de máquina falha (`metade-falhou`; aí o
@@ -1528,7 +1531,7 @@ você:
 - **o relógio** é do servidor: `MaquinaSumiu` chega quando uma máquina aceita
   parou e o lugar dela segue vazio depois do prazo (60 s); `MaquinaVoltou`,
   quando quem caiu volta. Sem quem hospeda o SEELE não há relógio: nada sai, e
-  nada muda de dona.
+  nada muda de dona — e a dona segue rodando (veja «Sem quem hospeda»).
 - **a cópia do mundo** é da metade de máquina, pelo túnel. Ponha na oferta um
   túnel TCP para ela (o MOD de multiplayer usa `<servidor>-copia`, na porta do
   jogo + 10000); a dona serve esse túnel, e a outra entra nele como quem joga.
@@ -1606,17 +1609,58 @@ O `nome` de cada artefato é um nome de arquivo, e só: letras e dígitos ASCII,
 espaço faz a oferta inteira ser recusada (`oferta-invalida`): ele vira caminho
 na pasta do servidor de jogo, e não pode sair dela.
 
+### Sem quem hospeda
+
+**Quando a conexão com quem hospeda o SEELE cai, a metade de máquina não para.**
+Ela segue rodando com os processos dela — a dona segue com o jogo de pé —, e a
+faixa no alto da tela de quem a roda diz, em laranja, que ela segue sem quem
+hospeda. Do lado de quem joga, **quem anda pela ligação direta (a malha)
+continua jogando**, inclusive com conexões novas pelo túnel que já tinha; quem
+passava pela estrela cai, e a faixa dele diz «quem hospeda o SEELE saiu; quem
+passava por ele caiu» (a queda `anfitriao-saiu`). **Nada novo abre sem quem
+hospeda**: um túnel novo, ou uma pessoa nova, precisa da concessão e da
+apresentação dele, que conferem as permissões.
+
+Quando quem hospeda volta, a metade de servidor chama a máquina de novo (no
+`MaquinaVoltou`, ou ao subir de novo, a quem ela guardou), e **o pedido igual ao
+aceito religa a metade que seguiu rodando, sem subir outra**: o mesmo código, os
+mesmos processos. Ela ouve então o `aoReconectar`:
+
+```js
+maquina.aoReconectar(async ({ fora }) => {      // fora: segundos sem quem hospeda
+  // O livro de quem hospeda esqueceu o túnel: sirva de novo.
+  await maquina.porta.servir({ nome: t.nome, protocolo: t.protocolo, porta: t.porta });
+  // A posse pode ter mudado enquanto ela estava fora: pergunte.
+  const plano = JSON.parse(await maquina.pedir({ op: "plano" }));
+  if (plano.dona === false) { /* desligue o jogo, e diga à metade de servidor */ }
+});
+```
+
+O aceite que o app manda de novo e a pergunta da metade chegam à metade de
+servidor por caminhos diferentes: a pergunta pode chegar antes do
+`MaquinaAceitou`. O MOD de multiplayer, nesse caso, termina a volta no aviso que
+manda ao ver o aceite. Quem joga pela malha pede entrada de novo sozinho, e
+segue na mesma porta; quem hospeda tem 30 s para apresentar de novo cada túnel
+à máquina, e o que ele não apresentar sai da ligação direta (é de quem perdeu a
+permissão enquanto ele estava fora). **Uma metade que ninguém chama de volta em
+10 minutos para**, salva pelo `aoParar("sem-volta")`, e a faixa diz por quê.
+Quem hospeda **fechando** o SEELE (SAIR) se despede de todos: as sessões
+acabam, e com elas os túneis, inclusive os diretos; a metade de máquina segue
+órfã do mesmo jeito.
+
 ### Quando o servidor SEELE reinicia
 
 **O livro das máquinas do servidor mora na memória.** Os pedidos pendentes e os
 aceites somem quando o servidor SEELE reinicia, e **nenhum `MaquinaParou` é
 dado por eles**: não há quem o dê, porque o processo que lembrava deles acabou.
-A metade de máquina, do lado de quem hospeda, para com `servidor-saiu` quando a
-sessão cai. (A posse de `mundo.maquinas.dona` também mora na memória, e volta à
+A metade de máquina, do lado de quem a roda, segue rodando sem ele (veja «Sem
+quem hospeda»). (A posse de `mundo.maquinas.dona` também mora na memória, e volta à
 principal: diga de novo depois de pedir.) Então **a metade de servidor não pode supor que a máquina de antes
-continua de pé depois de subir**: ao subir de novo, peça outra vez
+continua aceita depois de subir**: ao subir de novo, peça outra vez
 (`mundo.maquinas.pedir`). Quem já aceitou a mesma oferta, com o mesmo pacote, é
-ligado de novo sem tela.
+religado sem tela (ou ligado de novo, se a metade dele já parou); quem ainda
+não voltou ouve `nao-esta-aqui`, e o `MaquinaVoltou` daquele lugar chega quando
+voltar.
 
 E o pedido de novo, feito de um momento (`aoAcontecer`), pode não sair: por
 5 s depois de uma recusa automática da mesma pessoa para o mesmo servidor de

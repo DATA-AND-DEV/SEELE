@@ -2193,6 +2193,7 @@ pub const fn nome_da_queda(queda: seele_core::tunel::Queda) -> &'static str {
         Queda::Fechado => "fechado",
         Queda::SemCanais => "sem-canais",
         Queda::PortaFalhou => "porta-falhou",
+        Queda::AnfitriaoSaiu => "anfitriao-saiu",
     }
 }
 
@@ -2257,6 +2258,7 @@ mod tests {
             (Queda::Fechado, "fechado"),
             (Queda::SemCanais, "sem-canais"),
             (Queda::PortaFalhou, "porta-falhou"),
+            (Queda::AnfitriaoSaiu, "anfitriao-saiu"),
         ];
         for (queda, nome) in quedas {
             assert_eq!(nome_da_queda(queda), nome);

@@ -94,3 +94,37 @@ podiam se juntar num 12 só, e a v8 segue emendável.
   vermelho do canvas em hexadecimal. Se errada: a recusa de um MOD não segue o
   vermelho que o produto deriva sob um tema; o caminho é um nome só de
   citação, por API.
+
+## A parte 7 (a reserva) sobre a 0.19
+
+- **Fundida em b3ef3a24** (`ee29f50c` e `f26c1051`). O único conflito de texto
+  foi `api/congeladas.sha256`: as duas notas de emenda ficaram (a dos tetos da
+  0.19, depois a da reserva) e a linha da v8 foi refeita sobre a `v8.json`
+  fundida, que segue com a imagem em 100 MiB. **R0 conferido**: nada mudou em
+  `seele-proto`, `seele-web` nem nos bytes-ouro desde `c9e908a4`. O prelúdio
+  segue com 16 tipos da máquina. Se errada: nenhuma conhecida.
+- **A reserva no desenho 0.19** é do MOD (`DECISOES.md` dele): chips para o
+  aceite, a dona, a passagem e a cópia; o tempo perdido no aviso laranja do
+  canvas; PASSAR como controle do produto. Nada da tela do SEELE mudou na parte 7.
+
+## Sem quem hospeda (depois da parte 7)
+
+Decisões inteiras em `2026-10-31-api-8-sem-anfitriao-decisoes.md`. Em uma linha
+cada:
+
+- **M18 revista (S1–S5):** a metade de máquina sobrevive à queda do enlace,
+  órfã; o pedido igual ao aceito a religa sem subir de novo, e o
+  `maquina.aoReconectar({ fora })` dela serve de novo o túnel e pergunta a
+  posse; a órfã que ninguém chama em 10 min para com `sem-volta`. Se errada:
+  uma máquina sem sessão gasta até 10 min de CPU.
+- **Os túneis (S6–S9):** sem quem hospeda, o direto segue e a estrela acaba
+  com `AnfitriaoSaiu`; nada novo abre sem ele; na volta, quem joga pede entrada
+  de novo e a máquina dá 30 s para cada túnel ser apresentado de novo. Fechar o
+  SEELE de propósito ainda corta todos. Se errada: quem perdeu a permissão com
+  quem hospeda fora joga pela malha até ele voltar.
+- **O livro (S10):** chamar quem não está é lembrado, e `MaquinaVoltou` chega
+  quando a pessoa chega. Se errada: um momento a mais à metade de servidor.
+- **A faixa (0.19):** a órfã é a faixa da Porta em laranja (`sem-anfitriao`,
+  com a frase de até quando ela espera), e `sem-volta` é vermelha, entre as
+  paradas que ninguém pediu. A classe nova é `.maquina-sem-anfitriao` (a
+  `.maquina-aviso` já era do aceite), e `celular-texto.css` foi regerado.

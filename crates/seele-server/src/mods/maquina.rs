@@ -597,7 +597,10 @@ pub async fn despejar(server: &Arc<Server>, mod_id: &str, origem: Origem, declar
             continue;
         }
         if !server.maquinas().pode_ser_chamada(quem) {
-            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = NAO_ESTA_AQUI, "máquina: pedido a quem não está conectado num 12; volta ao MOD como recusa");
+            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = NAO_ESTA_AQUI, "máquina: pedido a quem não está conectado num 12; volta ao MOD como recusa, e o lugar é lembrado para quando ela chegar");
+            server
+                .maquinas()
+                .lembrar_quem_nao_esta(quem, mod_id, &servidor, papel);
             recusar_ao_mod(server, origem, mod_id, servidor, papel, quem, NAO_ESTA_AQUI);
             continue;
         }

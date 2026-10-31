@@ -323,6 +323,7 @@
 
 /* camada-maquina.css */
 :where(:root[data-casca="celular"]) .maquina-bloco { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-sem-anfitriao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .maquina-nota { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .maquina-desligar,
 :where(:root[data-casca="celular"]) .maquina-dispensar { font-size: calc(13px * var(--cel-escala)); }

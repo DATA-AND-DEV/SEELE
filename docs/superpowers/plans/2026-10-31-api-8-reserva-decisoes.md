@@ -222,6 +222,11 @@ parte não toca (`git diff` vazio nos dois). `cargo xtask check-api` limpo;
 
 ## Aberto
 
+> **Depois, na `desenho/api-8-sobre-0.19`:** os três primeiros itens daqui
+> (a metade que para quando a sessão cai, o túnel que derruba o direto, e a
+> principal que volta com o processo vivo no app) foram fechados em
+> `2026-10-31-api-8-sem-anfitriao-decisoes.md`.
+
 - **No app, a metade de máquina ainda para quando a sessão cai** (M18:
   `tirar_de_geracao_velha` e `sessao_saiu` → `servidor-saiu` → `aoParar` →
   `stop`). Então, no produto de hoje, «sem quem hospeda, a dona segue rodando»

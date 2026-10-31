@@ -26395,6 +26395,7 @@ fn tunel_cada_recusa_e_cada_queda_do_rust_tem_frase() {
         Queda::Fechado,
         Queda::SemCanais,
         Queda::PortaFalhou,
+        Queda::AnfitriaoSaiu,
     ];
     let frases = without_comments(&read("ui/frases.js"));
     let bloco = frases

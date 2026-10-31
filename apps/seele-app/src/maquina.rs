@@ -543,6 +543,9 @@ pub(crate) enum Fim {
     /// servidor mais novo). Parar é o lado seguro: seguir servindo seria
     /// supor que o motivo novo não diz «pare».
     DispensaDesconhecida,
+    /// **Quem hospeda não a chamou de volta a tempo**: ela seguiu rodando sem
+    /// ele ([`ESPERA_PELA_VOLTA`]), e nenhum pedido igual ao aceito a religou.
+    SemVolta,
 }
 
 impl Fim {
@@ -558,6 +561,7 @@ impl Fim {
             Self::ServidorSaiu => "servidor-saiu",
             Self::MetadeFalhou => "metade-falhou",
             Self::DispensaDesconhecida => "dispensa-desconhecida",
+            Self::SemVolta => "sem-volta",
         }
     }
 
@@ -585,7 +589,9 @@ impl Fim {
             | Self::OutroPedido
             | Self::SemAceite
             | Self::ServidorSaiu
-            | Self::DispensaDesconhecida => None,
+            | Self::DispensaDesconhecida
+            // Quem hospeda não a tem mais no livro: não há a quem dizer.
+            | Self::SemVolta => None,
         }
     }
 
@@ -627,7 +633,10 @@ pub(crate) struct Viva {
     /// Num cadeado porque o executor tem o canal de saída (que não é `Sync`)
     /// e é tocado pela bomba, pelas respostas que voltam do fio e pela parada.
     executor: Mutex<executor::ExecutorQuickJs>,
-    fio: Arc<dyn Fio>,
+    /// A conexão por onde ela fala. **Trocável**: a metade sobrevive à queda
+    /// de quem hospeda, e religada numa sessão nova fala pela conexão dela
+    /// ([`Maquinas::religar_se_orfa`]).
+    fio: Mutex<Arc<dyn Fio>>,
     /// Os túneis que ela serve, pelo nome: é o que a parada derruba.
     tuneis: Mutex<BTreeSet<String>>,
     /// Pediu-se o fim: uma falha depois disto é o fim que se pediu, e não
@@ -673,7 +682,7 @@ impl Viva {
             processos: programa::Processos::default(),
             recusas_da_cola: programa::RecusasDaCola::default(),
             executor: Mutex::new(executor),
-            fio,
+            fio: Mutex::new(fio),
             tuneis: Mutex::new(BTreeSet::new()),
             parando: AtomicBool::new(false),
             sinais: Mutex::new(Sinais::default()),
@@ -721,6 +730,29 @@ impl Viva {
             .pedir_encerramento();
         programa::encerrar_tudo(self, ESPERA_DO_ENCERRAR_TUDO);
         tracing::debug!(mod_id = %self.chave.mod_id, servidor = %self.chave.servidor, instancia = self.numero, "metade de máquina descartada antes de ligar");
+    }
+
+    /// A conexão por onde ela fala agora.
+    pub(crate) fn fio(&self) -> Arc<dyn Fio> {
+        Arc::clone(&self.fio.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Passa a falar por outra conexão (a da sessão em que foi religada).
+    fn trocar_fio(&self, fio: Arc<dyn Fio>) {
+        *self.fio.lock().unwrap_or_else(PoisonError::into_inner) = fio;
+    }
+
+    /// **A metade foi religada** depois de quem hospeda voltar: o
+    /// `maquina.aoReconectar` dela ouve quanto tempo ela ficou sem ele, e é
+    /// a vez de ela servir de novo o túnel e perguntar quem é a dona.
+    pub(crate) fn reconectar(&self, fora: Duration) {
+        if !self.de_pe() {
+            return;
+        }
+        self.entregar(
+            &serde_json::json!({ "tipo": "reconectar-maquina", "fora": fora.as_secs() })
+                .to_string(),
+        );
     }
 
     /// Quantos processos do `programa` dela estão vivos.
@@ -846,7 +878,7 @@ impl Viva {
         let tuneis =
             std::mem::take(&mut *self.tuneis.lock().unwrap_or_else(PoisonError::into_inner));
         for nome in tuneis {
-            if let Err(motivo) = self.fio.parar_tunel(mod_id, &nome) {
+            if let Err(motivo) = self.fio().parar_tunel(mod_id, &nome) {
                 tracing::info!(mod_id = %mod_id, servidor = %servidor, tunel = %nome, motivo, "metade de máquina: o túnel não foi parado no fio");
             }
         }
@@ -855,7 +887,7 @@ impl Viva {
             .unwrap_or_else(PoisonError::into_inner)
             .pedir_encerramento();
         if let Some(parada) = fim.parada_no_fio() {
-            if let Err(motivo) = self.fio.parar_maquina(mod_id, servidor, parada) {
+            if let Err(motivo) = self.fio().parar_maquina(mod_id, servidor, parada) {
                 tracing::info!(mod_id = %mod_id, servidor = %servidor, parada, motivo, "metade de máquina: MaquinaParada não saiu");
             }
         }
@@ -938,7 +970,7 @@ fn atender(viva: &Arc<Viva>, acao: Acao) {
         Acao::Pedir { n, payload } => {
             let (dela, futuro) = (
                 Arc::clone(viva),
-                viva.fio.pedir(&mod_id, &servidor, payload),
+                viva.fio().pedir(&mod_id, &servidor, payload),
             );
             tauri::async_runtime::spawn(async move {
                 let resposta = futuro.await;
@@ -962,7 +994,7 @@ fn atender(viva: &Arc<Viva>, acao: Acao) {
             }
             let (dela, futuro) = (
                 Arc::clone(viva),
-                viva.fio.servir(&mod_id, &nome, &protocolo, porta),
+                viva.fio().servir(&mod_id, &nome, &protocolo, porta),
             );
             tauri::async_runtime::spawn(async move {
                 match futuro.await {
@@ -977,7 +1009,7 @@ fn atender(viva: &Arc<Viva>, acao: Acao) {
                         if !dela.de_pe() {
                             drop(tuneis);
                             tracing::info!(mod_id = %dela.chave.mod_id, servidor = %dela.chave.servidor, tunel = %nome, porta, "metade de máquina: servir voltou depois do fim pedido; o túnel é parado já");
-                            if let Err(motivo) = dela.fio.parar_tunel(&dela.chave.mod_id, &nome) {
+                            if let Err(motivo) = dela.fio().parar_tunel(&dela.chave.mod_id, &nome) {
                                 tracing::warn!(mod_id = %dela.chave.mod_id, servidor = %dela.chave.servidor, tunel = %nome, motivo, "metade de máquina: o túnel servido tarde não foi parado no fio");
                             }
                             dela.responder(n, Err("sem-aceite"));
@@ -996,7 +1028,7 @@ fn atender(viva: &Arc<Viva>, acao: Acao) {
             });
         }
         Acao::PararTunel { n, nome } => {
-            let resultado = viva.fio.parar_tunel(&mod_id, &nome);
+            let resultado = viva.fio().parar_tunel(&mod_id, &nome);
             viva.tuneis
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -1004,7 +1036,7 @@ fn atender(viva: &Arc<Viva>, acao: Acao) {
             viva.responder(n, resultado.map(|()| serde_json::Value::Null));
         }
         Acao::Quedas { n, nome } => {
-            let (dela, futuro) = (Arc::clone(viva), viva.fio.quedas(&mod_id, &nome));
+            let (dela, futuro) = (Arc::clone(viva), viva.fio().quedas(&mod_id, &nome));
             tauri::async_runtime::spawn(async move {
                 let resposta = futuro.await.map(|quedas| {
                     serde_json::Value::Array(
@@ -1033,7 +1065,28 @@ struct Ligada {
     geracao: u64,
     hash: String,
     resumo: String,
+    /// **Órfã**: a conexão com quem hospeda caiu, e ela segue rodando sem ele
+    /// (M18 revista: ver [`Maquinas::orfanar`]).
+    orfa: Option<Orfa>,
 }
+
+/// Desde quando uma metade segue sem quem hospeda, e a vez dessa orfandade:
+/// o prazo de uma vez não para a metade religada e órfã de novo depois.
+#[derive(Debug, Clone, Copy)]
+struct Orfa {
+    desde: Instant,
+    vez: u64,
+}
+
+/// **Quanto uma metade segue rodando sem ser chamada de volta** (M18 revista).
+///
+/// Sem quem hospeda, a dona segue rodando (spec «A reserva», último item); na
+/// volta dele, a metade de servidor a chama de novo (`MaquinaVoltou`, ou o
+/// MOD que chama quem guardou), e o pedido igual ao aceito a religa sem subir
+/// de novo. Uma metade que ninguém chama nesse tempo para, salva, e a faixa
+/// diz por quê (`sem-volta`). Dez minutos cobrem os cinco da bateria do enlace
+/// e uma volta de quem hospeda que reinicia o computador.
+pub(crate) const ESPERA_PELA_VOLTA: Duration = Duration::from_secs(10 * 60);
 
 /// Um `MachineRequest` que chegou antes de a sessão estar no registro.
 struct ChegadoCedo {
@@ -1067,6 +1120,10 @@ struct Estado {
     ultimos: BTreeMap<Chave, (u64, u64)>,
     /// Por `(chave, sessão)`: todo pedido de número menor foi dispensado.
     cortes: BTreeMap<(Chave, u64), u64>,
+    /// Sobe a cada metade que fica órfã ([`Orfa::vez`]).
+    vez_da_orfa: u64,
+    /// Quantas metades foram religadas sem subir de novo, desde que o app abriu.
+    religadas: u64,
 }
 
 impl Estado {
@@ -1124,6 +1181,8 @@ pub(crate) struct Maquinas {
     /// primeira. Segurado durante decidir e ligar (inclusive pelo aceite da
     /// tela), e nunca junto do cadeado do estado por quem espera.
     vez: Mutex<()>,
+    /// [`ESPERA_PELA_VOLTA`], ou outra (em ms) nas provas.
+    espera_pela_volta_ms: std::sync::atomic::AtomicU64,
 }
 
 impl Maquinas {
@@ -1233,13 +1292,83 @@ impl Maquinas {
         true
     }
 
+    /// Quanto uma órfã espera ser chamada de volta.
+    pub(crate) fn espera_pela_volta(&self) -> Duration {
+        match self.espera_pela_volta_ms.load(Ordering::Relaxed) {
+            0 => ESPERA_PELA_VOLTA,
+            ms => Duration::from_millis(ms),
+        }
+    }
+
+    /// **As metades que ficam sem quem hospeda** (M18 revista, «sem quem
+    /// hospeda»): marcadas órfãs, **e não paradas** — o executor, os processos
+    /// e os túneis delas seguem, e a dona segue rodando. Devolve cada uma que
+    /// ficou órfã agora, com a vez da orfandade, para o prazo
+    /// ([`ESPERA_PELA_VOLTA`]). Uma que já era órfã segue com o prazo que tinha.
+    fn orfanar(&self, qual: impl Fn(&Chave, &Ligada) -> bool) -> Vec<(Arc<Viva>, u64)> {
+        let mut estado = self.estado();
+        let agora = Instant::now();
+        let mut vez = estado.vez_da_orfa;
+        let orfas: Vec<(Arc<Viva>, u64)> = estado
+            .ligadas
+            .iter_mut()
+            .filter(|(chave, ligada)| ligada.orfa.is_none() && qual(chave, ligada))
+            .map(|(_, ligada)| {
+                vez = vez.saturating_add(1);
+                ligada.orfa = Some(Orfa { desde: agora, vez });
+                (Arc::clone(&ligada.viva), vez)
+            })
+            .collect();
+        estado.vez_da_orfa = vez;
+        orfas
+    }
+
     /// **As metades desta sessão de antes de uma reconexão do enlace.** O
     /// servidor, ao ver a conexão velha cair, tirou o aceite delas do livro
-    /// (`maquinas::saiu`): de pé aqui, a faixa dizia «servindo» e cada
-    /// `servir` voltava fora-do-aceite. O pedido que o servidor reenvia na
-    /// conexão nova, igual ao aceito, liga de novo sem tela.
-    fn tirar_de_geracao_velha(&self, sessao: u64, geracao: u64) -> Vec<Arc<Viva>> {
-        self.tirar_ligadas(|_, l| l.sessao == sessao && l.geracao < geracao)
+    /// (`maquinas::saiu`). Antes (M18) elas paravam aqui com `servidor-saiu`
+    /// — e o jogo da dona parava junto, mesmo de quem jogava pela malha. Agora
+    /// ficam órfãs até o pedido igual ao aceito as religar.
+    fn orfanar_de_geracao_velha(&self, sessao: u64, geracao: u64) -> Vec<(Arc<Viva>, u64)> {
+        self.orfanar(|_, l| l.sessao == sessao && l.geracao < geracao)
+    }
+
+    /// **O pedido igual ao aceito religa a órfã**, sem subir de novo: a mesma
+    /// metade, os mesmos processos, a conexão da sessão que a chamou. Devolve
+    /// a metade e quanto ela ficou sem quem hospeda; `None` se não há órfã
+    /// desta chave com este resumo e este pacote.
+    fn religar_se_orfa(
+        &self,
+        pedido: &PedidoRecebido,
+        geracao: u64,
+        fio: Arc<dyn Fio>,
+    ) -> Option<(Arc<Viva>, Duration)> {
+        let mut estado = self.estado();
+        let ligada = estado.ligadas.get_mut(&pedido.chave)?;
+        let orfa = ligada.orfa?;
+        if ligada.resumo != pedido.resumo || ligada.hash != pedido.hash || !ligada.viva.de_pe() {
+            return None;
+        }
+        ligada.orfa = None;
+        ligada.sessao = pedido.sessao;
+        ligada.geracao = geracao;
+        ligada.viva.trocar_fio(fio);
+        let viva = Arc::clone(&ligada.viva);
+        estado.religadas = estado.religadas.saturating_add(1);
+        Some((viva, orfa.desde.elapsed()))
+    }
+
+    /// **A órfã cujo prazo venceu**: se ela ainda é órfã **daquela vez**, sai
+    /// do registro para parar.
+    fn tirar_orfa_vencida(&self, chave: &Chave, numero: u64, vez: u64) -> Option<Arc<Viva>> {
+        let mut estado = self.estado();
+        let vencida = estado
+            .ligadas
+            .get(chave)
+            .is_some_and(|l| l.viva.numero == numero && l.orfa.is_some_and(|o| o.vez == vez));
+        if !vencida {
+            return None;
+        }
+        estado.ligadas.remove(chave).map(|l| l.viva)
     }
 }
 
@@ -1369,12 +1498,14 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
     evento: &Event,
 ) -> bool {
     // Todo evento traz a geração do enlace: o primeiro de uma volta nova diz
-    // que a conexão velha caiu, e com ela o aceite das metades de antes.
+    // que a conexão velha caiu, e com ela o aceite das metades de antes. Elas
+    // **não param** (M18 revista): ficam órfãs, rodando, até o pedido igual
+    // ao aceito as religar — ou até o prazo, que as para com `sem-volta`.
     if let Some(estado) = sessoes(app) {
-        let velhas = estado.maquinas.tirar_de_geracao_velha(sessao, geracao);
-        if !velhas.is_empty() {
-            tracing::info!(sessao, geracao, quantas = velhas.len(), "o enlace voltou de uma queda: as metades de máquina de antes param com servidor-saiu");
-            encerrar_e_dizer(app, velhas, Fim::ServidorSaiu);
+        let orfas = estado.maquinas.orfanar_de_geracao_velha(sessao, geracao);
+        if !orfas.is_empty() {
+            tracing::warn!(sessao, geracao, quantas = orfas.len(), "o enlace voltou de uma queda: as metades de máquina de antes seguem rodando, órfãs, até serem chamadas de volta");
+            orfanar_e_vigiar(app, &estado.maquinas, orfas);
         }
     }
     match evento {
@@ -1469,13 +1600,74 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
             encerrar_e_dizer(app, dispensa.vivas, dispensa.fim);
             true
         }
-        Event::Ended { .. } => {
+        Event::Ended { reason } => {
+            // **Quem hospeda saiu, e a sessão acabou com ele** (a bateria
+            // descarregou, ou ele fechou o servidor): as metades seguem
+            // rodando, órfãs, e uma sessão nova com o mesmo servidor as religa
+            // pelo pedido igual. Nos outros fins (expulso, banido, recusado),
+            // param como antes. A saída pedida pela pessoa já as parou antes
+            // de chegar aqui (`desmontar_o_cliente`).
+            if sem_quem_hospeda(*reason) {
+                if let Some(estado) = sessoes(app) {
+                    let orfas = estado.maquinas.orfanar(|_, l| l.sessao == sessao);
+                    if !orfas.is_empty() {
+                        tracing::warn!(sessao, motivo = ?reason, quantas = orfas.len(), "a sessão acabou sem quem hospeda: as metades de máquina seguem rodando, órfãs");
+                        orfanar_e_vigiar(app, &estado.maquinas, orfas);
+                    }
+                }
+            }
             sessao_saiu(app, sessao);
             false
         }
         _ => false,
     }
 }
+
+/// **Os fins de sessão que são quem hospeda indo embora**, e não esta pessoa
+/// sendo tirada: a conexão perdida (a bateria que descarregou), o servidor
+/// encerrando, a manutenção. Neles a metade de máquina segue órfã.
+fn sem_quem_hospeda(motivo: seele_ffi::EndReason) -> bool {
+    matches!(
+        motivo,
+        seele_ffi::EndReason::LinkLost
+            | seele_ffi::EndReason::ServerShuttingDown
+            | seele_ffi::EndReason::ScheduledMaintenance
+    )
+}
+
+/// **As órfãs ficam na faixa, e cada uma tem o seu prazo.** A faixa diz que
+/// a metade segue sem quem hospeda (`sem-anfitriao`, ligada); passado
+/// [`ESPERA_PELA_VOLTA`] sem ser chamada de volta, ela para, salva, e a faixa
+/// diz `sem-volta`.
+fn orfanar_e_vigiar<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    maquinas: &Maquinas,
+    orfas: Vec<(Arc<Viva>, u64)>,
+) {
+    let espera = maquinas.espera_pela_volta();
+    for (viva, vez) in orfas {
+        tracing::warn!(mod_id = %viva.chave.mod_id, servidor = %viva.chave.servidor, instancia = viva.numero, processos = viva.processos_vivos(), espera = ?espera, "metade de máquina sem quem hospeda: segue rodando, órfã, até ser chamada de volta");
+        emitir_estado(app, &viva.chave, true, Some(MOTIVO_DA_ORFA));
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(espera);
+            let Some(estado) = sessoes(&app) else { return };
+            let Some(vencida) = estado
+                .maquinas
+                .tirar_orfa_vencida(&viva.chave, viva.numero, vez)
+            else {
+                return;
+            };
+            tracing::warn!(mod_id = %vencida.chave.mod_id, servidor = %vencida.chave.servidor, instancia = vencida.numero, espera = ?espera, motivo = Fim::SemVolta.nome(), "metade de máquina órfã que ninguém chamou de volta: para");
+            if vencida.encerrar(Fim::SemVolta) {
+                emitir_estado(&app, &vencida.chave, false, Some(Fim::SemVolta.nome()));
+            }
+        });
+    }
+}
+
+/// O motivo que a faixa lê numa metade **ligada** e órfã.
+pub(crate) const MOTIVO_DA_ORFA: &str = "sem-anfitriao";
 
 /// Encerra cada uma numa thread própria e diz `maquina-estado` ao fim.
 fn encerrar_e_dizer<R: tauri::Runtime>(app: &AppHandle<R>, vivas: Vec<Arc<Viva>>, fim: Fim) {
@@ -1536,7 +1728,12 @@ pub(crate) fn sessao_saiu<R: tauri::Runtime>(app: &AppHandle<R>, sessao: u64) {
         maquinas.esquecer_sessao(sessao);
     }
     dizer_pedidos_desfeitos(app, &desfeitos, Fim::ServidorSaiu);
-    let vivas = estado.maquinas.tirar_ligadas(|_, l| l.sessao == sessao);
+    // **As órfãs não são mais desta sessão**: seguem até serem chamadas de
+    // volta ou até o prazo delas. Dispensar a placa de uma sessão que quem
+    // hospeda encerrou não para o jogo; DESLIGAR, na faixa, para.
+    let vivas = estado
+        .maquinas
+        .tirar_ligadas(|_, l| l.sessao == sessao && l.orfa.is_none());
     encerrar_e_dizer(app, vivas, Fim::ServidorSaiu);
 }
 
@@ -1549,7 +1746,7 @@ pub(crate) fn sessao_saiu_sem_tela(maquinas: &Maquinas, sessao: u64) {
         estado.chegados_cedo.retain(|c| c.sessao != sessao);
         estado.esquecer_sessao(sessao);
     }
-    for viva in maquinas.tirar_ligadas(|_, l| l.sessao == sessao) {
+    for viva in maquinas.tirar_ligadas(|_, l| l.sessao == sessao && l.orfa.is_none()) {
         std::thread::spawn(move || viva.encerrar(Fim::ServidorSaiu));
     }
 }
@@ -1610,6 +1807,30 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
         sessao: chegado.sessao,
         numero: chegado.numero,
     };
+
+    // **A volta de quem hospeda**: o pedido igual ao aceito religa a órfã
+    // desta chave — a mesma metade, os mesmos processos —, e não sobe outra.
+    // O aceite sai de novo (o livro dele nasceu vazio, ou tirou o de antes), e
+    // só depois o `aoReconectar` dela: servir o túnel antes do aceite seria
+    // ouvir `fora-do-aceite`.
+    let geracao_agora = conexao.carimbo().geracao;
+    if let Some((viva, fora)) = estado.maquinas.religar_se_orfa(
+        &pedido,
+        geracao_agora,
+        Arc::new(FioDaConexao(Arc::clone(&conexao))),
+    ) {
+        tracing::info!(mod_id = %chave.mod_id, servidor = %chave.servidor, instancia = viva.numero, processos = viva.processos_vivos(), fora = ?fora, "metade de máquina órfã religada pelo pedido igual, sem subir de novo");
+        if let Err(motivo) = conexao.aceitar_maquina(
+            chave.mod_id.clone(),
+            chave.servidor.clone(),
+            pedido.resumo.clone(),
+        ) {
+            tracing::warn!(mod_id = %chave.mod_id, servidor = %chave.servidor, motivo, "o aceite da metade religada não saiu");
+        }
+        viva.reconectar(fora);
+        emitir_estado(app, &chave, true, None);
+        return;
+    }
 
     // **O mesmo pedido duas vezes** (o servidor pode mandá-lo de novo antes de
     // ver a primeira resposta): com a metade dele de pé, nesta sessão e nesta
@@ -1865,6 +2086,7 @@ fn ligar<R: tauri::Runtime>(
             geracao,
             hash: pedido.hash.clone(),
             resumo: pedido.resumo.clone(),
+            orfa: None,
         },
     );
     if !registrada {
@@ -2351,12 +2573,20 @@ mod testes {
             );
         }
         for tipo in ["programa-empacotar", "programa-oferecer-copia"] {
-            let json = format!(r#"{{"tipo":"{tipo}","n":8,"origem":"world","arquivo":"a.tar.gz","porta":35565}}"#);
-            assert!(matches!(tratar(&oferta, &com, &json), Acao::Programa { n: 8, .. }), "{tipo}");
+            let json = format!(
+                r#"{{"tipo":"{tipo}","n":8,"origem":"world","arquivo":"a.tar.gz","porta":35565}}"#
+            );
+            assert!(
+                matches!(tratar(&oferta, &com, &json), Acao::Programa { n: 8, .. }),
+                "{tipo}"
+            );
             assert!(
                 matches!(
                     tratar(&oferta, &["maquina", "maquina.porta"], &json),
-                    Acao::Recusar { erro: "tipo-desconhecido", .. }
+                    Acao::Recusar {
+                        erro: "tipo-desconhecido",
+                        ..
+                    }
                 ),
                 "{tipo} sem o poder programa"
             );
@@ -2452,6 +2682,8 @@ mod testes {
         atraso_do_servir: Duration,
         /// O que o volume da metade de servidor devolve (`None`: recusa).
         volume: Mutex<Option<Vec<u8>>>,
+        /// O que a metade de servidor responde a `maquina.pedir` (`None`: `"ok"`).
+        resposta: Mutex<Option<String>>,
     }
 
     impl FioDeMentira {
@@ -2478,7 +2710,13 @@ mod testes {
     impl Fio for FioDeMentira {
         fn pedir(&self, _: &str, _: &str, payload: String) -> Futuro<Result<String, &'static str>> {
             self.anotar(format!("pedir {payload}"));
-            Box::pin(async { Ok("\"ok\"".to_owned()) })
+            let resposta = self
+                .resposta
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| "\"ok\"".to_owned());
+            Box::pin(async move { Ok(resposta) })
         }
         fn servir(
             &self,
@@ -2555,6 +2793,7 @@ mod testes {
             geracao,
             hash: "h1".to_owned(),
             resumo: "aaaa".to_owned(),
+            orfa: None,
         }
     }
 
@@ -2697,11 +2936,12 @@ mod testes {
         assert!(maquinas.guardar_pendente_se_vale(outro, || ()));
     }
 
-    /// **A reconexão do enlace para as metades de antes dela**, e só as desta
-    /// sessão: o servidor tirou o aceite delas do livro quando a conexão velha
-    /// caiu. A metade ligada já na geração nova fica.
+    /// **A reconexão do enlace deixa as metades de antes dela órfãs, e não as
+    /// para** (M18 revista: sem quem hospeda, a dona segue rodando). Só as
+    /// desta sessão e de antes da geração nova ficam órfãs; nenhuma sai do
+    /// registro, e a que já era órfã não ganha outro prazo.
     #[test]
-    fn a_reconexao_para_as_metades_de_antes() {
+    fn a_reconexao_deixa_as_metades_de_antes_orfas() {
         let maquinas = Maquinas::default();
         let velha = Chave::de("casa", "x/jogo", "velha");
         let nova = Chave::de("casa", "x/jogo", "nova");
@@ -2713,15 +2953,255 @@ mod testes {
             estado.ligadas.insert(de_outra.clone(), ligada_de(2, 1));
         }
         assert!(
-            maquinas.tirar_de_geracao_velha(1, 1).is_empty(),
+            maquinas.orfanar_de_geracao_velha(1, 1).is_empty(),
             "a mesma geração não é queda"
         );
-        let paradas = maquinas.tirar_de_geracao_velha(1, 2);
-        assert_eq!(paradas.len(), 1, "a queda não parou só a metade de antes");
-        assert!(!maquinas.ligada(&velha));
-        assert!(maquinas.ligada(&nova));
-        assert!(maquinas.ligada(&de_outra));
-        parar_todas(paradas);
+        let orfas = maquinas.orfanar_de_geracao_velha(1, 2);
+        assert_eq!(
+            orfas.len(),
+            1,
+            "a queda não deixou órfã só a metade de antes"
+        );
+        assert!(orfas[0].0.de_pe(), "a órfã foi parada");
+        assert!(maquinas.ligada(&velha), "a órfã saiu do registro");
+        assert!(maquinas.estado().ligadas[&velha].orfa.is_some());
+        assert!(maquinas.estado().ligadas[&nova].orfa.is_none());
+        assert!(maquinas.estado().ligadas[&de_outra].orfa.is_none());
+        let de_novo = maquinas.orfanar_de_geracao_velha(1, 3);
+        assert_eq!(de_novo.len(), 1, "só a da geração 2 fica órfã agora");
+        assert!(
+            !de_novo.iter().any(|(v, _)| Arc::ptr_eq(v, &orfas[0].0)),
+            "a órfã ganhou outro prazo numa segunda queda"
+        );
+        parar_todas(maquinas.tirar_ligadas(|_, _| true));
+    }
+
+    /// Uma metade com um processo de verdade, no registro como ligada da
+    /// sessão 1 na geração 1.
+    fn ligada_com_processo(
+        casa: &PastaDoTeste,
+        filho: &str,
+        fonte: &str,
+    ) -> (Maquinas, Arc<FioDeMentira>, Arc<Viva>, std::path::PathBuf) {
+        let argumentos = ["--ignored", "--exact", filho, "--test-threads", "1"];
+        let (programa, oferta, raiz) = programa_que_roda_o_teste(casa, &argumentos);
+        let fio = Arc::new(FioDeMentira::default());
+        let fonte = fonte.replace("ARGUMENTOS", &serde_json::to_string(&argumentos).unwrap());
+        let viva = subir_com_programa(&fio, oferta, programa, &fonte);
+        fio.esperar(r#"pedir "rodou""#);
+        let maquinas = Maquinas::default();
+        maquinas.estado().ligadas.insert(
+            viva.chave.clone(),
+            Ligada {
+                viva: Arc::clone(&viva),
+                sessao: 1,
+                geracao: 1,
+                hash: "h1".to_owned(),
+                resumo: "aaaa".to_owned(),
+                orfa: None,
+            },
+        );
+        (maquinas, fio, viva, raiz)
+    }
+
+    /// Espera o batimento passar de `antes`, até 5 s.
+    fn bate_depois_de(raiz: &std::path::Path, antes: u64) -> bool {
+        let fim = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < fim {
+            if batimento(raiz).is_some_and(|n| n > antes) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    /// **A volta de quem hospeda religa a órfã, sem subir de novo** (o caminho
+    /// do app de «sem quem hospeda»). A metade roda um processo de verdade; a
+    /// conexão cai e ela fica órfã com o processo de pé; o pedido igual ao
+    /// aceito a religa — a mesma instância, o mesmo processo, que nunca subiu
+    /// de novo (o batimento só cresce, e o código dela rodou uma vez) —, ela
+    /// passa a falar pela conexão nova, e o `aoReconectar` dela ouve. Um
+    /// pedido com outro resumo não religa.
+    #[test]
+    fn a_volta_religa_a_orfa_sem_subir_de_novo() {
+        let casa = pasta_do_teste("religa");
+        let (maquinas, fio, viva, raiz) = ligada_com_processo(
+            &casa,
+            O_QUE_BATE,
+            "maquina.aoReconectar((v) => maquina.pedir('voltei ' + v.fora));             maquina.programa.rodar({ comando: 'bin/servidor', argumentos: ARGUMENTOS, pasta: '' })               .then(() => maquina.pedir('rodou'), (e) => maquina.pedir('recusou ' + e.erro));",
+        );
+        assert_eq!(viva.processos_vivos(), 1);
+        let orfas = maquinas.orfanar_de_geracao_velha(1, 2);
+        assert_eq!(orfas.len(), 1);
+        let antes = batimento(&raiz).unwrap_or(0);
+        assert!(bate_depois_de(&raiz, antes), "o jogo parou com a queda");
+        assert_eq!(viva.processos_vivos(), 1, "o processo da órfã morreu");
+
+        // Outro resumo é outra oferta: não religa.
+        let novo = Arc::new(FioDeMentira::default());
+        let mut outro = pedido(oferta(), "bbbb", "h1");
+        outro.sessao = 1;
+        assert!(maquinas
+            .religar_se_orfa(&outro, 2, Arc::clone(&novo) as Arc<dyn Fio>)
+            .is_none());
+        assert!(maquinas.estado().ligadas[&viva.chave].orfa.is_some());
+
+        // O pedido igual religa.
+        let igual = pedido(oferta(), "aaaa", "h1");
+        let (religada, fora) = maquinas
+            .religar_se_orfa(&igual, 2, Arc::clone(&novo) as Arc<dyn Fio>)
+            .expect("o pedido igual não religou a órfã");
+        assert!(Arc::ptr_eq(&religada, &viva), "subiu outra metade");
+        assert!(maquinas.estado().ligadas[&viva.chave].orfa.is_none());
+        assert_eq!(maquinas.estado().ligadas[&viva.chave].geracao, 2);
+        religada.reconectar(fora);
+        novo.esperar(r#"pedir "voltei 0""#);
+        assert_eq!(
+            fio.anotado()
+                .iter()
+                .filter(|l| *l == r#"pedir "rodou""#)
+                .count(),
+            1,
+            "o código da metade rodou de novo"
+        );
+        assert!(
+            !fio.anotado()
+                .iter()
+                .any(|l| l.starts_with(r#"pedir "voltei"#)),
+            "a religada falou pela conexão velha"
+        );
+        let agora = batimento(&raiz).unwrap_or(0);
+        assert!(
+            agora >= antes,
+            "o batimento recomeçou: o jogo subiu de novo"
+        );
+        assert!(bate_depois_de(&raiz, agora), "o jogo não segue de pé");
+        assert_eq!(viva.processos_vivos(), 1);
+        assert_eq!(maquinas.estado().religadas, 1);
+        parar_todas(maquinas.tirar_ligadas(|_, _| true));
+    }
+
+    /// **A órfã que ninguém chama de volta para, com o motivo**: o prazo dela
+    /// a tira do registro, o `aoParar` ouve `sem-volta` e o processo morre. O
+    /// prazo de uma orfandade não para a metade religada depois dela.
+    #[test]
+    fn a_orfa_que_ninguem_chama_de_volta_para_com_o_motivo() {
+        let casa = pasta_do_teste("sem-volta");
+        let (maquinas, fio, viva, _raiz) = ligada_com_processo(
+            &casa,
+            O_QUE_BATE,
+            "maquina.aoParar((motivo) => maquina.pedir('parou ' + motivo));             maquina.programa.rodar({ comando: 'bin/servidor', argumentos: ARGUMENTOS, pasta: '' })               .then(() => maquina.pedir('rodou'), (e) => maquina.pedir('recusou ' + e.erro));",
+        );
+        let (_, antiga) = maquinas.orfanar_de_geracao_velha(1, 2).pop().unwrap();
+        // Religada antes do prazo: o prazo daquela vez não a para.
+        let igual = pedido(oferta(), "aaaa", "h1");
+        assert!(maquinas
+            .religar_se_orfa(&igual, 2, Arc::clone(&fio) as Arc<dyn Fio>)
+            .is_some());
+        assert!(
+            maquinas
+                .tirar_orfa_vencida(&viva.chave, viva.numero, antiga)
+                .is_none(),
+            "o prazo de antes parou a metade religada"
+        );
+        // Órfã de novo, e ninguém chama. O prazo da primeira orfandade, que
+        // vence no meio desta, também não a para: só o desta vez.
+        let (_, vez) = maquinas.orfanar_de_geracao_velha(1, 3).pop().unwrap();
+        assert!(
+            maquinas
+                .tirar_orfa_vencida(&viva.chave, viva.numero, antiga)
+                .is_none(),
+            "o prazo de uma orfandade velha parou a órfã de agora"
+        );
+        let vencida = maquinas
+            .tirar_orfa_vencida(&viva.chave, viva.numero, vez)
+            .expect("a órfã vencida não saiu do registro");
+        assert!(!maquinas.ligada(&viva.chave));
+        assert!(vencida.encerrar(Fim::SemVolta));
+        fio.esperar(r#"pedir "parou sem-volta""#);
+        assert_eq!(
+            viva.processos_vivos(),
+            0,
+            "o processo da órfã vencida segue vivo"
+        );
+        assert!(
+            !fio.anotado().iter().any(|l| l.starts_with("parar-maquina")),
+            "a parada foi dita a quem hospeda, que não a tem mais"
+        );
+    }
+
+    /// **Sair da sessão não para as órfãs**: elas já não são dela (a sessão
+    /// caiu com quem hospeda). A ligada que não é órfã para como sempre.
+    #[test]
+    fn sair_da_sessao_nao_para_as_orfas() {
+        let maquinas = Maquinas::default();
+        let orfa = Chave::de("casa", "x/jogo", "orfa");
+        let viva = Chave::de("casa", "x/jogo", "viva");
+        {
+            let mut estado = maquinas.estado();
+            estado.ligadas.insert(orfa.clone(), ligada_de(1, 1));
+            estado.ligadas.insert(viva.clone(), ligada_de(1, 2));
+        }
+        assert_eq!(maquinas.orfanar_de_geracao_velha(1, 2).len(), 1);
+        sessao_saiu_sem_tela(&maquinas, 1);
+        assert!(maquinas.ligada(&orfa), "sair da sessão parou a órfã");
+        assert!(!maquinas.ligada(&viva), "a ligada da sessão não parou");
+        parar_todas(maquinas.tirar_ligadas(|_, _| true));
+    }
+
+    /// **A principal que volta sem a posse desliga o jogo e diz** — no
+    /// caminho do app, agora possível: a metade seguiu com o jogo de pé sem
+    /// quem hospeda, foi religada, pergunta a posse no `aoReconectar`, ouve
+    /// `dona: false`, manda `stop`, espera o jogo sair e conta à metade de
+    /// servidor (que conta e mostra, `voltouRodando`). Nenhum processo fica.
+    #[test]
+    fn a_principal_que_volta_sem_a_posse_mata_o_jogo_e_diz() {
+        let casa = pasta_do_teste("sem-posse");
+        let (maquinas, _fio, viva, raiz) = ligada_com_processo(
+            &casa,
+            O_QUE_PARA_NO_STOP,
+            "maquina.programa.rodar({ comando: 'bin/servidor', argumentos: ARGUMENTOS, pasta: '' })               .then((p) => {                 maquina.aoReconectar(async () => {                   const r = JSON.parse(await maquina.pedir({ op: 'quem-e-a-dona' }));                   if (r.dona === false) {                     await p.escrever('stop');                     const fim = await p.fim;                     await maquina.pedir({ op: 'perdeu-a-posse', codigo: fim.codigo });                   }                 });                 maquina.pedir('rodou');               }, (e) => maquina.pedir('recusou ' + e.erro));",
+        );
+        let _ = maquinas.orfanar_de_geracao_velha(1, 2);
+        assert_eq!(
+            viva.processos_vivos(),
+            1,
+            "o jogo não seguiu de pé sem quem hospeda"
+        );
+        let novo = Arc::new(FioDeMentira {
+            resposta: Mutex::new(Some(
+                r#"{"ok":true,"dona":false,"ordem":"desligar"}"#.to_owned(),
+            )),
+            ..FioDeMentira::default()
+        });
+        let (religada, fora) = maquinas
+            .religar_se_orfa(
+                &pedido(oferta(), "aaaa", "h1"),
+                2,
+                Arc::clone(&novo) as Arc<dyn Fio>,
+            )
+            .expect("não religou");
+        religada.reconectar(fora);
+        let anotado = novo.esperar(r#"pedir {"codigo":0,"op":"perdeu-a-posse"}"#);
+        assert_eq!(
+            anotado.first().map(String::as_str),
+            Some(r#"pedir {"op":"quem-e-a-dona"}"#),
+            "a religada não perguntou a posse antes: {anotado:?}"
+        );
+        assert!(
+            raiz.join("parou-no-stop").exists(),
+            "o stop não chegou ao jogo"
+        );
+        let fim = Instant::now() + Duration::from_secs(5);
+        while viva.processos_vivos() > 0 && Instant::now() < fim {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            viva.processos_vivos(),
+            0,
+            "o jogo de quem não é a dona segue de pé"
+        );
         parar_todas(maquinas.tirar_ligadas(|_, _| true));
     }
 

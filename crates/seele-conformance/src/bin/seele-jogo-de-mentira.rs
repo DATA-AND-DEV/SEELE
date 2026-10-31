@@ -5,7 +5,9 @@
 //! `seele-jogo-de-mentira PORTA`: escuta um eco TCP em `127.0.0.1:PORTA` (o
 //! jogo que o túnel serve), escreve um contador crescente em `batimento` (na
 //! pasta de trabalho) a cada 20 ms — é como a prova vê se ele está vivo — e
-//! sai quando lê `stop` na entrada. Não faz nada no produto e não é
+//! sai quando lê `stop` na entrada. Cada partida soma um em `partidas` (na
+//! pasta de trabalho): é como a prova de «quem hospeda volta» vê que o jogo foi
+//! religado à metade, e não subido de novo. Não faz nada no produto e não é
 //! empacotado.
 
 use std::io::{BufRead as _, Read as _, Write as _};
@@ -18,6 +20,11 @@ fn main() {
         eprintln!("a porta {porta} não abriu");
         std::process::exit(3);
     };
+    let partidas = std::fs::read_to_string("partidas")
+        .ok()
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let _ = std::fs::write("partidas", (partidas + 1).to_string());
     std::thread::spawn(move || {
         for fluxo in escuta.incoming().flatten() {
             std::thread::spawn(move || {

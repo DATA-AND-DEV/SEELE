@@ -1741,6 +1741,7 @@ const FRASES_DO_TUNEL = Object.freeze({
     "fechado": "a conexão foi fechada",
     "sem-canais": "o servidor não tinha mais canais livres para o seu jogo e cortou uma conexão",
     "porta-falhou": "este computador não conseguiu aceitar a conexão do jogo na porta (talvez falte arquivo aberto livre); feche programas e tente de novo",
+    "anfitriao-saiu": "quem hospeda o SEELE saiu; quem passava por ele caiu",
   }),
   // **O fim de um túnel inteiro** (`encerrado` do último relatório). Quase todo
   // motivo diz a mesma coisa que diz como queda; `fechado` aqui é o túnel que
@@ -1803,10 +1804,12 @@ const FRASES_DA_MAQUINA = Object.freeze({
   faixa: (titulo, mod) => `este computador serve ${titulo} (${mod})`,
   desligar: "DESLIGAR",
   revogar: "REVOGAR",
+  semAnfitriao: "quem hospeda o SEELE saiu: o jogo segue rodando aqui, e quem joga pela ligação direta continua jogando; se ele não chamar esta máquina de volta em 10 minutos, o jogo é salvo e parado",
   paradas: Object.freeze({ "pelo-dono": "desligado por você", "revogada": "aceite revogado por você", "app-fechou": "o app fechou",
     "metade-falhou": "a metade de máquina do MOD falhou; veja o registro", "mod-desligado": "o MOD foi desligado no servidor",
     "outro-pedido": "o servidor passou este jogo para outra máquina", "sem-aceite": "o servidor não reconhece mais o seu aceite",
     "servidor-saiu": "você saiu do servidor",
+    "sem-volta": "quem hospeda o SEELE não chamou esta máquina de volta em 10 minutos; o jogo foi salvo e parado",
     "dispensa-desconhecida": "o servidor parou esta máquina por um motivo que este app não conhece; veja o registro",
     "pacote-diferente": "o pacote do MOD não confere com o que você aceitou" }),
   campos: Object.freeze({ titulo: "o nome do jogo", receita: "a receita", versao_da_receita: "a versão da receita",

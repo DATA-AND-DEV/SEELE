@@ -240,6 +240,30 @@ async function caso(motor, numero, prova) {
           assert.match(await pagina.evaluate(() => faixaDeMaquinas()), /o pacote do MOD não confere com o que você aceitou/, `${motor}: 4 · pacote-diferente`);
         });
 
+        // 4b. Sem quem hospeda: a faixa segue de pé, em laranja, e diz até
+        // quando; a órfã que ninguém chamou de volta para, em vermelho.
+        await caso(motor, "4b", async () => {
+          await zerar();
+          await pagina.evaluate(() => {
+            titulosDeMaquinas.set(chaveDaMaquina("127.0.0.1:7000", "x/jogo", "srv-1"), "Minecraft");
+            emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: true, motivo: "sem-anfitriao" });
+          });
+          const faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /este computador serve Minecraft/, `${motor}: 4b · ${faixa}`);
+          assert.match(faixa, /quem hospeda o SEELE saiu: o jogo segue rodando aqui/, `${motor}: 4b · ${faixa}`);
+          assert.match(faixa, /DESLIGAR/, `${motor}: 4b · a órfã não oferece DESLIGAR`);
+          const cor = await pagina.evaluate(() => getComputedStyle(document.querySelector(".maquina-bloco")).borderTopColor);
+          assert.notEqual(cor, "rgba(0, 0, 0, 0)", `${motor}: 4b · sem borda`);
+          if (process.env.SEELE_RETRATO_DA_FAIXA) await pagina.screenshot({ path: `${process.env.SEELE_RETRATO_DA_FAIXA}-${motor}-orfa.png` });
+          // A volta religa: a faixa volta ao verde, sem o aviso.
+          await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: true }));
+          assert.doesNotMatch(await pagina.evaluate(() => faixaDeMaquinas()), /quem hospeda o SEELE saiu/, `${motor}: 4b · o aviso ficou depois da volta`);
+          await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "sem-volta" }));
+          assert.match(await pagina.evaluate(() => faixaDeMaquinas()), /não chamou esta máquina de volta em 10 minutos; o jogo foi salvo e parado/, `${motor}: 4b · sem-volta`);
+          assert.equal(await pagina.evaluate(() => document.querySelector(".maquina-bloco").dataset.motivo), "sem-volta");
+          if (process.env.SEELE_RETRATO_DA_FAIXA) await pagina.screenshot({ path: `${process.env.SEELE_RETRATO_DA_FAIXA}-${motor}-sem-volta.png` });
+        });
+
         // 5. O que mudou desde o aceite, em frase.
         await caso(motor, "5", async () => {
           await zerar();

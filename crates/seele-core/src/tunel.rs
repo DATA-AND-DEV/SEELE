@@ -135,6 +135,12 @@ pub enum Queda {
     /// rajada** de erros seguidos, e o laço espera um pouco mais a cada erro em
     /// vez de girar.
     PortaFalhou,
+    /// **Quem hospeda o SEELE saiu, e o túnel passava por ele** (a estrela):
+    /// não há quem repasse. Um túnel que andava pela ligação direta segue sem
+    /// quem hospeda, e só acaba assim se a ligação direta cair enquanto ele
+    /// está fora — não há estrela para onde voltar. Diferente de
+    /// [`Self::ServidorSaiu`], que é a sessão desta pessoa que acabou.
+    AnfitriaoSaiu,
 }
 
 /// O que o túnel mediu, para a casca desenhar.
@@ -475,6 +481,10 @@ pub(crate) enum Evento {
     Quedou(Queda),
     /// Um fluxo UDP acabou.
     FluxoAcabou { origem: SocketAddr, fluxo: u32 },
+    /// A conexão com quem hospeda (a estrela) acabou.
+    EstrelaCaiu,
+    /// Quem hospeda voltou e concedeu este túnel de novo: a estrela nova.
+    NovaEstrela(Via),
 }
 
 /// Uma tarefa que morre com quem a segura.
@@ -997,6 +1007,17 @@ impl TunelDeJogador {
         self.tarefa.take().and_then(AbortaAoLargar::tirar_alca)
     }
 
+    /// O laço dele ainda corre: um túnel que acabou sozinho (a estrela caiu
+    /// com ele nela) deixa só a entrada no mapa.
+    fn vivo(&self) -> bool {
+        !self.eventos.is_closed()
+    }
+
+    /// Quem hospeda voltou e concedeu o túnel de novo.
+    fn nova_estrela(&self, via: Via) {
+        let _ = self.eventos.send(Evento::NovaEstrela(via));
+    }
+
     /// Acaba o túnel por este motivo: sai o último relatório e a tarefa
     /// termina sozinha (não é abortada, ou o relatório se perderia).
     pub(crate) fn encerrar(mut self, queda: Queda) {
@@ -1247,10 +1268,31 @@ impl ErrosDeAccept {
 }
 
 /// O laço de um túnel de quem joga.
+/// Vigia a estrela: quando a conexão com quem hospeda acaba, o laço ouve
+/// [`Evento::EstrelaCaiu`] e decide (ver «sem quem hospeda» em
+/// [`laco_do_jogador`]). A geração separa a estrela velha da nova: uma volta
+/// de quem hospeda troca a estrela, e a queda da velha não fala da nova.
+fn vigiar_a_estrela(
+    filhos: &mut JoinSet<()>,
+    estrela: &Via,
+    tx: &mpsc::UnboundedSender<Evento>,
+    vez: Arc<AtomicU32>,
+) {
+    let (tx, estrela) = (tx.clone(), estrela.clone());
+    let minha = vez.load(Ordering::Acquire);
+    filhos.spawn(async move {
+        let motivo = estrela.fechou().await;
+        tracing::debug!(%motivo, "túnel: a conexão com o servidor acabou");
+        if vez.load(Ordering::Acquire) == minha {
+            let _ = tx.send(Evento::EstrelaCaiu);
+        }
+    });
+}
+
 async fn laco_do_jogador(
     contexto: Arc<Contexto>,
     escuta: Escuta,
-    estrela: Via,
+    mut estrela: Via,
     tx: mpsc::UnboundedSender<Evento>,
     mut rx: mpsc::UnboundedReceiver<Evento>,
 ) {
@@ -1261,14 +1303,12 @@ async fn laco_do_jogador(
     let mut geracao = 0_u32;
     let mut ligado: Option<Arc<ParLigado>> = None;
     let mut pingador = AbortaAoLargar::nova(pingar(via.clone(), Arc::clone(&contexto)));
-    {
-        let (tx, estrela) = (tx.clone(), estrela.clone());
-        filhos.spawn(async move {
-            let motivo = estrela.fechou().await;
-            tracing::debug!(%motivo, "túnel: a conexão com o servidor acabou");
-            let _ = tx.send(Evento::Fim(Queda::ServidorSaiu));
-        });
-    }
+    // **Sem quem hospeda** (API 8, «A reserva», último item): a estrela caiu e
+    // o túnel segue pela ligação direta. Enquanto isto vale, não há para onde
+    // voltar se o direto cair.
+    let mut sem_estrela = false;
+    let vez_da_estrela = Arc::new(AtomicU32::new(0));
+    vigiar_a_estrela(&mut filhos, &estrela, &tx, Arc::clone(&vez_da_estrela));
     let mut fluxos: HashMap<SocketAddr, (u32, mpsc::Sender<Vec<u8>>)> = HashMap::new();
     let mut proximo_fluxo = 0_u32;
     let mut buf_udp = vec![0_u8; 65_536];
@@ -1349,6 +1389,11 @@ async fn laco_do_jogador(
                         pingador = AbortaAoLargar::nova(pingar(via.clone(), Arc::clone(&contexto)));
                         mudou = true;
                     }
+                    Evento::DiretoCaiu(g) if g == geracao && ligado.is_some() && sem_estrela => {
+                        // Sem quem hospeda, não há estrela para onde voltar.
+                        tracing::warn!(mod_id = %contexto.mod_id, tunel = %contexto.nome, "túnel: a ligação direta caiu sem quem hospeda; não há estrela para onde voltar");
+                        break Queda::AnfitriaoSaiu;
+                    }
                     Evento::DiretoCaiu(g) if g == geracao && ligado.is_some() => {
                         descartes_acumulados = descartes_acumulados.saturating_add(via.descartes().saturating_sub(base_de_descartes));
                         via = estrela.clone();
@@ -1361,6 +1406,34 @@ async fn laco_do_jogador(
                         mudou = true;
                     }
                     Evento::DiretoCaiu(_) => {}
+                    Evento::EstrelaCaiu => {
+                        // **Quem hospeda saiu.** Quem passava por ele cai, e
+                        // sabe por quê; quem anda pela malha continua — as
+                        // conexões vivas e as novas, pelo túnel já concedido.
+                        if !matches!(caminho, Caminho::Direto { .. }) {
+                            break Queda::AnfitriaoSaiu;
+                        }
+                        sem_estrela = true;
+                        tracing::info!(mod_id = %contexto.mod_id, tunel = %contexto.nome, caminho = caminho.rotulo(), "túnel: quem hospeda saiu; a ligação direta segue");
+                        mudou = true;
+                    }
+                    Evento::NovaEstrela(nova) => {
+                        // Quem hospeda voltou e concedeu o túnel de novo: a
+                        // estrela nova é o caminho de volta se o direto cair.
+                        vez_da_estrela.fetch_add(1, Ordering::AcqRel);
+                        estrela = nova;
+                        vigiar_a_estrela(&mut filhos, &estrela, &tx, Arc::clone(&vez_da_estrela));
+                        if sem_estrela {
+                            tracing::info!(mod_id = %contexto.mod_id, tunel = %contexto.nome, caminho = caminho.rotulo(), "túnel: quem hospeda voltou; a estrela é de novo o caminho de volta");
+                        }
+                        sem_estrela = false;
+                        if !matches!(caminho, Caminho::Direto { .. }) {
+                            via = estrela.clone();
+                            base_de_descartes = via.descartes();
+                            pingador = AbortaAoLargar::nova(pingar(via.clone(), Arc::clone(&contexto)));
+                        }
+                        mudou = true;
+                    }
                     Evento::Quedou(queda) => medidas.quedar(queda),
                     Evento::FluxoAcabou { origem, fluxo } => {
                         if fluxos.get(&origem).is_some_and(|(id, _)| *id == fluxo) {
@@ -1559,7 +1632,22 @@ pub(crate) struct Maquina {
     /// O mesmo mapa de [`EstadoDaMaquina::atendendo`].
     atendendo: Arc<Mutex<HashMap<PersonId, Atendimento>>>,
     proximo_atendimento: u64,
+    /// Sobe a cada vez que quem hospeda sai: o prazo de uma volta só confere
+    /// as ligações se ele não saiu de novo no meio.
+    vez_do_anfitriao: Arc<AtomicU64>,
 }
+
+/// **Quanto quem hospeda tem, depois de voltar, para apresentar de novo cada
+/// túnel que seguiu pela malha sem ele.** Quem joga pede entrada de novo assim
+/// que volta ([`Tuneis::reentrar`]); um túnel que ele não apresentou nesse
+/// tempo é de quem não pode mais (perdeu a ação, foi banido, ou não voltou), e
+/// sai da ligação direta como uma retirada. Sem isto, quem perdeu a permissão
+/// enquanto quem hospeda estava fora seguia jogando pela malha até sair.
+pub(crate) const PRAZO_DA_REAPRESENTACAO: Duration = Duration::from_secs(30);
+
+/// De quanto em quanto quem joga pede entrada de novo, na volta de quem
+/// hospeda, enquanto a máquina ainda não serve ([`Tuneis::reentrar`]).
+const INTERVALO_DA_REENTRADA: Duration = Duration::from_secs(1);
 
 /// Os túneis que o servidor apresentou a uma pessoa: o que a ligação direta
 /// dela pode abrir. Um canal que nomeia outro túnel é cortado.
@@ -1570,6 +1658,9 @@ pub(crate) struct Maquina {
 /// direta, quem confere é esta lista, e sem o sinal ela só crescia.
 pub(crate) struct Permitidos {
     mapa: Mutex<HashMap<Chave, watch::Sender<()>>>,
+    /// Os túneis que seguiram sem quem hospeda e que ele ainda não apresentou
+    /// de novo depois de voltar ([`Maquina::anfitriao_voltou`]).
+    a_confirmar: Mutex<HashSet<Chave>>,
     /// Vira `true` quando a lista esvazia por retirada: a ligação direta para
     /// de aceitar canais e espera os que ainda acabam.
     esvaziada: watch::Sender<bool>,
@@ -1586,11 +1677,41 @@ impl Permitidos {
     pub(crate) fn de(chave: Chave) -> Arc<Self> {
         Arc::new(Self {
             mapa: Mutex::new(HashMap::from([(chave, watch::Sender::new(()))])),
+            a_confirmar: Mutex::new(HashSet::new()),
             esvaziada: watch::Sender::new(false),
         })
     }
 
+    /// Todo túnel desta pessoa passa a esperar quem hospeda apresentá-lo de
+    /// novo.
+    fn marcar_a_confirmar(&self) {
+        let chaves: HashSet<Chave> = self
+            .mapa
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect();
+        *self
+            .a_confirmar
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = chaves;
+    }
+
+    /// Os que quem hospeda não apresentou de novo, tirados da espera.
+    fn nao_confirmados(&self) -> Vec<Chave> {
+        self.a_confirmar
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain()
+            .collect()
+    }
+
     fn permitir(&self, chave: Chave) {
+        self.a_confirmar
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&chave);
         self.mapa
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1702,7 +1823,46 @@ impl Maquina {
             na_estrela: false,
             atendendo,
             proximo_atendimento: 0,
+            vez_do_anfitriao: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// **Quem hospeda saiu**: a máquina segue servindo quem está ligado a ela
+    /// pela malha — os túneis servidos ficam, as ligações diretas ficam e
+    /// aceitam canais dos túneis que já foram apresentados a cada pessoa. A
+    /// estrela acaba sozinha com a conexão dela; a próxima conexão volta a
+    /// aceitá-la no primeiro `servir`. **Nada novo é apresentado sem ele**: uma
+    /// pessoa nova, ou um túnel novo para quem já está, precisa de
+    /// `SirvaTunelPara`.
+    pub(crate) fn sem_anfitriao(&mut self) {
+        self.vez_do_anfitriao.fetch_add(1, Ordering::AcqRel);
+        self.na_estrela = false;
+        let atendendo = self
+            .atendendo
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for atendimento in atendendo.values() {
+            atendimento.permitidos.marcar_a_confirmar();
+        }
+        tracing::info!(
+            diretas = atendendo.len(),
+            "túnel: quem hospeda saiu; a máquina segue servindo quem está ligado pela malha"
+        );
+    }
+
+    /// **Quem hospeda voltou**: daqui a [`PRAZO_DA_REAPRESENTACAO`], todo túnel
+    /// que seguiu pela malha e que ele não apresentou de novo sai da ligação
+    /// direta ([`Self::conferir_a_volta`]).
+    pub(crate) fn anfitriao_voltou(&mut self) {
+        let vez = self.vez_do_anfitriao.load(Ordering::Acquire);
+        let vez_agora = Arc::clone(&self.vez_do_anfitriao);
+        let atendendo = Arc::clone(&self.atendendo);
+        self.tarefas.spawn(async move {
+            tokio::time::sleep(PRAZO_DA_REAPRESENTACAO).await;
+            if vez_agora.load(Ordering::Acquire) == vez {
+                conferir_a_volta(&atendendo);
+            }
+        });
     }
 
     pub(crate) fn estado(&self) -> Arc<EstadoDaMaquina> {
@@ -1876,6 +2036,20 @@ impl Maquina {
             .clear();
         self.na_estrela = false;
     }
+}
+
+/// Tira das ligações diretas os túneis que quem hospeda não apresentou de
+/// novo depois de voltar, como uma retirada (`SemPermissao` em cada canal), e
+/// esquece quem ficou sem nenhum.
+fn conferir_a_volta(atendendo: &Mutex<HashMap<PersonId, Atendimento>>) {
+    let mut atendendo = atendendo.lock().unwrap_or_else(PoisonError::into_inner);
+    atendendo.retain(|quem, atendimento| {
+        for (mod_id, nome) in atendimento.permitidos.nao_confirmados() {
+            tracing::warn!(%mod_id, tunel = %nome, %quem, "túnel: quem hospeda voltou e não apresentou de novo este túnel a esta pessoa; os canais dela nele acabam");
+            atendimento.permitidos.retirar(&(mod_id, nome));
+        }
+        !atendimento.permitidos.vazio()
+    });
 }
 
 /// Aceita canais de uma via até ela acabar. `restrito` são os túneis a que a
@@ -2270,6 +2444,12 @@ pub(crate) struct Tuneis {
     /// antes de o servidor responder: o verbo sai uma vez só.
     entrando: HashMap<Chave, Vec<oneshot::Sender<Result<PortaLocal, RecusaDeTunel>>>>,
     servindo: HashMap<Chave, oneshot::Sender<Result<(), RecusaDeTunel>>>,
+    /// Os túneis que seguiram pela malha sem quem hospeda e que, na volta
+    /// dele, pediram entrada de novo ([`Self::reentrar`]): a concessão que
+    /// chega troca a estrela deles, e não abre outra porta.
+    /// Com o fim do prazo de cada um: até lá, uma recusa porque a máquina
+    /// ainda não serve de novo (ela também está voltando) é pedida de novo.
+    reentrando: HashMap<Chave, Instant>,
     maquina: Maquina,
     avisos: mpsc::UnboundedSender<Aviso>,
 }
@@ -2281,9 +2461,51 @@ impl Tuneis {
             ligacoes: Ligacoes::default(),
             entrando: HashMap::new(),
             servindo: HashMap::new(),
+            reentrando: HashMap::new(),
             maquina: Maquina::nova(),
             avisos,
         }
+    }
+
+    /// Tira do mapa os túneis cujo laço já acabou sozinho.
+    fn podar_os_acabados(&mut self) {
+        self.jogando.retain(|_, t| t.vivo());
+        self.ligacoes.podar(&self.jogando);
+    }
+
+    /// **A conexão com quem hospeda caiu** (API 8, «A reserva», último item:
+    /// sem quem hospeda, quem joga pela malha continua jogando).
+    ///
+    /// Nada é derrubado daqui: cada túnel de quem joga decide no próprio laço
+    /// ([`Evento::EstrelaCaiu`]) — o que anda pela estrela acaba com
+    /// [`Queda::AnfitriaoSaiu`], o que anda pela ligação direta segue. A
+    /// máquina segue servindo quem já está ligado a ela pela malha
+    /// ([`Maquina::sem_anfitriao`]). **Nada novo abre sem quem hospeda**: um
+    /// túnel novo precisa da concessão e da apresentação dele, que conferem as
+    /// permissões; o que segue é só o que ele já tinha concedido. Os pedidos
+    /// que esperavam resposta não a terão.
+    pub(crate) fn sem_anfitriao(&mut self) {
+        self.entrando.clear();
+        self.servindo.clear();
+        self.reentrando.clear();
+        self.podar_os_acabados();
+        self.maquina.sem_anfitriao();
+    }
+
+    /// **Quem hospeda voltou**: os túneis que seguiram pela malha pedem
+    /// entrada de novo, para quem hospeda os conhecer (e conferir que a
+    /// pessoa ainda pode); a concessão troca a estrela deles, e a recusa os
+    /// acaba com o motivo. Devolve as chaves cujo `EntrarNoTunel` tem de sair.
+    /// A máquina dá às ligações diretas que seguiram um prazo para quem
+    /// hospeda as apresentar de novo ([`Maquina::anfitriao_voltou`]).
+    pub(crate) fn reentrar(&mut self) -> Vec<Chave> {
+        self.podar_os_acabados();
+        self.maquina.anfitriao_voltou();
+        let chaves: Vec<Chave> = self.jogando.keys().cloned().collect();
+        let prazo = Instant::now() + PRAZO_DA_REAPRESENTACAO;
+        self.reentrando
+            .extend(chaves.iter().cloned().map(|chave| (chave, prazo)));
+        chaves
     }
 
     pub(crate) fn estado_da_maquina(&self) -> Arc<EstadoDaMaquina> {
@@ -2305,6 +2527,7 @@ impl Tuneis {
         chave: Chave,
         resposta: oneshot::Sender<Result<PortaLocal, RecusaDeTunel>>,
     ) -> bool {
+        self.podar_os_acabados();
         if let Some(aberto) = self.jogando.get(&chave) {
             tracing::info!(mod_id = %chave.0, tunel = %chave.1, "túnel: já aberto; a porta de antes é devolvida");
             let _ = resposta.send(Ok(aberto.porta.descrita()));
@@ -2375,6 +2598,7 @@ impl Tuneis {
         self.ligacoes.por_maquina.clear();
         self.entrando.clear();
         self.servindo.clear();
+        self.reentrando.clear();
         self.maquina.derrubar_tudo(queda);
         let _ = tokio::time::timeout(teto, async {
             for espera in esperas {
@@ -2384,7 +2608,9 @@ impl Tuneis {
         .await;
     }
 
-    /// Tudo o que uma conexão perdida leva junto.
+    /// Tudo, de uma vez, sem esperar os relatórios. A queda da conexão não
+    /// passa mais por aqui ([`Self::sem_anfitriao`]); fica para as provas.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn derrubar_tudo(&mut self, queda: Queda) {
         for (_, tunel) in self.jogando.drain() {
             tunel.encerrar(queda);
@@ -2392,6 +2618,7 @@ impl Tuneis {
         self.ligacoes.por_maquina.clear();
         self.entrando.clear();
         self.servindo.clear();
+        self.reentrando.clear();
         self.maquina.derrubar_tudo(queda);
     }
 
@@ -2418,7 +2645,7 @@ impl Tuneis {
                 nome,
                 motivo,
             } => {
-                self.recusado(mod_id, nome, *motivo);
+                self.recusado(mod_id, nome, *motivo, enviar);
             }
             ServerMessage::TunelEncerrado {
                 mod_id,
@@ -2513,6 +2740,15 @@ impl Tuneis {
             let _ = resposta.send(Ok(()));
             return;
         }
+        if self.reentrando.remove(&chave).is_some() {
+            if let (Some(tunel), Some(estrela)) = (self.jogando.get(&chave), estrela) {
+                if tunel.vivo() {
+                    tracing::info!(%mod_id, tunel = %nome, "túnel: quem hospeda voltou e concedeu de novo; a mesma porta segue");
+                    tunel.nova_estrela(Via::nova(estrela.clone()));
+                    return;
+                }
+            }
+        }
         let esperas = self.entrando.remove(&chave).unwrap_or_default();
         if esperas.is_empty() {
             tracing::debug!(%mod_id, tunel = %nome, "túnel: concedido sem pedido em andamento");
@@ -2587,8 +2823,42 @@ impl Tuneis {
         }
     }
 
-    fn recusado(&mut self, mod_id: &str, nome: &str, motivo: RecusaDeTunel) {
+    fn recusado(&mut self, mod_id: &str, nome: &str, motivo: RecusaDeTunel, enviar: &Enviar) {
         let chave = (mod_id.to_owned(), nome.to_owned());
+        if let Some(prazo) = self.reentrando.get(&chave).copied() {
+            // **A máquina também está voltando**: quem hospeda não a tem ainda
+            // (`NaoExiste`, `MaquinaSaiu`) até a metade de servidor chamá-la
+            // de novo e ela servir. Dentro do prazo, pede-se de novo; a
+            // ligação direta segue enquanto isso.
+            let ainda_vem = matches!(
+                motivo,
+                RecusaDeTunel::NaoExiste | RecusaDeTunel::MaquinaSaiu
+            );
+            if ainda_vem
+                && Instant::now() < prazo
+                && self.jogando.get(&chave).is_some_and(TunelDeJogador::vivo)
+            {
+                tracing::info!(%mod_id, tunel = %nome, ?motivo, "túnel: quem hospeda voltou mas a máquina ainda não serve; pede-se de novo");
+                let enviar = Arc::clone(enviar);
+                let (mod_id, nome) = (mod_id.to_owned(), nome.to_owned());
+                tokio::spawn(async move {
+                    tokio::time::sleep(INTERVALO_DA_REENTRADA).await;
+                    enviar(ClientMessage::EntrarNoTunel { mod_id, nome });
+                });
+                return;
+            }
+            self.reentrando.remove(&chave);
+            // **Quem hospeda voltou e não concede mais** (a pessoa perdeu a
+            // ação, a máquina não serve): o túnel que seguiu pela malha acaba
+            // com o motivo dele.
+            let queda = fim_pela_recusa(motivo).unwrap_or(Queda::SemPermissao);
+            tracing::warn!(%mod_id, tunel = %nome, ?motivo, ?queda, "túnel: quem hospeda voltou e recusou o túnel que seguia pela malha");
+            if let Some(tunel) = self.jogando.remove(&chave) {
+                tunel.encerrar(queda);
+                self.ligacoes.podar(&self.jogando);
+            }
+            return;
+        }
         if let Some(resposta) = self.servindo.remove(&chave) {
             let _ = resposta.send(Err(motivo));
             return;
@@ -2628,6 +2898,57 @@ mod testes {
 
     const MOD: &str = "seele/jogo";
     const NOME: &str = "mundo";
+
+    // ---- sem quem hospeda
+
+    /// **Na volta de quem hospeda, a ligação direta só segue com o que ele
+    /// apresentou de novo.** Sem ele, nada é conferido; na volta, um túnel que
+    /// ele não apresentou outra vez a esta pessoa sai da ligação (os canais
+    /// dela nele acabam), e a pessoa sem nenhum é esquecida.
+    #[test]
+    fn na_volta_de_quem_hospeda_so_segue_o_que_ele_apresentou_de_novo() {
+        let chave = |n: &str| (MOD.to_owned(), n.to_owned());
+        let de_ana = Permitidos::de(chave("a"));
+        de_ana.permitir(chave("b"));
+        let de_bia = Permitidos::de(chave("a"));
+        let atendendo = Mutex::new(HashMap::from([
+            (
+                PersonId(1),
+                Atendimento {
+                    id: 1,
+                    permitidos: Arc::clone(&de_ana),
+                },
+            ),
+            (
+                PersonId(2),
+                Atendimento {
+                    id: 2,
+                    permitidos: Arc::clone(&de_bia),
+                },
+            ),
+        ]));
+        for a in atendendo.lock().unwrap().values() {
+            a.permitidos.marcar_a_confirmar();
+        }
+        // Quem hospeda voltou e apresentou de novo só o `a` de Ana.
+        de_ana.permitir(chave("a"));
+        conferir_a_volta(&atendendo);
+        assert!(
+            de_ana.vigia(&chave("a")).is_some(),
+            "o túnel apresentado de novo saiu"
+        );
+        assert!(
+            de_ana.vigia(&chave("b")).is_none(),
+            "o túnel que quem hospeda não apresentou de novo segue na ligação direta"
+        );
+        assert!(de_bia.vazio());
+        let atendendo = atendendo.lock().unwrap();
+        assert!(atendendo.contains_key(&PersonId(1)));
+        assert!(
+            !atendendo.contains_key(&PersonId(2)),
+            "quem ficou sem nenhum túnel segue sendo atendido"
+        );
+    }
 
     // ---- a porta de quem joga
 

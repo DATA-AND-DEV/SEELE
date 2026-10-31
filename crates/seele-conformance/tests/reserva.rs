@@ -19,8 +19,19 @@
 //!   conexão mas não o processo; volta (`MaquinaVoltou`), o servidor não a
 //!   deixa servir (`nao-e-a-dona`, contado), ela pergunta, ouve «desligar» e
 //!   mata o processo, e a metade de servidor conta — um processo só fica.
-//! - `sem_quem_hospeda_nada_muda_de_dona`: o servidor cai; a dona segue
-//!   rodando, e a reserva não liga.
+//! - `sem_quem_hospeda_a_dona_segue_e_quem_joga_pela_malha_continua`: o
+//!   servidor cai; a conexão do jogo que andava pela ligação direta segue
+//!   ecoando, uma conexão nova pelo mesmo túnel também, a dona segue rodando e
+//!   a reserva não liga.
+//! - `sem_quem_hospeda_quem_passa_pela_estrela_cai_e_sabe_por_que`: sem a
+//!   malha, o túnel de quem joga acaba com `AnfitriaoSaiu`; a dona segue e a
+//!   reserva não liga.
+//! - `quem_hospeda_volta_e_a_dona_e_a_mesma_religada`: a reserva é a dona, o
+//!   servidor cai e sobe de novo no mesmo endereço e banco; a dona segue a
+//!   mesma, o jogo dela foi religado e não subido de novo (`partidas`), quem
+//!   joga pela malha nunca parou e pede entrada de novo sozinho.
+//! - `o_pedido_a_quem_nao_esta_volta_quando_ela_chega`: chamar quem não está
+//!   não se perde — `MaquinaVoltou` chega quando a pessoa chega.
 
 #![allow(
     clippy::expect_used,
@@ -74,6 +85,8 @@ const anotar = (chave, linha) => { dados[chave] = (dados[chave] || "") + linha +
 const dona = () => dados.dona || "principal";
 const ok = (extra) => JSON.stringify(Object.assign({ ok: true }, extra || {}));
 function pedirA(quem, servidor, papel, tuneis) {
+  // A posse mora na memória do servidor (R3): a cada pedido, é dita de novo.
+  if (dados.dona) mundo.maquinas.dona({ servidor, papel: dados.dona });
   mundo.maquinas.pedir({ quem, servidor, papel, oferta: {
     titulo: "Eco (" + papel + ")", receita: "eco", versao_da_receita: "1.0.0",
     versao_do_jogo: "1", tuneis } });
@@ -83,6 +96,18 @@ function passar(servidor, papel, perdido) {
   mundo.maquinas.dona({ servidor, papel });
   mundo.maquinas.avisar({ servidor, papel, carga: { op: "assumir", perdido } });
   mundo.maquinas.avisar({ servidor, papel: outro(papel), carga: { op: "desligar" } });
+}
+// **Quem hospeda voltou** (o servidor subiu de novo): o livro das máquinas
+// nasceu vazio, e a metade de servidor chama de novo quem ela guardou no
+// quintal (`{ religar }`). Quem ainda não voltou ouve o pedido quando voltar
+// (`MaquinaVoltou`).
+function religar() {
+  for (const papel of ["principal", "reserva"]) {
+    if (dados["quem:" + papel] && dados.servidor) {
+      anotar("religar", papel);
+      pedirA(dados["quem:" + papel], dados.servidor, papel, JSON.parse(dados["tuneis:" + papel] || "[]"));
+    }
+  }
 }
 globalThis.aoPedir = (contexto, pedido) => {
   const c = JSON.parse(contexto);
@@ -102,11 +127,20 @@ globalThis.aoPedir = (contexto, pedido) => {
     if (p.op === "matei") { dados.voltouRodando = String(Number(dados.voltouRodando || "0") + 1); return ok(); }
     return ok();
   }
+  if (p.religar) { religar(); return ok(); }
+  if (p.pedirPara) {
+    dados["tuneis:" + p.papel] = JSON.stringify(p.tuneis);
+    pedirA(String(p.pedirPara), p.servidor, p.papel, p.tuneis);
+    return ok();
+  }
   if (p.ler) return ok({ momentos: dados.momentos || "", falas: dados.falas || "",
     perdido: dados.perdido === undefined ? null : JSON.parse(dados.perdido), dona: dona(),
-    voltouRodando: Number(dados.voltouRodando || "0"), recebida: dados.recebida || null });
+    voltouRodando: Number(dados.voltouRodando || "0"), recebida: dados.recebida || null,
+    religar: dados.religar || "" });
   if (p.pedir) {
     dados["tuneis:" + p.papel] = JSON.stringify(p.tuneis);
+    dados["quem:" + p.papel] = String(c.person);
+    dados.servidor = p.servidor;
     pedirA(c.person, p.servidor, p.papel, p.tuneis);
   }
   if (p.passar) {
@@ -870,10 +904,115 @@ async fn enlace_de_mentira(endereco: SocketAddr, conjunto: &str) -> Result<Enlac
     enlace(endereco, conjunto, 9, "ninguem").await
 }
 
+/// Lê os relatórios de quem joga até o túnel do jogo andar pela ligação
+/// direta.
+async fn esperar_o_direto(joga: &mut Enlace) -> Result<()> {
+    let fim = Instant::now() + PACIENCIA;
+    while Instant::now() < fim {
+        if let Ok(Aviso::Tunel(r)) =
+            tokio::time::timeout(Duration::from_millis(300), joga.proximo()).await
+        {
+            if r.nome == JOGO && matches!(r.caminho, Caminho::Direto { .. }) {
+                return Ok(());
+            }
+        }
+    }
+    anyhow::bail!("o túnel do jogo não foi pela ligação direta")
+}
+
+/// Nenhum relatório do túnel do jogo diz que ele acabou, por `quanto`.
+async fn o_jogo_nao_acaba(joga: &mut Enlace, quanto: Duration) -> Result<()> {
+    let fim = Instant::now() + quanto;
+    while Instant::now() < fim {
+        if let Ok(Aviso::Tunel(r)) =
+            tokio::time::timeout(Duration::from_millis(100), joga.proximo()).await
+        {
+            anyhow::ensure!(
+                !(r.nome == JOGO && r.encerrado.is_some()),
+                "o túnel do jogo acabou: {:?}",
+                r.encerrado
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Um eco por uma conexão já aberta: o que vai volta igual.
+async fn eco_na(fluxo: &mut TcpStream) -> Result<()> {
+    let ida = b"ainda aqui";
+    fluxo.write_all(ida).await?;
+    let mut volta = vec![0_u8; ida.len()];
+    tokio::time::timeout(PACIENCIA, fluxo.read_exact(&mut volta)).await??;
+    anyhow::ensure!(volta == ida, "o eco voltou outro");
+    Ok(())
+}
+
+/// Quantas vezes o jogo desta pasta subiu (`seele-jogo-de-mentira`).
+fn partidas(raiz: &Path) -> u64 {
+    std::fs::read_to_string(raiz.join("partidas"))
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// **Sem quem hospeda, a dona segue rodando, e quem joga pela malha
+/// continua jogando** (spec «A reserva», último item). O servidor cai; a
+/// conexão do jogo que já andava pela ligação direta segue ecoando, uma
+/// conexão nova pelo mesmo túnel também, a dona segue de pé, e a reserva não
+/// liga.
 #[tokio::test(flavor = "multi_thread")]
-async fn sem_quem_hospeda_nada_muda_de_dona() -> Result<()> {
-    let (daemon, _temp, mut principal, mut reserva, _joga, _, _) = montar(false).await?;
+async fn sem_quem_hospeda_a_dona_segue_e_quem_joga_pela_malha_continua() -> Result<()> {
+    let (daemon, _temp, mut principal, mut reserva, mut joga, _, _) = montar(true).await?;
     principal.rodar().await?;
+    principal
+        .enlace
+        .servir_tunel(MOD, JOGO, ProtocoloDeTunel::Tcp, principal.porta_do_jogo)
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?;
+    let porta = entrar_no_jogo(&joga).await?;
+    esperar_o_direto(&mut joga).await?;
+    // A conexão do jogo, aberta depois do direto: anda pela malha.
+    let mut fluxo = TcpStream::connect(("127.0.0.1", porta)).await?;
+    eco_na(&mut fluxo).await?;
+
+    // **Quem hospeda cai.**
+    daemon.shutdown();
+    drop(daemon);
+    // O enlace de quem joga vê a estrela acabar; o túnel não acaba com ela.
+    o_jogo_nao_acaba(&mut joga, Duration::from_secs(2)).await?;
+    eco_na(&mut fluxo)
+        .await
+        .map_err(|e| anyhow::anyhow!("a conexão do jogo pela malha caiu sem quem hospeda: {e}"))?;
+    // E uma conexão nova, pelo mesmo túnel já concedido, também passa.
+    eco_passa(porta)
+        .await
+        .map_err(|e| anyhow::anyhow!("uma conexão nova pela malha não passou: {e}"))?;
+    // Mais que o prazo: ninguém decide, e nada muda.
+    reserva.nenhum_aviso("assumir", PRAZO * 2).await?;
+    assert!(principal.jogo_vivo().await, "a dona parou sem quem hospeda");
+    assert!(
+        reserva.processo.is_none() && reserva.programa.processos_vivos() == 0,
+        "a reserva ligou sozinha"
+    );
+    eco_na(&mut fluxo).await?;
+    Ok(())
+}
+
+/// **Quem passava pela estrela cai, e sabe por quê.** Sem a malha, o túnel
+/// do jogo de quem joga acaba com `AnfitriaoSaiu` — «quem hospeda o SEELE
+/// saiu; quem passava por ele caiu» —, e não com o `ServidorSaiu` de quem
+/// saiu do servidor. A dona segue rodando, e a reserva não liga.
+#[tokio::test(flavor = "multi_thread")]
+async fn sem_quem_hospeda_quem_passa_pela_estrela_cai_e_sabe_por_que() -> Result<()> {
+    let (daemon, _temp, mut principal, mut reserva, mut joga, _, _) = montar(false).await?;
+    principal.rodar().await?;
+    principal
+        .enlace
+        .servir_tunel(MOD, JOGO, ProtocoloDeTunel::Tcp, principal.porta_do_jogo)
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?;
+    let porta = entrar_no_jogo(&joga).await?;
+    eco_passa(porta).await?;
     principal.escrever_o_mundo("a dona");
     principal.fazer_a_copia().await?;
     let carga = reserva.esperar_aviso("copia").await?;
@@ -882,6 +1021,11 @@ async fn sem_quem_hospeda_nada_muda_de_dona() -> Result<()> {
     // **Quem hospeda cai.**
     daemon.shutdown();
     drop(daemon);
+    assert_eq!(
+        esperar_o_fim_do_jogo(&mut joga).await?,
+        Queda::AnfitriaoSaiu,
+        "quem passava pela estrela não soube por que caiu"
+    );
     // Mais que o prazo: ninguém decide, e nada muda.
     reserva.nenhum_aviso("assumir", PRAZO * 3).await?;
     assert!(principal.jogo_vivo().await, "a dona parou sem quem hospeda");
@@ -890,5 +1034,173 @@ async fn sem_quem_hospeda_nada_muda_de_dona() -> Result<()> {
         "a reserva ligou sozinha"
     );
     assert!(!reserva.jogo_vivo().await);
+    Ok(())
+}
+
+/// Aceita o pedido que chegou a esta máquina, como o app aceita sozinho um
+/// pedido igual ao aceito: o resumo que o pedido traz.
+async fn aceitar_de_novo(maquina: &mut Maquina) -> Result<()> {
+    let resumo = maquina_de_jogo::esperar_o_pedido(&mut maquina.enlace, SERVIDOR).await?;
+    maquina
+        .enlace
+        .aceitar_maquina(MOD, SERVIDOR, &resumo)
+        .await
+        .map_err(|_| anyhow::anyhow!("o enlace da máquina já tinha acabado"))?;
+    Ok(())
+}
+
+/// **Quem hospeda volta, e a dona é a mesma.** A reserva é a dona (uma
+/// passagem avisada antes), o servidor cai e sobe de novo no mesmo endereço,
+/// com o mesmo banco: os enlaces voltam sozinhos, a metade de servidor chama
+/// de novo quem ela guardou, a reserva é aceita de novo e **religada, e não
+/// subida de novo** — o jogo dela subiu uma vez só (`partidas`) —, serve o
+/// túnel de novo como dona, e quem joga pela malha nunca deixou de jogar.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_hospeda_volta_e_a_dona_e_a_mesma_religada() -> Result<()> {
+    let (daemon, temp, mut principal, mut reserva, mut joga, endereco, _) = montar(true).await?;
+    // A reserva vira a dona por uma passagem avisada: assim «a mesma dona» não
+    // é o padrão do livro novo (a principal), e sim o que a metade guardou.
+    principal.rodar().await?;
+    principal.escrever_o_mundo("antes da passagem");
+    principal.fazer_a_copia().await?;
+    let carga = reserva.esperar_aviso("copia").await?;
+    reserva.receber_a_copia(&carga).await?;
+    let passou = pedir_ao_mod(
+        &mut joga,
+        &serde_json::json!({ "passar": "reserva", "servidor": SERVIDOR }),
+    )
+    .await?;
+    assert_eq!(passou, r#"{"ok":true}"#, "{passou}");
+    reserva.esperar_aviso("assumir").await?;
+    principal.desligar_o_jogo().await?;
+    reserva.rodar().await?;
+    reserva
+        .enlace
+        .servir_tunel(MOD, JOGO, ProtocoloDeTunel::Tcp, reserva.porta_do_jogo)
+        .await
+        .map_err(|r| anyhow::anyhow!("a reserva, dona, não serviu: {r:?}"))?;
+    let porta = entrar_no_jogo(&joga).await?;
+    esperar_o_direto(&mut joga).await?;
+    let mut fluxo = TcpStream::connect(("127.0.0.1", porta)).await?;
+    eco_na(&mut fluxo).await?;
+    assert_eq!(partidas(reserva.raiz()), 1);
+
+    // **Quem hospeda cai**, por mais que o prazo.
+    daemon.shutdown();
+    drop(daemon);
+    reserva.nenhum_aviso("desligar", PRAZO * 2).await?;
+    eco_na(&mut fluxo).await?;
+
+    // **E volta**, no mesmo endereço e com o mesmo banco.
+    let daemon = maquina_de_jogo::servidor_de_volta(endereco, &temp, true, PRAZO).await?;
+    // Quem opera volta e manda a metade de servidor chamar de novo as duas
+    // máquinas que ela guardou; a que ainda não voltou ouve o pedido quando
+    // voltar (`MaquinaVoltou`).
+    let fim = Instant::now() + PACIENCIA;
+    let religar = serde_json::json!({ "religar": true });
+    loop {
+        let pedido = pedir_ao_mod(&mut joga, &religar);
+        match tokio::time::timeout(Duration::from_secs(2), pedido).await {
+            Ok(Ok(_)) => break,
+            _ => anyhow::ensure!(Instant::now() < fim, "quem opera não voltou"),
+        }
+    }
+    aceitar_de_novo(&mut reserva).await?;
+    aceitar_de_novo(&mut principal).await?;
+    let livro = || daemon.server().maquinas();
+    assert_eq!(
+        livro().dona(MOD, SERVIDOR),
+        Papel::Reserva,
+        "quem hospeda voltou e a dona mudou"
+    );
+    // **Religada, e não subida de novo**: a reserva serve o túnel de novo com
+    // o mesmo processo, pergunta a posse e ouve que é a dona.
+    reserva
+        .enlace
+        .servir_tunel(MOD, JOGO, ProtocoloDeTunel::Tcp, reserva.porta_do_jogo)
+        .await
+        .map_err(|r| anyhow::anyhow!("a reserva religada não serviu de novo: {r:?}"))?;
+    let r = reserva
+        .falar(serde_json::json!({ "op": "quem-e-a-dona" }))
+        .await?;
+    assert_eq!(r["dona"], true, "{r}");
+    let r = principal
+        .falar(serde_json::json!({ "op": "quem-e-a-dona" }))
+        .await?;
+    assert_eq!(r["dona"], false, "{r}");
+    assert!(reserva.jogo_vivo().await, "o jogo da dona caiu na volta");
+    assert_eq!(
+        partidas(reserva.raiz()),
+        1,
+        "o jogo da dona foi subido de novo, e não religado"
+    );
+    assert!(!principal.jogo_vivo().await);
+    // **Quem joga pediu entrada de novo sozinho** (o túnel que seguiu pela
+    // malha): quem hospeda o concedeu de novo, sem ninguém clicar.
+    let quem_joga = joga.sessao().person;
+    let fim = Instant::now() + PACIENCIA;
+    while !daemon
+        .server()
+        .tuneis()
+        .concessoes()
+        .contains(&(quem_joga, MOD.to_owned()))
+    {
+        anyhow::ensure!(
+            Instant::now() < fim,
+            "o túnel que seguiu pela malha não pediu entrada de novo na volta de quem hospeda"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // Quem jogava pela malha não deixou de jogar, e entra de novo pelo mesmo
+    // endereço.
+    eco_na(&mut fluxo)
+        .await
+        .map_err(|e| anyhow::anyhow!("a conexão pela malha caiu na volta de quem hospeda: {e}"))?;
+    let de_novo = entrar_no_jogo(&joga).await?;
+    assert_eq!(de_novo, porta, "a porta de quem joga mudou na volta");
+    eco_passa(porta).await?;
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **Chamar quem ainda não voltou não se perde** (a volta de quem hospeda): a
+/// metade de servidor pede a máquina a alguém que não está conectado, ouve
+/// `nao-esta-aqui` — e, quando a pessoa chega, ouve `MaquinaVoltou` daquele
+/// lugar e pede de novo; o pedido chega a ela.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_pedido_a_quem_nao_esta_volta_quando_ela_chega() -> Result<()> {
+    let (daemon, _temp, _principal, _reserva, mut joga, endereco, conjunto) = montar(false).await?;
+    // Alguém que entrou uma vez (para ter número) e saiu.
+    let ausente = enlace(endereco, &conjunto, 7, "ausente").await?;
+    let pessoa = ausente.sessao().person;
+    drop(ausente);
+    let fim = Instant::now() + PACIENCIA;
+    while daemon.server().maquinas().pode_ser_chamada(pessoa) {
+        anyhow::ensure!(Instant::now() < fim, "a pessoa não saiu");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let tuneis: Vec<_> = [(JOGO, "tcp", porta_livre())]
+        .iter()
+        .map(|(n, p, porta)| serde_json::json!({ "nome": n, "protocolo": p, "porta": porta }))
+        .collect();
+    pedir_ao_mod(
+        &mut joga,
+        &serde_json::json!({ "pedirPara": pessoa.0, "servidor": "outro-1", "papel": "principal", "tuneis": tuneis }),
+    )
+    .await?;
+    esperar_momento(&mut joga, r#""motivo":"nao-esta-aqui""#).await?;
+    // Ela chega: o lugar volta à metade de servidor, que pede de novo.
+    let mut de_volta = enlace(endereco, &conjunto, 7, "ausente").await?;
+    de_volta.aceitar_pedidos_de_maquina(true);
+    esperar_momento(
+        &mut joga,
+        &format!(
+            r#"MaquinaVoltou {{"servidor":"outro-1","papel":"principal","pessoa":{}}}"#,
+            pessoa.0
+        ),
+    )
+    .await?;
+    maquina_de_jogo::esperar_o_pedido(&mut de_volta, "outro-1").await?;
+    daemon.shutdown();
     Ok(())
 }

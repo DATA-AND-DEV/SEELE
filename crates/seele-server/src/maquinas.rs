@@ -767,6 +767,26 @@ impl Maquinas {
         voltas
     }
 
+    /// **Um pedido a quem não está** (`nao-esta-aqui`): o lugar é lembrado
+    /// como o de quem caiu, e quando a pessoa chegar a metade de servidor ouve
+    /// `MaquinaVoltou` dele — e decide pedir de novo. É o caminho de quem
+    /// hospeda que volta: o livro nasce vazio, a metade de servidor chama de
+    /// novo quem ela guardou, e quem ainda não reconectou é chamado quando
+    /// reconectar, em vez de a chamada se perder.
+    pub fn lembrar_quem_nao_esta(
+        &mut self,
+        quem: PersonId,
+        mod_id: &str,
+        servidor: &str,
+        papel: Papel,
+    ) {
+        let k = chave(mod_id, servidor, papel);
+        let lembrados = self.ausentes.entry(quem).or_default();
+        if !lembrados.contains(&k) && lembrados.len() < LUGARES_LEMBRADOS_POR_PESSOA {
+            lembrados.push(k);
+        }
+    }
+
     /// **A pessoa voltou** (uma conexão dela negociou o 12 de novo): os lugares
     /// que ela operava quando caiu e que **seguem vazios**, para a metade de
     /// servidor ouvir `MaquinaVoltou` e decidir — pedir de novo, ou dizer a
@@ -1942,6 +1962,26 @@ mod tests {
         );
         let _ = m.saiu(A, 11);
         assert!(!m.pode_ser_chamada(A));
+    }
+
+    /// **Quem hospeda volta e chama quem ainda não reconectou**: o pedido a
+    /// quem não está é lembrado, e a chegada dela diz o lugar uma vez
+    /// (`MaquinaVoltou`). Um lugar que alguém ocupou nesse meio não é dito.
+    #[test]
+    fn o_pedido_a_quem_nao_esta_volta_quando_ela_chega() {
+        let mut m = Maquinas::default();
+        m.lembrar_quem_nao_esta(A, MOD, "mc-1", Papel::Reserva);
+        m.lembrar_quem_nao_esta(A, MOD, "mc-1", Papel::Reserva);
+        m.lembrar_quem_nao_esta(A, MOD, "mc-2", Papel::Principal);
+        let _ = m.chegou(A, 10);
+        assert_eq!(
+            m.voltou(A),
+            vec![
+                (MOD.to_owned(), "mc-1".to_owned(), Papel::Reserva),
+                (MOD.to_owned(), "mc-2".to_owned(), Papel::Principal),
+            ]
+        );
+        assert!(m.voltou(A).is_empty(), "cada lugar é dito uma vez");
     }
 
     /// A mesma recusa só é **nova** uma vez por janela; outra chave, ou a

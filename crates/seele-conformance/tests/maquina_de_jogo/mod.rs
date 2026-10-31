@@ -184,6 +184,50 @@ pub(crate) async fn servidor_com(
     Ok((endereco, daemon, conjunto, temp))
 }
 
+/// **O mesmo servidor, de volta** (API 8, «sem quem hospeda»): sobe de novo
+/// no mesmo endereço e com o mesmo banco de [`servidor_com`] — a mesma
+/// identidade TLS, o MOD ligado e o quintal da metade de servidor —, depois de
+/// o de antes ter caído. O livro das máquinas nasce vazio, como num servidor
+/// que reinicia.
+#[allow(dead_code, reason = "só as provas de quem hospeda voltar o usam")]
+pub(crate) async fn servidor_de_volta(
+    endereco: SocketAddr,
+    temp: &tempfile::TempDir,
+    malha_para_tuneis: bool,
+    prazo_da_maquina_sumida: Duration,
+) -> Result<Arc<Daemon>> {
+    // A metade de servidor é a mesma: o pacote já está no cache e ligado no banco.
+    let raizes = seele_server::RaizesDosMods {
+        pacotes: temp.path().join("cache"),
+        dados: temp.path().join("dados"),
+    };
+    let config = ServerConfig {
+        name: "Casa".into(),
+        listen: endereco,
+        database: Location::File(temp.path().join("seele.db")),
+        mods_dir: Some(raizes),
+        malha_para_tuneis,
+        prazo_da_maquina_sumida,
+        ..ServerConfig::default()
+    };
+    // A porta do de antes pode levar um instante a ficar livre.
+    let fim = Instant::now() + PACIENCIA;
+    let daemon = loop {
+        match Daemon::bind(config.clone()).await {
+            Ok(daemon) => break Arc::new(daemon),
+            Err(_) if Instant::now() < fim => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(erro) => return Err(erro.into()),
+        }
+    };
+    let atendendo = Arc::clone(&daemon);
+    tokio::spawn(async move {
+        let _ = atendendo.run().await;
+    });
+    Ok(daemon)
+}
+
 /// Os números de `request` destes pedidos ao MOD. Altos, para não cruzar com
 /// os que um teste escolha à mão; um contador do binário, porque as provas
 /// rodam em paralelo e cada uma tem o seu `Enlace`.

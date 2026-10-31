@@ -49,6 +49,10 @@ pub const PRELUDIO: &str = r#"
   let ouvinteDoAviso = null;
   let ouvinteDaParada = null;
   let paradaDada = false;
+  // **A volta de quem hospeda** (API 8, «sem quem hospeda»): a metade seguiu
+  // rodando sem ele e foi religada pelo pedido igual ao aceito, sem subir de
+  // novo. É a vez de ela servir de novo o túnel e perguntar quem é a dona.
+  let ouvinteDaVolta = null;
 
   // **O que o poder `programa` ouve sem ter pedido** (API 8 parte 4): o
   // progresso de um download (`programa-progresso`), a linha de um processo
@@ -66,6 +70,16 @@ pub const PRELUDIO: &str = r#"
       // metade inteira por um defeito de um ouvinte.
       if (!ouvinteDoAviso) return;
       try { ouvinteDoAviso(m.carga); } catch (erro) { dizerOErro('erro no aoAviso:', erro); }
+      return;
+    }
+    if (m.tipo === 'reconectar-maquina') {
+      // O erro de quem ouve fica com quem ouve, como no `aoAviso`; uma
+      // promessa que rejeita também é dita.
+      if (!ouvinteDaVolta) return;
+      const volta = Object.freeze({ fora: Number(m.fora ?? 0) });
+      try {
+        Promise.resolve(ouvinteDaVolta(volta)).catch((erro) => { dizerOErro('erro no aoReconectar:', erro); });
+      } catch (erro) { dizerOErro('erro no aoReconectar:', erro); }
       return;
     }
     if (m.tipo === 'parar-maquina') {
@@ -752,6 +766,8 @@ pub const PRELUDIO: &str = r#"
       // `SeeleUI.aoEvento`, pela mesma razão.
       aoAviso: (fn) => { ouvinteDoAviso = typeof fn === 'function' ? fn : null; },
       aoParar: (fn) => { ouvinteDaParada = typeof fn === 'function' ? fn : null; },
+      // `fn({ fora })`: quantos segundos a metade seguiu sem quem hospeda.
+      aoReconectar: (fn) => { ouvinteDaVolta = typeof fn === 'function' ? fn : null; },
       ...(porta ? { porta } : {}),
       ...(programa ? { programa } : {}),
     });

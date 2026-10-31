@@ -4373,12 +4373,15 @@ impl Motor {
         self.tela_pedida = None;
         self.parar_a_tela();
         self.largar_o_caminho_entre_pares();
-        // **Os túneis morrem com a conexão que os concedeu.** O servidor apaga
-        // a concessão e a declaração quando a sessão sai (`Tuneis::saiu`);
-        // uma porta local que sobrevivesse levaria o jogo para um canal que
-        // ninguém mais repassa. Quem joga reconecta no mesmo `localhost:porta`
-        // depois de entrar de novo.
-        self.tuneis.derrubar_tudo(crate::tunel::Queda::ServidorSaiu);
+        // **Sem quem hospeda, quem joga pela malha continua jogando** (API 8,
+        // «A reserva», último item). O túnel que anda pela estrela acaba com
+        // `AnfitriaoSaiu` — quem passava por ele caiu, e a tela diz por quê; o
+        // que anda pela ligação direta segue, e a máquina segue servindo quem
+        // está ligado a ela pela malha. Nada novo abre sem ele: concessão e
+        // apresentação são dele. Na volta, cada túnel que seguiu pede entrada
+        // de novo (`reentrar_nos_tuneis`). Antes desta regra, todo túnel morria
+        // aqui com `ServidorSaiu`, inclusive o direto.
+        self.tuneis.sem_anfitriao();
         self.lado_da_maquina.soltar();
     }
 
@@ -4526,6 +4529,7 @@ impl Motor {
                 );
                 self.cliente = Some(cliente);
                 self.bateria.on_reconnected();
+                self.reentrar_nos_tuneis().await;
                 // A sessão anterior já foi apagada de `Pares` (`Pares::saiu`,
                 // no servidor) quando ela caiu — sem redeclarar aqui, esta
                 // pessoa reconecta sem identidade nenhuma registrada até a
@@ -5266,6 +5270,23 @@ impl Motor {
                 None
             }
             outra => Some(outra),
+        }
+    }
+
+    /// **Quem hospeda voltou**: cada túnel que seguiu pela malha sem ele pede
+    /// entrada de novo, para ele conceder (e conferir a permissão) outra vez.
+    /// A concessão troca a estrela do túnel e mantém a porta; a recusa o acaba
+    /// com o motivo (ver `Tuneis::reentrar`).
+    async fn reentrar_nos_tuneis(&mut self) {
+        for (mod_id, nome) in self.tuneis.reentrar() {
+            tracing::info!(%mod_id, tunel = %nome, "túnel: quem hospeda voltou; o túnel que seguiu pela malha pede entrada de novo");
+            let chave = (mod_id.clone(), nome.clone());
+            if let Err(recusa) = self
+                .mandar_verbo_de_tunel(ClientMessage::EntrarNoTunel { mod_id, nome })
+                .await
+            {
+                self.tuneis.recusar_pedido(&chave, recusa);
+            }
         }
     }
 
