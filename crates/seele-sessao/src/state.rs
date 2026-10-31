@@ -272,6 +272,16 @@ pub struct Ended {
     pub reason: seele_proto::control::DisconnectReason,
 }
 
+/// Uma recusa de perfil, como o servidor a mandou (`PerfilRecusado`): o motivo
+/// e, quando é `Campos`, qual campo e por quê.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecusaDoPerfil {
+    /// O motivo.
+    pub motivo: seele_proto::perfil::RecusaDePerfil,
+    /// Um erro por campo; vazio nos outros motivos.
+    pub campos: Vec<seele_proto::perfil::ErroDeCampo>,
+}
+
 /// Everything this client knows about the server it is attached to.
 #[derive(Debug, Default, Clone)]
 pub struct Room {
@@ -473,6 +483,34 @@ pub struct Room {
     /// o último `QuadroDeCargos`, o último `SuasPermissoes` e a última recusa.
     /// Por `Room`, e o `Room` é de uma sessão só — o isolamento é este.
     pub cargos: crate::cargos::CargosDaSessao,
+
+    /// **O perfil público de cada pessoa que tem um** (SEELE 0.19, protocolo
+    /// 12): o último `PerfilMudou`, ou a lista de `Perfis` fechada na `ultima`.
+    ///
+    /// Fora do `Snapshot`, como [`Self::membros`]: são até 1,8 KB por pessoa, e
+    /// a casca os lê por [`crate::state::Room::perfis_em_ordem`] quando a
+    /// [`Self::perfis_marca`] anda — nunca a cada tique. Quem não tem perfil não
+    /// aparece (ausência é a resposta). Um servidor 0.18 nunca manda nada, e o
+    /// mapa fica vazio para sempre: a casca cai para o apelido e o ícone.
+    pub perfis: BTreeMap<PersonId, seele_proto::perfil::PerfilPublico>,
+    /// As partes de um `Perfis` que ainda não chegaram à `ultima`. Só então o
+    /// mapa de cima é trocado, como `Membros`: uma lista pela metade não apaga
+    /// o perfil de quem ainda não chegou.
+    perfis_chegando: Option<BTreeMap<PersonId, seele_proto::perfil::PerfilPublico>>,
+    /// **A marca dos perfis**: sobe a cada `Perfis` fechado, `PerfilMudou` e
+    /// reabertura que apagou algum. O mesmo acordo do `cargos_revision`: a
+    /// casca guarda a última que desenhou e relê os perfis quando ela anda. Da
+    /// sala e não contada por quem dobra, para o desktop e o navegador a
+    /// calcularem pela mesma conta.
+    pub perfis_marca: u64,
+    /// As imagens do **próprio** perfil que a migração não conseguiu trazer
+    /// (`PendenciaDoPerfil`). Vazia é o normal. Sai sozinha quando o servidor
+    /// confirma uma imagem nova desse lado (`PerfilMudou` desta pessoa).
+    pub pendencia_do_perfil: Vec<seele_proto::perfil::LadoDoPerfil>,
+    /// As recusas de perfil que o servidor mandou e a casca ainda não ouviu,
+    /// da mais antiga à mais nova. Uma fila e não um campo, pelo motivo de
+    /// [`Self::transfers`]: duas recusas no ar não se apagam.
+    pub recusas_de_perfil: Vec<RecusaDoPerfil>,
 }
 
 /// Uma transmissão de tela acontecendo numa sala de voz.
@@ -561,6 +599,13 @@ pub struct Changed {
     /// ou um `CargoRecusado` (ADR 0064). Bandeira própria, e não o `server`: o
     /// que se redesenha é a camada de cargos, e não o cabeçalho.
     pub cargos: bool,
+    /// Os perfis mudaram: um `Perfis` fechado, um `PerfilMudou` ou uma
+    /// `PendenciaDoPerfil` (protocolo 12). Bandeira própria: o que se redesenha
+    /// são as superfícies de perfil, e não a lista de pessoas.
+    pub perfis: bool,
+    /// Chegou uma `PerfilRecusado`; a recusa espera em
+    /// [`Room::recusas_de_perfil`].
+    pub recusa_de_perfil: bool,
     /// The session ended.
     pub ended: bool,
 }
@@ -578,6 +623,8 @@ impl Changed {
             || self.transfers
             || self.telas
             || self.cargos
+            || self.perfis
+            || self.recusa_de_perfil
             || self.ended
     }
 }
@@ -606,6 +653,13 @@ impl Room {
                 .then(um_id.cmp(outro_id))
         });
         fora
+    }
+
+    /// Os perfis que esta sessão conhece, por pessoa, em ordem de id. Cópia: é
+    /// o que a casca lê quando a [`Self::perfis_marca`] anda.
+    #[must_use]
+    pub fn perfis_em_ordem(&self) -> Vec<seele_proto::perfil::PerfilPublico> {
+        self.perfis.values().cloned().collect()
     }
 
     /// Seeds from what the handshake already established.
@@ -700,6 +754,17 @@ impl Room {
         // depois do aperto de mão. Guardá-las seria confiar num quadro que
         // pode não vir.
         self.person_icons.clear();
+        // Os perfis, pela mesma razão: o servidor reapresenta os que existem
+        // (`Perfis`) logo depois do aperto de mão, e quem estava fora enquanto
+        // alguém trocou a foto continuaria desenhando a antiga. A marca sobe
+        // só quando havia o que apagar, para a casca reler e ver o vazio.
+        if !self.perfis.is_empty() || !self.pendencia_do_perfil.is_empty() {
+            self.perfis_marca = self.perfis_marca.wrapping_add(1);
+        }
+        self.perfis.clear();
+        self.perfis_chegando = None;
+        self.pendencia_do_perfil.clear();
+        self.recusas_de_perfil.clear();
         self.voice_rooms = voice_rooms;
         self.channels = channels;
         self.permissions = permissions;
@@ -1793,12 +1858,43 @@ impl Room {
             // mora aqui.
             ServerMessage::ModAviso { .. } => {}
 
-            // F2/F4: perfis. O perfil público nativo (protocolo 12) ainda não é
-            // dobrado aqui; chega com o `HashMap<PersonId, PerfilPublico>` da F4.
-            ServerMessage::Perfis { .. }
-            | ServerMessage::PerfilMudou(..)
-            | ServerMessage::PerfilRecusado { .. }
-            | ServerMessage::PendenciaDoPerfil { .. } => {}
+            // **O perfil público nativo** (0.19, protocolo 12). `Perfis` chega em
+            // partes depois do `Session`, no padrão de `Membros`: o mapa só é
+            // trocado na `ultima`. `PerfilMudou` troca um perfil e, se é o
+            // desta pessoa, tira da pendência o lado que ganhou imagem.
+            ServerMessage::Perfis { parte, ultima } => {
+                let chegando = self.perfis_chegando.get_or_insert_with(BTreeMap::new);
+                for perfil in parte {
+                    chegando.insert(perfil.pessoa, perfil.clone());
+                }
+                if *ultima {
+                    self.perfis = self.perfis_chegando.take().unwrap_or_default();
+                    self.perfis_marca = self.perfis_marca.wrapping_add(1);
+                    changed.perfis = true;
+                }
+            }
+            ServerMessage::PerfilMudou(perfil) => {
+                if Some(perfil.pessoa) == self.me {
+                    self.pendencia_do_perfil.retain(|lado| match lado {
+                        seele_proto::perfil::LadoDoPerfil::Foto => perfil.foto.is_none(),
+                        seele_proto::perfil::LadoDoPerfil::Capa => perfil.capa.is_none(),
+                    });
+                }
+                self.perfis.insert(perfil.pessoa, perfil.clone());
+                self.perfis_marca = self.perfis_marca.wrapping_add(1);
+                changed.perfis = true;
+            }
+            ServerMessage::PerfilRecusado { motivo, campos } => {
+                self.recusas_de_perfil.push(RecusaDoPerfil {
+                    motivo: *motivo,
+                    campos: campos.clone(),
+                });
+                changed.recusa_de_perfil = true;
+            }
+            ServerMessage::PendenciaDoPerfil { faltou } => {
+                self.pendencia_do_perfil.clone_from(faltou);
+                changed.perfis = true;
+            }
 
             // **O tema do servidor** (rascunho da API 6, §9; tarefa 17d da F3):
             // guardado como veio, inclusive o `None`, que o tira. A casca o
@@ -3505,5 +3601,206 @@ mod tags_testes {
             ("teste".into(), "AAAA".into())
         );
         assert!(retrato.presentes.iter().any(|p| p.nickname == "teste#AAAA"));
+    }
+}
+
+#[cfg(test)]
+mod perfis_testes {
+    //! O fold do perfil público (0.19, protocolo 12): `Perfis` em partes,
+    //! `PerfilMudou`, a pendência e a fila de recusas.
+    use super::*;
+    use seele_proto::control::VoiceRoomInfo;
+    use seele_proto::perfil::{
+        CampoDoPerfil, Efeito, ErroDeCampo, ImagemDoPerfil, LadoDoPerfil, MotivoDoCampo,
+        PerfilPublico, RecusaDePerfil, TipoDaImagem,
+    };
+
+    fn sala() -> Room {
+        let mut room = Room::new();
+        room.apply(&ServerMessage::Session {
+            id: SessionId(1),
+            person: PersonId(7),
+            ssrc: Ssrc(700),
+            server: "Casa".into(),
+            voice_rooms: Vec::<VoiceRoomInfo>::new(),
+            channels: Vec::new(),
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        });
+        room
+    }
+
+    fn imagem(byte: u8) -> ImagemDoPerfil {
+        ImagemDoPerfil {
+            hash: [byte; 32],
+            tipo: TipoDaImagem::Png,
+            bytes: 10,
+        }
+    }
+
+    fn perfil(pessoa: u64, revisao: u32, nome: &str) -> PerfilPublico {
+        PerfilPublico {
+            pessoa: PersonId(pessoa),
+            revisao,
+            nome_exibido: nome.into(),
+            pronomes: String::new(),
+            status: String::new(),
+            bio: String::new(),
+            cor: [0xf2, 0x52, 0x1f],
+            efeito: Efeito::Nenhum,
+            foto: None,
+            capa: None,
+        }
+    }
+
+    /// As partes só trocam o mapa na `ultima`: uma lista pela metade não apaga o
+    /// perfil de quem ainda não chegou, e a marca anda **uma vez**.
+    #[test]
+    fn as_partes_de_perfis_so_valem_na_ultima() {
+        let mut room = sala();
+        let marca = room.perfis_marca;
+        let meio = room.apply(&ServerMessage::Perfis {
+            parte: vec![perfil(1, 1, "ana")],
+            ultima: false,
+        });
+        assert!(!meio.perfis, "uma parte sem `ultima` avisou a casca");
+        assert!(room.perfis.is_empty());
+        assert_eq!(room.perfis_marca, marca);
+
+        let fim = room.apply(&ServerMessage::Perfis {
+            parte: vec![perfil(2, 4, "bruno")],
+            ultima: true,
+        });
+        assert!(fim.perfis);
+        assert_eq!(room.perfis_marca, marca + 1);
+        assert_eq!(
+            room.perfis_em_ordem()
+                .iter()
+                .map(|p| (p.pessoa.0, p.nome_exibido.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(1, "ana"), (2, "bruno")]
+        );
+
+        // A volta de uma queda reenvia a lista: ela substitui, e quem saiu dela
+        // sai do mapa.
+        room.apply(&ServerMessage::Perfis {
+            parte: vec![perfil(2, 5, "bruno")],
+            ultima: true,
+        });
+        assert_eq!(room.perfis.len(), 1);
+        assert_eq!(room.perfis[&PersonId(2)].revisao, 5);
+    }
+
+    #[test]
+    fn perfil_mudou_troca_so_aquele_perfil_e_sobe_a_marca() {
+        let mut room = sala();
+        room.apply(&ServerMessage::Perfis {
+            parte: vec![perfil(1, 1, "ana"), perfil(2, 1, "bruno")],
+            ultima: true,
+        });
+        let marca = room.perfis_marca;
+        let mut novo = perfil(1, 2, "Ana Maria");
+        novo.foto = Some(imagem(9));
+        let mudou = room.apply(&ServerMessage::PerfilMudou(novo.clone()));
+        assert!(mudou.perfis);
+        assert_eq!(room.perfis_marca, marca + 1);
+        assert_eq!(room.perfis[&PersonId(1)], novo);
+        assert_eq!(room.perfis[&PersonId(2)].nome_exibido, "bruno");
+        // Pessoa que ninguém tinha: entra.
+        room.apply(&ServerMessage::PerfilMudou(perfil(3, 1, "carla")));
+        assert_eq!(room.perfis.len(), 3);
+    }
+
+    /// A pendência é da própria pessoa e sai quando o servidor confirma a imagem
+    /// **daquele lado**; o perfil de outra pessoa não mexe nela.
+    #[test]
+    fn a_pendencia_sai_quando_a_imagem_do_lado_chega() {
+        let mut room = sala();
+        let mudou = room.apply(&ServerMessage::PendenciaDoPerfil {
+            faltou: vec![LadoDoPerfil::Foto, LadoDoPerfil::Capa],
+        });
+        assert!(mudou.perfis);
+        assert_eq!(
+            room.pendencia_do_perfil,
+            vec![LadoDoPerfil::Foto, LadoDoPerfil::Capa]
+        );
+
+        // Outra pessoa trocou a capa: nada muda para mim.
+        let mut dela = perfil(1, 2, "ana");
+        dela.capa = Some(imagem(1));
+        room.apply(&ServerMessage::PerfilMudou(dela));
+        assert_eq!(room.pendencia_do_perfil.len(), 2);
+
+        // Eu escolhi a capa de novo: só ela sai.
+        let mut meu = perfil(7, 2, "eu");
+        meu.capa = Some(imagem(2));
+        room.apply(&ServerMessage::PerfilMudou(meu.clone()));
+        assert_eq!(room.pendencia_do_perfil, vec![LadoDoPerfil::Foto]);
+
+        meu.foto = Some(imagem(3));
+        room.apply(&ServerMessage::PerfilMudou(meu));
+        assert!(room.pendencia_do_perfil.is_empty());
+    }
+
+    #[test]
+    fn as_recusas_esperam_em_fila_ate_a_casca_ouvir() {
+        let mut room = sala();
+        let a = room.apply(&ServerMessage::PerfilRecusado {
+            motivo: RecusaDePerfil::Campos,
+            campos: vec![ErroDeCampo {
+                campo: CampoDoPerfil::Bio,
+                motivo: MotivoDoCampo::Longo,
+            }],
+        });
+        room.apply(&ServerMessage::PerfilRecusado {
+            motivo: RecusaDePerfil::RevisaoVelha,
+            campos: Vec::new(),
+        });
+        assert!(a.recusa_de_perfil && a.any());
+        assert_eq!(room.recusas_de_perfil.len(), 2, "a segunda apagou a primeira");
+        assert_eq!(room.recusas_de_perfil[0].motivo, RecusaDePerfil::Campos);
+        assert_eq!(room.recusas_de_perfil[0].campos.len(), 1);
+        assert_eq!(room.perfis_marca, 0, "uma recusa não é uma mudança de perfil");
+    }
+
+    /// A reconexão não herda perfil nenhum: o servidor reapresenta os que
+    /// existem, e a marca anda para a casca ver o vazio.
+    #[test]
+    fn reconectar_nao_herda_perfis() {
+        let mut room = sala();
+        room.apply(&ServerMessage::Perfis {
+            parte: vec![perfil(1, 1, "ana")],
+            ultima: true,
+        });
+        room.apply(&ServerMessage::PendenciaDoPerfil {
+            faltou: vec![LadoDoPerfil::Foto],
+        });
+        // Meio de uma lista nova que não chegou ao fim.
+        room.apply(&ServerMessage::Perfis {
+            parte: vec![perfil(9, 1, "x")],
+            ultima: false,
+        });
+        let marca = room.perfis_marca;
+        room.adopt(
+            &SessionInfo {
+                id: SessionId(2),
+                person: PersonId(7),
+                ssrc: Ssrc(700),
+                server: "Casa".into(),
+                voice_rooms: Vec::new(),
+                channels: Vec::new(),
+                permissions: Vec::new(),
+            },
+            "marcela",
+        );
+        assert!(room.perfis.is_empty());
+        assert!(room.pendencia_do_perfil.is_empty());
+        assert_eq!(room.perfis_marca, marca + 1);
+        // A parte velha que sobrou não contamina a lista nova.
+        room.apply(&ServerMessage::Perfis {
+            parte: vec![perfil(2, 1, "bruno")],
+            ultima: true,
+        });
+        assert_eq!(room.perfis.keys().map(|p| p.0).collect::<Vec<_>>(), vec![2]);
     }
 }

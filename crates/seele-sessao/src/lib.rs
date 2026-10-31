@@ -40,6 +40,7 @@ pub mod escolhidos;
 pub mod midia_de_mod;
 pub mod mods;
 pub mod nome_do_anexo;
+pub mod perfil;
 pub mod preview;
 #[cfg(feature = "reducao")]
 pub mod reducao;

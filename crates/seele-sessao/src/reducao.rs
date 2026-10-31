@@ -117,6 +117,112 @@ pub fn reduzir(bytes: &[u8], teto: &Teto) -> Result<Reduzida, String> {
     })
 }
 
+/// O lado máximo, em pixels, de um ícone de pessoa: o do protocolo
+/// (`MAX_SERVER_ICON_SIDE`).
+const LADO_DO_ICONE: u32 = seele_proto::control::MAX_SERVER_ICON_SIDE;
+
+/// O teto, em bytes, de um ícone de pessoa: o do protocolo
+/// (`MAX_SERVER_ICON_LEN`, 8 KiB). Ele viaja num quadro de controle de 16 KiB e
+/// quem hospeda o reenvia a cada pessoa conectada.
+const TETO_DO_ICONE: usize = seele_proto::control::MAX_SERVER_ICON_LEN;
+
+/// Os degraus do ícone, do que dói menos ao que dói mais: (lado máximo, bits
+/// por canal de cor). Primeiro perde cor no tamanho cheio, e só quando isso não
+/// basta é que começa a perder tamanho. O primeiro degrau é o tamanho cheio com
+/// as cores todas, então um ícone que já cabia atravessa sem perder nada.
+const DEGRAUS_DO_ICONE: [(u32, u8); 8] = [
+    (LADO_DO_ICONE, 8),
+    (LADO_DO_ICONE, 5),
+    (LADO_DO_ICONE, 4),
+    (192, 4),
+    (160, 4),
+    (128, 3),
+    (96, 3),
+    (64, 2),
+];
+
+/// **O ícone nativo de uma pessoa, feito da foto do perfil** (0.19, §9 Q1 da
+/// especificação dos perfis): um PNG de até 256 px de lado e 8 KiB, do **primeiro
+/// quadro** da imagem.
+///
+/// Existe para os clientes 0.18, que só conhecem o `SetPersonIcon`: ao salvar
+/// uma foto nova, o cliente 0.19 manda também este ícone, e quem ainda está na
+/// 0.18 vê o mesmo rosto. O desktop e o navegador chamam esta função, e o
+/// `icone::encolher` do `seele-app` é uma chamada a ela — a escada mora num
+/// lugar só.
+///
+/// PNG não tem botão de qualidade: o que o faz encolher é ter menos pixels e
+/// menos cores. Um distintivo aguenta perder cor muito antes de aguentar perder
+/// tamanho, e é nessa ordem que a escada desce ([`DEGRAUS_DO_ICONE`]). O último
+/// degrau (64 px, quatro níveis por canal) dá uns 2 KiB no pior caso que se
+/// consegue construir, então `None` é só «não é imagem».
+///
+/// Um GIF ou WebP animado entra pelo primeiro quadro (`load_from_memory`), e a
+/// proporção é mantida: uma foto retangular espremida num quadrado fica com a
+/// cara achatada.
+#[must_use]
+pub fn icone_do_perfil(escolhida: &[u8]) -> Option<Vec<u8>> {
+    let imagem = image::load_from_memory(escolhida).ok()?;
+    for (lado, bits) in DEGRAUS_DO_ICONE {
+        let mut quadro = if imagem.width() > lado || imagem.height() > lado {
+            // `Lanczos3` e não `Nearest`: reduzir foto sem filtro é o que
+            // produz aquele serrilhado que parece defeito da tela.
+            imagem
+                .resize(lado, lado, FilterType::Lanczos3)
+                .to_rgba8()
+        } else {
+            imagem.to_rgba8()
+        };
+        if bits < 8 {
+            achatar_cores(&mut quadro, bits);
+        }
+        let mut saida = Vec::new();
+        let escreveu = image::codecs::png::PngEncoder::new_with_quality(
+            &mut saida,
+            image::codecs::png::CompressionType::Best,
+            image::codecs::png::FilterType::Adaptive,
+        );
+        image::ImageEncoder::write_image(
+            escreveu,
+            quadro.as_raw(),
+            quadro.width(),
+            quadro.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+        if saida.len() <= TETO_DO_ICONE {
+            return Some(saida);
+        }
+    }
+    None
+}
+
+/// Reduz cada canal a `bits` níveis, mantendo preto preto e branco branco: a
+/// conta ingênua (apagar os bits de baixo) escurece a imagem inteira e nunca
+/// chega ao branco. O alfa não é achatado: um distintivo com borda suave vira
+/// um recorte de tesoura se for, e o alfa custa pouco no PNG.
+fn achatar_cores(quadro: &mut image::RgbaImage, bits: u8) {
+    let niveis = (1_u32 << bits).saturating_sub(1).max(1);
+    #[allow(clippy::cast_precision_loss, reason = "no máximo 255")]
+    let passo = 255.0 / niveis as f32;
+    for pixel in quadro.pixels_mut() {
+        for canal in 0..3 {
+            let Some(valor) = pixel.0.get_mut(canal) else {
+                continue;
+            };
+            let degrau = (f32::from(*valor) / passo).round();
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "limitado a 0..=255 na linha"
+            )]
+            {
+                *valor = (degrau * passo).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+}
+
 /// O nome com que uma imagem ilegível volta à janela.
 fn desconhecido() -> String {
     "formato-desconhecido".to_owned()
@@ -362,5 +468,69 @@ mod testes {
     fn so_um_uso_conhecido_tem_teto() {
         assert_eq!(teto_do_uso("capa"), Some(TETO_DA_CAPA));
         assert_eq!(teto_do_uso("qualquer coisa"), None);
+    }
+
+    /// Ruído: o pior caso do PNG, que não tem forma nem cor repetida.
+    fn ruido(lado: u32) -> Vec<u8> {
+        let mut quadro = RgbaImage::new(lado, lado);
+        let mut semente = 0x2545_F491_4F6C_DD1D_u64;
+        for pixel in quadro.pixels_mut() {
+            semente ^= semente << 13;
+            semente ^= semente >> 7;
+            semente ^= semente << 17;
+            let b = semente.to_le_bytes();
+            pixel.0 = [b[0], b[1], b[2], 255];
+        }
+        let mut saida = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(quadro)
+            .write_to(&mut saida, ImageFormat::Png)
+            .expect("gravar o ruído");
+        saida.into_inner()
+    }
+
+    /// **O ícone do perfil cabe no que o protocolo aceita, sempre**: PNG de até
+    /// 256 px e 8 KiB, mesmo para o pior caso, e `check_server_icon` (o portão
+    /// do servidor) o aceita.
+    #[test]
+    fn o_icone_do_perfil_cabe_no_que_o_protocolo_aceita() {
+        let pronto = icone_do_perfil(&ruido(1024)).expect("o ruído tinha de caber");
+        assert!(pronto.len() <= TETO_DO_ICONE, "saiu com {} bytes", pronto.len());
+        let (largura, altura) = dimensoes(&pronto);
+        assert!(largura <= LADO_DO_ICONE && altura <= LADO_DO_ICONE);
+        assert_eq!(
+            seele_proto::control::check_server_icon(Some(&pronto)),
+            Ok(()),
+            "o servidor recusaria o ícone que o cliente gerou"
+        );
+    }
+
+    /// Um GIF animado entra pelo **primeiro quadro**, e a proporção fica.
+    #[test]
+    fn o_icone_do_perfil_de_um_gif_e_o_primeiro_quadro() {
+        // Dois quadros, 300 × 150: o primeiro verde e o segundo vermelho.
+        let mut animado = Vec::new();
+        {
+            let mut gravador = GifEncoder::new(&mut animado);
+            gravador.set_repeat(Repeat::Infinite).expect("repetir");
+            for cor in [[0_u8, 200, 0, 255], [200, 0, 0, 255]] {
+                let imagem = RgbaImage::from_pixel(300, 150, image::Rgba(cor));
+                let quadro = Frame::from_parts(imagem, 0, 0, Delay::from_numer_denom_ms(100, 1));
+                gravador.encode_frame(quadro).expect("gravar o quadro");
+            }
+        }
+        let pronto = icone_do_perfil(&animado).expect("um GIF é imagem");
+        let imagem = image::load_from_memory(&pronto).expect("é PNG").to_rgba8();
+        assert_eq!(imagem.dimensions(), (256, 128), "a proporção mudou");
+        let pixel = imagem.get_pixel(10, 10).0;
+        assert!(
+            pixel[0] < 40 && pixel[1] > 150,
+            "não é o primeiro quadro (o verde): {pixel:?}"
+        );
+    }
+
+    #[test]
+    fn o_que_nao_e_imagem_nao_vira_icone() {
+        assert!(icone_do_perfil(b"isto nao e uma imagem").is_none());
+        assert!(icone_do_perfil(&[]).is_none());
     }
 }

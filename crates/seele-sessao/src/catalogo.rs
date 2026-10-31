@@ -169,6 +169,55 @@ pub struct ModNoCatalogo {
     /// As versões publicadas, da mais antiga para a mais nova.
     #[serde(default)]
     pub versoes: Vec<VersaoNoCatalogo>,
+    /// **O MOD foi incorporado ao produto** (`descontinuado` do indexador, 0.19):
+    /// `None` é um MOD vivo, e é o que todo catálogo de antes desta versão diz.
+    ///
+    /// **Descontinuar não é revogar.** Nenhuma versão some e nenhum hash muda: o
+    /// download segue permitido, porque quem ainda está num servidor 0.18 com o
+    /// MOD precisa dele. O campo só muda o que a tela diz («agora faz parte do
+    /// SEELE 0.19»).
+    ///
+    /// Tolerante de propósito: um `descontinuado` com forma que este build não
+    /// conhece (um catálogo de um indexador mais novo) vira `None`, e não faz o
+    /// catálogo inteiro deixar de abrir — ver [`le_o_descontinuado`].
+    #[serde(default, deserialize_with = "le_o_descontinuado")]
+    pub descontinuado: Option<Descontinuado>,
+}
+
+/// Quando, por quê e em que produto um MOD passou a fazer parte do SEELE.
+///
+/// Os três campos têm padrão: um campo que o indexador acrescentar amanhã não
+/// quebra a leitura de hoje, e um que faltar não inventa um valor — o texto
+/// vazio e o zero dizem «não sei».
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, serde::Serialize)]
+pub struct Descontinuado {
+    /// Desde quando, em segundos desde a época.
+    #[serde(default)]
+    pub desde: i64,
+    /// O motivo, da lista fechada do indexador (`incorporado-ao-produto`). Um
+    /// motivo que este build não conhece segue como veio: quem decide a frase é
+    /// a casca, e ela cai numa genérica.
+    #[serde(default)]
+    pub motivo: String,
+    /// O produto que o incorporou (`0.19`).
+    #[serde(default)]
+    pub produto: String,
+}
+
+/// Lê o `descontinuado` sem deixar uma forma desconhecida derrubar o catálogo.
+///
+/// Só um objeto vira `Some`; `null`, ausente ou qualquer outra forma é `None`.
+/// O catálogo está assinado, então a forma torta não é ataque — é um indexador
+/// mais novo que este build, e a resposta certa a ele é continuar listando o MOD.
+fn le_o_descontinuado<'de, D>(entrada: D) -> Result<Option<Descontinuado>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let valor = serde_json::Value::deserialize(entrada)?;
+    Ok(match valor {
+        serde_json::Value::Object(_) => serde_json::from_value(valor).ok(),
+        _ => None,
+    })
 }
 
 /// Uma versão publicada de um MOD.
@@ -425,5 +474,70 @@ mod tests {
                 "api-too-old".to_owned()
             ))
         );
+    }
+
+    fn catalogo_com(descontinuado: &str) -> Catalogo {
+        let texto = format!(
+            r#"{{"esquema":1,"gerado_em":5,"campo_futuro":true,"mods":[
+                {{"id":"seele/perfis","titulo":"Perfis","versoes":[]{descontinuado}}},
+                {{"id":"ana/outro","titulo":"Outro"}}]}}"#
+        );
+        serde_json::from_str(&texto).expect("o catálogo lê")
+    }
+
+    /// **O `descontinuado` do indexador é lido e exposto.** O MOD sem o campo
+    /// segue vivo, que é o que todo catálogo de antes dele diz.
+    #[test]
+    fn o_descontinuado_e_lido_e_o_mod_sem_ele_segue_vivo() {
+        let catalogo = catalogo_com(
+            r#","descontinuado":{"desde":1793404800,"motivo":"incorporado-ao-produto","produto":"0.19"}"#,
+        );
+        assert_eq!(
+            catalogo.mods[0].descontinuado,
+            Some(Descontinuado {
+                desde: 1_793_404_800,
+                motivo: "incorporado-ao-produto".to_owned(),
+                produto: "0.19".to_owned(),
+            })
+        );
+        assert_eq!(catalogo.mods[1].descontinuado, None);
+        // E vai à casca com o nome do campo.
+        let json = serde_json::to_value(&catalogo.mods[0]).unwrap();
+        assert_eq!(json["descontinuado"]["produto"], "0.19");
+    }
+
+    /// **Tolerante ao desconhecido**: um campo a mais dentro dele não o
+    /// derruba, um motivo novo segue como veio, e uma forma que este build não
+    /// conhece vira `None` sem fazer o catálogo inteiro falhar.
+    #[test]
+    fn o_descontinuado_tolera_o_que_este_build_nao_conhece() {
+        let com_a_mais = catalogo_com(
+            r#","descontinuado":{"desde":1,"motivo":"um-motivo-novo","produto":"0.20","ate":9}"#,
+        );
+        let lido = com_a_mais.mods[0].descontinuado.as_ref().unwrap();
+        assert_eq!(lido.motivo, "um-motivo-novo");
+        assert_eq!(lido.produto, "0.20");
+
+        let incompleto = catalogo_com(r#","descontinuado":{"produto":"0.19"}"#);
+        assert_eq!(
+            incompleto.mods[0].descontinuado,
+            Some(Descontinuado {
+                desde: 0,
+                motivo: String::new(),
+                produto: "0.19".to_owned()
+            })
+        );
+
+        for torto in [
+            r#","descontinuado":"sim""#,
+            r#","descontinuado":true"#,
+            r#","descontinuado":null"#,
+            r#","descontinuado":[1,2]"#,
+            r#","descontinuado":{"desde":"ontem"}"#,
+        ] {
+            let catalogo = catalogo_com(torto);
+            assert_eq!(catalogo.mods[0].descontinuado, None, "{torto}");
+            assert_eq!(catalogo.mods.len(), 2, "o catálogo inteiro caiu: {torto}");
+        }
     }
 }

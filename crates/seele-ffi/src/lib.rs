@@ -39,6 +39,7 @@ pub mod cargos;
 pub mod chamada_pessoal;
 pub mod foco;
 pub mod mods;
+pub mod perfis;
 /// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:
 /// para os testes daqui e para a conformidade dos dois produtores de retrato.
 #[cfg(any(test, feature = "conformidade"))]
@@ -1088,6 +1089,13 @@ enum Command {
         /// O nome novo.
         name: String,
     },
+    /// O `GravarPerfil` já montado e validado (0.19, protocolo 12).
+    GravarPerfil(seele_core::ClientMessage),
+    /// Tira a foto ou a capa do perfil (0.19, protocolo 12).
+    TirarImagemDoPerfil {
+        /// Qual das duas.
+        lado: perfis::LadoDoPerfil,
+    },
     SetServerIcon {
         icon: Option<Vec<u8>>,
     },
@@ -1363,6 +1371,9 @@ struct Shared {
     /// campo em cada `Person` do `Snapshot`, duas vezes por segundo, para
     /// distinguir um caso que ninguém trata separadamente.
     person_icons_revision: std::sync::atomic::AtomicU64,
+    /// O perfil público (0.19, protocolo 12): o protocolo que a conexão
+    /// negociou e as imagens já baixadas. Ver [`perfis`].
+    perfis: perfis::DoPerfil,
     /// Quem está esperando o peso de uma Linha, e por qual Linha.
     ///
     /// A única pergunta com resposta deste crate. Todo o resto que a casca pede
@@ -2114,6 +2125,7 @@ impl Connection {
             fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
+            perfis: perfis::DoPerfil::default(),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             sessao,
@@ -3928,6 +3940,8 @@ impl Connection {
             // Da sala: sai do `Room` pela foto, na mesma tomada do cadeado.
             identidades_apresentadas: sala.identidades_apresentadas,
             cargos_revision: sala.cargos_revision,
+            perfis_revision: sala.perfis_revision,
+            pendencia_do_perfil: sala.pendencia_do_perfil,
             telemetry: Telemetry {
                 rtt_ms,
                 // O jitter que a pessoa quer saber é o de chegada, medido
@@ -4946,6 +4960,9 @@ async fn drive(
     shared.gravar_caminho(chegado.caminho());
     let mut client = chegado.enlace;
     shared.gravar_impressao(client.pin_decision());
+    // O protocolo que o `Hello` negociou: é com ele que `Connection` decide se
+    // um verbo do perfil (protocolo 12) pode sair.
+    shared.perfis.guardar_o_protocolo(client.versao_negociada());
 
     // `Enlace::conectar` already returned `Err` above for anything that would
     // have made this a `PinDecision::Changed` or a refused invite — see
@@ -5140,6 +5157,8 @@ async fn drive(
                         tracing::info!(geracao, "o enlace voltou: geração nova do carimbo");
                         shared.tela_ligada_nova_geracao();
                         shared.gravar_enlace(seele_core::Link::Online, None);
+                        // A volta pode ter caído num servidor de outra versão.
+                        shared.perfis.guardar_o_protocolo(client.versao_negociada());
                         // A pessoa volta sentada onde o motor a sentou de novo:
                         // ver `readotar_na_volta`. É esse assento que a porta da
                         // voz olha no fim desta volta do laço.
@@ -6714,6 +6733,27 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         let marca = shared.room.lock().map_or(0, |room| room.cargos.marca());
         shared.notify(&Event::CargosChanged { marca });
     }
+    // **Os perfis públicos** (0.19, protocolo 12): a marca já subiu no `Room`,
+    // antes do aviso, e vai no evento — a casca relê `Connection::perfis` por
+    // ela. As recusas saem uma a uma, da mais antiga à mais nova, e a fila fica
+    // vazia (duas recusas no ar não se apagam).
+    if changed.perfis {
+        let marca = shared.room.lock().map_or(0, |room| room.perfis_marca);
+        shared.notify(&Event::PerfisChanged { marca });
+    }
+    if changed.recusa_de_perfil {
+        let recusas = shared
+            .room
+            .lock()
+            .map(|mut room| std::mem::take(&mut room.recusas_de_perfil))
+            .unwrap_or_default();
+        for recusa in recusas {
+            shared.notify(&Event::PerfilRecusado {
+                motivo: recusa.motivo,
+                campos: recusa.campos,
+            });
+        }
+    }
     if changed.telemetry {
         shared.notify(&Event::TelemetryChanged);
     }
@@ -7275,6 +7315,18 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         }
         Command::SetNickname { name } => {
             if client.definir_meu_apelido(name).await.is_err() {
+                return false;
+            }
+        }
+        // Nada vai ao `Room` aqui: o perfil novo é o que o servidor devolve no
+        // `PerfilMudou` (ou a recusa no `PerfilRecusado`).
+        Command::GravarPerfil(mensagem) => {
+            if client.gravar_perfil(mensagem).await.is_err() {
+                return false;
+            }
+        }
+        Command::TirarImagemDoPerfil { lado } => {
+            if client.tirar_imagem_do_perfil(lado).await.is_err() {
                 return false;
             }
         }
@@ -10449,6 +10501,7 @@ mod tests {
             fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
+            perfis: perfis::DoPerfil::negociado(seele_core::PROTOCOL_VERSION),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             sessao: SessaoId::nova(),
@@ -10609,6 +10662,7 @@ mod tests {
             fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
+            perfis: perfis::DoPerfil::negociado(seele_core::PROTOCOL_VERSION),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             sessao: SessaoId::nova(),
@@ -13731,6 +13785,7 @@ mod o_audio_segue_a_sala {
             fora_do_ar_revision: AtomicU64::new(0),
             icon_revision: AtomicU64::new(0),
             person_icons_revision: AtomicU64::new(0),
+            perfis: crate::perfis::DoPerfil::negociado(seele_core::PROTOCOL_VERSION),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
             sessao: super::SessaoId::nova(),

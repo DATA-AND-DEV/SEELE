@@ -645,6 +645,17 @@ const AGUARDANDO_TELA: &[&str] = &[
     // (`base.js`) e saiu daqui, e o `desfazer_escolha_de_mod` do P1 também
     // (`tela-boot.js`, rodada 3); a releitura do foco ainda não chama este.
     "foco_de_voz",
+    // O perfil público nativo (0.19, F4 de `docs/0.19/perfis-oficiais.md`): os
+    // comandos estão prontos e a tela (`ui/perfis.js`, F5) ainda não os chama.
+    // Cada um sai desta lista quando a F5 o chama — o teste logo abaixo avisa,
+    // pelo nome, na rodada em que isso acontecer.
+    "perfis",
+    "gravar_perfil",
+    "tirar_imagem_do_perfil",
+    "enviar_imagem_do_perfil",
+    "imagem_do_perfil",
+    "ler_relatorio_da_migracao_de_perfis",
+    "dispensar_relatorio",
 ];
 
 #[test]
@@ -11529,7 +11540,11 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // um número que sobe, e não segredo; ele tira o polling da tela de cargos.
     // 39: identidades_apresentadas contém somente PersonId, base e tag públicas;
     // nenhuma chave, credencial ou material de autenticação cruza essa fronteira.
-    const CAMPOS_DO_SNAPSHOT: usize = 39;
+    // 41 na 0.19: `perfis_revision` (um número que sobe, como o `cargos_revision`) e
+    // `pendencia_do_perfil` (os lados do próprio perfil cuja imagem a migração
+    // não trouxe: dois valores de uma lista fechada). Os perfis em si ficam
+    // fora do retrato, como o FORA DO AR.
+    const CAMPOS_DO_SNAPSHOT: usize = 41;
     let fora_da_leitura: Vec<&str> = retrato
         .lines()
         .map(str::trim)

@@ -860,6 +860,10 @@ pub struct FotoDaSala {
     pub tema: Option<TemaDaSessao>,
     /// A marca dos cargos desta sessão (`Room::cargos`, ADR 0064).
     pub cargos_revision: u64,
+    /// A marca dos perfis (`Room::perfis_marca`, protocolo 12).
+    pub perfis_revision: u64,
+    /// As imagens do próprio perfil que a migração deixou para trás.
+    pub pendencia_do_perfil: Vec<seele_proto::perfil::LadoDoPerfil>,
 }
 
 /// A parte do `Snapshot` que sai do `Room`, **com os nomes de campo dele**.
@@ -918,6 +922,19 @@ pub struct RetratoDaSala {
     /// mesmo nos dois produtores (desktop e navegador), e por isso sai igual
     /// dos dois pela mesma conta. A casca relê os cargos quando ela anda.
     pub cargos_revision: u64,
+    /// **A marca dos perfis públicos** (0.19, protocolo 12): sobe a cada
+    /// `Perfis` fechado, `PerfilMudou` e reabertura que apagou perfis. O mesmo
+    /// acordo do `person_icons_revision`: a casca guarda a última que desenhou e
+    /// relê [`crate::state::Room::perfis_em_ordem`] (pelo `perfis()` da
+    /// conexão) quando ela anda — **a lista nunca entra no retrato**, como o
+    /// FORA DO AR. Da SALA, e não contada por quem dobra: os dois produtores a
+    /// leem do mesmo `Room`.
+    pub perfis_revision: u64,
+    /// **Os lados do próprio perfil cuja imagem a migração não trouxe**
+    /// (`PendenciaDoPerfil`): vazia é o normal. O editor diz «Sua capa do
+    /// PERFIS não pôde ser trazida. Escolha de novo.» e a pendência sai quando
+    /// o servidor confirma a imagem nova.
+    pub pendencia_do_perfil: Vec<seele_proto::perfil::LadoDoPerfil>,
 }
 
 impl FotoDaSala {
@@ -958,6 +975,8 @@ impl FotoDaSala {
             ended: self.ended,
             tema_do_servidor: self.tema,
             cargos_revision: self.cargos_revision,
+            perfis_revision: self.perfis_revision,
+            pendencia_do_perfil: self.pendencia_do_perfil,
         }
     }
 }
@@ -1012,6 +1031,8 @@ pub fn foto_da_sala(
         ended: room.ended.map(|end| end.reason.into()),
         tema: room.tema.as_ref().map(tema_de),
         cargos_revision: room.cargos.marca(),
+        perfis_revision: room.perfis_marca,
+        pendencia_do_perfil: room.pendencia_do_perfil.clone(),
     }
 }
 

@@ -1087,7 +1087,16 @@ impl Client {
         Transfers {
             connection: self.connection.clone(),
             anexos: std::sync::Arc::clone(&self.anexos),
+            carimbo: self.carimbo,
         }
+    }
+
+    /// **O número de protocolo que esta conexão negociou** no `Hello`: o que
+    /// os dois lados carimbam em cada quadro. É o que decide se um verbo mais
+    /// novo que o 11 pode sair (`seele_sessao::perfil::portao_do_cliente`).
+    #[must_use]
+    pub const fn versao_negociada(&self) -> u8 {
+        self.carimbo
     }
 
     /// Asks the server for an attachment's bytes.
@@ -1374,6 +1383,42 @@ impl Client {
             &ClientMessage::SetNickname { name },
         )
         .await
+    }
+
+    /// Grava o perfil público de quem está usando este cliente (0.19, protocolo
+    /// 12). A validação dos campos é de quem chama (`perfil::montar_gravar`); o
+    /// servidor valida de novo, e a recusa volta como `PerfilRecusado`.
+    ///
+    /// # Errors
+    ///
+    /// [`ServidorAntigo`] (e nada é escrito) quando a conexão negociou menos
+    /// que o 12: um servidor 11 leria uma variante que não conhece e o fluxo
+    /// de controle desalinharia. Fora isso, falha se o fluxo de controle
+    /// fechou.
+    pub async fn gravar_perfil(&mut self, mensagem: ClientMessage) -> Result<()> {
+        self.escrever_com_portao(&mensagem).await
+    }
+
+    /// Tira a foto ou a capa de quem está usando este cliente (0.19).
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::gravar_perfil`].
+    pub async fn tirar_imagem_do_perfil(
+        &mut self,
+        lado: seele_proto::perfil::LadoDoPerfil,
+    ) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::TirarImagemDoPerfil { lado })
+            .await
+    }
+
+    /// Escreve uma mensagem **depois de conferir o portão de versão**: a que o
+    /// servidor negociado não conhece não sai.
+    async fn escrever_com_portao(&mut self, mensagem: &ClientMessage) -> Result<()> {
+        if let Err(erro) = seele_sessao::perfil::portao_do_cliente(mensagem, self.carimbo) {
+            return Err(anyhow::Error::new(ServidorAntigo(erro)));
+        }
+        frame::write_em(&mut self.send, self.carimbo, mensagem).await
     }
 
     /// Asks the server to end a person's session.
@@ -3429,6 +3474,24 @@ async fn concluir(
     }
 }
 
+/// O verbo não saiu porque o servidor negociou um protocolo que não o conhece.
+///
+/// Um erro próprio, e não um `ControlError`, porque **não é queda**: o motor
+/// do enlace o reconhece (`downcast_ref`) e segue com a conexão de pé, só
+/// registrando — quem chama (`seele_ffi::Connection`) já devolveu o erro tipado
+/// à casca antes de o comando chegar aqui, e esta é a segunda cerca, para a
+/// volta que renegociou um número menor no meio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServidorAntigo(pub seele_sessao::perfil::ErroDoPerfil);
+
+impl std::fmt::Display for ServidorAntigo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "o servidor negociado não conhece este pedido: {:?}", self.0)
+    }
+}
+
+impl std::error::Error for ServidorAntigo {}
+
 /// The file-moving half of a connection, usable while the control stream is busy.
 ///
 /// The same shape as [`MediaChannel`], and for the same reason: ADR 0027 gives
@@ -3442,6 +3505,9 @@ pub struct Transfers {
     connection: crate::transporte::Conexao,
     /// A fila que o roteador de `Client::connect` alimenta.
     anexos: FilaDeAnexos,
+    /// O número de protocolo negociado: o portão dos pedidos de imagem de
+    /// perfil, que um servidor 11 não conhece.
+    carimbo: u8,
 }
 
 impl Transfers {
@@ -3452,11 +3518,19 @@ impl Transfers {
         bytes: &[u8],
     ) -> Result<Vec<u8>> {
         use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem};
+        // **Antes de abrir o fluxo**: um servidor 11 que lê `EnviarAoPerfil`
+        // não o conhece e falha o fluxo. O nome é o da tabela das recusas do
+        // perfil, e é o que a FFI e o navegador traduzem em `ServidorAntigo`.
+        if seele_sessao::perfil::portao_do_pedido_de_imagem(&pedido, self.carimbo).is_err() {
+            anyhow::bail!(seele_sessao::perfil::NOME_DO_SERVIDOR_ANTIGO);
+        }
         let inicio = std::time::Instant::now();
         let (mut envio, mut entrada) = self.connection.open_bi().await?;
         envio.set_priority(TRANSFER_PRIORITY)?;
         frame::write(&mut envio, &pedido).await?;
-        if let PedidoDeImagem::Enviar { bytes: total, .. } = &pedido {
+        if let PedidoDeImagem::Enviar { bytes: total, .. }
+        | PedidoDeImagem::EnviarAoPerfil { bytes: total, .. } = &pedido
+        {
             anyhow::ensure!(*total == bytes.len() as u64, "tamanho de imagem mudou");
             for bloco in bytes.chunks(seele_proto::attachment::BLOCK_LEN) {
                 envio.write_all(bloco).await?;

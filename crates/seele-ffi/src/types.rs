@@ -894,6 +894,20 @@ pub struct Snapshot {
     /// último que desenhou e relê [`crate::Connection::cargos_na_tela`] quando
     /// ele muda — o mesmo contrato do [`Self::fora_do_ar_revision`].
     pub cargos_revision: u64,
+    /// **Os perfis públicos** (0.19, protocolo 12): sobe a cada lista de perfis
+    /// fechada, `PerfilMudou` e reabertura que apagou perfis. **O número, e
+    /// nunca a lista** — o mesmo acordo do [`Self::person_icons_revision`]: a
+    /// casca guarda o último que desenhou e relê
+    /// [`crate::Connection::perfis`] quando ele muda. Os perfis ficam fora do
+    /// `Snapshot`, como o FORA DO AR ([`crate::MembroForaDoAr`]): são até
+    /// 1,8 KB por pessoa, e todo MOD da API 5 para baixo lê o `Snapshot`
+    /// inteiro. Zero e parado é o servidor 0.18, que não conhece o perfil.
+    pub perfis_revision: u64,
+    /// **As imagens do próprio perfil que a migração do PERFIS não conseguiu
+    /// trazer** (`PendenciaDoPerfil`). Vazia é o normal. O editor diz «Sua capa
+    /// do PERFIS não pôde ser trazida. Escolha de novo.», e o lado sai da lista
+    /// quando o servidor confirma a imagem nova.
+    pub pendencia_do_perfil: Vec<crate::perfis::LadoDoPerfil>,
     /// Measurements.
     pub telemetry: Telemetry,
     /// The last thing worth surfacing.
@@ -1117,6 +1131,26 @@ pub enum Event {
     CargosChanged {
         /// O [`Snapshot::cargos_revision`] depois desta mudança.
         marca: u64,
+    },
+    /// Os perfis públicos mudaram (0.19, protocolo 12): uma lista fechada, um
+    /// `PerfilMudou` ou uma `PendenciaDoPerfil`. A casca relê
+    /// [`crate::Connection::perfis`] quando a `marca` anda — sem laço de leituras
+    /// e sem pedido ao servidor. Bandeira própria e não o `RosterChanged`, que
+    /// sobe a cada `PersonState`.
+    PerfisChanged {
+        /// O [`Snapshot::perfis_revision`] depois desta mudança.
+        marca: u64,
+    },
+    /// O servidor recusou um pedido de perfil (`PerfilRecusado`), e só a quem
+    /// pediu: a revisão velha («Seu perfil mudou em outra janela»), os campos
+    /// inválidos (um erro por campo, cada um volta ao campo dele), o HEIC, o
+    /// tipo, o tamanho. As recusas esperam em fila no `Room` e saem uma a uma,
+    /// na ordem em que chegaram.
+    PerfilRecusado {
+        /// O motivo.
+        motivo: crate::perfis::RecusaDePerfil,
+        /// Um erro por campo quando o motivo é `Campos`; vazio nos outros.
+        campos: Vec<crate::perfis::ErroDeCampo>,
     },
     /// New measurements.
     TelemetryChanged,

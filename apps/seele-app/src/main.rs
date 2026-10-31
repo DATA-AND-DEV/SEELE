@@ -7715,6 +7715,15 @@ enum FalhaNoMod {
         /// (`som-grande-demais-decodificado: …`, [`som_cabe_decodificado`]).
         motivo: String,
     },
+    /// **O MOD virou parte do produto** (0.19): o servidor não aceita ligá-lo, e a
+    /// tela de quem hospeda diz «Perfis agora faz parte do SEELE (0.19)…». Nada
+    /// foi gravado.
+    ModIncorporado {
+        /// O MOD (`seele/perfis`).
+        id: String,
+        /// A versão do produto que o incorporou (`0.19`).
+        desde: String,
+    },
     /// **O conjunto mudou desde que a tela abriu.**
     ///
     /// Outro operador, ou outro processo desta mesma máquina, aplicou um
@@ -9138,6 +9147,38 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
     }
 }
 
+#[cfg(test)]
+mod o_conjunto_recusa_o_incorporado {
+    use super::*;
+
+    fn escolhido(id: &str) -> ModEscolhido {
+        serde_json::from_value(serde_json::json!({ "id": id, "hash": "0".repeat(64) }))
+            .expect("um ModEscolhido")
+    }
+
+    /// Aplicar um conjunto com o PERFIS devolve `ModIncorporado`, antes de
+    /// qualquer leitura de disco. Tirar a chamada de `conferir_incorporados` do
+    /// comando (ou o corpo dela) reprova aqui.
+    #[test]
+    fn o_perfis_nao_se_liga_mais() {
+        let Err(FalhaNoMod::ModIncorporado { id, desde }) =
+            conferir_incorporados(&[escolhido("ana/outro"), escolhido("seele/perfis")])
+        else {
+            panic!("o PERFIS passou");
+        };
+        assert_eq!((id.as_str(), desde.as_str()), ("seele/perfis", "0.19"));
+        assert!(conferir_incorporados(&[escolhido("ana/outro")]).is_ok());
+        let fonte = fonte_sem_comentarios();
+        let corpo = corpo_de(&fonte, concat!("async fn aplicar_conjunto_de_mods", "("));
+        let chama = corpo.find(concat!("conferir_incorporados", "(&ligados)"));
+        let le = corpo.find(concat!("ler_por_", "hash("));
+        assert!(
+            chama.is_some() && chama < le,
+            "o comando não confere os incorporados antes de ler os pacotes"
+        );
+    }
+}
+
 /// O texto deste arquivo, para os guardas que afirmam sobre ele.
 #[cfg(test)]
 const FONTE_DESTE_ARQUIVO: &str = include_str!("main.rs");
@@ -9702,6 +9743,7 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
         FalhaNoMod::NaoEstaHospedando => "nao-esta-hospedando",
         FalhaNoMod::BancoNaoRespondeu => "banco-nao-respondeu",
         FalhaNoMod::ConjuntoMudou { .. } => "conjunto-mudou",
+        FalhaNoMod::ModIncorporado { .. } => "mod-incorporado",
     }
 }
 
@@ -10651,6 +10693,17 @@ struct ModEscolhido {
 /// quando o conjunto mudou por baixo, ou quando o banco não responde. **Nada é
 /// gravado em nenhum desses casos**: a validação inteira acontece antes da
 /// primeira escrita, e a escrita é uma transação.
+///
+/// `ModIncorporado` é a primeira conferência: um MOD que o produto incorporou
+/// (o PERFIS, na 0.19) não se liga mais, antes de ler disco algum.
+fn conferir_incorporados(ligados: &[ModEscolhido]) -> Result<(), FalhaNoMod> {
+    seele_server::mods::incorporados::conferir_conjunto(ligados.iter().map(|e| e.id.as_str()))
+        .map_err(|r| FalhaNoMod::ModIncorporado {
+            id: r.id.to_owned(),
+            desde: r.desde.to_owned(),
+        })
+}
+
 #[tauri::command]
 async fn aplicar_conjunto_de_mods(
     app: AppHandle,
@@ -10658,6 +10711,7 @@ async fn aplicar_conjunto_de_mods(
     ligados: Vec<ModEscolhido>,
     base: String,
 ) -> Result<String, FalhaNoMod> {
+    conferir_incorporados(&ligados)?;
     let persistence = persistence_do_mod(&session)?;
 
     // **Validar tudo antes de escrever qualquer coisa.** Um MOD que não serve
@@ -11414,6 +11468,226 @@ fn imagem_da_pessoa(
         "data:image/png;base64,{}",
         seele_ffi::base64_de(&bytes)
     ))
+}
+
+// ---- o perfil público (SEELE 0.19, protocolo 12) ---------------------------
+//
+// Os mesmos comandos que o navegador atende (`seele-web::comandos`), com os
+// mesmos nomes, argumentos e respostas. Todos de SESSÃO: a conexão pelo
+// carimbo. A validação, o portão de versão (nada do protocolo 12 sai para um
+// servidor 0.18) e a conferência da imagem moram na `Connection`
+// (`seele_ffi::perfis`); aqui só há o seletor de arquivo e o que é desta
+// máquina. Os erros voltam tipados, pelo nome da variante.
+
+/// Os perfis públicos desta sessão, em ordem de pessoa. A tela os pede quando o
+/// `perfis_revision` do snapshot (ou o `PerfisChanged`) anda; vazia num
+/// servidor 0.18.
+#[tauri::command]
+fn perfis(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<sessoes::NaSessao<Vec<seele_ffi::perfis::PerfilNaTela>>, ConnectionError> {
+    let conexao = session.conexao(carimbo)?;
+    Ok(sessoes::NaSessao::de(
+        &conexao,
+        session.geracao(),
+        conexao.perfis(),
+    ))
+}
+
+/// Grava o perfil de quem está usando esta janela. `revisao` é a que o editor
+/// viu (zero para quem ainda não tem perfil). Os campos são validados aqui
+/// pela mesma regra do servidor, e o erro volta **por campo**; o apelido é o
+/// `escolher_apelido`.
+///
+/// # Errors
+///
+/// `Campos`, `ServidorAntigo`, `NotConnected`.
+#[tauri::command]
+fn gravar_perfil(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u32,
+    entrada: seele_ffi::perfis::EntradaDoPerfil,
+) -> Result<(), seele_ffi::perfis::FalhaNoPerfil> {
+    session
+        .conexao(carimbo)?
+        .gravar_perfil(revisao, &entrada)
+        .map_err(Into::into)
+}
+
+/// Tira a foto ou a capa de quem está usando esta janela.
+///
+/// # Errors
+///
+/// `ServidorAntigo`, `NotConnected`.
+#[tauri::command]
+fn tirar_imagem_do_perfil(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+) -> Result<(), seele_ffi::perfis::FalhaNoPerfil> {
+    session
+        .conexao(carimbo)?
+        .tirar_imagem_do_perfil(lado)
+        .map_err(Into::into)
+}
+
+/// O que `enviar_imagem_do_perfil` fez.
+#[derive(serde::Serialize)]
+struct ImagemDoPerfilEnviada {
+    /// `false` é ter fechado o seletor sem escolher: o desfecho mais comum.
+    escolheu: bool,
+    /// Na foto nova, o ícone nativo (PNG de até 256 px e 8 KiB, do primeiro
+    /// quadro) também foi mandado pelo `SetPersonIcon`, para os clientes 0.18
+    /// verem o mesmo rosto. `false` quando a imagem não decodifica aqui (o
+    /// perfil já foi gravado; só o rosto dos 0.18 fica como estava) ou quando
+    /// é a capa.
+    icone_nativo: bool,
+}
+
+/// Abre o seletor, confere a imagem e a manda como a foto ou a capa de quem
+/// está usando esta janela.
+///
+/// **Confere antes de subir**: até 10 MiB e o tipo pelos bytes (PNG, JPEG, WebP
+/// ou GIF; o HEIC volta nomeado). Sem filtro de extensão no seletor, de
+/// propósito: quem escolhe uma foto do iPhone precisa ouvir «HEIC não é aceito»
+/// e não achar que o arquivo sumiu.
+///
+/// **Foto nova gera o ícone nativo** (§9 Q1 da especificação): o mesmo
+/// `icone::encolher` do `escolher_minha_imagem`, e o `SetPersonIcon` vai só
+/// para **esta** sessão — o perfil é do servidor, e o retrato desta máquina
+/// (`retrato.png`) não é tocado.
+///
+/// # Errors
+///
+/// `ImagemGrandeDemais`, `Heic`, `TipoRecusado`, `ImagemVazia`,
+/// `ArquivoIlegivel`, `ServidorAntigo`, a recusa do servidor, `NotConnected`.
+#[tauri::command]
+async fn enviar_imagem_do_perfil(
+    app: AppHandle,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+) -> Result<ImagemDoPerfilEnviada, seele_ffi::perfis::FalhaNoPerfil> {
+    use seele_ffi::perfis::{ErroDoPerfil, LadoDoPerfil};
+    use tauri_plugin_dialog::DialogExt as _;
+
+    let conexao = session.conexao(carimbo)?;
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title(match lado {
+            LadoDoPerfil::Foto => "Escolha a sua foto",
+            LadoDoPerfil::Capa => "Escolha a sua capa",
+        })
+        .pick_file(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(ImagemDoPerfilEnviada {
+            escolheu: false,
+            icone_nativo: false,
+        });
+    };
+    // Só o Android devolve `content://`, e este binário não roda lá.
+    let Ok(caminho) = escolha.into_path() else {
+        return Err(ErroDoPerfil::ArquivoIlegivel.into());
+    };
+    // O tamanho é perguntado antes de ler, e a leitura é fora da linha
+    // principal: dez megabytes no laço de eventos congelam a janela.
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        seele_ffi::perfis::ler_o_arquivo_da_imagem(&caminho)
+    })
+    .await
+    .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
+
+    let para_o_icone = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
+    conexao.enviar_imagem_do_perfil(lado, bytes).await?;
+
+    let mut icone_nativo = false;
+    if let Some(bytes) = para_o_icone {
+        let pronto = tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes))
+            .await
+            .ok()
+            .flatten();
+        match pronto {
+            Some(png) => match conexao.set_person_icon(Some(png)) {
+                Ok(()) => icone_nativo = true,
+                Err(erro) => tracing::warn!(
+                    ?erro,
+                    "a foto do perfil subiu, mas o ícone nativo para os clientes 0.18 não saiu"
+                ),
+            },
+            None => tracing::warn!(
+                "a foto do perfil subiu, mas não virou um ícone nativo: os clientes 0.18 \
+                 seguem vendo o de antes"
+            ),
+        }
+    }
+    Ok(ImagemDoPerfilEnviada {
+        escolheu: true,
+        icone_nativo,
+    })
+}
+
+/// A imagem de um perfil, em `data:` para a janela desenhar. `hash` é o que o
+/// `perfis` entrega (hexadecimal), e a imagem é cacheada por ele para sempre:
+/// a segunda chamada não toca a rede. `Mudou` quer dizer que o perfil trocou a
+/// imagem — a tela relê `perfis` e pede a nova.
+///
+/// # Errors
+///
+/// `Mudou`, `Incompleto`, `ServidorAntigo`, `NotConnected`.
+#[tauri::command]
+async fn imagem_do_perfil(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    pessoa: u64,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+    hash: String,
+) -> Result<String, seele_ffi::perfis::FalhaNoPerfil> {
+    use seele_ffi::perfis::{conferir_imagem, hash_de_hex, tipo_de_midia, ErroDoPerfil};
+
+    let conexao = session.conexao(carimbo)?;
+    // Um hash que não tem forma de hash é um perfil que mudou debaixo da tela.
+    let hash = hash_de_hex(&hash).ok_or(ErroDoPerfil::Mudou)?;
+    let bytes = conexao.imagem_do_perfil(pessoa, lado, hash).await?;
+    let tipo = conferir_imagem(&bytes).map_err(|_| ErroDoPerfil::TipoRecusado)?;
+    Ok(format!(
+        "data:{};base64,{}",
+        tipo_de_midia(tipo),
+        seele_ffi::base64_de(&bytes)
+    ))
+}
+
+/// O relatório da migração dos perfis do MOD PERFIS, para quem hospeda, ou
+/// nada quando não há (ou já foi dispensado). Fica no banco do servidor até ser
+/// dispensado.
+///
+/// Só vale numa janela que hospeda; sem hospedagem é `NaoEstaHospedando`, como
+/// os outros comandos do servidor desta janela.
+#[tauri::command]
+async fn ler_relatorio_da_migracao_de_perfis(
+    session: State<'_, Session>,
+) -> Result<Option<seele_server::persistence::perfis::RelatorioDaMigracaoDePerfis>, FalhaNoMod> {
+    let persistence = persistence_do_mod(&session)?;
+    let persistence = persistence.lock().await;
+    seele_server::persistence::perfis::relatorio(&persistence).map_err(|erro| {
+        tracing::warn!(%erro, "não li o relatório da migração dos perfis");
+        FalhaNoMod::BancoNaoRespondeu
+    })
+}
+
+/// Dispensa o relatório da migração dos perfis: quem hospeda o leu.
+#[tauri::command]
+async fn dispensar_relatorio(session: State<'_, Session>) -> Result<(), FalhaNoMod> {
+    let persistence = persistence_do_mod(&session)?;
+    let persistence = persistence.lock().await;
+    seele_server::persistence::perfis::dispensar_relatorio(&persistence).map_err(|erro| {
+        tracing::warn!(%erro, "não dispensei o relatório da migração dos perfis");
+        FalhaNoMod::BancoNaoRespondeu
+    })
 }
 
 /// Os bytes da imagem que está valendo, ou nada.
@@ -14472,6 +14746,13 @@ fn main() {
             preparar_icone_do_server,
             aplicar_icone_do_server,
             escolher_minha_imagem,
+            perfis,
+            gravar_perfil,
+            tirar_imagem_do_perfil,
+            enviar_imagem_do_perfil,
+            imagem_do_perfil,
+            ler_relatorio_da_migracao_de_perfis,
+            dispensar_relatorio,
             escolher_apelido,
             apelido_local,
             escolher_apelido_local,

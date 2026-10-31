@@ -244,6 +244,19 @@ impl Sessao {
         if mudou.cargos {
             eventos.push(json!({ "CargosChanged": { "marca": self.room.cargos.marca() } }));
         }
+        // **Os perfis públicos** (0.19, protocolo 12), na ordem da FFI: a marca
+        // já subiu no `Room`, e as recusas saem uma a uma, da mais antiga à mais
+        // nova, esvaziando a fila.
+        if mudou.perfis {
+            eventos.push(json!({ "PerfisChanged": { "marca": self.room.perfis_marca } }));
+        }
+        if mudou.recusa_de_perfil {
+            for recusa in std::mem::take(&mut self.room.recusas_de_perfil) {
+                eventos.push(json!({ "PerfilRecusado": {
+                    "motivo": recusa.motivo, "campos": recusa.campos,
+                } }));
+            }
+        }
         if mudou.telemetry {
             eventos.push(json!("TelemetryChanged"));
         }

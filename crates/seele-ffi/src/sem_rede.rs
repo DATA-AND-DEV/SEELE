@@ -26,6 +26,7 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
         icon_revision: std::sync::atomic::AtomicU64::new(0),
         person_icons_revision: std::sync::atomic::AtomicU64::new(0),
+        perfis: crate::perfis::DoPerfil::negociado(seele_core::PROTOCOL_VERSION),
         room: Mutex::new(Room::new()),
         listeners: Mutex::new(Vec::new()),
         sessao: crate::SessaoId::nova(),

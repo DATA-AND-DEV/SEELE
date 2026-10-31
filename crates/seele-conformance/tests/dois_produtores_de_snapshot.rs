@@ -27,6 +27,7 @@ use seele_proto::control::{
     ServerMessage, TemaDoServidor, VoiceRoomInfo,
 };
 use seele_proto::ids::{ChannelId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
+use seele_proto::perfil::{Efeito, ImagemDoPerfil, LadoDoPerfil, PerfilPublico, TipoDaImagem};
 use seele_proto::version::PROTOCOL_VERSION;
 use seele_web::sessao::Sessao;
 
@@ -131,7 +132,46 @@ fn mensagens() -> Vec<ServerMessage> {
             base: "é".repeat(16),
             tag: "AB01".into(),
         },
+        // **O perfil público (0.19, protocolo 12)**, também no fim: a marca
+        // `perfis_revision` e a `pendencia_do_perfil` são da sala (`Room`), e
+        // saem iguais dos dois produtores. Uma parte sem `ultima` não anda; a
+        // `ultima` anda uma vez; o `PerfilMudou` desta pessoa tira da
+        // pendência o lado que ganhou imagem.
+        ServerMessage::Perfis {
+            parte: vec![perfil_publico(9, 1)],
+            ultima: false,
+        },
+        ServerMessage::Perfis {
+            parte: vec![perfil_publico(8, 1)],
+            ultima: true,
+        },
+        ServerMessage::PendenciaDoPerfil {
+            faltou: vec![LadoDoPerfil::Foto, LadoDoPerfil::Capa],
+        },
+        ServerMessage::PerfilMudou(PerfilPublico {
+            capa: Some(ImagemDoPerfil {
+                hash: [4; 32],
+                tipo: TipoDaImagem::Png,
+                bytes: 10,
+            }),
+            ..perfil_publico(EU.0, 2)
+        }),
     ]
+}
+
+fn perfil_publico(pessoa: u64, revisao: u32) -> PerfilPublico {
+    PerfilPublico {
+        pessoa: PersonId(pessoa),
+        revisao,
+        nome_exibido: format!("pessoa {pessoa}"),
+        pronomes: String::new(),
+        status: String::new(),
+        bio: String::new(),
+        cor: [0xf2, 0x52, 0x1f],
+        efeito: Efeito::Nenhum,
+        foto: None,
+        capa: None,
+    }
 }
 
 #[test]
@@ -163,8 +203,8 @@ fn os_dois_produtores_dao_o_mesmo_retrato_depois_de_cada_mensagem() {
         let campos = navegador.as_object().expect("um objeto");
         assert_eq!(
             campos.len(),
-            21,
-            "o retrato da sala tem {} campos, e a lista deste teste é de 21",
+            23,
+            "o retrato da sala tem {} campos, e a lista deste teste é de 23",
             campos.len()
         );
         for (campo, valor) in campos {
@@ -261,6 +301,29 @@ fn os_dois_produtores_dao_o_mesmo_retrato_depois_de_cada_mensagem() {
     assert_eq!(
         fim.cargos_revision, 2,
         "a marca dos cargos não andou uma vez por mensagem de cargo"
+    );
+    // E a dos perfis: parada até a `ultima` (a parte sem ela não conta), +1 nela
+    // e +1 no `PerfilMudou` — a pendência (a mensagem entre os dois) não é
+    // mudança de perfil, mas a imagem da capa dela sai da pendência.
+    let primeira_parte = mensagens
+        .iter()
+        .position(|mensagem| matches!(mensagem, ServerMessage::Perfis { .. }))
+        .unwrap();
+    assert_eq!(do_navegador[primeira_parte].perfis_revision, 0);
+    assert_eq!(
+        do_navegador[primeira_parte + 1].perfis_revision, 0,
+        "uma parte sem `ultima` fez a marca andar"
+    );
+    assert_eq!(do_navegador[primeira_parte + 2].perfis_revision, 1);
+    assert_eq!(
+        do_navegador[primeira_parte + 3].pendencia_do_perfil,
+        vec![LadoDoPerfil::Foto, LadoDoPerfil::Capa]
+    );
+    assert_eq!(fim.perfis_revision, 2);
+    assert_eq!(
+        fim.pendencia_do_perfil,
+        vec![LadoDoPerfil::Foto],
+        "o PerfilMudou com a capa nova não tirou a capa da pendência"
     );
 }
 

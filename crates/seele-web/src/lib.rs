@@ -23,6 +23,7 @@ pub mod fluxos;
 pub mod fronteira;
 pub mod ligacao;
 pub mod mods;
+pub mod perfil;
 pub mod previa;
 pub mod sessao;
 pub mod tela;

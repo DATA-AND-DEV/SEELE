@@ -227,6 +227,23 @@ fn mensagens() -> Vec<ServerMessage> {
             channel: ChannelId(1),
         },
         ServerMessage::TemaMudou { tema: None },
+        // **O perfil público (0.19, protocolo 12)**: a lista fechada, o perfil
+        // que mudou, a recusa (que sai como evento, uma por vez) e a pendência.
+        ServerMessage::Perfis {
+            parte: vec![perfil_publico(9)],
+            ultima: true,
+        },
+        ServerMessage::PerfilMudou(perfil_publico(8)),
+        ServerMessage::PerfilRecusado {
+            motivo: seele_proto::perfil::RecusaDePerfil::Campos,
+            campos: vec![seele_proto::perfil::ErroDeCampo {
+                campo: seele_proto::perfil::CampoDoPerfil::Bio,
+                motivo: seele_proto::perfil::MotivoDoCampo::Longo,
+            }],
+        },
+        ServerMessage::PendenciaDoPerfil {
+            faltou: vec![seele_proto::perfil::LadoDoPerfil::Capa],
+        },
         ServerMessage::Disconnecting {
             reason: DisconnectReason::FellBehind,
         },
@@ -234,6 +251,21 @@ fn mensagens() -> Vec<ServerMessage> {
             reason: DisconnectReason::Kicked,
         },
     ]
+}
+
+fn perfil_publico(pessoa: u64) -> seele_proto::perfil::PerfilPublico {
+    seele_proto::perfil::PerfilPublico {
+        pessoa: PersonId(pessoa),
+        revisao: 1,
+        nome_exibido: format!("pessoa {pessoa}"),
+        pronomes: String::new(),
+        status: String::new(),
+        bio: String::new(),
+        cor: [0xf2, 0x52, 0x1f],
+        efeito: seele_proto::perfil::Efeito::Nenhum,
+        foto: None,
+        capa: None,
+    }
 }
 
 /// O nome do evento, para a cobertura: a variante, sem os campos.
@@ -259,6 +291,8 @@ const DO_FOLD: &[&str] = &[
     "NoticeRaised",
     "ScreenChanged",
     "TransferChanged",
+    "PerfisChanged",
+    "PerfilRecusado",
     "Ended",
 ];
 

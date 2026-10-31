@@ -551,6 +551,15 @@ enum Comando {
         /// A figura, ou `None` para não ter.
         icone: Option<Vec<u8>>,
     },
+    /// O perfil público de quem está usando este cliente (0.19, protocolo 12):
+    /// o `ClientMessage::GravarPerfil` já montado e validado por
+    /// `seele_sessao::perfil::montar_gravar`.
+    GravarPerfil(seele_proto::control::ClientMessage),
+    /// Tira a foto ou a capa do perfil de quem está usando este cliente (0.19).
+    TirarImagemDoPerfil {
+        /// Qual das duas.
+        lado: seele_proto::perfil::LadoDoPerfil,
+    },
     IconeDoServer {
         icone: Option<Vec<u8>>,
     },
@@ -687,6 +696,8 @@ impl Comando {
             Self::RenomearServer { .. } => "RenomearServer",
             Self::MeuApelido { .. } => "MeuApelido",
             Self::MinhaImagem { .. } => "MinhaImagem",
+            Self::GravarPerfil(..) => "GravarPerfil",
+            Self::TirarImagemDoPerfil { .. } => "TirarImagemDoPerfil",
             Self::IconeDoServer { .. } => "IconeDoServer",
             Self::Expulsar { .. } => "Expulsar",
             Self::Cargo(_) => "Cargo",
@@ -932,6 +943,10 @@ pub struct Enlace {
     /// conhecidos, e transformar cada janela de medição num aviso encheria a
     /// fila de coisas que ninguém precisa ver acontecer.
     caminho_medido: Arc<std::sync::atomic::AtomicU32>,
+    /// O protocolo que a conexão de agora negociou (`Client::versao_negociada`),
+    /// escrito pelo motor a cada (re)conexão. Um átomo pela razão do `rtt`: é
+    /// lido de fora a cada pedido de perfil, e não vale um aviso.
+    protocolo: Arc<std::sync::atomic::AtomicU8>,
     /// A tarefa do motor. `None` depois de [`Enlace::sair`], que a espera
     /// terminar — ou a aborta, vencido o teto.
     tarefa: Option<tokio::task::JoinHandle<()>>,
@@ -1989,6 +2004,7 @@ impl Enlace {
         let media = cliente.media();
         let rtt = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let caminho_medido = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let protocolo = Arc::new(std::sync::atomic::AtomicU8::new(cliente.versao_negociada()));
 
         let (comandos_tx, comandos_rx) = mpsc::channel(COMANDOS);
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
@@ -2017,6 +2033,7 @@ impl Enlace {
             avisos: avisos_tx,
             rtt: Arc::clone(&rtt),
             caminho_medido: Arc::clone(&caminho_medido),
+            protocolo: Arc::clone(&protocolo),
             tela_pedida: None,
             tela_viva: None,
             faixa: FAIXA_INICIAL,
@@ -2053,6 +2070,7 @@ impl Enlace {
             veredito,
             rtt,
             caminho_medido,
+            protocolo,
             tarefa: Some(tarefa),
         })
     }
@@ -2432,6 +2450,40 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn definir_minha_imagem(&self, icone: Option<Vec<u8>>) -> Result<(), Fechado> {
         self.mandar(Comando::MinhaImagem { icone }).await
+    }
+
+    /// Grava **o seu** perfil público (0.19, protocolo 12).
+    ///
+    /// Recebe a mensagem já montada e validada (`perfil::montar_gravar`), e
+    /// **não** é refeita ao reconectar, pelo mesmo motivo do nome e da imagem:
+    /// está gravada no servidor, e reenviá-la a cada volta escreveria de novo o
+    /// que já está lá — e, com a revisão velha, seria uma recusa a cada volta.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn gravar_perfil(&self, mensagem: seele_proto::control::ClientMessage) -> Result<(), Fechado> {
+        self.mandar(Comando::GravarPerfil(mensagem)).await
+    }
+
+    /// Tira **a sua** foto ou **a sua** capa (0.19, protocolo 12).
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn tirar_imagem_do_perfil(
+        &self,
+        lado: seele_proto::perfil::LadoDoPerfil,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::TirarImagemDoPerfil { lado }).await
+    }
+
+    /// O número de protocolo que a conexão **de agora** negociou. Sobe e desce
+    /// com a volta do enlace: um servidor que reiniciou numa versão menor muda
+    /// o que pode ser dito.
+    #[must_use]
+    pub fn versao_negociada(&self) -> u8 {
+        self.protocolo.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Troca **o seu** apelido.
@@ -2849,6 +2901,8 @@ struct Motor {
     avisos: mpsc::UnboundedSender<Aviso>,
     rtt: Arc<std::sync::atomic::AtomicU64>,
     caminho_medido: Arc<std::sync::atomic::AtomicU32>,
+    /// O protocolo negociado, o mesmo átomo de [`Enlace`].
+    protocolo: Arc<std::sync::atomic::AtomicU8>,
     /// A escolha da pessoa, esperando a transmissão ganhar nome.
     ///
     /// **A bomba não pode nascer no comando**, e é a forma da coisa e não uma
@@ -3657,6 +3711,10 @@ impl Motor {
                 self.queda = None;
                 let sessao = cliente.session().clone();
                 let media = cliente.media();
+                self.protocolo.store(
+                    cliente.versao_negociada(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 self.cliente = Some(cliente);
                 self.bateria.on_reconnected();
                 // A sessão anterior já foi apagada de `Pares` (`Pares::saiu`,
@@ -3817,6 +3875,8 @@ impl Motor {
             Comando::IconeDoServer { icone } => cliente.set_server_icon(icone).await,
             Comando::MinhaImagem { icone } => cliente.set_person_icon(icone).await,
             Comando::MeuApelido { nome } => cliente.set_nickname(nome).await,
+            Comando::GravarPerfil(mensagem) => cliente.gravar_perfil(mensagem).await,
+            Comando::TirarImagemDoPerfil { lado } => cliente.tirar_imagem_do_perfil(lado).await,
             Comando::Expulsar { pessoa } => cliente.kick_person(pessoa).await,
             Comando::Cargo(pedido) => cliente.cargo(pedido).await,
             Comando::Banir {
@@ -4042,6 +4102,19 @@ impl Motor {
         // fazia o `encode` falhar, e este braço tratava como enlace caído: a
         // sessão, a voz e o resto iam junto, por um nome comprido.
         if let Err(erro) = resultado {
+            // **Um verbo que o servidor negociado não conhece não é queda**: a
+            // `Connection` já devolveu `ServidorAntigo` à casca antes de o
+            // comando chegar; isto é a segunda cerca, para uma volta que
+            // renegociou um número menor. Nada saiu, a sessão segue, e o
+            // registro diz.
+            if let Some(antigo) = erro.downcast_ref::<crate::client::ServidorAntigo>() {
+                tracing::warn!(
+                    comando = nome,
+                    motivo = ?antigo.0,
+                    "o comando não saiu: o servidor negociado não conhece o pedido; a sessão segue"
+                );
+                return;
+            }
             match recusa_local(&erro) {
                 Some(recusa) => self.recusar_aqui(nome, recusa, entrada),
                 None => self.cair(),
@@ -9662,6 +9735,7 @@ mod tests {
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            protocolo: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),

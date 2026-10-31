@@ -92,6 +92,14 @@
 //! | `volume_resposta_chegou(alca, pedaco)` | — | — |
 //! | `volume_resposta_acabou(alca, imagem, viva, uso)` | 0 | o `MidiaDoMod` (`imagem` 1) ou nada |
 //! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `perfil_imagem_enviar(lado, bytes)` | 0 | o começo do fluxo de envio (`lado` 0 foto, 1 capa); os bytes seguem no fluxo |
+//! | | 1 | o `ErroDoPerfil` do desktop (`"Heic"`, `{"ServidorAntigo": …}`…) |
+//! | `perfil_imagem_ler(pedido)` | 0 | o começo do fluxo de leitura (`{"pessoa", "lado", "hash"}`) |
+//! | | 1 | o `ErroDoPerfil` |
+//! | `perfil_imagem_acabou(alca, viva, hash)` | 0 | os bytes da imagem lida (conferidos contra o hash) ou nada |
+//! | | 1 | o `ErroDoPerfil` |
+//! | `perfil_icone(bytes)` | 0 | o PNG do ícone nativo (até 256 px e 8 KiB) |
+//! | | 1 | `"IconNotAPicture"` |
 //! | `catalogo_endereco()` | 0 | o endereço do catálogo |
 //! | `catalogo_ler(catalogo, assinatura)` | 0 | nada: conferido e lido |
 //! | | 1 | a `FalhaNoCatalogo` do desktop |
@@ -1453,6 +1461,143 @@ pub unsafe extern "C" fn volume_resposta_acabou(
     match seele_sessao::midia_de_mod::pronta(bytes, teto.as_ref()) {
         Ok(pronta) => dizer(crate::mods::em_json(pronta).to_string().into_bytes(), 0),
         Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// O protocolo que a ligação desta página negociou, ou `None` sem ligação.
+fn protocolo_negociado() -> Option<u8> {
+    LIGACAO.with(|l| l.borrow().as_ref().map(Ligacao::carimbo))
+}
+
+/// Um erro de perfil, na saída: código 1 com o JSON do `ErroDoPerfil`, o mesmo
+/// que o `invoke` do desktop rejeita.
+fn erro_do_perfil(erro: &seele_sessao::perfil::ErroDoPerfil) -> u32 {
+    dizer(serde_json::json!(erro).to_string().into_bytes(), 1)
+}
+
+/// O lado de uma imagem de perfil, pelo nome que a casca usa.
+fn lado_do_pedido(pedido: &serde_json::Value) -> Option<seele_proto::perfil::LadoDoPerfil> {
+    pedido
+        .get("lado")
+        .and_then(|lado| serde_json::from_value(lado.clone()).ok())
+}
+
+/// **O começo do fluxo que envia a foto ou a capa** (0.19, protocolo 12). `lado`
+/// 0 é a foto, 1 a capa; `bytes` são os da imagem, que a página escreve no
+/// fluxo logo atrás do pedido. Confere tamanho e tipo pelos bytes (o HEIC volta
+/// nomeado) e o portão de versão antes de montar. Devolve 0 com o pedido
+/// enquadrado, ou 1 com o `ErroDoPerfil`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_imagem_enviar(lado: u32, ptr: *const u8, len: usize) -> u32 {
+    use seele_proto::perfil::LadoDoPerfil;
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let Some(negociado) = protocolo_negociado() else {
+        return erro_do_perfil(&seele_sessao::perfil::ErroDoPerfil::NotConnected);
+    };
+    let lado = if lado == 0 {
+        LadoDoPerfil::Foto
+    } else {
+        LadoDoPerfil::Capa
+    };
+    match crate::perfil::pedido_de_enviar(lado, bytes, negociado) {
+        Ok(pedido) => dizer(pedido, 0),
+        Err(erro) => erro_do_perfil(&erro),
+    }
+}
+
+/// **O começo do fluxo que lê a imagem de uma pessoa**: `{"pessoa", "lado",
+/// "hash"}` (o hash em hexadecimal, como o `perfis` o entrega). Devolve 0 com o
+/// pedido enquadrado, ou 1 com o `ErroDoPerfil`. A página guarda o que baixar
+/// por hash, para sempre.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_imagem_ler(ptr: *const u8, len: usize) -> u32 {
+    use seele_sessao::perfil::{hash_de_hex, ErroDoPerfil};
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(ptr, len) });
+    let Some(negociado) = protocolo_negociado() else {
+        return erro_do_perfil(&ErroDoPerfil::NotConnected);
+    };
+    let (Some(lado), Some(hash)) = (
+        lado_do_pedido(&pedido),
+        pedido
+            .get("hash")
+            .and_then(serde_json::Value::as_str)
+            .and_then(hash_de_hex),
+    ) else {
+        return erro_do_perfil(&ErroDoPerfil::Mudou);
+    };
+    match crate::perfil::pedido_de_ler(numero_do_pedido(&pedido, "pessoa"), lado, hash, negociado)
+    {
+        Ok(pedido) => dizer(pedido, 0),
+        Err(erro) => erro_do_perfil(&erro),
+    }
+}
+
+/// **A resposta `alca` de um fluxo de imagem de perfil acabou**, e é esquecida.
+/// `viva` 0 é a geração que acabou durante a transferência. `hash` (hexadecimal)
+/// é o que a leitura pediu, e os bytes são conferidos contra ele; vazio, num
+/// envio, não confere nada. Devolve 0 com os bytes (vazios num envio), ou 1 com
+/// o `ErroDoPerfil`.
+///
+/// # Safety
+///
+/// `hash_ptr` e `hash_len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_imagem_acabou(
+    alca: u32,
+    viva: u32,
+    hash_ptr: *const u8,
+    hash_len: usize,
+) -> u32 {
+    use seele_sessao::perfil::{hash_de_hex, ErroDoPerfil};
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let hash = texto_de(unsafe { entrada(hash_ptr, hash_len) });
+    let Some(resposta) = RESPOSTAS.with(|r| r.borrow_mut().1.remove(&alca)) else {
+        return erro_do_perfil(&ErroDoPerfil::Incompleto);
+    };
+    let acabada = resposta.acabou();
+    // A geração conferida **depois** de a transferência dar certo, como o
+    // desktop: a recusa do servidor chega como ela é.
+    if viva == 0 && acabada.is_ok() {
+        return erro_do_perfil(&ErroDoPerfil::SemResposta);
+    }
+    let esperado = if hash.is_empty() {
+        None
+    } else {
+        match hash_de_hex(hash) {
+            Some(hash) => Some(hash),
+            None => return erro_do_perfil(&ErroDoPerfil::Mudou),
+        }
+    };
+    match crate::perfil::conferir_resposta(acabada, esperado) {
+        Ok(bytes) => dizer(bytes, 0),
+        Err(erro) => erro_do_perfil(&erro),
+    }
+}
+
+/// **O ícone nativo da foto nova**, para os clientes 0.18 verem o mesmo rosto
+/// pelo `SetPersonIcon`: PNG de até 256 px e 8 KiB, do primeiro quadro. Devolve
+/// 0 com o PNG, ou 1 com `"IconNotAPicture"`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_icone(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    match crate::perfil::icone_nativo(bytes) {
+        Some(png) => dizer(png, 0),
+        None => dizer(b"\"IconNotAPicture\"".to_vec(), 1),
     }
 }
 

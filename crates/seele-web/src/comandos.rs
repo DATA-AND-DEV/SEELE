@@ -150,6 +150,9 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "editar_cargo",
     "enter_voice_room",
     "escolher_apelido",
+    // O perfil público (0.19, protocolo 12). Os bytes das imagens não passam
+    // por aqui: vão pelo fluxo de imagem (`perfil_pedido`, na fronteira).
+    "gravar_perfil",
     "explicar_permissoes",
     "expulsar_pessoa",
     "icone_do_server",
@@ -167,6 +170,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "pedir_anexo",
     "pedir_cargos",
     "pedir_quadro_chave",
+    "perfis",
     "peso_da_linha",
     "prever_cargo",
     // Os dois da volta, que a ponte chama por dentro: o `Ping` de rotina da
@@ -187,6 +191,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "set_total_isolation",
     "set_volume",
     "tirar_icone_do_server",
+    "tirar_imagem_do_perfil",
     "volumes_locais",
 ];
 
@@ -319,6 +324,15 @@ impl Ligacao {
             Ok(resposta) => resposta,
             Err(erro) => return Some(Err(erro)),
         };
+        // **O portão de versão, antes de escrever qualquer coisa**: um verbo que
+        // o servidor negociado não conhece (os do perfil, no protocolo 12, diante
+        // de um 11) não sai, e o erro volta tipado à casca. Vale para toda
+        // mensagem que um comando monta — a tabela é a do `seele-proto`.
+        for mensagem in &saida.mensagens {
+            if let Err(erro) = seele_sessao::perfil::portao_do_cliente(mensagem, self.carimbo()) {
+                return Some(Err(json!(erro)));
+            }
+        }
         let mut nao_saiu = None;
         for mensagem in &saida.mensagens {
             if let Err(erro) = self.escrever(mensagem) {
@@ -484,6 +498,35 @@ fn atender_na_sessao(
             Ok(Value::Null)
         }
         "icone_do_server" => Ok(json!(sessao.room.icon)),
+        // **O perfil público** (0.19, protocolo 12): os mesmos três do desktop.
+        // A leitura é da sala; os dois verbos validam como o desktop
+        // (`Connection::gravar_perfil`) e o portão de versão é de quem escreve
+        // no fio (`Ligacao::atender`).
+        "perfis" => Ok(json!(sessao
+            .room
+            .perfis
+            .values()
+            .map(seele_sessao::perfil::perfil_na_tela)
+            .collect::<Vec<_>>())),
+        "gravar_perfil" => {
+            let revisao = a.u32("revisao")?;
+            let entrada: seele_sessao::perfil::EntradaDoPerfil = a
+                .campo("entrada")
+                .and_then(|valor| serde_json::from_value(valor.clone()).ok())
+                .ok_or_else(|| a.invalido("entrada", "os campos do perfil"))?;
+            let mensagem = seele_sessao::perfil::montar_gravar(revisao, &entrada)
+                .map_err(|erro| json!(erro))?;
+            saida.mensagens.push(mensagem);
+            Ok(Value::Null)
+        }
+        "tirar_imagem_do_perfil" => {
+            let lado: seele_proto::perfil::LadoDoPerfil = a
+                .campo("lado")
+                .and_then(|valor| serde_json::from_value(valor.clone()).ok())
+                .ok_or_else(|| a.invalido("lado", "Foto ou Capa"))?;
+            saida.mensagens.push(seele_sessao::perfil::mensagem_de_tirar(lado));
+            Ok(Value::Null)
+        }
         "imagem_da_pessoa" => {
             let pessoa = PersonId(a.u64("person")?);
             Ok(json!(sessao.room.person_icons.get(&pessoa).map(
@@ -1106,6 +1149,15 @@ mod tests {
 
     /// Uma ligação já dentro da sessão, com o fio limpo.
     fn dentro() -> Ligacao {
+        dentro_em(PROTOCOL_VERSION)
+    }
+
+    /// A mesma, com um servidor que carimba os quadros com `numero`: é o que
+    /// a ligação grava como o protocolo negociado.
+    fn dentro_em(numero: u8) -> Ligacao {
+        let do_servidor = |mensagem: &ServerMessage| {
+            enquadrar(&encode_em(numero, mensagem).unwrap()).unwrap()
+        };
         let mut ligacao = Ligacao::abrir(Pedido {
             sala_pessoal: false,
             apelido: "marcela".into(),
@@ -2342,5 +2394,136 @@ mod tests {
         ] {
             assert_eq!(base64(bytes), esperado);
         }
+    }
+
+    fn entrada_de_perfil() -> Value {
+        json!({
+            "nome_exibido": " Maya ", "pronomes": "", "status": "", "bio": "um\ndois",
+            "cor": "#F2521F", "efeito": "Aurora",
+        })
+    }
+
+    /// **O perfil no navegador faz o que o desktop faz**: valida com a regra do
+    /// `seele-proto` (um erro por campo, e nada sai), apara, e escreve o
+    /// `GravarPerfil` e o `TirarImagemDoPerfil` no fio de um servidor 12.
+    #[test]
+    fn gravar_e_tirar_o_perfil_saem_no_doze_e_os_campos_ruins_voltam_por_campo() {
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "gravar_perfil",
+            json!({ "revisao": 3, "entrada": entrada_de_perfil() }),
+        );
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "tirar_imagem_do_perfil",
+            json!({ "lado": "Capa" }),
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![
+                ClientMessage::GravarPerfil {
+                    revisao: 3,
+                    nome_exibido: "Maya".into(),
+                    pronomes: String::new(),
+                    status: String::new(),
+                    bio: "um\ndois".into(),
+                    cor: [0xf2, 0x52, 0x1f],
+                    efeito: seele_proto::perfil::Efeito::Aurora,
+                },
+                ClientMessage::TirarImagemDoPerfil {
+                    lado: seele_proto::perfil::LadoDoPerfil::Capa
+                },
+            ]
+        );
+
+        let mut ruim = entrada_de_perfil();
+        ruim["status"] = json!("a\nb");
+        ruim["cor"] = json!("laranja");
+        let recusa = ligacao
+            .atender(
+                "gravar_perfil",
+                &json!({ "revisao": 3, "entrada": ruim }),
+                &mut chaves,
+                0,
+            )
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            recusa["Campos"]["campos"].as_array().map(Vec::len),
+            Some(2),
+            "{recusa}"
+        );
+        assert!(escritos(&mut ligacao).is_empty(), "um perfil ruim saiu");
+    }
+
+    /// **Nada do protocolo 12 sai para um servidor 11**, e o erro volta tipado.
+    /// Tirar o portão de `Ligacao::atender` faz o `GravarPerfil` chegar ao fio.
+    #[test]
+    fn um_servidor_onze_nao_recebe_os_verbos_do_perfil() {
+        let mut ligacao = dentro_em(11);
+        assert_eq!(ligacao.carimbo(), 11);
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let antigo = json!({ "ServidorAntigo": { "negociado": 11, "exige": 12 } });
+        for (comando, args) in [
+            (
+                "gravar_perfil",
+                json!({ "revisao": 0, "entrada": entrada_de_perfil() }),
+            ),
+            ("tirar_imagem_do_perfil", json!({ "lado": "Foto" })),
+        ] {
+            assert_eq!(
+                ligacao.atender(comando, &args, &mut chaves, 0),
+                Some(Err(antigo.clone())),
+                "{comando}"
+            );
+        }
+        assert!(escritos(&mut ligacao).is_empty());
+        // O que já existia segue saindo no 11.
+        let _ = atender(&mut ligacao, &mut chaves, "pedir_cargos", json!({}));
+        assert_eq!(escritos(&mut ligacao), vec![ClientMessage::PedirCargos]);
+    }
+
+    /// `perfis` lê o `Room`, na forma que o desktop devolve; e o fold do
+    /// navegador dá os avisos na ordem da FFI.
+    #[test]
+    fn os_perfis_do_room_chegam_a_casca_e_o_fold_avisa() {
+        use seele_proto::perfil::{Efeito, PerfilPublico};
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        assert_eq!(
+            atender(&mut ligacao, &mut chaves, "perfis", json!({})).resposta,
+            json!([])
+        );
+        let perfil = PerfilPublico {
+            pessoa: PersonId(3),
+            revisao: 2,
+            nome_exibido: "Ana".into(),
+            pronomes: String::new(),
+            status: String::new(),
+            bio: String::new(),
+            cor: [1, 2, 3],
+            efeito: Efeito::Pulso,
+            foto: None,
+            capa: None,
+        };
+        let sessao = ligacao.sessao_mut().unwrap();
+        let eventos = sessao.dobrar_com_eventos(&ServerMessage::PerfilMudou(perfil));
+        assert_eq!(eventos, vec![json!({ "PerfisChanged": { "marca": 1 } })]);
+        let eventos = sessao.dobrar_com_eventos(&ServerMessage::PerfilRecusado {
+            motivo: seele_proto::perfil::RecusaDePerfil::RevisaoVelha,
+            campos: vec![],
+        });
+        assert_eq!(
+            eventos,
+            vec![json!({ "PerfilRecusado": { "motivo": "RevisaoVelha", "campos": [] } })]
+        );
+        let lidos = atender(&mut ligacao, &mut chaves, "perfis", json!({})).resposta;
+        assert_eq!(lidos[0]["pessoa"], 3);
+        assert_eq!(lidos[0]["cor"], "#010203");
+        assert_eq!(lidos[0]["efeito"], "Pulso");
     }
 }
