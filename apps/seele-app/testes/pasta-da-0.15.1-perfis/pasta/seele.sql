@@ -4,20 +4,20 @@ CREATE TABLE schema_version (
                  version    INTEGER PRIMARY KEY,
                  applied_at INTEGER NOT NULL
              ) STRICT;
-INSERT INTO schema_version VALUES(1,1792906903);
-INSERT INTO schema_version VALUES(2,1792906903);
-INSERT INTO schema_version VALUES(3,1792906903);
-INSERT INTO schema_version VALUES(4,1792906903);
-INSERT INTO schema_version VALUES(5,1792906903);
-INSERT INTO schema_version VALUES(6,1792906903);
-INSERT INTO schema_version VALUES(7,1792906903);
-INSERT INTO schema_version VALUES(8,1792906903);
-INSERT INTO schema_version VALUES(9,1792906903);
-INSERT INTO schema_version VALUES(10,1792906903);
-INSERT INTO schema_version VALUES(11,1792906903);
-INSERT INTO schema_version VALUES(12,1792906903);
-INSERT INTO schema_version VALUES(13,1792906903);
-CREATE TABLE "people" (
+INSERT INTO schema_version VALUES(1,1793468138);
+INSERT INTO schema_version VALUES(2,1793468138);
+INSERT INTO schema_version VALUES(3,1793468138);
+INSERT INTO schema_version VALUES(4,1793468138);
+INSERT INTO schema_version VALUES(5,1793468138);
+INSERT INTO schema_version VALUES(6,1793468138);
+INSERT INTO schema_version VALUES(7,1793468138);
+INSERT INTO schema_version VALUES(8,1793468138);
+INSERT INTO schema_version VALUES(9,1793468138);
+INSERT INTO schema_version VALUES(10,1793468138);
+INSERT INTO schema_version VALUES(11,1793468138);
+INSERT INTO schema_version VALUES(12,1793468138);
+INSERT INTO schema_version VALUES(13,1793468138);
+CREATE TABLE IF NOT EXISTS "people" (
             id           INTEGER PRIMARY KEY,
             nickname     TEXT    NOT NULL UNIQUE,
             -- ADR 0004: identity is an Ed25519 public key, 32 bytes.
@@ -25,7 +25,8 @@ CREATE TABLE "people" (
             created_at   INTEGER NOT NULL,
             last_seen_at INTEGER
         , icon BLOB) STRICT;
-INSERT INTO people VALUES(1,'dono',X'5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E',1792906903,1792906903,NULL);
+INSERT INTO people VALUES(1,'dono',x'5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e',1793468138,1793468138,NULL);
+INSERT INTO people VALUES(2,'convidada',x'7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a',1793468138,1793468138,NULL);
 CREATE TABLE roles (
             id          INTEGER PRIMARY KEY,
             name        TEXT    NOT NULL UNIQUE,
@@ -44,13 +45,14 @@ INSERT INTO roles VALUES(1,'Commander','["ViewVoiceRoom","EnterVoiceRoom","Speak
 INSERT INTO roles VALUES(2,'Operator','["ViewVoiceRoom","EnterVoiceRoom","Speak","ReadChannel","WriteChannel","RemoveMessage","MovePerson","Kick","Ban","AttachFile"]','[]');
 INSERT INTO roles VALUES(3,'Person','["ViewVoiceRoom","EnterVoiceRoom","Speak","ReadChannel","WriteChannel","AttachFile"]','[]');
 INSERT INTO roles VALUES(4,'Observer','["ViewVoiceRoom","EnterVoiceRoom","ReadChannel"]','["Speak","WriteChannel","AttachFile"]');
-CREATE TABLE "person_roles" (
+CREATE TABLE IF NOT EXISTS "person_roles" (
             person_id INTEGER NOT NULL REFERENCES "people"(id) ON DELETE CASCADE,
             role_id  INTEGER NOT NULL REFERENCES roles(id)  ON DELETE CASCADE,
             PRIMARY KEY (person_id, role_id)
         ) STRICT;
 INSERT INTO person_roles VALUES(1,1);
-CREATE TABLE "voice_rooms" (
+INSERT INTO person_roles VALUES(2,3);
+CREATE TABLE IF NOT EXISTS "voice_rooms" (
             id             INTEGER PRIMARY KEY,
             name           TEXT    NOT NULL,
             member_limit   INTEGER NOT NULL,
@@ -62,7 +64,7 @@ CREATE TABLE "voice_rooms" (
             channel_id        INTEGER REFERENCES "channels"(id),
             position       INTEGER NOT NULL DEFAULT 0
         ) STRICT;
-CREATE TABLE "channels" (
+CREATE TABLE IF NOT EXISTS "channels" (
             id                 INTEGER PRIMARY KEY,
             name               TEXT    NOT NULL,
             minimum_read_role  INTEGER REFERENCES roles(id),
@@ -180,14 +182,14 @@ CREATE TABLE mods (
                 enabled    INTEGER NOT NULL DEFAULT 1,
                 config     TEXT NOT NULL DEFAULT '{}'
             , repo        TEXT    NOT NULL DEFAULT '', reach       TEXT    NOT NULL DEFAULT '[]', server_half INTEGER NOT NULL DEFAULT 0);
-INSERT INTO mods VALUES('seele/perfis','3.3.1','d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d',1,'{}','https://github.com/DATA-AND-DEV/SEELE-MOD-PERFIS','["perfil de cada pessoa"]',1);
+INSERT INTO mods VALUES('seele/perfis','3.3.1','23827c3d73f62e0205f4e0c2fd67da258f51d7eb4591e05bb7e6498859d9c29f',1,'{}','https://github.com/DATA-AND-DEV/PERFIS','["regiao","perfis no servidor","arquivos de perfis"]',1);
 CREATE TABLE mod_data (
                 mod_id     TEXT NOT NULL REFERENCES mods(id),
                 key        TEXT NOT NULL,
                 value      BLOB NOT NULL,
                 PRIMARY KEY (mod_id, key)
             );
-INSERT INTO mod_data VALUES('seele/perfis','perfil:1',X'7B227265766973696F6E223A312C226170656C69646F223A22646F6E61222C2262696F223A22686F737065646F206465736465206120302E3135227D');
+INSERT INTO mod_data VALUES('seele/perfis','profiles',x'7b2231223a7b227265766973696f6e223a332c22646973706c61794e616d65223a22446f6e612064612043617361222c2270726f6e6f756e73223a22656c612f64656c61222c2262696f223a22686f737065646f206465736465206120302e3135222c22737461747573223a226e6f206172222c22616363656e74223a2223333336366363222c22656666656374223a226175726f7261222c22617661746172223a22766f6c756d653a696d616765732f312d313739333436383133382d72316c71327876773532222c2262616e6e6572223a2275706c6f6164732f312d313739333436383133382d62373072666f377032676a2e7061727473227d2c2232223a7b227265766973696f6e223a312c22646973706c61794e616d65223a22436f6e766964616461222c2270726f6e6f756e73223a22222c2262696f223a22222c22737461747573223a22646520706173736167656d222c22616363656e74223a2223663235323166222c22656666656374223a226e6f6e65222c22617661746172223a6e756c6c2c2262616e6e6572223a6e756c6c7d7d');
 CREATE TABLE instancia (
                 id           INTEGER PRIMARY KEY CHECK (id = 1),
                 identidade   TEXT    NOT NULL,

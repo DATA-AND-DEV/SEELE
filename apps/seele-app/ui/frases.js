@@ -801,6 +801,17 @@ function fraseDaLigacao(erro, nome, trilha) {
   return null;
 }
 
+/**
+ * **Os MODs que viraram parte do produto** (0.19: o PERFIS), com a versão que
+ * os incorporou: o espelho de `INCORPORADOS`, em
+ * `seele-server/src/mods/incorporados.rs`. O servidor recusa ligá-los
+ * (`ModIncorporado`); a gestão desabilita o LIGAR, e o ANTES DE HOSPEDAR diz
+ * que o produto os incorporou no lugar de oferecer ATUALIZAR. Aqui, e não em
+ * `camada-mods.js`, porque esta frase e a tela de hospedar também os leem, e
+ * este arquivo carrega antes de todos.
+ */
+const MODS_INCORPORADOS_AO_PRODUTO = new Map([["seele/perfis", "0.19"]]);
+
 function fraseDeErro(erro, apelido, deOnde) {
   // A unidade do nativo para a conexão segura não verificada (0.17): a mesma
   // frase da página, que não acusa ninguém. Ver o ramo de objeto, abaixo.
@@ -848,12 +859,16 @@ function fraseDeErro(erro, apelido, deOnde) {
       // Uma API fora das do Servidor 0.15 nenhum servidor de hoje roda, e a
       // saída de hospedar por ele só vale para quem ele roda (lote 58-1,
       // rodada 2).
-      const ditos = mods.map(([id, api]) => (!api
+      // Um MOD incorporado ao produto não se atualiza (0.19): a frase dele é
+      // a da incorporação, e não a das três saídas.
+      const ditos = mods.map(([id, api]) => (MODS_INCORPORADOS_AO_PRODUTO.has(id)
+        ? FRASES_ANTES_DE_HOSPEDAR.modIncorporado(id, MODS_INCORPORADOS_AO_PRODUTO.get(id))
+        : !api
         ? `${id}: o pacote deste MOD não está nesta máquina — baixe-o de novo, ou desligue o MOD.`
         : APIS_DO_SERVIDOR_0_15.includes(api)
           ? `${id}: feito para a API ${api}, que roda no Servidor 0.15.`
           : `${id}: feito para a API ${api}, que nenhum servidor de hoje roda.`));
-      const algumComApi = mods.some(([, api]) => Boolean(api));
+      const algumComApi = mods.some(([id, api]) => Boolean(api) && !MODS_INCORPORADOS_AO_PRODUTO.has(id));
       const algumDo015 = mods.some(([, api]) => APIS_DO_SERVIDOR_0_15.includes(api));
       return (
         "ESTE SERVIDOR TEM MOD QUE ESTE APP NÃO RODA.\n" +
@@ -1448,6 +1463,12 @@ const FRASES = {
       "ESTE SERVIDOR NÃO ESTÁ ENTRE OS GUARDADOS DESTA MÁQUINA.\nNada foi mudado.",
     NaoEDeApiAntiga:
       "ESTE MOD JÁ NÃO IMPEDE DE HOSPEDAR.\nNada foi mudado: tente hospedar de novo.",
+    // Um MOD incorporado ao produto (0.19) não se atualiza nem se desliga por
+    // aqui: a saída dele é seguir sem ele, e a subida traz os dados.
+    IncorporadoAoProduto:
+      "ESTE MOD AGORA FAZ PARTE DO SEELE.\nNão há versão dele para atualizar: hospede sem ele, e os dados dele serão trazidos.",
+    NaoEIncorporado:
+      "ESTE MOD NÃO FAZ PARTE DO SEELE.\nNada foi mudado: atualize ou desligue o MOD.",
 
     // Instalar um MOD de uma pasta (`FalhaAoInstalarMod`, em `mods.rs`). A
     // única recusa sem campo; as outras três, que trazem o motivo ou o caminho,
@@ -1897,6 +1918,15 @@ const FRASES_ANTES_DE_HOSPEDAR = Object.freeze({
   modAAtualizar: (versao) => `A APLICAR AO HOSPEDAR: ATUALIZAR PARA ${versao}`,
   modADesligar: "A APLICAR AO HOSPEDAR: DESLIGAR · OS DADOS DELE FICAM",
   modAAtualizarSemVersao: "A APLICAR AO HOSPEDAR: ATUALIZAR",
+  /**
+   * **Um MOD que o produto incorporou** (0.19; `mods_incorporados` do
+   * `antes_de_hospedar`): no lugar de ATUALIZAR e DESLIGAR, a frase. O 4.0.0 do
+   * PERFIS existe no catálogo, e o servidor desta versão o recusa.
+   */
+  modIncorporado: (id, desde) => (id === "seele/perfis"
+    ? `Perfis agora faz parte do SEELE (${desde ?? "0.19"}). Os perfis deste servidor serão trazidos.`
+    : `${id} agora faz parte do SEELE (${desde ?? "0.19"}). Os dados dele serão trazidos.`),
+  modsSoIncorporados: "Nenhum MOD impede de subir. O que um MOD fazia agora é do SEELE, e os dados dele vêm junto.",
   modDesfazer: "DESFAZER",
   modDesfazerDe: (id) => `Desfazer a escolha para ${id}: nada foi aplicado, e o MOD volta a pedir uma escolha.`,
   modTemVersao: (versao) => `há versão para esta: ${versao}`,

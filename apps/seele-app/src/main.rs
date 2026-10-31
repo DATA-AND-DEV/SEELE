@@ -63,13 +63,14 @@ mod audio_de_mentira;
 mod escolhas_de_mods;
 // As sessões cliente, todas iguais, e o foco de voz da máquina (E3 da 0.17).
 mod sessoes;
+mod toque;
 // O cenário da multi-sessão contra servidores de verdade (E3 da 0.17).
 #[cfg(test)]
 mod varias_sessoes_testes;
-// A travessia de um MOD da API 5 para a API 6 pelo P1 (compat, 25/10).
-mod toque;
+// O PERFIS da API 5 que a 0.15 deixou ligado, no ANTES DE HOSPEDAR da 0.19:
+// incorporado ao produto, sem ATUALIZAR, e os perfis trazidos na subida.
 #[cfg(test)]
-mod travessia_api5_testes;
+mod perfis_incorporado_testes;
 mod versoes;
 
 use std::sync::{Arc, Mutex};
@@ -4253,6 +4254,11 @@ fn antes_de_hospedar(app: AppHandle, servidor: Option<String>) -> AntesDeHospeda
             &banco,
         ),
         mods_de_api_antiga,
+        mods_incorporados: if banco.exists() {
+            mods::incorporados_ligados(&banco)
+        } else {
+            Vec::new()
+        },
         escolhas_pendentes: escolhas_de_mods::pendentes(
             std::path::Path::new(&config),
             servidor.as_deref(),
@@ -4268,6 +4274,10 @@ struct AntesDeHospedarNaTela {
     /// Os MODs ligados que esta versão não roda, **como estão no banco**: uma
     /// escolha estagiada não os tira daqui, porque o banco não mudou.
     mods_de_api_antiga: Vec<(String, Option<u32>)>,
+    /// **Os MODs ligados que agora são parte do produto** (0.19), de qualquer
+    /// API: `(id, desde)`. A tela não oferece ATUALIZAR para eles; diz que o
+    /// produto os incorporou e que os dados deles serão trazidos na subida.
+    mods_incorporados: Vec<(String, String)>,
     /// **As escolhas de MOD estagiadas para este servidor** (P1 da 0.17): o
     /// `hospedar` as aplica depois da cópia e da conversão. Desistir, voltar e
     /// reabrir mostram as mesmas; o banco não foi tocado.

@@ -3,9 +3,12 @@
   "id": "seele/perfis",
   "version": "3.3.1",
   "api": 5,
-  "repo": "https://github.com/DATA-AND-DEV/SEELE-MOD-PERFIS",
+  "repo": "https://github.com/DATA-AND-DEV/PERFIS",
   "reach": [
-    "perfil de cada pessoa"
+    "regiao",
+    "perfis no servidor",
+    "arquivos de perfis"
   ],
+  "client": "cliente/main.js",
   "server": "servidor/main.js"
 }

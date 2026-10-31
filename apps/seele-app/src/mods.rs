@@ -599,6 +599,34 @@ pub(crate) fn mods_de_api_antiga(
     antigos
 }
 
+/// **Os MODs incorporados ao produto ligados neste banco**, de qualquer API,
+/// lido **só para leitura**: `(id, desde que versão do SEELE)`.
+///
+/// É o que o ANTES DE HOSPEDAR diz com «Perfis agora faz parte do SEELE»: um
+/// PERFIS da API 6 ou 7 não impede de subir (a subida o migra e o desliga), e
+/// um da API 5 impede até quem hospeda seguir sem ele — nos dois casos quem
+/// hospeda lê, antes, o que vai acontecer com os perfis. Sem banco ou sem a
+/// tabela, nenhum.
+pub(crate) fn incorporados_ligados(banco: &Path) -> Vec<(String, String)> {
+    let Ok(conexao) =
+        rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
+        return Vec::new();
+    };
+    let Ok(mut consulta) = conexao.prepare("SELECT id FROM mods WHERE enabled = 1 ORDER BY id")
+    else {
+        return Vec::new();
+    };
+    let Ok(linhas) = consulta.query_map([], |linha| linha.get::<_, String>(0)) else {
+        return Vec::new();
+    };
+    linhas
+        .flatten()
+        .filter_map(|id| seele_server::mods::incorporados::incorporado(&id))
+        .map(|incorporado| (incorporado.id, incorporado.desde.to_owned()))
+        .collect()
+}
+
 /// **A linha que liga estes bytes**: os sete campos lidos do pacote por hash,
 /// no mesmo ato (migrações 12 e 14), ou o nome da recusa.
 ///
@@ -631,6 +659,14 @@ pub(crate) enum SaidaDoModAntigo {
     Atualizar { hash: String },
     /// A saída 3: desliga o MOD. A linha e os dados ficam (ADR 0045).
     Desligar,
+    /// **A única saída de um MOD incorporado ao produto** (0.19; ver
+    /// `seele_server::mods::incorporados`): o PERFIS de uma API antiga não se
+    /// atualiza mais — o 4.0.0 que o ATUALIZAR traria é um MOD que esta linha
+    /// recusa. Quem hospeda lê que o produto faz o que ele fazia, e segue: o
+    /// MOD sai do conjunto (desligado, como o DESLIGAR), e a subida do servidor
+    /// traz os perfis dele para as tabelas do produto (`perfis::migracao`),
+    /// copiando, sem apagar o quintal.
+    Incorporado,
 }
 
 /// Por que uma saída de quem hospeda não foi aceita. A frase mora em
@@ -649,6 +685,13 @@ pub(crate) enum FalhaAoResolverModAntigo {
     /// Os bytes da versão nova não servem, com o nome da recusa
     /// ([`linha_do_pacote`]).
     PacoteNaoServe(String),
+    /// **Este MOD agora é parte do produto** (0.19): ATUALIZAR levaria a uma
+    /// versão que o servidor recusa, e DESLIGAR não diz o que acontece com os
+    /// dados dele. A saída é [`SaidaDoModAntigo::Incorporado`].
+    IncorporadoAoProduto,
+    /// [`SaidaDoModAntigo::Incorporado`] pedida para um MOD que o produto não
+    /// incorporou: ele tem as saídas de sempre.
+    NaoEIncorporado,
     /// A escolha não pôde ser guardada (o disco), com o motivo. O banco não
     /// foi tocado.
     NaoGuardou(String),
@@ -690,11 +733,24 @@ pub(crate) fn resolver_mod_de_api_antiga(
     else {
         return Err(FalhaAoResolverModAntigo::NaoEDeApiAntiga);
     };
+    // **Um MOD incorporado ao produto só tem a saída dele** (0.19): conferido
+    // antes do pacote, porque o 4.0.0 do PERFIS existe no catálogo e serviria
+    // aqui — e seria recusado na subida, depois da cópia e da conversão.
+    let incorporado = seele_server::mods::incorporados::incorporado(id);
+    match (saida, &incorporado) {
+        (SaidaDoModAntigo::Incorporado, None) => {
+            return Err(FalhaAoResolverModAntigo::NaoEIncorporado)
+        }
+        (SaidaDoModAntigo::Atualizar { .. } | SaidaDoModAntigo::Desligar, Some(_)) => {
+            return Err(FalhaAoResolverModAntigo::IncorporadoAoProduto)
+        }
+        _ => {}
+    }
     let nova = match saida {
         SaidaDoModAntigo::Atualizar { hash } => Some(
             linha_do_pacote(config, id, hash).map_err(FalhaAoResolverModAntigo::PacoteNaoServe)?,
         ),
-        SaidaDoModAntigo::Desligar => None,
+        SaidaDoModAntigo::Desligar | SaidaDoModAntigo::Incorporado => None,
     };
     crate::escolhas_de_mods::estagiar(
         Path::new(config),
@@ -711,6 +767,13 @@ pub(crate) fn resolver_mod_de_api_antiga(
         .api
         .map_or_else(|| "não lida".to_owned(), |api| api.to_string());
     match &nova {
+        None if incorporado.is_some() => tracing::info!(
+            servidor = qual,
+            mod_id = id,
+            api_antiga = %api,
+            "MOD incorporado ao produto: seguir sem ele escolhido; o banco não foi tocado, e no \
+             hospedar ele sai do conjunto e a subida traz os dados dele"
+        ),
         Some(linha) => tracing::info!(
             servidor = qual,
             mod_id = id,

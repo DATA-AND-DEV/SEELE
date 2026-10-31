@@ -530,6 +530,11 @@
 .antes-linha-sub {
   color: var(--seele-osso-apagado);
 }
+/* Um MOD que o produto incorporou (0.19): a frase é a saída, e se lê inteira,
+   na cor do texto, e não apagada como a API de um MOD. */
+.antes-linha-sub.antes-linha-incorporado {
+  color: var(--seele-osso);
+}
 /* Os «mais» de cada bloco: o caminho da cópia, as versões anteriores, as
    APIs. O triângulo do navegador diz «isto abre». */
 .antes-mais {

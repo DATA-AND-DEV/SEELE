@@ -26670,3 +26670,153 @@ confere("o padrão salvo não ficou guardado na janela", vm.runInContext("perfil
 "##,
     );
 }
+
+/// **O ANTES DE HOSPEDAR não oferece ATUALIZAR para um MOD que o produto
+/// incorporou** (0.19; `docs/0.19/perfis-oficiais.md`, §4).
+///
+/// Até a 0.18, quem chegava com o PERFIS 3.3.1 (API 5) ligado lia ATUALIZAR
+/// PARA 4.0.0 — e na 0.19 o 4.0.0 é um MOD que o servidor recusa. Roda de
+/// verdade no `node`, sobre as fontes reais:
+///
+/// (a) `desenharSaidasDeQuemHospeda`, com o catálogo oferecendo o 4.0.0: a
+///     linha do PERFIS diz «Perfis agora faz parte do SEELE (0.19). Os perfis
+///     deste servidor serão trazidos.» e não tem botão nenhum; a de outro MOD
+///     de API antiga continua com ATUALIZAR e DESLIGAR (o propósito do guarda
+///     de antes: as saídas dos outros não mudam);
+/// (b) `confirmarEHospedar` estagia «seguir sem ele» (`saida: "incorporado"`)
+///     **antes** de chamar o `hospedar`, e não hospeda quando a escolha não se
+///     guarda;
+/// (c) a lista da janela é a do servidor (`INCORPORADOS`).
+///
+/// O teste de ponta a ponta (o banco, a cópia, o cancelar e os perfis trazidos)
+/// é `perfis_incorporado_testes.rs`, em `src/`.
+#[test]
+fn o_antes_de_hospedar_diz_que_o_perfis_e_do_produto_e_nao_oferece_o_4_0_0() {
+    use std::io::Write;
+    // (c) A lista da janela, contra a do servidor.
+    let frases = read("ui/frases.js");
+    let declarada = without_comments(&frases);
+    let lista = declarada
+        .split_once("const MODS_INCORPORADOS_AO_PRODUTO = new Map(")
+        .and_then(|(_, depois)| depois.split_once(");"))
+        .map(|(lista, _)| lista.to_owned())
+        .expect("`MODS_INCORPORADOS_AO_PRODUTO` sumiu do frases.js");
+    let esperada = format!(
+        "[{}]",
+        seele_server::mods::incorporados::INCORPORADOS
+            .iter()
+            .map(|(id, desde)| format!("[\"{id}\", \"{desde}\"]"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert_eq!(
+        lista, esperada,
+        "a lista de MODs incorporados da janela não é a do servidor (`incorporados.rs`)"
+    );
+
+    let boot = read("ui/tela-boot.js");
+    let antes = read("ui/tela-antes-de-hospedar.js");
+    let fontes = serde_json::json!({
+        "frases": frases,
+        "saidas": format!(
+            "async function desenharSaidasDeQuemHospeda(mods, servidor, opcoesDaTela) {}",
+            js_function(&boot, "async function desenharSaidasDeQuemHospeda(")
+        ),
+        "hospedar": format!(
+            "async function confirmarEHospedar() {}",
+            js_function(&antes, "async function confirmarEHospedar(")
+        ),
+    })
+    .to_string();
+    let script = r#"
+const vm = require("vm");
+const fontes = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const falhas = [];
+const confere = (nome, ok) => { if (!ok) falhas.push(nome); };
+function no(tag, classe, texto) {
+  return { tag, className: classe ?? "", textContent: texto ?? "", dataset: {}, filhos: [], hidden: false,
+    append(...f) { this.filhos.push(...f); }, replaceChildren(...f) { this.filhos = f; },
+    setAttribute() {}, addEventListener() {}, focus() {}, scrollIntoView() {}, remove() {},
+    querySelector() { return null; }, querySelectorAll() { return []; } };
+}
+const todos = (n) => [n, ...(n.filhos ?? []).flatMap(todos)];
+function contexto(invoke) {
+  const elementos = {};
+  const ctx = { console, Map, Set, Promise, Object, invoke,
+    $: (id) => (elementos[id] ??= no("div")), elementos, chamadas: [],
+    elemento: no, versaoParaEsteApp: (v) => v?.[0] ?? null, APIS_QUE_ESTE_APLICATIVO_ACEITA: [7, 6],
+    geracaoDasSaidas: 0, fraseDaVersao: (f) => String(f), voltarParaTela() {}, servidorEscolhido: undefined };
+  vm.createContext(ctx);
+  vm.runInContext(fontes.frases, ctx);
+  return ctx;
+}
+(async () => {
+  // (a) As linhas: o PERFIS sem saída, o outro com as duas.
+  const catalogo = { mods: [
+    { id: "seele/perfis", versoes: [{ versao: "4.0.0", hash: "h4", api: 6 }] },
+    { id: "ana/outro", versoes: [{ versao: "2.0.0", hash: "h2", api: 7 }] },
+  ] };
+  const a = contexto(async (cmd) => (cmd === "catalogo_de_mods" ? catalogo : null));
+  vm.runInContext(fontes.saidas, a);
+  await vm.runInContext(`desenharSaidasDeQuemHospeda([["seele/perfis", 5], ["ana/outro", 4]], null,
+    { incorporados: new Map([["seele/perfis", "0.19"]]) })`, a);
+  const linhas = todos(a.elementos["boot-saidas"]).filter((n) => n.tag === "li");
+  const perfis = linhas.find((l) => l.dataset.mod === "seele/perfis");
+  const outro = linhas.find((l) => l.dataset.mod === "ana/outro");
+  confere("(a) a linha do PERFIS sumiu", Boolean(perfis));
+  const botoes = (l) => todos(l ?? { filhos: [] }).filter((n) => n.tag === "button").map((n) => n.dataset.saida);
+  confere(`(a) o PERFIS ainda tem saída: ${botoes(perfis)}`, botoes(perfis).length === 0);
+  confere("(a) o PERFIS não diz que agora faz parte do SEELE",
+    todos(perfis ?? { filhos: [] }).some((n) => n.textContent === "Perfis agora faz parte do SEELE (0.19). Os perfis deste servidor serão trazidos."));
+  confere("(a) o 4.0.0 aparece na linha do PERFIS", !todos(perfis ?? { filhos: [] }).some((n) => /4\.0\.0/.test(n.textContent)));
+  confere(`(a) o outro MOD perdeu ATUALIZAR ou DESLIGAR: ${botoes(outro)}`,
+    botoes(outro).includes("atualizar") && botoes(outro).includes("desligar"));
+
+  // (b) O HOSPEDAR do fim estagia o incorporado antes de subir.
+  const ordem = [];
+  const b = contexto(async (cmd, args) => { ordem.push([cmd, args?.saida, args?.id]); });
+  b.antesDeHospedar = { servidor: null, aSeguirSem: new Set(["seele/perfis"]), geracao: 0 };
+  b.hospedar = async () => { ordem.push(["hospedar"]); };
+  vm.runInContext(fontes.hospedar, b);
+  await vm.runInContext("confirmarEHospedar()", b);
+  confere(`(b) a ordem não é estagiar e depois hospedar: ${JSON.stringify(ordem)}`,
+    JSON.stringify(ordem) === JSON.stringify([["resolver_mod_de_api_antiga", "incorporado", "seele/perfis"], ["hospedar"]]));
+  const c = contexto(async () => { throw "NaoGuardou"; });
+  let hospedou = false;
+  c.antesDeHospedar = { servidor: null, aSeguirSem: new Set(["seele/perfis"]), geracao: 0 };
+  c.hospedar = async () => { hospedou = true; };
+  vm.runInContext(fontes.hospedar, c);
+  await vm.runInContext("confirmarEHospedar()", c);
+  confere("(b) hospedou com a escolha não guardada", !hospedou);
+  confere("(b) a escolha não guardada não foi dita", c.elementos["antes-erro"]?.hidden === false);
+  if (falhas.length) { console.log(falhas.join("\n")); process.exit(1); }
+})().catch((e) => { console.log(e.stack); process.exit(1); });
+"#;
+    let mut filho = match std::process::Command::new("node")
+        .args(["-e", script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(filho) => filho,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda do PERFIS incorporado não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    filho
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(fontes.as_bytes())
+        .expect("as fontes ao node");
+    let saida = filho.wait_with_output().expect("node");
+    assert!(
+        saida.status.success(),
+        "o ANTES DE HOSPEDAR oferece o 4.0.0 ao PERFIS, ou hospeda sem estagiar:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}

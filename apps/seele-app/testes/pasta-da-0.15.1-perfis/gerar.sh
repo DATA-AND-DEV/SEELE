@@ -22,5 +22,8 @@ cp "$AQUI/gerar.rs" "$PASTA/fonte/crates/seele-server/examples/gerar-pasta-perfi
 rm -rf "$AQUI/pasta"
 mkdir -p "$AQUI/pasta"
 cp -R "$PASTA/saida/mod-packages" "$AQUI/pasta/"
+# O quintal de arquivos do PERFIS (o volume e os fragmentos), como a 0.15.1 o
+# deixou ao lado do banco.
+cp -R "$PASTA/saida/mod-data-legado" "$AQUI/pasta/"
 sqlite3 "$PASTA/saida/seele.db" .dump > "$AQUI/pasta/seele.sql"
 echo "pronto: $AQUI/pasta"

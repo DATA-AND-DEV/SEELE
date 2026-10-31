@@ -637,13 +637,10 @@ $("mods-aceite").addEventListener("keydown", (evento) => {
 // editando o banco à mão.
 
 /** Desenha uma linha da lista de instalados. */
-/**
- * **Os MODs que viraram parte do produto** (0.19: o PERFIS), com a versão que
- * os incorporou. O servidor recusa ligá-los (`ModIncorporado`, a lista de
- * `seele-server/src/mods/incorporados.rs`); aqui o LIGAR fica desabilitado e a
- * linha diz por quê, antes de alguém tentar.
- */
-const MODS_INCORPORADOS_AO_PRODUTO = new Map([["seele/perfis", "0.19"]]);
+// Os MODs que viraram parte do produto (`MODS_INCORPORADOS_AO_PRODUTO`)
+// moram em `frases.js`: o ANTES DE HOSPEDAR e a frase da recusa também os
+// leem, e `frases.js` carrega antes de todos. Aqui o LIGAR fica desabilitado e
+// a linha diz por quê, antes de alguém tentar.
 
 function linhaDeModInstalado(mod, hospedando) {
   const linha = elemento("li");

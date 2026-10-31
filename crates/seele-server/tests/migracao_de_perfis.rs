@@ -459,6 +459,200 @@ async fn um_perfis_de_outra_api_ligado_nao_impede_a_subida() -> Result<()> {
     Ok(())
 }
 
+/// A pasta de quem hospedou na 0.15.1 com o PERFIS 3.3.1 (API 5), **escrita
+/// pelo código da v0.15.1 rodando a metade de servidor de verdade do 3.3.1**
+/// (`SEELE-MOD-PERFIS@0774774`; ver o `LEIA.md` dela). Mora no app, onde o
+/// teste da travessia a usa; aqui ela é só lida, como `acoes_de_mod.rs` lê a
+/// fixture de lá.
+fn pasta_da_0_15_1() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta")
+}
+
+/// O caminho relativo, em `dados`, do arquivo que termina em `fim`.
+fn na_pasta(dados: &Path, fim: &str) -> String {
+    arvore(dados)
+        .into_keys()
+        .find(|caminho| caminho.ends_with(fim))
+        .unwrap_or_else(|| panic!("a pasta não tem um arquivo terminado em {fim}"))
+}
+
+/// **O PERFIS 3.3.1 da API 5, como a 0.15.1 o deixou, vira perfil do produto.**
+///
+/// A F3 provou a migração com o PERFIS 1.0, 1.2 e 5.0; esta é a linha que a
+/// 0.15 rodava. O banco é o da 0.15.1 (esquema 13, convertido nesta subida), o
+/// quintal é o que o `save` do 3.3.1 gravou (`profiles`), a foto veio pelo
+/// volume (o transporte do 3.2 em diante) e a capa pelos fragmentos
+/// (`.parts`, dois pedaços). Medido em 31/10: o 3.3.1 guarda tudo na mesma
+/// forma que a migração já lê (a chave `profiles` é a mesma do 1.0 ao 5.0), e
+/// nada novo precisou ser lido.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_perfis_3_3_1_da_0_15_1_vira_perfil_do_produto() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let banco = temp.path().join("seele.db");
+    rusqlite::Connection::open(&banco)?.execute_batch(&std::fs::read_to_string(
+        pasta_da_0_15_1().join("seele.sql"),
+    )?)?;
+    let raizes = RaizesDosMods {
+        pacotes: temp.path().to_path_buf(),
+        dados: temp.path().join("mod-data-legado"),
+    };
+    copiar_arvore(&pasta_da_0_15_1().join("mod-data-legado"), &raizes.dados);
+    let dados = raizes.dados_de(PERFIS);
+    let dados_antes = impressoes(&dados);
+    let quintal_antes: Vec<(String, Vec<u8>)> = {
+        let sql = rusqlite::Connection::open(&banco)?;
+        let mut consulta = sql.prepare(
+            "SELECT key, CAST(value AS BLOB) FROM mod_data WHERE mod_id = ?1 ORDER BY key",
+        )?;
+        let linhas = consulta
+            .query_map([PERFIS], |l| Ok((l.get(0)?, l.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        linhas
+    };
+    assert_eq!(
+        quintal_antes
+            .iter()
+            .map(|(chave, _)| chave.as_str())
+            .collect::<Vec<_>>(),
+        ["profiles"],
+        "a pasta da 0.15.1 não tem o quintal que o 3.3.1 grava"
+    );
+    let config = ServerConfig {
+        name: "Casa".into(),
+        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+        database: Location::File(banco.clone()),
+        mods_dir: Some(raizes.clone()),
+        ..ServerConfig::default()
+    };
+    let pasta = seele_server::diretorio_de_perfis(&config).unwrap();
+
+    let daemon = Daemon::bind(config.clone()).await?;
+    let (dona, convidada, livro, relatorio, ligados, quintal) = {
+        let b = daemon.server().persistence.lock().await;
+        (
+            perfis::ler(&b, PersonId(1))?,
+            perfis::ler(&b, PersonId(2))?,
+            [1, 2].map(|p| perfis::registro_da_migracao(&b, PersonId(p)).unwrap()),
+            perfis::relatorio(&b)?,
+            seele_server::persistence::mods::enabled(&b)?
+                .into_iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>(),
+            seele_server::persistence::mods::ler_quintal(&b, PERFIS)?,
+        )
+    };
+
+    // O texto, campo a campo, como o `save` do 3.3.1 o gravou.
+    let dona = dona.expect("o perfil da dona não veio");
+    assert_eq!(
+        (
+            dona.revisao,
+            dona.nome_exibido.as_str(),
+            dona.pronomes.as_str(),
+            dona.status.as_str(),
+            dona.bio.as_str(),
+            dona.cor,
+            dona.efeito,
+        ),
+        (
+            3,
+            "Dona da Casa",
+            "ela/dela",
+            "no ar",
+            "hospedo desde a 0.15",
+            [0x33, 0x66, 0xcc],
+            Efeito::Aurora
+        )
+    );
+    let convidada = convidada.expect("o perfil da convidada não veio");
+    assert_eq!(
+        (
+            convidada.revisao,
+            convidada.nome_exibido.as_str(),
+            convidada.status.as_str(),
+            convidada.foto,
+            convidada.capa,
+        ),
+        (1, "Convidada", "de passagem", None, None)
+    );
+
+    // A foto, pelo volume: os bytes que o fluxo deixou, pelo SHA.
+    let do_volume = arvore(&dados)
+        .into_iter()
+        .find(|(caminho, _)| caminho.starts_with("volume/images/1-"))
+        .map(|(_, bytes)| bytes)
+        .expect("a pasta da 0.15.1 não tem a foto no volume");
+    let foto = dona.foto.expect("a foto (volume) não veio");
+    assert_eq!(foto.hash, sha(&do_volume));
+    assert_eq!(foto.tipo, TipoDaImagem::Png);
+    assert_eq!(
+        std::fs::read(pasta.join(seele_proto::attachment::hex(&foto.hash)))?,
+        do_volume
+    );
+    // A capa, pelos fragmentos: os bytes gravados em `perfis/`, em data-URL,
+    // são os dois pedaços juntos — conferido sem passar pelo leitor da
+    // migração.
+    let capa = dona.capa.expect("a capa (fragmentos) não veio");
+    assert_eq!(capa.tipo, TipoDaImagem::Png);
+    let gravada = std::fs::read(pasta.join(seele_proto::attachment::hex(&capa.hash)))?;
+    let todos = arvore(&dados);
+    let pedacos: String = [".parts.0", ".parts.1"]
+        .iter()
+        .map(|fim| String::from_utf8(todos[&na_pasta(&dados, fim)].clone()).unwrap())
+        .collect();
+    assert_eq!(
+        format!("data:image/png;base64,{}", base64(&gravada)),
+        pedacos
+    );
+
+    // O livro, e o relatório que quem hospeda lê.
+    let [livro_dona, livro_convidada] = livro;
+    let livro_dona = livro_dona.expect("a dona não entrou no livro");
+    assert_eq!(
+        (livro_dona.foto, livro_dona.capa),
+        (EstadoDaImagem::Trazida, EstadoDaImagem::Trazida)
+    );
+    let livro_convidada = livro_convidada.expect("a convidada não entrou no livro");
+    assert_eq!(
+        (livro_convidada.foto, livro_convidada.capa),
+        (EstadoDaImagem::Nenhuma, EstadoDaImagem::Nenhuma)
+    );
+    let relatorio = relatorio.expect("sem relatório para quem hospeda");
+    assert_eq!(relatorio.trazidos, 2);
+    assert!(!relatorio.incompleta);
+    assert!(
+        relatorio.ocorrencias.is_empty(),
+        "{:?}",
+        relatorio.ocorrencias
+    );
+
+    // O 3.3.1 sai desligado; o quintal e a pasta dele ficam como estavam.
+    assert!(
+        !ligados.contains(&PERFIS.to_owned()),
+        "o 3.3.1 continuou ligado"
+    );
+    let (_, bruto) = quintal_antes.first().unwrap();
+    assert_eq!(
+        quintal.get("profiles").map(String::as_bytes),
+        Some(bruto.as_slice()),
+        "o quintal do 3.3.1 mudou"
+    );
+    assert_eq!(impressoes(&dados), dados_antes, "a pasta do 3.3.1 mudou");
+
+    // Idempotente: a segunda subida não muda perfil, livro nem relatório.
+    let imagens = impressoes(&pasta);
+    drop(daemon);
+    let daemon = Daemon::bind(config).await?;
+    {
+        let b = daemon.server().persistence.lock().await;
+        assert_eq!(perfis::ler(&b, PersonId(1))?.map(|p| p.revisao), Some(3));
+        assert_eq!(perfis::relatorio(&b)?, Some(relatorio));
+    }
+    assert_eq!(impressoes(&pasta), imagens);
+    Ok(())
+}
+
 /// **O que não cabe vai para o relatório**: pessoa que não existe (e não é
 /// criada), campo inválido (vira `""`), cor inválida (volta ao padrão), efeito
 /// desconhecido (vira nenhum). E um perfil já editado no produto, com revisão

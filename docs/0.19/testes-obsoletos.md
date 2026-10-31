@@ -23,7 +23,7 @@ Hoje `APIS_ACEITAS = [7, 6]` e `MOD_API_MINIMA = 6` (`crates/seele-proto/src/mod
 **Remover:**
 - `mods.rs:1340` `a_api_6_continua_como_saiu`
 - `crates/seele-proto/tests/manifesto_da_0_16.rs` inteiro (réplica do leitor da 0.16; o `:154` ainda roda `git show`). Depende de a 0.16 deixar de receber catálogo.
-- `apps/seele-app/src/travessia_api5_testes.rs` (API 5 → 4.0.0 da API 6) + a fixture `apps/seele-app/testes/pasta-da-0.15.1-perfis/` + o `mod travessia_api5_testes;` em `main.rs:71`.
+- ~~`apps/seele-app/src/travessia_api5_testes.rs` (API 5 → 4.0.0 da API 6)~~ — substituído por `perfis_incorporado_testes.rs` (31/10): o PERFIS da API 5 é dito como incorporado, sem o 4.0.0. A fixture `apps/seele-app/testes/pasta-da-0.15.1-perfis/` fica (regravada com o 3.3.1 de verdade), e o `perfis-4.0.0/` dela é da API 6: sai com o corte.
 
 **Reescrever** (o assunto continua, a API 6 sai):
 - `mods.rs:1375`, `:1397`, `:1414`, `:1231` (+ fundir com `:1251`), `:1267`
