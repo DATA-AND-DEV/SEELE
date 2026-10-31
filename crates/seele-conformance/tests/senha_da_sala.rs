@@ -200,7 +200,9 @@ async fn entrar_com_a_senha_certa_senta_de_verdade_nas_duas_pontas() -> Result<(
         Duration::from_secs(15),
         |room| {
             room.roster(voice_room)
-                .any(|pessoa| pessoa.nickname == "visita")
+                // O apelido chega com a marca da chave (`visita#XXXX`) desde
+                // a 0.18; a pessoa é a base.
+                .any(|pessoa| pessoa.nickname.split('#').next() == Some("visita"))
         },
     )
     .await;

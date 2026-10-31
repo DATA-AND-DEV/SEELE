@@ -124,27 +124,41 @@ fn ordinal_de(nome: &str) -> u32 {
     u32::try_from(nomes.iter().position(|n| *n == nome).unwrap()).unwrap()
 }
 
-/// **O caso da revisão:** trocar para o apelido de outra chave volta como
-/// `PedidoRecusado { SetNickname, NomeTomado }`.
+/// **Trocar para o apelido de outra chave não é recusado** desde a 0.18
+/// (`8284b642`): bases iguais são admitidas, e cada chave guarda a própria
+/// marca (`maya#XXXX`), que separa as duas sem dar a uma a identidade da outra.
+/// Este teste dizia `NomeTomado`, a regra de antes; a recusa já não existe
+/// para o `SetNickname` (a regra das marcas está em `permissions.rs`).
+///
+/// O que se confere no fio: o primeiro alerta depois da troca é o do pedido
+/// seguinte, e não um `PedidoRecusado` do `SetNickname`. Sem o segundo pedido,
+/// «nenhum alerta» seria só um prazo vencido.
 #[tokio::test(flavor = "multi_thread")]
-async fn o_apelido_de_outra_chave_volta_como_nome_tomado() -> Result<()> {
+async fn o_apelido_de_outra_chave_e_admitido_com_outra_marca() -> Result<()> {
     let (endereco, daemon) = servidor().await?;
     let _maya = entrar(endereco, 121, "maya").await?;
     let mut shinji = entrar(endereco, 122, "shinji").await?;
 
-    let motivo = alerta_depois_de(
-        &mut shinji,
-        ClientMessage::SetNickname {
+    frame::write(
+        &mut shinji.envio,
+        &ClientMessage::SetNickname {
             name: "maya".into(),
         },
     )
+    .await?;
+    let motivo = alerta_depois_de(
+        &mut shinji,
+        ClientMessage::RemoveMessage {
+            message: MessageId(9_999),
+        },
+    )
     .await;
-    assert_eq!(
-        motivo,
-        Some(AlertReason::PedidoRecusado {
-            pedido: ordinal_de("SetNickname"),
-            causa: CausaDaRecusa::NomeTomado,
-        })
+    assert!(
+        matches!(
+            motivo,
+            Some(AlertReason::PedidoRecusado { pedido, .. }) if pedido == ordinal_de("RemoveMessage")
+        ),
+        "o primeiro alerta não foi o do pedido seguinte: o SetNickname para a base de outra chave foi recusado? {motivo:?}"
     );
 
     daemon.shutdown();
