@@ -307,6 +307,14 @@ fn zip(mut arquivo: File, x: &mut Extracao<'_>) -> Result<(), Recusa> {
     if quantas == 0xFFFF || inicio_do_central == 0xFFFF_FFFF {
         return Err(x.invalido("zip64 não é lido"));
     }
+    // **O diretório central cabe no arquivo** (revisão final, M5): o tamanho
+    // vem do pacote, e um EOCD quebrado pedia até 4 GiB de memória antes de
+    // qualquer leitura falhar.
+    if u64::from(inicio_do_central).saturating_add(u64::from(tamanho_do_central)) > tamanho {
+        return Err(x.invalido(format!(
+            "o diretório central ({tamanho_do_central} bytes a partir de {inicio_do_central}) passa do fim do arquivo ({tamanho} bytes)"
+        )));
+    }
     let mut central = vec![0_u8; tamanho_do_central as usize];
     arquivo
         .seek(SeekFrom::Start(u64::from(inicio_do_central)))

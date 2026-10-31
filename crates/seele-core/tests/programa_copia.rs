@@ -382,3 +382,31 @@ async fn sem_quem_ofereca_a_copia_cai_com_os_numeros() {
         outra => panic!("{outra:?}"),
     }
 }
+
+/// **Parar a oferta corta as ligações que ela já tinha** (revisão final,
+/// M3): uma ligação aberta antes do `encerrar_tudo` (REVOGAR, DESLIGAR) é
+/// fechada na hora, e não segue esperando o pedido (ou mandando o mundo).
+#[tokio::test]
+async fn encerrar_corta_as_ligacoes_da_copia_que_ja_estavam() {
+    let porta = porta_livre();
+    let (_a, principal) = programa("corta", 1 << 30, vec![porta]);
+    mundo(principal.raiz());
+    principal.empacotar("world", "a.tar.gz").unwrap();
+    principal.oferecer_copia("a.tar.gz", porta).await.unwrap();
+    let mut ligacao = tokio::net::TcpStream::connect(("127.0.0.1", porta))
+        .await
+        .unwrap();
+    // A ligação já foi aceita e espera o pedido.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    principal.encerrar_tudo().await;
+    let mut resto = Vec::new();
+    let lido = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        ligacao.read_to_end(&mut resto),
+    )
+    .await;
+    assert!(
+        lido.is_ok(),
+        "a ligação aberta antes de encerrar seguiu de pé depois dele"
+    );
+}

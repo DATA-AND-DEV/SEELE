@@ -304,6 +304,28 @@ fn o_zip_do_windows_vira_a_pasta_do_java() {
     assert!(sem_parcial(programa.raiz()));
 }
 
+/// **Um diretório central maior que o arquivo é recusado antes de alocar**
+/// (revisão final, M5): o tamanho vem do EOCD, e um pacote quebrado pedia até
+/// 4 GiB de memória (um aborto no Windows) antes de a leitura falhar.
+#[test]
+fn um_diretorio_central_alem_do_fim_e_recusado_antes_de_alocar() {
+    let (_p, programa) = programa("zip-central", 1 << 20);
+    let mut bytes = zip(&[("jdk-21-jre/bin/java.exe", b"MZ java", false)]);
+    let eocd = bytes
+        .windows(4)
+        .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+        .unwrap();
+    bytes[eocd + 12..eocd + 16].copy_from_slice(&0xFFFF_FFF0_u32.to_le_bytes());
+    std::fs::write(programa.raiz().join("grande.zip"), &bytes).unwrap();
+    let recusa = programa
+        .desempacotar(&pedido("grande.zip", "java", "jdk-21-jre"))
+        .unwrap_err();
+    assert!(
+        matches!(&recusa, Recusa::PacoteInvalido { motivo, .. } if motivo.contains("passa do fim")),
+        "{recusa:?}"
+    );
+}
+
 /// **Uma entrada que sairia da pasta recusa o pacote inteiro**, e nada fica.
 #[test]
 fn uma_entrada_com_pai_recusa_o_pacote_e_nada_fica() {

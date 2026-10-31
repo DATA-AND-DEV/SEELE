@@ -133,3 +133,16 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   escreve); uma leitura no meio via `0` e dava o processo por morto. Visto
   uma vez em `matar_a_pedido_para_o_processo_e_diz_que_foi_a_pedido` (passou
   nas três seguintes), e sempre no laço novo do I9. — Custo: nenhum no produto.
+- **Ruling R9 (M3): as ligações da cópia moram num `JoinSet` da escuta, e a
+  oferta confere `encerrado` de novo depois de guardar a escuta.** Parar a
+  escuta solta o conjunto e corta cada transferência; uma oferta que corria
+  durante o `encerrar_tudo` se desfaz e volta `encerrado`. — Custo: uma
+  oferta nova (a mesma porta) também corta quem estava baixando a de antes —
+  que já não seria a cópia anunciada.
+- **Ruling R10 (M5): o diretório central de um `.zip` tem de caber no
+  arquivo**, como em `seele_proto::pack`, antes de alocar. — Custo: nenhum
+  pacote válido tem o diretório além do fim.
+- **Ruling R11 (M6): `guardar` e `revogar` dizem no log quantas linhas
+  ilegíveis a regravação tira** (`WARN`, com o arquivo e o caminho). Não
+  mudei a assinatura (a ffi e a casca seguem iguais). — Custo: a contagem
+  fica no `seele.log`, e não na tela.
