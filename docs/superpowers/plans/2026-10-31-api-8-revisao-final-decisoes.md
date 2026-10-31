@@ -45,3 +45,13 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   só se resolvem quando o caminho já existe (o `canonicalize`); (f) a
   `pasta` de `rodar` deixa de ser uma escolha: um MOD que rodava numa
   subpasta passa a ser recusado (nenhum dos de referência roda).
+- **Ruling R2 (I3): a máquina serve a porta que ela pediu, e recusa a
+  concessão que traz outra.** `servindo` guarda o protocolo e a porta do
+  `ServirTunel` ao lado da resposta; a concessão é registrada com eles, e uma
+  com outra porta ou outro protocolo não registra nada, manda `PararTunel` ao
+  servidor e responde `fora-do-aceite` a quem pediu, com as duas portas no
+  log. — Por que recusar, e não só registrar a pedida: uma concessão que não
+  confere é um servidor quebrado ou hostil, e servir calado esconderia isso;
+  e `fora-do-aceite` já é o nome que a metade conhece para «servir o que não
+  foi aceito». — Custo: um servidor que um dia reescreva a porta de propósito
+  (não há caso hoje) faria a máquina parar de servir até os dois concordarem.
