@@ -60,6 +60,15 @@ pub fn dentro_da_raiz(raiz: &Path, caminho: &str, vazio_e_a_raiz: bool) -> Resul
             caminho: caminho.to_owned(),
         });
     }
+    // **`:` no meio de um nome** (revisão final, I8): no NTFS, `x:s` é um
+    // fluxo alternativo de `x`, que nenhuma listagem da pasta vê — e o que o
+    // teto de disco não vê, ele não conta. Recusado nos dois sistemas, pela
+    // mesma razão das duas barras.
+    if partes.iter().any(|p| p.contains(':')) {
+        return Err(Recusa::CaminhoInvalido {
+            caminho: caminho.to_owned(),
+        });
+    }
     if partes.is_empty() {
         return if vazio_e_a_raiz {
             Ok(raiz.to_path_buf())
@@ -246,6 +255,21 @@ pub(crate) mod tests {
             dentro_da_raiz(&raiz, "//", false),
             Err(Recusa::CaminhoAbsoluto { .. })
         ));
+    }
+
+    /// I8: `x:s` é um fluxo alternativo no NTFS, fora da conta do disco.
+    #[test]
+    fn dois_pontos_no_meio_de_um_nome_e_invalido() {
+        let (_p, raiz) = raiz();
+        for caminho in ["server.jar:escondido", "mods/a:b/c.jar"] {
+            assert!(
+                matches!(
+                    dentro_da_raiz(&raiz, caminho, false),
+                    Err(Recusa::CaminhoInvalido { .. })
+                ),
+                "{caminho}"
+            );
+        }
     }
 
     #[test]

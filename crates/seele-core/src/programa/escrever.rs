@@ -82,11 +82,8 @@ pub(crate) fn gravar_de_uma_vez(
         caminho: interior.raiz.clone(),
         motivo: "o cadeado da reserva de disco foi envenenado".to_owned(),
     })?;
-    let usado = caminho::ocupado(&interior.raiz, &|c| {
-        c.extension()
-            .is_some_and(|e| e == super::baixar::EXTENSAO_PARCIAL)
-    })
-    .saturating_add(*reservado);
+    let usado =
+        caminho::ocupado(&interior.raiz, &|c| interior.parcial_vivo(c)).saturating_add(*reservado);
     let substitui = std::fs::symlink_metadata(&alvo)
         .ok()
         .filter(std::fs::Metadata::is_file)

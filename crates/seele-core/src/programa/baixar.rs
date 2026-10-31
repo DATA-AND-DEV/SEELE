@@ -402,16 +402,35 @@ impl Drop for Reserva {
     }
 }
 
-/// O parcial: apagado ao ser solto, a menos que tenha virado o destino.
+/// O parcial: apagado ao ser solto, a menos que tenha virado o destino. Vive
+/// em [`Interior::parciais`] enquanto existe, e só ali a conta do disco o
+/// deixa de fora.
 struct Parcial {
     caminho: PathBuf,
     manter: bool,
+    interior: Arc<Interior>,
+}
+
+impl Parcial {
+    fn novo(interior: &Arc<Interior>, caminho: PathBuf) -> Self {
+        if let Ok(mut parciais) = interior.parciais.lock() {
+            parciais.insert(caminho.clone());
+        }
+        Self {
+            caminho,
+            manter: false,
+            interior: Arc::clone(interior),
+        }
+    }
 }
 
 impl Drop for Parcial {
     fn drop(&mut self) {
         if !self.manter {
             let _ = std::fs::remove_file(&self.caminho);
+        }
+        if let Ok(mut parciais) = self.interior.parciais.lock() {
+            parciais.remove(&self.caminho);
         }
     }
 }
@@ -427,7 +446,8 @@ fn reservar(interior: &Arc<Interior>, destino: &Path, tamanho: u64) -> Result<Re
         caminho: interior.raiz.clone(),
         motivo: "o cadeado da reserva de disco foi envenenado".to_owned(),
     })?;
-    let usado = caminho::ocupado(&interior.raiz, &e_parcial).saturating_add(*reservado);
+    let usado =
+        caminho::ocupado(&interior.raiz, &|c| interior.parcial_vivo(c)).saturating_add(*reservado);
     // Um arquivo que este download substitui sai quando ele entra.
     let substitui = std::fs::symlink_metadata(destino)
         .ok()
@@ -602,10 +622,10 @@ async fn correr(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let mut parcial = Parcial {
-        caminho: pasta.join(format!(".{nome}.{numero}.{EXTENSAO_PARCIAL}")),
-        manter: false,
-    };
+    let mut parcial = Parcial::novo(
+        interior,
+        pasta.join(format!(".{nome}.{numero}.{EXTENSAO_PARCIAL}")),
+    );
     let mut arquivo = tokio::fs::File::create(&parcial.caminho)
         .await
         .map_err(disco(&parcial.caminho))?;

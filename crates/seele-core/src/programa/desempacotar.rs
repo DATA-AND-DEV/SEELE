@@ -130,6 +130,10 @@ impl Extracao<'_> {
         if partes.iter().any(|p| p == "..") {
             return Err(self.invalido(format!("a entrada «{nome}» tem «..»")));
         }
+        // I8: um fluxo alternativo do NTFS fica fora da conta do disco.
+        if partes.iter().any(|p| p.contains(':')) {
+            return Err(self.invalido(format!("a entrada «{nome}» tem «:»")));
+        }
         Ok(partes
             .as_slice()
             .strip_prefix(self.prefixo.as_slice())
@@ -463,7 +467,7 @@ impl Programa {
         // pacote substitui. Medido uma vez, no começo (decisão Q8).
         let livre = {
             let reservado = interior.reservado.lock().map_or(0, |r| *r);
-            let usado = caminho::ocupado(&interior.raiz, &super::baixar::e_parcial)
+            let usado = caminho::ocupado(&interior.raiz, &|c| interior.parcial_vivo(c))
                 .saturating_add(reservado);
             // Por cima, nada sai: o que se troca conta duas vezes (o lado
             // seguro do teto).

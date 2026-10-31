@@ -73,3 +73,15 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   protocolo novos param o de antes (`MaquinaParou`) antes de o trocar. — Custo:
   um servido de pé reusado leva junto as medidas de antes da volta (é o que se
   quer contar); um `Servido` já parado nunca é reusado.
+- **Ruling R5 (I8): o teto de disco deixa de fora só os parciais vivos, e
+  `:` no meio de um nome é recusado.** `Interior::parciais` guarda o parcial de
+  cada download em andamento (entra ao ser criado, sai ao ser solto); a conta
+  de `baixar`, `escrever`, `trazer`, `desempacotar`, `empacotar` e
+  `receberCopia` pula só esses. `dentro_da_raiz` e as entradas de um pacote
+  recusam `:` dentro de um pedaço (`caminho-invalido` / `pacote-invalido`): no
+  NTFS, `x:s` é um fluxo alternativo que nenhuma listagem vê. — Por que não
+  recusar o nome `*.seele-parcial`: recusar o nome fecha o MOD, mas não o
+  parcial que um app fechado no meio deixou para trás, que também saía da
+  conta; contar pelo que está vivo fecha os dois. — Custo: um parcial deixado
+  por um app que caiu passa a contar no teto até alguém o apagar (o lado
+  seguro); um nome de arquivo com `:` no Mac ou no Linux é recusado também.

@@ -1124,3 +1124,34 @@ async fn so_os_bytes_aceitos_caem_sobre_o_que_o_aceite_roda() {
         .unwrap();
     assert_eq!(b.programa.recusas().get("reservado-ao-aceite"), Some(&12));
 }
+
+/// **O teto de disco vê todo arquivo que a metade grava** (revisão final,
+/// I8): antes, todo `*.seele-parcial` ficava fora da conta, e um destino com
+/// esse nome passava do teto que o dono aceitou. Só o parcial de um download
+/// em andamento fica fora (a reserva já o conta).
+#[tokio::test]
+async fn um_destino_com_nome_de_parcial_conta_no_disco() {
+    let bytes = [7_u8; 60];
+    let b = bancada(Mentira::default().com(URL, corpo(&bytes)), 100);
+    b.programa
+        .baixar(pedido(&bytes, "a.seele-parcial"))
+        .unwrap()
+        .terminar()
+        .await
+        .unwrap();
+    match b
+        .programa
+        .baixar(pedido(&bytes, "b.seele-parcial"))
+        .unwrap()
+        .terminar()
+        .await
+    {
+        Err(Recusa::DiscoCheio { usado, .. }) => assert_eq!(usado, 60),
+        outro => panic!("o segundo passou do teto: {outro:?}"),
+    }
+    let escrito = "x".repeat(50);
+    assert!(matches!(
+        b.programa.escrever("c.seele-parcial", &escrito),
+        Err(Recusa::DiscoCheio { .. })
+    ));
+}

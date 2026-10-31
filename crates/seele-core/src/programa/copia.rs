@@ -568,8 +568,8 @@ async fn receber(
     // que esta cópia substitui contado de volta.
     {
         let reservado = interior.reservado.lock().map_or(0, |r| *r);
-        let usado =
-            caminho::ocupado(&interior.raiz, &super::baixar::e_parcial).saturating_add(reservado);
+        let usado = caminho::ocupado(&interior.raiz, &|c| interior.parcial_vivo(c))
+            .saturating_add(reservado);
         let substitui = std::fs::symlink_metadata(&alvo)
             .ok()
             .filter(std::fs::Metadata::is_file)

@@ -625,6 +625,11 @@ pub(crate) struct Interior {
     recusas: Mutex<BTreeMap<&'static str, u64>>,
     /// Bytes declarados dos downloads em andamento, ainda não no disco.
     pub(crate) reservado: Mutex<u64>,
+    /// **Os parciais dos downloads em andamento** (revisão final, I8): só
+    /// estes ficam fora da conta do disco, porque a reserva já os conta pelo
+    /// tamanho declarado. Antes, todo `*.seele-parcial` ficava fora — e um
+    /// `destino: "a.seele-parcial"` passava do teto que o dono aceitou.
+    pub(crate) parciais: Mutex<std::collections::HashSet<PathBuf>>,
     pub(crate) encerrado: AtomicBool,
     proximo: AtomicU64,
     /// Os downloads em andamento, para encerrar.
@@ -648,6 +653,12 @@ impl Interior {
             *contagem.entry(recusa.nome()).or_default() += 1;
         }
         recusa
+    }
+
+    /// Se `caminho` é o parcial de um download em andamento, que a reserva
+    /// já conta: o que [`caminho::ocupado`] deixa de fora.
+    pub(crate) fn parcial_vivo(&self, caminho: &Path) -> bool {
+        self.parciais.lock().is_ok_and(|p| p.contains(caminho))
     }
 
     pub(crate) fn proximo_numero(&self) -> u64 {
@@ -695,6 +706,7 @@ impl Programa {
                 origem,
                 recusas: Mutex::new(BTreeMap::new()),
                 reservado: Mutex::new(0),
+                parciais: Mutex::new(std::collections::HashSet::new()),
                 encerrado: AtomicBool::new(false),
                 proximo: AtomicU64::new(1),
                 downloads: Mutex::new(HashMap::new()),
