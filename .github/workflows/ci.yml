@@ -606,6 +606,11 @@ jobs:
       - run: node apps/seele-app/bancada/tunel-de-jogador.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O aceite da máquina (API 8, parte 3): a tela do produto, o aviso da conta,
+      # os termos que a pessoa marca, e o DESLIGAR.
+      - run: node apps/seele-app/bancada/aceite-da-maquina.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
         if: ${{ !cancelled() }}
         timeout-minutes: 5

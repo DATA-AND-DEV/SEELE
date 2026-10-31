@@ -1,0 +1,279 @@
+/* SEELE — a máquina de jogo (`#maquinas` e `#maquina-aceite`, API 8 parte 3).
+
+   Duas peças do produto, fora de toda superfície de MOD: a tela que pergunta se
+   este computador roda o servidor de um jogo, e a faixa que diz que ele roda e
+   deixa desligar. O desenho é o das irmãs: a faixa é a das portas
+   (`camada-tuneis.css`), a tela é a da confirmação (`camada-travessia.css`).
+
+   Nenhuma cor literal aqui, nem em regra nem em comentário: `tests/tokens.rs`
+   lê o arquivo inteiro. O laranja é a decisão que se toma lendo (a tela, o
+   aviso da conta); o verde-fósforo é o valor nominal (a máquina de pé); o
+   vermelho é só da parada que ninguém pediu.
+
+   Toda classe começa por `maquina-` ou `camada-maquina`
+   (`no_two_screens_claim_the_same_class_name`). */
+
+/* ---------------------------------------------------------------- a faixa */
+
+/* Na pilha da tela, e não por cima dela, como a das portas: a pessoa lê, e uma
+   faixa fixa no canto cobriria o operador. Escondida, não ocupa nada. */
+.camada-maquina {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  margin: var(--seele-e1) 12px 0;
+  max-height: 30dvh;
+  overflow-y: auto;
+}
+
+.camada-maquina[hidden] { display: none; }
+
+.maquina-bloco {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--seele-e2);
+  padding: var(--seele-e1) var(--seele-e2);
+  border: var(--seele-b) solid var(--seele-fosforo);
+  border-radius: var(--seele-raio);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+}
+
+.maquina-bloco[data-estado="parada"] {
+  border-color: var(--seele-linha-forte);
+}
+
+.maquina-linha {
+  flex: 1 1 280px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.maquina-marca { color: var(--seele-fosforo); font-weight: 700; }
+.maquina-bloco[data-estado="parada"] .maquina-marca { color: var(--seele-osso); }
+
+.maquina-nota {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--seele-vermelho-alerta);
+  overflow-wrap: anywhere;
+}
+
+/* DESLIGAR é o laranja da decisão; DISPENSAR (de uma parada) é o neutro. */
+.maquina-desligar,
+.maquina-dispensar {
+  margin-left: auto;
+  min-height: 32px;
+  padding: 2px var(--seele-e2);
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio);
+  background: transparent;
+  color: var(--seele-laranja-nerv);
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: var(--seele-tracking-rotulo);
+  cursor: pointer;
+}
+
+.maquina-bloco[data-estado="parada"] .maquina-dispensar { border-color: var(--seele-linha-forte); color: var(--seele-osso); }
+.maquina-desligar:disabled { opacity: 0.5; cursor: default; }
+.maquina-desligar:focus-visible,
+.maquina-dispensar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+/* --------------------------------------------------------------- a tela */
+
+/* Acima do aviso de travessia (80) e de toda camada de MOD (60 e 70): o que
+   pergunta se um programa roda aqui não fica atrás de nada que um MOD desenhe. */
+.camada-maquina-aceite {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camada-maquina-aceite[hidden] { display: none; }
+
+.camada-maquina-aceite::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.85;
+}
+
+/* Coluna: título, aviso e ações **não rolam**; só o corpo rola. É o que mantém o
+   aviso da conta à vista numa janela baixa, e as ações ao alcance de quem leu. */
+.maquina-caixa {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 680px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 24px 28px;
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+}
+
+.maquina-titulo {
+  flex: 0 0 auto;
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: var(--seele-t-secao);
+  line-height: 1.15;
+  letter-spacing: var(--seele-tracking-cartela);
+  /* Maiúsculas só no título e nos botões: o apelido de quem pede entra no título
+     e aparece em maiúsculas por aqui, sem que o texto guardado mude. */
+  text-transform: uppercase;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+/* O aviso da conta: em destaque, e o primeiro depois do título. */
+.maquina-sua-conta {
+  flex: 0 0 auto;
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  border-left-width: 4px;
+  background: var(--seele-laranja-fraco);
+  color: var(--seele-osso);
+  font-size: var(--seele-t-corpo);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.maquina-mudou {
+  flex: 0 0 auto;
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--seele-padrao-azul);
+  background: var(--seele-azul-fraco);
+  color: var(--seele-osso);
+  font-size: var(--seele-t-dado);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.maquina-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.maquina-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.maquina-lista:empty { display: none; }
+
+.maquina-detalhe,
+.maquina-garantia {
+  position: relative;
+  padding-left: 18px;
+  font-size: var(--seele-t-dado);
+  line-height: 1.5;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+/* A garantia é o que a pessoa já sabe depois de ler o resto: mais apagada. */
+.maquina-lista > .maquina-detalhe::before,
+.maquina-garantia::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 8px;
+  height: 8px;
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+}
+
+.maquina-termo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--seele-e1);
+  padding: var(--seele-e1) 12px;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+}
+
+.maquina-termo-rotulo {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--seele-e1);
+  font-size: var(--seele-t-dado);
+  line-height: 1.45;
+  color: var(--seele-osso);
+  cursor: pointer;
+}
+
+.maquina-termo-caixa { margin: 3px 0 0; flex: 0 0 auto; accent-color: var(--seele-laranja-nerv); }
+.maquina-termo-texto { overflow-wrap: anywhere; }
+
+/* O endereço escrito, para a pessoa ver para onde LER leva antes de clicar. */
+.maquina-termo-url {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  overflow-wrap: anywhere;
+}
+
+.maquina-ler {
+  min-height: 28px;
+  padding: 2px var(--seele-e1);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: transparent;
+  color: var(--seele-osso);
+  font: inherit;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  cursor: pointer;
+}
+
+.maquina-ler:focus-visible,
+.maquina-termo-caixa:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+/* RECUSAR à esquerda e primeiro na tabulação: a saída que não muda nada. */
+.maquina-acoes {
+  flex: 0 0 auto;
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--seele-e1);
+}
+
+.maquina-acoes > button {
+  flex: 1 1 140px;
+  min-height: 44px;
+  letter-spacing: 0.12em;
+}
+
+#maquina-aceitar { flex: 2 1 240px; }
+
+@media (max-width: 560px) {
+  .maquina-caixa { padding: 16px; }
+  .maquina-acoes { flex-direction: column; }
+  .maquina-acoes > button,
+  #maquina-aceitar { flex: 0 0 auto; }
+}

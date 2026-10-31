@@ -50,6 +50,7 @@
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
 <link rel="stylesheet" href="camada-tuneis.css">
+<link rel="stylesheet" href="camada-maquina.css">
 <link rel="stylesheet" href="camada-portaria.css">
 <link rel="stylesheet" href="camada-toque.css">
 <link rel="stylesheet" href="camada-sala.css">
@@ -1152,6 +1153,16 @@
     `camada-tuneis.js`; escondida sem túnel nenhum.
   -->
   <div id="tuneis" class="camada-tuneis" role="status" aria-live="polite" hidden></div>
+
+  <!--
+    **As máquinas de jogo ligadas neste computador** (API 8, parte 3): uma linha
+    por máquina de pé, com DESLIGAR, e a última parada com o motivo em frase.
+    Como a faixa das portas, **é do produto e fica fora de toda superfície de
+    MOD**: um programa rodando aqui é o que a pessoa mais precisa ver, e mais
+    precisa poder parar. Desenhada por `camada-maquina.js`; escondida sem
+    máquina nenhuma.
+  -->
+  <div id="maquinas" class="camada-maquina" role="status" aria-live="polite" hidden></div>
 
   <!--
     As quatro colunas do comp v3, nas larguras dele — `60px 268px minmax(0,1fr)
@@ -3704,6 +3715,20 @@
               </div>
             </div>
           </div>
+
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">JOGOS QUE ESTE COMPUTADOR ACEITOU RODAR</h3>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <ul id="lista-maquinas-aceitas" class="server-dispositivos mods-rolagem"></ul>
+                <p id="maquinas-aceitas-erro" class="erro" role="alert" hidden></p>
+                <p class="nota">Revogar desliga o jogo, se ele estiver de pé, e
+                  apaga o aceite: o SEELE pergunta de novo no próximo pedido.</p>
+              </div>
+            </div>
+          </div>
           </div>
           <!--
             **Diagnóstico para quem escreve MOD** — especificação de 23/09,
@@ -4735,6 +4760,39 @@
   </div>
 </div>
 
+<!--
+  **O aceite da máquina de jogo** (API 8, parte 3; `camada-maquina.js`).
+
+  Quando o servidor pede que este computador rode o servidor de um jogo, o
+  SEELE mostra aqui o que vai baixar, o que vai rodar, quanto de disco ocupa e
+  os termos do jogo. **É do produto, e nada daqui passa por `mods-regiao.js`**:
+  o MOD oferece, mas quem pergunta é o SEELE.
+
+  `role="alertdialog"`: interrompe de propósito e pede uma resposta. O aviso
+  `maquina-sua-conta` fica FORA da área que rola (`maquina-corpo`): está à vista
+  em qualquer tamanho de janela. O foco nasce no RECUSAR, a saída que não muda
+  nada; Esc é RECUSAR; clicar no véu não é resposta. Global, fora das telas:
+  o pedido chega com a sessão que a pessoa estiver vendo, ou com nenhuma.
+-->
+<div id="maquina-aceite" class="camada-maquina-aceite" role="alertdialog" aria-modal="true"
+     aria-labelledby="maquina-titulo" aria-describedby="maquina-sua-conta" hidden>
+  <div class="maquina-caixa">
+    <h2 id="maquina-titulo" class="maquina-titulo"></h2>
+    <p id="maquina-sua-conta" class="maquina-sua-conta"></p>
+    <p id="maquina-mudou" class="maquina-mudou" hidden></p>
+    <div id="maquina-corpo" class="maquina-corpo" tabindex="-1">
+      <ul id="maquina-detalhes" class="maquina-lista"></ul>
+      <ul id="maquina-termos" class="maquina-lista"></ul>
+      <ul id="maquina-garantias" class="maquina-lista"></ul>
+    </div>
+    <p id="maquina-erro" class="erro" role="alert" hidden></p>
+    <div class="maquina-acoes">
+      <button id="maquina-recusar" type="button" class="botao botao-secundario"></button>
+      <button id="maquina-aceitar" type="button" class="botao" disabled></button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirmações também são abertas nas configurações, sem sessão visível.
      A camada é global para não herdar hidden da conversa. -->
 <div id="moderar" class="camada-moderar" role="dialog" aria-modal="true"
@@ -5075,6 +5133,7 @@
 <script src="camada-mods.js"></script>
 <script src="camada-versoes.js"></script>
 <script src="camada-tuneis.js"></script>
+<script src="camada-maquina.js"></script>
 <script src="tela-antes-de-hospedar.js"></script>
 <script src="camada-servidores.js"></script>
 <!--

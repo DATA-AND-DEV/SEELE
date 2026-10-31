@@ -2125,6 +2125,8 @@ async function desenharMods() {
   catalogoJaRedesenhou = true;
   await desenharOCache();
   await desenharAceites();
+  // O que o computador aceitou rodar é do produto, e mora em `camada-maquina.js`.
+  await desenharMaquinasAceitas();
 }
 
 // ------------------------------------------------------- a manutenção local

@@ -1449,6 +1449,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
     uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/tunel-de-jogador.cjs
+    uma_bancada node apps/seele-app/bancada/aceite-da-maquina.cjs
     uma_bancada node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
     uma_bancada node apps/seele-app/bancada/mods-nav-0174.cjs target/mods-nav-0174
     uma_bancada node apps/seele-app/bancada/visual-0174.cjs target/visual-0174-extras --extras

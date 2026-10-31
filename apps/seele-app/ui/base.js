@@ -98,7 +98,12 @@ const COMANDOS_DA_SESSAO = new Set([
 ]);
 
 /** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */
-const SEM_CARIMBO_DA_VISTA = new Set(["connect", "sessoes", "foco_de_voz"]);
+// A máquina de jogo é do computador, e não da sessão que a janela mostra: o pedido
+// de um servidor que não está na vista também precisa ser respondido.
+const SEM_CARIMBO_DA_VISTA = new Set([
+  "connect", "sessoes", "foco_de_voz",
+  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas",
+]);
 
 /** A vista passa a ser esta sessão (a resposta de `connect` ou `ver_sessao`). */
 function porNaVista(carimbo) {

@@ -1747,6 +1747,82 @@ const FRASES_DO_TUNEL = Object.freeze({
 });
 
 /**
+ * **A máquina de jogo** (API 8, parte 3): o que a tela do aceite mostra antes de
+ * este computador rodar o servidor de um jogo, a faixa das máquinas ligadas e a
+ * lista de aceites com REVOGAR (`camada-maquina.js`).
+ *
+ * Maiúsculas só no título e nos botões, como a casca faz. `suaConta` é o aviso
+ * que fica à vista sem rolar: o servidor de um jogo roda com a conta de quem
+ * aceitou, e dizer isso só depois de uma rolagem seria não dizer.
+ *
+ * Os nomes de `paradas` e de `campos` são os do Rust (`maquina-estado.motivo` e
+ * `maquina-pedido.mudou`); a frase é daqui, como em toda fronteira. O que o Rust
+ * dirá e a lista não tiver aparece com o próprio nome, e o fato vai ao registro.
+ */
+const FRASES_DA_MAQUINA = Object.freeze({
+  titulo: (quem) => `${quem} PEDE PARA RODAR UM SERVIDOR DE JOGO NESTE COMPUTADOR`,
+  mod: (nome, id) => `MOD: ${nome} (${id})`,
+  jogo: (titulo, versao) => versao ? `jogo: ${titulo}, versão ${versao}` : `jogo: ${titulo}`,
+  receita: (nome, versao) => `receita: ${nome} ${versao}`,
+  pedidoPor: (quem, servidor) => `pedido por ${quem}, no servidor ${servidor}`,
+  porta: (porta, protocolo) => `o jogo escuta na porta ${porta} (${protocolo}); quem está no servidor alcança essa porta pelo SEELE`,
+  baixar: (n, total, origens) => `vai baixar ${n === 1 ? "1 arquivo" : `${n} arquivos`}, ${total} no total, de ${origens}`,
+  nadaABaixar: "nada para baixar neste pedido",
+  rodar: (linha) => `vai rodar: ${linha}`,
+  nadaARodar: "nenhum programa: este pedido só abre a porta do jogo",
+  disco: (teto, pasta) => `ocupa até ${teto} de disco, em ${pasta}`,
+  oJogoBaixaSozinho: (dominios) => `o jogo baixa por conta própria de ${dominios}, sem o SEELE conferir`,
+  suaConta: "o servidor do jogo roda com a sua conta deste computador, e pode ler o que ela lê.",
+  termo: (titulo) => `li e aceito: ${titulo}`,
+  quemAceitaEVoce: "quem aceita os termos do jogo é você, e não o SEELE nem o MOD",
+  podeDesligar: "você desliga quando quiser, pela faixa no alto da tela",
+  mudou: (campos) => `isto mudou desde o seu aceite: ${campos}. Por isso o SEELE pergunta de novo.`,
+  aceitar: "ACEITAR E LIGAR",
+  recusar: "RECUSAR",
+  faixa: (titulo, mod) => `este computador serve ${titulo} (${mod})`,
+  desligar: "DESLIGAR",
+  revogar: "REVOGAR",
+  paradas: Object.freeze({ "pelo-dono": "desligado por você", "revogada": "aceite revogado por você", "app-fechou": "o app fechou",
+    "metade-falhou": "a metade de máquina do MOD falhou; veja o registro", "mod-desligado": "o MOD foi desligado no servidor",
+    "outro-pedido": "o servidor passou este jogo para outra máquina", "sem-aceite": "o servidor não reconhece mais o seu aceite",
+    "servidor-saiu": "você saiu do servidor",
+    "pacote-diferente": "o pacote do MOD não confere com o que você aceitou" }),
+  campos: Object.freeze({ titulo: "o nome do jogo", receita: "a receita", versao_da_receita: "a versão da receita",
+    versao_do_jogo: "a versão do jogo", tuneis: "as portas", artefatos: "o que se baixa", pack: "o pack",
+    origens: "de onde se baixa", dominios_do_jogo: "de onde o jogo baixa sozinho", rodar: "o programa e os argumentos",
+    disco_maximo: "o teto de disco", termos: "os termos", pacote: "a versão do MOD" }),
+
+  // O que a brevidade do texto acima não cobre: a leitura dos termos, a lista de
+  // aceites e a falha de cada verbo, dita em frase em vez do nome cru.
+  ler: "LER",
+  dispensar: "DISPENSAR",
+  quemSemNome: "alguém deste servidor",
+  listaVazia: "VOCÊ AINDA NÃO ACEITOU RODAR NENHUM JOGO",
+  listaLigada: "ligada agora",
+  listaDesligada: "desligada",
+  listaLinha: (titulo, mod, servidor) => `${titulo} (${mod}) · servidor ${servidor}`,
+  listaPedidoPor: (quem) => `pedido por ${quem}`,
+  listaPortas: (portas) => `portas: ${portas}`,
+  erros: Object.freeze({
+    "sem-pedido": "este pedido não existe mais",
+    "pedido-velho": "o servidor já mandou um pedido mais novo; a tela vai mostrá-lo",
+    "sem-conexao": "a conexão com o servidor acabou",
+    "sem-sessao": "a sessão com o servidor acabou",
+    "sessao-encerrada": "a sessão com o servidor acabou",
+    "conteudo-nao-bate": "o pacote do MOD não confere com o que o servidor anunciou; nada foi ligado",
+    "sem-metade-de-maquina": "este MOD não tem a metade que roda na máquina; nada foi ligado",
+    "conteudo-de-outro-mod": "o pacote lido é de outro MOD; nada foi ligado",
+    "executor-nao-subiu": "o SEELE não conseguiu preparar a execução; nada foi ligado",
+    "executor-nao-aceitou-o-codigo": "o código do MOD não passou na conferência do SEELE; nada foi ligado",
+    "nao-esta-ligada": "esta máquina já não estava ligada",
+    "sem-aceite": "não havia aceite guardado para revogar",
+    "so-no-app": "rodar um servidor de jogo só funciona no aplicativo",
+  }),
+  falhou: (frase) => `não deu certo: ${frase}`,
+  falhouSemFrase: (codigo) => `não deu certo (${codigo}); o motivo está no seele.log`,
+});
+
+/**
  * **A tela que este navegador não compartilha** (caso 12 do browser-signaling,
  * medido no WebKit). Igual na 0.16: a transmissão do navegador precisa do
  * `MediaStreamTrackProcessor`, e o Safari não o tem. Não é a versão nem a

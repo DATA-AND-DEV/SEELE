@@ -645,13 +645,6 @@ const AGUARDANDO_TELA: &[&str] = &[
     // (`base.js`) e saiu daqui, e o `desfazer_escolha_de_mod` do P1 também
     // (`tela-boot.js`, rodada 3); a releitura do foco ainda não chama este.
     "foco_de_voz",
-    // API 8 parte 3, Task 8: a metade de máquina no app. A tela do aceite e a
-    // faixa com DESLIGAR são do task seguinte da casca, que tira estes daqui.
-    "maquina_aceitar",
-    "maquina_recusar",
-    "maquina_desligar",
-    "maquina_revogar",
-    "maquinas_aceitas",
 ];
 
 #[test]
@@ -25840,6 +25833,172 @@ fn tunel_o_botao_leva_o_bilhete_e_a_faixa_e_do_produto() {
     assert!(
         !camada.contains("catch {}") && !camada.contains("catch (_) {}"),
         "a faixa dos túneis engole uma falha em silêncio"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A máquina de jogo na casca (API 8, parte 3): a tela do aceite, a faixa com
+// DESLIGAR e a lista com REVOGAR. O comportamento está na bancada
+// `bancada/aceite-da-maquina.cjs`; estes guardas seguram os fios que a ligam ao
+// resto da casca, e os que a bancada, sozinha, não veria sumir.
+// ---------------------------------------------------------------------------
+
+/// **O aviso da conta é o texto da regra, e fica fora do que rola.** O servidor
+/// de um jogo roda com a conta de quem aceita; dizer isso abaixo de uma
+/// rolagem seria não dizer. A frase é a da Global Constraint, palavra por
+/// palavra, e o elemento dela vem antes do corpo que rola e fora dele.
+#[test]
+fn maquina_o_aviso_da_conta_e_o_da_regra_e_nao_rola() {
+    let frases = without_comments(&read("ui/frases.js"));
+    assert!(
+        frases.contains(
+            "suaConta: \"o servidor do jogo roda com a sua conta deste computador, e pode ler o que ela lê.\""
+        ),
+        "`FRASES_DA_MAQUINA.suaConta` deixou de ser o texto exato da regra"
+    );
+    let pagina = without_comments(&read("ui/index.html"));
+    let aviso = pagina
+        .find("id=\"maquina-sua-conta\"")
+        .expect("a tela do aceite não tem o elemento do aviso da conta");
+    let corpo = pagina
+        .find("id=\"maquina-corpo\"")
+        .expect("a tela do aceite não tem o corpo que rola");
+    assert!(
+        aviso < corpo,
+        "o aviso da conta está depois do corpo da tela, onde só se chega rolando"
+    );
+    let camada = without_comments(&read("ui/camada-maquina.js"));
+    assert!(
+        camada.contains("$(\"maquina-sua-conta\").textContent = F.suaConta"),
+        "a tela não escreve `suaConta` no aviso"
+    );
+}
+
+/// **A tela é do produto**: nada dela passa por `mods-regiao.js`, e o que o MOD
+/// escolheu (título, programa, termos) nunca entra como marcação.
+#[test]
+fn maquina_a_tela_e_do_produto_e_nao_passa_pela_regiao_de_mod() {
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+    assert!(
+        !regiao.contains("camada-maquina") && !regiao.contains("maquina-aceite") && !regiao.contains("maquina_aceitar"),
+        "a tela do aceite passou por `mods-regiao.js`: ela é do produto, fora das superfícies de MOD"
+    );
+    let camada = without_comments(&read("ui/camada-maquina.js"));
+    assert!(
+        !camada.contains("mods-regiao") && !camada.contains("SeeleUI") && !camada.contains("donoDaRegiao"),
+        "a tela do aceite importa da região de MOD"
+    );
+    assert!(
+        !camada.contains("innerHTML") && !camada.contains("insertAdjacentHTML") && !camada.contains("outerHTML"),
+        "a tela do aceite monta marcação com texto que o MOD escolheu"
+    );
+    assert!(
+        !camada.contains("catch {}") && !camada.contains("catch (_) {}"),
+        "a tela do aceite engole uma falha em silêncio"
+    );
+    let html = read("ui/index.html");
+    assert!(
+        html.contains("<script src=\"camada-maquina.js\"></script>")
+            && html.contains("<link rel=\"stylesheet\" href=\"camada-maquina.css\">")
+            && html.contains("id=\"maquina-aceite\"")
+            && html.contains("id=\"maquinas\"")
+            && html.contains("id=\"lista-maquinas-aceitas\""),
+        "a tela, a faixa ou a lista da máquina de jogo não estão na página"
+    );
+    // A tela não fecha por fora: nenhum `fecharAoClicarFora` nela.
+    assert!(
+        !camada.contains("fecharAoClicarFora"),
+        "a tela do aceite fecha ao clicar fora, e um clique perdido não é uma resposta"
+    );
+    // Esc é RECUSAR, e ACEITAR só liga com toda caixa marcada.
+    assert!(
+        camada.contains("evento.key === \"Escape\"") && camada.contains("responderAMaquina(false)"),
+        "Esc deixou de ser RECUSAR"
+    );
+    assert!(
+        camada.contains("atual.caixas.every((c) => c.checked)"),
+        "ACEITAR deixou de depender de todo termo marcado"
+    );
+}
+
+/// **No navegador não se roda servidor de jogo**: a ponte recusa os verbos pelo
+/// nome, e a lista é vazia.
+#[test]
+fn maquina_a_ponte_do_navegador_recusa_o_aceite_com_so_no_app() {
+    let ponte = without_comments(&read("ui/ponte-web.js"));
+    for verbo in ["maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar"] {
+        let corpo = ponte
+            .split_once(&format!("  {verbo}:"))
+            .map(|(_, resto)| resto.split_once('\n').map_or(resto, |(a, _)| a).to_owned())
+            .unwrap_or_else(|| panic!("`{verbo}` não está nos atendimentos da ponte"));
+        assert!(
+            corpo.contains("so-no-app"),
+            "a ponte do navegador não recusa `{verbo}` com `so-no-app`: {corpo}"
+        );
+    }
+    assert!(
+        ponte.contains("maquinas_aceitas: async () => []"),
+        "a ponte do navegador não responde lista vazia a `maquinas_aceitas`"
+    );
+}
+
+/// **Toda parada e todo campo que o Rust nomeia tem frase na tela**: os nomes
+/// saem de `src/maquina.rs` (`Fim::nome`, `campos_que_mudaram`), e uma variante
+/// nova sem frase reprova aqui, em vez de aparecer como o nome cru em quem aceita.
+#[test]
+fn maquina_toda_parada_e_todo_campo_do_rust_tem_frase() {
+    let rust = read("src/maquina.rs");
+    let nomes = rust
+        .split_once("pub(crate) fn nome(self) -> &'static str {")
+        .and_then(|(_, resto)| resto.split_once("\n    }"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`Fim::nome` sumiu de src/maquina.rs");
+    let mut paradas: Vec<String> = nomes
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|trecho| trecho.split('"').next().map(str::to_owned))
+        .collect();
+    // O pedido que não confere com o pacote lido também termina assim.
+    paradas.push("pacote-diferente".to_owned());
+    assert!(paradas.len() >= 9, "não achei as paradas do Rust: {paradas:?}");
+    let campos_fn = rust
+        .split_once("pub(crate) fn campos_que_mudaram(")
+        .and_then(|(_, resto)| resto.split_once("\n    mudou\n}"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`campos_que_mudaram` sumiu de src/maquina.rs");
+    let mut campos: Vec<String> = campos_fn
+        .split("\"")
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, nome)| nome.to_owned())
+        .collect();
+    campos.push("pacote".to_owned());
+    assert!(campos.len() >= 13, "não achei os campos do Rust: {campos:?}");
+
+    let frases = without_comments(&read("ui/frases.js"));
+    let bloco = frases
+        .split_once("const FRASES_DA_MAQUINA")
+        .map(|(_, resto)| resto.to_owned())
+        .expect("`FRASES_DA_MAQUINA` sumiu de frases.js");
+    let paradas_js = bloco.split_once("paradas:").map(|(_, r)| r).expect("sem `paradas`");
+    let paradas_js = paradas_js.split_once("campos:").map_or(paradas_js, |(a, _)| a);
+    for parada in &paradas {
+        assert!(
+            paradas_js.contains(&format!("\"{parada}\":")),
+            "a parada «{parada}» do Rust não tem frase em `FRASES_DA_MAQUINA.paradas`"
+        );
+    }
+    let campos_js = bloco.split_once("campos:").map(|(_, r)| r).expect("sem `campos`");
+    let campos_js = campos_js.split_once("ler:").map_or(campos_js, |(a, _)| a);
+    for campo in &campos {
+        assert!(
+            campos_js.contains(&format!("{campo}:")),
+            "o campo «{campo}» do Rust não tem frase em `FRASES_DA_MAQUINA.campos`"
+        );
+    }
+    assert!(
+        !campos_js.contains("hash:"),
+        "`campos.hash` voltou: o Rust diz `pacote` quando o pacote do MOD muda"
     );
 }
 
