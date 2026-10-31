@@ -1871,6 +1871,14 @@ impl Maquina {
 
     /// Passa a servir `mod_id/nome`: as aberturas que o nomearem ligam em
     /// `127.0.0.1:porta`.
+    ///
+    /// **Servir de novo o que já se serve não deixa órfão** (revisão final,
+    /// I5). É o caminho da volta de quem hospeda (`aoReconectar` serve de
+    /// novo): as ligações diretas que seguiram sem ele seguram o `Servido` de
+    /// antes, e trocá-lo calado fazia o `parar` seguinte parar só o novo — as
+    /// velhas seguiam levando ao jogo, e as quedas delas iam a medidas que
+    /// ninguém lê. O mesmo protocolo e a mesma porta, ainda de pé: fica o de
+    /// antes. Outro: o de antes para (`MaquinaParou`) antes de sair.
     pub(crate) fn registrar(
         &mut self,
         mod_id: &str,
@@ -1878,20 +1886,33 @@ impl Maquina {
         protocolo: ProtocoloDeTunel,
         porta: u16,
     ) {
-        let (parada, _) = watch::channel(None);
-        self.estado
+        let chave = (mod_id.to_owned(), nome.to_owned());
+        let mut servidos = self
+            .estado
             .servidos
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(
-                (mod_id.to_owned(), nome.to_owned()),
-                Arc::new(Servido {
-                    protocolo,
-                    porta,
-                    medidas: Medidas::nova(None),
-                    parada,
-                }),
-            );
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(velho) = servidos.get(&chave) {
+            let de_pe = velho.parada.borrow().is_none();
+            if de_pe && velho.protocolo == protocolo && velho.porta == porta {
+                tracing::info!(%mod_id, tunel = %nome, porta, "túnel: servido de novo; as ligações de antes seguem no mesmo");
+                return;
+            }
+            if de_pe {
+                velho.parada.send_replace(Some(Queda::MaquinaParou));
+                tracing::info!(%mod_id, tunel = %nome, antes = velho.porta, agora = porta, "túnel: servido de novo com outra porta; as ligações de antes acabam");
+            }
+        }
+        let (parada, _) = watch::channel(None);
+        servidos.insert(
+            chave,
+            Arc::new(Servido {
+                protocolo,
+                porta,
+                medidas: Medidas::nova(None),
+                parada,
+            }),
+        );
     }
 
     /// Deixa de servir: as conexões vivas acabam com `queda`.
@@ -4232,6 +4253,29 @@ mod testes {
             RecusaDeTunel::SemPermissao
         );
         assert!(tuneis.jogando.is_empty());
+    }
+
+    /// **Servir de novo não deixa órfão o servido de antes** (revisão final,
+    /// I5): a ligação direta que segurava o `Servido` antes da volta de quem
+    /// hospeda é parada pelo `parar` de depois; e servir com outra porta
+    /// para as de antes na hora.
+    #[test]
+    fn servir_de_novo_nao_deixa_orfao_o_servido_de_antes() {
+        let mut maquina = Maquina::nova();
+        let chave = (MOD.to_owned(), NOME.to_owned());
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25565);
+        // O que uma ligação direta viva segura.
+        let segurado = maquina.estado.servido(&chave).expect("servido");
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25565);
+        assert!(maquina.parar(MOD, NOME, Queda::MaquinaParou));
+        assert_eq!(*segurado.parada.borrow(), Some(Queda::MaquinaParou));
+
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25565);
+        let segurado = maquina.estado.servido(&chave).expect("servido de novo");
+        assert!(segurado.parada.borrow().is_none());
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, 25566);
+        assert_eq!(*segurado.parada.borrow(), Some(Queda::MaquinaParou));
+        assert!(maquina.serve(MOD, NOME));
     }
 
     /// **A máquina serve a porta que ela pediu** (revisão final, I3): um

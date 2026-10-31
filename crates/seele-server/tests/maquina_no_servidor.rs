@@ -1214,6 +1214,50 @@ async fn quem_operava_com_um_pedido_novo_recebe_uma_dispensa_so() -> Result<()> 
     Ok(())
 }
 
+/// **O servidor que para o túnel diz à máquina** (revisão final, I4): um
+/// pedido a outra pessoa dispensa Alice e para o túnel que ela servia; quem jogava ouve
+/// `MaquinaParou`, **e Alice também** — sem isso a máquina dela seguia
+/// aceitando as ligações diretas de quem já tinha sido apresentado.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_tunel_parado_pelo_servidor_chega_a_maquina() -> Result<()> {
+    let m = montar().await?;
+    let gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut alice = entrar(m.endereco, ALICE, 12).await?;
+    let mut carla = entrar(m.endereco, CARLA, 12).await?;
+    let resumo = pedir(&m, alice.pessoa, gestora.pessoa);
+    aceitar(&m, &mut alice, &resumo).await?;
+    frame::write(&mut alice.ligado.envio, &servir()).await?;
+    assert_eq!(resposta_de_tunel(&mut alice).await?, Ok(PORTA));
+    frame::write(
+        &mut carla.ligado.envio,
+        &ClientMessage::EntrarNoTunel {
+            mod_id: MOD.into(),
+            nome: TUNEL.into(),
+        },
+    )
+    .await?;
+    assert_eq!(resposta_de_tunel(&mut carla).await?, Ok(PORTA));
+
+    // O MOD chama outra pessoa para o mesmo servidor de jogo: Alice é
+    // dispensada (`OutroPedido`), e o túnel dela para.
+    let _ = pedir(&m, PersonId(77), gestora.pessoa);
+    let para_alice = esperar(&mut alice.ligado.recebe, |q| match q {
+        ServerMessage::TunelEncerrado { motivo, nome, .. } if nome == TUNEL => Some(*motivo),
+        _ => None,
+    })
+    .await;
+    assert_eq!(para_alice, Some(MotivoDoFimDoTunel::MaquinaParou));
+    let para_carla = esperar(&mut carla.ligado.recebe, |q| match q {
+        ServerMessage::TunelEncerrado { motivo, .. } => Some(*motivo),
+        _ => None,
+    })
+    .await;
+    assert_eq!(para_carla, Some(MotivoDoFimDoTunel::MaquinaParou));
+    assert!(!m.daemon.server().tuneis().existe(MOD, TUNEL));
+    m.daemon.shutdown();
+    Ok(())
+}
+
 fn recusa(motivo: seele_proto::maquina::MotivoDaRecusaDeMaquina) -> ClientMessage {
     ClientMessage::RecusaDeMaquina {
         mod_id: MOD.into(),

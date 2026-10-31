@@ -55,3 +55,21 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   e `fora-do-aceite` já é o nome que a metade conhece para «servir o que não
   foi aceito». — Custo: um servidor que um dia reescreva a porta de propósito
   (não há caso hoje) faria a máquina parar de servir até os dois concordarem.
+- **Ruling R3 (I4): o túnel que o servidor para é dito à máquina.**
+  `maquinas::parar_tuneis` (a reserva que assume a posse, o aceite que muda os
+  túneis, outro pedido) passa por `Tuneis::parar_pelo_servidor`, que manda
+  `TunelEncerrado { MaquinaParou }` também à máquina; o `parar` que a própria
+  máquina pede (`PararTunel`) segue sem eco. No cliente, esse aviso já chama
+  `Maquina::parar`, que fecha as ligações diretas. — Por que não um
+  `TunelRetirado` por pessoa: a retirada tira uma pessoa e deixa o túnel; aqui
+  o túnel inteiro acaba, e o `MaquinaParou` é o motivo que a metade conhece.
+  — Custo: a máquina que ainda é jogadora do próprio túnel também o vê acabar
+  (é o que aconteceu); um `PararTunel` seguido de `ServirTunel` da máquina não
+  passa por aqui, então não há eco atrasado que pare o serviço novo.
+- **Ruling R4 (I5): servir de novo o mesmo protocolo e a mesma porta reusa o
+  `Servido` vivo; outro para o de antes.** As ligações diretas que seguiram
+  sem quem hospeda seguram o `Arc<Servido>` de antes; reusá-lo faz o `parar`
+  seguinte chegar a elas e mantém as medidas num lugar só. Uma porta ou um
+  protocolo novos param o de antes (`MaquinaParou`) antes de o trocar. — Custo:
+  um servido de pé reusado leva junto as medidas de antes da volta (é o que se
+  quer contar); um `Servido` já parado nunca é reusado.

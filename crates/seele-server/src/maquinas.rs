@@ -1466,7 +1466,7 @@ pub fn parar_tuneis(server: &Server, quem: PersonId, mod_id: &str, nomes: &[Stri
     {
         let mut livro = server.tuneis();
         for nome in nomes {
-            fim.extend(livro.parar(quem, mod_id, nome));
+            fim.extend(livro.parar_pelo_servidor(quem, mod_id, nome));
         }
     }
     crate::tuneis::anunciar(server, fim);
