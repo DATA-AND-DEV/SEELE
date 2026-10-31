@@ -272,6 +272,10 @@ const PEDIDOS_RECUSADOS = {
   DeleteChannel: "APAGAR O CANAL",
   // O único chamador é o APAGAR (`peso_da_linha`): o verbo é o da caixa dele.
   WeighChannel: "CONTAR O QUE HÁ NO CANAL ANTES DE APAGAR",
+  // O perfil público (0.19): o banco que não gravou volta pelo `nao_deu`; as
+  // recusas de campo, revisão e imagem voltam pelo `PerfilRecusado`, ao campo.
+  GravarPerfil: "SALVAR O SEU PERFIL",
+  TirarImagemDoPerfil: "REMOVER A IMAGEM DO SEU PERFIL",
 };
 
 /**
@@ -2816,6 +2820,7 @@ const FRASES_DO_CELULAR = Object.freeze({
     volume: (n) => `VOLUME DESTA PESSOA · ${n}%`,
     volumeDe: (quem) => `volume de ${quem}`,
     moderar: "MODERAR",
+    verPerfil: "VER PERFIL",
     foraModerar: "Expulsar, banir e mover pessoas é pelo SEELE no computador.",
     anexar: "ANEXAR",
     midia: "FOTO OU VÍDEO",
@@ -2842,6 +2847,8 @@ const FRASES_DO_CELULAR = Object.freeze({
     sobre: "SOBRE",
     // A camada dos cargos (G): quem pode o quê neste servidor, e por quê.
     cargos: "CARGOS E PERMISSÕES",
+    // O diretório dos perfis (0.19): a folha com a grade de cartões.
+    perfis: "PERFIS",
     sairDoServidor: "SAIR DO SERVIDOR",
     segurarParaFalar: "SEGURAR PARA FALAR",
     // Na faixa de contexto de CONFIGURAÇÕES, no lugar do «segura ESPAÇO».
@@ -3334,3 +3341,132 @@ const FRASES_DOS_CARGOS = Object.freeze({
   doServidor: (texto) => `O servidor disse: «${texto}»`,
   recusaSemNome: "O SERVIDOR RECUSOU O PEDIDO.",
 });
+
+/**
+ * **O perfil público** (0.19, `docs/0.19/perfis-oficiais.md` §5): o editor
+ * «Seu perfil», o diretório «Perfis», a folha de outra pessoa e o relatório da
+ * migração para quem hospeda. Na gramática da 0.19: inicial maiúscula nos
+ * rótulos, caixa alta só nos botões em pílula.
+ */
+const FRASES_DOS_PERFIS = Object.freeze({
+  rotulos: Object.freeze({
+    foto: "Foto",
+    capa: "Capa",
+    nomeExibido: "Nome exibido",
+    nomeExibidoNota: "o nome grande; o apelido segue embaixo",
+    pronomes: "Pronomes",
+    status: "Status",
+    bio: "Sobre você",
+    cor: "Cor",
+    corHex: "Cor em hexadecimal",
+    efeito: "Efeito",
+  }),
+  efeitos: Object.freeze({ Nenhum: "Nenhum", Aurora: "Aurora", Brilho: "Brilho", Pulso: "Pulso" }),
+  formatoDaFoto: "PNG, JPEG, WebP ou GIF · até 10 MiB · quadrada",
+  formatoDaCapa: "PNG, JPEG, WebP ou GIF · até 10 MiB · 16:9",
+  escolher: "ESCOLHER",
+  remover: "REMOVER",
+  escolherFoto: "Escolher a foto",
+  removerFoto: "Remover a foto",
+  escolherCapa: "Escolher a capa",
+  removerCapa: "Remover a capa",
+  enviando: "Enviando…",
+  enviada: (lado) => (lado === "Capa" ? "Capa enviada. Já vale para todos." : "Foto enviada. Já vale para todos."),
+  removendo: "Removendo…",
+  removida: (lado) => (lado === "Capa" ? "Capa removida." : "Foto removida."),
+  iconeAntigo: "Quem ainda usa o SEELE 0.18 vê esta foto como ícone.",
+  pendencia: (lado) =>
+    lado === "Capa"
+      ? "Sua capa do PERFIS não pôde ser trazida. Escolha de novo."
+      : "Sua foto do PERFIS não pôde ser trazida. Escolha de novo.",
+  pendenciaAviso: (lados) =>
+    lados.length > 1
+      ? "Sua foto e sua capa do PERFIS não vieram. Escolher de novo"
+      : lados[0] === "Capa"
+        ? "Sua capa do PERFIS não veio. Escolher de novo"
+        : "Sua foto do PERFIS não veio. Escolher de novo",
+  // As recusas da imagem, no próprio bloco.
+  imagem: Object.freeze({
+    Heic: "Este arquivo é HEIC, que o SEELE não lê. Exporte como JPEG ou PNG e escolha de novo.",
+    TipoRecusado: "Este arquivo não é PNG, JPEG, WebP nem GIF.",
+    ImagemVazia: "Este arquivo está vazio.",
+    ImagemGrandeDemais: "A imagem passa de 10 MiB. Escolha uma menor.",
+    ArquivoIlegivel: "O arquivo não pôde ser lido.",
+    Incompleto: "O envio parou no meio. Tente de novo.",
+    SemResposta: "O servidor não respondeu a tempo. Tente de novo.",
+    SemPastaDePerfis: "Este servidor não guarda imagens (banco em memória).",
+    ServidorAntigo: "Este servidor ainda não tem perfis (é anterior à 0.19).",
+    NotConnected: "Sem conexão com o servidor.",
+    RecusaDesconhecida: "O servidor recusou a imagem.",
+  }),
+  // As recusas de campo, ao lado de cada campo.
+  campo: Object.freeze({
+    Longo: (max) => `Passa de ${max} caracteres.`,
+    Controle: "Tem um caractere invisível ou de controle; apague e digite de novo.",
+    ControleSemQuebra: "Não aceita Enter nem caractere de controle.",
+    Formato: "Use o formato #rrggbb.",
+  }),
+  limites: Object.freeze({ NomeExibido: 40, Pronomes: 30, Status: 60, Bio: 280 }),
+  contador: (n, max) => `${n}/${max}`,
+  revisaoVelha: "Seu perfil mudou em outra janela. Recarregue para ver o que está valendo; o que você escreveu aqui se perde.",
+  recarregar: "RECARREGAR",
+  semResposta: "O servidor não confirmou o perfil. Nada foi perdido: tente salvar de novo.",
+  salvo: "Perfil salvo.",
+  descartar: "Descartar alterações?",
+  continuarEditando: "CONTINUAR EDITANDO",
+  descartarBotao: "DESCARTAR",
+  imagensNaHora: "Foto e capa valem na hora em que são enviadas; o SALVAR é dos textos.",
+  // O diretório, a entrada e a folha.
+  entrada: "Perfis",
+  entradaRotulo: "Perfis deste servidor",
+  diretorioTitulo: "Perfis",
+  diretorioSub: (n) => (n === 1 ? "1 pessoa neste servidor" : `${n} pessoas neste servidor`),
+  diretorioVazio: "Ninguém neste servidor preencheu o perfil ainda.",
+  editarOSeu: "EDITAR SEU PERFIL",
+  voltar: "VOLTAR",
+  voltarAConversa: "Voltar à conversa",
+  verPerfil: "Ver perfil",
+  verPerfilCelular: "VER PERFIL",
+  verPerfilDe: (quem) => `Ver o perfil de ${quem}`,
+  fechar: "FECHAR",
+  fecharPerfilDe: (quem) => `Fechar o perfil de ${quem}`,
+  perfilDe: (quem) => `Perfil de ${quem}`,
+  voce: "você",
+  semPerfil: "Esta pessoa ainda não preencheu o perfil.",
+  // O relatório da migração, para quem hospeda (nunca calado: fica até ser dispensado).
+  relatorio: Object.freeze({
+    titulo: "Perfis agora faz parte do SEELE (0.19)",
+    trazidos: (n) =>
+      n === 1 ? "1 perfil do MOD PERFIS foi trazido para o produto." : `${n} perfis do MOD PERFIS foram trazidos para o produto.`,
+    tudoVeio: "Tudo veio: textos, fotos e capas.",
+    ocorrencias: (n) => (n === 1 ? "1 coisa não veio inteira:" : `${n} coisas não vieram inteiras:`),
+    incompleta:
+      "A migração ficou incompleta: o banco falhou no meio. O MOD ficou desligado, e a próxima vez que o servidor subir tenta de novo.",
+    pessoa: (id) => `pessoa ${id}`,
+    dadosAntigos:
+      "Os dados antigos do MOD continuam guardados até a 0.20 (dá para voltar à 0.18). Apagá-los por aqui ainda não existe.",
+    entendi: "ENTENDI",
+    naoDispensou: "O relatório não pôde ser dispensado agora. Ele continua aqui.",
+  }),
+  // A gestão de MODs de quem hospeda.
+  incorporado: "Perfis agora faz parte do SEELE (0.19). Os perfis deste servidor foram trazidos.",
+  incorporadoBotao: "NO PRODUTO",
+});
+
+/** A frase de um `ErroDoPerfil` (ou de um `PerfilRecusado`) para uma imagem. */
+function fraseDaImagemDoPerfil(erro) {
+  const f = FRASES_DOS_PERFIS.imagem;
+  if (typeof erro === "string") return f[erro] ?? fraseDeErro(erro);
+  if (erro && typeof erro === "object") {
+    if (erro.ImagemGrandeDemais) return f.ImagemGrandeDemais;
+    if (erro.ServidorAntigo) return f.ServidorAntigo;
+    const motivo = erro.Recusada?.motivo;
+    if (motivo === "Heic") return f.Heic;
+    if (motivo === "TipoRecusado") return f.TipoRecusado;
+    if (motivo === "GrandeDemais") return f.ImagemGrandeDemais;
+    if (motivo === "Incompleto") return f.Incompleto;
+    if (motivo === "SemPastaDePerfis") return f.SemPastaDePerfis;
+    if (motivo) return f.RecusaDesconhecida;
+  }
+  return fraseDeErro(erro);
+}

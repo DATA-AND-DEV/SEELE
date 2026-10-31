@@ -2309,3 +2309,45 @@
 }
 :root[data-casca="celular"] #tela-sessao:not([data-aba="conversa"]) .paineis > .palco-de-paginas { display: none; }
 :root[data-casca="celular"] #tela-sessao .palco-de-paginas > .pagina-de-mod:not([hidden]) { flex: 1 1 auto; }
+
+/* ------------------------------------------------- o perfil público (0.19)
+   A linha da pessoa com o nome exibido: ele no lugar do nome, o apelido
+   pequeno ao lado, e «pronomes · status» numa terceira fileira (§5.3, «linha
+   igual» à do desktop). A foto de quem usa, na placa de SEU PERFIL, cobre o
+   quadrado como em toda a tela. */
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-exibido {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+  min-width: 0;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: calc(16px * var(--cel-escala));
+  overflow-wrap: anywhere;
+}
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-identidade-com-exibido .pessoa-nome {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: end;
+  justify-self: start;
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: calc(12px * var(--cel-escala));
+  color: var(--seele-osso-apagado);
+}
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-perfil-linha { display: none; }
+:root[data-casca="celular"] #lista-roster li.pessoa .pessoa-perfil-linha-solta {
+  display: block;
+  grid-column: 2 / span 2;
+  grid-row: 3;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: calc(12px * var(--cel-escala));
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+:root[data-casca="celular"] .cel-perfil-retrato[data-com-retrato="sim"] {
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}

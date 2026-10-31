@@ -778,7 +778,8 @@ const MEDIDOR = `
     await entrada.waitForTimeout(300);
 
     // O modal do PERFIL e a confirmação: o mesmo respiro em todas as seções, e
-    // FECHAR e as ações ao alcance também em 390 px.
+    // a saída (o CANCELAR do rodapé preso, desde a 0.19 sem FECHAR no
+    // cabeçalho) e as ações ao alcance também em 390 px.
     for (const [rotulo, largura, altura] of [["1280", 1280, 800], ["390", 390, 844]]) {
       await entrada.setViewportSize({ width: largura, height: altura });
       await entrada.waitForTimeout(300);
@@ -787,16 +788,18 @@ const MEDIDOR = `
       const modal = await entrada.evaluate(() => {
         const dentro = (r) => r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
         const caixa = document.querySelector("#perfil .nomear-caixa");
-        const antes = dentro($("perfil-fechar").getBoundingClientRect());
+        const antes = dentro($("perfil-cancelar").getBoundingClientRect());
+        const corpo = document.querySelector("#perfil .perfil-corpo");
         caixa.scrollTop = caixa.scrollHeight;
+        corpo.scrollTop = corpo.scrollHeight;
         return {
-          caixaDentro: dentro(caixa.getBoundingClientRect()), fecharDentro: antes, fecharDepoisDeRolar: dentro($("perfil-fechar").getBoundingClientRect()),
+          caixaDentro: dentro(caixa.getBoundingClientRect()), fecharDentro: antes, fecharDepoisDeRolar: dentro($("perfil-cancelar").getBoundingClientRect()),
           paddingDoForm: getComputedStyle($("perfil-forma")).paddingLeft, paddingDaSala: getComputedStyle(document.querySelector(".perfil-cartao-codigo")).paddingLeft,
           paddingDaCabeca: getComputedStyle(document.querySelector("#perfil .nomear-cabeca")).paddingLeft,
         };
       });
       assert.ok(modal.caixaDentro, `(v2 perfil ${rotulo}) a caixa do perfil passa da janela: ${JSON.stringify(modal)}`);
-      assert.ok(modal.fecharDentro && modal.fecharDepoisDeRolar, `(v2 perfil ${rotulo}) o FECHAR some ao rolar: ${JSON.stringify(modal)}`);
+      assert.ok(modal.fecharDentro && modal.fecharDepoisDeRolar, `(v2 perfil ${rotulo}) a saída (CANCELAR) some ao rolar: ${JSON.stringify(modal)}`);
       assert.equal(modal.paddingDaSala, modal.paddingDoForm, `(v2 perfil ${rotulo}) a seção SEU CÓDIGO tem outro respiro que o formulário: ${JSON.stringify(modal)}`);
       assert.ok(parseFloat(modal.paddingDaCabeca) >= 16, `(v2 perfil ${rotulo}) a cabeça do modal tem outro respiro: ${JSON.stringify(modal)}`);
       await entrada.screenshot({ path: path.join(capturas, `v2-perfil-${navegador}-${rotulo}.png`) });

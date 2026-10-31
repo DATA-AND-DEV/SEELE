@@ -95,6 +95,10 @@ const COMANDOS_DA_SESSAO = new Set([
   // ForaDaVista, e a camada também confere a sessão de origem.
   "pedir_cargos", "explicar_permissoes", "prever_cargo", "criar_cargo", "editar_cargo",
   "mover_cargo", "apagar_cargo", "atribuir_cargo", "revogar_cargo",
+  // O perfil público (0.19, `perfis.js`): a lista, os dois verbos e as imagens
+  // são da sessão da vista; uma resposta que chega depois da troca não vale.
+  "perfis", "gravar_perfil", "tirar_imagem_do_perfil", "enviar_imagem_do_perfil",
+  "imagem_do_perfil",
 ]);
 
 /** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */

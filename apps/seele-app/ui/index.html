@@ -81,6 +81,7 @@
 <link rel="stylesheet" href="tela-auth.css">
 <link rel="stylesheet" href="visual-0174.css">
 <link rel="stylesheet" href="redesenho-019-mods.css">
+<link rel="stylesheet" href="perfis.css">
 <link rel="stylesheet" href="celular-texto.css">
 <link rel="stylesheet" href="celular-base.css">
 <link rel="stylesheet" href="celular-sessao.css">
@@ -1357,6 +1358,23 @@
         <p id="canais-servidor-endereco" class="canais-servidor-endereco" hidden></p>
       </div>
       <div class="canais-rolagem">
+        <!--
+          O relatório da migração dos perfis do MOD PERFIS (0.19, §4), para quem
+          hospeda: quantos vieram, o que não veio inteiro e por quê. Nunca calado
+          — fica aqui até ENTENDI (`camada-hospedagem.js`).
+        -->
+        <section id="relatorio-perfis" class="relatorio-perfis" aria-labelledby="relatorio-perfis-titulo" hidden>
+          <h2 id="relatorio-perfis-titulo" class="relatorio-perfis-titulo"></h2>
+          <p id="relatorio-perfis-resumo" class="relatorio-perfis-frase"></p>
+          <p id="relatorio-perfis-incompleta" class="relatorio-perfis-frase relatorio-perfis-alerta" hidden></p>
+          <details id="relatorio-perfis-detalhes" class="relatorio-perfis-detalhes" hidden>
+            <summary id="relatorio-perfis-conta"></summary>
+            <ul id="relatorio-perfis-ocorrencias" class="relatorio-perfis-ocorrencias"></ul>
+          </details>
+          <p id="relatorio-perfis-antigos" class="relatorio-perfis-frase relatorio-perfis-nota"></p>
+          <p id="relatorio-perfis-erro" class="nomear-erro" role="alert" hidden></p>
+          <button id="relatorio-perfis-entendi" class="botao-fantasma" type="button">ENTENDI</button>
+        </section>
         <div class="canais-cabeca">
           <!--
             **O código do painel saiu.** `B·03` era herança do comp v2, que
@@ -1402,6 +1420,23 @@
           Escondida enquanto vazia; quem a preenche e `redesenharAsEntradasDeMod`
           em `tela-sessao.js`.
         -->
+        <!--
+          O diretório «Perfis» (0.19, `docs/0.19/perfis-oficiais.md` §5.3 e §9):
+          uma entrada fixa do produto, acima de «DOS MODS», que abre a grade de
+          cartões na coluna central. Logo abaixo, o aviso gentil de quem teve a
+          foto ou a capa do PERFIS deixada para trás pela migração. Escondida num
+          servidor sem perfis oficiais (`desenharEntradaDosPerfis`, `perfis.js`).
+        -->
+        <ul id="lista-perfis-navegacao" class="canais lista-perfis-navegacao" hidden>
+          <li>
+            <button id="perfis-entrada" class="linha entrada-perfis" type="button" aria-label="Perfis deste servidor">
+              <span class="entrada-perfis-icone" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="9" cy="8" r="3"/><path d="M3 20c.8-3 3.2-5 6-5s5.2 2 6 5M16 5a3 3 0 0 1 0 6M18 15c1.6.8 2.6 2.6 3 5"/></svg></span>
+              <span class="linha-rotulo">Perfis</span>
+            </button>
+          </li>
+          <li><button id="perfis-pendencia" class="perfis-pendencia" type="button" hidden></button></li>
+        </ul>
+
         <div id="cabeca-mods-navegacao" class="canais-cabeca" hidden>
           <h2 class="painel-titulo"><span>DOS MODS</span></h2>
         </div>
@@ -2157,6 +2192,18 @@
       </div>
       <div id="roster-mods" class="roster-mods" hidden></div>
       <ul id="lista-roster" class="roster"></ul>
+      <!--
+        O perfil de outra pessoa (0.19, §5.3): uma folha à direita, no lugar do
+        painel PESSOAS, com a capa, a foto, o nome exibido, o apelido#tag, os
+        pronomes, o status e a bio. FECHAR ou Escape devolvem a lista.
+      -->
+      <aside id="perfil-folha" class="perfil-folha" aria-labelledby="perfil-folha-titulo" hidden>
+        <header class="perfil-folha-cabeca">
+          <h2 id="perfil-folha-titulo" class="perfil-folha-titulo"></h2>
+          <button id="perfil-folha-fechar" class="botao-fantasma" type="button">FECHAR</button>
+        </header>
+        <div id="perfil-folha-corpo" class="perfil-folha-corpo"></div>
+      </aside>
     </section>
 
     <!--
@@ -2178,6 +2225,25 @@
       `createElement`.
     -->
     <div id="palco-de-paginas" class="palco-de-paginas" hidden></div>
+
+    <!--
+      O diretório «Perfis» (0.19, §5.3): uma página do produto na coluna central,
+      por cima da conversa, como a página de um MOD — a coluna de salas, as
+      pessoas, a voz e a saída continuam de pé. Uma grade de cartões; cada um
+      abre a folha da pessoa no lugar do painel PESSOAS. Escolher um canal, o
+      VOLTAR ou abrir a página de um MOD a fecha (`perfis.js`).
+    -->
+    <section id="perfis-diretorio" class="perfis-diretorio" aria-labelledby="perfis-diretorio-titulo" hidden>
+      <header class="perfis-diretorio-cabeca">
+        <div class="perfis-diretorio-nomes">
+          <h2 id="perfis-diretorio-titulo" class="perfis-diretorio-titulo" tabindex="-1">Perfis</h2>
+          <p id="perfis-diretorio-sub" class="perfis-diretorio-sub"></p>
+        </div>
+        <button id="perfis-diretorio-editar" class="botao-fantasma" type="button">EDITAR SEU PERFIL</button>
+        <button id="perfis-diretorio-voltar" class="botao-fantasma" type="button" aria-label="Voltar à conversa">VOLTAR</button>
+      </header>
+      <div id="perfis-diretorio-corpo" class="perfis-diretorio-corpo"></div>
+    </section>
 
     <!--
       O palco dos paineis de MOD: a coluna auxiliar que um MOD pode pedir para
@@ -4429,22 +4495,33 @@
 </div>
 
 <div id="perfil" class="camada-nomear" role="dialog" aria-modal="true"
-     aria-labelledby="perfil-titulo" tabindex="-1" hidden>
+     aria-labelledby="perfil-titulo" tabindex="-1" data-oficial="nao" hidden>
   <div class="nomear-caixa perfil-caixa">
+    <!--
+      «Seu perfil», sem FECHAR (0.19, `docs/0.19/perfis-oficiais.md` §5.4): a
+      saída é uma só — CANCELAR, Escape e o clique fora passam por
+      `pedirParaSairDoPerfil` (`camada-nomear.js`), que pergunta antes de
+      descartar o que foi escrito.
+    -->
     <div class="nomear-cabeca perfil-cabeca">
       <h2 id="perfil-titulo" class="nomear-titulo">SEU PERFIL</h2>
-      <button id="perfil-fechar" class="botao-fantasma" type="button">FECHAR</button>
     </div>
-    <!-- Um painel de altura natural reúne identidade, código e agenda. O corpo inteiro rola; o cabeçalho conserva a saída. -->
+    <!-- O corpo inteiro rola; a prévia e o rodapé ficam presos (`perfis.css`). -->
     <div class="perfil-corpo">
     <div class="perfil-painel">
-    <form id="perfil-forma" class="nomear-corpo perfil-cartao-eu" autocomplete="off">
+    <form id="perfil-forma" class="nomear-corpo perfil-cartao-eu" autocomplete="off" novalidate>
+      <!--
+        A prévia viva do cartão, em tamanho real: o rascunho dos textos com a
+        foto e a capa que valem agora (`atualizarEditorDoPerfil`, `perfis.js`).
+        Decoração para o leitor de tela: os campos logo abaixo dizem o mesmo.
+      -->
+      <div id="perfil-previa-cartao" class="perfil-previa-cartao" aria-hidden="true" data-so-oficial hidden></div>
+      <!--
+        A imagem desta máquina (o ícone nativo de 8 KiB), fora de sessão e num
+        servidor 0.18. A prévia é a inicial do apelido quando não há imagem: é
+        o que a lista de pessoas desenha para quem não pôs uma.
+      -->
       <div id="perfil-imagem" class="perfil-imagem">
-        <!--
-          A prévia é `<img>` quando há imagem e a inicial do apelido quando não
-          há. A inicial não é enfeite: é o que a lista de pessoas desenha para
-          quem não pôs imagem, então a prévia mostra o que os outros veem.
-        -->
         <span id="perfil-previa" class="perfil-previa" role="img"></span>
         <div class="perfil-imagem-texto">
           <span class="perfil-imagem-rotulo" aria-hidden="true">Imagem</span>
@@ -4456,61 +4533,114 @@
         </div>
       </div>
       <!--
-        O apelido, editável desde que o `SetNickname` foi construído.
-
-        **Sair do campo manda**, como o nome do servidor na configuração: é o
-        gesto que diz «o valor mudou **e** a edição acabou» de uma vez, e é o
-        que faz o Enter e o clique fora valerem a mesma coisa sem um botão no
-        meio — que esta janela não tem, por regra.
-
-        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
-        32 e contava caracteres, e o fio conta 32 **bytes**: vinte letras `á`
-        cabiam aqui e não no `Hello`. Quem confere agora é `guardarOApelido`, em
-        bytes, com o teto lido do Rust (`limites_dos_campos`), e a recusa diz o
-        número em `#perfil-erro`.
+        A foto (96px) e a capa (16:9) do perfil oficial. ESCOLHER abre o
+        seletor e sobe na hora (o comando `enviar_imagem_do_perfil`); o bloco
+        diz o andamento, a recusa (o HEIC pelo nome) e a pendência da migração.
       -->
-      <label class="nomear-campo">
-        <span class="rotulo">APELIDO<span class="perfil-rotulo-nota"> como as pessoas te veem</span></span>
-        <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
-               name="apelido"
-               spellcheck="false" autocomplete="off"
-               placeholder="como as pessoas te veem">
-        <!--
-          ID mantido para o ciclo da pergunta do nome; a microdescrição foi removida.
-        -->
-        <span id="perfil-nota-do-apelido" class="nota" hidden></span>
-      </label>
+      <div id="perfil-imagens" class="perfil-imagens" data-so-oficial hidden>
+        <div class="perfil-bloco-imagem" data-lado="Foto">
+          <span id="perfil-foto-amostra" class="perfil-foto-amostra" aria-hidden="true"></span>
+          <div class="perfil-bloco-texto">
+            <span class="perfil-bloco-rotulo">Foto</span>
+            <div class="perfil-bloco-acoes">
+              <button id="perfil-foto-escolher" class="botao-fantasma" type="button" aria-label="Escolher a foto">ESCOLHER</button>
+              <button id="perfil-foto-remover" class="botao-fantasma" type="button" aria-label="Remover a foto">REMOVER</button>
+            </div>
+            <p class="nota perfil-bloco-formato">PNG, JPEG, WebP ou GIF · até 10 MiB · quadrada</p>
+            <p id="perfil-foto-estado" class="perfil-bloco-estado" role="status" hidden></p>
+          </div>
+        </div>
+        <div class="perfil-bloco-imagem" data-lado="Capa">
+          <span id="perfil-capa-amostra" class="perfil-capa-amostra" aria-hidden="true"></span>
+          <div class="perfil-bloco-texto">
+            <span class="perfil-bloco-rotulo">Capa</span>
+            <div class="perfil-bloco-acoes">
+              <button id="perfil-capa-escolher" class="botao-fantasma" type="button" aria-label="Escolher a capa">ESCOLHER</button>
+              <button id="perfil-capa-remover" class="botao-fantasma" type="button" aria-label="Remover a capa">REMOVER</button>
+            </div>
+            <p class="nota perfil-bloco-formato">PNG, JPEG, WebP ou GIF · até 10 MiB · 16:9</p>
+            <p id="perfil-capa-estado" class="perfil-bloco-estado" role="status" hidden></p>
+          </div>
+        </div>
+      </div>
+      <!--
+        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5): o fio conta
+        bytes no apelido e code points nos campos do perfil, e quem confere é o
+        Rust (`guardarOApelido`, `gravar_perfil`), com a recusa no campo.
+      -->
+      <div class="perfil-par">
+        <label class="nomear-campo">
+          <span class="rotulo">Apelido<span class="perfil-rotulo-nota"> como as pessoas te veem</span></span>
+          <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
+                 name="apelido"
+                 spellcheck="false" autocomplete="off"
+                 placeholder="como as pessoas te veem">
+          <!--
+            ID mantido para o ciclo da pergunta do nome; a microdescrição foi removida.
+          -->
+          <span id="perfil-nota-do-apelido" class="nota" hidden></span>
+        </label>
+        <label class="nomear-campo" data-so-oficial hidden>
+          <span class="rotulo">Nome exibido</span>
+          <input id="perfil-nome-exibido" name="nome_exibido" autocomplete="off" aria-describedby="perfil-nome-exibido-erro">
+          <span id="perfil-nome-exibido-erro" class="perfil-campo-erro" hidden></span>
+        </label>
+      </div>
       <!--
         Só na pergunta do nome, antes da primeira entrada desta execução
         (`perguntarONome`), e só com o campo vazio: diz o que acontece a quem
-        fecha sem responder, antes de fechar. A frase é `ENTRAR_SEM_NOME`, de
-        `frases.js`, escrita aqui por `desenharNotasDoApelido`.
-
-        O campo a tem em `aria-describedby`, para o leitor de tela dizê-la quando
-        o foco chega ao campo, e não só ao fechar. Escondida, ela fica vazia: a
-        descrição lê até o texto de um nó escondido.
+        fecha sem responder. A frase é `ENTRAR_SEM_NOME`, de `frases.js`.
       -->
       <p id="perfil-sem-nome" class="nota" hidden></p>
+      <div class="perfil-par" data-so-oficial hidden>
+        <label class="nomear-campo">
+          <span class="rotulo">Pronomes</span>
+          <input id="perfil-pronomes" name="pronomes" autocomplete="off" aria-describedby="perfil-pronomes-erro">
+          <span id="perfil-pronomes-erro" class="perfil-campo-erro" hidden></span>
+        </label>
+        <label class="nomear-campo">
+          <span class="rotulo">Status</span>
+          <input id="perfil-status" name="status" autocomplete="off" aria-describedby="perfil-status-erro">
+          <span id="perfil-status-erro" class="perfil-campo-erro" hidden></span>
+        </label>
+      </div>
+      <label class="nomear-campo perfil-campo-bio" data-so-oficial hidden>
+        <span class="rotulo">Sobre você <span id="perfil-bio-contador" class="perfil-contador" aria-live="polite">0/280</span></span>
+        <textarea id="perfil-bio" name="bio" rows="4" aria-describedby="perfil-bio-erro"></textarea>
+        <span id="perfil-bio-erro" class="perfil-campo-erro" hidden></span>
+      </label>
+      <fieldset class="perfil-grupo perfil-cor" data-so-oficial hidden>
+        <legend class="rotulo">Cor</legend>
+        <div class="perfil-cor-linha">
+          <div id="perfil-amostras" class="perfil-amostras" role="radiogroup" aria-label="Cor"></div>
+          <input id="perfil-cor-hex" class="perfil-cor-hex" name="cor" spellcheck="false" autocomplete="off"
+                 aria-label="Cor em hexadecimal" aria-describedby="perfil-cor-hex-erro" placeholder="#f2521f">
+        </div>
+        <span id="perfil-cor-hex-erro" class="perfil-campo-erro" hidden></span>
+      </fieldset>
+      <fieldset class="perfil-grupo perfil-efeito" data-so-oficial hidden>
+        <legend class="rotulo">Efeito</legend>
+        <div id="perfil-efeitos" class="perfil-segmentos" role="group" aria-label="Efeito"></div>
+      </fieldset>
+      <p id="perfil-erro" class="nomear-erro" role="alert" hidden></p>
+      <button id="perfil-recarregar" class="botao-fantasma perfil-recarregar" type="button" hidden>RECARREGAR</button>
       <!--
-        **`SALVAR` e `CANCELAR`, como a comp os desenha** — e a versão sem eles
-        perdeu um nome em campo.
-
-        Eu os tinha tirado por uma razão que vale para **metade** desta caixa: a
-        imagem aplica no instante em que se escolhe, então um `SALVAR` para ela
-        seria um botão que não salva nada. O apelido não é assim. Ele era
-        gravado num `change`, que dispara ao sair do campo — quem digitasse o
-        nome e apertasse `FECHAR` fechava sem que o campo tivesse perdido o foco,
-        e o nome ia embora sem uma palavra. Foi o relato: «o modal de perfil na
-        tela inicial não salva o nome».
-
-        Então o botão existe, e ele é do apelido. A imagem continua se
-        confirmando sozinha — a prévia acima é a confirmação dela.
+        **O rodapé: CANCELAR (vidro) e SALVAR, a única ação primária.** SALVAR
+        manda tudo o que espera: o apelido (`SetNickname`), se mudou, e os
+        textos do perfil (`GravarPerfil`). Com alterações, sair pergunta antes,
+        no lugar dos dois botões: «Descartar alterações?».
       -->
       <div class="perfil-fim">
-        <button id="perfil-cancelar" class="botao-fantasma" type="button">CANCELAR</button>
-        <button id="perfil-salvar" class="botao" type="submit">SALVAR</button>
+        <div id="perfil-fim-normal" class="perfil-fim-linha">
+          <button id="perfil-cancelar" class="botao-fantasma" type="button">CANCELAR</button>
+          <button id="perfil-salvar" class="botao primario" type="submit">SALVAR</button>
+        </div>
+        <div id="perfil-fim-descartar" class="perfil-fim-linha perfil-fim-descartar" hidden>
+          <span class="perfil-fim-pergunta">Descartar alterações?</span>
+          <button id="perfil-continuar" class="botao-fantasma" type="button">CONTINUAR EDITANDO</button>
+          <button id="perfil-descartar" class="botao-fantasma perfil-descartar" type="button">DESCARTAR</button>
+        </div>
       </div>
-      <p id="perfil-erro" class="nomear-erro" role="alert" hidden></p>
     </form>
     <!--
       A sala pessoal no PERFIL (tarefas 23 e 29 da F7; spec de 23/09, «"SEU
@@ -4524,7 +4654,7 @@
              aria-labelledby="perfil-sala-titulo" hidden>
       <div class="area-cartao perfil-cartao-codigo">
       <span class="perfil-sala-eyebrow" aria-hidden="true">Ligações diretas</span>
-      <span id="perfil-sala-titulo" class="rotulo">SEU CÓDIGO</span>
+      <span id="perfil-sala-titulo" class="rotulo">Seu código</span>
       <div class="perfil-sala-codigo">
         <input id="perfil-codigo" readonly spellcheck="false" autocomplete="off"
                aria-labelledby="perfil-sala-titulo">
@@ -5330,6 +5460,7 @@
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
+<script src="perfis.js"></script>
 <!--
   A moderação depois da operação porque ela lê `mensagens`, que é declarado lá —
   e só de dentro de um manipulador, que é sempre depois de todos os arquivos.

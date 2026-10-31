@@ -1,0 +1,577 @@
+/* SEELE — o perfil público (0.19, `docs/0.19/perfis-oficiais.md` §5).
+
+   O cartão (diretório, folha de outra pessoa, prévia do editor), a moldura do
+   efeito, o editor «Seu perfil» na gramática da 0.19, a entrada «Perfis», a
+   linha de pessoa com nome exibido e a capa parada, e o relatório da migração.
+
+   **A capa é fundo e só fundo** (o redesenho dos MODs, 8f3ad16b): a camada
+   `.capa-camada` cobre a caixa de quem a veste, recortada no raio dela, atrás
+   de um véu de leitura; a imagem nunca dita o tamanho de nada. */
+
+/* ------------------------------------------------------ a moldura do efeito
+   Um anel na cor da pessoa em volta da foto. `box-shadow`, e não um pseudo-
+   elemento: a foto é o fundo do próprio quadrado, e um `::before` atrás dele
+   ficaria por cima da foto. Com o movimento reduzido, o anel fica, parado. */
+[data-moldura-do-perfil][data-efeito] {
+  --perfil-cor: var(--seele-laranja-nerv);
+  box-shadow: 0 0 0 2px var(--seele-negro-painel), 0 0 0 4px var(--perfil-cor);
+}
+[data-moldura-do-perfil][data-efeito="aurora"] { animation: perfil-aurora 6s ease-in-out infinite; }
+[data-moldura-do-perfil][data-efeito="brilho"] { animation: perfil-brilho 2.4s ease-in-out infinite; }
+[data-moldura-do-perfil][data-efeito="pulso"] { animation: perfil-pulso 1.8s ease-in-out infinite; }
+
+@keyframes perfil-aurora {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--seele-negro-painel), 0 0 0 4px var(--perfil-cor),
+      0 0 14px 2px color-mix(in srgb, var(--perfil-cor) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--seele-negro-painel), 0 0 0 4px color-mix(in srgb, var(--perfil-cor) 55%, var(--seele-fosforo)),
+      0 0 18px 4px color-mix(in srgb, color-mix(in srgb, var(--perfil-cor) 55%, var(--seele-padrao-azul)) 50%, transparent);
+  }
+}
+@keyframes perfil-brilho {
+  0%, 100% { box-shadow: 0 0 0 2px var(--seele-negro-painel), 0 0 0 4px var(--perfil-cor); }
+  50% {
+    box-shadow: 0 0 0 2px var(--seele-negro-painel), 0 0 0 4px color-mix(in srgb, var(--perfil-cor) 60%, var(--seele-osso)),
+      0 0 16px 3px color-mix(in srgb, var(--perfil-cor) 70%, transparent);
+  }
+}
+@keyframes perfil-pulso {
+  0%, 100% { box-shadow: 0 0 0 2px var(--seele-negro-painel), 0 0 0 4px var(--perfil-cor), 0 0 0 4px transparent; }
+  50% {
+    box-shadow: 0 0 0 2px var(--seele-negro-painel), 0 0 0 4px var(--perfil-cor),
+      0 0 0 9px color-mix(in srgb, var(--perfil-cor) 30%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-moldura-do-perfil][data-efeito] { animation: none !important; }
+}
+/* Fora da vista, nada compõe quadros. */
+[hidden] [data-moldura-do-perfil][data-efeito] { animation: none; }
+
+/* ----------------------------------------------------------------- o cartão */
+.perfil-cartao {
+  --perfil-cor: var(--seele-laranja-nerv);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  font-family: var(--seele-ui);
+  color: var(--seele-osso);
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
+}
+button.perfil-cartao { cursor: pointer; min-height: 0; white-space: normal; }
+button.perfil-cartao:hover { border-color: var(--seele-controle-borda); }
+button.perfil-cartao:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+/* A faixa da capa: altura do produto, a imagem recortada dentro dela. Sem capa,
+   a cor da pessoa num degradê, para o cartão não parecer um buraco. */
+.perfil-cartao-capa {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  height: 96px;
+  border-radius: 0;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--perfil-cor) 55%, var(--seele-negro-painel)), var(--seele-negro-painel) 85%);
+}
+.perfil-cartao-capa > .capa-camada { border-radius: 0; }
+.perfil-cartao-capa > .capa-camada::after {
+  background: linear-gradient(180deg, transparent 35%, color-mix(in srgb, var(--seele-negro-painel) 85%, transparent));
+}
+.perfil-cartao-corpo {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 6px;
+  align-items: end;
+  padding: 0 16px 16px;
+}
+.perfil-cartao-foto {
+  grid-row: 1;
+  grid-column: 1;
+  width: 72px;
+  height: 72px;
+  margin-top: -36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border-radius: 20px;
+  background-color: color-mix(in srgb, var(--perfil-cor) 22%, var(--seele-negro-painel));
+  background-size: cover;
+  background-position: center;
+  border: 3px solid var(--seele-negro-painel);
+  color: var(--perfil-cor);
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 28px;
+}
+.perfil-cartao-foto[data-efeito] { border-color: transparent; }
+.perfil-cartao-nomes {
+  grid-row: 1;
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  padding-top: 8px;
+}
+.perfil-cartao-nome {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.perfil-cartao-apelido, .perfil-cartao-voce {
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+.perfil-cartao-voce { color: var(--seele-laranja-nerv); }
+.perfil-cartao-linha {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+.perfil-cartao-bio {
+  grid-column: 1 / -1;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+/* No diretório, a bio em três linhas: o cartão inteiro está na folha. */
+.perfis-grade .perfil-cartao-bio {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --------------------------------------------- a entrada e o diretório */
+#lista-perfis-navegacao {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+#lista-perfis-navegacao[hidden] { display: none !important; }
+#lista-perfis-navegacao .entrada-perfis {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  min-height: 44px;
+}
+#lista-perfis-navegacao .linha-rotulo { flex: 1 1 auto; min-width: 0; text-align: left; }
+.entrada-perfis-icone {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--seele-rotulo-painel);
+}
+.entrada-perfis-icone svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+#lista-perfis-navegacao .entrada-perfis[aria-current="page"] {
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+  color: var(--seele-osso);
+}
+#lista-perfis-navegacao .entrada-perfis[aria-current="page"] .entrada-perfis-icone { color: var(--seele-laranja-nerv); }
+#tela-sessao.com-diretorio-de-perfis #lista-linhas .linha.aberto {
+  background: none;
+  border-color: transparent;
+  color: var(--seele-osso-apagado);
+}
+/* O aviso gentil da pendência: uma linha só, que leva ao editor. */
+.perfis-pendencia {
+  width: 100%;
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  min-height: 36px;
+  text-align: left;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--seele-laranja-claro, var(--seele-laranja-nerv));
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 30%, transparent);
+  border-radius: var(--seele-raio);
+  cursor: pointer;
+}
+.perfis-pendencia::after { content: " →"; }
+
+/* A página: na célula da conversa, por cima dela, como a página de um MOD. */
+.perfis-diretorio {
+  grid-area: linha;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  overflow: hidden;
+}
+.perfis-diretorio[hidden] { display: none; }
+.perfis-diretorio-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--seele-linha);
+}
+.perfis-diretorio-cabeca .botao-fantasma { margin-left: 0; }
+.perfis-diretorio-nomes { flex: 1 1 auto; min-width: 0; }
+.perfis-diretorio-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 30px;
+  letter-spacing: var(--seele-tracking-cartela);
+  line-height: 1.1;
+  color: var(--seele-osso);
+}
+.perfis-diretorio-titulo:focus { outline: none; }
+.perfis-diretorio-sub {
+  margin: 4px 0 0;
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
+}
+.perfis-diretorio-corpo { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 24px; }
+.perfis-grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.perfis-grade-item { display: flex; min-width: 0; }
+.perfis-diretorio-vazio { margin: 0 0 16px; }
+
+/* ------------------------------------------- a folha de outra pessoa */
+/* No lugar do painel: aberta, a folha é o que o painel mostra, e o resto dele
+   (a cartela, o filtro, a lista) sai até ela fechar. */
+section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none !important; }
+.perfil-folha {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.perfil-folha[hidden] { display: none; }
+.perfil-folha-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 12px;
+}
+.perfil-folha-titulo {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.perfil-folha-cabeca .botao-fantasma { margin-left: 0; }
+.perfil-folha-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 16px 16px;
+}
+.perfil-folha-corpo .perfil-cartao-capa { height: 120px; }
+.perfil-folha-corpo .botao-fantasma, .perfis-editar-o-seu { margin-left: 0; align-self: flex-start; }
+.perfil-folha-vazia { margin: 0; }
+
+/* -------------------------------------------- a linha de uma pessoa */
+#lista-roster .pessoa-identidade-com-exibido { flex-wrap: wrap; row-gap: 0; }
+#lista-roster .pessoa-exibido {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  color: var(--seele-osso);
+}
+/* O apelido fica pequeno e sempre à vista, ao lado do nome exibido. */
+#lista-roster .pessoa-identidade-com-exibido .pessoa-nome {
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--seele-osso-apagado);
+}
+#lista-roster .pessoa-perfil-linha {
+  display: block;
+  margin: 4px 0;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+#lista-roster .pessoa-perfil-linha-solta { display: none; }
+#lista-roster .pessoa-ver-perfil {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  margin: 4px 0 6px;
+  padding: 0 14px;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+}
+#lista-roster .pessoa-ver-perfil:hover { background: var(--seele-controle-hover); }
+/* A capa parada da linha, com o véu firme: o nome e o estado por cima dela
+   continuam com o contraste que têm sem capa. */
+#lista-roster .pessoa[data-com-capa] { overflow: hidden; }
+#lista-roster .pessoa[data-com-capa] > .capa-camada::after {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--seele-negro-painel) 90%, transparent),
+    color-mix(in srgb, var(--seele-negro-painel) 70%, transparent));
+}
+
+/* ------------------------------------------------- o editor «Seu perfil»
+   Na gramática da 0.19: painel de vidro, Inter com inicial maiúscula (fim do
+   mono em caixa alta nos rótulos), campos de 48px com raio de 16px, botões em
+   pílula. A ordem de cima para baixo é a do §5.4; a prévia e o rodapé ficam
+   presos enquanto o corpo rola. */
+#perfil[data-oficial="sim"] .perfil-caixa { width: 720px; }
+#perfil .rotulo,
+#perfil legend,
+#perfil .perfil-bloco-rotulo,
+#perfil .perfil-imagem-rotulo,
+#perfil .perfil-sala-eyebrow {
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-osso);
+}
+#perfil .perfil-rotulo-nota { font-weight: 400; color: var(--seele-osso-apagado); }
+#perfil .perfil-sala-eyebrow { font-size: 13px; color: var(--seele-rotulo-claro); }
+#perfil #perfil-sala-titulo { font-family: var(--seele-ui); font-size: 13px; color: var(--seele-osso-apagado); }
+
+/* A ordem (o formulário e a sala pessoal dissolvem as caixas deles). */
+#perfil .perfil-painel { display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
+#perfil #perfil-previa-cartao { order: 0; }
+#perfil #perfil-imagem, #perfil #perfil-imagens { order: 1; }
+#perfil .perfil-par { order: 2; }
+#perfil #perfil-sem-nome { order: 3; }
+#perfil .perfil-par[data-so-oficial] { order: 4; }
+#perfil .perfil-campo-bio { order: 5; }
+#perfil .perfil-cor { order: 6; }
+#perfil .perfil-efeito { order: 7; }
+#perfil .perfil-cartao-codigo { order: 8; }
+#perfil .perfil-cartao-agenda { order: 9; }
+#perfil #perfil-erro, #perfil #perfil-recarregar { order: 10; }
+#perfil .perfil-fim { order: 20; }
+#perfil [hidden] { display: none !important; }
+
+/* A prévia viva, presa no alto quando a janela tem altura para isso. */
+#perfil #perfil-previa-cartao { display: flex; justify-content: center; }
+#perfil #perfil-previa-cartao > .perfil-cartao { max-width: 400px; }
+@media (min-height: 860px) {
+  #perfil[data-oficial="sim"] .perfil-corpo { padding-top: 0; }
+  #perfil[data-oficial="sim"] #perfil-previa-cartao {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 14px 0 12px;
+    background: var(--seele-negro-painel);
+  }
+}
+
+/* As duas imagens: a foto (96px) e a capa (16:9), cada uma com as pílulas. */
+#perfil .perfil-imagens { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+#perfil .perfil-bloco-imagem {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-cartao);
+}
+#perfil .perfil-bloco-imagem[data-lado="Foto"] { flex-direction: row; align-items: flex-start; }
+#perfil .perfil-foto-amostra, #perfil .perfil-capa-amostra {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: color-mix(in srgb, var(--seele-laranja-nerv) 14%, var(--seele-negro-painel));
+  background-size: cover;
+  background-position: center;
+  color: var(--seele-laranja-nerv);
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 34px;
+}
+#perfil .perfil-foto-amostra { width: 96px; height: 96px; border-radius: 24px; }
+#perfil .perfil-capa-amostra { width: 100%; aspect-ratio: 16 / 9; border-radius: var(--seele-raio); }
+#perfil .perfil-bloco-texto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+#perfil .perfil-bloco-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+#perfil .perfil-bloco-acoes .botao-fantasma { margin: 0; min-height: 36px; padding: 0 16px; }
+#perfil .perfil-bloco-formato { margin: 0; font-size: 12px; color: var(--seele-rotulo-painel); }
+#perfil .perfil-bloco-estado { margin: 0; font-size: 12px; line-height: 1.4; color: var(--seele-osso-apagado); }
+#perfil .perfil-bloco-estado[data-tom="erro"] { color: color-mix(in srgb, var(--seele-vermelho-alerta) 70%, var(--seele-osso)); }
+#perfil .perfil-bloco-estado[data-tom="feito"] { color: var(--seele-fosforo); }
+#perfil .perfil-bloco-estado[data-tom="pendencia"] { color: var(--seele-laranja-nerv); }
+
+/* Os campos: dois lado a lado onde o §5.4 pede, um por linha no estreito. */
+#perfil .perfil-par { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+#perfil .perfil-par:not(:has(> :not([hidden]) + :not([hidden]))) { grid-template-columns: minmax(0, 1fr); }
+#perfil .nomear-campo { margin: 0; min-width: 0; }
+#perfil input:not([type="checkbox"]):not([type="range"]), #perfil textarea {
+  min-height: 48px;
+  border-radius: var(--seele-raio);
+  font-family: var(--seele-ui);
+  font-size: 15px;
+}
+#perfil textarea { resize: vertical; min-height: 104px; line-height: 1.45; }
+#perfil .perfil-contador { float: right; font-family: var(--seele-mono); font-size: 12px; font-weight: 400; color: var(--seele-rotulo-painel); }
+#perfil .perfil-contador[data-passou="sim"] { color: var(--seele-vermelho-alerta); }
+#perfil .perfil-campo-erro { font-size: 12px; line-height: 1.4; color: color-mix(in srgb, var(--seele-vermelho-alerta) 70%, var(--seele-osso)); }
+#perfil [aria-invalid="true"] { border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 60%, transparent); }
+#perfil .perfil-grupo { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+#perfil .perfil-grupo > legend { padding: 0; margin-bottom: 8px; }
+#perfil .perfil-cor-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+#perfil .perfil-amostras { display: flex; flex-wrap: wrap; gap: 8px; }
+#perfil .perfil-amostra {
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--amostra);
+  border: 2px solid var(--seele-negro-painel);
+  box-shadow: 0 0 0 1px var(--seele-controle-borda);
+  cursor: pointer;
+}
+#perfil .perfil-amostra[aria-checked="true"] { box-shadow: 0 0 0 2px var(--seele-osso); }
+#perfil .perfil-cor-hex { width: 132px; font-family: var(--seele-mono) !important; }
+#perfil .perfil-segmentos {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-pilula);
+}
+#perfil .perfil-segmento {
+  min-height: 36px;
+  padding: 0 16px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+}
+#perfil .perfil-segmento[aria-pressed="true"] {
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+}
+#perfil .perfil-recarregar { align-self: flex-start; margin: 0; }
+
+/* O rodapé preso: CANCELAR e SALVAR; ou a pergunta de descartar. */
+#perfil .perfil-corpo { padding-bottom: 0; }
+#perfil .perfil-fim {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: block;
+  margin: 0 -32px;
+  padding: 14px 32px 22px;
+  background: var(--seele-negro-painel);
+  border-top: 1px solid var(--seele-linha);
+}
+#perfil .perfil-fim-linha { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; }
+#perfil .perfil-fim-linha > button { margin: 0; min-height: 44px; }
+#perfil .perfil-fim-pergunta { margin-right: auto; font-family: var(--seele-ui); font-weight: 500; color: var(--seele-osso); }
+#perfil .perfil-descartar { color: color-mix(in srgb, var(--seele-vermelho-alerta) 75%, var(--seele-osso)); }
+
+/* Janela estreita: tela cheia, o rodapé no pé. */
+@media (max-width: 759px) {
+  #perfil[data-oficial="sim"] { padding: 0; }
+  #perfil[data-oficial="sim"] .perfil-caixa {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    border: 0;
+  }
+  #perfil .perfil-imagens, #perfil .perfil-par { grid-template-columns: minmax(0, 1fr); }
+  #perfil .perfil-fim { margin: 0 -20px; padding: 12px 20px max(16px, env(safe-area-inset-bottom)); }
+}
+@media (max-width: 520px) {
+  #perfil .perfil-bloco-imagem[data-lado="Foto"] { flex-direction: row; }
+}
+
+/* ------------------------------------------- o relatório da migração */
+.relatorio-perfis {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 35%, transparent);
+  border-radius: var(--seele-raio-cartao);
+}
+.relatorio-perfis[hidden] { display: none; }
+.relatorio-perfis-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--seele-osso);
+}
+.relatorio-perfis-frase { margin: 0; font-family: var(--seele-ui); font-size: 13px; line-height: 1.45; color: var(--seele-osso); }
+.relatorio-perfis-alerta { color: color-mix(in srgb, var(--seele-vermelho-alerta) 70%, var(--seele-osso)); }
+.relatorio-perfis-nota { color: var(--seele-osso-apagado); font-size: 12px; }
+.relatorio-perfis-detalhes summary { cursor: pointer; font-family: var(--seele-ui); font-size: 13px; color: var(--seele-osso); }
+.relatorio-perfis-ocorrencias { margin: 6px 0 0; padding-left: 18px; font-family: var(--seele-mono); font-size: 11px; line-height: 1.5; color: var(--seele-osso-apagado); }
+.relatorio-perfis .botao-fantasma { align-self: flex-start; margin-left: 0; }
+
+/* ---------------------------------- a gestão de MODs: o PERFIS incorporado */
+.mods-incorporado { color: var(--seele-laranja-nerv); }

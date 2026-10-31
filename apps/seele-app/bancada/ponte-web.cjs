@@ -409,6 +409,8 @@ async function osNeutros() {
     toques_agora: [],
     // As tarefas 19 e 20 da F7: o navegador não hospeda.
     meu_servidor: null,
+    // O relatório da migração dos perfis (0.19) é do banco de quem hospeda.
+    ler_relatorio_da_migracao_de_perfis: null,
   };
   for (const casca of [{ toque: true }, { largura: 1280 }]) {
     const p = pagina(casca);

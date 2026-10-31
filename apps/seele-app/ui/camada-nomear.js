@@ -226,12 +226,16 @@ async function abrirPerfil(titulo) {
     }
   }
   $("perfil-apelido").value = apelido;
+  // **Os campos do perfil oficial** (0.19, `perfis.js`): com perfis no servidor
+  // da vista, o «Seu perfil» ganha a prévia, a foto, a capa e os textos; sem
+  // eles (fora de sessão, ou num servidor 0.18), é o de sempre.
+  prepararOEditorDoPerfil(snapshot, apelido);
   // **A capa de quem usa no cabeçalho** (D-capa-1, do dono; rascunho da API 6,
   // §4, «o SEU PERFIL nativo, por um aplicador do produto»): dentro de uma
-  // sessão, a do `me`; antes de conectar não há pessoa, e a camada sai. O
-  // título e o FECHAR ficam sobre placas (`camada-nomear.css`).
+  // sessão, a do `me`; antes de conectar não há pessoa, e a camada sai. Com o
+  // perfil oficial, a capa vai na prévia do cartão, e o cabeçalho fica limpo.
   if (typeof vestirCapa === "function") {
-    vestirCapa(document.querySelector("#perfil .perfil-cabeca"), snapshot?.me ?? null);
+    vestirCapa(document.querySelector("#perfil .perfil-cabeca"), editorDoPerfil.oficial ? null : snapshot?.me ?? null);
   }
   // Antes de a caixa aparecer e de o foco chegar ao campo: o leitor de tela lê a
   // descrição do campo nesse instante, e ela tem de estar escrita.
@@ -249,10 +253,14 @@ async function abrirPerfil(titulo) {
   // Hoje o retrato mora nesta máquina, como o apelido, e sobe junto com a
   // conexão. Escolher uma imagem antes de entrar em qualquer lugar passou a
   // ter consequência.
-  $("perfil-imagem").hidden = false;
+  // Com o perfil oficial, a foto e a capa do perfil tomam o lugar dela.
+  $("perfil-imagem").hidden = editorDoPerfil.oficial;
   await desenharPrevia(apelido);
   $("perfil").hidden = false;
-  $("perfil-escolher").focus();
+  // O primeiro controle, no alto e sem rolar: o foco num campo abriria o
+  // teclado do celular e rolaria o corpo para longe da prévia.
+  document.querySelector("#perfil .perfil-corpo").scrollTop = 0;
+  $(editorDoPerfil.oficial ? "perfil-foto-escolher" : "perfil-escolher").focus({ preventScroll: true });
   // O título que está escrito, e não um fixo: na pergunta do nome, quem não vê
   // a tela precisa ouvir a pergunta, e não «seu perfil».
   const cabeca = $("perfil-titulo").textContent;
@@ -341,6 +349,8 @@ async function perguntarONome() {
 /** Fecha, devolvendo o teclado. */
 function fecharPerfil() {
   $("perfil").hidden = true;
+  // O editor do perfil solta quem esperava um SALVAR, e volta ao rodapé de sempre.
+  soltarOEditorDoPerfil();
   // As notas da pergunta do nome são da pergunta, e ela acabou.
   perguntandoONome = false;
   desenharNotasDoApelido();
@@ -411,6 +421,13 @@ $("perfil-tirar").addEventListener("click", async () => {
  */
 async function guardarOApelido() {
   const escolhido = $("perfil-apelido").value.trim();
+  // Com o perfil oficial, o apelido só vai quando mudou: o SALVAR é de tudo, e
+  // mandar o mesmo nome seria um `SetNickname` por nada. Vazio volta ao de
+  // antes sem reabrir — reabrir apagaria o que se escreveu nos outros campos.
+  if (editorDoPerfil.oficial && (escolhido === "" || escolhido === editorDoPerfil.apelido.trim())) {
+    $("perfil-apelido").value = editorDoPerfil.apelido;
+    return true;
+  }
   if (escolhido === "") {
     await abrirPerfil();
     return false;
@@ -457,27 +474,57 @@ async function guardarOApelido() {
   }
 }
 
+/**
+ * **SALVAR manda tudo** (0.19, §5.4): o apelido, se mudou (`SetNickname`), e
+ * os textos do perfil (`GravarPerfil`, com a espera do desfecho). A foto e a
+ * capa já foram, no ESCOLHER. `true` é poder fechar.
+ */
+async function salvarOPerfil() {
+  if (!(await guardarOApelido())) return false;
+  return gravarOPerfilOficial();
+}
+
 // `SALVAR` é o `submit` da forma, então o Enter dentro do campo continua
 // valendo — são a mesma porta, e não duas.
 $("perfil-forma").addEventListener("submit", (evento) => {
   evento.preventDefault();
-  guardarOApelido()
+  salvarOPerfil()
     .then((deuCerto) => {
       if (deuCerto) fecharPerfil();
     })
-    .catch((falha) => console.warn("guardar o apelido:", falha));
+    .catch((falha) => console.warn("salvar o perfil:", falha));
 });
 
-// `CANCELAR` fecha sem gravar o campo. A imagem já foi aplicada quando se
-// apertou `ESCOLHER`, e este botão não promete desfazê-la: ele é do apelido,
-// que é a única coisa aqui que espera para valer.
-$("perfil-cancelar").addEventListener("click", fecharPerfil);
+/**
+ * **A saída única do «Seu perfil»** (0.19, §5.4): CANCELAR, Escape e o clique
+ * fora passam por aqui, e só por aqui. Sem nada escrito, fecha. Com algo
+ * escrito, o rodapé pergunta «Descartar alterações?» — CONTINUAR EDITANDO ou
+ * DESCARTAR — em vez de jogar fora calado; e uma segunda saída com a pergunta
+ * aberta não descarta nada: quem descarta é o botão que diz isso.
+ *
+ * A foto e a capa já valem desde o ESCOLHER, e não se desfazem aqui.
+ */
+function pedirParaSairDoPerfil() {
+  if ($("perfil").hidden) return;
+  if (perguntandoSeDescarta()) return;
+  if (perfilTemAlteracoes()) {
+    mostrarRodapeDeSaida(true);
+    return;
+  }
+  fecharPerfil();
+}
 
-$("perfil-fechar").addEventListener("click", fecharPerfil);
+$("perfil-cancelar").addEventListener("click", pedirParaSairDoPerfil);
+$("perfil-continuar").addEventListener("click", () => {
+  mostrarRodapeDeSaida(false);
+  $("perfil-salvar").focus();
+});
+$("perfil-descartar").addEventListener("click", fecharPerfil);
+
 $("operador-quem").addEventListener("click", () => {
   abrirPerfil().catch((falha) => console.warn("abrir o perfil:", falha));
 });
-fecharAoClicarFora("perfil", fecharPerfil);
+fecharAoClicarFora("perfil", pedirParaSairDoPerfil);
 
 window.addEventListener(
   "keydown",
@@ -485,7 +532,7 @@ window.addEventListener(
     if (evento.key !== "Escape" || $("perfil").hidden) return;
     evento.preventDefault();
     evento.stopPropagation();
-    fecharPerfil();
+    pedirParaSairDoPerfil();
   },
   true,
 );

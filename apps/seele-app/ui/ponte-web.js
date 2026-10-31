@@ -115,6 +115,9 @@ const RECUSAS_NOMEADAS = new Map([
   ["antes_de_hospedar", RECUSA_HOSPEDAR],
   ["apagar_pacote_do_cache", RECUSA_MODS],
   ["apagar_servidor", RECUSA_HOSPEDAR],
+  // O relatório da migração dos perfis é do banco de quem hospeda (0.19): a
+  // casca só o dispensa depois de mostrá-lo, e no navegador ele nunca aparece.
+  ["dispensar_relatorio", RECUSA_HOSPEDAR],
   ["aplicar_conjunto_de_mods", RECUSA_MODS],
   ["baixar_modulo_de_video", RECUSA_MODULO],
   ["baixar_versao", RECUSA_VERSOES],
@@ -254,7 +257,11 @@ const COMANDOS_DA_PONTE = new Set([
   // `SeeleUI.salvar` é do mesmo poder que o túnel, e do aplicativo como ele.
   "salvar_do_mod",
   // A máquina de jogo é do aplicativo, como o túnel: aqui o pedido é recusado pelo nome.
-  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas"
+  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas",
+  // O perfil público (0.19, `perfis.js`): a lista e os dois verbos pelo `.wasm`
+  // da sessão; as imagens pelo fluxo bidirecional, como no desktop.
+  "perfis", "gravar_perfil", "tirar_imagem_do_perfil", "enviar_imagem_do_perfil",
+  "imagem_do_perfil"
 ]);
 
 /**
@@ -278,6 +285,10 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
       },
       motivo: "chamado sem gesto na sessão; é o estado do desktop sem hospedagem (main.rs)",
     },
+  ],
+  [
+    "ler_relatorio_da_migracao_de_perfis",
+    { resposta: null, motivo: "o relatório da migração dos perfis é do banco de quem hospeda; o desktop responde nada a quem não hospeda nem tem relatório (main.rs)" },
   ],
   [
     "estou_hospedando",
@@ -1988,6 +1999,131 @@ async function transferirAImagem(sessao, mods, pedido, corpo, acabar) {
   return feito;
 }
 
+// ------------------------------------------------- as imagens do perfil (0.19)
+
+/**
+ * **As imagens de perfil já lidas, pelo hash** (`perfil_imagem_ler`): o hash é
+ * o endereço, e a imagem sob ele não muda nunca — a segunda leitura não toca a
+ * rede. Com teto em bytes, como o cache do desktop (`seele_ffi::perfis`,
+ * 64 MiB): passou, sai a mais antiga.
+ */
+const IMAGENS_DO_PERFIL_LIDAS = new Map();
+const TETO_DAS_IMAGENS_DO_PERFIL_LIDAS = 64 * 1024 * 1024;
+let bytesDasImagensDoPerfilLidas = 0;
+
+function guardarAImagemDoPerfil(hash, url, tamanho) {
+  if (IMAGENS_DO_PERFIL_LIDAS.has(hash)) return;
+  IMAGENS_DO_PERFIL_LIDAS.set(hash, { url, tamanho });
+  bytesDasImagensDoPerfilLidas += tamanho;
+  for (const [velho, { tamanho: dele }] of IMAGENS_DO_PERFIL_LIDAS) {
+    if (bytesDasImagensDoPerfilLidas <= TETO_DAS_IMAGENS_DO_PERFIL_LIDAS || velho === hash) break;
+    IMAGENS_DO_PERFIL_LIDAS.delete(velho);
+    bytesDasImagensDoPerfilLidas -= dele;
+  }
+}
+
+/** O tipo de mídia pelos primeiros bytes (o `.wasm` já conferiu que é um dos quatro). */
+function tipoDaImagemDoPerfil(bytes) {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+  if (bytes[0] === 0x47 && bytes[1] === 0x49) return "image/gif";
+  return "image/webp";
+}
+
+/**
+ * **Um fluxo de imagem de perfil**: o pedido (e, num envio, os bytes atrás
+ * dele), a resposta inteira, e o desfecho pelo `.wasm` da sessão. A recusa do
+ * servidor volta como o `ErroDoPerfil` do desktop; o prazo, como `SemResposta`.
+ */
+async function transferirAImagemDoPerfil(sessao, pedido, corpo, hash) {
+  const perfil = sessao.perfil;
+  const prazo = perfil.prazo();
+  const alca = perfil.respostaNova();
+  const transferir = async () => {
+    const fluxo = await sessao.abrirUmFluxoDeImagem();
+    const escritor = fluxo.writable.getWriter();
+    try {
+      await escritor.write(pedido);
+      for (let inicio = 0; corpo && inicio < corpo.length; inicio += BLOCO_DA_IMAGEM) {
+        await escritor.write(corpo.subarray(inicio, inicio + BLOCO_DA_IMAGEM));
+      }
+      await escritor.close();
+    } catch (falha) {
+      // A recusa do servidor para de ler o que chega; a resposta ainda vem.
+      console.warn("ponte: a ida da imagem do perfil parou:", falha);
+    }
+    const leitor = fluxo.readable.getReader();
+    for (;;) {
+      const { value, done } = await leitor.read();
+      if (done) break;
+      perfil.respostaChegou(alca, value);
+    }
+  };
+  try {
+    await comPrazo(transferir(), prazo.ms, prazo.motivo);
+  } catch (falha) {
+    perfil.acabou(alca, false, "");
+    console.warn("ponte: o fluxo da imagem do perfil não acabou:", falha);
+    throw "SemResposta";
+  }
+  const feito = perfil.acabou(alca, sessaoDaPonte.atual === sessao && !sessao.acabou, hash ?? "");
+  if (feito.falha) throw feito.falha;
+  return feito.bytes;
+}
+
+/**
+ * `enviar_imagem_do_perfil`: o seletor dentro do gesto, a conferência pelos
+ * bytes (até 10 MiB; o HEIC nomeado) e a subida. A foto nova também vira o
+ * ícone nativo (`perfil_icone` → `minha_imagem`), para quem ainda usa a 0.18
+ * ver o mesmo rosto — como o desktop.
+ */
+async function enviarAImagemDoPerfil(lado) {
+  const arquivo = await escolherUmaImagem();
+  if (!arquivo) return { escolheu: false, icone_nativo: false };
+  const sessao = sessaoDaPonte.atual;
+  if (!sessao) throw "NotConnected";
+  // O tamanho antes de ler: dez megabytes a mais na memória por nada.
+  if (arquivo.size > 10 * 1024 * 1024) throw { ImagemGrandeDemais: { limite_bytes: 10 * 1024 * 1024 } };
+  let bytes;
+  try {
+    bytes = new Uint8Array(await arquivo.arrayBuffer());
+  } catch {
+    throw "ArquivoIlegivel";
+  }
+  const montado = sessao.perfil.enviar(lado, bytes);
+  if (montado.falha) throw montado.falha;
+  await transferirAImagemDoPerfil(sessao, montado.pedido, bytes, "");
+  let iconeNativo = false;
+  if (lado === "Foto") {
+    const icone = sessao.perfil.icone(bytes);
+    if (icone.png) {
+      try {
+        await pelaSessaoDe(sessao, "minha_imagem")({ icone: Array.from(icone.png) });
+        iconeNativo = true;
+      } catch (falha) {
+        console.warn("ponte: a foto do perfil subiu, mas o ícone nativo para os clientes 0.18 não saiu:", falha);
+      }
+    } else {
+      console.warn("ponte: a foto do perfil subiu, mas não virou um ícone nativo: os clientes 0.18 seguem vendo o de antes");
+    }
+  }
+  return { escolheu: true, icone_nativo: iconeNativo };
+}
+
+/** `imagem_do_perfil`: do cache pelo hash, ou pelo fluxo, em `data:`. */
+async function lerAImagemDoPerfil({ pessoa, lado, hash }) {
+  const guardada = IMAGENS_DO_PERFIL_LIDAS.get(hash);
+  if (guardada) return guardada.url;
+  const sessao = sessaoDaPonte.atual;
+  if (!sessao) throw "NotConnected";
+  const montado = sessao.perfil.ler({ pessoa, lado, hash });
+  if (montado.falha) throw montado.falha;
+  const bytes = await transferirAImagemDoPerfil(sessao, montado.pedido, null, hash);
+  const url = `data:${tipoDaImagemDoPerfil(bytes)};base64,${(await osModsDaPagina()).base64De(bytes)}`;
+  guardarAImagemDoPerfil(hash, url, bytes.length);
+  return url;
+}
+
 /**
  * **O seletor do navegador**, com o filtro `accept`: o arquivo, ou `null`
  * quando a pessoa desiste. Um por chamada, e tirado da página ao responder.
@@ -2447,6 +2583,13 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   icone_do_server: pelaSessao("icone_do_server"),
   // Sem sessão, `null`: o desktop não erra aqui.
   imagem_da_pessoa: (args) => (sessaoDaPonte.atual ? pelaSessao("imagem_da_pessoa")(args).catch(() => null) : null),
+  // **O perfil público** (0.19): os mesmos comandos, nomes, argumentos e
+  // respostas do desktop (`main.rs`), e os mesmos erros (`ErroDoPerfil`).
+  perfis: pelaSessao("perfis"),
+  gravar_perfil: pelaSessao("gravar_perfil"),
+  tirar_imagem_do_perfil: pelaSessao("tirar_imagem_do_perfil"),
+  enviar_imagem_do_perfil: ({ lado } = {}) => enviarAImagemDoPerfil(lado),
+  imagem_do_perfil: (args) => lerAImagemDoPerfil(args ?? {}),
   // A geração que a casca guardou do `connect`: zero ou velha é a de uma
   // sessão que acabou (`confere_geracao`).
   // **Os MODs da sessão**: os pacotes no armazém da página, lidos pelas
