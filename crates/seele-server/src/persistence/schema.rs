@@ -795,6 +795,45 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE people SET nickname_base = nickname;
         "#,
     },
+    // **Número provisório.** Na `entrega/0.19` o PERFIS oficial usa a 20; a API 8
+    // (`desenho/api-8-multiplayer`) também usa a 20. Na fusão (§8 de
+    // `docs/0.19/perfis-oficiais.md`) a da API 8 vira a 21 — só bancos de
+    // desenvolvimento daquela branch chegaram à 20 —, e esta fica como está.
+    Migration {
+        version: 20,
+        description: "perfis oficiais: o perfil público de cada pessoa e o livro da migração do MOD",
+        sql: r#"
+            -- Uma linha por pessoa. As imagens são endereçadas pelo SHA-256 e
+            -- moram em disco, em `perfis/<hex>` ao lado do banco; aqui ficam só o
+            -- hash, o tipo e o tamanho. `revisao` sobe a cada escrita, inclusive
+            -- de imagem: é o que `GravarPerfil` confere.
+            CREATE TABLE perfis (
+                pessoa       INTEGER PRIMARY KEY REFERENCES people(id),
+                revisao      INTEGER NOT NULL,
+                nome_exibido TEXT    NOT NULL DEFAULT '',
+                pronomes     TEXT    NOT NULL DEFAULT '',
+                status       TEXT    NOT NULL DEFAULT '',
+                bio          TEXT    NOT NULL DEFAULT '',
+                cor          TEXT    NOT NULL DEFAULT '#f2521f',
+                efeito       TEXT    NOT NULL DEFAULT 'nenhum'
+                    CHECK (efeito IN ('nenhum','aurora','brilho','pulso')),
+                foto_hash    BLOB, foto_tipo TEXT, foto_bytes INTEGER,
+                capa_hash    BLOB, capa_tipo TEXT, capa_bytes INTEGER
+            ) STRICT;
+
+            -- O que a migração do MOD PERFIS fez com cada pessoa. Quem está aqui
+            -- não é migrado de novo. Sem chave estrangeira de propósito: o livro
+            -- guarda também o que não deu para trazer.
+            CREATE TABLE perfis_migracao (
+                pessoa         INTEGER PRIMARY KEY,
+                revisao_no_mod INTEGER NOT NULL,
+                -- 'trazida' | 'nenhuma' | 'falhou:<motivo>'
+                foto           TEXT    NOT NULL,
+                capa           TEXT    NOT NULL,
+                avisada        INTEGER NOT NULL DEFAULT 0
+            ) STRICT;
+        "#,
+    },
 ];
 
 #[cfg(test)]

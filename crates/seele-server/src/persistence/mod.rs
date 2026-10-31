@@ -33,6 +33,7 @@ pub mod channels;
 pub mod instancia;
 pub mod messages;
 pub mod mods;
+pub mod perfis;
 pub mod schema;
 pub mod subida;
 pub mod tema;
@@ -779,6 +780,11 @@ mod tests {
                      ALTER TABLE roles DROP COLUMN position;
                      UPDATE roles SET permissions = replace(replace(permissions, ',\"ShareScreen\"', ''), ',\"Administrator\"', ''),
                                       denials     = replace(denials, ',\"ShareScreen\"', '');
+
+                     -- A migração 20 (perfis oficiais): as duas tabelas. `perfis`
+                     -- aponta para `people`, então sai antes da 19 mexer nela.
+                     DROP TABLE perfis;
+                     DROP TABLE perfis_migracao;
 
                      -- A migração 19 acrescentou base/tag e índice; esta
                      -- fixture rebobina o schema antes de testar o replay.

@@ -40,6 +40,7 @@ pub mod hospedagem;
 pub mod mods;
 pub mod pares;
 pub mod perda_de_subida;
+pub mod perfis;
 pub mod permissions;
 pub mod persistence;
 pub mod portaria;
