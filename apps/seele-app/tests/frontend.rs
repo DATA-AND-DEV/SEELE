@@ -645,6 +645,13 @@ const AGUARDANDO_TELA: &[&str] = &[
     // (`base.js`) e saiu daqui, e o `desfazer_escolha_de_mod` do P1 também
     // (`tela-boot.js`, rodada 3); a releitura do foco ainda não chama este.
     "foco_de_voz",
+    // API 8 parte 3, Task 8: a metade de máquina no app. A tela do aceite e a
+    // faixa com DESLIGAR são do task seguinte da casca, que tira estes daqui.
+    "maquina_aceitar",
+    "maquina_recusar",
+    "maquina_desligar",
+    "maquina_revogar",
+    "maquinas_aceitas",
 ];
 
 #[test]
@@ -20898,8 +20905,42 @@ fn o_aviso_do_mod_chega_a_janela_pelos_nomes_que_o_rust_serializa() {
 /// existiam e sempre falhavam.
 #[test]
 fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
-    let preludio = read("../../crates/seele-motor/src/preludio.rs");
+    let preludio_inteiro = read("../../crates/seele-motor/src/preludio.rs");
     let base = without_comments(&read("ui/base.js"));
+
+    // **A metade de máquina não fala com a janela** (API 8 parte 3): os tipos
+    // dela são atendidos pela bomba Rust de `src/maquina.rs`, e a conferência
+    // deles com quem atende é a de baixo. O resto do prelúdio é da janela.
+    let (preludio, da_maquina) = preludio_inteiro
+        .split_once("// ---- a metade de máquina ----")
+        .and_then(|(antes, resto)| {
+            resto
+                .split_once("// ---- tempo ----")
+                .map(|(maquina, depois)| (format!("{antes}{depois}"), maquina.to_owned()))
+        })
+        .expect("a seção da metade de máquina sumiu do prelúdio");
+    let tipos_da_maquina: BTreeSet<String> = da_maquina
+        .split("pedir('")
+        .skip(1)
+        .filter_map(|resto| resto.split_once('\'').map(|(tipo, _)| tipo.to_owned()))
+        .collect();
+    let bomba = read("src/maquina.rs");
+    let tratar = bomba
+        .split_once("pub(crate) fn tratar(")
+        .and_then(|(_, resto)| resto.split_once("\n}\n"))
+        .map(|(corpo, _)| corpo)
+        .expect("`tratar` sumiu de src/maquina.rs");
+    for tipo in &tipos_da_maquina {
+        assert!(
+            tratar.contains(&format!("\"{tipo}\"")),
+            "o prelúdio da metade de máquina pede `{tipo}`, e `tratar` não o atende"
+        );
+    }
+    assert_eq!(
+        tipos_da_maquina.len(),
+        4,
+        "a leitura dos tipos da metade de máquina quebrou: {tipos_da_maquina:?}"
+    );
 
     let do_preludio: BTreeSet<String> = preludio
         .split("pedir('")

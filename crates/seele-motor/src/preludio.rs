@@ -42,9 +42,39 @@ pub const PRELUDIO: &str = r#"
   // aqui ele só é carregado, e solto ao fim da volta.
   let gestoDaVolta = null;
 
+  // **Os dois ouvintes da metade de máquina** (API 8 parte 3), e a marca de
+  // que a parada já foi dada. Só a metade de máquina os registra (`maquina`
+  // existe só com a capacidade `maquina`); na de janela ficam nulos, e uma
+  // mensagem desses tipos que chegasse lá não acharia ninguém.
+  let ouvinteDoAviso = null;
+  let ouvinteDaParada = null;
+  let paradaDada = false;
+
   globalThis.aoResponder = (texto) => {
     let m;
     try { m = JSON.parse(texto); } catch { return; }
+    if (m.tipo === 'aviso-maquina') {
+      // O erro de quem ouve fica com quem ouve, e é dito: um `aoAviso` que
+      // lança não pode impedir o próximo aviso de chegar, nem derrubar a
+      // metade inteira por um defeito de um ouvinte.
+      if (!ouvinteDoAviso) return;
+      try { ouvinteDoAviso(m.carga); } catch (erro) { dizerOErro('erro no aoAviso:', erro); }
+      return;
+    }
+    if (m.tipo === 'parar-maquina') {
+      // **Uma vez só**, e a resposta sai quando o `aoParar` acabar — inclusive
+      // o que ele esperou (uma promessa devolvida). É por esta mensagem que o
+      // anfitrião sabe que pode encerrar antes dos 2 s do teto; sem ela, toda
+      // parada custaria o teto inteiro.
+      if (paradaDada) return;
+      paradaDada = true;
+      const quem = ouvinteDaParada;
+      Promise.resolve()
+        .then(() => (quem ? quem(String(m.motivo ?? '')) : undefined))
+        .catch((erro) => { dizerOErro('erro no aoParar:', erro); })
+        .finally(() => { seele.postar(JSON.stringify({ tipo: 'maquina-parada-pronta' })); });
+      return;
+    }
     if (m.tipo === 'evento') {
       if (!ouvinte) return;
       // Só o `botao` carrega bilhete: um `gesto` num evento de outro nome não é
@@ -343,7 +373,14 @@ pub const PRELUDIO: &str = r#"
   // projetado por lista branca (rascunho da API 6, §6). Ele saía pela falta da
   // capacidade `retrato`, e um pacote sem ela ainda o ganhava: agora não há
   // caminho que o monte (a limpeza da máquina das APIs 3 a 5, depois do corte).
-  globalThis.SeeleMods = Object.freeze({
+  // **A metade de máquina não tem tela** (API 8 parte 3): com a capacidade
+  // `maquina`, nem `SeeleMods` nem `SeeleUI` existem, e o que existe é o
+  // global `maquina`. Ausentes, e não recusados: um `SeeleUI.superficies` que
+  // existisse e sempre falhasse faria o autor descobrir num `catch`, em
+  // produção, que a metade dele não tem onde desenhar.
+  const daMaquina = capacidades.has('maquina');
+
+  if (!daMaquina) globalThis.SeeleMods = Object.freeze({
     request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
     // **A ação declarada** (API 7, capacidade `acoes`): o `request` que nomeia
     // uma ação do `permissoes` do `mod.json`. Quem confere o MOD ligado, a
@@ -420,7 +457,7 @@ pub const PRELUDIO: &str = r#"
     entrar: async (nome) => pedir('tunel-entrar', { nome: String(nome ?? ''), gesto: gestoDaVolta }),
   }));
 
-  globalThis.SeeleUI = Object.freeze({
+  if (!daMaquina) globalThis.SeeleUI = Object.freeze({
     // **Sem `regiao` e sem `cartoes`** (decisão do dono de 08/10): a região é
     // um ponto de contribuição, e o cartão de uma pessoa é o `pessoa.cartao`.
     // Os dois eram das APIs 3 a 5, que este build não executa, e saíram do
@@ -473,6 +510,53 @@ pub const PRELUDIO: &str = r#"
       soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
     } : {}),
   });
+
+  // ---- a metade de máquina ----
+  //
+  // **O que foi aceito, e só isso.** O anfitrião põe em `__seeleMaquina` o
+  // servidor de jogo e a oferta que o dono da máquina aceitou (em JSON), e
+  // ela chega aqui congelada até o fundo: a metade lê o que pode servir, e
+  // reescrever a cópia não mudaria nada — quem confere `porta.servir` contra a
+  // oferta é o Rust, com a cópia dele. Lido e apagado, como as capacidades.
+  if (daMaquina) {
+    let dados = {};
+    try { dados = JSON.parse(String(globalThis.__seeleMaquina ?? '{}')) || {}; } catch { dados = {}; }
+    delete globalThis.__seeleMaquina;
+    const congelar = (valor) => {
+      if (valor && typeof valor === 'object') {
+        for (const dentro of Object.values(valor)) congelar(dentro);
+        Object.freeze(valor);
+      }
+      return valor;
+    };
+    // **O poder `porta`, só para quem o declara**: ausente sem ele, como
+    // toda capacidade. As três resolvem com o que o anfitrião respondeu; a
+    // recusa chega com o nome em `erro` (`fora-do-aceite`, ou o de
+    // `RecusaDeTunel` que o servidor disse).
+    const porta = capacidades.has('maquina.porta') ? Object.freeze({
+      servir: async (tunel) => {
+        await pedir('porta-servir', {
+          nome: String(tunel?.nome ?? ''),
+          protocolo: String(tunel?.protocolo ?? ''),
+          porta: Number(tunel?.porta),
+        });
+      },
+      parar: async (nome) => { await pedir('porta-parar', { nome: String(nome ?? '') }); },
+      quedas: (nome) => pedir('porta-quedas', { nome: String(nome ?? '') }),
+    }) : null;
+    globalThis.maquina = Object.freeze({
+      servidor: String(dados.servidor ?? ''),
+      oferta: congelar(dados.oferta ?? null),
+      // À metade de servidor do MOD, pelo servidor; resolve com o texto que
+      // ela respondeu, e rejeita com `sem-aceite` ou `sem-resposta`.
+      pedir: (valor) => pedir('maquina-pedir', { valor }),
+      // Um ouvinte de cada, e o último vence — a mesma regra de
+      // `SeeleUI.aoEvento`, pela mesma razão.
+      aoAviso: (fn) => { ouvinteDoAviso = typeof fn === 'function' ? fn : null; },
+      aoParar: (fn) => { ouvinteDaParada = typeof fn === 'function' ? fn : null; },
+      ...(porta ? { porta } : {}),
+    });
+  }
 
   // ---- tempo ----
   //

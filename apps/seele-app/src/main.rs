@@ -50,6 +50,7 @@ mod executor;
 mod firewall;
 mod icone;
 mod ligar;
+mod maquina;
 mod mods;
 // A redução de imagem de MOD mora no `seele-sessao` desde a Tarefa 2.6 da F4.
 use seele_ffi::reducao;
@@ -151,6 +152,11 @@ struct Session {
     /// **Aqui e não na janela** porque o runtime é nativo: quem o desmonta tem
     /// de ser quem o criou, e a janela pode desaparecer antes de pedir.
     mods_nativos: Mutex<ModsNativos>,
+    /// **As metades de máquina** (API 8 parte 3): as que o dono desta máquina
+    /// aceitou e estão de pé, e os pedidos que a tela ainda não respondeu.
+    /// Aqui e não na janela pelo mesmo motivo dos MODs nativos: o runtime é
+    /// nativo, e quem o desmonta tem de ser quem o criou. Ver [`maquina`].
+    maquinas: maquina::Maquinas,
     /// O último motivo por que cada MOD não carregou, como o `seele.log` o
     /// disse. É o que faz uma recusa repetida a cada quatro segundos sair uma
     /// vez: ver [`recusa_de_carga_dita`]. Esvaziada a cada sessão que fecha
@@ -1033,6 +1039,10 @@ struct Bridge<R: tauri::Runtime = tauri::Wry> {
     /// A tentativa da janela que pediu esta entrada, quando ela disse qual.
     /// Vai em cada etapa da chegada ([`carga_do_evento`]).
     tentativa: Option<u64>,
+    /// **Por onde esta sessão entrou**: o servidor SEELE de um pedido de
+    /// máquina. Na ponte, e não lido do registro, porque o servidor reenvia os
+    /// pedidos pendentes durante o `connect` — antes de a sessão estar lá.
+    alvo: String,
 }
 
 /// O canal do sinal «a lista de sessões mudou» ([`MudancaNaSessao`]).
@@ -1158,6 +1168,13 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
         if !self.marcas.viva.load(Ordering::Acquire) || carimbo.sessao != self.marcas.sessao {
             self.marcas.descartados.fetch_add(1, Ordering::Relaxed);
             self.descartados.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        // **Os eventos da máquina não vão crus à janela** (API 8 parte 3): o
+        // pedido vai como `maquina-pedido`, com o apelido no lugar do número, e
+        // o aviso é da metade de máquina e de mais ninguém. O fim da sessão
+        // passa por aqui também (para as metades dela) e segue para a janela.
+        if maquina::ao_evento(&self.app, carimbo.sessao, &self.alvo, &event) {
             return;
         }
         let na_vista = self.vista.load(Ordering::Acquire) == self.marcas.sessao;
@@ -1725,6 +1742,7 @@ async fn connect<R: tauri::Runtime>(
         de_pe: Arc::clone(&session.geracao),
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
         tentativa,
+        alvo: alvo.clone(),
     }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
     // **O CANCELAR desta tentativa** (tarefa 28 da F7): a vaga fica na sessão
@@ -1907,6 +1925,9 @@ async fn connect<R: tauri::Runtime>(
             session.por_na_vista_com(&mut slot, Some(&nova));
             drop(slot);
             avisar_a_trilha(&app, sessao_id, "entrou");
+            // Os pedidos de máquina que chegaram durante o `connect` agora têm
+            // conexão e lista de pessoas.
+            maquina::sessao_entrou(&app, sessao_id);
             None
         }
         Ok(_) => Some(connection),
@@ -2113,6 +2134,7 @@ fn soltar_a_entrada_em(session: &Session, geracao: u64) -> bool {
             // não uma sessão a mais esquecida no fundo.
             if let Some(vista) = session.sessoes.vista() {
                 session.sessoes.tirar(vista);
+                maquina::sessao_saiu_sem_tela(&session.maquinas, vista);
             }
             let solta = slot.take();
             session.por_na_vista_com(&mut slot, None);
@@ -5836,6 +5858,9 @@ fn desmontar_o_cliente<R: tauri::Runtime>(
     }
 
     let saindo = session.sessoes.tirar(sessao);
+    // As metades de máquina desta sessão param com `servidor-saiu`; o aceite
+    // guardado fica.
+    maquina::sessao_saiu(app, sessao);
     if na_vista {
         session.por_na_vista(None);
     }
@@ -6923,6 +6948,96 @@ async fn tunel_entrar(
     nome: String,
 ) -> Result<seele_ffi::PortaDeTunel, FalhaNoMod> {
     entrar_no_tunel_do_mod(&session, carimbo, geracao, &id, nome).await
+}
+
+/// **O dono da máquina aceitou** o pedido de máquina pendente de `resumo`
+/// (API 8 parte 3): o aceite é guardado, a metade de máquina é lida do pacote
+/// agora e ligada, e o `AceiteDeMaquina` sai. Ver [`maquina::aceitar`].
+///
+/// # Errors
+///
+/// `sem-pedido`, `pedido-velho` (o resumo não é o do pedido pendente),
+/// `sem-conexao`, ou o nome da recusa da leitura do pacote ou do aceite.
+#[tauri::command]
+async fn maquina_aceitar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+    resumo: String,
+) -> Result<seele_ffi::mods::AceiteDeMaquinaGuardado, String> {
+    // Numa thread de bloqueio: subir a metade pode esperar até 2 s a anterior
+    // da mesma chave parar.
+    tauri::async_runtime::spawn_blocking(move || {
+        maquina::aceitar(&app, &alvo, &mod_id, &servidor, &resumo)
+    })
+    .await
+    .unwrap_or_else(|_| Err("falhou".to_owned()))
+}
+
+/// O dono recusou o pedido de máquina: `RecusaDeMaquina { PeloDono }`.
+///
+/// # Errors
+///
+/// `sem-pedido`, `sem-conexao`, `sessao-encerrada`.
+#[tauri::command]
+fn maquina_recusar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+) -> Result<(), String> {
+    maquina::recusar(&app, &alvo, &mod_id, &servidor)
+}
+
+/// **DESLIGAR**: `aoParar("pelo-dono")`, os túneis dela caem, o executor
+/// para e o servidor recebe `MaquinaParada { PeloDono }`. O aceite fica.
+///
+/// # Errors
+///
+/// `nao-esta-ligada`.
+#[tauri::command]
+async fn maquina_desligar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        maquina::desligar(&app, &alvo, &mod_id, &servidor, maquina::Fim::PeloDono)
+    })
+    .await
+    .unwrap_or_else(|_| Err("falhou".to_owned()))
+}
+
+/// **REVOGAR**: o mesmo que DESLIGAR com `revogada`, e o aceite guardado é
+/// apagado — o próximo pedido pergunta de novo.
+///
+/// # Errors
+///
+/// `sem-aceite` (nada ligado nem guardado), ou o nome da recusa do arquivo.
+#[tauri::command]
+async fn maquina_revogar(
+    app: AppHandle,
+    alvo: String,
+    mod_id: String,
+    servidor: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        maquina::desligar(&app, &alvo, &mod_id, &servidor, maquina::Fim::Revogada)
+    })
+    .await
+    .unwrap_or_else(|_| Err("falhou".to_owned()))
+}
+
+/// Os aceites de máquina guardados nesta máquina, com quais estão de pé.
+///
+/// # Errors
+///
+/// `NaoDeuParaLer`.
+#[tauri::command]
+fn maquinas_aceitas(app: AppHandle) -> Result<Vec<maquina::MaquinaAceita>, String> {
+    maquina::aceitas(&app)
 }
 
 /// A recusa de um comando de túnel que não achou a sessão do carimbo: ela
@@ -14401,6 +14516,15 @@ fn main() {
     // e um pânico antes disto não teria onde cair além da saída de erro.
     instalar_gancho_de_panico();
 
+    // **Este processo tem tela** (API 8 parte 3): toda conexão dele mostra
+    // pedidos de máquina, em vez de o núcleo os recusar sozinho com
+    // `sem-tela`. Aqui, uma vez, antes de qualquer conexão — inclusive a
+    // automática do arranque —, porque o servidor reenvia os pedidos pendentes
+    // logo depois do `Session`, antes de um comando por conexão poder chegar.
+    // **Nunca num ajudante que os testes usam**: o valor é do processo, e um
+    // binário de teste que o ligasse mudaria o padrão de todos os testes dele.
+    seele_ffi::este_processo_tem_tela(true);
+
     // A window that cannot open is not a case with a graceful path: there is
     // nowhere left to show the reason. It goes to the log and to the exit code.
     // Qual criptografia o `reqwest` usa, dito de fora.
@@ -14713,6 +14837,11 @@ fn main() {
             mods_instalados,
             mod_request,
             tunel_entrar,
+            maquina_aceitar,
+            maquina_recusar,
+            maquina_desligar,
+            maquina_revogar,
+            maquinas_aceitas,
             tunel_sair_do_mod,
             tuneis_abertos,
             aceite_de_mods,
@@ -14891,6 +15020,10 @@ fn main() {
 fn despedir_se(handle: &tauri::AppHandle) {
     use tauri::Manager as _;
 
+    // **As metades de máquina primeiro**, todas ao mesmo tempo, com
+    // `aoParar("app-fechou")` e o `MaquinaParada { AppFechou }`: depois da linha
+    // de baixo a conexão já se despediu, e o servidor saberia só pela queda.
+    maquina::parar_todas_na_saida(&handle.state::<Session>().maquinas);
     despedir_da_sessao(&handle.state::<Session>(), ESPERA_DOS_MODS_NA_SAIDA);
 }
 

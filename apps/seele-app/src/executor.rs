@@ -68,6 +68,10 @@ pub(crate) enum ParaODentro {
         /// (`ModInstalado::capacidades`), com a regra de
         /// `capacidades_do_manifesto`.
         capacidades: Vec<&'static str>,
+        /// **Só na metade de máquina** (API 8 parte 3): o JSON `{ servidor,
+        /// oferta }` do que o dono aceitou, que o prelúdio expõe em
+        /// `maquina`. `None` é a metade de janela de sempre.
+        maquina: Option<String>,
     },
     /// Uma resposta a um pedido que o MOD fez.
     Resposta(String),
@@ -181,6 +185,33 @@ impl ExecutorQuickJs {
             .send(ParaODentro::Codigo {
                 fonte: codigo.to_owned(),
                 capacidades,
+                maquina: None,
+            })
+            .map_err(|_| "o executor não está de pé")
+    }
+
+    /// Entrega o código de uma **metade de máquina**, com o que o dono aceitou
+    /// (`dados`, o JSON `{ servidor, oferta }`). As capacidades são as de
+    /// `capacidades_da_maquina`, e com elas o prelúdio não monta tela nenhuma.
+    ///
+    /// **O mesmo executor, com os mesmos tetos** (`Limites::default()`) que a
+    /// metade de janela: o que muda é quem lê o canal de saída — uma bomba
+    /// Rust (`maquina.rs`), e não a janela.
+    ///
+    /// # Errors
+    ///
+    /// Falha quando a thread já morreu.
+    pub(crate) fn iniciar_de_maquina(
+        &self,
+        codigo: &str,
+        capacidades: Vec<&'static str>,
+        dados: String,
+    ) -> Result<(), &'static str> {
+        self.para_dentro
+            .send(ParaODentro::Codigo {
+                fonte: codigo.to_owned(),
+                capacidades,
+                maquina: Some(dados),
             })
             .map_err(|_| "o executor não está de pé")
     }
@@ -375,9 +406,14 @@ fn rodar(
         match entrada {
             ParaODentro::Encerrar => break,
             ParaODentro::Diagnostico => motor.diagnostico(),
-            ParaODentro::Codigo { fonte, capacidades } => {
-                motor.codigo(&fonte, &capacidades);
-            }
+            ParaODentro::Codigo {
+                fonte,
+                capacidades,
+                maquina,
+            } => match maquina {
+                Some(dados) => motor.codigo_de_maquina(&fonte, &capacidades, &dados),
+                None => motor.codigo(&fonte, &capacidades),
+            },
             ParaODentro::Resposta(json) => {
                 // O lugar volta **ao tirar da fila**, que é quando ela deixa de
                 // ocupar memória — e é o que a faz voltar a aceitar.

@@ -21,8 +21,8 @@ use seele_core::mods::{hex, refusal_name, Found};
 /// `crates/seele-conformance/tests/a_api_dos_mods_nao_diverge.rs`: a primeira
 /// divergência só apareceu no primeiro MOD de verdade.
 pub use seele_core::mods::{
-    capacidades_da_api, capacidades_de, capacidades_do_manifesto, Poder, APIS_ACEITAS,
-    MOD_API_MINIMA, MOD_API_VERSION,
+    capacidades_da_api, capacidades_da_maquina, capacidades_de, capacidades_do_manifesto, Poder,
+    APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
 };
 
 /// Ler um arquivo de mídia de um MOD — ver [`seele_core::mods::ler_midia`].
@@ -87,6 +87,55 @@ pub fn ler_por_hash(pasta: &str, hash: &str) -> Result<ModInstalado, String> {
         seele_core::mods::read_one(&dir).map(|lido| (lido.manifest, lido.hash)),
         hash,
     )
+}
+
+/// **A metade de máquina de um pacote** (API 8 parte 3): o fonte do arquivo
+/// que `manifesto.maquina` nomeia e o que ela pode chamar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadeDeMaquina {
+    /// `autor/nome`, do manifesto dos bytes lidos.
+    pub id: String,
+    /// O texto do arquivo.
+    pub fonte: String,
+    /// [`capacidades_da_maquina`] do mesmo manifesto.
+    pub capacidades: Vec<&'static str>,
+}
+
+/// Lê a metade de máquina do pacote de conteúdo `hash`.
+///
+/// **Só quem aceitou chama isto**, e no instante do aceite: o código da
+/// metade de máquina não é lido antes de o dono da máquina dizer sim. Por
+/// isso ela não passa por [`caminho_declarado`] — esse é o que a janela pode
+/// servir, e a metade de máquina **não** é servida à janela nunca.
+///
+/// O manifesto, o hash e o arquivo saem da mesma leitura da pasta: quem
+/// decide o que ela pode chamar é o mesmo manifesto que provou os bytes.
+///
+/// # Errors
+///
+/// `conteudo-nao-bate` quando o conteúdo não é o que o hash promete, o nome
+/// da recusa do manifesto, `sem-metade-de-maquina`, `maquina-fora-do-pacote`,
+/// `maquina-nao-lida` ou `maquina-nao-e-utf8`.
+pub fn codigo_da_maquina(pasta: &str, hash: &str) -> Result<MetadeDeMaquina, String> {
+    let dir = std::path::Path::new(pasta).join(PACOTES).join(hash);
+    let lido = seele_core::mods::read_one(&dir).map_err(|why| refusal_name(&why).to_owned())?;
+    if hex(&lido.hash) != hash {
+        return Err("conteudo-nao-bate".to_owned());
+    }
+    let Some(caminho) = lido.manifest.maquina.as_deref() else {
+        return Err("sem-metade-de-maquina".to_owned());
+    };
+    // O manifesto já foi recusado se o caminho sai do pacote; conferir de novo
+    // aqui custa uma linha e não depende de que aquela regra continue lá.
+    let relativo = seele_core::mods::inner_path(&caminho.split('/').collect::<Vec<_>>())
+        .ok_or_else(|| "maquina-fora-do-pacote".to_owned())?;
+    let bytes = std::fs::read(dir.join(relativo)).map_err(|_| "maquina-nao-lida".to_owned())?;
+    let fonte = String::from_utf8(bytes).map_err(|_| "maquina-nao-e-utf8".to_owned())?;
+    Ok(MetadeDeMaquina {
+        id: lido.manifest.id.clone(),
+        fonte,
+        capacidades: capacidades_da_maquina(&lido.manifest),
+    })
 }
 
 /// Todo MOD instalado nesta máquina, válido ou não.
@@ -684,5 +733,55 @@ mod hash_de_pasta {
             "HASH={} ID={} VERSAO={}",
             instalado.hash, instalado.id, instalado.version
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod a_metade_de_maquina_do_pacote {
+    use super::*;
+
+    /// Um pacote de API 8 com metade de máquina, publicado pelo conteúdo como o
+    /// instalador faz. Devolve a pasta de configuração e o hash.
+    fn publicar(nome: &str) -> (String, String) {
+        let raiz = std::env::temp_dir().join(format!(
+            "seele-ffi-metade-{nome}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&raiz);
+        let dir = raiz.join("em-obras");
+        std::fs::create_dir_all(dir.join("cliente")).unwrap();
+        std::fs::create_dir_all(dir.join("maquina")).unwrap();
+        std::fs::write(
+            dir.join("mod.json"),
+            r#"{"schema": 1, "id": "x/jogo", "version": "1.0.0", "api": 8,
+                "repo": "https://github.com/x/jogo", "reach": ["dom"], "state": 1,
+                "client": "cliente/main.js", "plataformas": ["app"], "poderes": ["porta"],
+                "maquina": "maquina/main.js", "server": "servidor.js",
+                "permissoes": [{"acao": "entrar-no-jogo", "nome": "Entrar no jogo", "todos": true}]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("cliente/main.js"), "// janela").unwrap();
+        std::fs::write(dir.join("maquina/main.js"), "// máquina").unwrap();
+        std::fs::write(dir.join("servidor.js"), "// servidor").unwrap();
+        let hash = ler_pasta(&dir.to_string_lossy()).expect("o pacote é válido").hash;
+        let destino = raiz.join(PACOTES).join(&hash);
+        std::fs::create_dir_all(destino.parent().unwrap()).unwrap();
+        std::fs::rename(&dir, &destino).unwrap();
+        (raiz.to_string_lossy().into_owned(), hash)
+    }
+
+    /// **O arquivo de `manifesto.maquina`, com as capacidades da máquina** — e
+    /// não as da janela, que dariam a ela um `SeeleUI`.
+    #[test]
+    fn a_metade_de_maquina_sai_do_arquivo_que_o_manifesto_nomeia() {
+        let (pasta, hash) = publicar("le");
+        let metade = codigo_da_maquina(&pasta, &hash).expect("a metade de máquina");
+        assert_eq!(metade.id, "x/jogo");
+        assert_eq!(metade.fonte, "// máquina");
+        assert_eq!(metade.capacidades, vec!["maquina", "maquina.porta"]);
+        // Outro hash é outro conteúdo, e o que não bate não é lido.
+        let outro = "0".repeat(hash.len());
+        assert!(codigo_da_maquina(&pasta, &outro).is_err());
     }
 }

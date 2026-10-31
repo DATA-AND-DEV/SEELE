@@ -1898,6 +1898,25 @@ impl Motor {
     /// `capacidades_da_api` do `seele-proto`: este crate não conhece o
     /// manifesto.
     pub fn codigo(&mut self, fonte: &str, capacidades: &[&str]) {
+        self.codigo_com(fonte, capacidades, None);
+    }
+
+    /// O código da **metade de máquina** (API 8 parte 3), com o que o dono
+    /// aceitou: `dados` é o JSON `{ servidor, oferta }` que o prelúdio lê de
+    /// `__seeleMaquina` e expõe, congelado, em `maquina.servidor` e
+    /// `maquina.oferta`.
+    ///
+    /// **Pelo mesmo caminho das capacidades**, e pela mesma razão: interpolar
+    /// a oferta no texto do prelúdio faria dele uma coisa diferente a cada
+    /// aceite, e uma constante é o que dá para revisar uma vez. As capacidades
+    /// são as de `capacidades_da_maquina` (`maquina`, e `maquina.porta` com o
+    /// poder `porta`): com `maquina` o prelúdio não monta `SeeleUI` nem
+    /// `SeeleMods`.
+    pub fn codigo_de_maquina(&mut self, fonte: &str, capacidades: &[&str], dados: &str) {
+        self.codigo_com(fonte, capacidades, Some(dados));
+    }
+
+    fn codigo_com(&mut self, fonte: &str, capacidades: &[&str], maquina: Option<&str>) {
         self.interrupcao.comecar();
         let volta = self.contexto.with(|ctx| {
             let resultado = (|| -> rquickjs::Result<()> {
@@ -1906,6 +1925,9 @@ impl Motor {
                     lista.set(onde, *nome)?;
                 }
                 ctx.globals().set("__seeleCapacidades", lista)?;
+                if let Some(dados) = maquina {
+                    ctx.globals().set("__seeleMaquina", dados)?;
+                }
                 // O teto por mensagem, pelo mesmo caminho e pela mesma
                 // razão: o prelúdio precisa dele para separar «não
                 // coube» de «a fila encheu», e interpolá-lo no texto
@@ -2345,5 +2367,83 @@ mod testes {
             "o `Falhou` da conta além da espera não diz de que é a conta, e a gestão mostra «e \
              mais 3» sem sujeito"
         );
+    }
+
+    /// O que a metade de máquina vê, com estas capacidades: a primeira
+    /// mensagem que o código postou.
+    fn o_que_a_maquina_ve(capacidades: &[&str]) -> serde_json::Value {
+        let (manda, recebe) = std::sync::mpsc::channel();
+        let limites = Limites::default();
+        let interrupcao = Arc::new(Interrupcao::nova(limites));
+        let fila = Arc::new(Fila::default());
+        let Some(mut motor) = Motor::subir(&manda, &interrupcao, &fila, limites) else {
+            panic!("o motor não subiu");
+        };
+        motor.codigo_de_maquina(
+            "seele.postar(JSON.stringify({\
+               seeleUI: typeof SeeleUI,\
+               seeleMods: typeof SeeleMods,\
+               pedir: typeof maquina.pedir,\
+               aoAviso: typeof maquina.aoAviso,\
+               aoParar: typeof maquina.aoParar,\
+               porta: typeof maquina.porta,\
+               servir: typeof (maquina.porta && maquina.porta.servir),\
+               servidor: maquina.servidor,\
+               congelada: Object.isFrozen(maquina.oferta) && Object.isFrozen(maquina.oferta.tuneis[0]),\
+               sobrou: typeof __seeleMaquina,\
+             }));",
+            capacidades,
+            r#"{"servidor":"mundo","oferta":{"titulo":"Minecraft","tuneis":[{"nome":"mc","protocolo":"tcp","porta":25565}]}}"#,
+        );
+        let corpo = loop {
+            match recebe.try_recv() {
+                Ok(ParaOFora::Mensagem(json)) => break json,
+                Ok(ParaOFora::Falhou(erro)) => panic!("a metade de máquina lançou: {erro}"),
+                Ok(_) => {}
+                Err(_) => panic!("a metade de máquina não postou nada"),
+            }
+        };
+        motor.parar();
+        serde_json::from_str(&corpo).expect("o código posta JSON")
+    }
+
+    /// **A metade de máquina não tem tela** (API 8 parte 3): com a capacidade
+    /// `maquina` não existem `SeeleUI` nem `SeeleMods`, existe `maquina`; e
+    /// `maquina.porta` só com `maquina.porta`.
+    #[test]
+    #[allow(clippy::indexing_slicing, reason = "num teste, o pânico é o relatório")]
+    fn a_metade_de_maquina_nao_tem_tela() {
+        let sem_porta = o_que_a_maquina_ve(&["maquina"]);
+        assert_eq!(
+            sem_porta["seeleUI"], "undefined",
+            "a metade de máquina ganhou SeeleUI: {sem_porta}"
+        );
+        assert_eq!(
+            sem_porta["seeleMods"], "undefined",
+            "a metade de máquina ganhou SeeleMods: {sem_porta}"
+        );
+        assert_eq!(sem_porta["pedir"], "function", "{sem_porta}");
+        assert_eq!(sem_porta["aoAviso"], "function", "{sem_porta}");
+        assert_eq!(sem_porta["aoParar"], "function", "{sem_porta}");
+        assert_eq!(
+            sem_porta["porta"], "undefined",
+            "sem o poder `porta` a metade de máquina ganhou `maquina.porta`: {sem_porta}"
+        );
+        assert_eq!(sem_porta["servidor"], "mundo", "{sem_porta}");
+        assert_eq!(
+            sem_porta["congelada"], true,
+            "a oferta aceita chega mutável: {sem_porta}"
+        );
+        assert_eq!(
+            sem_porta["sobrou"], "undefined",
+            "o vetor da oferta ficou ao alcance: {sem_porta}"
+        );
+
+        let com_porta = o_que_a_maquina_ve(&["maquina", "maquina.porta"]);
+        assert_eq!(
+            com_porta["servir"], "function",
+            "com `maquina.porta` falta servir: {com_porta}"
+        );
+        assert_eq!(com_porta["seeleUI"], "undefined", "{com_porta}");
     }
 }
