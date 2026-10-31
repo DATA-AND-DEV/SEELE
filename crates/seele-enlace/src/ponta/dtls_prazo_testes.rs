@@ -7,7 +7,7 @@ fn atributo(pacote: &mut Vec<u8>, tipo: u16, valor: &[u8]) {
     pacote.extend_from_slice(&tipo.to_be_bytes());
     pacote.extend_from_slice(&(valor.len() as u16).to_be_bytes());
     pacote.extend_from_slice(valor);
-    while pacote.len() % 4 != 0 {
+    while !pacote.len().is_multiple_of(4) {
         pacote.push(0);
     }
 }
@@ -31,11 +31,7 @@ fn binding(u: &str, nomeia: bool, transacao: u8) -> Vec<u8> {
     atributo(&mut p, 0x0008, &mac);
     let lido = str0m::ice::StunMessage::parse(&p).expect("STUN legivel");
     assert!(lido.is_binding_request());
-    assert!(
-        lido.verify(u.as_bytes(), |chave, partes| crate::cripto::hmac_sha1(
-            chave, partes
-        ))
-    );
+    assert!(lido.verify(u.as_bytes(), crate::cripto::hmac_sha1));
     assert_eq!(binding_com_u(&p).as_deref(), Some(u));
     p
 }

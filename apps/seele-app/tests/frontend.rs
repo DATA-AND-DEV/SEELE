@@ -19060,20 +19060,17 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
              enche a sessão seguinte com os volumes da que acabou"
         );
     }
-    for (tela, arquivo, ouvinte) in [
-        (
-            "o deslizante do roster",
-            "ui/tela-sessao.js",
+    // O deslizante do roster. 0.19: o cartão da chamada não escreve volume; ele
+    // abre a ficha, e o deslizante da ficha é conferido logo abaixo.
+    {
+        let corpo = body_of(
+            &without_comments(&read("ui/tela-sessao.js")),
             "$(\"lista-roster\").addEventListener(\"input\", (evento) => {",
-        ),
-        // 0.19: o cartão da chamada não escreve volume; ele abre a ficha, e o
-        // deslizante da ficha é conferido logo abaixo.
-    ] {
-        let corpo = body_of(&without_comments(&read(arquivo)), ouvinte);
+        );
         assert!(
             corpo.contains("marcarVolume(") && !corpo.contains("volumesLidos.set("),
-            "{tela} escreve o volume do gesto sem passar por `marcarVolume`: uma leitura de \
-             antes dele o desfaz:\n{corpo}"
+            "o deslizante do roster escreve o volume do gesto sem passar por `marcarVolume`: \
+             uma leitura de antes dele o desfaz:\n{corpo}"
         );
     }
     assert!(

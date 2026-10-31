@@ -3365,9 +3365,7 @@ async fn run_session(
                                 crate::autorizacao::Acesso::Escrita,
                             )
                             .unwrap_or(false)
-                            {
-                                Some(MessageRefusal::PermissionDenied)
-                            } else if replies_to.is_some_and(|pai| {
+                                || replies_to.is_some_and(|pai| {
                                 !Messages::new(&mut guarda)
                                     .one(pai)
                                     .ok()

@@ -1154,7 +1154,7 @@ pub async fn atender_imagem(
             )
             .await;
             let _ = envio.finish();
-            return Err(erro.into());
+            return Err(erro);
         }
     };
     let inicio = Instant::now();

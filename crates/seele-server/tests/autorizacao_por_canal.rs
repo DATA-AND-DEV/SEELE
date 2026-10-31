@@ -429,7 +429,7 @@ async fn mensagem_que_responde_a_mensagem_de_outro_canal_e_recusada() -> Result<
             ServerMessage::MessageRejected { client_message_id, reason, .. }
                 if *client_message_id == ClientMessageId(chave) =>
             {
-                Some(reason.clone())
+                Some(*reason)
             }
             _ => None,
         }

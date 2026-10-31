@@ -218,7 +218,7 @@ pub(crate) async fn servidor_de_volta(
             Err(_) if Instant::now() < fim => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            Err(erro) => return Err(erro.into()),
+            Err(erro) => return Err(erro),
         }
     };
     let atendendo = Arc::clone(&daemon);

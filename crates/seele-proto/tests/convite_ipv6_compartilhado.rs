@@ -1,4 +1,12 @@
 //! Convites IPv6 compartilhados: equivalência de URL e preservação da âncora.
+
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "num teste, o pânico é o relatório"
+)]
+
 use seele_proto::uri::{analisar, analisar_no_navegador, Bilhete, Convite, ORIGEM_DO_NAVEGADOR};
 
 fn convite() -> Convite {
