@@ -613,3 +613,10 @@
   color: var(--seele-rotulo-claro);
 }
 :root[data-casca="celular"] .cel-entrada[data-tipo="entrar-em"] .cel-entrada-campo > .rotulo { margin-bottom: -8px; }
+
+/* A tela de autenticação no celular: uma coluna só. Estas quatro regras moravam
+   no fim de `tela-auth.css` (49758837), que é do desktop e não cita a marca. */
+:root[data-casca="celular"] #tela-auth .auth-server { grid-column: 1; grid-row: auto; }
+:root[data-casca="celular"] #tela-auth .auth-selo { align-items: flex-start; }
+:root[data-casca="celular"] #tela-auth .auth-selo .auth-nota { text-align: left; }
+:root[data-casca="celular"] #tela-auth .cartela-padrao-rotulo { font-size: 12px; }

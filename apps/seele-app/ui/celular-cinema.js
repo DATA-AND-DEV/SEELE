@@ -19,6 +19,9 @@
 (() => {
   if (document.documentElement.dataset.casca !== "celular") return;
 
+  // O botão de sair do desktop (`palco-imagem.js`) não nasce aqui: este arquivo traz o dele.
+  globalThis.cinemaComSaidaPropria = true;
+
   const { h } = CELULAR;
   const PALAVRAS = FRASES_DO_CELULAR.cinema;
   let saida = null;

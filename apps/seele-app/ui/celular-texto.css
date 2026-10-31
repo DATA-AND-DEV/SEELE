@@ -20,16 +20,18 @@
 :where(:root[data-casca="celular"]) input,
 :where(:root[data-casca="celular"]) textarea,
 :where(:root[data-casca="celular"]) select { font-size: inherit; }
-:where(:root[data-casca="celular"]) .botao,
-:where(:root[data-casca="celular"]) .botao-fantasma { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .botao { font-size: inherit; }
-:where(:root[data-casca="celular"]) .botao-fantasma { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .rotulo,
 :where(:root[data-casca="celular"]) .coordenada { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .nota { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-hospedar-titulo { font-size: calc(24px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mensagem-texto { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .estado-sem-sessao { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) body { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .botao,
+:where(:root[data-casca="celular"]) .botao-fantasma,
+:where(:root[data-casca="celular"]) .botao-secundario { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .rotulo,
+:where(:root[data-casca="celular"]) .coordenada { font-size: calc(11px * var(--cel-escala)); }
 
 /* tela-boot.css */
 :where(:root[data-casca="celular"]) .visitados-titulo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
@@ -69,27 +71,109 @@
   :where(:root[data-casca="celular"]) #tela-servidores .boot-titulo,
   :where(:root[data-casca="celular"]) #tela-preparar .boot-titulo { font-size: calc(30px * var(--cel-escala)); }
 }
+:where(:root[data-casca="celular"]) #tela-boot .boot-topo .boot-nome { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-topo .boot-marca-sub { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-perfil { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-perfil .operador-inicial { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-perfil .operador-nome,
+:where(:root[data-casca="celular"]) #tela-boot #boot-perfil-nome { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .inicio-introducao h1 { font-size: calc(34px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot #boot-servidores-titulo,
+:where(:root[data-casca="celular"]) #tela-boot #boot-codigo-titulo,
+:where(:root[data-casca="celular"]) #tela-boot #boot-amigos-titulo,
+:where(:root[data-casca="celular"]) #tela-boot .boot-hospedar-titulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .inicio-conectar h2 { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-colunas p.nota { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .inicio-conectar .campo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-esq .servidor-sigla { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-esq .servidor-nome { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-esq .servidor-endereco { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-esq .servidor-visto { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-esq .servidor-esquecer { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-sessao-nome { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-sessao-sub { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot #boot-codigo-valor { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .amigo-avatar { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .amigo-nome { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .amigo-codigo { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .amigo-aviso { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .amigo-ligar,
+:where(:root[data-casca="celular"]) #tela-boot .amigo-tirar { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .larga-hospedar a { font-size: calc(14px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) #tela-boot .inicio-introducao h1 { font-size: calc(28px * var(--cel-escala)); }
+}
+@media (max-width: 1100px) {
+  :where(:root[data-casca="celular"]) #tela-boot #boot-codigo-valor { font-size: calc(15px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) #tela-boot:has(.inicio-introducao) #botao-server { font-size: inherit; }
+:where(:root[data-casca="celular"]) #tela-boot:has(.larga-hospedar) .boot-faixa-web { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-faixa-origem { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-faixa-web .botao-fantasma { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-nome { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-marca-sub { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-painel-rotulo,
+:where(:root[data-casca="celular"]) #tela-boot .boot-hospedar-titulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-painel-titulo { font-size: calc(34px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-hospedar-frase { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-sigla { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-sub { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-entrar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-esquecer { font-size: 0; }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-esq .servidor-esquecer::before { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-sessoes-frase { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-codigo-titulo,
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-amigos-titulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-codigo-estado { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-copiar-codigo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .amigo-tirar { font-size: 0; }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .amigo-tirar::before { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-meu-servidor-frase { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-terminal { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-identidade-frase { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-identidade-avatar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-identidade-nome { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-identidade-sub { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-fora-rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-fora-lista li { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-fora-lista li::before { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-fora-nota { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-topo .boot-nome { font-size: calc(24px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot .boot-amigos-campo-rotulo { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-meu-servidor .boot-saidas > button { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-meu-servidor-frase { font-size: calc(13px * var(--cel-escala)); }
 
 /* tela-antes-de-hospedar.css */
-:where(:root[data-casca="celular"]) .antes-servidor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-passo-num { font-size: calc(26px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-passo-titulo { font-size: calc(25px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-estado { font-size: calc(10px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-passo-frase { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .antes-linha-texto { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .antes-linha-feito { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-ir { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .antes-mais > summary { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-mods-apis { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-motivo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .antes-detalhes > summary { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .antes-detalhes-lista { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #tela-antes-de-hospedar .boot-titulo { font-size: calc(36px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .antes-contexto .antes-resumo { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .antes-contexto .antes-garantia { font-size: calc(12px * var(--cel-escala)); }
 @media (max-width: 700px) {
   :where(:root[data-casca="celular"]) #tela-antes-de-hospedar .boot-titulo { font-size: calc(30px * var(--cel-escala)); }
 }
+:where(:root[data-casca="celular"]) #tela-antes-de-hospedar .hospedagem-etapa { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #tela-antes-de-hospedar .boot-titulo { font-size: calc(36px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-servidor { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-contexto .antes-resumo,
+:where(:root[data-casca="celular"]) .antes-contexto .antes-garantia { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-ir { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-passo-frase { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-acoes > button,
+:where(:root[data-casca="celular"]) .antes-linha-acoes > button { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-mais > summary { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-mods-apis { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-detalhes > summary { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-detalhes-lista { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-motivo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .antes-passo-titulo { font-size: calc(15px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) .antes-passo-titulo { font-size: calc(17px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-passo-num { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .antes-estado { font-size: calc(10px * var(--cel-escala)); }
 
 /* tela-sessao.css */
 :where(:root[data-casca="celular"]) .marca { font-size: calc(16px * var(--cel-escala)); }
@@ -97,37 +181,37 @@
 :where(:root[data-casca="celular"]) .topo-server-sub { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .topo-kanji { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .relogio { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .veredito-texto { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .trilha-titulo { font-size: calc(8px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .veredito-texto { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .trilha-titulo { font-size: calc(9px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .trilha-item { font-size: 15px; }
 :where(:root[data-casca="celular"]) .trilha-mais { font-size: 18px; }
-:where(:root[data-casca="celular"]) .painel-ajuda { font-size: calc(10px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .painel-ajuda { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .painel-acao { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voice_room-nome { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) button.voice_room-nome { font-size: inherit; }
 :where(:root[data-casca="celular"]) .voice_room-ocupacao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .voice_room-pessoa { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .voice_room-pessoa { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voice_room-vazio { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .voice_room-entrar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .voice_room-entrar { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voice_room-apagar,
 :where(:root[data-casca="celular"]) .linha-apagar,
 :where(:root[data-casca="celular"]) .linha-renomear { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .linha-renomear { font-size: inherit; }
 :where(:root[data-casca="celular"]) .barra { font-size: var(--seele-t-rotulo); }
-:where(:root[data-casca="celular"]) .linha { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .selo-da-previa { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .operador-rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .operador-rotulo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-nome { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-config { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-glifo { font-size: inherit; }
 :where(:root[data-casca="celular"]) .canais-grupo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .linha-barra-cerquilha { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha-barra-cerquilha { font-size: calc(28px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) button.linha-nome { font-size: inherit; }
 :where(:root[data-casca="celular"]) .linha-nome-vazio { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .linha-buscar { font-size: inherit; }
 :where(:root[data-casca="celular"]) .mensagem-autor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mensagem-hora { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mensagens-dia { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mensagem-hora { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mensagens-dia { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mensagens .editada { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mensagens .envio { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mensagens .envio-acao { font-size: calc(10px * var(--cel-escala)); }
@@ -140,19 +224,20 @@
 :where(:root[data-casca="celular"]) .anexo-tamanho { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .anexo-estado { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .anexo-arquivo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .anexo-salvar { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .anexo-previa { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .anexo-previa-fechar { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .anexo-salvar { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .anexo-previa { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .anexo-previa-fechar { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .anexo-recusa { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoas-conta { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .roster-sala { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .membro-fora-do-ar { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoas-conta { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .roster-sala { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .membro-fora-do-ar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .roster-subgrupo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoa-nome { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .sync-marca { font-size: 11px; }
 :where(:root[data-casca="celular"]) .pessoa-sync-valor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa .barra { font-size: 11px; }
 :where(:root[data-casca="celular"]) .pessoa-rodape { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pastilha { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .metrica .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .metrica span { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .falha-local { font-size: calc(11px * var(--cel-escala)); }
@@ -173,7 +258,7 @@
 :where(:root[data-casca="celular"]) .pessoa-nome-porta { font-size: inherit; }
 :where(:root[data-casca="celular"]) .painel-titulo { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .linha-nome { font-size: calc(20px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compor-enviar { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compor-enviar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .telemetria .metrica { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .telemetria .rotulo { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoas-cartela { font-size: calc(14px * var(--cel-escala)); }
@@ -181,6 +266,16 @@
 :where(:root[data-casca="celular"]) .mensagem .corpo { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .aviso-fone-detalhes { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-diagnostico-resumo { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .canais-cabeca .painel-titulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .operador-fileira > button { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha-nome,
+:where(:root[data-casca="celular"]) button.linha-nome { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mensagem.propria .mensagem-avatar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mensagem-avatar { font-size: 14px; }
+:where(:root[data-casca="celular"]) .mensagens .envio-acao { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-avatar { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .metrica .rotulo { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .telemetria .rotulo { font-size: calc(12px * var(--cel-escala)); }
 @media (max-width: 1240px) {
   :where(:root[data-casca="celular"]) .linha-pessoas { font-size: calc(11px * var(--cel-escala)); }
 }
@@ -193,42 +288,60 @@
 @media (max-width:700px) {
   :where(:root[data-casca="celular"]) #aviso-fone { font-size: calc(12px * var(--cel-escala)); }
 }
+:where(:root[data-casca="celular"]) .canais-servidor-nome { font-size: calc(24px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .canais-servidor-chip { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .canais-servidor-endereco { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .voice_room-aqui { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha-sub { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .telemetria-estado { font-size: calc(12px * var(--cel-escala)); }
 
 /* camada-alerta.css */
 :where(:root[data-casca="celular"]) .alerta-fechar { font-size: calc(20px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .alerta-kanji { font-size: calc(44px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .alerta-palavra { font-size: calc(34px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .alerta-eixo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .alerta-palavra { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .alerta-eixo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .alerta-frase { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .alerta-ejetar { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .alerta-ejetar { font-size: calc(14px * var(--cel-escala)); }
 
 /* camada-bateria.css */
-:where(:root[data-casca="celular"]) .bateria-nome { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .bateria-nome { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .bateria-kanji { font-size: calc(16px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) #bateria-conta { font-size: calc(64px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #bateria-conta { font-size: calc(80px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .bateria-dizeres .rotulo { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .bateria-frase { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .bateria-pe .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) #bateria-tentativas { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .bateria-pe .rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #bateria-tentativas { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .bateria-forcar { font-size: calc(13px * var(--cel-escala)); }
 @media(max-width:700px) {
-  :where(:root[data-casca="celular"]) #bateria-conta { font-size: calc(48px * var(--cel-escala)); }
+  :where(:root[data-casca="celular"]) #bateria-conta { font-size: calc(56px * var(--cel-escala)); }
 }
 
 /* camada-portaria.css */
-:where(:root[data-casca="celular"]) .portaria-titulo { font-size: calc(28px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .portaria-fechar { font-size: calc(13px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .portaria-secao { font-size: calc(0.75rem * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-eyebrow { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-chip { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-titulo { font-size: calc(32px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-fechar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-camada > .rotulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #portaria-ligar { font-size: 0; }
+:where(:root[data-casca="celular"]) .portaria-estado { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-secao { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-avatar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .portaria-impressao { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .portaria-diz { font-size: calc(0.75rem * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-nome { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .portaria-contexto,
-:where(:root[data-casca="celular"]) .portaria-quando { font-size: calc(0.8125rem * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .portaria-veredito { font-size: calc(0.75rem * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .porta-titulo { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-quando { font-size: calc(0.75rem * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-veredito { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .porta-titulo { font-size: calc(24px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .porta-prosa { font-size: calc(13px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .portaria-identidade { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-identidade { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .portaria-identidade-nota { font-size: calc(12px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .portaria-titulo { font-size: calc(22px * var(--cel-escala)); }
+}
 
 /* camada-sala.css */
-:where(:root[data-casca="celular"]) .ligacao-desligar { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ligacao-desligar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .ligacao-cabeca-estado { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .amigo-nome { font-size: calc(17px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .amigo-codigo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
@@ -243,48 +356,52 @@
 }
 
 /* camada-moderar.css */
+:where(:root[data-casca="celular"]) .moderar-eyebrow { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-kanji { font-size: calc(32px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .moderar-titulo { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .moderar-titulo { font-size: calc(32px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-vazio { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .moderar-campo > .rotulo { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-select { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .moderar-acao-titulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .moderar-acao > .nota { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-verbo { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-consequencia { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-cancelar { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .moderar-confirmar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-fechar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-porta { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-remover { font-size: calc(11px * var(--cel-escala)); }
 
 /* cargos.css */
-:where(:root[data-casca="celular"]) .cargos-titulo { font-size: calc(28px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-servidor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-titulo { font-size: calc(32px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-servidor { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-fechar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-regra { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-regra-frase { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-aba { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-estado { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-item-botao { font-size: inherit; }
+:where(:root[data-casca="celular"]) .cargos-mestre-titulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-lateral-dica { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-item-pos { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-item-nome { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-item-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-item-meta { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-ordem-botao { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-botao { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-salvar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-voltar { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-editor-titulo { font-size: calc(22px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-editor-titulo { font-size: calc(24px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-vazio { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-motivo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-campo > .rotulo { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-entrada { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-rascunho { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-grupo-titulo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-grupo-titulo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-permissao-nome { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-permissao-desc { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-permissao-desc { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-mudou { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-chave { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-opcao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-previa-titulo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-previa-item { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .cargos-atribuicao-nome { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-opcao { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-previa-titulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-previa-item { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cargos-atribuicao-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-veredito { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cargos-explicado-regra { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 @media (max-width: 760px), (max-height: 500px) {
@@ -301,24 +418,29 @@
 }
 
 /* camada-travessia.css */
-:where(:root[data-casca="celular"]) .travessia-marca { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .travessia-titulo { font-size: calc(var(--seele-t-titulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .travessia-resumo { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .travessia-itens > li { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .travessia-nota { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .travessia-marca { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .travessia-titulo { font-size: calc(30px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .travessia-resumo { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .travessia-itens > li { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .travessia-nota { font-size: calc(13px * var(--cel-escala)); }
+@media (max-width: 560px) {
+  :where(:root[data-casca="celular"]) .travessia-titulo { font-size: calc(26px * var(--cel-escala)); }
+}
 
 /* camada-ajuda.css */
-:where(:root[data-casca="celular"]) .ajuda-titulo { font-size: calc(28px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .ajuda-fechar { font-size: inherit; }
-:where(:root[data-casca="celular"]) .ajuda-secao-nome { font-size: calc(22px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ajuda-titulo { font-size: calc(32px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ajuda-dica { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ajuda-secao-nome { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .ajuda-termo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .ajuda-diz { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .ajuda-tecla { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ajuda-tecla,
+:where(:root[data-casca="celular"]) .ajuda-dica-tecla { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .ajuda-titulo { font-size: calc(26px * var(--cel-escala)); }
+}
 
 /* camada-nomear.css */
-:where(:root[data-casca="celular"]) .nomear-titulo { font-size: calc(24px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .nomear-erro { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .nomear-confirmar { font-size: inherit; }
 :where(:root[data-casca="celular"]) .perfil-previa { font-size: calc(28px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .perfil-apelido { font-size: calc(17px * var(--cel-escala)); }
 @media (max-width: 520px) {
@@ -330,28 +452,33 @@
 :where(:root[data-casca="celular"]) #perfil #perfil-codigo { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-sala-receber { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil #perfil-sala-estado { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .perfil-agenda-titulo { font-size: calc(22px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-agenda-linha button { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-agenda-quem { font-size: calc(12px * var(--cel-escala)); }
 @media(max-width:719px) {
   :where(:root[data-casca="celular"]) #perfil #perfil-codigo { font-size: calc(16px * var(--cel-escala)); }
 }
+:where(:root[data-casca="celular"]) .nomear-titulo { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .nomear-campo > .rotulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .nomear-erro { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .nomear-confirmar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-cabeca .nomear-titulo { font-size: calc(30px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-previa { font-size: calc(36px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-imagem-texto .nota { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .nomear-campo > .rotulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfil-agenda-titulo { font-size: calc(20px * var(--cel-escala)); }
+@media (max-width: 520px) {
+  :where(:root[data-casca="celular"]) #perfil .perfil-previa { font-size: calc(30px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) #perfil .perfil-imagem-rotulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-imagem-texto .nota { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-sala-eyebrow { font-size: calc(10px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-cartao-codigo > .rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil #perfil-codigo { font-size: calc(15px * var(--cel-escala)); }
 
 /* camada-mods.css */
-:where(:root[data-casca="celular"]) .mods-titulo { font-size: calc(24px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-contagem { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-prosa { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-servidor-alvo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-ordem { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-id { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-versao { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-repo,
 :where(:root[data-casca="celular"]) .mods-hash { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-etiqueta { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-servidor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-tema { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-recusado { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .mods-mudou { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-exigido { font-size: calc(0.75rem * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-estado { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-aba { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
@@ -359,10 +486,44 @@
 :where(:root[data-casca="celular"]) .contorno-de-ponto-nome { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .contornos-dos-pontos-aviso { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-acoes > button { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-versao,
+:where(:root[data-casca="celular"]) .mods-repo,
+:where(:root[data-casca="celular"]) .mods-hash { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-repo .rotulo,
+:where(:root[data-casca="celular"]) .mods-hash .rotulo { font-size: calc(10px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-servidor,
+:where(:root[data-casca="celular"]) .mods-tema { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-tema { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-corpo-geral > .nota { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-acoes > button { font-size: calc(14px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .mods-titulo { font-size: calc(30px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) .mods-titulo { font-size: calc(44px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-eyebrow { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-contagem { font-size: calc(10px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-prosa { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-ordem { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-id { font-size: calc(17px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-versao { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-repo,
+:where(:root[data-casca="celular"]) .mods-hash { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-servidor,
+:where(:root[data-casca="celular"]) .mods-tema { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-servidor { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-mudou { font-size: calc(14px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .mods-titulo { font-size: calc(30px * var(--cel-escala)); }
+}
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .mods-prosa { font-size: calc(16px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) .mods-etiqueta { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-servidor-alvo { font-size: calc(12px * var(--cel-escala)); }
 
 /* mods-superficies.css */
 :where(:root[data-casca="celular"]) .superficie-de-mod { font-size: calc(var(--seele-t-corpo, 13px) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .superficie-de-mod-origem { font-size: calc(var(--seele-t-micro, 10px) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .superficie-de-mod-origem { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pagina-de-mod-titulo { font-size: calc(22px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .painel-de-mod-titulo,
 :where(:root[data-casca="celular"]) .folha-de-mod-titulo { font-size: calc(15px * var(--cel-escala)); }
@@ -371,7 +532,7 @@
 :where(:root[data-casca="celular"]) .aviso-de-mod { font-size: calc(var(--seele-t-dado, 11px) * var(--cel-escala)); }
 
 /* mods-controles.css */
-:where(:root[data-casca="celular"]) .regiao-de-mod-rotulo { font-size: calc(var(--seele-t-micro, 10px) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .regiao-de-mod-rotulo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .regiao-de-mod-caixa,
 :where(:root[data-casca="celular"]) .regiao-de-mod-escolha { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) button.regiao-de-mod-parte { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
@@ -381,7 +542,7 @@
 :where(:root[data-casca="celular"]) label.regiao-de-mod-parte[data-mensagem-de-erro]::after { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .regiao-de-mod-contador { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) form.regiao-de-mod-parte[data-erro]::before { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .regiao-de-mod-tira { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .regiao-de-mod-tira { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) span.regiao-de-mod-parte[data-forma="retrato"] { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) span.regiao-de-mod-parte[data-forma="distintivo"] { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .entrada-de-mod-origem { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
@@ -391,43 +552,44 @@
 :where(:root[data-casca="celular"]) .pessoa-apresentada-porta-rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .contribuicao-de-mod > .regiao-de-mod-parte { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .acao-de-mod { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) button.regiao-de-mod-parte { font-size: calc(14px * var(--cel-escala)); }
 
 /* camada-servidores.css */
 :where(:root[data-casca="celular"]) .servidor-linha { font-size: inherit; }
-:where(:root[data-casca="celular"]) .servidor-sigla { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .servidor-sigla { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .servidor-nome { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .servidor-endereco { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .servidor-visto { font-size: calc(10px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .servidor-esquecer { font-size: calc(10px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .servidor-endereco { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .servidor-visto { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .servidor-esquecer { font-size: calc(12px * var(--cel-escala)); }
 
 /* camada-sessoes.css */
-:where(:root[data-casca="celular"]) .trilha-grupo { font-size: calc(8px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .trilha-grupo { font-size: calc(9px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .trilha-marca { font-size: calc(8px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .trilha-marca-enlace { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .trilha-naolidas { font-size: calc(9px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voz-foco-frase { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-sessao-texto { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .boot-sessao-sub { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .boot-sessao-sub { font-size: calc(12px * var(--cel-escala)); }
 
 /* tela-chamada.css */
-:where(:root[data-casca="celular"]) .chamada-placa { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-nome { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-placa { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-nome { font-size: calc(32px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-enlace { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-campo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-barra .rotulo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-palco-razao { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-palco-quem { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco-razao { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco-quem { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-escolha button { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco[data-transmitindo="nao"] .chamada-palco-quem { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-parada { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-acao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-aperto { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-vazio { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-nome { font-size: calc(20px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-pastilha { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao-nome { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-pastilha { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-cartao-linha .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-cartao-marca { font-size: 11px; }
-:where(:root[data-casca="celular"]) .chamada-cartao-valor { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao-valor { font-size: calc(16px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-cartao-barra { font-size: 11px; }
 :where(:root[data-casca="celular"]) .chamada-volume .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-vol-passo { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
@@ -443,7 +605,20 @@
 :where(:root[data-casca="celular"]) .chamada-palco-cheia { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) body[data-cinema="sim"]::after { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-falha { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-avatar { font-size: var(--seele-t-secao); }
+:where(:root[data-casca="celular"]) .chamada-avatar { font-size: 22px; }
+:where(:root[data-casca="celular"]) .chamada-enlace,
+:where(:root[data-casca="celular"]) .chamada-campo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-campo .rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco-cabeca .chamada-titulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco[data-transmitindo="nao"] .chamada-palco-quem { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco-escolha button { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco-acao,
+:where(:root[data-casca="celular"]) .chamada-palco-cheia { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco-volume .rotulo { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-palco-aperto,
+:where(:root[data-casca="celular"]) .chamada-palco-parada { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao .nota { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao-linha .rotulo { font-size: calc(11px * var(--cel-escala)); }
 @media(max-width:900px) {
   :where(:root[data-casca="celular"]) .chamada-acoes-estreitas > button { font-size: calc(12px * var(--cel-escala)); }
 }
@@ -452,65 +627,120 @@
 :where(:root[data-casca="celular"]) .pessoal-web-participante-nome { font-size: calc(18px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoal-web input,
 :where(:root[data-casca="celular"]) .pessoal-web textarea { font-size: inherit; }
-:where(:root[data-casca="celular"]) .pessoal-web-autor { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoal-web-titulo { font-size: calc(24px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-mensagem { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-autor { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-titulo { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoal-web-estado { font-size: calc(15px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoal-web-entrada-titulo { font-size: calc(32px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoal-web-inicial { font-size: calc(32px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web[data-fase="dentro"] .pessoal-web-estado { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-entrada-titulo { font-size: calc(34px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-inicial { font-size: calc(40px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoal-web-participante-papel { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoal-web-chat-titulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-chat-titulo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoal-web-rodape > button { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoal-web-status { font-size: calc(12px * var(--cel-escala)); }
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
   :where(:root[data-casca="celular"]) .pessoal-web-titulo { font-size: calc(18px * var(--cel-escala)); }
 }
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
   :where(:root[data-casca="celular"]) .pessoal-web-topo > button { font-size: calc(11px * var(--cel-escala)); }
 }
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
   :where(:root[data-casca="celular"]) .pessoal-web-estado { font-size: calc(12px * var(--cel-escala)); }
 }
-@media (max-width: 700px) {
-  :where(:root[data-casca="celular"]) .pessoal-web-inicial { font-size: calc(24px * var(--cel-escala)); }
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web .pessoal-web-inicial { font-size: calc(24px * var(--cel-escala, 1)); }
+}
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-participante-nome { font-size: calc(14px * var(--cel-escala)); }
+}
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web .pessoal-web-participante-papel { font-size: calc(10px * var(--cel-escala)); }
+}
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-chat-titulo { font-size: calc(12px * var(--cel-escala)); }
+}
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web .pessoal-web-rodape > button { font-size: calc(10px * var(--cel-escala)); }
+}
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-erro { font-size: calc(12px * var(--cel-escala)); }
+}
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-entrada-titulo { font-size: calc(26px * var(--cel-escala)); }
+}
+@media (max-height: 600px) and (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web .pessoal-web-inicial { font-size: calc(18px * var(--cel-escala, 1)); }
+}
+@media (max-height: 600px) and (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-participante-nome { font-size: calc(12px * var(--cel-escala)); }
+}
+@media (max-height: 600px) and (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web .pessoal-web-participante-papel { font-size: calc(9px * var(--cel-escala)); }
+}
+@media (max-height: 600px) and (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-entrada-titulo { font-size: calc(20px * var(--cel-escala)); }
+}
+@media (max-height: 600px) and (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-nome { font-size: calc(12px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) .pessoal-web-estado-topo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoal-web-tempo { font-size: calc(12px * var(--cel-escala)); }
+@media (min-width: 701px) and (min-height: 501px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-participante-nome { font-size: calc(14px * var(--cel-escala)); }
+}
+@media (min-width: 701px) and (min-height: 501px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-participante-papel { font-size: calc(11px * var(--cel-escala)); }
+}
+@media (min-width: 701px) and (min-height: 501px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-mensagem { font-size: calc(13px * var(--cel-escala)); }
 }
 @media (max-width: 700px) {
-  :where(:root[data-casca="celular"]) .pessoal-web-participante-nome { font-size: calc(15px * var(--cel-escala)); }
+  :where(:root[data-casca="celular"]) .pessoal-web-mensagem { font-size: calc(14px * var(--cel-escala)); }
 }
 @media (max-width: 700px) {
-  :where(:root[data-casca="celular"]) .pessoal-web-rodape > button { font-size: calc(9px * var(--cel-escala)); }
+  :where(:root[data-casca="celular"]) .pessoal-web-mensagem .pessoal-web-autor { font-size: calc(12px * var(--cel-escala)); }
 }
-@media(max-width: 700px) {
-  :where(:root[data-casca="celular"]) .pessoal-web-titulo { font-size: calc(20px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-mensagem .pessoal-web-hora { font-size: calc(12px * var(--cel-escala)); }
 }
-@media(max-width: 700px) {
-  :where(:root[data-casca="celular"]) .pessoal-web-topo > button { font-size: calc(12px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-mensagem .pessoal-web-conteudo { font-size: calc(15px * var(--cel-escala)); }
 }
-@media(max-width: 700px) {
-  :where(:root[data-casca="celular"]) .pessoal-web-inicial { font-size: calc(22px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .pessoal-web .pessoal-web-rodape > button { font-size: calc(10px * var(--cel-escala)); }
 }
-@media(max-width: 700px) {
-  :where(:root[data-casca="celular"]) .pessoal-web-rodape > button { font-size: calc(12px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-entrada-titulo { font-size: calc(30px * var(--cel-escala)); }
+}
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-secao-rotulo { font-size: calc(11px * var(--cel-escala)); }
 }
 
 /* camada-compartilhar.css */
-:where(:root[data-casca="celular"]) .compartilhar-titulo { font-size: calc(26px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-fechar { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-permissao-diz { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-modulo-diz { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-modulo-onde { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-som-aviso { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-titulo { font-size: calc(32px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-fechar { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-pilula { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-permissao-diz,
+:where(:root[data-casca="celular"]) .compartilhar-modulo-diz { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-modulo-onde { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-som-rotulo .rotulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-som-aviso { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-vazio { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-fonte { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-fonte-diz { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .compartilhar-select { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-fonte-nome { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-fonte-diz { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-select { font-size: calc(14px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .compartilhar-titulo { font-size: calc(26px * var(--cel-escala)); }
+}
 
 /* tela-server.css */
-:where(:root[data-casca="celular"]) .server-marca-titulo { font-size: calc(22px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-marca-titulo { font-size: calc(21px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-secao-icone { font-size: calc(16px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-grupo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-voltar { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-contexto { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-titulo { font-size: calc(24px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-grupo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-voltar { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-contexto { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-titulo { font-size: calc(30px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-painel .rotulo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-dispositivo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-dispositivo-marca { font-size: calc(11px * var(--cel-escala)); }
@@ -525,10 +755,10 @@
 :where(:root[data-casca="celular"]) .server-atalho-tecla-troca { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-par-valor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-marcar { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-regua-valor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-regua-valor { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-lista-valor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-lista-acao { font-size: calc(10px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-atualizacao-estado { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-lista-acao { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-atualizacao-estado { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-atualizacao-notas { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-atualizacao-aviso p { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-atualizacao-barra { font-size: 11px; }
@@ -541,33 +771,92 @@
 :where(:root[data-casca="celular"]) .server-secao { font-size: inherit; }
 :where(:root[data-casca="celular"]) .server-secao .nota { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-secao-nome { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-bloco-nome { font-size: calc(24px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .server-painel-secao:not(#painel-audio) .server-bloco-nome { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-bloco-nome { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-painel-secao:not(#painel-audio) .server-bloco-nome { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-painel-secao:not(#painel-audio) .nota,
 :where(:root[data-casca="celular"]) .server-painel-secao:not(#painel-audio) .server-frase { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-painel-secao:not(#painel-audio) .rotulo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #painel-aparencia .aparencia-nome { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-secao .nota { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #server-testar-microfone,
+:where(:root[data-casca="celular"]) #server-ouvir-microfone,
+:where(:root[data-casca="celular"]) #alertas-testar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #painel-mods .mods-aba { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #painel-mods .mods-linha-gestao > .botao-fantasma { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #painel-mods .mods-id { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #painel-mods .mods-versao,
+:where(:root[data-casca="celular"]) #painel-mods .mods-servidor { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #painel-mods .mods-recusado { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #painel-mods .mods-estado,
+:where(:root[data-casca="celular"]) #painel-mods .mods-exigido { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #painel-atualizacao #atualizacao-travessia { font-size: calc(14px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .server-titulo { font-size: calc(24px * var(--cel-escala)); }
+}
+@media (min-width: 701px) {
+  :where(:root[data-casca="celular"]) .server-marca-titulo { font-size: calc(26px * var(--cel-escala)); }
+}
+@media (min-width: 701px) {
+  :where(:root[data-casca="celular"]) #secao-malha .nota { font-size: calc(14px * var(--cel-escala)); }
+}
+@media (min-width: 701px) {
+  :where(:root[data-casca="celular"]) .server-voltar:not(.server-so-celular) { font-size: calc(14px * var(--cel-escala)); }
+}
+@media (min-width: 701px) {
+  :where(:root[data-casca="celular"]) .server-titulo { font-size: calc(34px * var(--cel-escala)); }
+}
+@media (min-width: 701px) {
+  :where(:root[data-casca="celular"]) .server-faixa-texto > .nota { font-size: calc(14px * var(--cel-escala)); }
+}
+@media (min-width: 701px) {
+  :where(:root[data-casca="celular"]) #painel-audio .server-campo > .rotulo { font-size: calc(14px * var(--cel-escala)); }
+}
+@media (min-width: 701px) {
+  :where(:root[data-casca="celular"]) #painel-atualizacao #atualizacao-estado { font-size: calc(16px * var(--cel-escala)); }
+}
 
 /* tela-fim.css */
-:where(:root[data-casca="celular"]) .fim-titulo { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .fim-motivo { font-size: calc(20px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .fim-titulo { font-size: calc(44px * var(--cel-escala)); }
+}
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .fim-motivo { font-size: calc(17px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) .fim-etiqueta { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .fim-titulo { font-size: calc(72px * var(--cel-escala)); }
 
 /* tela-auth.css */
-:where(:root[data-casca="celular"]) .cartela-padrao-rotulo { font-size: calc(24px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .cartela-padrao-kanji { font-size: calc(15px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-nota { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-valor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-conferido { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .botao-auth { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-espera-frase { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-repique { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .cartela-padrao-rotulo { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-nota { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-valor,
+:where(:root[data-casca="celular"]) .auth-valor.auth-valor-marcado { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .botao-auth,
+:where(:root[data-casca="celular"]) .botao-auth[data-padrao] { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-parede { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-espera-frase { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-espera-fatos { font-size: calc(14px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-parede { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-repique { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .registro-linhas { font-size: calc(12px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-server-nome { font-size: calc(24px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-server-sub { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-pares { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-titulo { font-size: calc(28px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .auth-servidor-cabecalho { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-servidor-cabecalho { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-server-nome { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-server-sub { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-aperto > summary.coordenada { font-size: calc(14px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .auth-titulo { font-size: calc(36px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) .auth-titulo { font-size: calc(48px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-eyebrow { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .tela[data-modo="espera"] .auth-eyebrow { font-size: calc(48px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-conferido { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-conferido-titulo { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-impressao { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .registro-linhas { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .registro-linha .registro-hora { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-pares { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-par dt { font-size: calc(14px * var(--cel-escala)); }
 
 /* visual-0174.css */
 :where(:root[data-casca="celular"]) .inicio-conectar h2 { font-size: calc(24px * var(--cel-escala)); }

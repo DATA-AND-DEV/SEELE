@@ -713,9 +713,18 @@ fn every_element_the_script_reaches_for_exists_in_the_page() {
 
     assert!(!wanted.is_empty(), "the script reaches for nothing at all");
 
+    // Um elemento que a própria página cria em tempo de execução (`sair.id =
+    // "palco-sair-desktop"`, 02a2c4af) não está no index.html, e procurá-lo antes de
+    // criá-lo (`$(…)` devolve `null`, e a criação vem depois) não é erro. Só vale o id
+    // que um script ATRIBUI por inteiro, entre aspas; o que ninguém cria continua faltando.
+    let criados: BTreeSet<String> = script
+        .split(".id = \"")
+        .skip(1)
+        .filter_map(|piece| piece.split('"').next().map(str::to_owned))
+        .collect();
     let missing: Vec<&String> = wanted
         .iter()
-        .filter(|id| !page.contains(&format!("id=\"{id}\"")))
+        .filter(|id| !page.contains(&format!("id=\"{id}\"")) && !criados.contains(*id))
         .collect();
     assert!(
         missing.is_empty(),
@@ -755,13 +764,41 @@ fn the_page_loads_only_files_that_are_shipped() {
     // the `fontes.css` link once left all nineteen tests green. Same defect
     // class as the one `without_comments` exists for, one file over: a guard a
     // comment can satisfy is a guard that cannot fail.
-    let stylesheets = linked_assets(&page, "href");
-    let sources = linked_assets(&page, "src");
+    let mut stylesheets = linked_assets(&page, "href");
+    let mut sources = linked_assets(&page, "src");
+
+    // **As outras páginas servidas** carregam os arquivos delas, e esses não são
+    // arquivos que ninguém vê: `diagnostico-rede.html` (7cb6c27d, d9610874) é o teste
+    // de conexão que o navegador abre sozinho, com CSP própria. A exceção é conferida
+    // como a do worklet: a página existe, tem regra em `web/_headers` (é servida), e
+    // o que ela carrega está em `ui/`. Uma página que ninguém serve não esconde nada.
+    let headers = read("web/_headers");
+    for outra in ["diagnostico-rede.html"] {
+        assert!(
+            headers.contains(&format!("/{outra}\n")),
+            "{outra} não tem regra em web/_headers: a exceção abaixo esconderia uma página que ninguém serve"
+        );
+        let outra_pagina = read(&format!("ui/{outra}"));
+        for asset in linked_assets(&outra_pagina, "href")
+            .into_iter()
+            .chain(linked_assets(&outra_pagina, "src"))
+        {
+            assert!(
+                app_dir().join("ui").join(&asset).exists(),
+                "{outra} carrega {asset}, que não está em ui/"
+            );
+            if asset.ends_with(".css") {
+                stylesheets.push(asset);
+            } else if asset.ends_with(".js") {
+                sources.push(asset);
+            }
+        }
+    }
 
     for asset in stylesheets.iter().chain(sources.iter()) {
         assert!(
             app_dir().join("ui").join(asset).exists(),
-            "index.html loads {asset}, which is not in ui/"
+            "uma página carrega {asset}, que não está em ui/"
         );
     }
 
@@ -8353,9 +8390,48 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // so they cannot drift: the copy this test exists to forbid is one nobody
     // checks.
     let excecao = "tela-server.js";
+    // **E o retrato do perfil pessoal** (02a2c4af, a chamada direta do navegador):
+    // `chamada-web.js` confere o retrato que o par mandou e `identidade-web.js`
+    // reduz o do próprio perfil. O formato é fixo pelo contrato do perfil (PNG, até
+    // 128x128), e nenhum dos dois confia numa declaração: ambos conferem a
+    // assinatura de oito bytes e o IHDR ANTES de dar o `image/png` ao decodificador,
+    // o mesmo que a exceção do ícone do servidor. O `image/png` é o que os bytes já
+    // provaram. Presos à forma, com o número de menções de cada arquivo: um segundo
+    // tipo, uma menção a mais ou uma declaração de remetente na vizinhança reprova.
+    const DO_RETRATO: &[(&str, usize)] = &[("chamada-web.js", 1), ("identidade-web.js", 3)];
+    for (name, mencoes) in DO_RETRATO {
+        let limpo = without_comments(&read(&format!("ui/{name}")));
+        assert_eq!(
+            limpo.matches("image/png").count(),
+            *mencoes,
+            "`{name}` mudou o número de vezes que escreve `image/png`: a exceção do retrato \
+             não vale para uma menção a mais"
+        );
+        assert!(
+            limpo.contains("[137,80,78,71,13,10,26,10]"),
+            "`{name}` dá `image/png` ao decodificador sem conferir a assinatura PNG antes: \
+             é a prova que torna o tipo escrito aqui seguro"
+        );
+        for outro in [
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "declared_type",
+            "claimed",
+        ] {
+            assert!(
+                !limpo.contains(outro),
+                "`{name}` fala em `{outro}`: a exceção do retrato é de um formato só, sem \
+                 declaração de remetente"
+            );
+        }
+    }
     let mut fonte = String::new();
     for name in ui_files(".js") {
-        if name == excecao || name == "ponte-web.js" {
+        if name == excecao
+            || name == "ponte-web.js"
+            || DO_RETRATO.iter().any(|(arquivo, _)| *arquivo == name)
+        {
             continue;
         }
         fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
@@ -12699,6 +12775,47 @@ fn no_script_calls_a_function_that_no_script_declares() {
                 ) {
                     if let Some(seguinte) = palavras.get(i + 1) {
                         declarados.insert(seguinte.clone());
+                    }
+                }
+            }
+            // **Declaração com várias vírgulas**: `let a = 1, b = 2, pararMedidas = () => {};`
+            // (`diagnostico-rede.js`, 7cb6c27d). A leitura acima só pegava o nome logo
+            // depois do `let`, e o `pararMedidas`, que existe, foi acusado de não
+            // existir. Só vale a vírgula da própria declaração: a de dentro de
+            // parênteses, colchetes ou chaves é de outra coisa, e a linha tem de
+            // começar por `let`, `const` ou `var`.
+            {
+                let cru = linha.trim_start();
+                let resto = ["let ", "const ", "var "]
+                    .iter()
+                    .find_map(|chave| cru.strip_prefix(chave));
+                if let Some(resto) = resto {
+                    let mut fundura = 0i32;
+                    let mut trecho = String::new();
+                    let mut trechos = Vec::new();
+                    for c in resto.chars() {
+                        match c {
+                            '(' | '[' | '{' => fundura += 1,
+                            ')' | ']' | '}' => fundura -= 1,
+                            _ => {}
+                        }
+                        if c == ',' && fundura == 0 {
+                            trechos.push(std::mem::take(&mut trecho));
+                        } else {
+                            trecho.push(c);
+                        }
+                    }
+                    trechos.push(trecho);
+                    for trecho in trechos.iter().skip(1) {
+                        let nome: String = trecho
+                            .trim_start()
+                            .chars()
+                            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+                            .collect();
+                        let depois = trecho.trim_start()[nome.len()..].trim_start();
+                        if !nome.is_empty() && (depois.starts_with('=') || depois.is_empty()) {
+                            declarados.insert(nome);
+                        }
                     }
                 }
             }
@@ -20445,6 +20562,15 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
              `as_constantes_do_enlace_da_pagina_sao_as_do_seele_enlace`",
         ),
         (
+            "rtc-chamada-web.js",
+            "const MAX_CANDIDATOS = 64;",
+            "quantos candidatos ICE a chamada direta aceita de cada lado antes de falhar \
+             com «candidatos demais» (13918258): é conta de recurso desta página, e o fio \
+             não a tem (o protocolo só limita o TAMANHO de um candidato, \
+             `seele_proto::chamada::MAX_CANDIDATO`). Coincide com os lugares de uma sala \
+             nova por acaso",
+        ),
+        (
             "tela-sessao.js",
             "const TETO_DE_GRUPOS = 32;",
             "quantos grupos uma lista que um MOD arranja mostra: é desenho desta janela, \
@@ -21929,7 +22055,10 @@ function cenario(connect) {
     encerrarALigacao: async () => {}, atendendo: false, atendimentoFalho: null,
     variasSessoes: () => true, pedirTrocaDeServidor: (...a) => m.chamadas.push({ cmd: "pedirTroca", args: a }),
   });
+  // As três contas da vista que `irParaAEntradaSemSair` sobe (02a2c4af): a época
+  // (base.js) e a troca em curso (camada-sessoes.js). Sem elas a função estoura.
   vm.runInContext(`
+    let epocaDaVista = 0, trocasDeVista = 0, trocaEmCurso = null;
     ${funcao("camada-sessoes.js", "irParaAEntradaSemSair")}
     ${funcao("camada-toque.js", "entrarNaSalaAoAtender")}
     ${funcao("camada-servidores.js", "irParaOServidorNativo")}
@@ -21950,6 +22079,7 @@ await m.ctx.entrarNaSalaAoAtender("@K9P2-CSM7-NBFR-AYQ3", 1);
 intacto(m, abertas, "atender");
 confere("atender não passou pelo connect", so(m, "connect").length === 1 && so(m, "connect")[0].args.server === "@K9P2-CSM7-NBFR-AYQ3");
 confere("atender não abriu a sessão da ligação", abertas.length === 2);
+confere("atender não subiu a época da vista (uma resposta atrasada de antes valeria)", vm.runInContext("epocaDaVista", m.ctx) === 1);
 
 // ATENDER, o connect falha: a frase aparece na entrada, e nada foi derrubado.
 ({ m, abertas } = cenario(() => Promise.reject("sala-recusou")));
@@ -22996,6 +23126,7 @@ fn a_ui_nao_oferece_turn_nem_relay_e_so_a_limpeza_fala_da_chave() {
     let mut achados = Vec::new();
     let mut limpezas = 0;
     let mut recusas_de_credenciais_na_url = 0;
+    let mut classificacoes_de_candidato = 0;
     for extensao in [".js", ".html", ".css"] {
         for nome in ui_files(extensao) {
             let texto = read(&format!("ui/{nome}"));
@@ -23027,6 +23158,21 @@ fn a_ui_nao_oferece_turn_nem_relay_e_so_a_limpeza_fala_da_chave() {
                     recusas_de_credenciais_na_url += 1;
                     continue;
                 }
+                // O diagnóstico só CLASSIFICA o tipo de candidato que o navegador relata
+                // (o par remoto pode ter o TURN dele): a lista fechada de tipos do
+                // `contarCandidato` (13918258) e a do `resumirCaminhoRtc` (d9610874). Não
+                // oferece, não configura, não pede. Exatamente estas duas linhas, uma vez
+                // cada; um `relay` em qualquer outra continua reprovando.
+                if (nome == "rtc-chamada-web.js"
+                    && linha.trim()
+                        == r#"const tipo = texto.match(/ typ (host|srflx|prflx|relay)(?: |$)/)?.[1] || "outro";"#)
+                    || (nome == "rtc-web.js"
+                        && linha.trim()
+                            == r#"const tipo = (c) => ["host", "srflx", "prflx", "relay"].includes(c?.candidateType) ? c.candidateType : "desconhecido";"#)
+                {
+                    classificacoes_de_candidato += 1;
+                    continue;
+                }
                 let minuscula = linha.to_lowercase();
                 // `return`, `turno` e afins não contam: a palavra inteira.
                 let palavra_turn = minuscula
@@ -23053,6 +23199,10 @@ fn a_ui_nao_oferece_turn_nem_relay_e_so_a_limpeza_fala_da_chave() {
     assert_eq!(
         limpezas, 1,
         "a limpeza da chave `seele.turn` é uma só, num lugar só"
+    );
+    assert_eq!(
+        classificacoes_de_candidato, 2,
+        "as duas classificações de tipo de candidato (rtc-chamada-web.js e rtc-web.js) são a exceção revisada"
     );
     assert_eq!(
         recusas_de_credenciais_na_url, 1,

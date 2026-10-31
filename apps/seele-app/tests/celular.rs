@@ -214,6 +214,14 @@ fn toda_regra_das_cascas_do_navegador_comeca_pela_marca() {
 /// As formas de ler a marca: o atributo (num seletor de CSS, num `[data-casca`
 /// de JS, num `getAttribute`) e o `dataset`. O `?.` sai antes da comparação: a
 /// leitura da oitava integração era `dataset?.casca`.
+/// O prefixo das regras do desktop que o 0.19 escreveu fora da casca do celular
+/// (`:root:not([data-casca="celular"]) …`, commit 49758837, o desenho do canvas
+/// 0.19): só nestes dois arquivos, e só nesta forma negativa. O app de desktop
+/// nunca põe a marca, então a regra vale sempre ali; no celular ela se desliga e
+/// a folha dele (`celular-sessao.css`) manda.
+const FORA_DO_CELULAR: &str = ":root:not([data-casca=\"celular\"])";
+const COM_O_DESKTOP_FORA_DO_CELULAR: &[&str] = &["tela-sessao.css", "tela-chamada.css"];
+
 const LEITURAS_DA_MARCA: &[&str] = &[
     "data-casca",
     "dataset.casca",
@@ -264,9 +272,14 @@ fn nenhum_arquivo_do_desktop_cita_a_marca() {
             continue;
         }
         lidos += 1;
-        let codigo = codigo_de(&nome, &ler(&nome))
+        let mut codigo = codigo_de(&nome, &ler(&nome))
             .replace("?.[", "[")
             .replace("?.", ".");
+        // A forma negativa do 0.19 passa nos dois arquivos que o desenho tocou; a leitura
+        // positiva (`[data-casca="celular"] …`, `dataset.casca`) continua reprovando em todos.
+        if COM_O_DESKTOP_FORA_DO_CELULAR.contains(&nome.as_str()) {
+            codigo = codigo.replace(FORA_DO_CELULAR, "");
+        }
         for leitura in LEITURAS_DA_MARCA {
             if codigo.contains(leitura) {
                 leem.push(format!("{nome}: {leitura}"));
@@ -517,6 +530,14 @@ enum Tamanho {
     SegueOPai(String),
 }
 
+/// `calc(<tamanho> * var(--cel-escala, 1))`: a regra do desktop que já multiplica
+/// pela escala, com `1` de reserva onde a escala não existe (`pessoal-web.css`,
+/// 09d1e914). O gêmeo repete o valor como está: escalar de novo contaria a escala
+/// duas vezes, e omitir o gêmeo deixaria um gêmeo anterior vencer a regra.
+fn se_escala_sozinho(valor: &str) -> bool {
+    valor.starts_with("calc(") && valor.ends_with(" * var(--cel-escala, 1))")
+}
+
 /// A última declaração de tamanho de uma regra, contando o `font: inherit`. Uma
 /// forma que este guarda não conhece reprova, e não passa calada.
 fn tamanho_da_letra(onde: &str, corpo: &str) -> Option<Tamanho> {
@@ -539,7 +560,15 @@ fn tamanho_da_letra(onde: &str, corpo: &str) -> Option<Tamanho> {
                         || (valor.starts_with("var(--seele-t-") && valor.ends_with(')'))
                     {
                         Tamanho::Escala(valor.to_owned())
-                    } else if valor == "inherit" || numero(valor, "em") || numero(valor, "%") {
+                    } else if valor == "inherit"
+                        || valor == "0"
+                        || se_escala_sozinho(valor)
+                        || numero(valor, "em")
+                        || numero(valor, "%")
+                    {
+                        // `0` esconde o texto da regra (o REMOVER que vira ×): zero escalado é
+                        // zero, e o gêmeo precisa existir só para o gêmeo anterior, de
+                        // `10px`, não vencer a regra que o zera.
                         Tamanho::SegueOPai(valor.to_owned())
                     } else {
                         panic!(
@@ -593,6 +622,11 @@ fn texto_do_celular() -> String {
                 // A raiz não casa debaixo da marca; o corpo, a casca escala ela
                 // mesma em celular-base.css.
                 if seletor == "html" {
+                    continue;
+                }
+                // `:root:not([data-casca="celular"]) …` (0.19, 49758837): a regra já nasce
+                // fora do celular, que tem a folha dele; não casa sob a marca, e não pede gêmeo.
+                if seletor.starts_with(FORA_DO_CELULAR) {
                     continue;
                 }
                 assert!(

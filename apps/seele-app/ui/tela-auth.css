@@ -623,7 +623,3 @@
   .auth-selo { align-items: flex-start; }
   .auth-selo .auth-nota { text-align: left; }
 }
-:root[data-casca="celular"] #tela-auth .auth-server { grid-column: 1; grid-row: auto; }
-:root[data-casca="celular"] #tela-auth .auth-selo { align-items: flex-start; }
-:root[data-casca="celular"] #tela-auth .auth-selo .auth-nota { text-align: left; }
-:root[data-casca="celular"] #tela-auth .cartela-padrao-rotulo { font-size: 12px; }

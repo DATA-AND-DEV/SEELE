@@ -914,9 +914,10 @@ async function trocarCinema(ligada) {
     delete document.body.dataset.cinemaModo;
   }
   if (mudou) marcarCaminhoDoCinema(ligada);
-  // A casca móvel fornece sua saída junto da alternativa de vídeo do iOS.
-  // No computador a cabeça do palco fica escondida durante o cinema.
-  if (document.documentElement.dataset.casca !== "celular") {
+  // No computador a cabeça do palco fica escondida durante o cinema, e este botão
+  // é a saída. A casca móvel tem a dela (`celular-cinema.js`) e avisa por
+  // `cinemaComSaidaPropria`: o desktop não lê a marca da casca, quem a lê é ela.
+  if (!globalThis.cinemaComSaidaPropria) {
     let sair = $("palco-sair-desktop");
     if (ligada && !sair) {
       sair = document.createElement("button");

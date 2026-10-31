@@ -633,23 +633,6 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   outline-offset: -2px;
 }
 
-/* Cada linha nativa reinicia a reserva; os detalhes abertos não herdam a
-   coluna de ações da pessoa que os contém. */
-.roster .pessoa {
-  --pessoa-espaco-acoes: 16px;
-  --pessoa-altura-minima: 56px;
-}
-
-/* A coluna do «⋯» pertence ao produto. O cartão e os detalhes do MOD ficam
-   fora do alvo de 44px, com 12px de folga e 16px até a borda da linha. */
-.roster :is(.pessoa-apresentada, .pessoa-com-detalhes) {
-  --pessoa-espaco-acoes: 72px;
-  --pessoa-altura-minima: 68px;
-  position: relative;
-  padding-right: var(--pessoa-espaco-acoes);
-  min-height: var(--pessoa-altura-minima);
-}
-
 /* A apresentação do MOD ocupa a faixa; identidade verificável e moderação
    permanecem nos detalhes nativos, fora da caixa fechada do MOD. */
 .pessoa-apresentada-faixa {

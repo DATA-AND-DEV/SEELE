@@ -3641,3 +3641,29 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-salvar { grid-area: salvar; min-height: 36px; font-size: 12px; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-previa { grid-area: previa; min-height: 36px; font-size: 12px; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-estado { grid-area: est; }
+
+/* ---------- a reserva da coluna do «⋯» nas linhas de pessoa ----------
+   Estas duas regras moravam em `mods-controles.css` (02a2c4af), mas `.roster` é
+   desta folha: duas folhas com a mesma classe deixam a que carrega depois ganhar
+   todo empate. Aqui elas ganham pelo peso (`#lista-roster`), e não pela ordem:
+   a `.pessoa` do bloco de cima (`:root:not(…) .roster .pessoa`, 0,4,0) trocava
+   o `padding` por `4px 10px` e o `min-height` por 46px, e a coluna do «⋯» que o
+   cartão do MOD reserva (72px) voltava a ficar embaixo do texto. A folha do
+   celular segue mandando: ela usa `#lista-roster .pessoa` com a marca. */
+
+/* Cada linha nativa reinicia a reserva; os detalhes abertos não herdam a
+   coluna de ações da pessoa que os contém. */
+#lista-roster .pessoa {
+  --pessoa-espaco-acoes: 16px;
+  --pessoa-altura-minima: 56px;
+}
+
+/* A coluna do «⋯» pertence ao produto. O cartão e os detalhes do MOD ficam
+   fora do alvo de 44px, com 12px de folga e 16px até a borda da linha. */
+#lista-roster .pessoa:is(.pessoa-apresentada, .pessoa-com-detalhes) {
+  --pessoa-espaco-acoes: 72px;
+  --pessoa-altura-minima: 68px;
+  position: relative;
+  padding-right: var(--pessoa-espaco-acoes);
+  min-height: var(--pessoa-altura-minima);
+}
