@@ -26769,3 +26769,35 @@ fn o_app_diz_que_tem_tela_no_main_antes_de_qualquer_conexao() {
         "`este_processo_tem_tela` é chamado em mais de um lugar de main.rs; só o `main` pode"
     );
 }
+
+/// **Toda variável que o estilo de um MOD escreve existe** (achado na fusão da
+/// API 8 com a 0.19, 31/10/2026). `familia: 'sans'` virava
+/// `var(--seele-sans)` desde a API 4, e esse token nunca existiu: a regra
+/// valia `unset`, o texto herdava o mono da casca, e nada reclamava — o MOD
+/// pedia sans e recebia mono. O guarda lê cada `var(--…)` das palavras do
+/// estilo em `mods-estilos.js` e exige a declaração dele em `tokens.css` ou
+/// `base.css`.
+#[test]
+fn toda_variavel_do_estilo_de_mod_esta_declarada() {
+    let estilos = without_comments(&read("ui/mods-estilos.js"));
+    let declaradas = format!("{}\n{}", read("ui/tokens.css"), read("ui/base.css"));
+    let palavras = estilos
+        .split_once("const PALAVRAS_DO_ESTILO")
+        .and_then(|(_, resto)| resto.split_once("});"))
+        .map(|(tabela, _)| tabela.to_owned())
+        .expect("`PALAVRAS_DO_ESTILO` sumiu de mods-estilos.js");
+    let mut vistas = 0;
+    for pedaco in palavras.split("var(--").skip(1) {
+        let nome: String = pedaco
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+        vistas += 1;
+        assert!(
+            declaradas.contains(&format!("--{nome}:")),
+            "`PALAVRAS_DO_ESTILO` escreve `var(--{nome})`, e nenhuma folha o declara: \
+             o estilo do MOD vira `unset` sem aviso"
+        );
+    }
+    assert!(vistas >= 2, "o guarda não achou as famílias em `PALAVRAS_DO_ESTILO`");
+}

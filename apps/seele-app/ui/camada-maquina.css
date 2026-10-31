@@ -2,8 +2,12 @@
 
    Duas peças do produto, fora de toda superfície de MOD: a tela que pergunta se
    este computador roda o servidor de um jogo, e a faixa que diz que ele roda e
-   deixa desligar. O desenho é o das irmãs: a faixa é a das portas
-   (`camada-tuneis.css`), a tela é a da confirmação (`camada-travessia.css`).
+   deixa desligar. Desde a fusão com a 0.19, o desenho é o do canvas: a tela é a
+   do aceite dos MODs (`Mods-aceite.dc.html`: a caixa opaca de 32px, o rótulo
+   miúdo com a marca, o título grande, os cartões de vidro com ícone traçado,
+   o aviso laranja e as ações à direita), e a faixa é a da porta
+   (`Porta.dc.html`: a faixa de 18px com a marca na frente, verde de pé e
+   vermelha na parada que ninguém pediu).
 
    Nenhuma cor literal aqui, nem em regra nem em comentário: `tests/tokens.rs`
    lê o arquivo inteiro. O laranja é a decisão que se toma lendo (a tela, o
@@ -29,7 +33,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--seele-e1);
-  padding: var(--seele-e1) 12px 0;
+  padding: var(--seele-e1) var(--seele-e2) 0;
   max-height: 30dvh;
   overflow-y: auto;
   pointer-events: none;
@@ -39,23 +43,55 @@
 
 .camada-maquina[hidden] { display: none; }
 
+/* A faixa da porta (`Porta.dc.html`): 18px de raio, 12/18 de respiro, a marca
+   na frente e a ação na ponta. De pé é o verde nominal; parada, o vermelho. */
 .maquina-bloco {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px var(--seele-e2);
-  padding: var(--seele-e1) var(--seele-e2);
-  border: var(--seele-b) solid var(--seele-fosforo);
-  border-radius: var(--seele-raio);
-  background: var(--seele-negro-painel);
+  gap: 6px var(--seele-e2);
+  padding: 10px 10px 10px 18px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  border-radius: var(--seele-raio-cartao);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 85%, var(--seele-negro-absoluto));
   color: var(--seele-osso);
-  font-family: var(--seele-mono);
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-dado);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
+/* Parada a pedido (por você, pelo servidor, ao sair): o vidro neutro. Parada
+   que ninguém pediu (a metade falhou, o pacote não confere, um motivo que este
+   app não conhece) ou com uma falha a dizer: a faixa vermelha do canvas. */
 .maquina-bloco[data-estado="parada"] {
-  border-color: var(--seele-linha-forte);
+  border-color: var(--seele-controle-borda);
+  /* Opaca: a faixa é fixa, e o que passa por baixo não pode se ler através. */
+  background: var(--seele-negro-painel);
+}
+.maquina-bloco[data-estado="parada"]:is([data-motivo="metade-falhou"], [data-motivo="pacote-diferente"], [data-motivo="dispensa-desconhecida"], [data-motivo="sem-aceite"]),
+.maquina-bloco:has(.maquina-nota) {
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 85%, var(--seele-negro-absoluto));
+}
+
+/* A marca da faixa, como o «[!]» do canvas: um ponto que diz o estado sem ler. */
+.maquina-bloco::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-fosforo);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--seele-fosforo) 18%, transparent);
+}
+.maquina-bloco[data-estado="parada"]::before {
+  background: var(--seele-osso-apagado);
+  box-shadow: none;
+}
+.maquina-bloco[data-estado="parada"]:is([data-motivo="metade-falhou"], [data-motivo="pacote-diferente"], [data-motivo="dispensa-desconhecida"], [data-motivo="sem-aceite"])::before,
+.maquina-bloco:has(.maquina-nota)::before {
+  border-radius: 0;
+  background: var(--seele-vermelho-alerta);
 }
 
 .maquina-linha {
@@ -64,36 +100,69 @@
   overflow-wrap: anywhere;
 }
 
-.maquina-marca { color: var(--seele-fosforo); font-weight: 700; }
+.maquina-marca { color: var(--seele-fosforo); font-weight: 600; }
 .maquina-bloco[data-estado="parada"] .maquina-marca { color: var(--seele-osso); }
+.maquina-bloco[data-estado="parada"]:is([data-motivo="metade-falhou"], [data-motivo="pacote-diferente"], [data-motivo="dispensa-desconhecida"], [data-motivo="sem-aceite"]) .maquina-marca { color: var(--seele-vermelho-alerta); }
 
 .maquina-nota {
   flex: 1 0 100%;
+  order: 3;
   margin: 0;
+  padding-left: 24px;
   color: var(--seele-vermelho-alerta);
+  font-size: var(--seele-t-rotulo);
   overflow-wrap: anywhere;
 }
 
-/* DESLIGAR é o laranja da decisão; DISPENSAR (de uma parada) é o neutro. */
+/* DESLIGAR e DISPENSAR são a pílula de vidro do canvas (o FECHAR da porta):
+   a faixa já diz o estado pela cor, e o botão é a ação, à mão na ponta. */
 .maquina-desligar,
 .maquina-dispensar {
   margin-left: auto;
-  min-height: 32px;
-  padding: 2px var(--seele-e2);
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
-  border-radius: var(--seele-raio);
-  background: transparent;
-  color: var(--seele-laranja-nerv);
-  font: inherit;
-  font-weight: 700;
-  letter-spacing: var(--seele-tracking-rotulo);
+  min-height: 36px;
+  padding: 0 18px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.maquina-bloco[data-estado="parada"] .maquina-dispensar { border-color: var(--seele-linha-forte); color: var(--seele-osso); }
+.maquina-desligar:not(:disabled):hover,
+.maquina-dispensar:not(:disabled):hover { background: var(--seele-controle-hover); }
 .maquina-desligar:disabled { opacity: 0.5; cursor: default; }
 .maquina-desligar:focus-visible,
 .maquina-dispensar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+/* ------------------------------------------------ a lista, nas configurações */
+
+/* O estado de cada jogo aceito, como os chips de `Config-mods`: verde é de pé,
+   o neutro é desligada. Em minúsculas: é a frase do produto, e não um rótulo. */
+.maquina-estado {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  margin: 4px 0 2px;
+  padding: 0 10px;
+  border: var(--seele-b) solid var(--seele-campo-borda);
+  border-radius: var(--seele-raio-pilula);
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.maquina-estado[data-ligada="sim"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+  color: var(--seele-fosforo);
+}
 
 /* --------------------------------------------------------------- a tela */
 
@@ -106,6 +175,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
 }
 
 .camada-maquina-aceite[hidden] { display: none; }
@@ -118,72 +188,165 @@
   opacity: 0.85;
 }
 
-/* Coluna: título, aviso e ações **não rolam**; só o corpo rola. É o que mantém o
-   aviso da conta à vista numa janela baixa, e as ações ao alcance de quem leu. */
+/* A caixa do aceite dos MODs (`Mods-aceite.dc.html`): opaca, 32px de raio,
+   40/44 de respiro. Coluna: cabeça, título, aviso e ações **não rolam**; só o
+   corpo rola. É o que mantém o aviso da conta à vista numa janela baixa, e as
+   ações ao alcance de quem leu. */
 .maquina-caixa {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 680px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 32px);
-  padding: 24px 28px;
-  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  gap: 18px;
+  width: 760px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  box-sizing: border-box;
+  padding: 36px 44px 32px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: 32px;
   background: var(--seele-negro-painel);
+  font-family: var(--seele-ui);
 }
+
+/* A linha miúda de cima: a marca, o MOD e o servidor; as portas num chip. */
+.maquina-cabeca {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.maquina-logo { width: 24px; height: 24px; flex: 0 0 auto; }
+.maquina-logo-cheio { fill: var(--seele-laranja-nerv); }
+.maquina-logo-vazio { fill: none; stroke: var(--seele-laranja-nerv); stroke-width: 6; }
+.maquina-logo-traco { fill: none; stroke: var(--seele-osso); stroke-width: 6; }
+.maquina-rotulo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+.maquina-chip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 10px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
+  border-radius: var(--seele-raio-pilula);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  color: var(--seele-laranja-claro);
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.maquina-chip:empty { display: none; }
 
 .maquina-titulo {
   flex: 0 0 auto;
   margin: 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: var(--seele-t-secao);
-  line-height: 1.15;
+  font-size: 32px;
+  line-height: 1.12;
   letter-spacing: var(--seele-tracking-cartela);
-  /* Maiúsculas só no título e nos botões: o apelido de quem pede entra no título
-     e aparece em maiúsculas por aqui, sem que o texto guardado mude. */
+  /* Maiúsculas no título: o apelido de quem pede entra nele e aparece em
+     maiúsculas por aqui, sem que o texto guardado mude. */
   text-transform: uppercase;
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
 
-/* O aviso da conta: em destaque, e o primeiro depois do título. */
-.maquina-sua-conta {
+/* O aviso da conta: o primeiro depois do título, em destaque, num cartão
+   laranja com a marca traçada. */
+.maquina-aviso {
   flex: 0 0 auto;
-  margin: 14px 0 0;
-  padding: 10px 14px;
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
-  border-left-width: 4px;
-  background: var(--seele-laranja-fraco);
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 18px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 55%, transparent);
+  border-radius: var(--seele-raio-cartao);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
+}
+.maquina-aviso > .maquina-icone { flex-basis: 36px; height: 36px; border-radius: var(--seele-raio-icone); }
+.maquina-sua-conta {
+  margin: 0;
+  align-self: center;
   color: var(--seele-osso);
-  font-size: var(--seele-t-corpo);
-  font-weight: 700;
-  line-height: 1.4;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
+/* «Isto mudou desde o seu aceite»: a caixa laranja do canvas para a lista que
+   mudou desde o último sim. Laranja e não vermelho: não é erro, é o que decide
+   se vale ler de novo. */
 .maquina-mudou {
   flex: 0 0 auto;
-  margin: 12px 0 0;
-  padding: 8px 12px;
-  border-left: 2px solid var(--seele-padrao-azul);
-  background: var(--seele-azul-fraco);
-  color: var(--seele-osso);
-  font-size: var(--seele-t-dado);
-  line-height: 1.45;
+  margin: 0;
+  padding: 12px 16px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 40%, transparent);
+  border-radius: var(--seele-raio);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 50%, transparent);
+  color: var(--seele-laranja-claro);
+  font-size: 13px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .maquina-corpo {
   flex: 1 1 auto;
   min-height: 0;
-  margin-top: 14px;
+  margin: 0 -8px;
+  padding: 0 8px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+}
+
+/* O ícone traçado de um cartão, como o de cada MOD no aceite. */
+.maquina-icone {
+  flex: 0 0 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 12%, transparent);
+  color: var(--seele-laranja-nerv);
+}
+.maquina-traco {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* O cartão de vidro do que vai rodar: o ícone à esquerda, as linhas com seta. */
+.maquina-cartao {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 16px;
+  padding: 18px 20px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-osso) 9%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
 }
 
 .maquina-lista {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -194,55 +357,78 @@
 
 .maquina-lista:empty { display: none; }
 
-.maquina-detalhe,
-.maquina-garantia {
-  position: relative;
-  padding-left: 18px;
-  font-size: var(--seele-t-dado);
+.maquina-detalhe {
+  display: flex;
+  gap: 8px;
+  font-family: var(--seele-mono);
+  font-size: 13px;
   line-height: 1.5;
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
 
-/* A garantia é o que a pessoa já sabe depois de ler o resto: mais apagada. */
-.maquina-lista > .maquina-detalhe::before,
-.maquina-garantia::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0.5em;
-  width: 8px;
-  height: 8px;
-  border: var(--seele-b) solid var(--seele-laranja-nerv);
+.maquina-detalhe::before {
+  content: "→";
+  flex: 0 0 auto;
+  color: var(--seele-laranja-nerv);
 }
 
+/* A garantia é o que a pessoa já sabe depois de ler o resto: mais apagada. */
+.maquina-garantia {
+  display: flex;
+  gap: 8px;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+.maquina-garantia::before {
+  content: "·";
+  flex: 0 0 auto;
+  color: var(--seele-rotulo-painel);
+}
+#maquina-garantias { padding: 2px 4px 0; gap: 2px; }
+
+/* Cada termo, um cartão de vidro: a caixa de marcar, o endereço escrito e LER. */
+#maquina-termos { gap: 10px; }
 .maquina-termo {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px var(--seele-e1);
-  padding: var(--seele-e1) 12px;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  gap: 8px 12px;
+  padding: 14px 16px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-osso) 9%, transparent);
+  border-radius: var(--seele-raio-cartao);
+  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
 }
 
 .maquina-termo-rotulo {
   flex: 1 0 100%;
   display: flex;
-  align-items: flex-start;
-  gap: var(--seele-e1);
-  font-size: var(--seele-t-dado);
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1.45;
   color: var(--seele-osso);
   cursor: pointer;
 }
 
-.maquina-termo-caixa { margin: 3px 0 0; flex: 0 0 auto; accent-color: var(--seele-laranja-nerv); }
+.maquina-termo-caixa {
+  margin: 0;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--seele-laranja-nerv);
+}
 .maquina-termo-texto { overflow-wrap: anywhere; }
 
 /* O endereço escrito, para a pessoa ver para onde LER leva antes de clicar. */
 .maquina-termo-url {
   flex: 1 1 200px;
   min-width: 0;
+  padding-left: 30px;
   color: var(--seele-osso-apagado);
   font-family: var(--seele-mono);
   font-size: var(--seele-t-rotulo);
@@ -250,40 +436,47 @@
 }
 
 .maquina-ler {
-  min-height: 28px;
-  padding: 2px var(--seele-e1);
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  background: transparent;
+  min-height: 32px;
+  padding: 0 14px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
   color: var(--seele-osso);
-  font: inherit;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   cursor: pointer;
 }
+.maquina-ler:not(:disabled):hover { background: var(--seele-controle-hover); }
 
 .maquina-ler:focus-visible,
 .maquina-termo-caixa:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
-/* RECUSAR à esquerda e primeiro na tabulação: a saída que não muda nada. */
+#maquina-erro { flex: 0 0 auto; margin: 0; }
+
+/* As ações à direita, como no canvas: o vidro secundário e o laranja cheio.
+   RECUSAR é o primeiro na tabulação: a saída que não muda nada. */
 .maquina-acoes {
   flex: 0 0 auto;
-  margin-top: 16px;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--seele-e1);
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .maquina-acoes > button {
-  flex: 1 1 140px;
-  min-height: 44px;
-  letter-spacing: 0.12em;
+  min-height: 52px;
+  padding: 0 22px;
+  font-size: 15px;
 }
 
-#maquina-aceitar { flex: 2 1 240px; }
-
-@media (max-width: 560px) {
-  .maquina-caixa { padding: 16px; }
-  .maquina-acoes { flex-direction: column; }
-  .maquina-acoes > button,
-  #maquina-aceitar { flex: 0 0 auto; }
+@media (max-width: 700px) {
+  .camada-maquina-aceite { padding: 12px; }
+  .maquina-caixa { padding: 24px 20px 20px; border-radius: var(--seele-raio-painel); gap: 14px; max-height: calc(100dvh - 24px); }
+  .maquina-titulo { font-size: 24px; }
+  .maquina-cartao { padding: 14px; gap: 12px; }
+  /* No celular a largura é do texto: o ícone do cartão sai, o do aviso fica. */
+  .maquina-cartao > .maquina-icone { display: none; }
+  .maquina-acoes > button { flex: 1 1 140px; min-height: 48px; }
 }

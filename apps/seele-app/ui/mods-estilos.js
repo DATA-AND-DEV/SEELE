@@ -88,7 +88,10 @@ const PALAVRAS_DO_ESTILO = Object.freeze({
     entre: "space-between", ao_redor: "space-around", igual: "space-evenly",
   },
   quebra: { sim: "wrap", nao: "nowrap" },
-  familia: { mono: "var(--seele-mono)", sans: "var(--seele-sans)" },
+  // `sans` é a pilha de interface do produto. Até a fusão com a 0.19 ela
+  // apontava para `--seele-sans`, que nunca existiu: o pedido virava `unset` e
+  // o texto herdava o mono da casca (`toda_variavel_do_estilo_de_mod_esta_declarada`).
+  familia: { mono: "var(--seele-mono)", sans: "var(--seele-pilha-sans)" },
   peso: { leve: "300", normal: "400", medio: "500", forte: "700" },
   alinhamento: { esquerda: "left", centro: "center", direita: "right", justificado: "justify" },
   transformar: { nenhuma: "none", maiuscula: "uppercase", minuscula: "lowercase", capitular: "capitalize" },

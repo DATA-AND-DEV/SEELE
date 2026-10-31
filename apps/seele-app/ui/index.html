@@ -4966,11 +4966,22 @@
 <div id="maquina-aceite" class="camada-maquina-aceite" role="alertdialog" aria-modal="true"
      aria-labelledby="maquina-titulo" aria-describedby="maquina-sua-conta" hidden>
   <div class="maquina-caixa">
+    <div class="maquina-cabeca">
+      <svg class="maquina-logo" viewBox="0 0 96 96" width="24" height="24" aria-hidden="true" focusable="false"><rect class="maquina-logo-cheio" x="12" y="12" width="24" height="24"/><rect class="maquina-logo-vazio" x="62" y="62" width="20" height="20"/><path class="maquina-logo-traco" d="M34 34L62 62"/></svg>
+      <span id="maquina-rotulo" class="maquina-rotulo"></span>
+      <span id="maquina-portas" class="maquina-chip"></span>
+    </div>
     <h2 id="maquina-titulo" class="maquina-titulo"></h2>
-    <p id="maquina-sua-conta" class="maquina-sua-conta"></p>
+    <div class="maquina-aviso">
+      <span class="maquina-icone" aria-hidden="true"><svg class="maquina-traco" viewBox="0 0 24 24" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M12 8v5M12 16.5v.5"/></svg></span>
+      <p id="maquina-sua-conta" class="maquina-sua-conta"></p>
+    </div>
     <p id="maquina-mudou" class="maquina-mudou" hidden></p>
     <div id="maquina-corpo" class="maquina-corpo" tabindex="-1">
-      <ul id="maquina-detalhes" class="maquina-lista"></ul>
+      <div class="maquina-cartao">
+        <span class="maquina-icone" aria-hidden="true"><svg class="maquina-traco" viewBox="0 0 24 24" focusable="false"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg></span>
+        <ul id="maquina-detalhes" class="maquina-lista"></ul>
+      </div>
       <ul id="maquina-termos" class="maquina-lista"></ul>
       <ul id="maquina-garantias" class="maquina-lista"></ul>
     </div>

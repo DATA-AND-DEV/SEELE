@@ -175,6 +175,12 @@ function mostrarOErroDaMaquina(frase) {
 /** Desenha o pedido na tela e a abre. */
 function desenharOPedido(pedido) {
   const F = FRASES_DA_MAQUINA;
+  // A linha miúda de cima (0.19): o MOD e o servidor, e as portas num chip —
+  // dados do pedido, sem frase nova.
+  $("maquina-rotulo").textContent = `${pedido.mod_nome || pedido.mod_id} · ${pedido.servidor}`;
+  $("maquina-portas").textContent = (pedido.oferta.tuneis ?? [])
+    .map((tunel) => `${tunel.porta}/${String(tunel.protocolo).toUpperCase()}`)
+    .join(" · ");
   $("maquina-titulo").textContent = F.titulo(pedido.pedido_por);
   $("maquina-sua-conta").textContent = F.suaConta;
 
@@ -365,6 +371,8 @@ function desenharUmaMaquina(entrada) {
   const bloco = elemento("div", "maquina-bloco");
   bloco.dataset.estado = entrada.ligada ? "ligada" : "parada";
   bloco.dataset.mod = entrada.modId;
+  // O motivo da parada pinta a faixa: a que ninguém pediu sai vermelha.
+  if (!entrada.ligada && entrada.motivo) bloco.dataset.motivo = entrada.motivo;
   const linha = elemento("p", "maquina-linha");
   if (entrada.ligada) {
     linha.append(elemento("span", "maquina-marca", F.faixa(entrada.titulo, entrada.modId)));
@@ -497,10 +505,13 @@ async function desenharMaquinasAceitas() {
     const linha = elemento("li");
     const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
     const texto = elemento("span", "server-dispositivo-nome");
+    // O estado é um chip (0.19, `Config-mods`): verde de pé, neutro desligada.
+    const estado = elemento("span", "maquina-estado", aceita.ligada ? F.listaLigada : F.listaDesligada);
+    estado.dataset.ligada = aceita.ligada ? "sim" : "nao";
     texto.append(
       elemento("span", "mods-id", F.listaLinha(aceita.titulo, aceita.mod_id, aceita.servidor)),
+      estado,
       elemento("span", "mods-versao", [
-        aceita.ligada ? F.listaLigada : F.listaDesligada,
         F.listaPedidoPor(aceita.pedido_por),
         ...((aceita.tuneis ?? []).length > 0
           ? [F.listaPortas(aceita.tuneis.map((t) => `${t.porta} (${t.protocolo})`).join(", "))]

@@ -50,3 +50,42 @@ podiam se juntar num 12 só, e a v8 segue emendável.
   confere o teto do tipo nos bytes, o do pack inclusive.
 - **A `api/v8.json` passa a dizê-lo** (emenda em `congeladas.sha256`), e o guia
   do autor também.
+
+## As telas da API 8 no desenho 0.19
+
+- **O aceite da máquina é a caixa do aceite dos MODs** (`Mods-aceite.dc.html`):
+  opaca no `negro-painel` (o `#12100E` do canvas não é token), 32px de raio,
+  a linha miúda com a marca, o MOD e o servidor (dados do pedido, sem frase
+  nova) e as portas num chip; o título grande em Inter Tight (32px, ainda em
+  maiúsculas: o apelido entra nele, e as bancadas o leem assim); o aviso da
+  conta num cartão laranja com o escudo traçado, **fora da área que rola**,
+  como antes; «isto mudou desde o seu aceite» na caixa laranja do canvas (era
+  azul); o que vai rodar num cartão de vidro com o ícone traçado e as linhas
+  com seta; cada termo num cartão; as ações à direita, o vidro e o laranja.
+  Nenhuma frase mudou.
+- **As duas faixas são a faixa da Porta** (`Porta.dc.html`): 18px de raio, a
+  marca na frente, Inter, a ação em pílula de vidro na ponta. A da máquina é
+  verde de pé, vidro neutro quando a parada foi pedida (por você, pelo
+  servidor, ao sair) e **vermelha quando ninguém a pediu** (a metade falhou, o
+  pacote não confere, um motivo desconhecido, sem aceite) ou quando DESLIGAR
+  falhou — por isso o bloco ganhou `data-motivo`. Opaca, porque é fixa e
+  cobre o que passa por baixo. A das portas é verde aberta e vermelha fechada
+  ou recusada; as notas (a porta trocada, a queda) vão embaixo, alinhadas ao
+  texto.
+- **A lista de jogos aceitos nas configurações** já usava as linhas de
+  gestão da 0.19; o estado virou um chip (verde ligada, neutro desligada), em
+  minúsculas porque é a frase do produto e as bancadas a leem.
+- **`familia: 'sans'` passou a valer.** Desde a API 4 ela virava
+  `var(--seele-sans)`, que nunca existiu: o estilo era `unset` e o texto do
+  MOD herdava o mono da casca, sem aviso. Agora é `--seele-pilha-sans`, e
+  `toda_variavel_do_estilo_de_mod_esta_declarada` exige que toda variável das
+  palavras do estilo esteja declarada (reprova com a linha velha). Se errada:
+  um MOD que pedia sans e se acostumou ao mono muda de letra.
+- **Sem um nome `alerta` no tema da API 8.** `TEMA_DA_API` serve às duas
+  portas do tema — a que cita (`{ tema }`) e a que publica (`mundo.tema`,
+  `SeeleUI.tema`) —, e um nome novo nela vira chave que um MOD de tema escreve,
+  com contraste e derivação próprios; o guia diz que o vermelho é do produto,
+  derivado do tema, e não chave dele. Não seria só aditivo. O MULTIPLAYER usa o
+  vermelho do canvas em hexadecimal. Se errada: a recusa de um MOD não segue o
+  vermelho que o produto deriva sob um tema; o caminho é um nome só de
+  citação, por API.

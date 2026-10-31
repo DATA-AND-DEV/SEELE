@@ -8,7 +8,11 @@
    Nenhuma cor literal aqui, nem em regra nem em comentário: `tests/tokens.rs`
    lê o arquivo inteiro. O verde-fósforo é o valor nominal (a porta aberta e a
    medida), o laranja é o aviso (a porta trocada, a queda), e o vermelho é só da
-   queda que acabou com o túnel. */
+   queda que acabou com o túnel.
+
+   Desde a fusão com a 0.19, cada linha é a faixa da porta do canvas
+   (`Porta.dc.html`): 18px de raio, a marca na frente, o texto em Inter e a
+   ação em pílula na ponta; a fechada e a recusada são a faixa vermelha. */
 
 /* **Na pilha da tela, e não por cima dela**: entre o cabeçalho e os painéis, ocupando
    o lugar que tem. Uma faixa fixa no canto cobria o operador (microfone e SAIR DA
@@ -19,7 +23,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--seele-e1);
-  margin: var(--seele-e1) 12px 0;
+  margin: var(--seele-e1) var(--seele-e2) 0;
   max-height: 30dvh;
   overflow-y: auto;
 }
@@ -28,53 +32,95 @@
 
 .tunel-bloco {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--seele-e1) var(--seele-e2);
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
-  background: var(--seele-negro-painel);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--seele-e2);
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 10px 18px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-cartao);
+  background: var(--seele-vidro);
   color: var(--seele-osso);
-  font-family: var(--seele-mono);
+  font-family: var(--seele-ui);
   font-size: var(--seele-t-dado);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
-.tunel-bloco[data-estado="aberta"] { border-color: var(--seele-fosforo); }
+.tunel-bloco[data-estado="aberta"] {
+  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
+}
 .tunel-bloco[data-estado="fechada"],
 .tunel-bloco[data-estado="recusada"] {
-  border-color: var(--seele-vermelho-alerta);
-  background: var(--seele-vermelho-fraco);
+  padding-right: 10px;
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 80%, transparent);
+}
+
+/* A marca na frente, como o «[!]» da faixa do canvas. */
+.tunel-bloco::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-osso-apagado);
+}
+.tunel-bloco[data-estado="aberta"]::before {
+  background: var(--seele-fosforo);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--seele-fosforo) 18%, transparent);
+}
+.tunel-bloco[data-estado="fechada"]::before,
+.tunel-bloco[data-estado="recusada"]::before {
+  border-radius: 0;
+  background: var(--seele-vermelho-alerta);
 }
 
 /* Em bloco e em linha, e não em flex: a linha é uma frase, e o texto dela tem
    de sair inteiro, com os espaços, de quem a lê com um leitor de tela. */
 .tunel-linha {
+  flex: 1 1 280px;
   margin: 0;
   overflow-wrap: anywhere;
 }
+.tunel-bloco[data-estado="fechada"] .tunel-linha,
+.tunel-bloco[data-estado="recusada"] .tunel-linha { color: var(--seele-vermelho-claro); }
 
-.tunel-porta { color: var(--seele-fosforo); font-weight: 700; }
+.tunel-porta { color: var(--seele-fosforo); font-family: var(--seele-mono); font-weight: 700; }
 .tunel-bloco[data-estado="fechada"] .tunel-porta,
 .tunel-bloco[data-estado="recusada"] .tunel-porta { color: var(--seele-vermelho-alerta); }
 
 .tunel-medida { color: var(--seele-osso-apagado); }
 
 /* A porta trocada e a última queda: o que a pessoa precisa para agir (usar
-   outra porta) ou para saber por que o jogo soluçou. */
+   outra porta) ou para saber por que o jogo soluçou. Embaixo da linha, na
+   largura toda, alinhadas ao texto e não à marca. */
 .tunel-nota {
+  flex: 1 0 100%;
+  order: 3;
   margin: 0;
-  color: var(--seele-laranja-nerv);
+  padding-left: 24px;
+  color: var(--seele-laranja-claro);
+  font-size: var(--seele-t-rotulo);
   overflow-wrap: anywhere;
 }
 
+/* DISPENSAR: a pílula de vidro do canvas, na ponta da linha. */
 .tunel-dispensar {
-  align-self: flex-end;
-  padding: 2px var(--seele-e1);
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  border-radius: var(--seele-raio);
-  background: transparent;
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0 18px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
   color: var(--seele-osso);
-  font: inherit;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
   cursor: pointer;
 }
+.tunel-dispensar:not(:disabled):hover { background: var(--seele-controle-hover); }
+.tunel-dispensar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
