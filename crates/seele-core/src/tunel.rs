@@ -4255,10 +4255,7 @@ mod testes {
             protocolo,
             porta,
         };
-        for (protocolo, porta) in [
-            (ProtocoloDeTunel::Tcp, 22),
-            (ProtocoloDeTunel::Udp, 25565),
-        ] {
+        for (protocolo, porta) in [(ProtocoloDeTunel::Tcp, 22), (ProtocoloDeTunel::Udp, 25565)] {
             let (servir, servida) = oneshot::channel();
             tuneis.pedir_servico(
                 (MOD.to_owned(), NOME.to_owned()),
@@ -4282,7 +4279,10 @@ mod testes {
         }
         assert!(matches!(
             mandados.lock().unwrap().as_slice(),
-            [ClientMessage::PararTunel { .. }, ClientMessage::PararTunel { .. }]
+            [
+                ClientMessage::PararTunel { .. },
+                ClientMessage::PararTunel { .. }
+            ]
         ));
         let (servir, servida) = oneshot::channel();
         tuneis.pedir_servico(
