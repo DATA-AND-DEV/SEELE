@@ -152,6 +152,17 @@ async fn recarregar_o_conjunto(
 ) {
     let exigidos: Vec<(String, String)> = {
         let banco = persistence.lock().await;
+        // **As permissões que o conjunto novo declara, no mesmo passo.** Só o
+        // arranque as gravava (`lib.rs`), e o SALVAR da tela liga o MOD com o
+        // servidor de pé: o MOD respondia, e nenhuma ação dele passava pelos
+        // cargos — nem a de quem hospeda, nem as `todos` — até alguém
+        // reiniciar o servidor. Medido no app de verdade (e2e da API 8, 31/10):
+        // o CRIAR do Multiplayer desligado para a própria anfitriã, com
+        // `mod_permissoes` vazia e o MOD ligado. A mesma função do arranque, e
+        // idempotente pela mesma razão: ela roda a cada subida.
+        for queixa in super::gravar_permissoes_declaradas(&banco, raizes) {
+            tracing::warn!("MOD habilitado sem permissões gravadas — {queixa}");
+        }
         match crate::persistence::mods::enabled(&banco) {
             Ok(ligados) => ligados
                 .into_iter()
@@ -1738,6 +1749,115 @@ mod tests {
             Some("PersonLeft"),
             "o MOD ligado com o servidor de pé continuou mudo aos eventos por oito segundos: o \
              despachante ficou com o código do arranque"
+        );
+    }
+
+    /// **Ligar um MOD com o servidor de pé grava as permissões que ele declara.**
+    ///
+    /// Só o arranque as gravava, e o SALVAR da tela liga o MOD com o servidor
+    /// de pé: o MOD rodava, e toda ação dele era recusada pelos cargos —
+    /// inclusive a `todos`, inclusive para quem hospeda — até reiniciar. Foi o
+    /// CRIAR do Multiplayer desligado para a anfitriã no app de verdade.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ligar_um_mod_com_o_servidor_de_pe_grava_as_permissoes_dele() {
+        use crate::persistence::{Location, Persistence};
+
+        let raiz = pasta("permissoes-ao-ligar");
+        let obras = raiz.join("em-obras");
+        std::fs::create_dir_all(obras.join("servidor")).expect("criar");
+        let api = seele_proto::mods::MOD_API_VERSION;
+        std::fs::write(
+            obras.join("mod.json"),
+            format!(
+                r#"{{"schema":1,"id":"seele/acoes-tardias","version":"1.0.0","api":{api},
+                "repo":"https://example.invalid/t","reach":["estado no servidor"],
+                "server":"servidor/main.js",
+                "permissoes":[{{"acao":"jogar","nome":"Jogar","todos":true}}]}}"#
+            ),
+        )
+        .expect("manifesto");
+        std::fs::write(
+            obras.join("servidor/main.js"),
+            b"globalThis.aoAcontecer = () => {};",
+        )
+        .expect("fonte");
+        let mut arquivos = vec![
+            (
+                "mod.json".to_owned(),
+                std::fs::read(obras.join("mod.json")).expect("ler"),
+            ),
+            (
+                "servidor/main.js".to_owned(),
+                std::fs::read(obras.join("servidor/main.js")).expect("ler"),
+            ),
+        ];
+        let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut arquivos));
+        let destino = raiz.join("mod-packages").join(&hash);
+        std::fs::create_dir_all(destino.parent().expect("pai")).expect("raiz");
+        std::fs::rename(&obras, &destino).expect("publicar");
+
+        // O servidor sobe sem MOD nenhum, com uma pessoa dentro.
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let pessoa = crate::permissions::Permissions::new(&banco)
+            .register_or_find(&[3; 32], "membra")
+            .expect("a pessoa")
+            .id;
+        let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
+        let (despachante, _) = Despachante::iniciar(Vec::<MetadeDeServidor>::new());
+        let (bus, receptor) = tokio::sync::broadcast::channel(16);
+        let acompanhando = tokio::spawn(acompanhar(
+            receptor,
+            bus.downgrade(),
+            std::sync::Arc::clone(&persistence),
+            despachante,
+            crate::RaizesDosMods {
+                pacotes: raiz.clone(),
+                dados: raiz.join("mod-data"),
+            },
+            std::sync::Arc::new(super::super::aviso::Avisador::default()),
+            std::sync::Weak::new(),
+        ));
+
+        {
+            let banco = persistence.lock().await;
+            assert!(
+                crate::cargos::acoes_do_mod(&banco, pessoa, "seele/acoes-tardias").is_empty(),
+                "a pessoa já tinha a ação antes de o MOD ser ligado: o teste não mede nada"
+            );
+            crate::persistence::mods::enable(
+                &banco,
+                &crate::persistence::mods::EnabledMod {
+                    id: "seele/acoes-tardias".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    hash: hash.clone(),
+                    repo: String::new(),
+                    reach: Vec::new(),
+                    server_half: true,
+                    api,
+                    tema: false,
+                    plataformas: None,
+                },
+            )
+            .expect("ligar");
+        }
+
+        let mut acoes = Vec::new();
+        for _ in 0..200 {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            let banco = persistence.lock().await;
+            acoes = crate::cargos::acoes_do_mod(&banco, pessoa, "seele/acoes-tardias");
+            if !acoes.is_empty() {
+                break;
+            }
+        }
+        acompanhando.abort();
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        assert_eq!(
+            acoes,
+            vec!["jogar".to_owned()],
+            "o MOD ligado com o servidor de pé ficou sem as permissões que declara: toda ação \
+             dele seria recusada até reiniciar o servidor"
         );
     }
 
