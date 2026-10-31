@@ -547,8 +547,15 @@ async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
     let pacote = tokio::task::spawn_blocking(move || p.empacotar("world", "copias/mundo.tar.gz")).await??;
     let empacotou_em = relogio.elapsed() - salvou_em;
     jogo.escrever("save-on\n").await?;
-    eprintln!("salvo em {salvou_em:?} («{salvo}»); pacote: {} arquivos, {} bytes → {} bytes, {} links pulados, em {empacotou_em:?}",
-        pacote.arquivos, pacote.bytes, pacote.tamanho, pacote.links_pulados);
+    eprintln!("salvo em {salvou_em:?} («{salvo}»); pacote: {} arquivos, {} bytes → {} bytes, {} links pulados, {} travados {:?}, em {empacotou_em:?}",
+        pacote.arquivos, pacote.bytes, pacote.tamanho, pacote.links_pulados, pacote.travados_pulados, pacote.travados);
+    // **O que o jogo trava** (decisão W7): no Windows, só o `session.lock`
+    // do mundo, que o Minecraft segura enquanto roda; no Unix, nada.
+    if cfg!(windows) {
+        assert_eq!(pacote.travados, vec!["world/session.lock".to_owned()]);
+    } else {
+        assert_eq!(pacote.travados_pulados, 0);
+    }
     let oferta = principal.oferecer_copia("copias/mundo.tar.gz", copia_a).await?;
     ea.servir_tunel(MOD, COPIA, ProtocoloDeTunel::Tcp, copia_a).await.map_err(|r| anyhow::anyhow!("{r:?}"))?;
 
