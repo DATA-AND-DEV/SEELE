@@ -4118,14 +4118,18 @@ mod testes {
             "o motd não é o da configuração: {status}"
         );
 
-        // Com mods: o que o Fabric carregou, e o que o pack deixou na pasta.
+        // Com mods: o que o loader carregou, e o que o pack deixou na pasta.
+        // O plano diz o que esperar de qualquer loader (`pack_esperado`, do
+        // índice do pack): cada mod do servidor em `mods/`, e nenhum dos
+        // `env.server: unsupported`.
         if lido.get("pack_local").is_some() {
             let log =
                 std::fs::read_to_string(raiz.join("logs").join("latest.log")).unwrap_or_default();
-            for linha in log
-                .lines()
-                .filter(|l| l.contains("Loading") && l.contains("mod"))
-            {
+            for linha in log.lines().filter(|l| {
+                (l.contains("Loading") && l.contains("mod"))
+                    || l.contains("]: Done (")
+                    || l.contains("Found mod file")
+            }) {
                 eprintln!("log do jogo: {linha}");
             }
             let mods: Vec<String> = std::fs::read_dir(raiz.join("mods"))
@@ -4135,21 +4139,24 @@ mod testes {
                         .collect()
                 })
                 .unwrap_or_default();
-            eprintln!("mods/ na pasta: {mods:?}");
+            eprintln!("mods/ na pasta: {} arquivos: {mods:?}", mods.len());
             eprintln!(
                 "config/seele-prova.txt: {:?}; config/so-overrides.txt: {:?}",
                 std::fs::read_to_string(raiz.join("config/seele-prova.txt")).ok(),
                 std::fs::read_to_string(raiz.join("config/so-overrides.txt")).ok()
             );
-            assert!(
-                mods.iter().any(|m| m.starts_with("fabric-api")),
-                "sem a Fabric API: {mods:?}"
-            );
-            assert!(
-                !mods.iter().any(|m| m.starts_with("sodium")),
-                "o mod só do cliente foi baixado: {mods:?}"
-            );
-            assert!(log.contains("lithium"), "o Fabric não carregou o Lithium");
+            let nomes = |chave: &str| -> Vec<String> {
+                lido["pack_esperado"][chave]
+                    .as_array()
+                    .map(|v| v.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+                    .unwrap_or_default()
+            };
+            for m in nomes("presentes") {
+                assert!(mods.contains(&m), "sem {m} em mods/: {mods:?}");
+            }
+            for m in nomes("ausentes") {
+                assert!(!mods.contains(&m), "o mod só do cliente {m} foi baixado");
+            }
         }
 
         let parada = Instant::now();
