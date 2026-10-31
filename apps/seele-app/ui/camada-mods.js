@@ -1881,9 +1881,18 @@ let escolhendoQuemPinta = false;
 function pendencias() {
   // Os nomes que a pessoa lê são os identificadores; a chave é o par.
   const nome = (chave) => chave.split("\u0000")[0];
-  const ligar = [...rascunho].filter((c) => !conjuntoNoServidor.has(c)).map(nome);
-  const desligar = [...conjuntoNoServidor].filter((c) => !rascunho.has(c)).map(nome);
-  return { ligar, desligar };
+  const entram = [...rascunho].filter((c) => !conjuntoNoServidor.has(c));
+  const saem = [...conjuntoNoServidor].filter((c) => !rascunho.has(c));
+  // **Trocar de revisão é o mesmo nome nas duas listas.** Só o identificador
+  // dava «Passa a exigir: x. Deixa de exigir: x.», e a pessoa não lia qual
+  // revisão entra e qual sai (visto no app de verdade, no e2e da API 8). O
+  // nome que está dos dois lados leva a revisão, como o cartão a escreve.
+  const trocados = new Set(entram.map(nome).filter((id) => saem.some((c) => nome(c) === id)));
+  const dizer = (chave) => {
+    const [id, hash] = chave.split("\u0000");
+    return trocados.has(id) && hash ? `${id} (revisão ${hash.slice(0, 8)})` : id;
+  };
+  return { ligar: entram.map(dizer), desligar: saem.map(dizer) };
 }
 
 /** Há edição por salvar? Lido de fora, pelo aviso de saída. */

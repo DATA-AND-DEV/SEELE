@@ -206,6 +206,22 @@ function aLinhaDoMod(aba, id) {
       `o SALVAR não avisa que o segundo MOD de tema pede a escolha — diz «${consequencia}»`);
     await aba.evaluate(() => { document.getElementById("moderar").hidden = true; descartarORascunho(); });
 
+    // ------------------------- 5b. trocar de revisão diz qual entra e qual sai
+    // Visto no app de verdade (e2e da API 8): «Passa a exigir: seele/multiplayer.
+    // Deixa de exigir: seele/multiplayer.», sem dizer as revisões.
+    await desenharCom(aba, [structuredClone(PERFIS), mod("seele/perfis", "d")]);
+    const troca = await aba.evaluate(async () => {
+      rascunho.delete(`seele/perfis\u0000${"c".repeat(64)}`);
+      rascunho.add(`seele/perfis\u0000${"d".repeat(64)}`);
+      await salvarAlteracoes();
+      return document.getElementById("moderar-consequencia")?.textContent ?? "";
+    });
+    assert.match(troca, /Passa a exigir: seele\/perfis \(revisão dddddddd\)/,
+      `a troca de revisão não diz qual entra — diz «${troca}»`);
+    assert.match(troca, /Deixa de exigir: seele\/perfis \(revisão cccccccc\)/,
+      `a troca de revisão não diz qual sai — diz «${troca}»`);
+    await aba.evaluate(() => { document.getElementById("moderar").hidden = true; descartarORascunho(); });
+
     // ------------------------------------------------------------ 6. a recusa
     await desenharCom(aba, [structuredClone(ESTILO), structuredClone(NOITE)]);
     await aba.evaluate(() => {
