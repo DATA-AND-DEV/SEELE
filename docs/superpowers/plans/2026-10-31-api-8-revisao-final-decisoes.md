@@ -146,3 +146,13 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   ilegíveis a regravação tira** (`WARN`, com o arquivo e o caminho). Não
   mudei a assinatura (a ffi e a casca seguem iguais). — Custo: a contagem
   fica no `seele.log`, e não na tela.
+- **Ruling R12 (M2): cada porta da tela do aceite vem com o nome do túnel**
+  («o túnel «mc-copia» escuta na porta 35565…»), e não «o jogo escuta». O
+  produto não sabe sozinho qual túnel é de cópia (`portas_de_copia` são todas
+  as TCP da oferta), mas o MOD o nomeia, e o nome é o que a pessoa compara.
+  — Custo: um MOD que nomeie mal o túnel engana a tela do mesmo jeito; marcar
+  a cópia na oferta pediria um campo novo no fio.
+- **Ruling R13 (M9): a falha de `maquinas_aceitas` aparece na lista**
+  (`#maquinas-aceitas-erro`, em frase), além do registro. Bancada
+  `aceite-da-maquina.cjs`, caso 17, nos dois motores. — Custo: a lista de
+  antes fica desenhada embaixo da frase até a próxima leitura dar certo.

@@ -119,7 +119,7 @@ function linhasDoPedido(pedido) {
   ];
   if (oferta.receita) linhas.push(F.receita(oferta.receita, oferta.versao_da_receita));
   linhas.push(F.pedidoPor(pedido.pedido_por, pedido.servidor));
-  for (const tunel of oferta.tuneis ?? []) linhas.push(F.porta(tunel.porta, tunel.protocolo));
+  for (const tunel of oferta.tuneis ?? []) linhas.push(F.porta(String(tunel.nome ?? ""), tunel.porta, tunel.protocolo));
 
   // **Só o que este computador baixa** (API 8 parte 4): o Rust separa, pela
   // mesma regra da política do `programa`, os artefatos deste sistema dos de
@@ -468,12 +468,17 @@ function aplicarOEstadoDaMaquina(estado) {
 
 // ------------------------------------------------------------- a lista de aceites
 
-/** Lê o que o Rust guarda (`maquinas_aceitas`), ou `[]` dizendo ao registro o que falhou. */
+/** A última falha de `maquinas_aceitas`, para a lista dizê-la (M9). */
+let falhaDasMaquinasAceitas = null;
+
+/** Lê o que o Rust guarda (`maquinas_aceitas`), ou `null` dizendo ao registro o que falhou. */
 async function lerAsMaquinasAceitas() {
   try {
     const aceitas = await invoke("maquinas_aceitas");
+    falhaDasMaquinasAceitas = null;
     return Array.isArray(aceitas) ? aceitas : [];
   } catch (falha) {
+    falhaDasMaquinasAceitas = falha;
     registrarNoAnfitriao("maquina", `maquinas_aceitas falhou — ${codigoDaFalhaDaMaquina(falha)}`, "aviso");
     return null;
   }
@@ -499,7 +504,14 @@ async function desenharMaquinasAceitas() {
   const F = FRASES_DA_MAQUINA;
   const lista = $("lista-maquinas-aceitas");
   const aceitas = await lerAsMaquinasAceitas();
-  if (aceitas === null) return;
+  if (aceitas === null) {
+    // **A falha na tela, e não só no registro** (revisão final, M9): uma lista
+    // vazia sem frase deixava um jogo de pé sem DESLIGAR, calado.
+    const erro = $("maquinas-aceitas-erro");
+    erro.hidden = false;
+    erro.textContent = fraseDaFalhaDaMaquina(falhaDasMaquinasAceitas);
+    return;
+  }
   if (aceitas.length === 0) {
     repovoar(lista, [elemento("li", "server-dispositivos-vazio", F.listaVazia)]);
     return;

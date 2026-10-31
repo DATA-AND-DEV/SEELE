@@ -39,6 +39,8 @@
 //     de onde mais arquivos podem vir.
 // 16. (parte 6) o pack pelo hash, o instalador do loader antes do servidor, e
 //     os domínios de onde o loader baixa sozinho.
+// 17. (revisão final, M9) a falha de `maquinas_aceitas` aparece na lista, em
+//     frase; e (M2, no caso 1) cada porta vem com o nome do túnel.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/aceite-da-maquina.cjs
 
@@ -152,6 +154,8 @@ async function caso(motor, numero, prova) {
           assert.match(texto, /MOD: x\/jogo \(x\/jogo\)/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /jogo: Minecraft, versão 1\.21/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /porta 25565 \(tcp\)/, `${motor}: 1 · ${texto}`);
+          // M2: o nome do túnel, para a cópia do mundo não passar por porta do jogo.
+          assert.match(texto, /o túnel «minecraft-1» escuta na porta 25565/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /nada para baixar neste pedido/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /nenhum programa: este pedido só abre a porta do jogo/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /ocupa até 2\.0 GB de disco, em \/home\/eu\/seele\/jogos\/x-jogo/, `${motor}: 1 · ${texto}`);
@@ -540,8 +544,23 @@ async function caso(motor, numero, prova) {
           ], `${motor}: 16 · ${linhas.join(" | ")}`);
         });
 
+        // 17. (revisão final, M9) `maquinas_aceitas` que falha: a lista diz
+        //     a falha em frase, em vez de ficar vazia e calada.
+        await caso(motor, "17", async () => {
+          await zerar();
+          await pagina.evaluate(() => {
+            $("maquinas-aceitas-erro").hidden = true;
+            table.maquinas_aceitas = () => { throw { Recusado: { motivo: "aceite-invalido" } }; };
+          });
+          await pagina.evaluate(() => desenharMaquinasAceitas());
+          const erro = await pagina.evaluate(() => ({ hidden: $("maquinas-aceitas-erro").hidden, texto: $("maquinas-aceitas-erro").innerText }));
+          assert.equal(erro.hidden, false, `${motor}: 17 · a falha não apareceu`);
+          assert.ok(erro.texto.length > 0, `${motor}: 17 · a falha apareceu sem frase`);
+          await pagina.evaluate(() => { table.maquinas_aceitas = () => []; $("maquinas-aceitas-erro").hidden = true; });
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 17, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 18, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();
