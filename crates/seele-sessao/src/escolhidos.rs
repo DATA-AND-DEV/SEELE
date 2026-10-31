@@ -18,9 +18,10 @@ pub const ARQUIVOS_DE_PE: usize = 4;
 
 /// **O maior arquivo que uma pessoa pode escolher para um MOD.**
 ///
-/// Dez megabytes, que é o teto que os MODs oficiais já praticavam do lado do
-/// servidor. Ele não atravessa inteiro: sai em pedaços que o MOD pede.
-pub const TETO_DO_ESCOLHIDO: usize = 10 * 1024 * 1024;
+/// Cem MiB desde a 0.19 (eram dez), o mesmo teto por item que o volume do
+/// servidor grava e serve (`midia_de_mod::TETO_DE_ARQUIVO`). Ele não atravessa
+/// inteiro: sai em pedaços que o MOD pede.
+pub const TETO_DO_ESCOLHIDO: usize = 100 * 1024 * 1024;
 
 /// Quanto de um arquivo escolhido sai por pedido.
 ///

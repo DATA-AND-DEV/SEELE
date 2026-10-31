@@ -138,7 +138,7 @@ SeeleUI.contribuicoes.registrar({
 | `SeeleUI.tema(valores, { previa: true, superficie })` | a prévia de um tema, só nesta máquina e só enquanto a superfície estiver de pé. O tema que todos veem é o da metade de servidor (ver «O tema»). |
 | `SeeleUI.aoEvento(fn)` | o que a pessoa faz no que o MOD desenhou, o que muda na tela e o aviso da metade de servidor voltam por aqui, sem número e sem resposta. Um ouvinte só, e o último vence. |
 | `SeeleUI.pedaco(arquivo, inicio)` e `SeeleUI.soltar(arquivo)` | leem em pedaços o arquivo que alguém escolheu pela forma `arquivo`, e o devolvem. O MOD recebe identificador, papel e tamanho, e nunca o caminho. |
-| `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor uma imagem escolhida, até 10 MiB, por um fluxo próprio. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
+| `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor uma imagem escolhida, até 100 MiB (10 MiB antes da 0.19), por um fluxo próprio. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
 | `SeeleUI.capacidades()` | o que este build oferece ao seu MOD, nesta plataforma. `estilos` e `classes` estão na lista como rótulos: nada pergunta por eles, e o estilo de um nó vale onde a forma dele monta. |
 | `console` | cada chamada vira uma linha no `seele.log` da máquina que roda o MOD (ver «Quando o MOD não faz o que devia»). |
 | `setTimeout`, `setInterval` e os dois `clear` | a fachada do relógio do anfitrião, com até 256 de pé; acima disso devolvem `0`, que é o «não deu». |
@@ -999,7 +999,7 @@ mundo.tema({ fundo: "#0b1d2a", texto: "#f5f1e6" });           // → { ok } ou {
 
 ### `volume` — imagens grandes
 
-Para a imagem que não cabe numa mensagem: até 10 MiB, sem passar pelo QuickJS.
+Para a imagem que não cabe numa mensagem: até 100 MiB (10 MiB antes da 0.19), sem passar pelo QuickJS. Mostrar na tela continua limitado ao bolso de mídia da superfície.
 Os bytes vão por um fluxo próprio, direto ao disco
 ([ADR 0048](adr/0048-mods-ganham-o-caminho-de-volume-que-os-anexos-ja-tem.md)).
 

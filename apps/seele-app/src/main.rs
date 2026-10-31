@@ -17148,29 +17148,43 @@ mod a_supervisao_dos_mods_nativos {
         guardados.soltar(7, "prova/mod", numero);
     }
 
-    /// **O escolhido tem teto de 10 MiB, e o MOD só o aperta** (`volume.cliente`
-    /// e `recusas.volume[3]`; a auditoria do `v6.json`, tabela 9). O comando
-    /// abre o seletor do sistema e não sobe em teste: trocar o teto para 20 MiB
-    /// passava. O número é o do texto, lido dele.
+    /// **O escolhido tem teto de 100 MiB, e o MOD só o aperta** (`volume.cliente`
+    /// e `recusas.volume[3]`). A 0.19 subiu o teto de 10 para 100 MiB; a API 7
+    /// publicada promete «até 10 MiB», e a promessa segue cumprida: o teto
+    /// desta máquina nunca fica abaixo do número do texto. O texto da API 8
+    /// diz o número novo. O comando abre o seletor do sistema e não sobe em
+    /// teste, então o número é conferido contra o texto e contra o teto do
+    /// servidor, que tem de ser o mesmo.
     #[test]
-    fn o_escolhido_tem_teto_de_10_mib_e_o_mod_so_o_aperta() {
+    fn o_escolhido_tem_teto_de_100_mib_e_o_mod_so_o_aperta() {
         const MIB: usize = 1024 * 1024;
-        let v6: serde_json::Value =
-            serde_json::from_str(include_str!("../../../api/v6.json")).expect("o v6.json");
-        let texto = v6
+        let v7: serde_json::Value =
+            serde_json::from_str(include_str!("../../../api/v7.json")).expect("o v7.json");
+        let texto = v7
             .get("volume")
             .and_then(|volume| volume.get("cliente"))
             .and_then(serde_json::Value::as_str)
             .expect("o texto do volume.cliente");
+        let prometido: usize = texto
+            .split("até ")
+            .nth(1)
+            .and_then(|resto| resto.split(" MiB").next())
+            .and_then(|numero| numero.trim().parse().ok())
+            .expect("o v7.json não diz «até N MiB» no volume.cliente");
         assert!(
-            texto.contains(&format!("até {} MiB", super::TETO_DO_ESCOLHIDO / MIB)),
-            "o teto do escolhido ({} MiB) não é o que o v6.json diz: {texto}",
+            super::TETO_DO_ESCOLHIDO >= prometido * MIB,
+            "o teto do escolhido ({} MiB) ficou abaixo do que a API 7 promete ({prometido} MiB)",
             super::TETO_DO_ESCOLHIDO / MIB
         );
-        assert_eq!(super::teto_do_escolhido(None), 10 * MIB);
+        assert_eq!(
+            super::TETO_DO_ESCOLHIDO,
+            seele_proto::midia_de_mod::TETO_DE_ARQUIVO,
+            "a pessoa escolhe um arquivo que o servidor não grava, ou o contrário"
+        );
+        assert_eq!(super::teto_do_escolhido(None), 100 * MIB);
         assert_eq!(
             super::teto_do_escolhido(Some(0)),
-            10 * MIB,
+            100 * MIB,
             "zero é «não declarou»"
         );
         assert_eq!(
@@ -17179,8 +17193,8 @@ mod a_supervisao_dos_mods_nativos {
             "o MOD não apertou o teto"
         );
         assert_eq!(
-            super::teto_do_escolhido(Some(20 * MIB)),
-            10 * MIB,
+            super::teto_do_escolhido(Some(200 * MIB)),
+            100 * MIB,
             "o MOD ampliou o que esta máquina aceita ler"
         );
     }

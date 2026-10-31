@@ -54,9 +54,12 @@ impl TipoDeMidia {
 
 /// **O maior arquivo que um MOD pode trazer**, por arquivo.
 ///
-/// Dez MiB, o mesmo teto da seleção de imagens. A interface também limita
-/// a soma de mídias simultâneas por superfície.
-pub const TETO_DE_ARQUIVO: usize = 10 * 1024 * 1024;
+/// Cem MiB desde a 0.19 (eram dez: pouco para um item de galeria ou um
+/// arquivo para baixar, decisão do dono). É o teto de gravar e de servir um
+/// item do volume. **Mostrar** é outro limite: a interface ainda soma as
+/// mídias simultâneas por superfície (`bytesDeMidia`), e um item maior que
+/// esse bolso é guardado e servido, mas não vira mídia na tela.
+pub const TETO_DE_ARQUIVO: usize = 100 * 1024 * 1024;
 
 /// O que estes bytes são, ou nada.
 ///
