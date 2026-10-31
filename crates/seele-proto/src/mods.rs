@@ -268,13 +268,17 @@ pub fn capacidades_de(api: u32, poderes: &[Poder]) -> Vec<&'static str> {
 /// **O que a metade de máquina deste manifesto pode chamar.** Lista própria, e
 /// não uma extensão de [`capacidades_de`]: a metade de máquina não tem tela,
 /// então nenhuma capacidade de [`capacidades_da_api`] entra aqui, e somar as
-/// duas listas daria a ela um `SeeleUI` que ela não tem. `Programa` não dá
-/// capacidade nesta parte.
+/// duas listas daria a ela um `SeeleUI` que ela não tem. `Programa` dá
+/// `maquina.programa` (API 8 parte 4): baixar com hash, escrever, desempacotar
+/// e rodar o comando aceito, só na pasta daquele servidor de jogo.
 #[must_use]
 pub fn capacidades_da_maquina(manifest: &Manifest) -> Vec<&'static str> {
     let mut capacidades = vec!["maquina"];
     if manifest.poderes.contains(&Poder::Porta) {
         capacidades.push("maquina.porta");
+    }
+    if manifest.poderes.contains(&Poder::Programa) {
+        capacidades.push("maquina.programa");
     }
     capacidades
 }
@@ -630,7 +634,9 @@ pub enum Poder {
     /// `127.0.0.1`. Exige a permissão `entrar-no-jogo`
     /// ([`Refused::PortaSemEntrarNoJogo`]).
     Porta,
-    /// Reservado ao aceite da máquina (parte 3); sem efeito nesta parte.
+    /// Baixar artefatos e rodar o servidor do jogo na máquina que aceitou
+    /// (parte 4): dá `maquina.programa` à metade de máquina
+    /// ([`capacidades_da_maquina`]), preso ao que o aceite mostrou.
     Programa,
 }
 
@@ -1853,6 +1859,28 @@ mod tests {
         for c in capacidades_da_api(8) {
             assert!(!capacidades_da_maquina(&m).contains(c), "{c} vazou");
         }
+    }
+
+    /// **O poder `programa` dá `maquina.programa`, e só à metade de máquina**
+    /// (API 8 parte 4): o manifesto do MOD de multiplayer, com os dois poderes,
+    /// ganha as duas capacidades, e nenhuma metade com tela ganha o programa.
+    #[test]
+    fn o_poder_programa_da_o_programa_a_metade_de_maquina() {
+        let completo = PORTA_COMPLETA.replace(r#"["porta"]"#, r#"["porta", "programa"]"#);
+        let m = read_manifest(&com_api(8, &completo)).expect("os dois poderes leem");
+        assert_eq!(
+            capacidades_da_maquina(&m),
+            vec!["maquina", "maquina.porta", "maquina.programa"]
+        );
+        assert!(!capacidades_do_manifesto(&m)
+            .iter()
+            .any(|c| c.contains("programa")));
+        let so_programa = PORTA_COMPLETA.replace(r#"["porta"]"#, r#"["programa"]"#);
+        let m = read_manifest(&com_api(8, &so_programa)).expect("só programa lê");
+        assert_eq!(
+            capacidades_da_maquina(&m),
+            vec!["maquina", "maquina.programa"]
+        );
     }
 
     /// **`plataformas` num manifesto de API anterior à 8 é recusado**, pelo nome

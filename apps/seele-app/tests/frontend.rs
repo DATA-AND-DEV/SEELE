@@ -20932,9 +20932,11 @@ fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
             "o prelúdio da metade de máquina pede `{tipo}`, e `tratar` não o atende"
         );
     }
+    // Os quatro da parte 3 (`maquina-pedir` e os três `porta-*`) e os sete do
+    // poder `programa` da parte 4.
     assert_eq!(
         tipos_da_maquina.len(),
-        4,
+        11,
         "a leitura dos tipos da metade de máquina quebrou: {tipos_da_maquina:?}"
     );
 
@@ -25888,11 +25890,15 @@ fn maquina_a_tela_e_do_produto_e_nao_passa_pela_regiao_de_mod() {
     );
     let camada = without_comments(&read("ui/camada-maquina.js"));
     assert!(
-        !camada.contains("mods-regiao") && !camada.contains("SeeleUI") && !camada.contains("donoDaRegiao"),
+        !camada.contains("mods-regiao")
+            && !camada.contains("SeeleUI")
+            && !camada.contains("donoDaRegiao"),
         "a tela do aceite importa da região de MOD"
     );
     assert!(
-        !camada.contains("innerHTML") && !camada.contains("insertAdjacentHTML") && !camada.contains("outerHTML"),
+        !camada.contains("innerHTML")
+            && !camada.contains("insertAdjacentHTML")
+            && !camada.contains("outerHTML"),
         "a tela do aceite monta marcação com texto que o MOD escolheu"
     );
     assert!(
@@ -25968,7 +25974,12 @@ fn maquina_a_saida_do_pedido_e_dita_e_a_faixa_e_de_toda_tela() {
 #[test]
 fn maquina_a_ponte_do_navegador_recusa_o_aceite_com_so_no_app() {
     let ponte = without_comments(&read("ui/ponte-web.js"));
-    for verbo in ["maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar"] {
+    for verbo in [
+        "maquina_aceitar",
+        "maquina_recusar",
+        "maquina_desligar",
+        "maquina_revogar",
+    ] {
         let corpo = ponte
             .split_once(&format!("  {verbo}:"))
             .map(|(_, resto)| resto.split_once('\n').map_or(resto, |(a, _)| a).to_owned())
@@ -26002,7 +26013,10 @@ fn maquina_toda_parada_e_todo_campo_do_rust_tem_frase() {
         .collect();
     // O pedido que não confere com o pacote lido também termina assim.
     paradas.push("pacote-diferente".to_owned());
-    assert!(paradas.len() >= 9, "não achei as paradas do Rust: {paradas:?}");
+    assert!(
+        paradas.len() >= 9,
+        "não achei as paradas do Rust: {paradas:?}"
+    );
     let campos_fn = rust
         .split_once("pub(crate) fn campos_que_mudaram(")
         .and_then(|(_, resto)| resto.split_once("\n    mudou\n}"))
@@ -26015,27 +26029,39 @@ fn maquina_toda_parada_e_todo_campo_do_rust_tem_frase() {
         .map(|(_, nome)| nome.to_owned())
         .collect();
     campos.push("pacote".to_owned());
-    assert!(campos.len() >= 13, "não achei os campos do Rust: {campos:?}");
+    assert!(
+        campos.len() >= 13,
+        "não achei os campos do Rust: {campos:?}"
+    );
 
     let frases = without_comments(&read("ui/frases.js"));
     let bloco = frases
         .split_once("const FRASES_DA_MAQUINA")
         .map(|(_, resto)| resto.to_owned())
         .expect("`FRASES_DA_MAQUINA` sumiu de frases.js");
-    let paradas_js = bloco.split_once("paradas:").map(|(_, r)| r).expect("sem `paradas`");
-    let paradas_js = paradas_js.split_once("campos:").map_or(paradas_js, |(a, _)| a);
+    let paradas_js = bloco
+        .split_once("paradas:")
+        .map(|(_, r)| r)
+        .expect("sem `paradas`");
+    let paradas_js = paradas_js
+        .split_once("campos:")
+        .map_or(paradas_js, |(a, _)| a);
     for parada in &paradas {
         assert!(
             paradas_js.contains(&format!("\"{parada}\":")),
             "a parada «{parada}» do Rust não tem frase em `FRASES_DA_MAQUINA.paradas`"
         );
     }
-    let campos_js = bloco.split_once("campos:").map(|(_, r)| r).expect("sem `campos`");
+    let campos_js = bloco
+        .split_once("campos:")
+        .map(|(_, r)| r)
+        .expect("sem `campos`");
     let campos_js = campos_js.split_once("ler:").map_or(campos_js, |(a, _)| a);
     for campo in &campos {
         assert!(
             // A chave inteira: `receita:` também casa dentro de `versao_da_receita:`.
-            campos_js.contains(&format!(" {campo}:")) || campos_js.contains(&format!("{{ {campo}:")),
+            campos_js.contains(&format!(" {campo}:"))
+                || campos_js.contains(&format!("{{ {campo}:")),
             "o campo «{campo}» do Rust não tem frase em `FRASES_DA_MAQUINA.campos`"
         );
     }

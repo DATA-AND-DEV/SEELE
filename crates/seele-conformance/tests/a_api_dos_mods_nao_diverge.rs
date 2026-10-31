@@ -272,8 +272,8 @@ fn as_capacidades_por_poder_da_v8_sao_as_do_codigo() {
         capacidades_da_api, capacidades_da_maquina, capacidades_de, read_manifest, Poder,
     };
 
-    let v8: serde_json::Value = serde_json::from_str(include_str!("../../../api/v8.json"))
-        .expect("a api/v8.json é JSON");
+    let v8: serde_json::Value =
+        serde_json::from_str(include_str!("../../../api/v8.json")).expect("a api/v8.json é JSON");
     // `get` em vez de índice: uma chave que some vira lista vazia, e a
     // comparação abaixo reprova com o nome dela em vez de um pânico mudo.
     let lista = |caminho: &[&str]| -> Vec<String> {
@@ -335,5 +335,27 @@ fn as_capacidades_por_poder_da_v8_sao_as_do_codigo() {
         lista(&["compatibilidade", "capacidades-da-maquina", "base"]),
         vec!["maquina".to_owned()],
         "capacidades-da-maquina.base da api/v8.json diverge do código"
+    );
+}
+
+/// **As recusas do `programa` da `api/v8.json` são as do núcleo** (API 8
+/// parte 4): `recusas.programa` é a lista fechada que a metade de máquina lê
+/// num `catch`, e `NOMES_DAS_RECUSAS` é a que `Recusa::nome` dá. Um nome novo
+/// no núcleo sem linha no contrato, ou uma linha que o núcleo não dá mais,
+/// reprova aqui com o nome.
+#[test]
+fn as_recusas_do_programa_da_v8_sao_as_do_nucleo() {
+    let v8: serde_json::Value =
+        serde_json::from_str(include_str!("../../../api/v8.json")).expect("a api/v8.json é JSON");
+    let no_json: Vec<&str> = v8
+        .get("recusas")
+        .and_then(|r| r.get("programa"))
+        .and_then(serde_json::Value::as_array)
+        .map(|l| l.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        no_json,
+        seele_core::programa::NOMES_DAS_RECUSAS,
+        "recusas.programa da api/v8.json diverge de `NOMES_DAS_RECUSAS`"
     );
 }

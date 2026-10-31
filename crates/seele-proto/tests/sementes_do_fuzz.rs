@@ -215,6 +215,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
                         algoritmo: seele_proto::maquina::AlgoritmoDeHash::Sha1,
                         hex: "ab".repeat(20),
                     },
+                    plataformas: vec![],
                 }],
                 pack: None,
                 origens: vec!["exemplo.com".to_owned()],

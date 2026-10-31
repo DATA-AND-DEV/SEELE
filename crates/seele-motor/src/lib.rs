@@ -2388,12 +2388,16 @@ mod testes {
                aoParar: typeof maquina.aoParar,\
                porta: typeof maquina.porta,\
                servir: typeof (maquina.porta && maquina.porta.servir),\
+               programa: typeof maquina.programa,\
+               rodar: typeof (maquina.programa && maquina.programa.rodar),\
+               baixar: typeof (maquina.programa && maquina.programa.baixar),\
+               plataforma: maquina.plataforma,\
                servidor: maquina.servidor,\
                congelada: Object.isFrozen(maquina.oferta) && Object.isFrozen(maquina.oferta.tuneis[0]),\
                sobrou: typeof __seeleMaquina,\
              }));",
             capacidades,
-            r#"{"servidor":"mundo","oferta":{"titulo":"Minecraft","tuneis":[{"nome":"mc","protocolo":"tcp","porta":25565}]}}"#,
+            r#"{"servidor":"mundo","plataforma":"mac-aarch64","oferta":{"titulo":"Minecraft","tuneis":[{"nome":"mc","protocolo":"tcp","porta":25565}]}}"#,
         );
         let corpo = loop {
             match recebe.try_recv() {
@@ -2445,5 +2449,24 @@ mod testes {
             "com `maquina.porta` falta servir: {com_porta}"
         );
         assert_eq!(com_porta["seeleUI"], "undefined", "{com_porta}");
+        assert_eq!(
+            com_porta["programa"], "undefined",
+            "sem o poder `programa` a metade ganhou `maquina.programa`: {com_porta}"
+        );
+    }
+
+    /// **`maquina.programa` só com a capacidade dele** (API 8 parte 4), e o
+    /// sistema da máquina chega em `maquina.plataforma`.
+    #[test]
+    #[allow(clippy::indexing_slicing, reason = "num teste, o pânico é o relatório")]
+    fn o_programa_so_existe_com_o_poder() {
+        let sem = o_que_a_maquina_ve(&["maquina", "maquina.porta"]);
+        assert_eq!(sem["programa"], "undefined", "{sem}");
+        let com = o_que_a_maquina_ve(&["maquina", "maquina.programa"]);
+        assert_eq!(com["programa"], "object", "{com}");
+        assert_eq!(com["rodar"], "function", "{com}");
+        assert_eq!(com["baixar"], "function", "{com}");
+        assert_eq!(com["porta"], "undefined", "{com}");
+        assert_eq!(com["plataforma"], "mac-aarch64", "{com}");
     }
 }

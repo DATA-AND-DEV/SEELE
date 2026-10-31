@@ -37,7 +37,7 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::sync::mpsc;
 
 use super::hash::{o_mais_forte, Calculo, HashDeclarado};
-use super::{caminho, host_aceito, AlgoritmoDeHash, Interior, Programa, Recusa};
+use super::{caminho, host_aceito, AlgoritmoDeHash, Interior, Politica, Programa, Recusa};
 
 /// Quantos redirecionamentos um download segue.
 pub const MAX_REDIRECIONAMENTOS: usize = 5;
@@ -46,7 +46,7 @@ pub const MAX_REDIRECIONAMENTOS: usize = 5;
 const PASSO_DO_PROGRESSO: u64 = 1024 * 1024;
 
 /// A extensão do arquivo parcial, que o teto de disco não conta duas vezes.
-const EXTENSAO_PARCIAL: &str = "seele-parcial";
+pub(crate) const EXTENSAO_PARCIAL: &str = "seele-parcial";
 
 /// Um futuro que se pode guardar numa caixa e mandar entre threads.
 pub type FuturoDe<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -209,6 +209,59 @@ fn conferir_url(url: &str, dominios: &[String]) -> Result<reqwest::Url, Recusa> 
     Ok(lida)
 }
 
+/// **O aceite prende o que foi mostrado** (spec §4; decisão Q1). Uma URL de
+/// artefato aceito só baixa com o hash e o tamanho que a tela mostrou; a de
+/// um artefato de outro sistema não baixa; qualquer outra só baixa de um host
+/// de `origens`.
+///
+/// O hash comparado é o mais forte do pedido, e tem de ser do mesmo algoritmo
+/// do aceito: um `sha1` certo ao lado do `sha256` aceito não vale como o
+/// `sha256`.
+fn conferir_contra_o_aceite(
+    politica: &Politica,
+    pedido: &PedidoDeDownload,
+    hash: &HashDeclarado,
+    url: &reqwest::Url,
+) -> Result<(), Recusa> {
+    if let Some(aceito) = politica.artefatos.iter().find(|a| a.url == pedido.url) {
+        let pedido_hex = hash.hex.to_ascii_lowercase();
+        if aceito.hash.algoritmo != hash.algoritmo
+            || aceito.hash.hex.to_ascii_lowercase() != pedido_hex
+        {
+            return Err(Recusa::DiferenteDoAceito {
+                url: pedido.url.clone(),
+                campo: "hash",
+                aceito: format!("{} {}", aceito.hash.algoritmo, aceito.hash.hex),
+                pedido: format!("{} {pedido_hex}", hash.algoritmo),
+            });
+        }
+        if aceito.tamanho != pedido.tamanho {
+            return Err(Recusa::DiferenteDoAceito {
+                url: pedido.url.clone(),
+                campo: "tamanho",
+                aceito: aceito.tamanho.to_string(),
+                pedido: pedido.tamanho.to_string(),
+            });
+        }
+        return Ok(());
+    }
+    if politica.de_outros_sistemas.contains(&pedido.url) {
+        return Err(Recusa::ArtefatoDeOutroSistema {
+            url: pedido.url.clone(),
+        });
+    }
+    if !url
+        .host_str()
+        .is_some_and(|host| host_aceito(host, &politica.origens))
+    {
+        return Err(Recusa::ForaDosArtefatosAceitos {
+            url: pedido.url.clone(),
+            origens: politica.origens.clone(),
+        });
+    }
+    Ok(())
+}
+
 impl Programa {
     /// Começa um download em segundo plano.
     ///
@@ -243,6 +296,7 @@ impl Programa {
                     hex: hash.hex,
                 });
             }
+            conferir_contra_o_aceite(&interior.politica, &pedido, &hash, &url)?;
             let destino = caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, false)?;
             Ok((url, hash, destino))
         })();
@@ -315,7 +369,7 @@ impl Drop for Parcial {
     }
 }
 
-fn e_parcial(caminho: &Path) -> bool {
+pub(crate) fn e_parcial(caminho: &Path) -> bool {
     caminho.extension().is_some_and(|e| e == EXTENSAO_PARCIAL)
 }
 
@@ -348,6 +402,45 @@ fn reservar(interior: &Arc<Interior>, destino: &Path, tamanho: u64) -> Result<Re
     })
 }
 
+/// Quantas vezes um pedido que falhou **antes de qualquer resposta** é
+/// tentado (decisão Q10).
+pub const MAX_TENTATIVAS: u32 = 3;
+
+/// A espera entre duas tentativas.
+const ESPERA_ENTRE_TENTATIVAS: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// **Pede, e tenta de novo quando a falha vem antes de qualquer resposta**
+/// (conexão, TLS): até [`MAX_TENTATIVAS`]. Medido em 31/10/2026, neste Mac,
+/// contra `piston-data.mojang.com` (Azure Front Door): o primeiro pedido de
+/// cada processo leva de 3 a 5 s, e alguns morrem em 9 a 10 s com «peer closed
+/// connection without sending TLS close_notify»; o segundo leva ~80 ms. Uma
+/// resposta (inclusive um status de erro) não é tentada de novo, e uma falha
+/// no meio do corpo também não: o parcial é recusado e apagado.
+async fn pedir_com_tentativas(origem: &dyn Origem, url: &reqwest::Url) -> Result<Resposta, Recusa> {
+    let mut motivos = Vec::new();
+    for tentativa in 1..=MAX_TENTATIVAS {
+        match origem.pedir(url).await {
+            Ok(resposta) => {
+                if tentativa > 1 {
+                    tracing::info!(url = %url, tentativa, antes = ?motivos, "programa: o pedido passou depois de falhar");
+                }
+                return Ok(resposta);
+            }
+            Err(motivo) => {
+                tracing::warn!(url = %url, tentativa, de = MAX_TENTATIVAS, motivo = %motivo, "programa: o pedido falhou antes de qualquer resposta");
+                motivos.push(motivo);
+                if tentativa < MAX_TENTATIVAS {
+                    tokio::time::sleep(ESPERA_ENTRE_TENTATIVAS).await;
+                }
+            }
+        }
+    }
+    Err(Recusa::OrigemFalhou {
+        url: url.to_string(),
+        motivo: format!("{} tentativas: {}", MAX_TENTATIVAS, motivos.join(" | ")),
+    })
+}
+
 #[allow(clippy::too_many_lines)]
 async fn correr(
     interior: &Arc<Interior>,
@@ -372,15 +465,7 @@ async fn correr(
 
     let mut saltos = 0_usize;
     let (alegado, mut corpo) = loop {
-        let resposta =
-            interior
-                .origem
-                .pedir(&url)
-                .await
-                .map_err(|motivo| Recusa::OrigemFalhou {
-                    url: url.to_string(),
-                    motivo,
-                })?;
+        let resposta = pedir_com_tentativas(interior.origem.as_ref(), &url).await?;
         match resposta {
             Resposta::Corpo { alegado, corpo } => break (alegado, corpo),
             Resposta::Status(status) => {

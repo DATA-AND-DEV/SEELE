@@ -109,6 +109,9 @@ fn programa(der: &[u8], nome: &str) -> (Pasta, Programa) {
     let programa = Programa::novo(
         Politica {
             dominios: vec!["localhost".to_owned()],
+            artefatos: vec![],
+            de_outros_sistemas: vec![],
+            origens: vec!["localhost".to_owned()],
             comando: None::<ComandoAceito>,
             teto_de_disco: 1 << 30,
             raiz: pasta.0.join("jogo"),

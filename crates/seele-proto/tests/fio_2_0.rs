@@ -483,6 +483,7 @@ fn oferta_cheia() -> OfertaDeMaquina {
                 algoritmo: AlgoritmoDeHash::Sha1,
                 hex: "ab".repeat(20),
             },
+            plataformas: vec!["mac-aarch64".into(), "mac-x64".into()],
         }],
         pack: Some(HashDeArtefato {
             algoritmo: AlgoritmoDeHash::Sha512,

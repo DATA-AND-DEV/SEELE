@@ -50,6 +50,13 @@ pub const PRELUDIO: &str = r#"
   let ouvinteDaParada = null;
   let paradaDada = false;
 
+  // **O que o poder `programa` ouve sem ter pedido** (API 8 parte 4): o
+  // progresso de um download (`programa-progresso`), a linha de um processo
+  // (`processo-linha`) e o fim dele (`processo-fim`). Montado só com a
+  // capacidade `maquina.programa`; sem ela fica nulo, e essas mensagens não
+  // acham ninguém.
+  let aoProgramaChegou = null;
+
   globalThis.aoResponder = (texto) => {
     let m;
     try { m = JSON.parse(texto); } catch { return; }
@@ -73,6 +80,10 @@ pub const PRELUDIO: &str = r#"
         .then(() => (quem ? quem(String(m.motivo ?? '')) : undefined))
         .catch((erro) => { dizerOErro('erro no aoParar:', erro); })
         .finally(() => { seele.postar(JSON.stringify({ tipo: 'maquina-parada-pronta' })); });
+      return;
+    }
+    if (m.tipo === 'programa-progresso' || m.tipo === 'processo-linha' || m.tipo === 'processo-fim') {
+      if (aoProgramaChegou) aoProgramaChegou(m);
       return;
     }
     if (m.tipo === 'evento') {
@@ -544,9 +555,138 @@ pub const PRELUDIO: &str = r#"
       parar: async (nome) => { await pedir('porta-parar', { nome: String(nome ?? '') }); },
       quedas: (nome) => pedir('porta-quedas', { nome: String(nome ?? '') }),
     }) : null;
+    // **O poder `programa`, só para quem o declara** (API 8 parte 4). Tudo
+    // aqui é um pedido ao anfitrião, que confere contra o aceite guardado
+    // (a cópia que vale é a do Rust, e não `maquina.oferta`). A recusa chega
+    // como `Error` com o nome em `erro` e os dados dela em campos (`host`,
+    // `aceitos`, `esperado`, `obtido`, `usado`, `teto`...), como toda recusa.
+    const programa = capacidades.has('maquina.programa') ? (() => {
+      // O progresso de cada download, pelo número do pedido que o começou.
+      const progressos = new Map();
+      // Cada processo, pelo número que o anfitrião deu. Uma linha que chega
+      // antes de o objeto existir (a resposta de `rodar` ainda não virou
+      // objeto) ou antes de `aoLinha` fica guardada, até TETO_GUARDADAS; o
+      // que passa disso é contado e dito no fim (`linhasNaoOuvidas`).
+      const processos = new Map();
+      const TETO_GUARDADAS = 256;
+      const doProcesso = (numero) => {
+        let p = processos.get(numero);
+        if (!p) {
+          p = { aoLinha: null, aoSair: null, guardadas: [], naoOuvidas: 0, fim: null, resolverFim: null };
+          p.promessa = new Promise((resolve) => { p.resolverFim = resolve; });
+          processos.set(numero, p);
+        }
+        return p;
+      };
+      const ouvirLinha = (p, linha, fluxo) => {
+        try { p.aoLinha(linha, fluxo); } catch (erro) { dizerOErro('erro no aoLinha:', erro); }
+      };
+      const terminar = (p) => {
+        if (p.aoSair) {
+          try { p.aoSair(p.fim); } catch (erro) { dizerOErro('erro no aoSair:', erro); }
+        }
+        p.resolverFim(p.fim);
+      };
+      aoProgramaChegou = (m) => {
+        if (m.tipo === 'programa-progresso') {
+          const fn = progressos.get(m.n);
+          if (!fn) return;
+          try { fn({ recebidos: Number(m.recebidos), total: Number(m.total) }); } catch (erro) { dizerOErro('erro no aoProgresso:', erro); }
+          return;
+        }
+        const p = doProcesso(Number(m.processo));
+        if (m.tipo === 'processo-linha') {
+          const linha = String(m.linha ?? '');
+          const fluxo = m.fluxo === 'erro' ? 'erro' : 'saida';
+          if (p.aoLinha) ouvirLinha(p, linha, fluxo);
+          else if (p.guardadas.length < TETO_GUARDADAS) p.guardadas.push([linha, fluxo]);
+          else p.naoOuvidas += 1;
+          return;
+        }
+        // processo-fim: uma vez só.
+        if (p.fim) return;
+        p.fim = Object.freeze({
+          codigo: m.codigo ?? null,
+          mortoAPedido: m.mortoAPedido === true,
+          linhasPerdidas: Number(m.linhasPerdidas) || 0,
+          linhasCortadas: Number(m.linhasCortadas) || 0,
+          linhasNaoOuvidas: p.naoOuvidas,
+        });
+        processos.delete(Number(m.processo));
+        terminar(p);
+      };
+      const objetoDoProcesso = (r) => {
+        const numero = Number(r && r.processo);
+        const p = doProcesso(numero);
+        return Object.freeze({
+          numero,
+          pid: (r && r.pid) ?? null,
+          // Um ouvinte de cada, e o último vence, como `aoAviso`. Ao registrar,
+          // o que estava guardado chega primeiro, na ordem.
+          aoLinha: (fn) => {
+            p.aoLinha = typeof fn === 'function' ? fn : null;
+            if (!p.aoLinha) return;
+            const guardadas = p.guardadas.splice(0);
+            for (const [linha, fluxo] of guardadas) ouvirLinha(p, linha, fluxo);
+          },
+          aoSair: (fn) => {
+            p.aoSair = typeof fn === 'function' ? fn : null;
+            // Já tinha saído: o ouvinte novo ouve o fim que passou.
+            if (p.aoSair && p.fim) {
+              try { p.aoSair(p.fim); } catch (erro) { dizerOErro('erro no aoSair:', erro); }
+            }
+          },
+          // A mesma saída, como promessa.
+          fim: p.promessa,
+          escrever: (texto) => pedir('processo-escrever', { processo: numero, texto: String(texto ?? '') }),
+          matar: () => pedir('processo-matar', { processo: numero }),
+        });
+      };
+      const hashes = (pedido) => {
+        const saida = {};
+        for (const algoritmo of ['sha1', 'sha256', 'sha512']) {
+          if (pedido && pedido[algoritmo] !== undefined) saida[algoritmo] = String(pedido[algoritmo]);
+        }
+        return saida;
+      };
+      return Object.freeze({
+        // Resolve quando o arquivo chegou e bateu: `{ destino, tamanho,
+        // algoritmo, hash }`. `aoProgresso({ recebidos, total })` é chamado
+        // enquanto ele corre.
+        baixar: (pedido) => {
+          const n = proximo + 1;
+          if (typeof (pedido && pedido.aoProgresso) === 'function') progressos.set(n, pedido.aoProgresso);
+          return pedir('programa-baixar', {
+            url: String(pedido?.url ?? ''),
+            ...hashes(pedido),
+            tamanho: Number(pedido?.tamanho),
+            destino: String(pedido?.destino ?? ''),
+          }).finally(() => { progressos.delete(n); });
+        },
+        escrever: (pedido) => pedir('programa-escrever', {
+          destino: String(pedido?.destino ?? ''),
+          texto: String(pedido?.texto ?? ''),
+        }),
+        desempacotar: (pedido) => pedir('programa-desempacotar', {
+          arquivo: String(pedido?.arquivo ?? ''),
+          destino: String(pedido?.destino ?? ''),
+          raiz: String(pedido?.raiz ?? ''),
+        }),
+        rodar: async (pedido) => objetoDoProcesso(await pedir('programa-rodar', {
+          comando: String(pedido?.comando ?? ''),
+          argumentos: Array.isArray(pedido?.argumentos) ? pedido.argumentos.map(String) : [],
+          pasta: String(pedido?.pasta ?? ''),
+        })),
+        // `{ nome: vezes }`: cada recusa desde que esta metade subiu.
+        recusas: () => pedir('programa-recusas', {}),
+      });
+    })() : null;
     globalThis.maquina = Object.freeze({
       servidor: String(dados.servidor ?? ''),
       oferta: congelar(dados.oferta ?? null),
+      // O sistema desta máquina, no nome das receitas (`mac-aarch64`...): é o
+      // que escolhe, entre os artefatos da oferta, os que esta máquina baixa.
+      plataforma: String(dados.plataforma ?? ''),
       // À metade de servidor do MOD, pelo servidor; resolve com o texto que
       // ela respondeu, e rejeita com `sem-aceite` ou `sem-resposta`.
       pedir: (valor) => pedir('maquina-pedir', { valor }),
@@ -555,6 +695,7 @@ pub const PRELUDIO: &str = r#"
       aoAviso: (fn) => { ouvinteDoAviso = typeof fn === 'function' ? fn : null; },
       aoParar: (fn) => { ouvinteDaParada = typeof fn === 'function' ? fn : null; },
       ...(porta ? { porta } : {}),
+      ...(programa ? { programa } : {}),
     });
   }
 

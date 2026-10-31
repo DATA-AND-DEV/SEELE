@@ -32,6 +32,9 @@ struct Mentira {
     rotas: Mutex<HashMap<String, Roteiro>>,
     pedidos: AtomicUsize,
     entregues: Arc<AtomicU64>,
+    /// Quantos pedidos falham antes de qualquer resposta, como a conexão que
+    /// o CDN da Mojang fecha no primeiro pedido.
+    falhas_antes: AtomicUsize,
 }
 
 impl Mentira {
@@ -71,6 +74,13 @@ impl Origem for Mentira {
     fn pedir<'a>(&'a self, url: &'a reqwest::Url) -> FuturoDe<'a, Result<Resposta, String>> {
         Box::pin(async move {
             self.pedidos.fetch_add(1, Ordering::SeqCst);
+            if self
+                .falhas_antes
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return Err("peer closed connection without sending TLS close_notify".to_owned());
+            }
             let roteiro = self
                 .rotas
                 .lock()
@@ -150,6 +160,9 @@ fn bancada(origem: Mentira, teto: u64) -> Bancada {
     let programa = Programa::novo(
         Politica {
             dominios: vec!["mojang.com".to_owned()],
+            artefatos: vec![],
+            de_outros_sistemas: vec![],
+            origens: vec!["mojang.com".to_owned()],
             comando: Some(ComandoAceito {
                 comando: "java/bin/java".to_owned(),
                 argumentos: vec![],
@@ -654,4 +667,174 @@ async fn encerrar_no_meio_apaga_o_parcial() {
         b.programa.baixar(pedido(b"x", "y.bin")).unwrap_err(),
         Recusa::Encerrado
     );
+}
+
+/// Uma bancada cuja política tem um artefato aceito (`URL`, com o hash e o
+/// tamanho de `bytes`), um de outro sistema, e `origens` só com o CDN.
+fn bancada_com_aceite(origem: Mentira, bytes: &[u8]) -> Bancada {
+    let pasta = Pasta::nova("aceite");
+    let origem = Arc::new(origem);
+    let programa = Programa::novo(
+        Politica {
+            dominios: vec![
+                "piston-data.mojang.com".to_owned(),
+                "github.com".to_owned(),
+                "cdn.modrinth.com".to_owned(),
+            ],
+            artefatos: vec![super::super::ArtefatoAceito {
+                url: URL.to_owned(),
+                hash: sha256(bytes),
+                tamanho: bytes.len() as u64,
+            }],
+            de_outros_sistemas: vec!["https://github.com/win.zip".to_owned()],
+            origens: vec!["cdn.modrinth.com".to_owned()],
+            comando: None,
+            teto_de_disco: 1 << 20,
+            raiz: pasta.caminho().join("jogo"),
+        },
+        Arc::clone(&origem) as Arc<dyn Origem>,
+    )
+    .unwrap();
+    Bancada {
+        _pasta: pasta,
+        programa,
+        origem,
+    }
+}
+
+/// **O aceite prende o artefato mostrado** (spec §4, decisão Q1): a URL do
+/// `server.jar` aceito só baixa com o hash e o tamanho que a tela mostrou;
+/// outro hash, ou outro tamanho, é recusado antes de qualquer pedido.
+#[tokio::test]
+async fn o_artefato_aceito_so_baixa_como_foi_mostrado() {
+    let bytes = b"o server.jar mostrado";
+    let outro = b"um server.jar que ninguem viu";
+    let b = bancada_com_aceite(Mentira::default().com(URL, corpo(bytes)), bytes);
+
+    let trocado = PedidoDeDownload {
+        hashes: vec![sha256(outro)],
+        tamanho: outro.len() as u64,
+        ..pedido(bytes, "server.jar")
+    };
+    match b.programa.baixar(trocado) {
+        Err(Recusa::DiferenteDoAceito { campo: "hash", .. }) => {}
+        outro => panic!("outro hash na URL aceita passou: {outro:?}"),
+    }
+    let maior = PedidoDeDownload {
+        tamanho: bytes.len() as u64 + 1,
+        ..pedido(bytes, "server.jar")
+    };
+    match b.programa.baixar(maior) {
+        Err(Recusa::DiferenteDoAceito {
+            campo: "tamanho", ..
+        }) => {}
+        outro => panic!("outro tamanho na URL aceita passou: {outro:?}"),
+    }
+    // O sha1 do mesmo arquivo não é o sha256 que a tela mostrou.
+    let mais_fraco = PedidoDeDownload {
+        hashes: vec![hash_de(AlgoritmoDeHash::Sha1, bytes)],
+        ..pedido(bytes, "server.jar")
+    };
+    assert!(matches!(
+        b.programa.baixar(mais_fraco),
+        Err(Recusa::DiferenteDoAceito { campo: "hash", .. })
+    ));
+    assert_eq!(b.origem.pedidos.load(Ordering::SeqCst), 0, "pediu à origem");
+    assert_eq!(b.programa.recusas().get("diferente-do-aceito"), Some(&3));
+
+    let pronto = b
+        .programa
+        .baixar(pedido(bytes, "server.jar"))
+        .unwrap()
+        .terminar()
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(pronto.destino).unwrap(), bytes);
+}
+
+/// **Uma URL fora dos artefatos só baixa de uma origem**: do host de um
+/// artefato aceito (`piston-data.mojang.com`), uma URL que não é a dele é
+/// recusada; da origem (`cdn.modrinth.com`), vale com o hash declarado — o que
+/// a parte 6 precisa para os arquivos de um modpack.
+#[tokio::test]
+async fn fora_dos_artefatos_so_das_origens() {
+    let bytes = b"um mod do pack";
+    let do_cdn = "https://cdn.modrinth.com/data/x/mod.jar";
+    let vizinho = "https://piston-data.mojang.com/v1/outro.jar";
+    let b = bancada_com_aceite(
+        Mentira::default()
+            .com(do_cdn, corpo(bytes))
+            .com(vizinho, corpo(bytes)),
+        b"o server.jar mostrado",
+    );
+    let de = |url: &str| PedidoDeDownload {
+        url: url.to_owned(),
+        ..pedido(bytes, "mods/mod.jar")
+    };
+    match b.programa.baixar(de(vizinho)) {
+        Err(Recusa::ForaDosArtefatosAceitos { origens, .. }) => {
+            assert_eq!(origens, vec!["cdn.modrinth.com".to_owned()]);
+        }
+        outro => panic!("uma URL do host do artefato, sem ser ele, passou: {outro:?}"),
+    }
+    match b.programa.baixar(de("https://github.com/win.zip")) {
+        Err(Recusa::ArtefatoDeOutroSistema { .. }) => {}
+        outro => panic!("o Java de outro sistema passou: {outro:?}"),
+    }
+    assert_eq!(b.origem.pedidos.load(Ordering::SeqCst), 0);
+    b.programa
+        .baixar(de(do_cdn))
+        .unwrap()
+        .terminar()
+        .await
+        .unwrap();
+    let recusas = b.programa.recusas();
+    assert_eq!(recusas.get("fora-dos-artefatos-aceitos"), Some(&1));
+    assert_eq!(recusas.get("artefato-de-outro-sistema"), Some(&1));
+}
+
+/// **Uma falha antes de qualquer resposta é tentada de novo** (decisão Q10):
+/// o primeiro pedido ao CDN da Mojang morre às vezes no TLS, e o segundo passa.
+#[tokio::test]
+async fn a_conexao_que_cai_antes_da_resposta_e_tentada_de_novo() {
+    let bytes = b"um servidor de jogo";
+    let origem = Mentira::default().com(URL, corpo(bytes));
+    origem.falhas_antes.store(2, Ordering::SeqCst);
+    let b = bancada(origem, 1 << 20);
+    let pronto = b
+        .programa
+        .baixar(pedido(bytes, "server.jar"))
+        .unwrap()
+        .terminar()
+        .await;
+    assert!(pronto.is_ok(), "{pronto:?}");
+    assert_eq!(b.origem.pedidos.load(Ordering::SeqCst), 3);
+    assert!(b.programa.recusas().is_empty());
+}
+
+/// E tem teto: depois de [`MAX_TENTATIVAS`], a recusa diz quantas foram e por
+/// quê, e é contada uma vez.
+#[tokio::test]
+async fn as_tentativas_tem_teto_e_a_recusa_diz_quantas() {
+    let bytes = b"um servidor de jogo";
+    let origem = Mentira::default().com(URL, corpo(bytes));
+    origem.falhas_antes.store(10, Ordering::SeqCst);
+    let b = bancada(origem, 1 << 20);
+    match b
+        .programa
+        .baixar(pedido(bytes, "server.jar"))
+        .unwrap()
+        .terminar()
+        .await
+    {
+        Err(Recusa::OrigemFalhou { motivo, .. }) => {
+            assert!(motivo.starts_with("3 tentativas: peer closed"), "{motivo}");
+        }
+        outro => panic!("{outro:?}"),
+    }
+    assert_eq!(
+        b.origem.pedidos.load(Ordering::SeqCst) as u32,
+        super::MAX_TENTATIVAS
+    );
+    assert_eq!(b.programa.recusas().get("origem-falhou"), Some(&1));
 }

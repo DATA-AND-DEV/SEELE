@@ -39,6 +39,7 @@ pub mod cargos;
 pub mod chamada_pessoal;
 pub mod foco;
 pub mod mods;
+pub mod programa;
 /// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:
 /// para os testes daqui e para a conformidade dos dois produtores de retrato.
 #[cfg(any(test, feature = "conformidade"))]

@@ -33,7 +33,10 @@
 //     pedido novo da mesma chave; só o que nomeia o resumo dele fecha;
 // 13. a máquina ligada continua com DESLIGAR à vista e clicável quando a janela
 //     está na tela de entrada, e não só na da sessão;
-// 14. na lista de aceites, uma máquina ligada tem DESLIGAR ao lado de REVOGAR.
+// 14. na lista de aceites, uma máquina ligada tem DESLIGAR ao lado de REVOGAR;
+// 15. (parte 4) cada artefato deste computador, com nome, origem e tamanho; a
+//     soma só deles; os de outros sistemas ditos e fora da soma; e as origens
+//     de onde mais arquivos podem vir.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/aceite-da-maquina.cjs
 
@@ -95,18 +98,25 @@ async function caso(motor, numero, prova) {
         await pagina.evaluate(() => {
           window.emitir = (nome, payload) => ouvintes.filter((o) => o.nome === nome).forEach((o) => o.fn({ payload }));
           // O pedido que o Rust emite, com o que cada caso muda.
-          window.pedido = (extra = {}, oferta = {}) => ({
-            alvo: "127.0.0.1:7000", mod_id: "x/jogo", mod_nome: "x/jogo", servidor: "srv-1",
-            pedido_por: "Fulano", resumo: "resumo-1", pasta: "/home/eu/seele/jogos/x-jogo", mudou: null,
-            oferta: {
+          // `artefatos_daqui` e `de_outros_sistemas` como o Rust os calcula
+          // (`artefatos_desta_maquina`), para um Mac ARM: sem marca, serve
+          // aqui; com marca, só se ela nomeia este sistema.
+          window.pedido = (extra = {}, oferta = {}) => {
+            const o = {
               titulo: "Minecraft", receita: "vanilla", versao_da_receita: "1.2", versao_do_jogo: "1.21",
               tuneis: [{ nome: "minecraft-1", protocolo: "tcp", porta: 25565 }],
               artefatos: [], pack: null, origens: [], dominios_do_jogo: [], rodar: null,
               disco_maximo: 2 * 1024 * 1024 * 1024, termos: [],
               ...oferta,
-            },
-            ...extra,
-          });
+            };
+            const daqui = o.artefatos.filter((a) => !(a.plataformas ?? []).length || a.plataformas.includes("mac-aarch64"));
+            return {
+              alvo: "127.0.0.1:7000", mod_id: "x/jogo", mod_nome: "x/jogo", servidor: "srv-1",
+              pedido_por: "Fulano", resumo: "resumo-1", pasta: "/home/eu/seele/jogos/x-jogo", mudou: null,
+              oferta: o, artefatos_daqui: daqui, de_outros_sistemas: o.artefatos.length - daqui.length,
+              ...extra,
+            };
+          };
           window.chamadasDe = (cmd) => chamadas.filter((c) => c.cmd === cmd).map((c) => c.args);
           window.tela = () => $("maquina-aceite").hidden ? "" : $("maquina-aceite").innerText;
           window.faixaDeMaquinas = () => $("maquinas").hidden ? "" : $("maquinas").innerText;
@@ -451,8 +461,37 @@ async function caso(motor, numero, prova) {
           ], `${motor}: 14 · as três chaves de maquina_desligar pela lista`);
         });
 
+        // 15. Cada artefato deste computador, com nome, origem e tamanho; os
+        //     de outros sistemas fora da soma, e ditos; as origens livres, ditas.
+        await caso(motor, "15", async () => {
+          await zerar();
+          const java = (p, mb) => ({
+            nome: `java-${p}`, url: `https://github.com/adoptium/${p}.tar.gz`, tamanho: mb * 1048576,
+            hash: { algoritmo: "sha256", hex: "ab" }, plataformas: [p],
+          });
+          await emitirPedido({}, {
+            artefatos: [
+              { nome: "server.jar", url: "https://piston-data.mojang.com/v1/objects/x/server.jar", tamanho: 55 * 1048576, hash: { algoritmo: "sha1", hex: "ab" } },
+              java("windows-x64", 47), java("mac-aarch64", 50), java("mac-x64", 51), java("linux-x64", 52), java("linux-aarch64", 53),
+            ],
+            origens: ["github.com", "release-assets.githubusercontent.com"],
+          });
+          await esperarTela("FULANO");
+          const linhas = await pagina.evaluate(() => [...$("maquina-detalhes").children].map((li) => li.innerText));
+          const de = (re) => linhas.filter((l) => re.test(l));
+          assert.deepEqual(de(/vai baixar/), ["vai baixar 2 arquivos, 105.0 MB no total:"], `${motor}: 15 · a soma: ${linhas.join(" | ")}`);
+          assert.deepEqual(de(/^· /), [
+            "· server.jar, de piston-data.mojang.com, 55.0 MB",
+            "· java-mac-aarch64, de github.com, 50.0 MB",
+          ], `${motor}: 15 · um por artefato: ${linhas.join(" | ")}`);
+          assert.deepEqual(de(/outros sistemas/), ["4 arquivos são de outros sistemas, e este computador não os baixa"], `${motor}: 15 · ${linhas.join(" | ")}`);
+          assert.deepEqual(de(/pode baixar outros/), [
+            "e pode baixar outros arquivos, cada um com o hash conferido, de github.com, release-assets.githubusercontent.com",
+          ], `${motor}: 15 · ${linhas.join(" | ")}`);
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 15, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 16, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

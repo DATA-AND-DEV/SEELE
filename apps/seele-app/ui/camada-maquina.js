@@ -100,18 +100,13 @@ function camposQueMudaram(mudou) {
   return mudou.map((campo) => fraseDaListaDaMaquina("campos", campo)).join(", ");
 }
 
-/** De onde se baixa: as origens do pedido, ou os hosts dos próprios arquivos se não vieram. */
-function origensDoPedido(oferta) {
-  if (Array.isArray(oferta.origens) && oferta.origens.length > 0) return oferta.origens.join(", ");
-  const hosts = new Set();
-  for (const artefato of oferta.artefatos ?? []) {
-    try {
-      hosts.add(new URL(artefato.url).host);
-    } catch {
-      hosts.add(String(artefato.url));
-    }
+/** De onde vem um arquivo: o host da URL dele, ou a URL inteira se ela não se lê. */
+function origemDoArtefato(artefato) {
+  try {
+    return new URL(artefato.url).host;
+  } catch {
+    return String(artefato.url);
   }
-  return [...hosts].join(", ");
 }
 
 /** As linhas de fato do pedido, na ordem em que a pessoa as lê. */
@@ -126,13 +121,21 @@ function linhasDoPedido(pedido) {
   linhas.push(F.pedidoPor(pedido.pedido_por, pedido.servidor));
   for (const tunel of oferta.tuneis ?? []) linhas.push(F.porta(tunel.porta, tunel.protocolo));
 
-  const artefatos = oferta.artefatos ?? [];
+  // **Só o que este computador baixa** (API 8 parte 4): o Rust separa, pela
+  // mesma regra da política do `programa`, os artefatos deste sistema dos de
+  // outros (`artefatos_daqui`, `de_outros_sistemas`). Somar os da oferta
+  // inteira era dizer cinco Javas quando se baixa um.
+  const artefatos = pedido.artefatos_daqui ?? [];
+  const deOutros = Number(pedido.de_outros_sistemas) || 0;
   if (artefatos.length === 0) {
     linhas.push(F.nadaABaixar);
   } else {
     const total = artefatos.reduce((soma, a) => soma + (Number(a.tamanho) || 0), 0);
-    linhas.push(F.baixar(artefatos.length, emBytes(total), origensDoPedido(oferta)));
+    linhas.push(F.baixar(artefatos.length, emBytes(total)));
+    for (const a of artefatos) linhas.push(F.artefato(a.nome, origemDoArtefato(a), emBytes(Number(a.tamanho) || 0)));
   }
+  if (deOutros > 0) linhas.push(F.deOutrosSistemas(deOutros));
+  if ((oferta.origens ?? []).length > 0) linhas.push(F.podeBaixarDe(oferta.origens.join(", ")));
   if (oferta.rodar) {
     linhas.push(F.rodar([oferta.rodar.comando, ...(oferta.rodar.argumentos ?? [])].join(" ")));
   } else {

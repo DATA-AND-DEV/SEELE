@@ -6031,6 +6031,7 @@ mod o_vocabulario_e_a_versao {
                     algoritmo: crate::maquina::AlgoritmoDeHash::Sha1,
                     hex: "ab".repeat(20),
                 },
+                plataformas: vec![],
             }],
             pack: None,
             origens: vec![],
@@ -6039,12 +6040,14 @@ mod o_vocabulario_e_a_versao {
             disco_maximo: 0,
             termos: vec![],
         };
-        let pedido = |hash: String, oferta: crate::maquina::OfertaDeMaquina| ServerMessage::PedidoDeMaquina {
-            mod_id: "a/b".into(),
-            hash,
-            servidor: "mc-1".into(),
-            pedido_por: PersonId(1),
-            oferta: Box::new(oferta),
+        let pedido = |hash: String, oferta: crate::maquina::OfertaDeMaquina| {
+            ServerMessage::PedidoDeMaquina {
+                mod_id: "a/b".into(),
+                hash,
+                servidor: "mc-1".into(),
+                pedido_por: PersonId(1),
+                oferta: Box::new(oferta),
+            }
         };
         let crua = |m: &ServerMessage| {
             let mut quadro = vec![PROTOCOL_VERSION];

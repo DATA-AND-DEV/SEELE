@@ -5289,6 +5289,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "ed25519-dalek",
+ "flate2",
  "if-addrs",
  "rand 0.10.2",
  "rcgen",
@@ -5304,6 +5305,7 @@ dependencies = [
  "sha1",
  "sha2 0.10.9",
  "socket2",
+ "tar",
  "thiserror 2.0.19",
  "tokio",
  "tokio-rustls",

@@ -120,6 +120,55 @@ pub struct ArtefatoOferecido {
     pub tamanho: u64,
     /// O hash esperado.
     pub hash: HashDeArtefato,
+    /// **Em que sistemas ele serve** (API 8 parte 4): nomes de
+    /// [`PLATAFORMAS_DE_MAQUINA`]; vazio é «em todos».
+    ///
+    /// A metade de servidor não sabe o sistema da máquina antes do aceite, e
+    /// um servidor de jogo que roda num runtime (o Java) manda o de cada
+    /// sistema. Sem esta marca, a tela somava os cinco e a política aceitava
+    /// baixar os cinco. Nasceu no 12, neste ramo, e nunca saiu (o R6 da parte
+    /// 2 é o precedente): o campo entra no fim da struct, e o ouro do fio é
+    /// regerado só na linha da oferta.
+    #[serde(default)]
+    pub plataformas: Vec<String>,
+}
+
+/// **Os sistemas que uma máquina de jogo pode ser**, `<so>-<arquitetura>`,
+/// como as receitas os escrevem. Lista fechada: um nome fora dela é recusado
+/// na oferta (`artefato_plataformas`), para um erro de grafia (`macos-arm64`)
+/// não virar um artefato que nenhuma máquina baixa sem ninguém saber.
+pub const PLATAFORMAS_DE_MAQUINA: [&str; 5] = [
+    "windows-x64",
+    "mac-aarch64",
+    "mac-x64",
+    "linux-x64",
+    "linux-aarch64",
+];
+
+impl ArtefatoOferecido {
+    /// Se este artefato é baixado numa máquina de `plataforma`: sem marca, em
+    /// todas; com marca, só nas que ela nomeia.
+    #[must_use]
+    pub fn serve_em(&self, plataforma: &str) -> bool {
+        self.plataformas.is_empty() || self.plataformas.iter().any(|p| p == plataforma)
+    }
+}
+
+/// **Os artefatos que uma máquina de `plataforma` baixa**, na ordem da oferta,
+/// e quantos ficam para outros sistemas. Uma regra só: a tela do aceite e a
+/// política do `programa` contam por aqui.
+#[must_use]
+pub fn artefatos_para<'a>(
+    oferta: &'a OfertaDeMaquina,
+    plataforma: &str,
+) -> (Vec<&'a ArtefatoOferecido>, usize) {
+    let daqui: Vec<_> = oferta
+        .artefatos
+        .iter()
+        .filter(|a| a.serve_em(plataforma))
+        .collect();
+    let outros = oferta.artefatos.len() - daqui.len();
+    (daqui, outros)
 }
 
 /// O comando que a máquina vai executar.
@@ -265,6 +314,18 @@ impl Validate for OfertaDeMaquina {
                 return Err(fora("artefato_tamanho"));
             }
             hash("artefato_hash", &a.hash)?;
+            check_bounds(
+                "artefato_plataformas",
+                a.plataformas.len(),
+                PLATAFORMAS_DE_MAQUINA.len(),
+            )?;
+            for (i, p) in a.plataformas.iter().enumerate() {
+                if !PLATAFORMAS_DE_MAQUINA.contains(&p.as_str())
+                    || a.plataformas.iter().take(i).any(|antes| antes == p)
+                {
+                    return Err(fora("artefato_plataformas"));
+                }
+            }
         }
         if let Some(pack) = &self.pack {
             hash("pack", pack)?;
@@ -329,8 +390,9 @@ pub fn resumo_da_oferta(
     // resumia os mesmos bytes vazios, e um aceite valia para qualquer outra.
     // Um `Vec` como destino só falha sem memória, e então é melhor cair.
     #[allow(clippy::expect_used)]
-    let bytes = postcard::to_extend(&corpo, ROTULO.to_vec())
-        .expect("codificar a oferta num Vec só falha sem memória; resumir vazio aceitaria qualquer oferta");
+    let bytes = postcard::to_extend(&corpo, ROTULO.to_vec()).expect(
+        "codificar a oferta num Vec só falha sem memória; resumir vazio aceitaria qualquer oferta",
+    );
     Sha256::digest(&bytes).into()
 }
 
@@ -466,6 +528,7 @@ mod tests {
                     algoritmo: AlgoritmoDeHash::Sha1,
                     hex: sha('a', 40),
                 },
+                plataformas: vec![],
             }],
             pack: Some(HashDeArtefato {
                 algoritmo: AlgoritmoDeHash::Sha256,
@@ -485,6 +548,40 @@ mod tests {
         }
     }
 
+    /// **Só os artefatos desta máquina contam**: sem marca, em todas; com
+    /// marca, só nas nomeadas, e o resto é dito como «de outros sistemas».
+    #[test]
+    fn cada_maquina_conta_so_os_artefatos_dela() {
+        let mut o = oferta_de_exemplo();
+        let java = |nome: &str, plataformas: &[&str]| ArtefatoOferecido {
+            nome: nome.into(),
+            url: format!("https://github.com/{nome}"),
+            tamanho: 10,
+            hash: HashDeArtefato {
+                algoritmo: AlgoritmoDeHash::Sha256,
+                hex: sha('c', 64),
+            },
+            plataformas: plataformas.iter().map(|p| (*p).to_owned()).collect(),
+        };
+        o.artefatos
+            .push(java("java-mac", &["mac-aarch64", "mac-x64"]));
+        o.artefatos.push(java("java-win", &["windows-x64"]));
+        assert!(o.validate().is_ok());
+        let nomes = |p: &str| -> (Vec<String>, usize) {
+            let (daqui, outros) = artefatos_para(&o, p);
+            (daqui.iter().map(|a| a.nome.clone()).collect(), outros)
+        };
+        assert_eq!(
+            nomes("mac-aarch64"),
+            (vec!["server.jar".into(), "java-mac".into()], 1)
+        );
+        assert_eq!(
+            nomes("windows-x64"),
+            (vec!["server.jar".into(), "java-win".into()], 1)
+        );
+        assert_eq!(nomes("linux-x64"), (vec!["server.jar".into()], 2));
+    }
+
     #[test]
     fn a_oferta_de_exemplo_e_valida() {
         assert!(oferta_de_exemplo().validate().is_ok());
@@ -497,7 +594,10 @@ mod tests {
         assert_eq!(r, resumo_da_oferta("x/jogo", HASH_A, "mc-1", &base.clone()));
 
         type Mexe = fn(&mut OfertaDeMaquina);
-        let casos: [(&str, Mexe); 22] = [
+        let casos: [(&str, Mexe); 23] = [
+            ("artefatos.plataformas", |o| {
+                o.artefatos[0].plataformas = vec!["mac-aarch64".into()];
+            }),
             ("titulo", |o| o.titulo.push('x')),
             ("receita", |o| o.receita.push('x')),
             ("versao_da_receita", |o| o.versao_da_receita.push('x')),
@@ -610,6 +710,12 @@ mod tests {
             ("artefato maior que o disco", |o| {
                 o.artefatos[0].tamanho = MAX_DISCO + 1;
             }),
+            ("plataforma fora da lista", |o| {
+                o.artefatos[0].plataformas = vec!["macos-arm64".into()];
+            }),
+            ("plataforma repetida", |o| {
+                o.artefatos[0].plataformas = vec!["mac-x64".into(), "mac-x64".into()];
+            }),
             ("hex de sha1 com 64 caracteres", |o| {
                 o.artefatos[0].hash.hex = sha('a', 64);
             }),
@@ -690,7 +796,13 @@ mod tests {
             assert!(com_nome(ruim).is_err(), "o nome «{ruim}» passou");
         }
         let teto = "a".repeat(MAX_TEXTO);
-        for bom in ["server.jar", "fabric-api_0.1.jar", "..a", ".config", teto.as_str()] {
+        for bom in [
+            "server.jar",
+            "fabric-api_0.1.jar",
+            "..a",
+            ".config",
+            teto.as_str(),
+        ] {
             assert!(com_nome(bom).is_ok(), "o nome «{bom}» foi recusado");
         }
         assert!(com_nome(&"a".repeat(MAX_TEXTO + 1)).is_err());

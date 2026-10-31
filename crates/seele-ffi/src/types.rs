@@ -2751,6 +2751,9 @@ pub struct ArtefatoOferecidoFfi {
     pub tamanho: u64,
     /// O hash esperado.
     pub hash: HashDeArtefatoFfi,
+    /// Em que sistemas ele serve (`mac-aarch64`...); vazio é em todos.
+    #[serde(default)]
+    pub plataformas: Vec<String>,
 }
 
 /// O comando que a máquina vai executar.
@@ -2911,6 +2914,7 @@ impl From<&seele_core::maquina::OfertaDeMaquina> for OfertaDeMaquinaFfi {
                     url: a.url.clone(),
                     tamanho: a.tamanho,
                     hash: hash_ffi(&a.hash),
+                    plataformas: a.plataformas.clone(),
                 })
                 .collect(),
             pack: oferta.pack.as_ref().map(hash_ffi),
@@ -2971,6 +2975,7 @@ impl OfertaDeMaquinaFfi {
                         url: a.url.clone(),
                         tamanho: a.tamanho,
                         hash: hash_do_nucleo(&a.hash)?,
+                        plataformas: a.plataformas.clone(),
                     })
                 })
                 .collect::<Result<_, &'static str>>()?,
@@ -3032,6 +3037,7 @@ mod a_oferta_de_maquina {
                     algoritmo: AlgoritmoDeHash::Sha1,
                     hex: "a".repeat(40),
                 },
+                plataformas: vec!["mac-aarch64".into()],
             }],
             pack: Some(HashDeArtefato {
                 algoritmo: AlgoritmoDeHash::Sha512,

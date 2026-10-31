@@ -60,6 +60,9 @@
       ],
       "porta": [
         "maquina.porta"
+      ],
+      "programa": [
+        "maquina.programa"
       ]
     },
     "rotulos": "estilos e classes são rótulos, sem efeito: SeeleUI.capacidades() os lista na 6, e nada pergunta por eles. O estilo de um nó vale onde a forma dele monta, numa superfície ou numa contribuição, e o superficie-classes pede superficies; nenhum manifesto declara capacidade, que vem com a api (D-api-10)",
@@ -192,7 +195,9 @@
     "MaquinaAceitou": "momento { servidor, pessoa } entregue só ao MOD da máquina (despacho::so_para), quando a pessoa aceita a oferta mostrada (MudancaDeMaquina::Aceitou).",
     "MaquinaRecusou": "momento { servidor, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Recusou): motivo é o nome da recusa da pessoa (pelo-dono, sem-tela, so-no-app, pacote-diferente, oferta-invalida; nome_da_recusa) ou do servidor (nao-esta-aqui, pendentes-demais, maquinas-demais).",
     "MaquinaParou": "momento { servidor, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Parou): a parada da pessoa (pelo-dono, revogada, app-fechou, metade-falhou; nome_da_parada), a saída dela (saiu) ou a dispensa pelo servidor (mod-desligado, outro-pedido; nome_da_dispensa).",
-    "maquinas-por-chamada": "MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA e MAX_AVISOS_A_MAQUINA_POR_CHAMADA, em crates/seele-server/src/mods/maquina.rs; acima deles, a chamada lança com o nome."
+    "maquinas-por-chamada": "MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA e MAX_AVISOS_A_MAQUINA_POR_CHAMADA, em crates/seele-server/src/mods/maquina.rs; acima deles, a chamada lança com o nome.",
+    "maquina.programa": "O poder programa dá maquina.programa só à metade de máquina (capacidades-da-maquina.programa), preso ao aceite guardado nesta máquina: a política sai dele (os hosts dos artefatos e as origens, os artefatos desta plataforma com hash e tamanho, o rodar, o disco_maximo e a pasta), e não do que a metade pede. Mudar a versão, o pack ou o comando pede aceite novo, e até lá todo pedido do programa volta aceite-diferente.",
+    "artefatos.plataformas": "Opcional em cada artefato da oferta de mundo.maquinas.pedir: os sistemas em que ele serve (PLATAFORMAS_DE_MAQUINA); ausente ou vazio, em todos. A tela do aceite lista e soma só os desta máquina, e diz quantos são de outros; a política recusa baixar os de outros (artefato-de-outro-sistema). Um nome fora da lista é recusado na oferta (oferta-invalida:artefato_plataformas)."
   },
   "moments": [
     "PersonJoined",
@@ -856,12 +861,80 @@
       "um pedido que um momento repete a quem recusou sozinho (sem-tela, so-no-app) dentro de JANELA_DA_RECUSA_REPETIDA não sai: o MOD já leu essa recusa, e o pedido repetido fica no seele.log e em Server::recusas_juntadas (Maquinas::recusa_automatica_recente)",
       "pendentes-demais e maquinas-demais (não lançam: voltam como MaquinaRecusou, pelos tetos do livro, Excesso::PendentesDemais e Excesso::MaquinasDemais)",
       "sem-maquina (não lança nem volta: o aviso a um servidor de jogo sem máquina aceita não sai, fica no seele.log e no contador Server::avisos_sem_maquina; SEM_MAQUINA)"
-    ]
+    ],
+    "programa": [
+      "nao-e-https",
+      "url-invalida",
+      "dominio-fora-do-aceito",
+      "redirecionou-para-fora",
+      "redirecionamentos-demais",
+      "sem-hash",
+      "hash-mal-formado",
+      "caminho-absoluto",
+      "caminho-com-pai",
+      "caminho-vazio",
+      "caminho-invalido",
+      "link-sai-da-raiz",
+      "disco-cheio",
+      "tamanho-alegado-diferente",
+      "maior-que-o-declarado",
+      "menor-que-o-declarado",
+      "hash-nao-bate",
+      "origem-respondeu",
+      "origem-falhou",
+      "disco",
+      "comando-fora-do-aceito",
+      "argumentos-fora-do-aceito",
+      "nao-iniciou",
+      "entrada-fechada",
+      "encerrado",
+      "diferente-do-aceito",
+      "artefato-de-outro-sistema",
+      "fora-dos-artefatos-aceitos",
+      "texto-grande-demais",
+      "formato-desconhecido",
+      "pacote-invalido",
+      "nada-sob-a-raiz"
+    ],
+    "programa-da-cola": [
+      "sem-aceite (a metade subiu sem um aceite guardado para este servidor de jogo)",
+      "aceite-diferente (o aceite guardado é de outra oferta ou de outro pacote: a versão, o pack ou o comando mudaram, e o dono ainda não aceitou)",
+      "aceite-invalido (o aceite guardado não monta a política)",
+      "programa-nao-montou (o cliente HTTPS ou a pasta não montou)",
+      "processo-desconhecido (escrever ou matar um processo que já terminou)",
+      "pedido-invalido (falta um campo, ou um campo não é do tipo)"
+    ],
+    "programa-como-chega": "a promessa rejeita com um Error: o nome em erro e em message, a frase inteira (com os números) em frase, e os dados em campos: host e aceitos, url, esperado e obtido, usado, pedido e teto, campo, aceito e pedido, origens"
   },
   "manifesto": {
     "permissoes": "PermissaoDeclarada",
     "plataformas": "Plataforma",
     "poderes": "Poder",
     "maquina": "caminho"
+  },
+  "metade-de-maquina": {
+    "o-que-e": "O global maquina, na metade de máquina (API 8 parte 3 e 4): só numa máquina cujo dono aceitou, no app, e sem SeeleUI nem SeeleMods. Os membros existem pelas capacidades de compatibilidade.capacidades-da-maquina; um que a capacidade não dá não existe (TypeError na primeira chamada), e não falha calado.",
+    "maquina.servidor": "texto: o servidor de jogo aceito",
+    "maquina.oferta": "a oferta que o dono aceitou, congelada até o fundo; reescrevê-la não muda nada, porque quem confere é o produto, com a cópia do aceite guardado",
+    "maquina.plataforma": "texto: o sistema desta máquina no nome das receitas (windows-x64, mac-aarch64, mac-x64, linux-x64, linux-aarch64; PLATAFORMAS_DE_MAQUINA), ou desconhecida. É o que escolhe, entre os artefatos da oferta (artefatos[].plataformas), os que esta máquina baixa",
+    "maquina.pedir(valor)": "Promise<texto>: à metade de servidor do MOD (aoPedir com contexto.maquina); rejeita com sem-aceite ou sem-resposta",
+    "maquina.aoAviso(fn(carga))": "um ouvinte, o último vence: o mundo.maquinas.avisar da metade de servidor para este servidor de jogo",
+    "maquina.aoParar(fn(motivo))": "uma vez só, antes de a metade acabar, com o motivo (pelo-dono, revogada, app-fechou, mod-desligado, outro-pedido, sem-aceite, servidor-saiu, dispensa-desconhecida); o app espera a promessa devolvida até 2 s, ou até 20 s com um processo do programa vivo (ESPERA_DO_AO_PARAR_COM_PROCESSO). Depois dela, todo processo e todo download do programa são encerrados e esperados",
+    "maquina.porta.servir({nome, protocolo, porta})": "capacidade maquina.porta: abre a ponta do túnel; só o túnel da oferta aceita (fora-do-aceite)",
+    "maquina.porta.parar(nome)": "capacidade maquina.porta: fecha o túnel",
+    "maquina.porta.quedas(nome)": "capacidade maquina.porta: Promise<[[motivo, vezes]]>",
+    "maquina.programa.baixar({url, sha1|sha256|sha512, tamanho, destino, aoProgresso})": "capacidade maquina.programa: Promise<{destino, tamanho, algoritmo, hash}>. Só https. Uma URL que é de um artefato aceito para esta máquina baixa só com o hash (do mesmo algoritmo) e o tamanho que o aceite mostrou (diferente-do-aceito); a de um artefato de outro sistema não baixa (artefato-de-outro-sistema); qualquer outra só de um host de oferta.origens (fora-dos-artefatos-aceitos), com o hash declarado. Vale o hash mais forte declarado. aoProgresso({recebidos, total}) é chamado a cada MiB, e um que não coube na fila é trocado pelo próximo. O arquivo só aparece em destino se o tamanho e o hash bateram",
+    "maquina.programa.escrever({destino, texto})": "capacidade maquina.programa: Promise<{destino, bytes}>. Um texto de até 64 KiB (MAX_BYTES_ESCRITOS), trocado de uma vez (grava ao lado e renomeia). Para a configuração do jogo e os termos aceitos (eula.txt): não passa pelo aceite, só pela pasta e pelo teto de disco",
+    "maquina.programa.desempacotar({arquivo, destino, raiz})": "capacidade maquina.programa: Promise<{arquivos, bytes, linksPulados, foraDaRaiz}>. Abre um .tar.gz ou um .zip (stored e deflate, sem zip64) da pasta em destino, com só o que está sob raiz dentro do pacote, sem o prefixo. Links não são criados (contados em linksPulados); uma entrada com .. ou absoluta recusa o pacote inteiro; o que se escreve conta no teto de disco; o destino de antes só é trocado com o novo inteiro",
+    "maquina.programa.rodar({comando, argumentos, pasta})": "capacidade maquina.programa: Promise<processo>. Só o comando e os argumentos exatos do aceite (comando-fora-do-aceito, argumentos-fora-do-aceito); o comando é um caminho dentro da pasta do servidor de jogo (java/bin/java acha java.exe no Windows), nunca procurado no PATH; pasta é relativa a ela, e \"\" é ela mesma. Roda com a conta de quem aceitou",
+    "processo.numero": "número do processo neste servidor de jogo",
+    "processo.pid": "o pid do sistema, ou null",
+    "processo.aoLinha(fn(linha, fluxo))": "um ouvinte, o último vence; fluxo é saida ou erro; a linha vem sem o fim de linha, cortada em 16 KiB. As que chegam antes do ouvinte ficam guardadas (até 256) e chegam ao registrá-lo",
+    "processo.aoSair(fn(fim))": "uma vez: fim = {codigo, mortoAPedido, linhasPerdidas, linhasCortadas, linhasNaoOuvidas}; codigo é null quando morto por sinal. Registrado depois do fim, ouve o fim",
+    "processo.fim": "Promise<fim>: o mesmo de aoSair",
+    "processo.escrever(texto)": "Promise: uma linha na entrada do processo (o fim de linha é posto se faltar); entrada-fechada se ele terminou",
+    "processo.matar()": "Promise: manda matar; o aoSair diz quando morreu, com mortoAPedido",
+    "maquina.programa.recusas()": "Promise<{nome: vezes}>: cada recusa do programa desde que esta metade subiu, as do núcleo (recusas.programa) e as da cola (sem-aceite, aceite-diferente, processo-desconhecido, pedido-invalido). Cada uma também vai ao seele.log de quem aceitou",
+    "pasta": "<config>/jogos/<alvo>/<mod-id com / trocado por _>/<servidor>/, cada pedaço escapado: a pasta deste servidor de jogo, longe da identidade. Chaveada pelo alvo, como o aceite (decisão Q7): o mesmo servidor SEELE alcançado por outro endereço tem outro aceite e outra pasta"
   }
 }

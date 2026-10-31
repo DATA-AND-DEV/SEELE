@@ -24,7 +24,15 @@
 //! antes de um comando por conexão poder chegar). Nunca aqui: os testes deste
 //! arquivo rodam no mesmo binário, e o valor é do processo inteiro.
 
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,6 +45,10 @@ use tauri::{AppHandle, Emitter as _, Manager as _};
 
 use crate::executor;
 
+mod programa;
+
+pub(crate) use programa::SemPrograma;
+
 /// Quanto o `aoParar` da metade tem para terminar antes de o executor ser
 /// encerrado de qualquer jeito.
 ///
@@ -45,6 +57,15 @@ use crate::executor;
 /// teto é o que impede uma metade travada de segurar o DESLIGAR — ou a saída
 /// do app — para sempre.
 pub(crate) const ESPERA_DO_AO_PARAR: Duration = Duration::from_secs(2);
+
+/// **O teto do `aoParar` de uma metade com processo vivo** (API 8 parte 4;
+/// decisão Q9). O servidor do jogo salva o mundo ao receber `stop`, e matar
+/// no meio perde chunks; o `aoParar` que manda `stop` e espera a saída tem
+/// este tempo. Medido no Minecraft 1.21.4 deste Mac: ver as decisões.
+pub(crate) const ESPERA_DO_AO_PARAR_COM_PROCESSO: Duration = Duration::from_secs(20);
+
+/// Quanto `encerrar_tudo` tem para matar e esperar cada processo.
+pub(crate) const ESPERA_DO_ENCERRAR_TUDO: Duration = Duration::from_secs(10);
 
 /// O que a tela diz quando não há apelido para quem pediu: um momento da
 /// metade de servidor (`pedido_por = 0`), ou alguém que já não está na lista.
@@ -242,6 +263,11 @@ pub(crate) enum Acao {
         erro: &'static str,
         tipo: String,
     },
+    /// `maquina.programa.*`: o pedido já lido.
+    Programa {
+        n: u64,
+        pedido: programa::PedidoDoPrograma,
+    },
     /// O `aoParar` acabou.
     ParadaPronta,
     /// Nem número de pedido tem: não há a quem responder, só o log.
@@ -275,8 +301,30 @@ pub(crate) fn tratar(oferta: &OfertaDeMaquinaFfi, capacidades: &[&str], json: &s
             .to_owned()
     };
     let com_porta = capacidades.contains(&"maquina.porta");
+    let com_programa = capacidades.contains(&"maquina.programa");
     let recusar = |erro, tipo: String| Acao::Recusar { n, erro, tipo };
     match tipo.as_str() {
+        // O poder `programa` (parte 4), só com a capacidade: sem ela, os
+        // tipos dele são desconhecidos como todo outro.
+        //
+        // Escritos aqui, e não só em `programa::TIPOS`: o guarda do prelúdio
+        // (`tests/frontend.rs`) confere cada tipo que ele pede contra este
+        // corpo, e uma lista noutro arquivo o faria olhar o lugar errado.
+        t @ ("programa-baixar"
+        | "programa-escrever"
+        | "programa-desempacotar"
+        | "programa-rodar"
+        | "processo-escrever"
+        | "processo-matar"
+        | "programa-recusas")
+            if com_programa =>
+        {
+            debug_assert!(programa::TIPOS.contains(&t));
+            match programa::ler(t, &valor) {
+                Ok(pedido) => Acao::Programa { n, pedido },
+                Err(erro) => recusar(erro, tipo),
+            }
+        }
         "maquina-pedir" => Acao::Pedir {
             n,
             payload: serde_json::to_string(valor.get("valor").unwrap_or(&serde_json::Value::Null))
@@ -511,6 +559,13 @@ pub(crate) struct Viva {
     pub(crate) numero: u64,
     oferta: OfertaDeMaquinaFfi,
     capacidades: Vec<&'static str>,
+    /// O poder `programa` desta metade, montado do aceite guardado ao subir,
+    /// ou por que não há um ([`programa::programa_para`]).
+    programa: programa::ProgramaDaMetade,
+    /// Os processos que ela rodou e que ainda vivem.
+    processos: programa::Processos,
+    /// As recusas do `programa` que a cola deu sozinha.
+    recusas_da_cola: programa::RecusasDaCola,
     /// Num cadeado porque o executor tem o canal de saída (que não é `Sync`)
     /// e é tocado pela bomba, pelas respostas que voltam do fio e pela parada.
     executor: Mutex<executor::ExecutorQuickJs>,
@@ -542,6 +597,7 @@ impl Viva {
         numero: u64,
         oferta: OfertaDeMaquinaFfi,
         capacidades: Vec<&'static str>,
+        programa: programa::ProgramaDaMetade,
         fio: Arc<dyn Fio>,
         ao_falhar: AoFalhar,
     ) -> Result<Arc<Self>, &'static str> {
@@ -555,6 +611,9 @@ impl Viva {
             numero,
             oferta,
             capacidades,
+            programa,
+            processos: programa::Processos::default(),
+            recusas_da_cola: programa::RecusasDaCola::default(),
             executor: Mutex::new(executor),
             fio,
             tuneis: Mutex::new(BTreeSet::new()),
@@ -580,6 +639,7 @@ impl Viva {
         let dados = serde_json::json!({
             "servidor": self.chave.servidor,
             "oferta": self.oferta,
+            "plataforma": seele_ffi::programa::esta_plataforma(),
         })
         .to_string();
         self.executor
@@ -601,7 +661,13 @@ impl Viva {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .pedir_encerramento();
+        programa::encerrar_tudo(self, ESPERA_DO_ENCERRAR_TUDO);
         tracing::debug!(mod_id = %self.chave.mod_id, servidor = %self.chave.servidor, instancia = self.numero, "metade de máquina descartada antes de ligar");
+    }
+
+    /// Quantos processos do `programa` dela estão vivos.
+    pub(crate) fn processos_vivos(&self) -> usize {
+        self.programa.as_ref().map_or(0, |p| p.processos_vivos())
     }
 
     /// Ainda não se pediu o fim dela.
@@ -620,13 +686,17 @@ impl Viva {
             .collect()
     }
 
-    /// Manda ao executor; uma recusa é dita, com o tamanho.
-    fn entregar(&self, json: &str) {
-        let resultado = self
-            .executor
+    /// Manda ao executor, e devolve a recusa dele sem dizer nada.
+    fn tentar_entregar(&self, json: &str) -> Result<(), &'static str> {
+        self.executor
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .entregar(json);
+            .entregar(json)
+    }
+
+    /// Manda ao executor; uma recusa é dita, com o tamanho.
+    fn entregar(&self, json: &str) {
+        let resultado = self.tentar_entregar(json);
         if let Err(motivo) = resultado {
             tracing::warn!(
                 mod_id = %self.chave.mod_id,
@@ -685,10 +755,16 @@ impl Viva {
                 &serde_json::json!({ "tipo": "parar-maquina", "motivo": fim.nome() }).to_string(),
             );
             let relogio = Instant::now();
+            // Com um processo vivo, o `aoParar` tem o tempo de o jogo salvar.
+            let teto = if self.processos_vivos() > 0 {
+                ESPERA_DO_AO_PARAR_COM_PROCESSO
+            } else {
+                ESPERA_DO_AO_PARAR
+            };
             let sinais = self.sinais.lock().unwrap_or_else(PoisonError::into_inner);
             let (sinais, espera) = self
                 .acordar
-                .wait_timeout_while(sinais, ESPERA_DO_AO_PARAR, |s| !s.pronta && !s.parou)
+                .wait_timeout_while(sinais, teto, |s| !s.pronta && !s.parou)
                 .unwrap_or_else(PoisonError::into_inner);
             drop(sinais);
             if espera.timed_out() {
@@ -698,12 +774,17 @@ impl Viva {
                     mod_id = %mod_id,
                     servidor = %servidor,
                     motivo = fim.nome(),
-                    "metade de máquina: o aoParar não terminou em 2 s; encerrada assim mesmo"
+                    teto = ?teto,
+                    "metade de máquina: o aoParar não terminou no teto; encerrada assim mesmo"
                 );
             } else {
                 tracing::debug!(mod_id = %mod_id, servidor = %servidor, levou = ?relogio.elapsed(), "metade de máquina: aoParar terminou");
             }
         }
+        // **Todo processo e todo download do `programa` morrem aqui**, em todo
+        // motivo (DESLIGAR, REVOGAR, o app fechando, o MOD desligado, a
+        // sessão que acabou, a metade que falhou), e a parada espera.
+        programa::encerrar_tudo(self, ESPERA_DO_ENCERRAR_TUDO);
         let tuneis =
             std::mem::take(&mut *self.tuneis.lock().unwrap_or_else(PoisonError::into_inner));
         for nome in tuneis {
@@ -788,6 +869,7 @@ fn atender(viva: &Arc<Viva>, acao: Acao) {
     let (mod_id, servidor) = (viva.chave.mod_id.clone(), viva.chave.servidor.clone());
     match acao {
         Acao::ParadaPronta => viva.sinalizar(|s| s.pronta = true),
+        Acao::Programa { n, pedido } => programa::atender(viva, n, pedido),
         Acao::Ignorar { tipo } => {
             tracing::warn!(mod_id = %mod_id, servidor = %servidor, tipo = ?tipo, motivo = "tipo-desconhecido", "metade de máquina: mensagem sem número de pedido, ignorada");
         }
@@ -1118,6 +1200,12 @@ pub(crate) struct PedidoNaTela {
     /// Onde a parte 4 vai pôr o jogo (`pasta_do_servidor_de_jogo`).
     pub(crate) pasta: String,
     pub(crate) mudou: Option<Vec<&'static str>>,
+    /// **Os artefatos que este computador baixa** (parte 4), pela regra da
+    /// política (`seele_ffi::programa::artefatos_desta_maquina`): a tela lista
+    /// e soma só estes.
+    pub(crate) artefatos_daqui: Vec<seele_ffi::ArtefatoOferecidoFfi>,
+    /// Quantos artefatos da oferta são de outros sistemas.
+    pub(crate) de_outros_sistemas: usize,
 }
 
 /// `maquina-estado`, como a casca o lê.
@@ -1522,6 +1610,8 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
             )
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
+            let (artefatos_daqui, de_outros_sistemas) =
+                seele_ffi::programa::artefatos_desta_maquina(&pedido.oferta);
             let na_tela = PedidoNaTela {
                 alvo: chave.alvo.clone(),
                 mod_id: chave.mod_id.clone(),
@@ -1532,6 +1622,8 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
                 resumo: pedido.resumo.clone(),
                 pasta,
                 mudou,
+                artefatos_daqui,
+                de_outros_sistemas,
             };
             let mostrou = estado.maquinas.guardar_pendente_se_vale(pedido, || {
                 if let Err(erro) = app.emit(EVENTO_DO_PEDIDO, na_tela) {
@@ -1653,11 +1745,36 @@ fn ligar<R: tauri::Runtime>(
                 motivo.to_owned()
             })
     };
+    // **O `programa` sai do aceite que está no disco agora** — o que acabou
+    // de ser guardado, ou o que fez o pedido se aceitar sozinho —, e só se ele
+    // é deste resumo e deste pacote.
+    let guardado =
+        seele_ffi::mods::aceite_de_maquina(&home, &chave.alvo, mod_id, servidor).unwrap_or_else(|motivo| {
+            tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo = %motivo, "o aceite guardado não foi lido; a metade sobe sem programa");
+            None
+        });
+    let programa = programa::programa_para(
+        &metade.capacidades,
+        &pedido.resumo,
+        &pedido.hash,
+        guardado.as_ref(),
+        &home,
+    );
+    match &programa {
+        Ok(p) => {
+            tracing::info!(mod_id = %mod_id, servidor = %servidor, raiz = %p.raiz().display(), "programa da metade de máquina montado do aceite")
+        }
+        Err(SemPrograma::SemOPoder) => {}
+        Err(sem) => {
+            tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo = sem.nome(), "a metade de máquina sobe sem programa: todo baixar e rodar será recusado")
+        }
+    }
     let viva = match Viva::subir(
         chave.clone(),
         numero,
         pedido.oferta.clone(),
         metade.capacidades,
+        programa,
         Arc::new(FioDaConexao(Arc::clone(conexao))),
         ao_falhar,
     ) {
@@ -2019,7 +2136,10 @@ mod testes {
             vec![(de_outra_sessao.chave.clone(), "aaaa".to_owned())]
         );
         // O motivo que vai à tela é o nome da dispensa, ou `servidor-saiu`.
-        assert_eq!(Fim::da_dispensa("outro-pedido").map(Fim::nome), Some("outro-pedido"));
+        assert_eq!(
+            Fim::da_dispensa("outro-pedido").map(Fim::nome),
+            Some("outro-pedido")
+        );
         assert_eq!(Fim::ServidorSaiu.nome(), "servidor-saiu");
     }
 
@@ -2103,6 +2223,7 @@ mod testes {
                 algoritmo: "sha1".to_owned(),
                 hex: "a".repeat(40),
             },
+            plataformas: vec![],
         });
         tudo.pack = Some(seele_ffi::types::HashDeArtefatoFfi {
             algoritmo: "sha1".to_owned(),
@@ -2294,6 +2415,7 @@ mod testes {
             1,
             oferta(),
             vec!["maquina", "maquina.porta"],
+            Err(SemPrograma::SemOPoder),
             Arc::clone(fio) as Arc<dyn Fio>,
             Box::new(move |_, texto| falhas.lock().unwrap().push(texto)),
         )
@@ -2344,8 +2466,15 @@ mod testes {
         let maquinas = com_pedido_e_metade(&chave);
         let dispensa = maquinas.dispensar(&chave, 1, "sem-aceite");
         assert_eq!(dispensa.fim, Fim::SemAceite);
-        assert!(dispensa.desfeitos.is_empty(), "sem-aceite fechou um pedido pendente");
-        assert_eq!(dispensa.vivas.len(), 1, "sem-aceite não parou a metade de pé");
+        assert!(
+            dispensa.desfeitos.is_empty(),
+            "sem-aceite fechou um pedido pendente"
+        );
+        assert_eq!(
+            dispensa.vivas.len(),
+            1,
+            "sem-aceite não parou a metade de pé"
+        );
         assert!(maquinas.estado().pendentes.contains_key(&chave));
         assert!(!maquinas.ligada(&chave));
         parar_todas(dispensa.vivas);
@@ -2367,9 +2496,17 @@ mod testes {
         let maquinas = com_pedido_e_metade(&chave);
         let dispensa = maquinas.dispensar(&chave, 1, "um-motivo-do-futuro");
         assert_eq!(dispensa.fim, Fim::DispensaDesconhecida);
-        assert_eq!(dispensa.vivas.len(), 1, "o motivo desconhecido deixou a metade de pé");
+        assert_eq!(
+            dispensa.vivas.len(),
+            1,
+            "o motivo desconhecido deixou a metade de pé"
+        );
         assert!(dispensa.desfeitos.is_empty());
-        assert_eq!(dispensa.fim.parada_no_fio(), None, "quem decidiu foi o servidor");
+        assert_eq!(
+            dispensa.fim.parada_no_fio(),
+            None,
+            "quem decidiu foi o servidor"
+        );
         parar_todas(dispensa.vivas);
     }
 
@@ -2391,7 +2528,11 @@ mod testes {
         assert!(!maquinas.guardar_pendente_se_vale(r1, || mostrados.push("r1")));
         assert_eq!(mostrados, vec!["r2"], "o pedido velho abriu diálogo");
         assert_eq!(
-            maquinas.estado().pendentes.get(&chave).map(|p| p.resumo.clone()),
+            maquinas
+                .estado()
+                .pendentes
+                .get(&chave)
+                .map(|p| p.resumo.clone()),
             Some("r2".to_owned())
         );
     }
@@ -2451,7 +2592,10 @@ mod testes {
             estado.ligadas.insert(nova.clone(), ligada_de(1, 2));
             estado.ligadas.insert(de_outra.clone(), ligada_de(2, 1));
         }
-        assert!(maquinas.tirar_de_geracao_velha(1, 1).is_empty(), "a mesma geração não é queda");
+        assert!(
+            maquinas.tirar_de_geracao_velha(1, 1).is_empty(),
+            "a mesma geração não é queda"
+        );
         let paradas = maquinas.tirar_de_geracao_velha(1, 2);
         assert_eq!(paradas.len(), 1, "a queda não parou só a metade de antes");
         assert!(!maquinas.ligada(&velha));
@@ -2624,5 +2768,592 @@ mod testes {
                 r#"pedir "oi:[[\"jogo-recusou\",2]]""#.to_owned(),
             ]
         );
+    }
+
+    // ------------------------------------------------- o poder `programa`
+
+    /// Uma pasta temporária, apagada ao sair.
+    struct PastaDoTeste(std::path::PathBuf);
+
+    impl Drop for PastaDoTeste {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn pasta_do_teste(nome: &str) -> PastaDoTeste {
+        use std::sync::atomic::AtomicU64;
+        static N: AtomicU64 = AtomicU64::new(0);
+        let caminho = std::env::temp_dir().join(format!(
+            "seele-app-programa-{nome}-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&caminho);
+        std::fs::create_dir_all(&caminho).unwrap();
+        PastaDoTeste(caminho)
+    }
+
+    /// A oferta com o `server.jar` da Mojang e um comando aceito.
+    fn oferta_com_programa(comando: &str, argumentos: &[&str]) -> OfertaDeMaquinaFfi {
+        let mut o = oferta();
+        o.artefatos.push(seele_ffi::types::ArtefatoOferecidoFfi {
+            nome: "server.jar".to_owned(),
+            url: "https://piston-data.mojang.com/v1/objects/x/server.jar".to_owned(),
+            tamanho: 10,
+            hash: seele_ffi::types::HashDeArtefatoFfi {
+                algoritmo: "sha1".to_owned(),
+                hex: "a".repeat(40),
+            },
+            plataformas: vec![],
+        });
+        o.rodar = Some(seele_ffi::types::ComandoOferecidoFfi {
+            comando: comando.to_owned(),
+            argumentos: argumentos.iter().map(|a| (*a).to_owned()).collect(),
+        });
+        o
+    }
+
+    fn subir_com_programa(
+        fio: &Arc<FioDeMentira>,
+        oferta: OfertaDeMaquinaFfi,
+        programa: programa::ProgramaDaMetade,
+        fonte: &str,
+    ) -> Arc<Viva> {
+        let viva = Viva::subir(
+            Chave::de("casa", "x/jogo", "mundo"),
+            7,
+            oferta,
+            vec!["maquina", "maquina.programa"],
+            programa,
+            Arc::clone(fio) as Arc<dyn Fio>,
+            Box::new(|_, _| {}),
+        )
+        .expect("a metade sobe");
+        viva.iniciar(fonte).expect("o código entra");
+        viva
+    }
+
+    /// **Sem o aceite, nenhum `baixar` e nenhum `rodar`** (spec, «Como provar
+    /// que funciona»). Sem aceite guardado, `programa_para` não monta nada; a
+    /// metade sobe sem `Programa`, e cada pedido volta `sem-aceite`, contado,
+    /// sem tocar o disco.
+    #[test]
+    fn sem_o_aceite_nada_baixa_e_nada_roda() {
+        let casa = pasta_do_teste("sem-aceite");
+        let home = casa.0.to_string_lossy().into_owned();
+        let caps = ["maquina", "maquina.programa"];
+        let sem = programa::programa_para(&caps, "aaaa", "h1", None, &home);
+        assert_eq!(sem.err(), Some(SemPrograma::SemAceite));
+
+        let fio = Arc::new(FioDeMentira::default());
+        let viva = subir_com_programa(
+            &fio,
+            oferta_com_programa("java/bin/java", &[]),
+            Err(SemPrograma::SemAceite),
+            "const r = (p) => p.then(() => 'passou', (e) => e.erro);\
+             (async () => {\
+               const b = await r(maquina.programa.baixar({ url: 'https://piston-data.mojang.com/v1/objects/x/server.jar', sha1: 'a'.repeat(40), tamanho: 10, destino: 'server.jar' }));\
+               const x = await r(maquina.programa.rodar({ comando: 'java/bin/java', argumentos: [], pasta: '' }));\
+               const e = await r(maquina.programa.escrever({ destino: 'eula.txt', texto: 'eula=true' }));\
+               await maquina.pedir([b, x, e].join(','));\
+             })();",
+        );
+        let anotado = fio.esperar("pedir ");
+        assert_eq!(
+            anotado,
+            vec![r#"pedir "sem-aceite,sem-aceite,sem-aceite""#.to_owned()]
+        );
+        assert_eq!(
+            viva.recusas_da_cola.todas_para_o_teste().get("sem-aceite"),
+            Some(&3)
+        );
+        assert!(
+            std::fs::read_dir(&casa.0).unwrap().next().is_none(),
+            "a metade sem aceite tocou o disco"
+        );
+        viva.descartar();
+    }
+
+    /// **Mudar a versão ou o pack não roda até o aceite novo.** A oferta nova
+    /// tem outro resumo (o servidor o calcula de tudo o que a tela mostra), e
+    /// o aceite guardado é o da velha: a política não sai dele. O pacote
+    /// trocado, com o mesmo resumo, também não.
+    #[test]
+    fn a_versao_ou_o_pack_mudados_nao_rodam_sem_aceite_novo() {
+        let casa = pasta_do_teste("mudou");
+        let home = casa.0.to_string_lossy().into_owned();
+        let velho = guardado(oferta_com_programa("java/bin/java", &[]), "aaaa", "h1");
+        assert!(programa::politica_para("aaaa", "h1", Some(&velho), &home).is_ok());
+        assert_eq!(
+            programa::politica_para("bbbb", "h1", Some(&velho), &home).err(),
+            Some(SemPrograma::AceiteDiferente),
+            "a oferta nova rodou com o aceite da velha"
+        );
+        assert_eq!(
+            programa::politica_para("aaaa", "h2", Some(&velho), &home).err(),
+            Some(SemPrograma::AceiteDiferente),
+            "o pacote novo rodou com o aceite do velho"
+        );
+        // E a tela pergunta de novo, dizendo o que mudou.
+        let mut nova = velho.oferta.clone();
+        nova.versao_do_jogo = "1.21.5".to_owned();
+        nova.pack = Some(seele_ffi::types::HashDeArtefatoFfi {
+            algoritmo: "sha512".to_owned(),
+            hex: "c".repeat(128),
+        });
+        assert_eq!(
+            decidir(&pedido(nova, "bbbb", "h1"), Some(&velho)),
+            Decisao::Mostrar {
+                mudou: Some(vec!["versao_do_jogo", "pack"])
+            }
+        );
+    }
+
+    /// **Uma URL fora do aceite é recusada**, com o host e os aceitos, sem
+    /// pedido à rede e sem arquivo; e a do artefato aceito com outro hash
+    /// também.
+    #[test]
+    fn uma_url_fora_do_aceite_e_recusada_com_os_dados() {
+        let casa = pasta_do_teste("fora");
+        let home = casa.0.to_string_lossy().into_owned();
+        let aceite = guardado(oferta_com_programa("java/bin/java", &[]), "aaaa", "h1");
+        let caps = ["maquina", "maquina.programa"];
+        let programa = programa::programa_para(&caps, "aaaa", "h1", Some(&aceite), &home)
+            .expect("o aceite monta o programa");
+        let raiz = programa.raiz().to_path_buf();
+        let fio = Arc::new(FioDeMentira::default());
+        let viva = subir_com_programa(
+            &fio,
+            aceite.oferta.clone(),
+            Ok(programa),
+            "const r = (p) => p.then(() => 'passou', (e) => [e.erro, e.host || e.campo, (e.aceitos || []).join('+')].join(' '));\
+             (async () => {\
+               const fora = await r(maquina.programa.baixar({ url: 'https://evil.example/server.jar', sha1: 'a'.repeat(40), tamanho: 10, destino: 'server.jar' }));\
+               const outro = await r(maquina.programa.baixar({ url: 'https://piston-data.mojang.com/v1/objects/x/server.jar', sha1: 'b'.repeat(40), tamanho: 10, destino: 'server.jar' }));\
+               const recusas = await maquina.programa.recusas();\
+               await maquina.pedir(fora + ' | ' + outro + ' | ' + JSON.stringify(recusas));\
+             })();",
+        );
+        let anotado = fio.esperar("pedir ");
+        assert_eq!(
+            anotado,
+            vec![concat!(
+                r#"pedir "dominio-fora-do-aceito evil.example piston-data.mojang.com | "#,
+                r#"diferente-do-aceito hash  | "#,
+                r#"{\"diferente-do-aceito\":1,\"dominio-fora-do-aceito\":1}""#
+            )
+            .to_owned()]
+        );
+        assert!(!raiz.join("server.jar").exists());
+        viva.descartar();
+    }
+
+    /// O nome deste teste, para o filho o achar com `--exact`.
+    const O_QUE_BATE: &str = "maquina::testes::um_processo_que_bate";
+
+    /// **Não é um teste**: é o processo que os testes de baixo rodam pelo
+    /// `programa` (o próprio binário de testes, ligado na pasta do servidor
+    /// de jogo), no Mac e no Windows, sem `sh`. Escreve um contador em
+    /// `batimento`, na pasta em que roda, a cada 20 ms, por até 60 s.
+    #[test]
+    #[ignore = "é o processo filho dos testes do programa, e não um teste"]
+    fn um_processo_que_bate() {
+        for n in 0_u64..3000 {
+            let _ = std::fs::write("batimento", n.to_string());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// O nome do segundo processo filho.
+    const O_QUE_PARA_NO_STOP: &str = "maquina::testes::um_processo_que_para_no_stop";
+
+    /// **Não é um teste**: um servidor de jogo de mentira que lê a entrada e
+    /// sai com código 0 quando lê `stop`, como o Minecraft. Desiste em 60 s.
+    #[test]
+    #[ignore = "é o processo filho dos testes do programa, e não um teste"]
+    fn um_processo_que_para_no_stop() {
+        let (manda, recebe) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for linha in std::io::stdin().lines() {
+                if linha.is_ok_and(|l| l.trim() == "stop") {
+                    let _ = manda.send(());
+                    return;
+                }
+            }
+        });
+        println!("pronto");
+        if recebe.recv_timeout(Duration::from_secs(60)).is_ok() {
+            let _ = std::fs::write("parou-no-stop", "sim");
+        }
+    }
+
+    /// Um `Programa` que roda o próprio binário de testes, com `argumentos`.
+    fn programa_que_roda_o_teste(
+        casa: &PastaDoTeste,
+        argumentos: &[&str],
+    ) -> (
+        programa::ProgramaDaMetade,
+        OfertaDeMaquinaFfi,
+        std::path::PathBuf,
+    ) {
+        let home = casa.0.to_string_lossy().into_owned();
+        let aceite = guardado(
+            oferta_com_programa("bin/servidor", argumentos),
+            "aaaa",
+            "h1",
+        );
+        let caps = ["maquina", "maquina.programa"];
+        let programa = programa::programa_para(&caps, "aaaa", "h1", Some(&aceite), &home)
+            .expect("o aceite monta o programa");
+        let raiz = programa.raiz().to_path_buf();
+        std::fs::create_dir_all(raiz.join("bin")).unwrap();
+        let alvo = raiz
+            .join("bin")
+            .join(format!("servidor{}", std::env::consts::EXE_SUFFIX));
+        let eu = std::env::current_exe().unwrap();
+        if std::fs::hard_link(&eu, &alvo).is_err() {
+            std::fs::copy(&eu, &alvo).unwrap();
+        }
+        (Ok(programa), aceite.oferta, raiz)
+    }
+
+    /// **O `aoParar` fala com o jogo**: parando, a metade não começa nada
+    /// novo, mas ainda escreve na entrada do processo dela — é por ali que o
+    /// `stop` chega e o mundo é salvo antes de o produto matar. Medido no
+    /// Minecraft 1.21.4 (31/10/2026): com o `stop` recusado, a parada esperava
+    /// o prazo do MOD inteiro (15 s) e o jogo morria sem salvar.
+    #[test]
+    fn o_ao_parar_manda_stop_e_o_jogo_sai_sozinho() {
+        let casa = pasta_do_teste("stop");
+        let argumentos = [
+            "--ignored",
+            "--exact",
+            O_QUE_PARA_NO_STOP,
+            "--test-threads",
+            "1",
+        ];
+        let (programa, oferta, raiz) = programa_que_roda_o_teste(&casa, &argumentos);
+        let fio = Arc::new(FioDeMentira::default());
+        let viva = subir_com_programa(
+            &fio,
+            oferta,
+            programa,
+            &format!(
+                "maquina.programa.rodar({{ comando: 'bin/servidor', argumentos: {}, pasta: '' }}).then((p) => {{                   maquina.aoParar(async () => {{ await p.escrever('stop'); const fim = await p.fim; await maquina.pedir('fim ' + fim.codigo + ' ' + fim.mortoAPedido); }});                   maquina.pedir('rodou');                 }}, (e) => maquina.pedir('recusou ' + e.erro));",
+                serde_json::to_string(&argumentos).unwrap()
+            ),
+        );
+        fio.esperar(r#"pedir "rodou""#);
+        let relogio = Instant::now();
+        assert!(viva.encerrar(Fim::PeloDono));
+        let levou = relogio.elapsed();
+        let anotado = fio.anotado();
+        assert!(
+            anotado.iter().any(|l| l == r#"pedir "fim 0 false""#),
+            "o jogo não saiu sozinho com o stop: {anotado:?} (levou {levou:?})"
+        );
+        assert!(
+            raiz.join("parou-no-stop").exists(),
+            "o stop não chegou ao processo"
+        );
+        assert!(
+            levou < Duration::from_secs(10),
+            "a parada esperou o prazo: {levou:?}"
+        );
+    }
+
+    fn batimento(raiz: &std::path::Path) -> Option<u64> {
+        std::fs::read_to_string(raiz.join("batimento"))
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+    }
+
+    /// **Os processos morrem quando a metade para**, e a parada espera: com o
+    /// jogo de pé, `encerrar` (o caminho de todo motivo: DESLIGAR, REVOGAR, o
+    /// app fechando, o MOD desligado) volta só com o processo morto.
+    #[test]
+    fn os_processos_morrem_quando_a_metade_para() {
+        let casa = pasta_do_teste("morre");
+        let home = casa.0.to_string_lossy().into_owned();
+        let argumentos = ["--ignored", "--exact", O_QUE_BATE, "--test-threads", "1"];
+        let aceite = guardado(
+            oferta_com_programa("bin/servidor", &argumentos),
+            "aaaa",
+            "h1",
+        );
+        let caps = ["maquina", "maquina.programa"];
+        let programa = programa::programa_para(&caps, "aaaa", "h1", Some(&aceite), &home)
+            .expect("o aceite monta o programa");
+        let raiz = programa.raiz().to_path_buf();
+        std::fs::create_dir_all(raiz.join("bin")).unwrap();
+        let alvo = raiz
+            .join("bin")
+            .join(format!("servidor{}", std::env::consts::EXE_SUFFIX));
+        let eu = std::env::current_exe().unwrap();
+        if std::fs::hard_link(&eu, &alvo).is_err() {
+            std::fs::copy(&eu, &alvo).unwrap();
+        }
+        let fio = Arc::new(FioDeMentira::default());
+        let viva = subir_com_programa(
+            &fio,
+            aceite.oferta.clone(),
+            Ok(programa),
+            &format!(
+                "maquina.programa.rodar({{ comando: 'bin/servidor', argumentos: {}, pasta: '' }})\
+                   .then((p) => maquina.pedir('rodou ' + p.numero), (e) => maquina.pedir('recusou ' + e.erro + ' ' + e.frase));",
+                serde_json::to_string(&argumentos).unwrap()
+            ),
+        );
+        let anotado = fio.esperar("pedir ");
+        assert!(anotado[0].starts_with(r#"pedir "rodou "#), "{anotado:?}");
+        let fim = Instant::now() + Duration::from_secs(20);
+        while batimento(&raiz).unwrap_or(0) < 3 {
+            assert!(Instant::now() < fim, "o processo não bateu");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(viva.processos_vivos(), 1);
+
+        assert!(viva.encerrar(Fim::PeloDono));
+        assert_eq!(
+            viva.processos_vivos(),
+            0,
+            "encerrar voltou com processo vivo"
+        );
+        let parado = batimento(&raiz);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            batimento(&raiz),
+            parado,
+            "o processo seguiu batendo depois da parada"
+        );
+    }
+
+    // ------------------------------------- o Minecraft de verdade (rede)
+
+    /// O status de um servidor Minecraft Java (handshake + status request), e
+    /// o JSON que ele devolve: é o que o cliente do jogo faz na lista de
+    /// servidores.
+    fn status_do_minecraft(porta: u16) -> std::io::Result<String> {
+        use std::io::{Read as _, Write as _};
+        fn varint(mut v: u32, saida: &mut Vec<u8>) {
+            loop {
+                let b = (v & 0x7f) as u8;
+                v >>= 7;
+                if v == 0 {
+                    saida.push(b);
+                    return;
+                }
+                saida.push(b | 0x80);
+            }
+        }
+        fn ler_varint(r: &mut impl std::io::Read) -> std::io::Result<u32> {
+            let mut v = 0_u32;
+            for i in 0..5 {
+                let mut b = [0_u8];
+                r.read_exact(&mut b)?;
+                v |= u32::from(b[0] & 0x7f) << (7 * i);
+                if b[0] & 0x80 == 0 {
+                    return Ok(v);
+                }
+            }
+            Err(std::io::Error::other("varint longo demais"))
+        }
+        let mut fluxo = std::net::TcpStream::connect(("127.0.0.1", porta))?;
+        fluxo.set_read_timeout(Some(Duration::from_secs(10)))?;
+        let mut corpo = vec![0x00];
+        varint(769, &mut corpo); // 1.21.4
+        varint(9, &mut corpo);
+        corpo.extend_from_slice(b"127.0.0.1");
+        corpo.extend_from_slice(&porta.to_be_bytes());
+        varint(1, &mut corpo);
+        let mut pacote = Vec::new();
+        varint(u32::try_from(corpo.len()).unwrap(), &mut pacote);
+        pacote.extend_from_slice(&corpo);
+        pacote.extend_from_slice(&[0x01, 0x00]);
+        fluxo.write_all(&pacote)?;
+        let _tamanho = ler_varint(&mut fluxo)?;
+        let _id = ler_varint(&mut fluxo)?;
+        let n = ler_varint(&mut fluxo)? as usize;
+        let mut json = vec![0_u8; n];
+        fluxo.read_exact(&mut json)?;
+        Ok(String::from_utf8_lossy(&json).into_owned())
+    }
+
+    /// O lado de servidor do MOD, para a metade de máquina de verdade: o
+    /// `plano` que a metade de servidor dá à máquina aceita, e cada estado e
+    /// falha anotados com a hora.
+    struct FioDoMinecraft {
+        plano: serde_json::Value,
+        comeco: Instant,
+        anotado: Mutex<Vec<(Duration, String)>>,
+    }
+
+    impl FioDoMinecraft {
+        fn anotar(&self, linha: String) {
+            eprintln!("[{:>7.1?}] {linha}", self.comeco.elapsed());
+            self.anotado
+                .lock()
+                .unwrap()
+                .push((self.comeco.elapsed(), linha));
+        }
+        fn quando(&self, prefixo: &str) -> Option<Duration> {
+            self.anotado
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(_, l)| l.starts_with(prefixo))
+                .map(|(t, _)| *t)
+        }
+    }
+
+    impl Fio for FioDoMinecraft {
+        fn pedir(&self, _: &str, _: &str, payload: String) -> Futuro<Result<String, &'static str>> {
+            let valor: serde_json::Value = serde_json::from_str(&payload).unwrap_or_default();
+            let resposta = match valor["op"].as_str() {
+                Some("plano") => serde_json::json!({ "ok": true, "plano": self.plano }),
+                Some("estado") => {
+                    let mut linha = format!("estado {}", valor["estado"].as_str().unwrap_or("?"));
+                    if let Some(j) = valor["jogadores"].as_array().filter(|j| !j.is_empty()) {
+                        linha.push_str(&format!(" jogadores={j:?}"));
+                    }
+                    self.anotar(linha);
+                    serde_json::json!({ "ok": true })
+                }
+                Some("falha") => {
+                    self.anotar(format!("falha {payload}"));
+                    serde_json::json!({ "ok": true })
+                }
+                _ => serde_json::json!({ "ok": false, "erro": "op-desconhecida" }),
+            };
+            let texto = resposta.to_string();
+            Box::pin(async move { Ok(texto) })
+        }
+        fn servir(
+            &self,
+            _: &str,
+            nome: &str,
+            protocolo: &str,
+            porta: u16,
+        ) -> Futuro<Result<(), &'static str>> {
+            self.anotar(format!("servir {nome} {protocolo} {porta}"));
+            Box::pin(async { Ok(()) })
+        }
+        fn parar_tunel(&self, _: &str, nome: &str) -> Result<(), &'static str> {
+            self.anotar(format!("parar-tunel {nome}"));
+            Ok(())
+        }
+        fn quedas(&self, _: &str, _: &str) -> Futuro<Result<Vec<(String, u32)>, &'static str>> {
+            Box::pin(async { Ok(vec![]) })
+        }
+        fn parar_maquina(&self, _: &str, _: &str, motivo: &str) -> Result<(), &'static str> {
+            self.anotar(format!("parar-maquina {motivo}"));
+            Ok(())
+        }
+    }
+
+    /// **Um Minecraft Vanilla de verdade pela metade de máquina de verdade**
+    /// (API 8 parte 4, «Como provar que funciona»): o executor QuickJS do app
+    /// com a metade de máquina do MOD de multiplayer, o `programa` montado de
+    /// um aceite com a oferta do MOD, o `server.jar` (sha1) e o Java da
+    /// Temurin (sha256) baixados da internet, o pacote aberto, o `eula.txt` e
+    /// o `server.properties` escritos, o Java rodando, o «Done (» lido pela
+    /// metade, o túnel pedido, o status do jogo respondido com o motd, e a
+    /// parada pelo dono que manda `stop` e espera.
+    ///
+    /// Rede de verdade, então fora da suíte. Para rodar:
+    ///
+    /// ```text
+    /// node <SEELE-MOD-MULTIPLAYER>/ferramentas/plano-de-verdade.cjs plano.json   # a oferta e o plano do MOD
+    /// SEELE_MINECRAFT_DE_VERDADE=plano.json \
+    /// SEELE_MOD_MULTIPLAYER=<SEELE-MOD-MULTIPLAYER> \
+    /// SEELE_MINECRAFT_CASA=<pasta que fica> \
+    ///   cargo test -p seele-app --bin seele-app minecraft_de_verdade -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "rede de verdade e ~105 MB: SEELE_MINECRAFT_DE_VERDADE=<plano.json>"]
+    fn minecraft_de_verdade_pela_metade_de_maquina() {
+        let Ok(plano) = std::env::var("SEELE_MINECRAFT_DE_VERDADE") else {
+            eprintln!("pulado: sem SEELE_MINECRAFT_DE_VERDADE");
+            return;
+        };
+        let pasta_do_mod = std::env::var("SEELE_MOD_MULTIPLAYER").expect("SEELE_MOD_MULTIPLAYER");
+        let casa = std::env::var("SEELE_MINECRAFT_CASA").expect("SEELE_MINECRAFT_CASA");
+        let lido: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(plano).unwrap()).unwrap();
+        let servidor = lido["servidor"].as_str().unwrap().to_owned();
+        let oferta: OfertaDeMaquinaFfi = serde_json::from_value(lido["oferta"].clone()).unwrap();
+        let (daqui, outros) = seele_ffi::programa::artefatos_desta_maquina(&oferta);
+        eprintln!(
+            "esta máquina ({}) baixa {:?}; {outros} de outros sistemas",
+            seele_ffi::programa::esta_plataforma(),
+            daqui
+                .iter()
+                .map(|a| (&a.nome, a.tamanho))
+                .collect::<Vec<_>>()
+        );
+        let aceite = AceiteDeMaquinaGuardado {
+            alvo: "casa:8383".to_owned(),
+            mod_id: "seele/multiplayer".to_owned(),
+            hash: "h1".to_owned(),
+            servidor: servidor.clone(),
+            resumo: "r1".to_owned(),
+            oferta: oferta.clone(),
+            pedido_por: "ana".to_owned(),
+            quando: 1,
+        };
+        let caps = ["maquina", "maquina.porta", "maquina.programa"];
+        let programa = programa::programa_para(&caps, "r1", "h1", Some(&aceite), &casa)
+            .expect("o aceite monta o programa");
+        eprintln!("pasta do servidor de jogo: {}", programa.raiz().display());
+        let fio = Arc::new(FioDoMinecraft {
+            plano: lido["plano"].clone(),
+            comeco: Instant::now(),
+            anotado: Mutex::default(),
+        });
+        let viva = Viva::subir(
+            Chave::de("casa:8383", "seele/multiplayer", &servidor),
+            99,
+            oferta,
+            caps.to_vec(),
+            Ok(programa),
+            Arc::clone(&fio) as Arc<dyn Fio>,
+            Box::new(|_, texto| eprintln!("A METADE FALHOU: {texto}")),
+        )
+        .unwrap();
+        let fonte = std::fs::read_to_string(format!("{pasta_do_mod}/maquina/main.js")).unwrap();
+        viva.iniciar(&fonte).unwrap();
+
+        let fim = Instant::now() + Duration::from_secs(900);
+        while fio.quando("servir ").is_none() {
+            assert!(Instant::now() < fim, "o túnel não foi pedido em 15 min");
+            assert!(
+                fio.quando("falha ").is_none(),
+                "a metade falhou: {:?}",
+                fio.anotado.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let porta = 25565;
+        let status = status_do_minecraft(porta).expect("o jogo respondeu ao status");
+        eprintln!("status do jogo em 127.0.0.1:{porta}: {status}");
+        assert!(
+            status.contains("Casa"),
+            "o motd não é o da configuração: {status}"
+        );
+
+        let parada = Instant::now();
+        assert!(viva.encerrar(Fim::PeloDono));
+        let levou = parada.elapsed();
+        assert_eq!(viva.processos_vivos(), 0);
+        let porta_fechada = std::net::TcpStream::connect(("127.0.0.1", porta)).is_err();
+        eprintln!(
+            "medidas: baixando {:?}, pronto {:?}, ligando {:?}, servir {:?}, a parada pelo dono levou {levou:?}, a porta do jogo fechou: {porta_fechada}",
+            fio.quando("estado baixando"),
+            fio.quando("estado pronto"),
+            fio.quando("estado ligando"),
+            fio.quando("servir "),
+        );
+        assert!(porta_fechada, "o jogo seguiu escutando depois da parada");
     }
 }

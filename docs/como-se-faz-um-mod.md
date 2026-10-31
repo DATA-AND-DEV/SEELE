@@ -1149,7 +1149,7 @@ São três metades trabalhando, e é bom saber qual faz o quê:
 | metade | onde roda | o que faz |
 |---|---|---|
 | servidor (`servidor/main.js`) | a máquina de quem hospeda o servidor SEELE | chama alguém a hospedar o jogo (`mundo.maquinas.pedir`), ouve o aceite, avisa a máquina |
-| máquina (`maquina/main.js`) | o computador de quem aceitou, **só no app** | abre a porta do jogo (`maquina.porta.servir`) e a fecha ao parar |
+| máquina (`maquina/main.js`) | o computador de quem aceitou, **só no app** | baixa e roda o jogo (`maquina.programa`), abre a porta dele (`maquina.porta.servir`) e para tudo ao parar |
 | cliente (`cliente/main.js`) | o computador de quem joga, **só no app** | mostra o botão; no clique, `SeeleUI.tunel.entrar(nome)` |
 
 ### O fluxo inteiro
@@ -1204,7 +1204,12 @@ pode ficar vazio**: `titulo`, `receita`, `versao_da_receita` e `versao_do_jogo`
 são textos não vazios; cada túnel tem `nome` válido, `porta` de 1 a 65535 e
 `protocolo` `"tcp"` ou `"udp"` (outro valor, ou ausente, é `tuneis`); cada
 artefato tem `tamanho` de pelo menos 1 e um `hash` válido (`sha1`, `sha256` ou
-`sha512`, com o `hex` do tamanho dele). Uma oferta que não passa **lança na
+`sha512`, com o `hex` do tamanho dele) e, se quiser, `plataformas`: os
+sistemas em que ele serve (`windows-x64`, `mac-aarch64`, `mac-x64`,
+`linux-x64`, `linux-aarch64`; ausente é em todos). A metade de servidor não sabe
+o sistema da máquina antes do aceite, então um jogo que pede um runtime (o Java)
+manda o de cada sistema, cada um marcado: a tela soma só os da máquina, e o
+`programa` recusa baixar os outros. Uma oferta que não passa **lança na
 hora**, com o nome da regra (`oferta-invalida:titulo`, `oferta-invalida:tuneis`,
 `oferta-invalida:artefato_hash`), e não na máquina da outra pessoa.
 
@@ -1217,8 +1222,10 @@ do MOD pode cobri-la ou imitá-la. A tela diz, nesta ordem:
 - **o jogo**: o título e a versão, a receita e a versão dela;
 - **a porta**: em qual porta o jogo escuta, e que quem está no servidor a alcança
   pelo SEELE;
-- **o que vai baixar** (quantos arquivos, quanto no total, **de onde**) e **o que
-  vai rodar** (o comando e os argumentos), ou que não há programa nenhum;
+- **o que vai baixar**: cada arquivo deste computador, com o nome, o host de onde
+  vem e o tamanho, e a soma; quantos são de outros sistemas (e não se baixam
+  aqui); e as `origens`, de onde mais arquivos podem vir, cada um com hash;
+- **o que vai rodar** (o comando e os argumentos), ou que não há programa nenhum;
 - **o disco**: até quanto ocupa, e em que pasta;
 - **de onde o jogo baixa por conta própria**, sem o SEELE conferir, quando a
   oferta declara `dominios_do_jogo`;
@@ -1345,6 +1352,87 @@ em frase; o `MaquinaParou` que o MOD lê leva o nome da lista da seção
 da metade de máquina recebe os do app (`servidor-saiu`, `sem-aceite`, …), e o
 `MaquinaParou` da metade de servidor diz `saiu` para a mesma causa.
 
+### O poder `programa`: baixar, abrir, escrever e rodar
+
+Com `"poderes": ["programa"]`, a metade de máquina ganha `maquina.programa`.
+**Tudo nele é preso ao aceite guardado neste computador**, e não ao que a metade
+pede: o app monta a política do aceite que o dono deu (os hosts dos artefatos e
+as `origens`, os artefatos deste sistema com o hash e o tamanho mostrados, o
+`rodar`, o `disco_maximo` e a pasta), e `maquina.oferta` é só uma cópia para ler.
+Sem aceite que confira (a oferta, a versão, o pack ou o pacote mudaram e o dono
+ainda não aceitou de novo), todo pedido do `programa` rejeita com `sem-aceite`
+ou `aceite-diferente`.
+
+```js
+// maquina/main.js — o Minecraft, do download ao «Done»
+(async () => {
+  const java = maquina.oferta.artefatos.find((a) => a.plataformas?.includes(maquina.plataforma));
+  const jar = maquina.oferta.artefatos.find((a) => a.nome === "server.jar");
+
+  await maquina.programa.baixar({
+    url: jar.url, sha1: jar.hash.hex, tamanho: jar.tamanho, destino: "server.jar",
+    aoProgresso: ({ recebidos, total }) => console.log(`${recebidos}/${total}`),
+  });
+  await maquina.programa.baixar({ url: java.url, sha256: java.hash.hex, tamanho: java.tamanho, destino: "java.tar.gz" });
+  await maquina.programa.desempacotar({ arquivo: "java.tar.gz", destino: "java", raiz: "jdk-21.0.5+11-jre/Contents/Home" });
+  await maquina.programa.escrever({ destino: "eula.txt", texto: "eula=true\n" });
+  await maquina.programa.escrever({ destino: "server.properties", texto: "server-port=25565\nserver-ip=127.0.0.1\n" });
+
+  const jogo = await maquina.programa.rodar({ comando: "java/bin/java", argumentos: ["-jar", "server.jar", "nogui"], pasta: "" });
+  jogo.aoLinha((linha) => {
+    if (/\]: Done \(/.test(linha)) maquina.porta.servir(maquina.oferta.tuneis[0]);
+  });
+  jogo.aoSair((fim) => maquina.pedir({ caiu: !fim.mortoAPedido, codigo: fim.codigo }));
+
+  maquina.aoParar(async () => {            // com o jogo de pé, o app espera até 20 s
+    await jogo.escrever("stop");
+    await jogo.fim;
+  });
+})().catch((falha) => console.warn(`não ligou: ${falha.erro} ${falha.frase ?? ""}`));
+```
+
+- **`maquina.plataforma`**: o sistema deste computador, no nome das receitas.
+- **`baixar({ url, sha1 | sha256 | sha512, tamanho, destino, aoProgresso })`**
+  resolve com `{ destino, tamanho, algoritmo, hash }` quando o arquivo chegou e
+  bateu. Só `https`. **Duas portas**: uma URL que é de um artefato aceito para
+  este computador só baixa com o hash (do mesmo algoritmo) e o tamanho que a
+  tela mostrou (`diferente-do-aceito`); a de um artefato de outro sistema não
+  baixa (`artefato-de-outro-sistema`); qualquer outra URL só baixa de um host das
+  `origens` (`fora-dos-artefatos-aceitos`), com o hash que você declarar. Vale o
+  hash mais forte declarado; um redirecionamento é seguido só dentro dos hosts do
+  aceite (declare o CDN nas `origens`: o GitHub redireciona para
+  `release-assets.githubusercontent.com`). O arquivo só aparece em `destino` se
+  o tamanho e o hash bateram; antes, é um parcial que some em qualquer falha.
+- **`escrever({ destino, texto })`**: um texto de até 64 KiB, trocado de uma vez.
+  É para o que o jogo lê e que não pede aceite novo (a configuração, o
+  `eula.txt` que a pessoa aceitou na tela).
+- **`desempacotar({ arquivo, destino, raiz })`** abre um `.tar.gz` ou um `.zip`
+  da pasta em `destino`, com só o que está sob `raiz` dentro do pacote. Links não
+  são criados (`linksPulados`); uma entrada com `..` recusa o pacote inteiro.
+- **`rodar({ comando, argumentos, pasta })`**: só o comando e os argumentos
+  **exatos** do aceite; o comando é um caminho dentro da pasta do servidor de
+  jogo (nunca procurado no `PATH`), e `pasta: ""` é ela mesma. O processo tem
+  `numero`, `pid`, `aoLinha(fn(linha, fluxo))` (`saida` ou `erro`; o que chega
+  antes do ouvinte fica guardado, até 256 linhas), `aoSair(fn(fim))` e `fim` (a
+  mesma saída como promessa: `{ codigo, mortoAPedido, linhasPerdidas,
+  linhasCortadas, linhasNaoOuvidas }`), `escrever(texto)` e `matar()`.
+- **`recusas()`** resolve com `{ nome: vezes }`: cada recusa desde que a metade
+  subiu. Mande-as à metade de servidor por `maquina.pedir` para a tela do MOD.
+
+**Toda recusa rejeita com o nome em `erro`, a frase inteira em `frase`, e os
+dados em campos** (`host` e `aceitos`, `esperado` e `obtido`, `usado`, `pedido` e
+`teto`...), e vai ao `seele.log` de quem aceitou. A lista fechada está em
+`api/v8.json`, `recusas.programa`.
+
+**Nada fica rodando.** Toda parada da metade — DESLIGAR, REVOGAR, o app fechando,
+o MOD desligado, a sessão que acabou, a metade que falhou — chama o `aoParar`
+(com um processo vivo, até 20 s, para o jogo salvar) e depois **mata e espera**
+cada processo e cada download. Soltar o objeto do processo não o mata; quem mata
+é a parada.
+
+**A pasta** é `<config>/jogos/<alvo>/<mod-id>/<servidor>/`, longe da identidade.
+Caminho absoluto e `..` são recusados, e um link que sai dela também.
+
 ### O que o aceite prende
 
 O que a pessoa viu e aceitou fica preso por um **resumo**: o SHA-256 de quatro
@@ -1365,11 +1453,11 @@ que a pessoa que hospeda pode mudar sem pedir de novo ao dono da máquina.
 **A tela e o resumo não são a mesma lista: o resumo prende mais do que a tela
 mostra, e nunca menos.** A tela mostra o MOD, o jogo e a versão dele, a receita e
 a versão dela, quem pediu e o servidor de jogo, cada porta com o protocolo,
-**quantos** arquivos se baixam, o tamanho somado e de onde (as `origens`, ou os
-hosts das URLs), o comando com os argumentos, os `dominios_do_jogo`, o teto de
-disco com a pasta, e cada termo com a URL. Ela **não** mostra o `pack`, nem o
-nome, a URL, o tamanho e o hash de cada arquivo um a um — e o resumo prende
-todos eles. Tudo o que a tela mostra está no resumo, então nada do que a pessoa
+**cada arquivo deste computador** (nome, host e tamanho) e a soma, quantos são de
+outros sistemas, as `origens`, o comando com os argumentos, os
+`dominios_do_jogo`, o teto de disco com a pasta, e cada termo com a URL. Ela
+**não** mostra o `pack`, nem a URL inteira e o hash de cada arquivo, nem os
+arquivos de outros sistemas um a um — e o resumo prende todos eles. Tudo o que a tela mostra está no resumo, então nada do que a pessoa
 viu muda depois do aceite sem invalidá-lo; e o que ela não viu um a um também
 não muda calado: trocar o hash de um arquivo, ou o `pack`, pede o aceite de
 novo, e a tela diz qual campo mudou (`o que se baixa`, `o pack`). O aceite
@@ -1404,7 +1492,8 @@ sempre sai.
 ### O que a metade de máquina não tem
 
 Um contexto só dela, **sem tela e sem servidor**: não existem `SeeleUI`,
-`SeeleMods`, `dados` nem `mundo` (nem `fetch`, nem `localStorage`). Ela fala por
+`SeeleMods`, `dados` nem `mundo` (nem `fetch`, nem `localStorage`). O disco e a
+rede que ela tem são os do `maquina.programa`, presos ao aceite. Ela fala por
 três vias, e só: o `maquina`, o `console` (que escreve no `seele.log` de quem a
 roda) e os relógios (`setTimeout`, `setInterval`). Quem quiser rede, estado ou
 tela os pede à metade de servidor, por `maquina.pedir`; é a metade de servidor

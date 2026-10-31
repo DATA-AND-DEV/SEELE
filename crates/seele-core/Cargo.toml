@@ -73,6 +73,13 @@ rustls = { version = "0.23.43", default-features = false, features = ["ring", "s
 # estão na árvore deste crate, pelo STUN e pelo SRTP do `seele-enlace`.
 sha1 = "0.10.7"
 sha2 = "0.10.9"
+# `maquina.programa.desempacotar` (API 8 parte 4): o Java da Adoptium vem em
+# `.tar.gz` no Mac e no Linux, e em `.zip` no Windows. As mesmas duas que o
+# `seele-app` e o `seele-instalador` já usam para o pacote do atualizador:
+# zero crate novo no `Cargo.lock`. O `.zip` é lido à mão (`desempacotar.rs`),
+# pelo `flate2`, para não trazer o `zip` e a árvore dele.
+tar = "0.4"
+flate2 = "1"
 
 [features]
 # O gêmeo do guarda da F5 (`seele-server`, a mesma feature), do lado de quem

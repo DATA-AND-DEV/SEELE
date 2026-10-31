@@ -346,12 +346,19 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
         .iter()
         .map(|a| {
             let a = objeto(a, "artefatos")?;
-            so_as_chaves(a, &["nome", "url", "tamanho", "hash"])?;
+            so_as_chaves(a, &["nome", "url", "tamanho", "hash", "plataformas"])?;
+            // Opcional (API 8 parte 4): sem a chave, o artefato serve em todo
+            // sistema, como antes de a marca existir.
+            let plataformas = match a.get("plataformas") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(_) => textos(a, "plataformas", "artefato_plataformas")?,
+            };
             Ok(ArtefatoOferecido {
                 nome: texto(a, "nome", "artefato_nome")?,
                 url: texto(a, "url", "artefato_url")?,
                 tamanho: numero(a, "tamanho", "artefato_tamanho")?,
                 hash: hash(a.get("hash").unwrap_or(&Value::Null), "artefato_hash")?,
+                plataformas,
             })
         })
         .collect::<Result<_, String>>()?;

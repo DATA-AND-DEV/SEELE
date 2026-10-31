@@ -55,6 +55,9 @@ fn programa(nome: &str, argumentos: &[&str]) -> (Pasta, Programa) {
     std::fs::copy(env!("CARGO_BIN_EXE_seele-programa-de-teste"), &alvo).unwrap();
     let politica = Politica {
         dominios: vec![],
+        artefatos: vec![],
+        de_outros_sistemas: vec![],
+        origens: vec![],
         comando: Some(ComandoAceito {
             comando: COMANDO.to_owned(),
             argumentos: argumentos.iter().map(|a| (*a).to_owned()).collect(),
@@ -234,6 +237,9 @@ async fn comando_aceito_com_pai_e_recusado_mesmo_assim() {
     let p = pasta("comando-pai");
     let politica = Politica {
         dominios: vec![],
+        artefatos: vec![],
+        de_outros_sistemas: vec![],
+        origens: vec![],
         comando: Some(ComandoAceito {
             comando: "../fora".to_owned(),
             argumentos: vec![],

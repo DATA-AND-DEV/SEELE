@@ -26,8 +26,11 @@
 //! isso manda matar todos ([`Drop`]), e cada filho é criado com
 //! `kill_on_drop`, então nem o runtime caindo deixa um para trás.
 
+mod aceite;
 mod baixar;
 mod caminho;
+mod desempacotar;
+mod escrever;
 mod hash;
 mod rodar;
 
@@ -36,11 +39,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+pub use aceite::{plataforma_desta_maquina, politica_do_aceite};
 pub use baixar::{
     Baixado, Corpo, Download, EventoDoDownload, FuturoDe, Origem, OrigemHttps, PedidoDeDownload,
-    Resposta, MAX_REDIRECIONAMENTOS,
+    Resposta, MAX_REDIRECIONAMENTOS, MAX_TENTATIVAS,
 };
 pub use caminho::dentro_da_raiz;
+pub use desempacotar::{Desempacotado, PedidoDeDesempacotar, MAX_ENTRADAS_DESEMPACOTADAS};
+pub use escrever::MAX_BYTES_ESCRITOS;
 pub use hash::{o_mais_forte, AlgoritmoDeHash, HashDeclarado};
 pub use rodar::{
     EventoDoProcesso, FimDoProcesso, PedidoDeExecucao, Processo, MAX_BYTES_POR_LINHA,
@@ -57,12 +63,39 @@ pub struct ComandoAceito {
     pub argumentos: Vec<String>,
 }
 
+/// Um artefato que o aceite mostrou: a URL dele só baixa com **este** hash e
+/// **este** tamanho.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtefatoAceito {
+    /// A URL, como a oferta a trouxe (comparada como texto exato).
+    pub url: String,
+    /// O hash que a tela mostrou.
+    pub hash: HashDeclarado,
+    /// O tamanho que a tela somou.
+    pub tamanho: u64,
+}
+
 /// O que foi aceito para um servidor de jogo nesta máquina.
+///
+/// **Duas portas para um download** (decisão Q1 de
+/// `2026-10-31-api-8-programa-decisoes.md`): uma URL que é de um artefato
+/// aceito só baixa com o hash e o tamanho dele; qualquer outra só baixa de um
+/// host de `origens`, com o hash que o MOD declarar. É o que deixa a parte 6
+/// baixar os arquivos de um modpack sem pôr cada um no aceite, sem deixar o
+/// `server.jar` mostrado ser trocado por outro do mesmo host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Politica {
-    /// Os domínios de origem. Vale o host exato ou um subdomínio dele
-    /// (`mojang.com` aceita `piston-data.mojang.com`).
+    /// Todo host que um download ou um salto de redirecionamento pode tocar:
+    /// os dos artefatos aceitos e as origens. Vale o host exato ou um
+    /// subdomínio dele (`mojang.com` aceita `piston-data.mojang.com`).
     pub dominios: Vec<String>,
+    /// Os artefatos aceitos **para esta máquina**.
+    pub artefatos: Vec<ArtefatoAceito>,
+    /// As URLs dos artefatos aceitos para outros sistemas: recusadas pelo nome,
+    /// para a tela que não os contou não ser desmentida pelo disco.
+    pub de_outros_sistemas: Vec<String>,
+    /// Os hosts de onde uma URL que não é artefato aceito pode baixar.
+    pub origens: Vec<String>,
     /// O comando que pode rodar. `None`: nenhum.
     pub comando: Option<ComandoAceito>,
     /// O teto de disco da raiz, em bytes.
@@ -272,7 +305,101 @@ pub enum Recusa {
     /// O [`Programa`] já foi encerrado; nada novo começa.
     #[error("o programa deste servidor de jogo foi encerrado")]
     Encerrado,
+    /// A URL é de um artefato aceito, e o pedido traz outro hash ou outro
+    /// tamanho que o que a tela mostrou.
+    #[error("{url}: o aceite mostrou {campo} {aceito}, e o pedido traz {pedido}")]
+    DiferenteDoAceito {
+        /// A URL.
+        url: String,
+        /// `hash` ou `tamanho`.
+        campo: &'static str,
+        /// O que o aceite mostrou.
+        aceito: String,
+        /// O que o MOD pediu.
+        pedido: String,
+    },
+    /// A URL é de um artefato aceito para outro sistema.
+    #[error("{url} é o artefato de outro sistema; esta máquina não o baixa")]
+    ArtefatoDeOutroSistema {
+        /// A URL.
+        url: String,
+    },
+    /// A URL não é de artefato aceito, e o host dela não é uma das origens.
+    #[error("{url} não é um artefato aceito, e o host não é uma das origens ({})", origens.join(", "))]
+    ForaDosArtefatosAceitos {
+        /// A URL.
+        url: String,
+        /// As origens do aceite.
+        origens: Vec<String>,
+    },
+    /// O texto a escrever passa do teto ([`MAX_BYTES_ESCRITOS`]).
+    #[error("o texto tem {tamanho} bytes, e o teto é {teto}")]
+    TextoGrandeDemais {
+        /// O tamanho do texto.
+        tamanho: u64,
+        /// O teto.
+        teto: u64,
+    },
+    /// O arquivo a desempacotar não é `.tar.gz` nem `.zip`.
+    #[error("{arquivo} não é .tar.gz nem .zip")]
+    FormatoDesconhecido {
+        /// O arquivo pedido.
+        arquivo: String,
+    },
+    /// O pacote não se lê, ou traz uma entrada que sairia da pasta.
+    #[error("{arquivo} não se desempacota: {motivo}")]
+    PacoteInvalido {
+        /// O arquivo pedido.
+        arquivo: String,
+        /// O que deu errado.
+        motivo: String,
+    },
+    /// Nenhuma entrada do pacote está sob a raiz pedida.
+    #[error("{arquivo} não tem nada sob {raiz}")]
+    NadaSobARaiz {
+        /// O arquivo pedido.
+        arquivo: String,
+        /// A raiz pedida.
+        raiz: String,
+    },
 }
+
+/// **Todo nome de [`Recusa`]**, na ordem do enum: o que `api/v8.json` escreve
+/// em `recusas.programa`, e o que o guarda de conformidade amarra ao contrato.
+pub const NOMES_DAS_RECUSAS: &[&str] = &[
+    "nao-e-https",
+    "url-invalida",
+    "dominio-fora-do-aceito",
+    "redirecionou-para-fora",
+    "redirecionamentos-demais",
+    "sem-hash",
+    "hash-mal-formado",
+    "caminho-absoluto",
+    "caminho-com-pai",
+    "caminho-vazio",
+    "caminho-invalido",
+    "link-sai-da-raiz",
+    "disco-cheio",
+    "tamanho-alegado-diferente",
+    "maior-que-o-declarado",
+    "menor-que-o-declarado",
+    "hash-nao-bate",
+    "origem-respondeu",
+    "origem-falhou",
+    "disco",
+    "comando-fora-do-aceito",
+    "argumentos-fora-do-aceito",
+    "nao-iniciou",
+    "entrada-fechada",
+    "encerrado",
+    "diferente-do-aceito",
+    "artefato-de-outro-sistema",
+    "fora-dos-artefatos-aceitos",
+    "texto-grande-demais",
+    "formato-desconhecido",
+    "pacote-invalido",
+    "nada-sob-a-raiz",
+];
 
 impl Recusa {
     /// O nome, de lista fechada, como a tela do MOD o conta.
@@ -304,6 +431,13 @@ impl Recusa {
             Self::NaoIniciou { .. } => "nao-iniciou",
             Self::EntradaFechada { .. } => "entrada-fechada",
             Self::Encerrado => "encerrado",
+            Self::DiferenteDoAceito { .. } => "diferente-do-aceito",
+            Self::ArtefatoDeOutroSistema { .. } => "artefato-de-outro-sistema",
+            Self::ForaDosArtefatosAceitos { .. } => "fora-dos-artefatos-aceitos",
+            Self::TextoGrandeDemais { .. } => "texto-grande-demais",
+            Self::FormatoDesconhecido { .. } => "formato-desconhecido",
+            Self::PacoteInvalido { .. } => "pacote-invalido",
+            Self::NadaSobARaiz { .. } => "nada-sob-a-raiz",
         }
     }
 }
@@ -488,6 +622,126 @@ mod tests {
 
     fn d(lista: &[&str]) -> Vec<String> {
         lista.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    /// **`NOMES_DAS_RECUSAS` é cada `Recusa::nome`, na ordem do enum**: a
+    /// lista que o contrato escreve (`recusas.programa`) não pode esquecer um
+    /// nome que a metade de máquina recebe.
+    #[test]
+    fn os_nomes_das_recusas_sao_os_de_cada_variante() {
+        let s = String::new;
+        let p = PathBuf::new;
+        let a = AlgoritmoDeHash::Sha1;
+        let todas = [
+            Recusa::NaoEHttps { url: s() },
+            Recusa::UrlInvalida {
+                url: s(),
+                motivo: s(),
+            },
+            Recusa::DominioForaDoAceito {
+                host: s(),
+                aceitos: vec![],
+            },
+            Recusa::RedirecionouParaFora { de: s(), para: s() },
+            Recusa::RedirecionamentosDemais {
+                url: s(),
+                saltos: 0,
+            },
+            Recusa::SemHash { url: s() },
+            Recusa::HashMalFormado {
+                algoritmo: a,
+                hex: s(),
+            },
+            Recusa::CaminhoAbsoluto { caminho: s() },
+            Recusa::CaminhoComPai { caminho: s() },
+            Recusa::CaminhoVazio,
+            Recusa::CaminhoInvalido { caminho: s() },
+            Recusa::LinkSaiDaRaiz {
+                caminho: s(),
+                aponta_para: p(),
+            },
+            Recusa::DiscoCheio {
+                usado: 0,
+                pedido: 0,
+                teto: 0,
+            },
+            Recusa::TamanhoAlegadoDiferente {
+                url: s(),
+                declarado: 0,
+                alegado: 0,
+            },
+            Recusa::MaiorQueODeclarado {
+                url: s(),
+                declarado: 0,
+                recebido: 0,
+            },
+            Recusa::MenorQueODeclarado {
+                url: s(),
+                declarado: 0,
+                recebido: 0,
+            },
+            Recusa::HashNaoBate {
+                url: s(),
+                algoritmo: a,
+                esperado: s(),
+                obtido: s(),
+            },
+            Recusa::OrigemRespondeu {
+                url: s(),
+                status: 0,
+            },
+            Recusa::OrigemFalhou {
+                url: s(),
+                motivo: s(),
+            },
+            Recusa::Disco {
+                caminho: p(),
+                motivo: s(),
+            },
+            Recusa::ComandoForaDoAceito {
+                pedido: s(),
+                aceito: None,
+            },
+            Recusa::ArgumentosForaDoAceito {
+                pedidos: vec![],
+                aceitos: vec![],
+            },
+            Recusa::NaoIniciou {
+                comando: p(),
+                motivo: s(),
+            },
+            Recusa::EntradaFechada {
+                processo: 0,
+                motivo: s(),
+            },
+            Recusa::Encerrado,
+            Recusa::DiferenteDoAceito {
+                url: s(),
+                campo: "hash",
+                aceito: s(),
+                pedido: s(),
+            },
+            Recusa::ArtefatoDeOutroSistema { url: s() },
+            Recusa::ForaDosArtefatosAceitos {
+                url: s(),
+                origens: vec![],
+            },
+            Recusa::TextoGrandeDemais {
+                tamanho: 0,
+                teto: 0,
+            },
+            Recusa::FormatoDesconhecido { arquivo: s() },
+            Recusa::PacoteInvalido {
+                arquivo: s(),
+                motivo: s(),
+            },
+            Recusa::NadaSobARaiz {
+                arquivo: s(),
+                raiz: s(),
+            },
+        ];
+        let nomes: Vec<&str> = todas.iter().map(Recusa::nome).collect();
+        assert_eq!(nomes, NOMES_DAS_RECUSAS);
     }
 
     #[test]
