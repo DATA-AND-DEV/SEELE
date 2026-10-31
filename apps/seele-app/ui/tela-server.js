@@ -469,12 +469,8 @@ function desenharIdentidade(snapshot) {
   const frase = $("server-identidade-frase");
   if (!frase) return;
   frase.textContent = foraDeSessao
-    ? "A sua chave é desta máquina e vale em todo servidor. O apelido é de "
-      + "cada servidor: ele fica reservado para a sua chave no dia em que você "
-      + "entra num deles pela primeira vez."
-    : "Neste servidor os apelidos são presos a chaves. O seu ficou reservado "
-      + "para a sua chave no dia em que você entrou pela primeira vez, e "
-      + "ninguém mais consegue usá-lo.";
+    ? "A sua chave é desta máquina e vale em todo servidor. O apelido é de cada servidor."
+    : "Neste servidor o seu apelido é preso à sua chave: ninguém mais consegue usá-lo.";
 }
 
 /**
@@ -1538,9 +1534,7 @@ function desenharAchado(nova) {
   const fronteira = nova.fronteira;
   if (nova.pede_aviso && fronteira?.tipo === "cruza") {
     muda.textContent =
-      `MUDA A VERSÃO DO SERVIDOR: do Servidor ${FRASES_DA_TRAVESSIA.servidor(fronteira.de)} ` +
-      `para o Servidor ${FRASES_DA_TRAVESSIA.servidor(fronteira.para)}. Quem ficar na ${nova.instalada} não ` +
-      `conversa com a ${nova.versao}.` + (nova.adiada ? ` ${FRASES_DA_TRAVESSIA.adiadaAntes}` : "");
+      `MUDA A VERSÃO DO SERVIDOR. Quem ficar na ${nova.instalada} não conversa com a ${nova.versao}.` + (nova.adiada ? ` ${FRASES_DA_TRAVESSIA.adiadaAntes}` : "");
     muda.hidden = false;
   } else if (nova.pede_aviso) {
     muda.textContent = FRASES_DA_TRAVESSIA.naoSabe;
@@ -1590,10 +1584,8 @@ async function contarAAtualizacaoQueNaoPegou() {
   if (!alvo) return;
 
   const frase =
-    `A atualização para a ${alvo} não foi aplicada: o instalador foi aberto e ` +
-    "não terminou. No Windows isso quase sempre é o aviso de permissão do " +
-    "sistema recusado ou fechado. Abra a configuração e tente de novo, " +
-    "respondendo Sim quando o Windows perguntar.";
+    `A atualização para a ${alvo} não foi concluída. ` +
+    "Abra a configuração e tente de novo, respondendo Sim quando o Windows pedir permissão.";
 
   // **Na entrada, e não escondida na configuração.**
   //

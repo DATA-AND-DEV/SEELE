@@ -77,7 +77,7 @@ function fraseDaVersao(falha) {
         : "NÃO HÁ PACOTE DESTA VERSÃO PARA ESTE SISTEMA.";
     }
     if (falha.SemPacoteParaEsteSistema) {
-      return "NÃO HÁ PACOTE DESTA VERSÃO PARA ESTE SISTEMA.\nNo Mac Intel e no Linux, o Servidor 0.15 nunca teve pacote.";
+      return "NÃO HÁ PACOTE DESTA VERSÃO PARA ESTE SISTEMA.";
     }
     if (falha.NaoBaixei) return "O DOWNLOAD NÃO TERMINOU.\nTente de novo.";
     if (falha.PacoteRecusado) {
@@ -101,9 +101,8 @@ function confirmarOutraVersao(servidor, perdeConversas, vaiBaixar) {
   const sim = $("versoes-confirmar-sim");
   const nao = $("versoes-confirmar-nao");
   $("versoes-confirmar-frase").textContent =
-    `Este servidor roda o Servidor ${servidor}. Ele abre noutra janela do SEELE, ` +
-    `com as conversas dele: o que você escreveu aqui não aparece lá, e o que ` +
-    `estiver lá não aparece aqui.` +
+    `Este servidor é de outra versão. Ele abre noutra janela do SEELE, ` +
+    `com as conversas dele. ${CONVERSAS_NAO_PASSAM}` +
     (perdeConversas ? " Nesta máquina ele ainda não tem conversa nenhuma." : "");
   $("versoes-confirmar-estado").textContent = "";
   sim.textContent = vaiBaixar ? "BAIXAR E ABRIR" : "ABRIR";
@@ -432,16 +431,13 @@ async function dizerOQueAPrimeiraAberturaFez() {
   // **Qual versão anterior**: desde a 0.17 a cópia pode ser da 0.16, para o
   // Servidor 1.0 (`Guardados.linha`, do compat). Sem o campo, é a 0.15, como
   // a 0.16 escrevia.
-  const linha = dados.Guardados?.linha ?? dados.NaoGuardei?.linha ?? dados.BancoJaMigrado?.linha ?? "0.15";
-  const [app, servidor] = linha === "1" ? ["0.16", "1.0"] : ["0.15", "0.15"];
   if ("Guardados" in dados) {
     nota.textContent =
-      `As conversas da ${app} ficaram guardadas para o Servidor ${servidor}. O que você ` +
-      "escrever nesta versão não aparece lá, e o que estiver lá não aparece aqui.";
+      `As conversas da versão anterior ficaram guardadas para o servidor antigo. ${CONVERSAS_NAO_PASSAM}`;
     nota.hidden = false;
   } else if ("BancoJaMigrado" in dados || "NaoGuardei" in dados) {
     nota.textContent =
-      `Não deu para guardar as conversas da ${app} para o Servidor ${servidor}: ele vai ` +
+      `Não deu para guardar as conversas da versão anterior para o servidor antigo: ele vai ` +
       "abrir vazio. As conversas continuam aqui, nesta versão.";
     nota.hidden = false;
   }

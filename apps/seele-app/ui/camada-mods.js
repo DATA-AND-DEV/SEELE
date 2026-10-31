@@ -1845,8 +1845,7 @@ async function salvarAlteracoes() {
       : "",
     "Quem está dentro agora cai e precisa aceitar o conjunto novo, no aparelho " +
       "de cada um. Uma vez só, e não uma por MOD.",
-    "Salvar também registra o seu sim nesta máquina para o conjunto resultante — " +
-      "você não vai ser perguntado outra vez pela decisão que acabou de tomar.",
+    "Salvar também registra o seu sim para este conjunto: você não será perguntado de novo.",
   ].filter(Boolean);
 
   abrirConfirmacao(
@@ -1876,9 +1875,7 @@ async function salvarAlteracoes() {
         const mudou = falha?.ConjuntoMudou;
         erro.hidden = false;
         erro.textContent = mudou
-          ? "outra pessoa mudou o conjunto deste servidor enquanto esta tela " +
-            "estava aberta. Nada foi gravado. A lista abaixo já mostra o que " +
-            "está valendo agora — confira o que você queria mudar e salve de novo."
+          ? "O servidor mudou. Nada foi gravado. Confira a lista abaixo e salve de novo."
           : fraseDeErro(falha);
         salvando = false;
         if (mudou) baseDoConjunto = mudou.atual;

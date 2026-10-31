@@ -1,9 +1,9 @@
 # 0.19 — Limpeza de textos: levantamento
 
-Levantamento só de leitura das frases que a pessoa vê em `apps/seele-app/ui/`.
-Nada foi alterado ainda. **Cobertura parcial:** as strings multilinha de
-`tela-sessao.js` e os avisos que vêm do Rust (`snapshot.notice`) ainda não foram
-varridos.
+Levantamento das frases que a pessoa vê em `apps/seele-app/ui/`, com o
+resultado da limpeza no fim (seção «Resultado»). Os números de linha das seções
+A–G são do levantamento; o `index.html` foi redesenhado depois, e os itens dele
+foram achados pelo texto.
 
 Legenda: V = cita versão interna · J = jargão técnico · L = longo · D = repetido.
 
@@ -87,3 +87,73 @@ Legenda: V = cita versão interna · J = jargão técnico · L = longo · D = re
 
 - index.html:4416 — «aperto de mão».
 - Cerca de 20 confirmações de 20 a 25 palavras (index.html; frases.js:2916-3043), dicas de tooltip (index.html:3222, 3281) e o rótulo «OPUS Nk» em tela-sessao.js:3491.
+
+
+## Resultado da limpeza
+
+Legenda: FEITO · MANTIDO (por quê) · ADIADO (API 6: reescrito junto do corte da API 6).
+
+**A. Link no navegador** — FEITO. Um só «ESTE LINK É DE UM SERVIDOR ANTIGO / Abra no app
+do SEELE.» (`SERVIDOR_ANTIGO` em `frases.js`, usado por `servidor-0.15`, `outraLinha`;
+`ponte-web.js` diz o mesmo em minúsculas). Sem STUN, NAT, WebRTC, «furar»; `HandshakeTimeout`
+passou a ser a mesma frase de `AnfitriaoCalado`; `incompleto` e `vencido` encurtados;
+`redeLocal` e `SoPeloEncontro` mantidos. MANTIDO: `SoPeloEncontro` (frases.js ~2447) ainda
+diz «NAT simétrico» e a porta, porque `bancada/link-do-navegador.cjs:112` confere o aviso
+e a porta UDP é o que a pessoa precisa abrir (listado para uma próxima passada).
+
+**B. Atualização e versões** — FEITO: travessia (2 itens, sem WebRTC nem «Servidor 1.0/2.0»),
+aviso de «muda a versão do servidor» (`tela-server.js`), instalador que não terminou,
+linha do Mac Intel/Linux, as três variantes de «o que você escreveu aqui não aparece lá»
+(agora `CONVERSAS_NAO_PASSAM`), «Servidor X» nas notas de conversas guardadas,
+`RECUSA_VERSOES` (ponte-web.js). ADIADO (API 6): `RECUSAS_DE_PACOTE["api-too-old"]`,
+`frases.js` ~843/852 («feito para a API X, que roda no Servidor 0.15», «hospede pelo Servidor
+0.15»), ~1897 («o Servidor 0.15 roda as APIs…»), `camada-mods.js` ~2263. FEITO: textos
+para autor de MOD (`permissoes-pedem-api-nova`, `permissoes-invalidas`, `alcances-demais`,
+`alcance-grande-demais`). MANTIDO: `ESTE SERVIDOR É O SERVIDOR 0.15… use o SEELE 0.15`
+(frases.js ~1052): o número é o remédio (qual versão instalar). MANTIDO: rótulos
+«ABRIR O SERVIDOR X PARA HOSPEDAR» e `data-saida="servidor-0.15"` (seletor de versão,
+bancada os usa). `index.html` «Instalar é opcional»: FEITO.
+
+**C. Voz, microfone e chamada** — FEITO: `nao_abriu_no_prazo` («O ÁUDIO NÃO ABRIU. A conversa
+por escrito funciona; …» — a reafirmação de que o texto funciona é o que o guarda
+`fora_de_sala_a_tela_nao_diz_sem_audio…` protege); «só ouvindo» unificado em
+`FRASE_DO_SO_OUVINDO` (frases.js), usado por `ABERTURA_DO_AUDIO.so_ouvindo` e por
+`pessoal-web-entrada.js` (index.html carrega frases.js antes; a bancada
+`pessoal-web-entrada.cjs` passou a servir `frases.js`); compartilhar (som do SEELE
+na captura, permissão de tela); módulo de vídeo sem «codec»; rótulo CODEC/«OPUS Nk» do rodapé
+virou VOZ/«64k». MANTIDO: o botão inerte «O SEELE já está tentando sozinho…» (explica por que
+não há botão).
+
+**D. Navegador e celular** — FEITO: seis variantes de «só no app» reduzidas a «Disponível só
+no app do SEELE» onde a lista dá o nome do recurso; `compartilhar`, `testeDoMicrofone`,
+`esperaPausa`, «Instalar é opcional».
+
+**E. Moderação, portaria, MODs e cargos** — FEITO: contagem de mensagens («Não foi possível
+contar as mensagens de #canal, e o canal não foi apagado.»), banimento por prazo,
+`ConjuntoMudou` («O servidor mudou. Nada foi gravado.»), confirmação de aplicar MODs, nota
+duplicada de APAGAR MOD removida do `index.html`, firewall (`frases.js`), «EM 6 SEGUNDOS».
+MANTIDO (segurança, guardas pinam): expulsar, banir para sempre («Nenhuma tela deste produto
+desfaz»), mover, apagar sala/canal, ADMITIR/RECUSAR/REVOGAR da portaria (impressão digital e
+«ninguém pergunta de novo»), frases dos cargos (`cargos_ui.rs`).
+
+**F. Perfil e identidade** — FEITO: `tela-server.js` (frase de chave/apelido, 2 variantes) e
+`frases.js` («não guardou o seu apelido»). MANTIDO: `index.html` «Perder a chave cria outra
+identidade; um administrador… precisará devolver seus acessos» (consequência).
+
+**G. Menores** — FEITO: «aperto de mão» → «verificação» (Ajuda), «consentimento que não se
+retira…» removido, «OPUS Nk». NÃO FEITO (por escolha): as ~20 confirmações de 20 a 25 palavras
+e as dicas de tooltip: quase todas dizem a consequência de um ato destrutivo ou de segurança
+(regra 5) e a maioria é pinada por guardas; ficam para uma passada com revisão de UX.
+
+### Achados novos: `tela-sessao.js` e Rust
+
+- `tela-sessao.js`: FEITO — «Dá para estar em um servidor/lugar por vez…» (o porquê) e «O campo do
+  endereço fica vazio…» saíram das confirmações de trocar de servidor/ligar/ir à entrada; a
+  frase de sala acima do limite de subida ficou mais curta. MANTIDO: veredito de impressão
+  digital (primeiro contato, convite que não corresponde, lista guardava outra) — segurança.
+- Rust (`seele-ffi`, `seele-core`, `seele-sessao`, `apps/seele-app/src`): `snapshot.notice`
+  carrega só enums (`NoticeReason`/`AlertReason`), e a frase vem de `frases.js` (já coberta). O
+  `operator_text` é texto de quem opera o servidor, não do produto. Strings do Rust mostradas a
+  pessoas (`main.rs`: regra de firewall do Windows, «Encerre a hospedagem antes de apagar um
+  servidor»; `servidores.rs`) já são uma frase do fato e uma do que fazer: MANTIDAS, nenhum
+  arquivo Rust alterado.

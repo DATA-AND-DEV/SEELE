@@ -92,7 +92,7 @@ const RECUSA_HOSPEDAR = "hospedar é do app do SEELE: o navegador não hospeda";
 const RECUSA_PORTARIA = "a portaria mora no app de quem hospeda este servidor";
 const RECUSA_REDE = "o navegador não abre porta nem aceita conexão de entrada";
 const RECUSA_MODS = "MODs se instalam, se ligam e se aplicam pelo app do SEELE que hospeda o servidor";
-const RECUSA_VERSOES = "as versões do servidor moram no app do SEELE: esta página fala só o Servidor 2.0";
+const RECUSA_VERSOES = "as versões do servidor moram no app do SEELE";
 const RECUSA_ATUALIZAR = "a versão é a desta página: não há o que instalar";
 const RECUSA_SISTEMA = "a página não abre os ajustes do sistema";
 const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica é ele";
@@ -609,11 +609,11 @@ const entradaEmCurso = { cancelar: null };
 const FRASES_DO_LINK = Object.freeze({
   DominioDescontinuado: "Este endereço foi aposentado. Peça um novo convite.",
   OutraOrigem: "este não é um link do navegador para o SEELE: peça a quem hospeda o link do navegador",
-  // Na 0.17 o navegador fala só o Servidor 2.0: um link da 0.16 ou de antes
+  // O navegador fala só a linha atual do servidor: um link de uma antiga
   // chega como `OutraLinha` (`seele_proto::uri::ErroDoNavegador`), e não mais
   // como falta de hashes.
   OutraLinha:
-    "este link é de um servidor de uma versão anterior do SEELE (0.16 ou antes), que o navegador não abre: abra-o no app do SEELE, que abre a versão certa ao lado",
+    "este link é de um servidor antigo: abra no app do SEELE",
   SemFragmento: "o link chegou sem o servidor: copie-o de novo, inteiro",
   ConsultaForaDoFragmento: "o link chegou partido: copie-o de novo, inteiro",
   SemImpressaoDigital: "o link chegou sem a impressão do servidor: copie-o de novo, inteiro",

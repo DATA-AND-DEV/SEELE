@@ -18501,8 +18501,8 @@ fn entrada_da_abertura(dicionario: &str, nome: &str) -> String {
 /// nenhuma das três a escreve por conta própria.
 #[test]
 fn fora_de_sala_a_tela_nao_diz_sem_audio_e_a_frase_de_quando_nao_abriu_sai_do_estado() {
-    const FRASE: &str = "O ÁUDIO NÃO ABRIU A TEMPO. A conversa por escrito já funciona; \
-                         para tentar a voz de novo, saia da sala e entre de novo.";
+    const FRASE: &str = "O ÁUDIO NÃO ABRIU. A conversa por escrito funciona; \
+                         para tentar a voz, saia da sala e entre de novo.";
     let frases = read("ui/frases.js");
     let dicionario = js_function(&frases, "const ABERTURA_DO_AUDIO = ");
 

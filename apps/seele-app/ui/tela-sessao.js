@@ -596,8 +596,8 @@ function desenhar(snapshot) {
   // Os alertas da sala e da conexão comparam este quadro com o de antes, e por
   // isso vêm antes de `desenhado` ser trocado: o primeiro quadro da sessão (e
   // o seguinte à troca de sessão, que zera `desenhado`) não têm anterior.
-  alertasSonoros.notarSala(desenhado, snapshot);
-  alertasSonoros.notarEnlace(desenhado, snapshot);
+  globalThis.alertasSonoros?.notarSala(desenhado, snapshot);
+  globalThis.alertasSonoros?.notarEnlace(desenhado, snapshot);
   desenhado = snapshot;
   // Com os nós de MOD já recolocados: o som do que saiu da tela — a pessoa que
   // saiu da sala, o canal que sumiu — para, como o `<audio>` parava. Ver
@@ -3550,7 +3550,7 @@ function desenharTelemetria(snapshot) {
   medido(
     $("tel-codec"),
     snapshot.audio_available
-      ? `OPUS ${Math.round(tel.bitrate_bps / 1000)}k`
+      ? `${Math.round(tel.bitrate_bps / 1000)}k`
       : (ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.rodape ?? SEM_MEDIDA),
   );
 
@@ -3720,7 +3720,7 @@ function fraseDoAviso(motivo) {
         : "";
     return (
       `${frase}.${numeros} Ninguém foi barrado, mas a voz pode picar para todos: ` +
-      "menos gente falando junto, ou o servidor numa internet que envie mais, resolve."
+      "com menos gente falando junto, ou numa internet mais rápida, ela melhora."
     );
   }
   // O que se pediu, por que não deu e o que fazer: ver `fraseDoPedidoRecusado`.
@@ -4713,8 +4713,7 @@ function oMeuServidorContinua(daqui) {
  */
 function consequenciaDeTrocar(daqui, ate, noMeuServidor) {
   const comum =
-    `Você sai de ${daqui} agora, no meio do que estiver fazendo, e entra em ${ate}.\n` +
-    "Dá para estar em um servidor por vez: entrar em outro é sair deste.";
+    `Você sai de ${daqui} agora, no meio do que estiver fazendo, e entra em ${ate}.`;
   if (!noMeuServidor) return comum;
   return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
@@ -4727,7 +4726,7 @@ function consequenciaDeTrocar(daqui, ate, noMeuServidor) {
 function consequenciaDeLigar(daqui, para, noMeuServidor) {
   const comum =
     `Ligar para ${para} sai de ${daqui} agora, no meio do que estiver fazendo.\n` +
-    "Dá para estar em um lugar por vez: a ligação é numa sala só sua e de quem atender.";
+    "A ligação é numa sala só sua e de quem atender.";
   if (!noMeuServidor) return comum;
   return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
@@ -4736,8 +4735,7 @@ function consequenciaDeLigar(daqui, para, noMeuServidor) {
 function consequenciaDeIrParaAEntrada(daqui, noMeuServidor) {
   const comum =
     `Você sai de ${daqui} agora, no meio do que estiver fazendo, e volta à tela ` +
-    "de entrada sem estar em servidor nenhum.\n" +
-    "O campo do endereço fica vazio, esperando o do servidor novo.";
+    "de entrada sem estar em servidor nenhum.";
   if (!noMeuServidor) return comum;
   return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }

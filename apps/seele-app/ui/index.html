@@ -2218,7 +2218,7 @@
     <span class="metrica"><b class="rotulo">ATRASO</b> <span id="tel-rtt">·</span></span>
     <span class="metrica"><b class="rotulo">JITTER</b> <span id="tel-jit">·</span></span>
     <span class="metrica"><b class="rotulo">DISTÚRBIO</b> <span id="tel-loss">·</span></span>
-    <span class="metrica"><b class="rotulo">CODEC</b> <span id="tel-codec">·</span></span>
+    <span class="metrica"><b class="rotulo">VOZ</b> <span id="tel-codec">·</span></span>
     <span class="metrica"><b class="rotulo">UPTIME</b> <span id="tel-uptime">·</span></span>
     <span class="metrica"><b class="rotulo">SALA</b> <span id="tel-voice_room">·</span></span>
     <!--
@@ -3837,7 +3837,6 @@
                   não é de nenhum MOD: é da janela.
                 -->
                 <p id="sessao-contadores" class="nota" role="status"></p>
-                <p class="nota">Apaga o pacote local. Os dados do MOD permanecem no servidor.</p>
               </div>
             </div>
           </div>
@@ -3854,8 +3853,7 @@
               <div class="server-campo">
                 <ul id="lista-aceites" class="server-dispositivos mods-rolagem"></ul>
                 <p class="nota">Desfazer um sim faz a lista de MODs daquele
-                  servidor ser perguntada de novo na próxima entrada. Um
-                  consentimento que não se retira não é consentimento.</p>
+                  servidor ser perguntada de novo na próxima entrada.</p>
               </div>
             </div>
           </div>
@@ -4586,7 +4584,7 @@
           <dt class="ajuda-termo">SINAL</dt>
           <dd class="ajuda-diz">Quanto da sua voz está chegando inteira do outro lado.</dd>
           <dt class="ajuda-termo">CONEXÃO SEGURA</dt>
-          <dd class="ajuda-diz">O aperto de mão foi até o fim: o caminho é cifrado e a chave do servidor confere.</dd>
+          <dd class="ajuda-diz">A verificação foi até o fim: o caminho é cifrado e a chave do servidor confere.</dd>
           <!--
             A frase da faixa que acende ao entrar numa sala de voz, igual a
             `AVISO_DE_FONE` de `frases.js`. A faixa se fecha e não volta nesta
@@ -4693,8 +4691,7 @@
       <div id="compartilhar-modulo" class="compartilhar-modulo" hidden>
         <p class="compartilhar-modulo-diz">FALTA O MÓDULO DE VÍDEO.</p>
         <p class="nota">
-          Baixe o módulo de vídeo do Cisco para compartilhar. O download é
-          feito uma vez; o módulo permanece nesta máquina nas próximas atualizações.
+          Baixe o módulo de vídeo do Cisco para compartilhar. O download é feito uma vez.
         </p>
         <p id="compartilhar-modulo-onde" class="compartilhar-modulo-onde"></p>
         <button id="compartilhar-baixar" class="botao" type="button">BAIXAR O MÓDULO</button>

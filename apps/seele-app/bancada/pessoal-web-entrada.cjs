@@ -8,9 +8,9 @@ const engines = require('./playwright.cjs');
 const ui = path.resolve(__dirname, '../ui');
 (async () => {
   const server = http.createServer((req, res) => {
-    if (req.url === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end('<!doctype html><meta name="viewport" content="width=device-width"><button id="boot-conversa-pessoal" hidden>CONVERSAR POR LINK</button><span id="boot-perfil-nome">Pessoa</span><script src="/glifos.js"></script><script src="/pessoal-web.js"></script><script src="/pessoal-web-entrada.js"></script>'); return; }
+    if (req.url === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end('<!doctype html><meta name="viewport" content="width=device-width"><button id="boot-conversa-pessoal" hidden>CONVERSAR POR LINK</button><span id="boot-perfil-nome">Pessoa</span><script src="/glifos.js"></script><script src="/frases.js"></script><script src="/alertas-sonoros.js"></script><script src="/pessoal-web.js"></script><script src="/pessoal-web-entrada.js"></script>'); return; }
     const nome = req.url.slice(1);
-    if (!['glifos.js','pessoal-web.js','pessoal-web-entrada.js'].includes(nome)) { res.statusCode = 404; res.end(); return; }
+    if (!["glifos.js","frases.js","alertas-sonoros.js","pessoal-web.js","pessoal-web-entrada.js"].includes(nome)) { res.statusCode = 404; res.end(); return; }
     res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); res.end(fs.readFileSync(path.join(ui, nome)));
   });
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -110,19 +110,32 @@ const ui = path.resolve(__dirname, '../ui');
       await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).click();
       await page.evaluate(() => callbacksDaChamada.aoEstado({ estado: 'tocando', apelido: 'Par' }));
       assert.equal(await page.getByLabel('Seu nome', { exact: true }).inputValue(), 'Nome escolhido', 'receber a chamada não troca o nome escolhido pelo perfil padrão');
-      assert.equal(await page.evaluate(() => prova.capturas), 0, 'tocar/aceitar não solicita captura antes do botão de microfone');
+      // 0.19: entrar na conversa pede o microfone NO GESTO (o teste no Chrome do
+      // Android: a pessoa entrava e ficava sem falar até achar o botão).
+      const capturasAntes = await page.evaluate(() => prova.capturas);
+      await page.getByRole('button', { name: 'ATENDER', exact: true }).click();
+      assert.equal(await page.evaluate(() => prova.capturas), capturasAntes + 1, 'atender a conversa não pediu o microfone no gesto');
       await page.evaluate(() => {
         callbacksDaChamada.aoEstado({ estado: 'dentro', papel: 'quem-recebe' });
         callbacksDaChamada.aoPar({ transporteDaVoz: {}, tela: {}, abortar() {} }, { papel: 'quem-recebe' });
       });
       await page.waitForFunction(() => prova.liberouFoco === 1 && prova.entrouVoz === 1);
-      assert.equal(await page.evaluate(() => prova.capturas), 0, 'a escuta não deve pedir microfone');
+      // A escuta entra antes da permissão; o microfone espera por ela, sem pedir outra captura.
+      assert.equal(await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).count(), 0, 'o microfone apareceu ligado antes da permissão');
+      await page.evaluate(() => permitirMicrofone());
+      await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).waitFor({ state: 'visible' });
+      assert.equal(await page.evaluate(() => prova.capturas), capturasAntes + 1, 'o par que chegou pediu outra captura');
+      assert.equal(await page.evaluate(() => prova.trilhasVivas), 1, 'a permissão do gesto não ligou o microfone');
+      assert.equal(await page.evaluate(() => prova.entrouVoz), 2, 'o microfone do gesto não entrou na voz');
+      // Desligar pelo botão volta ao caminho de sempre: o resto da bancada parte do microfone fechado.
+      await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).click();
+      await page.waitForFunction(() => prova.calou === 1);
       const fechamentosAntes = await page.evaluate(() => prova.fechouVoz);
       // IPC de foco falha antes da permissão: cancela captura pendente sem
       // interromper a reprodução e sem promessa rejeitada sem dono.
       await page.evaluate(() => prova.falharFoco = true);
       await page.getByRole('button', { name: 'LIGAR MICROFONE' }).click();
-      await page.waitForFunction(() => prova.calou === 1);
+      await page.waitForFunction(() => prova.calou === 2);
       await page.evaluate(() => permitirMicrofone());
       assert.equal(await page.evaluate(() => prova.trilhasVivas), 0);
       assert.equal(await page.evaluate(() => prova.fechouVoz), fechamentosAntes);
@@ -130,15 +143,15 @@ const ui = path.resolve(__dirname, '../ui');
       await page.getByRole('button', { name: 'LIGAR MICROFONE' }).click();
       await page.waitForFunction(() => typeof permitirFoco === 'function');
       await page.evaluate(() => recusarMicrofone());
-      await page.waitForFunction(() => prova.calou === 2);
+      await page.waitForFunction(() => prova.calou === 3);
       await page.evaluate(() => { permitirFoco(); prova.esperarFoco = false; });
       assert.deepEqual(await page.evaluate(() => prova.rejeicoes), []);
       await page.getByRole('button', { name: 'LIGAR MICROFONE' }).click();
-      await page.waitForFunction(() => prova.capturas === 3);
+      await page.waitForFunction(base => prova.capturas === base + 4, capturasAntes);
       await page.getByRole('button', { name: 'SAIR DA CONVERSA' }).click();
       await page.evaluate(() => permitirMicrofone());
       await page.waitForFunction(base => prova.fechouVoz >= base + 2, fechamentosAntes);
-      assert.equal(await page.evaluate(() => prova.entrouVoz), 1, 'a permissão tardia reabriu voz após sair');
+      assert.equal(await page.evaluate(() => prova.entrouVoz), 2, 'a permissão tardia reabriu voz após sair');
       assert.ok(await page.evaluate(() => prova.fechouTela >= 1));
       assert.equal(await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).count(), 0);
       const antesDeSuspender = await page.evaluate(() => ({ destruiu: prova.destruiu, recebeu: prova.recebeu }));
@@ -146,8 +159,8 @@ const ui = path.resolve(__dirname, '../ui');
       await page.waitForFunction(base => prova.destruiu > base, antesDeSuspender.destruiu);
       await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
       await page.waitForFunction(base => prova.recebeu > base, antesDeSuspender.recebeu);
-      assert.equal(await page.evaluate(() => prova.capturas), 3, 'BFCache não reabre microfone');
-      console.log(`${engine}: criação/entrada recusadas visíveis, cliques pendentes bloqueados, cancelamento, foco recusado, captura recusada, permissão tardia, saída e BFCache PASS`);
+      assert.equal(await page.evaluate(() => prova.capturas), capturasAntes + 4, 'BFCache não reabre microfone');
+      console.log(`${engine}: criação/entrada recusadas visíveis, cliques pendentes bloqueados, microfone pedido no gesto e ligado com o par, cancelamento, foco recusado, captura recusada, permissão tardia, saída e BFCache PASS`);
     } finally { await browser.close(); }
   } } finally { server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

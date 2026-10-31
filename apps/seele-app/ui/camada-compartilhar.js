@@ -231,9 +231,7 @@ const PERMISSAO_DE_TELA = {
     // (ver `mostrarPermissao`), então marcação aparece literal na tela. Foi o
     // que aconteceu aqui.
     nota:
-      "O sistema pergunta uma vez. Se você recusar, a volta é pelos ajustes " +
-      "dele — e depois de marcar lá, feche e abra o SEELE, ou ele continua " +
-      "achando que não tem permissão.",
+      "O sistema pergunta uma vez. Se você recusar, marque o SEELE nos ajustes dele e reabra o app.",
     pedir: true,
   },
   // Esta compilação não tem como perguntar ao sistema. A chamada nem desenha o
@@ -249,10 +247,8 @@ const PERMISSAO_DE_TELA = {
   Negada: {
     diz: "O SISTEMA NEGOU A GRAVAÇÃO DE TELA",
     nota:
-      "No macOS ele não pergunta de novo: abra Ajustes do Sistema · " +
-      "Privacidade e Segurança · Gravação de Tela, marque o SEELE e reabra o " +
-      "app. No Linux quem decide é o compositor, e ele pergunta de novo na " +
-      "próxima tentativa.",
+      "No macOS, abra Ajustes do Sistema · Privacidade e Segurança · Gravação de Tela, " +
+      "marque o SEELE e reabra o app. No Linux, ele pergunta de novo na próxima tentativa.",
     pedir: false,
   },
 };
@@ -604,9 +600,8 @@ async function desenharSomDaCaptura() {
   if (dito === "NaoExcluido") {
     aviso.dataset.exclusao = "nao";
     aviso.textContent =
-      "Neste sistema a captura leva o som da saída inteira — a conversa do " +
-      "SEELE junto. Quem estiver falando vai se ouvir de volta. Duas saídas: " +
-      "compartilhe uma janela em vez do monitor, ou desmarque INCLUIR SOM.";
+      "A captura inclui o som do SEELE, e quem fala vai se ouvir de volta. " +
+      "Compartilhe só uma janela ou desmarque INCLUIR SOM.";
     return;
   }
   // `SemCaptura`, ou a pergunta falhou. Nos dois casos não há o que prometer, e

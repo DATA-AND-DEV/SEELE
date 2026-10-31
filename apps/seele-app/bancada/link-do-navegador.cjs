@@ -109,7 +109,8 @@ const LINK = 'https://' + ORIGEM + '/#203.0.113.7:8383?fp=' + 'ab'.repeat(32) + 
     // Na 0.17 o navegador também passa pelo ponto de encontro (D7): o aviso
     // diz que quem está fora entra por ele, e o caso em que o caminho não abre.
     assert.match(tela.aviso ?? '', /ENTRA PELO PONTO DE ENCONTRO/, `o aviso não diz por onde quem está fora entra: ${tela.aviso}`);
-    assert.match(tela.aviso, /NAT simétrico/, `o aviso não diz quando o caminho pode não abrir: ${tela.aviso}`);
+    assert.match(tela.aviso, /mudam o endereço a cada destino/, `o aviso não diz quando o caminho pode não abrir: ${tela.aviso}`);
+    assert.doesNotMatch(tela.aviso, /NAT/, `o aviso voltou a falar em NAT, jargão que a 0.19 tirou da tela: ${tela.aviso}`);
     assert.doesNotMatch(tela.aviso, /não usa o encontro/, `o aviso repete a frase da 0.16, falsa na 0.17: ${tela.aviso}`);
     assert.match(tela.aviso, /porta UDP 8383/, `o aviso não diz qual porta abrir: ${tela.aviso}`);
     assert.match(tela.aviso, /IPv6/, `o aviso não oferece o IPv6: ${tela.aviso}`);

@@ -601,8 +601,7 @@ function consequenciaDeBanir(quem, ate) {
   }
   return (
     comum +
-    `A barreira cai sozinha em ${new Date(ate * 1000).toLocaleString()}, pelo relógio ` +
-    "deste computador — depois disso a pessoa entra de novo sem que ninguém faça nada."
+    `A barreira cai sozinha em ${new Date(ate * 1000).toLocaleString()}; depois disso a pessoa entra de novo.`
   );
 }
 
@@ -813,10 +812,7 @@ $("lista-linhas").addEventListener("click", async (evento) => {
   } catch (falha) {
     abrirRecusa(
       `APAGAR O CANAL #${linha.name} ?`,
-      `Não consegui contar o que há dentro de #${linha.name}, então não vou ` +
-        `perguntar se você quer apagá-lo.\n` +
-        `Esta caixa existe para dizer quantas mensagens, de quanta gente e ` +
-        `desde quando — e um número inventado seria pior que nenhum.\n` +
+      `Não foi possível contar as mensagens de #${linha.name}, e o canal não foi apagado.\n` +
         `${fraseDeErro(falha)}`,
     );
     return;

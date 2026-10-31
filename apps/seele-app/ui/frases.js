@@ -379,6 +379,13 @@ const PERMISSAO_DE_MICROFONE = {
 };
 
 /**
+ * O «só ouvindo»: a saída abriu e o microfone não. A mesma frase na sala (aqui) e
+ * na conversa por link (`pessoal-web-entrada.js`, carregado depois deste).
+ */
+const FRASE_DO_SO_OUVINDO =
+  "O MICROFONE NÃO ABRIU. Você ouve, mas ninguém ouve você. Libere o microfone para este site no navegador e entre de novo.";
+
+/**
  * O que a tela diz sobre a abertura do áudio, por estado. Pendência 52.
  *
  * Os nomes vêm de `seele_ffi::AberturaDoAudio`, como o serde os escreve. Na
@@ -423,14 +430,14 @@ const ABERTURA_DO_AUDIO = {
   nao_abriu_no_prazo: {
     rodape: "SEM ÁUDIO",
     medidor: "— SEM ÁUDIO NESTA SALA",
-    frase: "O ÁUDIO NÃO ABRIU A TEMPO. A conversa por escrito já funciona; para tentar a voz de novo, saia da sala e entre de novo.",
+    frase: "O ÁUDIO NÃO ABRIU. A conversa por escrito funciona; para tentar a voz, saia da sala e entre de novo.",
   },
   // **Ouvindo, sem o microfone** (0.19): a saída abriu e a captura não. A
   // pessoa ouve a sala; a frase diz que ninguém a ouve e o que fazer.
   so_ouvindo: {
     rodape: "SÓ OUVINDO",
     medidor: "— MICROFONE FECHADO",
-    frase: "O MICROFONE NÃO ABRIU. Você ouve a sala, mas ninguém ouve você. Libere o microfone para este site no navegador, saia da sala e entre de novo.",
+    frase: FRASE_DO_SO_OUVINDO,
   },
   // **A voz está noutra sessão** (E3 da 0.17; fronteiras.md §5). Um microfone
   // por máquina, e ele está com outro servidor: nada aqui abre aparelho, nada
@@ -704,9 +711,9 @@ const RECUSAS_DE_PACOTE = {
   // A API 7 (0.17; `Refused::PermissoesPedemApiNova` e `PermissoesInvalidas`,
   // `refusal_name` no seele-sessao): as permissões de MOD dos cargos.
   "permissoes-pedem-api-nova":
-    "ele declara permissões de cargos, que só existem a partir da API 7, mas diz ser de uma API anterior; quem publica precisa declarar a API 7",
+    "ele declara permissões de cargos, mas diz ser de uma API anterior à 7; quem publica precisa declarar a API 7",
   "permissoes-invalidas":
-    "a lista de permissões que ele declara não passa na conferência (nome repetido, vazio ou fora do formato); quem publica precisa corrigi-la",
+    "a lista de permissões que ele declara é inválida (nome repetido, vazio ou fora do formato); quem publica precisa corrigi-la",
   "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API 6 ou 7, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
@@ -716,9 +723,9 @@ const RECUSAS_DE_PACOTE = {
   // Os tetos do `reach` no anúncio da linha 2 (`Refused::AlcancesDemais` e
   // `AlcanceGrandeDemais`, `refusal_name` no seele-sessao).
   "alcances-demais":
-    "ele declara mais itens de alcance do que o anúncio do servidor leva (até 16); quem publica precisa juntar alguns",
+    "ele declara mais de 16 itens de alcance; quem publica precisa juntar alguns",
   "alcance-grande-demais":
-    "um item do alcance que ele declara passa de 48 bytes, o tamanho que o anúncio do servidor leva; quem publica precisa encurtá-lo",
+    "um item de alcance dele passa de 48 bytes; quem publica precisa encurtá-lo",
 };
 
 const NOMES_RECUSADOS = {
@@ -1379,8 +1386,7 @@ const FRASES = {
     // da internet» sem número é uma difícil.
     ScreenModuleMissing:
       "FALTA O MÓDULO DE VÍDEO.\n" +
-      "Este app captura a tela, e o codec que comprime a imagem não vem junto: " +
-      "a licença dele não deixa. São cerca de 1 MB, baixados uma vez.",
+      "Baixe o módulo de vídeo para compartilhar a tela. São cerca de 1 MB, uma vez só.",
 
     // Por que um texto colado não é um convite. O Rust devolve o nome da
     // falha; a frase é daqui, como todas as outras.
@@ -1927,9 +1933,8 @@ const FRASES_DA_TRAVESSIA = Object.freeze({
   tituloNaoSabe: "NÃO DÁ PARA SABER SE ESTA VERSÃO CONVERSA COM A SUA",
   resumo: (instalada, versao) => `Da ${instalada} para a ${versao}. Leia antes de instalar: isto não se desfaz pelo botão de atualizar.`,
   itens: (instalada, versao, de, para) => [
-    `A ${versao} fala o Servidor ${para}, que usa outra conexão (WebRTC). Ela não conversa com a ${instalada} nem com as versões anteriores.`,
-    `Quem ficar na ${instalada} não entra nos servidores da ${versao}; e, por esta janela, você deixa de entrar nos servidores da ${instalada} (Servidor ${de}).`,
-    `A ${instalada} continua disponível: o SEELE a guarda ao lado e a abre sozinho quando um link ou um servidor pedir o Servidor ${de}.`,
+    `A ${versao} não conversa com a ${instalada} nem com as anteriores: quem ficar na ${instalada} não entra nos servidores da ${versao}, e por esta janela você deixa de entrar nos da ${instalada}.`,
+    `A ${instalada} continua guardada: o SEELE a abre sozinho quando um link ou um servidor pedir.`,
   ],
   conversas: (n) => (n === 1
     ? "A conversa aberta agora cai com a troca."
@@ -2289,7 +2294,7 @@ const SALA_PESSOAL = Object.freeze({
    * vem antes desta, que diz para que serve a 8385.
    */
   firewall:
-    "A porta 8385 é a da sua sala: é por ela que quem liga pelo seu código entra. Sem a regra, quem liga de fora da sua rede pode não chegar.",
+    "A porta 8385 é por onde quem liga pelo seu código entra. Sem a regra de firewall, quem liga de fora da sua rede pode não chegar.",
   abrirAPorta: "ABRIR A PORTA AGORA",
 
   /** A faixa `#toque`: o apelido entre aspas, porque é o que a pessoa diz. */
@@ -2444,7 +2449,7 @@ const LINK_DO_NAVEGADOR = Object.freeze({
     // caminho pode não abrir entre duas redes do tipo que muda o endereço.
     SoPeloEncontro: (porta) =>
       "QUEM ESTÁ FORA DA SUA REDE ENTRA PELO PONTO DE ENCONTRO, como pelo convite.\n" +
-      "Entre duas redes que mudam o endereço a cada destino (NAT simétrico), o caminho pode não abrir. " +
+      "Entre duas redes que mudam o endereço a cada destino, o caminho pode não abrir. " +
       `Para garantir, abra a porta UDP ${porta} no roteador, ou ligue o IPv6 nele, se o seu provedor oferecer.`,
     SoNaRede: () => "COMO O CONVITE, ESTE LINK SÓ FUNCIONA NA SUA REDE.",
     // Só 127.0.0.1: o navegador de outro aparelho não chega, nem na sua rede.
@@ -2507,14 +2512,14 @@ const AVISO_DE_FONE_CELULAR = "";
  * põe o link para baixar o app ao lado da frase.
  */
 const SO_NO_APP_DO_SEELE = (aparelho) => Object.freeze({
-  hospedar: ["HOSPEDAR UM SERVIDOR", "Pôr um servidor no ar, o link de convite, a porta e o firewall ficam no app do SEELE, instalado num computador.", true],
-  portaria: ["A PORTARIA DO SEU SERVIDOR", "Aprovar quem bate, a senha e os convites ficam no app do SEELE que hospeda o servidor."],
-  mods: ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar, desligar e aplicar MODs no servidor é de quem hospeda, pelo app do SEELE."],
-  pacotes: ["PACOTES DE MOD", "O espaço que os pacotes ocupam, as revisões guardadas e o APAGAR ficam no app do SEELE."],
-  codigo: ["LIGAR PELO CÓDIGO", "Ligar pelo código é pelo app do SEELE: o navegador não abre o caminho que a ligação usa."],
-  receber: ["RECEBER LIGAÇÕES PELO SEU CÓDIGO", "Receber ligações pelo SEU CÓDIGO é pelo app do SEELE: quem recebe a ligação a hospeda, e o navegador não hospeda."],
-  versoes: ["VERSÕES LADO A LADO", "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE."],
-  telaEntrePessoas: ["A TELA ENTRE PESSOAS", `No navegador, a tela de quem transmite vem sempre pelo servidor, e ${aparelho} não a repassa a ninguém.`],
+  hospedar: ["HOSPEDAR UM SERVIDOR", "Disponível só no app do SEELE, instalado num computador.", true],
+  portaria: ["A PORTARIA DO SEU SERVIDOR", "Disponível só no app do SEELE de quem hospeda: aprovar quem bate, a senha e os convites."],
+  mods: ["INSTALAR E LIGAR MODS", "Disponível só no app do SEELE de quem hospeda: instalar, ligar, desligar e aplicar MODs."],
+  pacotes: ["PACOTES DE MOD", "Disponível só no app do SEELE."],
+  codigo: ["LIGAR PELO CÓDIGO", "Disponível só no app do SEELE."],
+  receber: ["RECEBER LIGAÇÕES PELO SEU CÓDIGO", "Disponível só no app do SEELE."],
+  versoes: ["VERSÕES LADO A LADO", "O navegador abre a versão que o link pede. Guardar e abrir outras versões: disponível só no app do SEELE."],
+  telaEntrePessoas: ["A TELA ENTRE PESSOAS", `No navegador, a tela de quem transmite vem só pelo servidor: ${aparelho} não a repassa a ninguém.`],
 });
 
 /** O que é pelo SEELE no computador: a outra metade da lista do celular. */
@@ -2522,9 +2527,21 @@ const NO_COMPUTADOR = Object.freeze({
   moderar: ["MODERAR", "Expulsar, banir, mover pessoas e remover mensagens de outros é pelo SEELE no computador."],
   salasECanais: ["SALAS E CANAIS", "Criar, renomear e apagar salas de voz e canais é pelo SEELE no computador."],
   nomeEImagem: ["NOME E IMAGEM DO SERVIDOR", "Pelo SEELE no computador. A aparência do servidor se edita aqui, em ESTE SERVIDOR."],
-  compartilhar: ["COMPARTILHAR A TELA", "O navegador do celular não grava a tela. Compartilhar é pelo SEELE no computador, e a tela de quem compartilhar aparece na chamada."],
-  testeDoMicrofone: ["TESTAR O MICROFONE FORA DE SALA", "O microfone do celular só abre numa sala de voz. Testar e ouvir a própria voz fora de sala é pelo SEELE no computador."],
+  compartilhar: ["COMPARTILHAR A TELA", "Compartilhar é pelo SEELE no computador. A tela de quem compartilha aparece na chamada."],
+  testeDoMicrofone: ["TESTAR O MICROFONE FORA DE SALA", "Fora de sala, o teste é pelo SEELE no computador. O celular só abre o microfone numa sala de voz."],
   saidaDeSom: ["ESCOLHER A SAÍDA DE SOM", "O navegador do celular não escolhe a saída: troque entre fone, Bluetooth e alto-falante pelo controle de som do celular."],
+});
+
+/**
+ * O que acontece com as conversas quando um servidor de outra versão abre noutra
+ * janela do SEELE: uma frase só, para as três telas que a dizem.
+ */
+const CONVERSAS_NAO_PASSAM = "O que você escreveu aqui não aparece lá, e o que estiver lá não aparece aqui.";
+
+/** O link de um servidor antigo: uma frase só, no cartão do link e na falha. */
+const SERVIDOR_ANTIGO = Object.freeze({
+  titulo: "ESTE LINK É DE UM SERVIDOR ANTIGO",
+  corpo: "Abra no app do SEELE.",
 });
 
 const FRASES_DO_CELULAR = Object.freeze({
@@ -2703,7 +2720,7 @@ const FRASES_DO_CELULAR = Object.freeze({
       "numa-aba": Object.freeze({
         titulo: "ENTRAR NESTA ABA",
         comoInstalar: "Como instalar (opcional)",
-        corpo: "Instalar é opcional. Sua identidade nesta aba pode ser diferente da Tela de Início; mudar entre os dois pode pedir um novo convite.",
+        corpo: "Sua identidade nesta aba pode ser diferente da Tela de Início; mudar entre os dois pode pedir um novo convite.",
         passos: Object.freeze(["Se preferir instalar: Compartilhar, Adicionar à Tela de Início.", "Abra pelo ícone e cole este link antes de usá-lo nesta aba."]),
         copiar: "COPIAR O LINK",
         copiado: "LINK COPIADO. Cole na tela de início do SEELE instalado.",
@@ -2712,15 +2729,15 @@ const FRASES_DO_CELULAR = Object.freeze({
       }),
       vencido: Object.freeze({
         titulo: (data) => `ESTE LINK VENCEU EM ${data}`,
-        corpo: "O navegador só abre a conexão com o certificado que o link anuncia, e ele expirou. Peça um link novo a quem hospeda.",
+        corpo: "Peça um link novo a quem hospeda.",
       }),
       "servidor-0.15": Object.freeze({
-        titulo: "ESTE LINK É DE UM SERVIDOR 0.15",
-        corpo: "O navegador entra só no Servidor 2.0, o do SEELE 0.17. Abra o link no app do SEELE, que abre a versão certa ao lado, ou peça a quem hospeda o Servidor 2.0.",
+        titulo: SERVIDOR_ANTIGO.titulo,
+        corpo: SERVIDOR_ANTIGO.corpo,
       }),
       incompleto: Object.freeze({
         titulo: "LINK INCOMPLETO",
-        corpo: "Falta a impressão do servidor ou o certificado do navegador. Sem os dois não há como conferir quem responde, e o navegador não abre a conexão. Peça o link de novo, copiado inteiro.",
+        corpo: "Faltam dados do servidor, e sem eles não há como conferir quem responde. Peça o link de novo, copiado inteiro.",
       }),
       "outra-origem": Object.freeze({
         titulo: "ESTE LINK É DE OUTRA PÁGINA DO SEELE",
@@ -2757,7 +2774,7 @@ const FRASES_DO_CELULAR = Object.freeze({
       // Um servidor da lista cujo apelido este aparelho não guardou: a entrada
       // não conecta com o nome vazio, e pede o apelido no mesmo campo da «ENTRAR EM».
       "pede-apelido": Object.freeze(["ESCOLHA UM APELIDO PARA ENTRAR",
-        "Este aparelho não guardou o apelido que você usava neste servidor. Digite o que quer usar e toque ENTRAR: a sua chave é a mesma."]),
+        "Este aparelho não guardou o seu apelido neste servidor. Digite o que quer usar e toque ENTRAR: a sua chave é a mesma."]),
       // Os hashes guardados de um servidor deste aparelho venceram (os
       // certificados do navegador são curtos), e a sessão não trouxe novos.
       "link-vencido": Object.freeze(["O LINK DESTE SERVIDOR VENCEU",
@@ -2771,7 +2788,7 @@ const FRASES_DO_CELULAR = Object.freeze({
     }),
     conectando: "CONECTANDO A",
     // Na espera da portaria, o que o celular faz com ela (spec §2.1).
-    esperaPausa: "Com esta página fora da tela, em outro app ou com a tela apagada, a verificação para, e volta quando você volta a ela.",
+    esperaPausa: "Com a página fora da tela, a verificação para e volta quando você volta.",
     // O registro e o anúncio da entrada sem o aperto (D-celular-3, P11).
     entradaDireta: Object.freeze({
       registro: "IMPRESSÃO CONFERIDA NA ENTRADA — ENTRANDO",
@@ -2820,12 +2837,8 @@ const FRASES_DO_TRANSPORTE = Object.freeze({
     // O texto é da ui-ux (o tom); a chave é do browser-signaling.
     ImpressaoDiferente:
       "NÃO FOI POSSÍVEL VERIFICAR A CONEXÃO SEGURA COM ESTE SERVIDOR.\n" +
-      "O caminho até ele abriu, e a verificação da conexão cifrada não terminou. Nada foi enviado a ele. " +
-      "Causas possíveis:\n" +
-      "· o link é de outro servidor, ou está desatualizado;\n" +
-      "· o servidor foi reinstalado e ganhou outra chave;\n" +
-      "· algo no caminho interferiu na conexão.\n" +
-      "Peça a quem hospeda um link novo, por um canal em que você confia, e tente de novo.",
+      "Nada foi enviado a ele. O link pode ser de outro servidor ou estar desatualizado: " +
+      "peça a quem hospeda um link novo, por um canal em que você confia.",
     // O nome do motivo que o `rtc-web.js` dá (`FALHA_DO_ENLACE.verificacaoFalhou`):
     // a mesma frase, sem acusar.
     get VerificacaoDaConexaoSegura() {
@@ -2833,59 +2846,50 @@ const FRASES_DO_TRANSPORTE = Object.freeze({
     },
     SemCaminho:
       "NENHUM ENDEREÇO DO LINK RESPONDEU.\n" +
-      "O servidor pode estar fora do ar, ou numa rede que não aceita conexão de fora. " +
-      "Este link não traz ponto de encontro, então não há como furar o NAT dele.",
+      "O servidor pode estar fora do ar ou numa rede que não aceita conexão de fora. Peça um link novo a quem hospeda.",
     // O link só tinha nomes (um DNS dinâmico, por exemplo), e nenhum ponto de
     // encontro: a página não sabe se o nome não resolveu ou se o servidor não
     // respondeu nele, e diz as duas.
     NomeSemResposta:
       "ESTE LINK USA UM NOME, E NADA RESPONDEU NELE.\n" +
-      "O nome pode não ter resolvido neste aparelho, ou o servidor não está no endereço que ele aponta. " +
-      "No navegador, um link só com nome e sem ponto de encontro depende disso. Peça a quem hospeda um " +
-      "link novo: o do app já leva os endereços e o ponto de encontro.",
+      "Peça um link novo a quem hospeda, copiado do app do SEELE.",
     SemRefletido:
-      "ESTA REDE NÃO DEIXOU A PÁGINA FALAR COM O PONTO DE ENCONTRO.\n" +
-      "O ponto não respondeu ao STUN, que é por onde a página descobre o próprio endereço. Redes de empresa " +
-      "e de escola costumam bloquear UDP. Tente de outra rede, como a do celular.",
+      "ESTA REDE BLOQUEOU A CONEXÃO.\n" +
+      "Tente de outra rede, como a do celular.",
     NinguemNoPonto:
       "O PONTO DE ENCONTRO NÃO CONHECE ESTE SERVIDOR AGORA.\n" +
       "Ou ele está fora do ar, ou quem hospeda não usa este ponto. Confira com quem hospeda.",
     AnfitriaoCalado:
-      "O SERVIDOR ESTÁ NO PONTO DE ENCONTRO, MAS NÃO ATENDEU.\n" +
-      "Ele pode ter acabado de fechar, ou a rede dele parou de responder. Tente de novo em alguns segundos.",
+      "O SERVIDOR NÃO ATENDEU.\n" +
+      "Ele pode ter acabado de fechar. Tente de novo em alguns segundos.",
     PontoRecusou:
       "O PONTO DE ENCONTRO RECUSOU A CHAMADA POR EXCESSO.\n" +
-      "O limite é por endereço público, e outras pessoas da sua rede podem estar usando o mesmo. " +
-      "Espere um pouco e tente de novo.",
+      "Outras pessoas da sua rede podem estar usando o mesmo limite. Espere um pouco e tente de novo.",
     SinalMudo:
       "O PONTO DE ENCONTRO NÃO RESPONDEU À PÁGINA.\n" +
-      "Ele pode estar fora do ar, ou não atender o navegador (o navegador precisa do HTTPS do ponto). " +
-      "O caminho direto do link também não abriu.",
+      "Ele pode estar fora do ar. O caminho direto do link também não abriu.",
     CaminhoNaoAbriu:
-      "O CAMINHO ENTRE AS DUAS REDES NÃO ABRIU.\n" +
-      "O ponto apresentou as duas máquinas, e o furo não passou: as duas redes provavelmente são do tipo que muda " +
-      "o endereço a cada destino (NAT simétrico). As saídas são abrir a porta no roteador de quem hospeda " +
-      "ou ligar o IPv6.",
-    HandshakeTimeout: "O SERVIDOR NÃO TERMINOU A ENTRADA NO PRAZO. Tente de novo.",
+      "AS DUAS REDES NÃO SE ALCANÇARAM.\n" +
+      "Quem hospeda pode abrir a porta no roteador.",
+    // A mesma situação de `AnfitriaoCalado`: o servidor não atendeu.
+    get HandshakeTimeout() {
+      return this.AnfitriaoCalado;
+    },
     ProtocoloDoEnlace:
-      "O SERVIDOR RESPONDEU FORA DO QUE ESTA PÁGINA FALA.\n" +
-      "Ele pode ser de outra versão. Peça um link novo a quem hospeda.",
+      "ESTE SERVIDOR É DE OUTRA VERSÃO.\n" +
+      "Peça um link novo a quem hospeda.",
     SemWebRtc:
-      "ESTE NAVEGADOR NÃO DEIXOU A PÁGINA ABRIR UMA CONEXÃO.\n" +
-      "A página precisa de WebRTC. Abra num Chrome, Edge, Firefox ou Safari atualizado.",
+      "ESTE NAVEGADOR NÃO TEM OS RECURSOS DE CONEXÃO QUE A PÁGINA PRECISA.\n" +
+      "Abra num Chrome, Edge, Firefox ou Safari atualizado.",
   }),
   // Um link de um Servidor de outra linha (`OutraLinha`): `versao` é o `v=`
   // dele, quando o link o traz.
-  outraLinha: (versao) =>
-    `ESTE LINK É DE UM SERVIDOR ${versao ? `${versao} ` : ""}DE ANTES DA 0.17.\n` +
-    "A partir da 0.17, o SEELE fala WebRTC e não conversa com a 0.16 nem com as anteriores. " +
-    "Quem hospeda precisa atualizar para a 0.17; para entrar nele como está, use o app da 0.16, " +
-    "que o launcher continua oferecendo.",
+  outraLinha: () => `${SERVIDOR_ANTIGO.titulo}.\n${SERVIDOR_ANTIGO.corpo}`,
   // A permissão de rede local do Chrome (Local Network Access), quando o
   // candidato do link é da rede de casa e a página vem da origem pública.
   redeLocal:
-    "O NAVEGADOR VAI PERGUNTAR SE ESTA PÁGINA PODE FALAR COM A SUA REDE LOCAL.\n" +
-    "É o servidor que está na sua casa. Sem a permissão, a página só entra por fora.",
+    "O NAVEGADOR VAI PERGUNTAR SE ESTA PÁGINA PODE ACESSAR A SUA REDE LOCAL.\n" +
+    "Permita quando ele perguntar; sem isso, a página só entra por fora.",
   // A voz no foco de outra sessão (E3), na sessão que não tem o microfone.
   vozEmOutraSessao:
     "A VOZ ESTÁ EM OUTRO SERVIDOR.\n" + "Entre numa sala de voz aqui para trazer o microfone para cá.",
@@ -3075,7 +3079,7 @@ const FRASES_DOS_CARGOS = Object.freeze({
     "ESTE SERVIDOR NÃO RESPONDE SOBRE CARGOS.\nEle pode ser de uma versão sem cargos. Quem hospeda decide quando atualizar.",
   /** O verbo foi mandado e o servidor não respondeu nem aceitando nem recusando. */
   semConfirmacao:
-    "O SERVIDOR NÃO CONFIRMOU A MUDANÇA EM 6 SEGUNDOS.\nEla pode ter entrado ou não: a lista foi relida. Confira antes de tentar de novo.",
+    "O SERVIDOR NÃO CONFIRMOU A MUDANÇA.\nEla pode ter entrado ou não: a lista foi relida. Confira antes de tentar de novo.",
   confirmando: "mandado ao servidor; esperando a resposta…",
   semDono:
     "ESTE SERVIDOR NÃO TEM PROPRIETÁRIO DECLARADO. Quem hospeda o declara pela máquina que hospeda.",

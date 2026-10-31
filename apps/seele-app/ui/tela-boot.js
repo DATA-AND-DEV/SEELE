@@ -1585,9 +1585,8 @@ function escolherVersaoParaHospedar(l, porque = "") {
   if (linhaEscolhida !== null) {
     aviso.textContent =
       porque +
-      `Quem hospeda é outra janela do SEELE, com as conversas do Servidor ` +
-      `${l.servidor}: o que você escreveu aqui não aparece lá. O nome e a ` +
-      "imagem você define lá." +
+      "Quem hospeda é outra janela do SEELE, com as conversas daquela versão. " +
+      `${CONVERSAS_NAO_PASSAM} O nome e a imagem você define lá.` +
       (l.perde_conversas ? " Nesta máquina ele ainda não tem conversa nenhuma." : "");
   }
   $("preparar-confirmar").textContent =

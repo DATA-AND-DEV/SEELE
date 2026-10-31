@@ -11,8 +11,8 @@ function instalarConversasPessoaisWeb() {
   /** A captura pedida no gesto de chamar ou atender: o par a liga quando chega. */
   let capturaDoGesto = null;
   let apelidoDaConversa = "";
-  const FRASE_DO_MICROFONE_FECHADO =
-    "O microfone não abriu. Você ouve a conversa, mas a outra pessoa não ouve você. Libere o microfone para este site no navegador e toque no microfone.";
+  // A mesma frase da sala (`frases.js`, carregado antes deste script).
+  const FRASE_DO_MICROFONE_FECHADO = FRASE_DO_SO_OUVINDO;
   let diagnosticoDaConexao = null;
   let fase = "livre", linkDeEntrada = null, conviteNoServico = null, recebendoCodigo = true;
   let estadoDoCodigoDireto = { estado: "Subindo" }, criandoLink = false, preparoDoConvite = null;
@@ -200,7 +200,7 @@ function instalarConversasPessoaisWeb() {
     else servico?.encerrar();
     // A caixa pessoal continua alcançável enquanto a página está aberta.
     if (recebendoCodigo && servico) {
-      alertasSonoros.notarFase(fase, "encerrada");
+      globalThis.alertasSonoros?.notarFase(fase, "encerrada");
       fase = "encerrada"; vista.estado({ estado: fase });
       return;
     }
@@ -208,7 +208,7 @@ function instalarConversasPessoaisWeb() {
     // de sair. Os callbacks da geração antiga deixam de alcançar esta tela.
     ++geracao;
     servico?.destruir(); servico = null; preparando = null;
-    alertasSonoros.notarFase(fase, "encerrada");
+    globalThis.alertasSonoros?.notarFase(fase, "encerrada");
     fase = "encerrada"; vista.estado({ estado: fase });
     entrada.textContent = "CONVERSAR POR LINK";
   }
@@ -257,7 +257,7 @@ function instalarConversasPessoaisWeb() {
       aoEstado(estado) {
         if (vez !== geracao || (estado.estado === "recebendo" && !criandoLink)) return;
         if (fase === "encerrada" && ["tocando", "chamando"].includes(estado.estado)) vista.limpar();
-        alertasSonoros.notarFase(fase, estado.estado);
+        globalThis.alertasSonoros?.notarFase(fase, estado.estado);
         fase = estado.estado; vista.estado(estado);
         if (fase === "tocando") vista.abrir({ apelido: nomeLocal() });
         entrada.textContent = viva() ? "VOLTAR À CONVERSA" : "CONVERSAR POR LINK";
@@ -268,7 +268,7 @@ function instalarConversasPessoaisWeb() {
         if (vez !== geracao) return;
         vista.texto(texto);
         // Com a aba escondida a mensagem do par não tem outro jeito de chamar.
-        if (texto?.de === "par" && document.hidden) alertasSonoros.tocar("mensagem");
+        if (texto?.de === "par" && document.hidden) globalThis.alertasSonoros?.tocar("mensagem");
       },
       aoPar(enlace, meta) {
         if (vez !== geracao) { enlace?.abortar(); return; }
