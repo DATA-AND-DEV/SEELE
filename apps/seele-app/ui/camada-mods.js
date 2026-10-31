@@ -637,6 +637,14 @@ $("mods-aceite").addEventListener("keydown", (evento) => {
 // editando o banco à mão.
 
 /** Desenha uma linha da lista de instalados. */
+/**
+ * **Os MODs que viraram parte do produto** (0.19: o PERFIS), com a versão que
+ * os incorporou. O servidor recusa ligá-los (`ModIncorporado`, a lista de
+ * `seele-server/src/mods/incorporados.rs`); aqui o LIGAR fica desabilitado e a
+ * linha diz por quê, antes de alguém tentar.
+ */
+const MODS_INCORPORADOS_AO_PRODUTO = new Map([["seele/perfis", "0.19"]]);
+
 function linhaDeModInstalado(mod, hospedando) {
   const linha = elemento("li");
   const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
@@ -767,6 +775,19 @@ function linhaDeModInstalado(mod, hospedando) {
   // sessão e exige nova entrada; ativar vários MODs repete o processo para
   // cada um». Agora o servidor só muda no SALVAR, e muda de uma vez.
   const ligadoNoRascunho = rascunho.has(chaveDoPacote(mod));
+  // **O PERFIS agora é do produto** (0.19): o servidor recusa ligá-lo, e a
+  // linha diz isso no lugar do interruptor. Quem o tinha ligado o vê desligado
+  // pela migração, com os perfis já trazidos.
+  if (MODS_INCORPORADOS_AO_PRODUTO.has(mod.id) && !ligadoNoRascunho) {
+    texto.append(elemento("span", "mods-servidor mods-incorporado", FRASES_DOS_PERFIS.incorporado));
+    const incorporado = elemento("button", "botao-fantasma", "LIGAR");
+    incorporado.type = "button";
+    incorporado.disabled = true;
+    incorporado.title = FRASES_DOS_PERFIS.incorporado;
+    caixa.append(incorporado);
+    linha.append(caixa);
+    return linha;
+  }
   const botao = elemento("button", "botao-fantasma");
   botao.type = "button";
   botao.textContent = ligadoNoRascunho ? "DESLIGAR" : "LIGAR";
@@ -1904,9 +1925,13 @@ async function salvarAlteracoes() {
         // recarrega o que está de pé, e as pendências passam a ser contra ele.
         const mudou = falha?.ConjuntoMudou;
         erro.hidden = false;
+        // O MOD que o produto incorporou (o PERFIS, na 0.19) é recusado com o
+        // nome e a versão, e a frase diz o que aconteceu com os perfis.
         erro.textContent = mudou
           ? "O servidor mudou. Nada foi gravado. Confira a lista abaixo e salve de novo."
-          : fraseDeErro(falha);
+          : falha?.ModIncorporado
+            ? FRASES_DOS_PERFIS.incorporado
+            : fraseDeErro(falha);
         salvando = false;
         if (mudou) baseDoConjunto = mudou.atual;
         await desenharMods();

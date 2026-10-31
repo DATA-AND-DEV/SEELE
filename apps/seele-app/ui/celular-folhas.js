@@ -227,7 +227,7 @@
     return { caixa, pintar };
   }
 
-  function folhaDaPessoa({ id, nome, iniciais = "", sinal, estado, volume, mudarVolume, podeModerar }) {
+  function folhaDaPessoa({ id, nome, iniciais = "", sinal, estado, volume, mudarVolume, podeModerar, verPerfil = null }) {
     let fechar = null;
     let deslizante = null;
     // O sinal e o volume num cartão só (Cel-folha-pessoa.dc).
@@ -255,6 +255,15 @@
     }
     const detalhes = id === null ? null : detalhesNaFolha(String(id));
     if (detalhes) corpo.push(detalhes.caixa);
+    // VER PERFIL, acima de MODERAR (0.19, `docs/0.19/perfis-oficiais.md` §5.3):
+    // a folha da pessoa dá lugar à folha do perfil dela, que sobe da borda.
+    if (verPerfil) {
+      corpo.push(h("button", {
+        class: "botao-fantasma cel-folha-ver-perfil",
+        type: "button",
+        onclick: () => verPerfil(),
+      }, PALAVRAS.verPerfil));
+    }
     if (podeModerar) {
       corpo.push(h("p", { class: "cel-fora" }, h("span", { class: "rotulo", text: PALAVRAS.moderar }), PALAVRAS.foraModerar));
     }
@@ -271,6 +280,44 @@
     // O foco entra na folha, como nas outras: sem ele, o leitor da tela lia a
     // sessão por baixo dela (medido na árvore do WebKit).
     (deslizante ?? fecharBotao).focus();
+  }
+
+  // ------------------------------------------------ uma folha de conteúdo
+
+  /**
+   * **Uma folha com o que outro arquivo montou** (0.19): o perfil de uma
+   * pessoa e o diretório «Perfis» (`perfis.js`). `alta` é a folha de altura
+   * total, com a rolagem por dentro. Uma folha de cada vez, como as outras: a
+   * que estava aberta (a da pessoa) dá lugar a esta.
+   */
+  function folhaDeConteudo({ id, titulo, conteudo, alta = false }) {
+    let fechar = null;
+    const fecharBotao = h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar);
+    const secao = folha(id, titulo, ...conteudo, h("div", { class: "cel-folha-acoes" }, fecharBotao));
+    if (alta) secao.classList.add("cel-folha-alta");
+    fechar = abrirFolha(secao, () => fechar());
+    secao.querySelector(".cel-folha-corpo").scrollTop = 0;
+    fecharBotao.focus();
+    return fechar;
+  }
+  CELULAR.registrar("folhaDeConteudo", folhaDeConteudo);
+
+  // ------------------------------------------- o «Seu perfil» acima do teclado
+  //
+  // O editor do perfil é uma folha de altura total (`celular-folhas.css`), e o
+  // teclado do sistema só encolhe o pedaço da página que se vê: a folha segue
+  // esse pedaço, para o rodapé com SALVAR ficar logo acima do teclado.
+  const vista = window.visualViewport;
+  const editor = document.getElementById("perfil");
+  if (vista && editor) {
+    const acompanhar = () => {
+      if (editor.hidden) return;
+      editor.style.setProperty("--perfil-visivel", `${vista.height}px`);
+      editor.style.setProperty("--perfil-visivel-topo", `${vista.offsetTop}px`);
+    };
+    vista.addEventListener("resize", acompanhar);
+    vista.addEventListener("scroll", acompanhar);
+    new MutationObserver(acompanhar).observe(editor, { attributes: true, attributeFilter: ["hidden"] });
   }
 
   // ------------------------------------------------------------- ANEXAR

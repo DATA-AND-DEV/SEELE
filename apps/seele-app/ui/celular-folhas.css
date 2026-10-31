@@ -740,3 +740,58 @@
 :root[data-casca="celular"] :is(#cel-folha-mensagem, #cel-folha-anexar) .cel-folha-acoes > button::first-letter {
   text-transform: uppercase;
 }
+
+/* ------------------------------------------------- o perfil público (0.19)
+   `docs/0.19/perfis-oficiais.md` §5.3 e §5.4. VER PERFIL na folha da pessoa,
+   acima de MODERAR; a folha do perfil e a do diretório sobem da borda (a do
+   diretório, de altura total); o «Seu perfil» é uma folha de altura total, com
+   a alça, que acompanha o pedaço da tela acima do teclado (`--perfil-visivel`,
+   de `celular-folhas.js`) para o rodapé com SALVAR ficar logo acima dele. */
+:root[data-casca="celular"] .cel-folha-ver-perfil { width: 100%; margin: 0; min-height: var(--cel-alvo); }
+:root[data-casca="celular"] .cel-folha-alta { top: 12px; max-height: none; }
+:root[data-casca="celular"] .cel-folha .perfil-cartao-capa { height: 112px; }
+:root[data-casca="celular"] .cel-folha .perfis-grade { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+:root[data-casca="celular"] .cel-folha .perfis-diretorio-sub { margin: 0; font-family: var(--seele-mono); font-size: calc(12px * var(--cel-escala)); color: var(--seele-rotulo-painel); }
+/* Na lista do celular o toque na linha abre a folha, que já tem VER PERFIL. */
+:root[data-casca="celular"] #lista-roster .pessoa-ver-perfil { display: none; }
+
+:root[data-casca="celular"] #perfil {
+  padding: 0;
+  align-items: flex-end;
+  justify-content: stretch;
+  height: var(--perfil-visivel, 100%);
+  bottom: auto;
+  transform: translateY(var(--perfil-visivel-topo, 0px));
+}
+:root[data-casca="celular"] #perfil .perfil-caixa,
+:root[data-casca="celular"] #perfil[data-oficial="sim"] .perfil-caixa {
+  width: 100%;
+  max-width: none;
+  height: calc(100% - 12px);
+  max-height: none;
+  border: 0;
+  border-top: 1px solid var(--seele-controle-borda);
+  border-radius: 28px 28px 0 0;
+}
+:root[data-casca="celular"] #perfil .perfil-cabeca { position: relative; padding-top: 26px; }
+:root[data-casca="celular"] #perfil .perfil-cabeca::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  width: 40px;
+  height: 4px;
+  margin-left: -20px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--seele-osso) 20%, transparent);
+}
+:root[data-casca="celular"] #perfil .perfil-imagens,
+:root[data-casca="celular"] #perfil .perfil-par { grid-template-columns: minmax(0, 1fr); }
+:root[data-casca="celular"] #perfil .perfil-fim {
+  margin: 0 -20px;
+  padding: 12px 20px calc(12px + var(--cel-seguro-pe, 0px));
+}
+:root[data-casca="celular"] #perfil .perfil-fim-linha > button { flex: 1 1 0; }
+/* A entrada «Perfis» do celular mora em AJUSTES; na aba SERVIDOR fica só o
+   aviso gentil da pendência da migração. */
+:root[data-casca="celular"] #lista-perfis-navegacao > li:first-child { display: none; }

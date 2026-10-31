@@ -134,6 +134,29 @@ function fronteiraDaLigacao(w) {
       }
       return saidaEmJson();
     },
+    // **As imagens do perfil** (0.19, `seele_web::perfil`): os pedidos passam
+    // pelo portão do protocolo que ESTA ligação negociou, e por isso moram na
+    // instância da sessão, e não na da página. A resposta é lida pelo mesmo
+    // leitor do volume (`volume_resposta_*`), e conferida contra o hash.
+    perfilEnviar(lado, bytes) {
+      const codigo = comBytes(bytes, (p, n) => w.perfil_imagem_enviar(lado === "Capa" ? 1 : 0, p, n));
+      return codigo === 0 ? { pedido: saida() } : { falha: saidaEmJson() };
+    },
+    perfilLer(pedido) {
+      const codigo = comJson(pedido, (p, n) => w.perfil_imagem_ler(p, n));
+      return codigo === 0 ? { pedido: saida() } : { falha: saidaEmJson() };
+    },
+    perfilPrazo: () => (w.volume_prazo(), saidaEmJson()),
+    perfilRespostaNova: () => w.volume_resposta_nova(),
+    perfilRespostaChegou: (alca, pedaco) => comBytes(pedaco, (p, n) => w.volume_resposta_chegou(alca, p, n)),
+    perfilAcabou(alca, viva, hash) {
+      const codigo = comBytes(codificador.encode(hash ?? ""), (p, n) => w.perfil_imagem_acabou(alca, viva ? 1 : 0, p, n));
+      return codigo === 0 ? { bytes: saida() } : { falha: saidaEmJson() };
+    },
+    perfilIcone(bytes) {
+      const codigo = comBytes(bytes, (p, n) => w.perfil_icone(p, n));
+      return codigo === 0 ? { png: saida() } : { falha: saidaEmJson() };
+    },
     /** A queda: a sessão fica guardada, e os eventos dela saem. */
     largar: () => (w.ligacao_largar() === 0 ? saidaEmJson() : []),
     /** A volta: o pedido de antes (sem o convite) e as escolhas; `null`, ou a recusa. */
@@ -1001,6 +1024,20 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       acabou || voltando || !wt ? Promise.reject("sessao-encerrada") : wt.createBidirectionalStream(),
     /** O `Preview` do desktop, pelo juiz do `.wasm`. */
     previa: (pedidoDaPrevia, bytes) => ligacao.previa(pedidoDaPrevia, bytes),
+    /**
+     * As imagens do perfil (0.19) pela ligação desta sessão: o pedido de
+     * enviar ou de ler, o leitor da resposta, o prazo e o ícone nativo da
+     * foto nova. Quem os usa é a ponte (`enviarAImagemDoPerfil`).
+     */
+    perfil: Object.freeze({
+      enviar: (lado, bytes) => ligacao.perfilEnviar(lado, bytes),
+      ler: (pedido) => ligacao.perfilLer(pedido),
+      prazo: () => ligacao.perfilPrazo(),
+      respostaNova: () => ligacao.perfilRespostaNova(),
+      respostaChegou: (alca, pedaco) => ligacao.perfilRespostaChegou(alca, pedaco),
+      acabou: (alca, viva, hash) => ligacao.perfilAcabou(alca, viva, hash),
+      icone: (bytes) => ligacao.perfilIcone(bytes),
+    }),
     /**
      * Fecha a sessão, sem `Ended`: quem fecha é esta ponta (o `disconnect`, a
      * recusa, o prazo do aperto, o CANCELAR), e a casca já sabe.

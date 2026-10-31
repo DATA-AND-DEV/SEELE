@@ -595,12 +595,22 @@ function pintarCartao(cartao, pessoa, temAudio) {
   const avatar = cartao.querySelector(".chamada-avatar");
   avatar.textContent = iniciaisDoCartao(apelidoApresentado(pessoa.id, pessoa.nickname));
   vestirAvatar(avatar, pessoa.id);
-  // A capa da pessoa, quando um MOD a dá (rascunho da API 6, §4; tarefa 6). Quem
-  // fala vai à frente na escolha das capas que animam.
+  // A moldura do efeito do perfil oficial em volta da foto (0.19, §5.2 e
+  // §5.3): a animação é do produto (`perfis.css`) e para com o movimento
+  // reduzido; sem perfil, ou com o avatar de outro MOD, nada.
+  if (typeof vestirMolduraDoPerfil === "function") vestirMolduraDoPerfil(avatar, pessoa.id);
+  // A capa da pessoa — de outro MOD ou do perfil oficial, pela precedência de
+  // `aplicarCapa` (rascunho da API 6, §4; 0.19, §5.2). Quem fala vai à frente
+  // na escolha das capas que animam.
   if (pessoa.speaking) anotarQuemFala(pessoa.id);
   vestirCapa(cartao, pessoa.id);
-  cartao.querySelector(".chamada-cartao-nome").textContent =
-    apelidoApresentado(pessoa.id, pessoa.nickname) + (pessoa.is_self ? " (você)" : "");
+  // O nome exibido do perfil, quando há; o apelido segue no `title`, e é o
+  // que a lista de pessoas, ao lado, mostra junto.
+  const exibido = typeof perfilOficial === "function" ? perfilOficial(pessoa.id)?.nome_exibido?.trim() : "";
+  const apelidoDoCartao = apelidoApresentado(pessoa.id, pessoa.nickname);
+  const nomeDoCartao = cartao.querySelector(".chamada-cartao-nome");
+  nomeDoCartao.textContent = (exibido || apelidoDoCartao) + (pessoa.is_self ? " (você)" : "");
+  nomeDoCartao.title = exibido ? apelidoDoCartao : "";
   // O estado em frase, ao lado do estado em palavra, e sempre visível: é o dado
   // mais importante do cartão, e não havia versão desta tela em que escondê-lo
   // fosse defensável.

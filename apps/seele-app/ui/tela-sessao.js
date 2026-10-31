@@ -577,6 +577,10 @@ function desenhar(snapshot) {
       }
     })
     .catch((falha) => console.warn("retratos:", falha));
+  // Os perfis oficiais (0.19, `perfis.js`), quando o `perfis_revision` anda: o
+  // armazém relê e redesenha o que mostra perfil. Antes das pessoas, para a
+  // linha nova já sair com o nome exibido de agora.
+  if (typeof sincronizarPerfis === "function") sincronizarPerfis(snapshot);
   desenharPessoas(snapshot);
   // Os volumes, do Rust: o deslizante nasce com a última leitura, e uma leitura
   // que mudou repinta os que não estão sob o dedo. Ver `volumesLidos`.
@@ -3330,8 +3334,23 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
     vestirAvatar(avatar, pessoa.id);
     identidade.append(avatar);
   }
+  // **O nome exibido do perfil oficial** (0.19, §5.3), grande, com o apelido
+  // pequeno ao lado e sempre visível: o apelido é o nome verificável, o que a
+  // moderação e o resto do produto usam, e ele não some atrás de um apelido
+  // de vitrine. Sem perfil (ou num servidor 0.18), a linha é a de sempre.
+  const oficial = typeof perfilOficial === "function" ? perfilOficial(pessoa.id) : null;
+  const exibido = oficial?.nome_exibido?.trim() ?? "";
+  if (exibido && exibido !== String(pessoa.nome ?? "")) {
+    identidade.append(elemento("span", "pessoa-exibido", exibido));
+    identidade.classList.add("pessoa-identidade-com-exibido");
+  }
   // Na apresentação do MOD, este é o nome verificável nos detalhes nativos.
   identidade.append(nomeDaPessoa(pessoa));
+  // «pronomes · status» também fora do recolhido: o celular desenha a linha em
+  // grade e mostra este; o desktop o esconde e mostra o de dentro do recolhido
+  // (`perfis.css`), junto do «Ver perfil».
+  const linhaDoOficial = linhaDoPerfil(oficial);
+  if (linhaDoOficial && !comoDetalhe) identidade.append(elemento("span", "pessoa-perfil-linha-solta", linhaDoOficial));
 
   // `PERMISSIONS·01`, o subsistema por pessoa, não entra. O protocolo não diz qual
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que
@@ -3438,9 +3457,30 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
     // que seja preciso abrir para saber se vale a pena abrir.
     elemento("span", "pessoa-diagnostico-valor", medido ? String(pessoa.ratio) : SEM_MEDIDA),
   );
-  diagnostico.append(resumo, numero, barra);
+  diagnostico.append(resumo);
+  // **Ao expandir, o perfil** (0.19, §5.3): pronomes · status e «Ver perfil»,
+  // que abre a folha da pessoa no lugar deste painel. Só com perfis oficiais.
+  if (!comoDetalhe && pessoa.id !== undefined && pessoa.id !== null
+    && typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis()) {
+    if (linhaDoOficial) diagnostico.append(elemento("span", "pessoa-perfil-linha", linhaDoOficial));
+    const ver = elemento("button", "pessoa-ver-perfil", FRASES_DOS_PERFIS.verPerfil);
+    ver.type = "button";
+    ver.dataset.verPerfil = String(pessoa.id);
+    ver.setAttribute("aria-label", FRASES_DOS_PERFIS.verPerfilDe(exibido || pessoa.nome));
+    diagnostico.append(ver);
+  }
+  diagnostico.append(numero, barra);
 
   item.append(cabeca, rodape, diagnostico);
+
+  // **A capa parada ao fundo da linha** (0.19, §5.3): recortada na área dela, e
+  // sempre o quadro parado — numa lista de 250, nenhuma linha anima; o teto de
+  // capas animadas fica para a chamada e o operador. Só quem tem capa ganha a
+  // camada: as outras linhas não entram na escolha de cada quadro.
+  if (!comoDetalhe && pessoa.id !== undefined && pessoa.id !== null && capaDaPessoa(String(pessoa.id))) {
+    item.dataset.capaSempreParada = "sim";
+    vestirCapa(item, pessoa.id);
+  }
 
   // Volume por pessoa (`specs/03-audio.md`).
   if (pessoa.volume !== null && temAudio) {
@@ -4532,6 +4572,8 @@ async function salvarAnexo(anexo) {
 async function alternarCanal(evento) {
   const item = evento.target.closest("button[data-voice_room], button[data-linha]");
   if (!item) return;
+  // Um canal escolhido é o centro de volta à conversa: o diretório «Perfis» sai.
+  if (item.dataset.linha && typeof fecharDiretorioDosPerfis === "function") fecharDiretorioDosPerfis();
   let entrou = false;
   try {
     if (item.dataset.voice_room) {
@@ -4957,6 +4999,8 @@ function esquecerOEstadoDaSessao() {
   // Os dois que se esquecem com o que anda junto: o retrato e a revisão dele,
   // e os casamentos da busca com o cursor e o contador.
   esquecerRetratos();
+  // E os perfis oficiais da sessão que acabou (`perfis.js`): a próxima relê.
+  if (typeof esquecerOsPerfis === "function") esquecerOsPerfis();
   limparBusca();
   // O arquivo escolhido e a subida dele (I-1 da rodada 1). Sem isto, o arquivo
   // escolhido para um servidor ficava na caixa, e o primeiro Enter no seguinte
@@ -5966,7 +6010,8 @@ function escolherAsCapasAnimadas() {
     const caixa = quadro.getBoundingClientRect();
     return caixa.width > 0 && caixa.height > 0 && caixa.bottom > 0 && caixa.top < innerHeight
       && caixa.right > 0 && caixa.left < innerWidth
-      && Boolean(quadro.dataset.pessoaDaCapa && capaContribuida(quadro.dataset.pessoaDaCapa));
+      && quadro.dataset.capaSempreParada !== "sim"
+      && Boolean(quadro.dataset.pessoaDaCapa && capaDaPessoa(quadro.dataset.pessoaDaCapa));
   });
   const falou = (quadro) => falouPorUltimo.get(quadro.dataset.pessoaDaCapa) ?? 0;
   // `sort` é estável: no empate, fica a ordem da tela.
@@ -6003,7 +6048,7 @@ document.addEventListener("visibilitychange", () => redesenharCapas());
  */
 function aplicarCapa(quadro) {
   const id = quadro.dataset.pessoaDaCapa;
-  const capa = id ? capaContribuida(id) : null;
+  const capa = id ? capaDaPessoa(id) : null;
   // Parada com o movimento reduzido, e fora das capas escolhidas para animar.
   const parada = quadro.dataset.capaAnimada !== "sim"
     || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -6024,15 +6069,31 @@ function aplicarCapa(quadro) {
   return quadro;
 }
 
+/**
+ * **A capa de uma pessoa, pela precedência** (0.19, `docs/0.19/perfis-oficiais.md`
+ * §5.2): a contribuição de outro MOD (escolha de quem hospeda) → a capa do
+ * perfil oficial → nada. A mesma ordem do avatar, em `aplicarAvatar`.
+ */
+function capaDaPessoa(id) {
+  return capaContribuida(id)
+    ?? (typeof capaOficial === "function" ? capaOficial(id) : null);
+}
+
 /** Atualiza só as imagens: a chegada da mídia não remonta a chamada. */
 function redesenharAvatares() {
   document.querySelectorAll("[data-pessoa-do-avatar]").forEach(aplicarAvatar);
 }
 
+/**
+ * Põe a imagem de uma pessoa num quadrado, pela precedência (0.19, §5.2): a
+ * contribuição de outro MOD (escolha de quem hospeda) → a foto do perfil
+ * oficial → o ícone nativo → as iniciais.
+ */
 function aplicarAvatar(quadrado) {
   const id = quadrado.dataset.pessoaDoAvatar;
   const uri = id === "" ? null
     : (typeof avatarContribuido === "function" ? avatarContribuido(id) : null)
+      || (typeof fotoOficial === "function" ? fotoOficial(id) : null)
       || retratos.get(Number(id)) || retratos.get(id);
   if (uri) {
     quadrado.style.backgroundImage = `url(${uri})`;

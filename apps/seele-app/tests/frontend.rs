@@ -645,17 +645,8 @@ const AGUARDANDO_TELA: &[&str] = &[
     // (`base.js`) e saiu daqui, e o `desfazer_escolha_de_mod` do P1 também
     // (`tela-boot.js`, rodada 3); a releitura do foco ainda não chama este.
     "foco_de_voz",
-    // O perfil público nativo (0.19, F4 de `docs/0.19/perfis-oficiais.md`): os
-    // comandos estão prontos e a tela (`ui/perfis.js`, F5) ainda não os chama.
-    // Cada um sai desta lista quando a F5 o chama — o teste logo abaixo avisa,
-    // pelo nome, na rodada em que isso acontecer.
-    "perfis",
-    "gravar_perfil",
-    "tirar_imagem_do_perfil",
-    "enviar_imagem_do_perfil",
-    "imagem_do_perfil",
-    "ler_relatorio_da_migracao_de_perfis",
-    "dispensar_relatorio",
+    // Os sete comandos do perfil público (0.19, F4) estiveram aqui entre o Rust e
+    // a tela, e saíram com a F5: `perfis.js` e `camada-hospedagem.js` os chamam.
 ];
 
 #[test]
@@ -25218,7 +25209,7 @@ const corpo = perfil.indexOf('class="perfil-corpo"');
 confere("o corpo que rola existe", corpo > 0);
 confere("o formulário está no corpo", perfil.indexOf('<form id="perfil-forma"') > corpo);
 confere("a sala pessoal está no corpo", perfil.indexOf('<section id="perfil-sala"') > corpo);
-for (const id of ["perfil-apelido", "perfil-escolher", "perfil-tirar", "perfil-fechar", "perfil-codigo", "perfil-copiar-codigo", "perfil-receber", "perfil-agenda", "perfil-sala-firewall-abrir"]) {
+for (const id of ["perfil-apelido", "perfil-escolher", "perfil-tirar", "perfil-cancelar", "perfil-codigo", "perfil-copiar-codigo", "perfil-receber", "perfil-agenda", "perfil-sala-firewall-abrir"]) {
   confere("o id " + id + " continua no perfil", perfil.includes('id="' + id + '"'));
 }
 for (const id of ["cargos-form", "cargos-lista", "cargos-novo", "cargos-fechar", "cargos-voltar", "cargos-aba-cargos"]) {
@@ -26029,4 +26020,270 @@ fn os_alertas_sonoros_carregam_antes_de_quem_os_chama() {
             "{quem} deixou de usar o motor dos alertas: o gancho sumiu"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// O perfil público (0.19, `docs/0.19/perfis-oficiais.md` §5.4 e §7 «UI»).
+// ---------------------------------------------------------------------------
+
+/// O `#perfil` da página, sem comentários: do `<div id="perfil"` ao diálogo
+/// seguinte (`#nomear`).
+fn bloco_do_perfil() -> String {
+    let pagina = without_comments(&read("ui/index.html"));
+    let inicio = pagina.find("<div id=\"perfil\"").expect("o #perfil sumiu da página");
+    let fim = pagina[inicio..].find("<div id=\"nomear\"").expect("o #nomear sumiu da página");
+    pagina[inicio..inicio + fim].to_owned()
+}
+
+/// **O editor tem uma ação primária só, e nenhum FECHAR no cabeçalho** (§5.4 e
+/// §7): SALVAR é o único `button.primario` (e o único `.botao` cheio); o
+/// cabeçalho é só o título — a saída é CANCELAR, Escape ou o clique fora, que
+/// perguntam antes de descartar; e nenhum rótulo é escrito em caixa alta, nem
+/// pintado em caixa alta pela folha (o `.rotulo` do `base.css` é `uppercase`, e
+/// o editor o desfaz).
+///
+/// Provado revertendo: com o FECHAR de volta no cabeçalho, com o CANCELAR
+/// também `primario`, com «APELIDO» no rótulo e sem o `text-transform: none`
+/// do `perfis.css`, este guarda reprova.
+#[test]
+fn o_editor_do_perfil_tem_uma_acao_primaria_e_nenhum_fechar_no_cabecalho() {
+    let perfil = bloco_do_perfil();
+    let botoes: Vec<&str> = perfil
+        .match_indices("<button")
+        .map(|(em, _)| {
+            let resto = &perfil[em..];
+            &resto[..resto.find('>').map_or(resto.len(), |fim| fim + 1)]
+        })
+        .collect();
+    let classes = |tag: &str| -> Vec<String> {
+        attribute(tag, "class")
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect()
+    };
+    let primarios: Vec<&&str> = botoes
+        .iter()
+        .filter(|tag| classes(tag).iter().any(|c| c == "primario"))
+        .collect();
+    assert_eq!(
+        primarios.len(),
+        1,
+        "o editor do perfil tem {} `button.primario`; a única ação primária é SALVAR:\n{primarios:?}",
+        primarios.len()
+    );
+    assert_eq!(
+        attribute(primarios[0], "id").as_deref(),
+        Some("perfil-salvar"),
+        "a ação primária do editor não é o SALVAR: {}",
+        primarios[0]
+    );
+    let cheios = botoes
+        .iter()
+        .filter(|tag| classes(tag).iter().any(|c| c == "botao"))
+        .count();
+    assert_eq!(
+        cheios, 1,
+        "há {cheios} botões laranja cheios (`.botao`) no editor; só o SALVAR é cheio"
+    );
+
+    let cabeca = perfil
+        .split("class=\"nomear-cabeca perfil-cabeca\"")
+        .nth(1)
+        .and_then(|resto| resto.split("</div>").next())
+        .expect("o cabeçalho do perfil sumiu");
+    assert!(
+        !cabeca.contains("<button") && !cabeca.contains("FECHAR"),
+        "o cabeçalho do «Seu perfil» voltou a ter uma saída (FECHAR): a saída é uma só, \
+         pelo rodapé, pelo Escape e pelo clique fora:\n{cabeca}"
+    );
+
+    // Os rótulos: o texto de cada um tem minúscula (inicial maiúscula, e não caixa alta).
+    let mut rotulos = Vec::new();
+    for marca in [
+        "class=\"rotulo\">",
+        "<legend class=\"rotulo\">",
+        "class=\"perfil-bloco-rotulo\">",
+        "class=\"perfil-sala-eyebrow\" aria-hidden=\"true\">",
+    ] {
+        for (em, _) in perfil.match_indices(marca) {
+            let texto: String = perfil[em + marca.len()..]
+                .chars()
+                .take_while(|c| *c != '<')
+                .collect();
+            rotulos.push(texto.trim().to_owned());
+        }
+    }
+    assert!(
+        rotulos.len() >= 9,
+        "só {} rótulos lidos no editor ({rotulos:?}): a leitura quebrou",
+        rotulos.len()
+    );
+    let em_caixa_alta: Vec<&String> = rotulos
+        .iter()
+        .filter(|t| !t.is_empty() && !t.chars().any(char::is_lowercase))
+        .collect();
+    assert!(
+        em_caixa_alta.is_empty(),
+        "rótulos do editor em caixa alta (a 0.19 escreve com inicial maiúscula): {em_caixa_alta:?}"
+    );
+    let folha = without_comments(&read("ui/perfis.css"));
+    let regra = folha
+        .split("#perfil .rotulo,")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("a regra dos rótulos do editor sumiu de `perfis.css`");
+    assert!(
+        regra.contains("#perfil legend") && regra.contains("text-transform: none"),
+        "o editor deixou de desfazer o `text-transform: uppercase` do `.rotulo` (base.css): \
+         os rótulos voltariam em caixa alta na tela:\n{regra}"
+    );
+}
+
+/// **CANCELAR, Escape e o clique fora passam por uma única função de saída**
+/// (§5.4 e §7), e ela pergunta antes de descartar o que foi escrito.
+///
+/// Lido das ligações em `camada-nomear.js`, e rodado no node: com alteração,
+/// a saída mostra «Descartar alterações?» e não fecha; com a pergunta aberta,
+/// uma segunda saída não descarta; sem alteração, fecha. Provado revertendo:
+/// o Escape chamando `fecharPerfil` direto, ou a saída sem conferir as
+/// alterações, reprova.
+#[test]
+fn cancelar_esc_e_clique_fora_saem_do_perfil_pelo_mesmo_caminho() {
+    let nomear = without_comments(&read("ui/camada-nomear.js"));
+    let ouvinte = |marca: &str| -> String {
+        let resto = nomear
+            .split(marca)
+            .nth(1)
+            .unwrap_or_else(|| panic!("`{marca}` sumiu de camada-nomear.js"));
+        resto
+            .chars()
+            .take_while(|c| *c != ')')
+            .collect::<String>()
+            .trim()
+            .to_owned()
+    };
+    let cancelar = ouvinte("$(\"perfil-cancelar\").addEventListener(\"click\",");
+    let fora = ouvinte("fecharAoClicarFora(\"perfil\",");
+    let esc = nomear
+        .split("if (evento.key !== \"Escape\" || $(\"perfil\").hidden) return;")
+        .nth(1)
+        .and_then(|resto| resto.split("evento.stopPropagation();").nth(1))
+        .and_then(|resto| resto.split('(').next())
+        .map(|t| t.trim().to_owned())
+        .expect("o Escape do perfil sumiu de camada-nomear.js");
+    assert_eq!(
+        (cancelar.as_str(), fora.as_str(), esc.as_str()),
+        ("pedirParaSairDoPerfil", "pedirParaSairDoPerfil", "pedirParaSairDoPerfil"),
+        "CANCELAR, o clique fora e o Escape não passam pela mesma saída do perfil"
+    );
+
+    rodar_node(
+        "a saída única do perfil",
+        r##"
+const m = mundo({});
+let fechou = 0, perguntou = [], sujo = false, aberta = false;
+Object.assign(m.ctx, {
+  fecharPerfil: () => { fechou += 1; },
+  perfilTemAlteracoes: () => sujo,
+  perguntandoSeDescarta: () => aberta,
+  mostrarRodapeDeSaida: (sim) => { perguntou.push(sim); aberta = sim; },
+});
+m.$("perfil").hidden = false;
+vm.runInContext(funcao("camada-nomear.js", "pedirParaSairDoPerfil"), m.ctx);
+const sair = () => vm.runInContext("pedirParaSairDoPerfil()", m.ctx);
+sair();
+confere("sem alteração, a saída não fechou", fechou === 1 && perguntou.length === 0);
+sujo = true;
+sair();
+confere("com alteração, a saída fechou sem perguntar", fechou === 1);
+confere("com alteração, a saída não mostrou «Descartar alterações?»", perguntou.join() === "true");
+sair();
+confere("com a pergunta aberta, uma segunda saída descartou", fechou === 1 && perguntou.length === 1);
+"##,
+    );
+}
+
+/// **A precedência do avatar e da capa, com a ponte simulada** (§5.2 e §7):
+/// outro MOD → o perfil oficial → o ícone nativo → as iniciais, no avatar; e
+/// outro MOD → o perfil oficial na capa. As imagens do perfil são pedidas pela
+/// ponte (`imagem_do_perfil`) uma vez por hash.
+///
+/// `perfis.js` roda inteiro, com o `perfis` e o `imagem_do_perfil` da ponte
+/// simulados; `aplicarAvatar`, `aplicarCapa` e `capaDaPessoa` vêm de
+/// `tela-sessao.js`. Provado revertendo: com a foto oficial antes do MOD, sem
+/// ela no meio, ou com a capa só do MOD, este guarda reprova.
+#[test]
+fn a_precedencia_do_avatar_e_da_capa_e_mod_perfil_nativo_iniciais() {
+    rodar_node(
+        "a precedência do avatar e da capa",
+        r##"
+const H1 = "a".repeat(64), H2 = "b".repeat(64);
+let lista = [{ pessoa: 7, revisao: 1, nome_exibido: "Ana", pronomes: "", status: "", bio: "", cor: "#112233", efeito: "Nenhum",
+  foto: { hash: H1, tipo: "image/png", bytes: 10 }, capa: { hash: H2, tipo: "image/png", bytes: 10 } }];
+const m = mundo({
+  perfis: () => lista,
+  imagem_do_perfil: ({ lado, hash }) => `data:oficial-${lado}-${hash.slice(0, 1)}`,
+});
+let doMod = null, capaDoMod = null;
+const comEstilo = (no) => Object.assign(no, {
+  style: { backgroundImage: "", setProperty() {}, removeProperty(k) { if (k === "background-image") this.backgroundImage = ""; } },
+  prepend(c) { c.pai = this; this.children.unshift(c); },
+  remove() { if (this.pai) this.pai.children = this.pai.children.filter((x) => x !== this); },
+  querySelector() { return this.children.find((c) => c.className === "capa-camada") ?? null; },
+  querySelectorAll: () => [],
+});
+Object.assign(m.ctx, {
+  requestAnimationFrame: (f) => setTimeout(f, 0), matchMedia: () => ({ matches: false }), Image: class {},
+  window: { addEventListener() {} },
+  elemento: (tag, classe, texto) => { const e = comEstilo(new El("")); e.className = classe ?? ""; if (texto !== undefined) e.textContent = texto; return e; },
+  avatarContribuido: () => doMod, capaContribuida: () => capaDoMod,
+  retratos: new Map([[7, "data:nativo"]]),
+});
+m.ctx.document.querySelectorAll = () => [];
+m.ctx.document.querySelector = () => null;
+m.ctx.document.addEventListener = () => {};
+m.$("tela-sessao").classList = { toggle() {} };
+m.$("perfis-entrada").removeAttribute = () => {};
+m.$("perfis-diretorio").hidden = true;
+m.$("perfil-folha").hidden = true;
+carregar(m, "frases.js", "perfis.js");
+for (const nome of ["aplicarAvatar", "aplicarCapa", "capaDaPessoa"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+vm.runInContext("sincronizarPerfis({ perfis_revision: 1, me: 1 })", m.ctx);
+await tick();
+const quadrado = comEstilo(new El("q"));
+quadrado.dataset.pessoaDoAvatar = "7"; quadrado.dataset.iniciaisDoAvatar = "AN";
+const avatar = () => { m.ctx.q = quadrado; vm.runInContext("aplicarAvatar(q)", m.ctx); return quadrado.style.backgroundImage || quadrado.textContent; };
+// O primeiro pedido começa a carga; enquanto ela não chega, o degrau seguinte.
+confere("sem a foto ainda, o ícone nativo não ficou no lugar: " + avatar(), avatar().includes("data:nativo"));
+await tick();
+confere("o perfil oficial não venceu o ícone nativo: " + avatar(), avatar().includes("data:oficial-Foto"));
+doMod = "data:mod";
+confere("o avatar de outro MOD não venceu o perfil oficial: " + avatar(), avatar().includes("data:mod"));
+doMod = null;
+confere("a foto foi pedida mais de uma vez pelo mesmo hash", so(m, "imagem_do_perfil").filter((c) => c.args.lado === "Foto").length === 1);
+// Sem foto no perfil: o nativo; sem nativo: as iniciais.
+lista = [{ ...lista[0], revisao: 2, foto: null }];
+vm.runInContext("perfisOficiais.marca = null; sincronizarPerfis({ perfis_revision: 2, me: 1 })", m.ctx);
+await tick();
+confere("sem foto no perfil, o ícone nativo não voltou: " + avatar(), avatar().includes("data:nativo"));
+m.ctx.retratos.clear();
+confere("sem imagem nenhuma, as iniciais não voltaram: " + avatar(), avatar() === "AN");
+
+// A capa: outro MOD → perfil oficial → nada.
+const quadro = comEstilo(new El("c"));
+quadro.dataset.pessoaDaCapa = "7"; quadro.dataset.capaAnimada = "sim";
+const capa = () => { m.ctx.c = quadro; vm.runInContext("aplicarCapa(c)", m.ctx); return quadro.querySelector()?.style.backgroundImage ?? ""; };
+capa();
+await tick();
+confere("a capa do perfil oficial não apareceu: " + capa(), capa().includes("data:oficial-Capa"));
+capaDoMod = { url: "data:capa-mod", estatico: "data:capa-mod" };
+confere("a capa de outro MOD não venceu a do perfil: " + capa(), capa().includes("data:capa-mod"));
+capaDoMod = null;
+lista = [{ ...lista[0], revisao: 3, capa: null }];
+vm.runInContext("perfisOficiais.marca = null; sincronizarPerfis({ perfis_revision: 3, me: 1 })", m.ctx);
+await tick();
+confere("sem capa em lugar nenhum, a camada ficou", capa() === "");
+"##,
+    );
 }

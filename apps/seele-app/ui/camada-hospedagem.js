@@ -168,3 +168,57 @@ Promise.resolve(
     );
   }),
 ).catch((falha) => console.warn("o pedido de fechar:", falha));
+
+// ------------------------------- o relatório da migração dos perfis (0.19)
+//
+// O servidor 0.19 traz para o produto os perfis do MOD PERFIS na primeira
+// subida (`docs/0.19/perfis-oficiais.md` §4) e grava um relatório: quantos
+// vieram, o que não veio inteiro, se o banco falhou no meio. Quem hospeda o lê
+// aqui, na coluna do servidor, até apertar ENTENDI — **nunca calado**: uma foto
+// que não veio e ninguém disse é a pergunta que volta dias depois, sem dado.
+
+/** Desenha o relatório, se esta janela hospeda e há um a ler; senão o esconde. */
+async function desenharRelatorioDosPerfis() {
+  const bloco = $("relatorio-perfis");
+  if (!bloco) return;
+  let relatorio = null;
+  try {
+    if (await invoke("estou_hospedando")) relatorio = await invoke("ler_relatorio_da_migracao_de_perfis");
+  } catch (falha) {
+    // Dito, e não escondido como «não há relatório»: o banco que não respondeu
+    // é uma coisa, nenhum relatório é outra.
+    console.warn("o relatório da migração dos perfis não foi lido:", falha);
+  }
+  if (!relatorio) {
+    bloco.hidden = true;
+    return;
+  }
+  const f = FRASES_DOS_PERFIS.relatorio;
+  const ocorrencias = Array.isArray(relatorio.ocorrencias) ? relatorio.ocorrencias : [];
+  $("relatorio-perfis-titulo").textContent = f.titulo;
+  $("relatorio-perfis-resumo").textContent =
+    `${f.trazidos(Number(relatorio.trazidos) || 0)} ${ocorrencias.length === 0 && !relatorio.incompleta ? f.tudoVeio : ""}`.trim();
+  $("relatorio-perfis-incompleta").hidden = !relatorio.incompleta;
+  $("relatorio-perfis-incompleta").textContent = relatorio.incompleta ? f.incompleta : "";
+  $("relatorio-perfis-detalhes").hidden = ocorrencias.length === 0;
+  $("relatorio-perfis-conta").textContent = f.ocorrencias(ocorrencias.length);
+  $("relatorio-perfis-ocorrencias").replaceChildren(...ocorrencias.map((o) => elemento(
+    "li",
+    null,
+    o.pessoa === null || o.pessoa === undefined ? o.assunto : `${f.pessoa(o.pessoa)}: ${o.assunto}`,
+  )));
+  $("relatorio-perfis-antigos").textContent = f.dadosAntigos;
+  $("relatorio-perfis-erro").hidden = true;
+  bloco.hidden = false;
+}
+
+$("relatorio-perfis-entendi").addEventListener("click", async () => {
+  try {
+    await invoke("dispensar_relatorio");
+    $("relatorio-perfis").hidden = true;
+  } catch (falha) {
+    console.warn("dispensar o relatório da migração dos perfis:", falha);
+    $("relatorio-perfis-erro").textContent = FRASES_DOS_PERFIS.relatorio.naoDispensou;
+    $("relatorio-perfis-erro").hidden = false;
+  }
+});

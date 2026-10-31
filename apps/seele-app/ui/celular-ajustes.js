@@ -222,6 +222,18 @@
     // `.server-secao` escondendo o painel dela, e estas não têm painel.
     // CARGOS E PERMISSÕES (G): a camada sobre a sala, como no desktop. A aba
     // AJUSTES fecha antes, para a camada ficar sobre a conversa de que fala.
+    // O diretório «Perfis» (0.19, §5.3): no celular, a entrada mora em AJUSTES
+    // e abre uma folha de altura total. Escondida sem perfis oficiais.
+    h("li", { class: "cel-perfis-item", hidden: true }, h("button", {
+      class: "cel-ajustes-acao cel-perfis",
+      type: "button",
+      // A camada de AJUSTES fecha antes, como a de CARGOS: a folha sobe sobre a sessão.
+      onclick: () => {
+        fecharServer();
+        abrirDiretorioDosPerfis();
+      },
+    }, h("span", { class: "server-secao-icone" }, glifo("linhas")),
+      h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.perfis })))),
     typeof abrirCargos === "function" && h("li", {}, h("button", {
       class: "cel-ajustes-acao cel-cargos",
       type: "button",
@@ -255,9 +267,15 @@
   tecla.querySelector(".server-modo-nome").textContent = PALAVRAS.segurarParaFalar;
 
   CASCA.depoisDeDesenhar.push((snapshot) => {
-    apelido.textContent = document.getElementById("operador-nome").textContent;
-    iniciais.textContent = document.getElementById("operador-inicial").textContent;
+    // O nome exibido do perfil oficial, quando há; o apelido segue o do operador.
+    const exibido = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
+    apelido.textContent = exibido || document.getElementById("operador-nome").textContent;
+    iniciais.textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
+    // A foto e a capa pela mesma precedência da tela inteira (§5.2).
+    vestirAvatar(iniciais, snapshot.me);
     vestirCapa(placa, snapshot.me);
+    const entrada = coluna.querySelector(".cel-perfis-item");
+    if (entrada) entrada.hidden = !(typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis());
   });
 })();
 

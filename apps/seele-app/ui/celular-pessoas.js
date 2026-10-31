@@ -59,6 +59,11 @@
       // O desktop só desenha a porta do nome para quem pode ser moderado por
       // quem usa o aparelho (`quemPodeSerModerado`): a regra é dele.
       podeModerar: !!linha.querySelector("button[data-moderar-pessoa]"),
+      // VER PERFIL, só num servidor com perfis oficiais (0.19): num 0.18 com o
+      // MOD PERFIS, o perfil é o que o MOD desenha, como sempre.
+      verPerfil: linha.dataset.pessoaId && typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis()
+        ? () => abrirPerfilDaPessoa(linha.dataset.pessoaId)
+        : null,
     });
   }
 

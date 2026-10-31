@@ -892,3 +892,40 @@
 @media (min-width: 1241px) {
   :where(:root[data-casca="celular"]) .pessoas-mini-item { font-size: calc(13px * var(--cel-escala)); }
 }
+
+/* perfis.css */
+:where(:root[data-casca="celular"]) .perfil-cartao { font-size: inherit; }
+:where(:root[data-casca="celular"]) .perfil-cartao-foto { font-size: calc(28px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfil-cartao-nome { font-size: calc(19px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfil-cartao-apelido,
+:where(:root[data-casca="celular"]) .perfil-cartao-voce { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfil-cartao-linha { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfil-cartao-bio { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfis-pendencia { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfis-diretorio-titulo { font-size: calc(30px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfis-diretorio-sub { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .perfil-folha-titulo { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #lista-roster .pessoa-identidade-com-exibido .pessoa-nome { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #lista-roster .pessoa-perfil-linha { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #lista-roster .pessoa-ver-perfil { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .rotulo,
+:where(:root[data-casca="celular"]) #perfil legend,
+:where(:root[data-casca="celular"]) #perfil .perfil-bloco-rotulo,
+:where(:root[data-casca="celular"]) #perfil .perfil-imagem-rotulo,
+:where(:root[data-casca="celular"]) #perfil .perfil-sala-eyebrow { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-sala-eyebrow { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil #perfil-sala-titulo { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-foto-amostra,
+:where(:root[data-casca="celular"]) #perfil .perfil-capa-amostra { font-size: calc(34px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-bloco-formato { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-bloco-estado { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil input:not([type="checkbox"]):not([type="range"]),
+:where(:root[data-casca="celular"]) #perfil textarea { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-contador { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-campo-erro { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-segmento { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .relatorio-perfis-titulo { font-size: calc(16px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .relatorio-perfis-frase { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .relatorio-perfis-nota { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .relatorio-perfis-detalhes summary { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .relatorio-perfis-ocorrencias { font-size: calc(11px * var(--cel-escala)); }

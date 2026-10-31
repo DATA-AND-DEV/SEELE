@@ -72,7 +72,7 @@
    opacas da cor do fundo nativo da caixa, e o contraste é o de sem capa —
    medido em `bancada/capa.cjs` contra uma capa branca, uma preta e uma da cor
    da tinta. O título encolhe ao tamanho do texto, para a capa aparecer. */
-.perfil-cabeca[data-com-capa] :where(.nomear-titulo, #perfil-fechar) {
+.perfil-cabeca[data-com-capa] .nomear-titulo {
   background-color: var(--seele-negro-painel);
 }
 
