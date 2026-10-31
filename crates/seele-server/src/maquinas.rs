@@ -416,6 +416,12 @@ pub struct Maquinas {
 /// Quantos lugares se lembram por pessoa que caiu.
 const LUGARES_LEMBRADOS_POR_PESSOA: usize = MAX_MAQUINAS_POR_MOD * 2;
 
+/// **Quantas pessoas ausentes o livro lembra** (revisão final, M7): o `quem`
+/// de um pedido a quem não está vem da metade de servidor, e qualquer número
+/// virava uma entrada para sempre. Passado o teto, a pessoa nova não é
+/// lembrada, e o log diz.
+pub const MAX_AUSENTES_LEMBRADOS: usize = 4096;
+
 impl Maquinas {
     /// O servidor pede a `quem` que rode a máquina **principal** de
     /// `servidor` ([`Self::pedir_como`]).
@@ -781,6 +787,10 @@ impl Maquinas {
         papel: Papel,
     ) {
         let k = chave(mod_id, servidor, papel);
+        if !self.ausentes.contains_key(&quem) && self.ausentes.len() >= MAX_AUSENTES_LEMBRADOS {
+            tracing::warn!(%mod_id, %servidor, %quem, teto = MAX_AUSENTES_LEMBRADOS, "máquina: ausentes demais no livro; o pedido a quem não está não é lembrado para a volta dela");
+            return;
+        }
         let lembrados = self.ausentes.entry(quem).or_default();
         if !lembrados.contains(&k) && lembrados.len() < LUGARES_LEMBRADOS_POR_PESSOA {
             lembrados.push(k);
@@ -868,6 +878,13 @@ impl Maquinas {
         desligado.restam_aceitas = self.aceitas.keys().any(|(m, _, _)| m == mod_id);
         if ligado.is_none() {
             self.donas.retain(|(m, _), _| m != mod_id);
+            // **O MOD desligado leva o que o livro lembrava dele** (M7): as
+            // vezes dos lugares e os lugares de quem estava ausente.
+            self.vezes.retain(|(m, _, _), _| m != mod_id);
+            for lembrados in self.ausentes.values_mut() {
+                lembrados.retain(|(m, _, _)| m != mod_id);
+            }
+            self.ausentes.retain(|_, lembrados| !lembrados.is_empty());
         }
         desligado.a_parar = sairam
             .iter()
@@ -2010,6 +2027,30 @@ mod tests {
             ]
         );
         assert!(m.voltou(A).is_empty(), "cada lugar é dito uma vez");
+    }
+
+    /// **O livro não cresce sem fim** (revisão final, M7): o MOD desligado
+    /// leva as vezes e os ausentes dele, e passado o teto de ausentes uma
+    /// pessoa nova não é lembrada.
+    #[test]
+    fn o_livro_esquece_o_mod_desligado_e_tem_teto_de_ausentes() {
+        let mut m = Maquinas::default();
+        m.lembrar_quem_nao_esta(A, MOD, "mc-1", Papel::Principal);
+        m.lembrar_quem_nao_esta(A, "x/outro", "mc-1", Papel::Principal);
+        let _ = m.mudar_a_vez(&chave(MOD, "mc-1", Papel::Principal));
+        let _ = m.mod_desligado(MOD, None);
+        assert!(m.vezes.keys().all(|(mod_id, _, _)| mod_id != MOD));
+        assert_eq!(
+            m.ausentes.get(&A).cloned().unwrap_or_default(),
+            vec![chave("x/outro", "mc-1", Papel::Principal)]
+        );
+        let _ = m.mod_desligado("x/outro", None);
+        assert!(m.ausentes.is_empty());
+
+        for n in 0..MAX_AUSENTES_LEMBRADOS as u64 + 10 {
+            m.lembrar_quem_nao_esta(PersonId(10_000 + n), MOD, "mc-1", Papel::Principal);
+        }
+        assert_eq!(m.ausentes.len(), MAX_AUSENTES_LEMBRADOS);
     }
 
     /// A mesma recusa só é **nova** uma vez por janela; outra chave, ou a

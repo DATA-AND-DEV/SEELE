@@ -156,3 +156,42 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   (`#maquinas-aceitas-erro`, em frase), além do registro. Bancada
   `aceite-da-maquina.cjs`, caso 17, nos dois motores. — Custo: a lista de
   antes fica desenhada embaixo da frase até a próxima leitura dar certo.
+- **Ruling R14 (M7): o MOD desligado leva do livro as vezes e os ausentes
+  dele, e o livro lembra no máximo `MAX_AUSENTES_LEMBRADOS` (4096) pessoas
+  ausentes** — passado o teto, o pedido a quem não está não é lembrado, e o
+  `WARN` diz. `donas` já saía com o MOD; segue crescendo por nome de
+  `servidor` enquanto o MOD está ligado (limitado pelo que a metade de
+  servidor declara). — Custo: a 4097ª pessoa chamada sem estar aqui não ouve
+  `MaquinaVoltou` ao chegar (a metade de servidor pode chamá-la de novo);
+  recusar um `quem` que não é membro ficou de fora (pede o livro de membros
+  dentro deste, e um membro novo ainda não gravado seria recusado).
+- **Ruling R15 (M13b): o teste das dispensas lê numa tarefa só, e o prazo
+  fica na fila.** Um `timeout` em volta de `frame::read` cancelava a leitura
+  no meio de um quadro partido, e o resto vinha desalinhado. — Prova por
+  reversão: não há (o defeito é uma corrida rara do teste, não do produto).
+  O `esperar` do mesmo arquivo tem o mesmo desenho (300 ms) e ficou: os
+  quadros dele são pequenos e chegam inteiros numa mensagem. Custo: se um dia
+  não chegarem, a mesma falha falsa volta lá.
+
+## O que ficou, com o porquê
+
+- **Ruling R16 (M4): os canais `j` fora do crédito da conexão ficam** —
+  PLAUSÍVEL, e o conserto (recusar `t`/`j` sem opt-in, ou contá-los no
+  crédito) mexe no `seele-enlace`, que serve a tela e a voz; sem medir o
+  teto real que uma ponta segura, um conserto daqui seria palpite. — Custo:
+  um par hostil pode prender ~250 MiB num jogador ou num par de tela.
+- **Ruling R17 (M8): o pedido cujo destinatário saiu fica calado no livro.**
+  Dizer `MaquinaRecusou` com o pedido ainda de pé contradiz o nome; trocar o
+  pendente por um ausente (e o `MaquinaVoltou` na chegada) muda o contrato
+  que a metade de servidor de referência segue, e pede o MOD junto. — Custo:
+  o pendente conta no `MAX_PEDIDOS_PENDENTES_POR_MOD` até a pessoa voltar ou
+  o MOD pedir de novo.
+- **Ruling R18 (M13a): os guardas de texto de `tests/frontend.rs` ficam.**
+  O M9 e o M2 ganharam caso na bancada `aceite-da-maquina.cjs`, que roda o
+  produto nos dois motores; mover os outros guardas para as bancadas é
+  trabalho de cada tela, fora desta revisão. — Custo: um guarda de texto pode
+  passar com o defeito presente, como o M9 passava.
+- **Fora do SEELE:** I2, I10, M1, M10, M11 e M12 são do MOD de multiplayer;
+  e o contrato que o MOD copia (`test/contrato/api-v8.json`) precisa ser
+  copiado de novo: a v8 ganhou `reservado-ao-aceite`, `pasta-fora-do-aceite`
+  e os campos `caminho`, `reservado` e `pasta`, e o `rodar` só roda na raiz.

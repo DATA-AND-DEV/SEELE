@@ -1197,18 +1197,29 @@ async fn quem_operava_com_um_pedido_novo_recebe_uma_dispensa_so() -> Result<()> 
         &outra_oferta,
     );
     let _ = pedir(&m, PersonId(77), gestora.pessoa);
+    // **Quem lê é uma tarefa só, que nunca é cancelada** (revisão final,
+    // M13b): um `timeout` em volta de `frame::read` cancelava a leitura no
+    // meio de um quadro partido em duas mensagens, e o resto do fluxo vinha
+    // desalinhado — uma falha falsa. O prazo fica na fila.
+    let mut recebe = alice.ligado.recebe;
+    let (quadros, mut chegaram) = tokio::sync::mpsc::unbounded_channel();
+    let leitor = tokio::spawn(async move {
+        while let Ok(quadro) = frame::read::<ServerMessage>(&mut recebe).await {
+            if quadros.send(quadro).is_err() {
+                break;
+            }
+        }
+    });
     let mut dispensas = 0;
     let fim = Instant::now() + Duration::from_millis(800);
     while Instant::now() < fim {
-        if let Ok(Ok(ServerMessage::MaquinaDispensada { .. })) = tokio::time::timeout(
-            Duration::from_millis(100),
-            frame::read::<ServerMessage>(&mut alice.ligado.recebe),
-        )
-        .await
+        if let Ok(Some(ServerMessage::MaquinaDispensada { .. })) =
+            tokio::time::timeout(Duration::from_millis(100), chegaram.recv()).await
         {
             dispensas += 1;
         }
     }
+    leitor.abort();
     assert_eq!(dispensas, 1, "Alice recebeu {dispensas} dispensas");
     m.daemon.shutdown();
     Ok(())
