@@ -497,23 +497,83 @@ impl Validate for OfertaDeMaquina {
     }
 }
 
+/// **O papel de uma máquina num servidor de jogo** (API 8 parte 7): cada um
+/// tem uma principal e, se a metade de servidor quiser, uma reserva. As duas
+/// ficam aceitas ao mesmo tempo; só a dona agora serve.
+///
+/// Viaja no [`crate::control::ServerMessage::PedidoDeMaquina`] e entra no
+/// [`resumo_da_oferta`]: **ser a reserva muda o que a pessoa aceita** — este
+/// computador guarda uma cópia do mundo e só roda o jogo se a principal sair —,
+/// então a tela o diz, e um aceite de reserva não vale para um pedido de
+/// principal com a mesma oferta (nem o contrário).
+///
+/// **Sempre acrescente no fim** (ADR 0058).
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub enum PapelDaMaquina {
+    /// A máquina de sempre: a que roda quando nada mudou.
+    #[default]
+    Principal,
+    /// A que assume quando a metade de servidor manda.
+    Reserva,
+}
+
+impl PapelDaMaquina {
+    /// Os dois, na ordem.
+    pub const TODOS: [Self; 2] = [Self::Principal, Self::Reserva];
+
+    /// O nome que o MOD lê e escreve, e que a casca recebe.
+    #[must_use]
+    pub const fn nome(self) -> &'static str {
+        match self {
+            Self::Principal => "principal",
+            Self::Reserva => "reserva",
+        }
+    }
+
+    /// O papel de um nome, ou `None`.
+    #[must_use]
+    pub fn de(nome: &str) -> Option<Self> {
+        match nome {
+            "principal" => Some(Self::Principal),
+            "reserva" => Some(Self::Reserva),
+            _ => None,
+        }
+    }
+
+    /// O outro papel.
+    #[must_use]
+    pub const fn o_outro(self) -> Self {
+        match self {
+            Self::Principal => Self::Reserva,
+            Self::Reserva => Self::Principal,
+        }
+    }
+}
+
 /// O resumo do que a pessoa viu: SHA-256 da codificação do fio (postcard, a
 /// mesma dos quadros de controle) de `(mod_id, hash_do_pacote, servidor,
-/// oferta)`, atrás de um rótulo de domínio.
+/// papel, oferta)`, atrás de um rótulo de domínio.
 ///
 /// Determinístico porque o postcard o é: nenhum mapa, nenhum campo opcional
 /// escrito de dois jeitos. O aceite guarda este resumo, e não a oferta, então
 /// qualquer coisa que a oferta mostre e que não entrasse aqui poderia mudar
-/// depois do aceite sem invalidá-lo.
+/// depois do aceite sem invalidá-lo. O papel entra pelo mesmo motivo: a tela o
+/// mostra, e o app aceita sozinho um pedido com o resumo guardado.
 #[must_use]
 pub fn resumo_da_oferta(
     mod_id: &str,
     hash_do_pacote: &str,
     servidor: &str,
+    papel: PapelDaMaquina,
     oferta: &OfertaDeMaquina,
 ) -> [u8; 32] {
-    const ROTULO: &[u8] = b"seele/oferta-de-maquina/1\0";
-    let corpo = (mod_id, hash_do_pacote, servidor, oferta);
+    // `/2`: o `/1` não amarrava o papel. Um aceite guardado com o `/1` deixa
+    // de bater e a tela pergunta de novo — o que é certo, porque ele não dizia
+    // em que papel a pessoa aceitou.
+    const ROTULO: &[u8] = b"seele/oferta-de-maquina/2\0";
+    let corpo = (mod_id, hash_do_pacote, servidor, papel, oferta);
     // Falhar aqui não pode virar um resumo: com `unwrap_or_default` toda oferta
     // resumia os mesmos bytes vazios, e um aceite valia para qualquer outra.
     // Um `Vec` como destino só falha sem memória, e então é melhor cair.
@@ -630,6 +690,7 @@ pub(crate) fn check_maquina(mod_id: &str, servidor: &str) -> Result<(), ControlE
 mod tests {
     use super::*;
 
+    const P: PapelDaMaquina = PapelDaMaquina::Principal;
     const HASH_A: &str = "aa00000000000000000000000000000000000000000000000000000000000000";
     const HASH_B: &str = "bb00000000000000000000000000000000000000000000000000000000000000";
 
@@ -766,8 +827,11 @@ mod tests {
     #[test]
     fn o_resumo_muda_com_cada_coisa_mostrada() {
         let base = oferta_de_exemplo();
-        let r = resumo_da_oferta("x/jogo", HASH_A, "mc-1", &base);
-        assert_eq!(r, resumo_da_oferta("x/jogo", HASH_A, "mc-1", &base.clone()));
+        let r = resumo_da_oferta("x/jogo", HASH_A, "mc-1", P, &base);
+        assert_eq!(
+            r,
+            resumo_da_oferta("x/jogo", HASH_A, "mc-1", P, &base.clone())
+        );
 
         type Mexe = fn(&mut OfertaDeMaquina);
         let casos: [(&str, Mexe); 30] = [
@@ -840,30 +904,37 @@ mod tests {
             mexe(&mut o);
             assert_ne!(
                 r,
-                resumo_da_oferta("x/jogo", HASH_A, "mc-1", &o),
+                resumo_da_oferta("x/jogo", HASH_A, "mc-1", P, &o),
                 "mexer em {nome} não mudou o resumo"
             );
         }
         assert_ne!(
             r,
-            resumo_da_oferta("x/jogo", HASH_B, "mc-1", &base),
+            resumo_da_oferta("x/jogo", HASH_B, "mc-1", P, &base),
             "hash do pacote"
         );
         assert_ne!(
             r,
-            resumo_da_oferta("y/jogo", HASH_A, "mc-1", &base),
+            resumo_da_oferta("y/jogo", HASH_A, "mc-1", P, &base),
             "mod_id"
         );
         assert_ne!(
             r,
-            resumo_da_oferta("x/jogo", HASH_A, "mc-2", &base),
+            resumo_da_oferta("x/jogo", HASH_A, "mc-2", P, &base),
             "servidor"
+        );
+        // **O papel entra**: sem ele, o aceite guardado de uma reserva ligava
+        // sozinho (resumo igual) um pedido de principal com a mesma oferta.
+        assert_ne!(
+            r,
+            resumo_da_oferta("x/jogo", HASH_A, "mc-1", PapelDaMaquina::Reserva, &base),
+            "papel"
         );
     }
 
     #[test]
     fn o_resumo_em_hex_tem_64_caracteres_minusculos() {
-        let r = resumo_da_oferta("x/jogo", HASH_A, "mc-1", &oferta_de_exemplo());
+        let r = resumo_da_oferta("x/jogo", HASH_A, "mc-1", P, &oferta_de_exemplo());
         let hex = resumo_em_hex(&r);
         assert!(crate::mods::e_hash_de_conteudo(&hex), "{hex}");
     }

@@ -1337,6 +1337,9 @@ pub enum Event {
         /// longe o maior evento, e raro: sem ela, todo `RosterChanged` pagaria
         /// o tamanho dele na fila.
         oferta: Box<OfertaDeMaquinaFfi>,
+        /// Em que papel: `principal` ou `reserva`. A tela diz que é a reserva,
+        /// e o resumo o amarra.
+        papel: String,
         /// O resumo da oferta, 64 caracteres em hex.
         resumo: String,
     },

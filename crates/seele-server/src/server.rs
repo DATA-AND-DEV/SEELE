@@ -569,6 +569,8 @@ pub enum Event {
         /// valor do barramento, e sem a caixa todo evento pagaria o tamanho
         /// dela.
         oferta: Box<seele_proto::maquina::OfertaDeMaquina>,
+        /// Em que papel: a tela diz que é a reserva.
+        papel: seele_proto::maquina::PapelDaMaquina,
     },
     /// Um aviso da metade de servidor à máquina.
     AvisoParaMaquina {

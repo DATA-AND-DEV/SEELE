@@ -3014,6 +3014,11 @@ pub enum ServerMessage {
         // que carrega uma). O postcard codifica `Box<T>` igual a `T`, então o
         // fio não muda.
         oferta: Box<crate::maquina::OfertaDeMaquina>,
+        /// Em que papel a pessoa é chamada: a principal ou a reserva (API 8
+        /// parte 7). A tela diz, e o resumo amarra. Nasceu no 12 desta branch,
+        /// que nunca foi publicado, e entra no fim, como o `quem` do
+        /// `AlcanceTunelPor` (ADR 0058 não a alcança).
+        papel: crate::maquina::PapelDaMaquina,
     },
     /// Um aviso da metade de servidor do MOD à máquina. O mesmo teto do
     /// [`Self::ModAviso`].
@@ -6149,6 +6154,7 @@ mod o_vocabulario_e_a_versao {
                 servidor: "mc-1".into(),
                 pedido_por: PersonId(1),
                 oferta: Box::new(oferta),
+                papel: crate::maquina::PapelDaMaquina::Principal,
             }
         };
         let crua = |m: &ServerMessage| {

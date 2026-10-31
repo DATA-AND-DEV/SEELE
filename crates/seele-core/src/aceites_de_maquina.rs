@@ -50,6 +50,11 @@ pub struct AceiteDeMaquina {
     pub hash: String,
     /// O servidor de jogo.
     pub servidor: String,
+    /// Em que papel a pessoa aceitou (o do pedido). Entra no resumo; ausente
+    /// numa linha de antes do campo é a principal, e então o resumo dela (do
+    /// rótulo `/1`) não bate com pedido nenhum, e a tela pergunta de novo.
+    #[serde(default)]
+    pub papel: seele_proto::maquina::PapelDaMaquina,
     /// O resumo do que foi mostrado, em hex: o que o `Aviso` trouxe, nunca
     /// recalculado aqui.
     pub resumo: String,
@@ -356,6 +361,7 @@ mod tests {
             mod_id: "seele/jogo".into(),
             hash: "ab".repeat(32),
             servidor: servidor.into(),
+            papel: seele_proto::maquina::PapelDaMaquina::Reserva,
             resumo: "cd".repeat(32),
             oferta: oferta(porta),
             pedido_por: "marcela".into(),

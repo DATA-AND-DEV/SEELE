@@ -51,6 +51,10 @@
 //     achou e o que se fez, uma linha por processo.
 // 21. (e2e de 31/10, passo 5) o MOD sem o id repetido, e o servidor do SEELE
 //     pelo nome, e não o id do jogo.
+// 22. (API 8 parte 7) o pedido da reserva diz que é a reserva — chip e título à
+//     vista sem rolar, e a linha do que isso quer dizer —, e o da principal não;
+//     `mudou: ["papel"]` tem frase. (O 4b prova também que «o jogo segue
+//     rodando aqui» só sai com o jogo de pé.)
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/aceite-da-maquina.cjs
 
@@ -273,10 +277,18 @@ async function caso(motor, numero, prova) {
             titulosDeMaquinas.set(chaveDaMaquina("127.0.0.1:7000", "x/jogo", "srv-1"), "Minecraft");
             emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: true, motivo: "sem-anfitriao" });
           });
-          const faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          let faixa = await pagina.evaluate(() => faixaDeMaquinas());
           assert.match(faixa, /este computador está pronto para servir Minecraft/, `${motor}: 4b · ${faixa}`);
-          assert.match(faixa, /quem hospeda o SEELE saiu: o jogo segue rodando aqui/, `${motor}: 4b · ${faixa}`);
+          // **Sem jogo de pé, nada «segue rodando»**: a faixa dizia as duas
+          // coisas ao mesmo tempo («não está rodando» e «segue rodando aqui»).
+          assert.doesNotMatch(faixa, /segue rodando aqui/, `${motor}: 4b · «segue rodando» sem jogo: ${faixa}`);
+          assert.match(faixa, /quem hospeda o SEELE saiu, e o jogo não está rodando aqui; se ele não chamar esta máquina de volta em 10 minutos, ela é desligada/, `${motor}: 4b · sem jogo: ${faixa}`);
           assert.match(faixa, /DESLIGAR/, `${motor}: 4b · a órfã não oferece DESLIGAR`);
+          // Com o jogo de pé, ele segue rodando, e quem joga pelo direto também.
+          await pagina.evaluate(() => emitir("maquina-jogo", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", rodando: true }));
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /quem hospeda o SEELE saiu: o jogo segue rodando aqui/, `${motor}: 4b · com jogo: ${faixa}`);
+          assert.doesNotMatch(faixa, /ela é desligada/, `${motor}: 4b · com jogo: ${faixa}`);
           const cor = await pagina.evaluate(() => getComputedStyle(document.querySelector(".maquina-bloco")).borderTopColor);
           assert.notEqual(cor, "rgba(0, 0, 0, 0)", `${motor}: 4b · sem borda`);
           if (process.env.SEELE_RETRATO_DA_FAIXA) await pagina.screenshot({ path: `${process.env.SEELE_RETRATO_DA_FAIXA}-${motor}-orfa.png` });
@@ -683,8 +695,47 @@ async function caso(motor, numero, prova) {
           await esperarFechada();
         });
 
+        // 22. (API 8 parte 7) O pedido da reserva diz que é a reserva: no
+        //     alto, sem rolar (chip e título), e numa linha que diz o que isso
+        //     quer dizer. O da principal não diz nada disso.
+        await caso(motor, "22", async () => {
+          await zerar();
+          await emitirPedido({ papel: "reserva", resumo: "resumo-reserva" });
+          await esperarTela("Fulano");
+          const texto = await pagina.evaluate(() => tela());
+          assert.match(texto, /Fulano pede que este computador seja a reserva de um servidor de jogo/, `${motor}: 22 · título: ${texto}`);
+          assert.match(texto, /como reserva: este computador só roda o jogo se a máquina principal sair, com uma cópia do mundo/, `${motor}: 22 · ${texto}`);
+          const chip = await pagina.evaluate(() => {
+            const c = $("maquina-papel");
+            const r = c.getBoundingClientRect();
+            const corpo = $("maquina-corpo").getBoundingClientRect();
+            return { texto: c.innerText, visivel: r.width > 0 && r.height > 0, acimaDoCorpo: r.bottom <= corpo.top };
+          });
+          assert.equal(chip.texto, "RESERVA", `${motor}: 22 · chip: ${JSON.stringify(chip)}`);
+          assert.ok(chip.visivel && chip.acimaDoCorpo, `${motor}: 22 · o chip não está à vista sem rolar: ${JSON.stringify(chip)}`);
+          await pagina.click("#maquina-aceitar");
+          await esperarFechada();
+          assert.deepEqual(await pagina.evaluate(() => chamadasDe("maquina_aceitar")), [
+            { alvo: "127.0.0.1:7000", modId: "x/jogo", servidor: "srv-1", resumo: "resumo-reserva" },
+          ], `${motor}: 22 · o aceite da reserva leva o resumo dela`);
+          // A principal: sem chip, sem a linha, o título de sempre.
+          await emitirPedido({ papel: "principal" });
+          await esperarTela("Fulano");
+          const principal = await pagina.evaluate(() => ({ texto: tela(), chip: $("maquina-papel").getBoundingClientRect().width }));
+          assert.doesNotMatch(principal.texto, /reserva/i, `${motor}: 22 · a principal falou de reserva: ${principal.texto}`);
+          assert.equal(principal.chip, 0, `${motor}: 22 · chip na principal`);
+          await pagina.click("#maquina-recusar");
+          await esperarFechada();
+          // O papel que mudou desde o aceite tem frase.
+          await emitirPedido({ papel: "reserva", mudou: ["papel"] });
+          await esperarTela("Fulano");
+          assert.match(await pagina.evaluate(() => tela()), /isto mudou desde o seu aceite: o papel deste computador \(principal ou reserva\)/, `${motor}: 22 · mudou`);
+          await pagina.click("#maquina-recusar");
+          await esperarFechada();
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 22, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 23, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

@@ -728,22 +728,29 @@ async fn aceitar_o_que_chegou(m: &Montado, par: &mut Par, pedido_por: PersonId) 
             servidor,
             pedido_por,
             oferta,
+            papel,
         } => Some((
             mod_id.clone(),
             hash.clone(),
             servidor.clone(),
             *pedido_por,
             (**oferta).clone(),
+            *papel,
         )),
         _ => None,
     })
     .await;
-    let (mod_id, hash, servidor, por, oferta_que_veio) =
+    let (mod_id, hash, servidor, por, oferta_que_veio, papel) =
         veio.ok_or_else(|| anyhow::anyhow!("o PedidoDeMaquina não chegou"))?;
     assert_eq!(mod_id, MOD);
     assert_eq!(hash, m.hash, "o hash não é o do pacote ligado");
     assert_eq!(servidor, SERVIDOR);
     assert_eq!(por, pedido_por, "pedido_por não é quem pediu ao MOD");
+    assert_eq!(
+        papel,
+        seele_proto::maquina::PapelDaMaquina::Principal,
+        "um pedido sem papel é o da principal"
+    );
     assert_eq!(
         oferta_que_veio,
         oferta(),
@@ -753,6 +760,7 @@ async fn aceitar_o_que_chegou(m: &Montado, par: &mut Par, pedido_por: PersonId) 
         &mod_id,
         &hash,
         &servidor,
+        papel,
         &oferta_que_veio,
     ));
     frame::write(&mut par.ligado.envio, &aceite(&resumo)).await?;

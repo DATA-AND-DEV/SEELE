@@ -6711,12 +6711,14 @@ fn translate(
             servidor,
             pedido_por,
             oferta,
+            papel,
         } => (*para == self_person).then(|| ServerMessage::PedidoDeMaquina {
             mod_id: mod_id.clone(),
             hash: hash.clone(),
             servidor: servidor.clone(),
             pedido_por: *pedido_por,
             oferta: oferta.clone(),
+            papel: *papel,
         }),
         Event::AvisoParaMaquina {
             para,

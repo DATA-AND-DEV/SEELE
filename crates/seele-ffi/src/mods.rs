@@ -337,6 +337,11 @@ pub struct AceiteDeMaquinaGuardado {
     pub hash: String,
     /// O servidor de jogo.
     pub servidor: String,
+    /// Em que papel a pessoa aceitou: `principal` ou `reserva`, o do
+    /// [`crate::Event::MachineRequest`]. Entra no resumo; ausente é a
+    /// principal.
+    #[serde(default = "papel_principal")]
+    pub papel: String,
     /// O resumo do que foi mostrado, como o [`crate::Event::MachineRequest`]
     /// o trouxe.
     pub resumo: String,
@@ -348,10 +353,17 @@ pub struct AceiteDeMaquinaGuardado {
     pub quando: u64,
 }
 
+fn papel_principal() -> String {
+    seele_core::maquina::PapelDaMaquina::Principal
+        .nome()
+        .to_owned()
+}
+
 impl AceiteDeMaquinaGuardado {
     fn de(aceite: seele_core::aceites_de_maquina::AceiteDeMaquina) -> Self {
         Self {
             oferta: crate::OfertaDeMaquinaFfi::from(&aceite.oferta),
+            papel: aceite.papel.nome().to_owned(),
             alvo: aceite.alvo,
             mod_id: aceite.mod_id,
             hash: aceite.hash,
@@ -421,8 +433,9 @@ pub fn aceite_de_maquina(
 /// # Errors
 ///
 /// `"EnderecoInvalido"`, `"OfertaInvalida"` (uma oferta que o fio recusaria
-/// não vira aceite), `"ResumoNaoConfere"` (o resumo não é o desta oferta, deste
-/// pacote e deste servidor de jogo) e `"NaoDeuParaGravar"`.
+/// não vira aceite), `"PapelInvalido"` (nem `principal` nem `reserva`),
+/// `"ResumoNaoConfere"` (o resumo não é o desta oferta, deste pacote, deste
+/// servidor de jogo e deste papel) e `"NaoDeuParaGravar"`.
 pub fn guardar_aceite_de_maquina(
     home: &str,
     alvo: &str,
@@ -433,6 +446,8 @@ pub fn guardar_aceite_de_maquina(
         .oferta
         .para_o_nucleo()
         .map_err(|_| "OfertaInvalida".to_owned())?;
+    let papel = seele_core::maquina::PapelDaMaquina::de(&aceite.papel)
+        .ok_or_else(|| "PapelInvalido".to_owned())?;
     // O resumo é o que a pessoa aceitou; a oferta guardada é o que a parte 4
     // executa. Se os dois não falam da mesma coisa — uma casca que remontou a
     // oferta errado, ou juntou a oferta de um pedido ao resumo de outro —, o
@@ -441,6 +456,7 @@ pub fn guardar_aceite_de_maquina(
         &aceite.mod_id,
         &aceite.hash,
         &aceite.servidor,
+        papel,
         &oferta,
     ));
     if resumo != aceite.resumo {
@@ -455,6 +471,7 @@ pub fn guardar_aceite_de_maquina(
             mod_id: aceite.mod_id.clone(),
             hash: aceite.hash.clone(),
             servidor: aceite.servidor.clone(),
+            papel,
             resumo: aceite.resumo.clone(),
             oferta,
             pedido_por: aceite.pedido_por.clone(),
@@ -525,6 +542,7 @@ mod tests_do_aceite_de_maquina {
             &aceite.mod_id,
             &aceite.hash,
             &aceite.servidor,
+            seele_core::maquina::PapelDaMaquina::de(&aceite.papel).unwrap(),
             &aceite.oferta.para_o_nucleo().unwrap(),
         ));
         aceite
@@ -536,6 +554,7 @@ mod tests_do_aceite_de_maquina {
             mod_id: "seele/jogo".into(),
             hash: "ab".repeat(32),
             servidor: "mundo".into(),
+            papel: "reserva".into(),
             resumo: "cd".repeat(32),
             oferta: crate::OfertaDeMaquinaFfi {
                 titulo: "Minecraft".into(),
@@ -578,6 +597,10 @@ mod tests_do_aceite_de_maquina {
             .expect("o aceite guardado pelo endereço curto");
         assert_eq!(achado.alvo, crate::chave_do_servidor("casa").unwrap());
         assert_eq!(achado.oferta, aceite().oferta);
+        assert_eq!(
+            achado.papel, "reserva",
+            "o papel do aceite não voltou do disco"
+        );
         assert!(achado.quando > 0);
         assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 1);
 
@@ -604,7 +627,11 @@ mod tests_do_aceite_de_maquina {
         outra_porta.oferta.tuneis[0].porta = 25566;
         let mut outro_pacote = aceite();
         outro_pacote.hash = "ef".repeat(32);
-        for torto in [sem_resumo(), outra_porta, outro_pacote] {
+        // O resumo de reserva com o papel trocado: o disco guardaria um «sim»
+        // de principal que a pessoa nunca deu.
+        let mut outro_papel = aceite();
+        outro_papel.papel = "principal".into();
+        for torto in [sem_resumo(), outra_porta, outro_pacote, outro_papel] {
             assert_eq!(
                 guardar_aceite_de_maquina(&home, "casa", &torto),
                 Err("ResumoNaoConfere".to_owned())
@@ -612,6 +639,17 @@ mod tests_do_aceite_de_maquina {
         }
         assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 0);
         guardar_aceite_de_maquina(&home, "casa", &aceite()).unwrap();
+    }
+
+    #[test]
+    fn um_papel_desconhecido_nao_vira_aceite() {
+        let home = pasta("papel");
+        let mut torto = aceite();
+        torto.papel = "terceira".into();
+        assert_eq!(
+            guardar_aceite_de_maquina(&home, "casa", &torto),
+            Err("PapelInvalido".to_owned())
+        );
     }
 
     #[test]

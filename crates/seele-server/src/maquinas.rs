@@ -42,49 +42,12 @@ pub const MAX_MAQUINAS_POR_MOD: usize = crate::tuneis::MAX_TUNEIS_POR_MOD;
 /// tem uma principal e, se a metade de servidor quiser, uma reserva. As duas
 /// ficam aceitas ao mesmo tempo; só a dona agora ([`Maquinas::dona`]) serve.
 ///
-/// Não vai no fio: o pedido, o aceite e a parada chegam pela pessoa e pelo
-/// servidor de jogo, e a mesma pessoa não pode ter os dois papéis
-/// ([`Excesso::MesmaPessoaNasDuas`]) — então a pessoa diz o papel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Papel {
-    /// A máquina de sempre: a que roda quando nada mudou.
-    Principal,
-    /// A que assume quando a metade de servidor manda.
-    Reserva,
-}
-
-impl Papel {
-    /// Os dois, na ordem.
-    pub const TODOS: [Self; 2] = [Self::Principal, Self::Reserva];
-
-    /// O nome que o MOD lê e escreve.
-    #[must_use]
-    pub const fn nome(self) -> &'static str {
-        match self {
-            Self::Principal => "principal",
-            Self::Reserva => "reserva",
-        }
-    }
-
-    /// O papel de um nome, ou `None`.
-    #[must_use]
-    pub fn de(nome: &str) -> Option<Self> {
-        match nome {
-            "principal" => Some(Self::Principal),
-            "reserva" => Some(Self::Reserva),
-            _ => None,
-        }
-    }
-
-    /// O outro papel.
-    #[must_use]
-    pub const fn o_outro(self) -> Self {
-        match self {
-            Self::Principal => Self::Reserva,
-            Self::Reserva => Self::Principal,
-        }
-    }
-}
+/// O pedido leva o papel no fio (`PedidoDeMaquina.papel`), para a tela dizer
+/// que é a reserva e o resumo o amarrar. O aceite e a parada continuam
+/// chegando pela pessoa e pelo servidor de jogo: a mesma pessoa não pode ter
+/// os dois papéis ([`Excesso::MesmaPessoaNasDuas`]), então a pessoa diz o
+/// papel.
+pub use seele_proto::maquina::PapelDaMaquina as Papel;
 
 type Chave = (String, String, Papel);
 
@@ -128,6 +91,8 @@ pub struct Reenvio {
     pub mod_id: String,
     /// O servidor de jogo.
     pub servidor: String,
+    /// O papel do pedido: o reenvio diz o mesmo que o primeiro.
+    pub papel: Papel,
     /// O hash do pacote do pedido.
     pub hash: String,
     /// Quem pediu.
@@ -491,7 +456,7 @@ impl Maquinas {
             return Pedido::Recusado(Excesso::MesmaPessoaNasDuas);
         }
         let resumo_hex = seele_proto::maquina::resumo_em_hex(
-            &seele_proto::maquina::resumo_da_oferta(mod_id, hash, servidor, oferta),
+            &seele_proto::maquina::resumo_da_oferta(mod_id, hash, servidor, papel, oferta),
         );
         if self
             .aceitas
@@ -927,7 +892,7 @@ impl Maquinas {
             conexoes.push(conexao);
         }
         let mut reenvios = Vec::new();
-        for ((mod_id, servidor, _), pendente) in &mut self.pendentes {
+        for ((mod_id, servidor, papel), pendente) in &mut self.pendentes {
             if pendente.quem != quem || pendente.esperando.contains(&conexao) {
                 continue;
             }
@@ -935,6 +900,7 @@ impl Maquinas {
             reenvios.push(Reenvio {
                 mod_id: mod_id.clone(),
                 servidor: servidor.clone(),
+                papel: *papel,
                 hash: pendente.hash.clone(),
                 pedido_por: pendente.pedido_por,
                 oferta: pendente.oferta.clone(),
@@ -1369,6 +1335,7 @@ pub fn pedir_como(
                 servidor: servidor.to_owned(),
                 pedido_por,
                 oferta: Box::new(oferta.clone()),
+                papel,
             });
         }
         Pedido::JaAceito => {
@@ -1574,6 +1541,7 @@ pub fn chegou(server: &Server, quem: PersonId, conexao: u64) {
             servidor: r.servidor,
             pedido_por: r.pedido_por,
             oferta: Box::new(r.oferta),
+            papel: r.papel,
         });
     }
 }
@@ -1764,8 +1732,12 @@ mod tests {
     }
 
     fn resumo(servidor: &str, o: &OfertaDeMaquina) -> String {
+        resumo_como(Papel::Principal, servidor, o)
+    }
+
+    fn resumo_como(papel: Papel, servidor: &str, o: &OfertaDeMaquina) -> String {
         seele_proto::maquina::resumo_em_hex(&seele_proto::maquina::resumo_da_oferta(
-            MOD, HASH, servidor, o,
+            MOD, HASH, servidor, papel, o,
         ))
     }
 
@@ -1992,7 +1964,11 @@ mod tests {
         const NOVO: &str = "bb00000000000000000000000000000000000000000000000000000000000000";
         let resumo_de = |hash: &str, servidor: &str, o: &OfertaDeMaquina| {
             seele_proto::maquina::resumo_em_hex(&seele_proto::maquina::resumo_da_oferta(
-                MOD, hash, servidor, o,
+                MOD,
+                hash,
+                servidor,
+                Papel::Principal,
+                o,
             ))
         };
         let mut m = Maquinas::default();
@@ -2164,9 +2140,34 @@ mod tests {
             "{pedido:?}"
         );
         let aceita = m
-            .aceitar(quem, conexao, MOD, "mc-1", &resumo("mc-1", &o))
+            .aceitar(quem, conexao, MOD, "mc-1", &resumo_como(papel, "mc-1", &o))
             .expect("aceita");
         assert_eq!(aceita.papel, papel);
+    }
+
+    /// **O pedido da reserva diz que é a reserva, e o aceite dela é o dela.**
+    /// O papel entra no resumo: o «sim» à mesma oferta como principal não
+    /// aceita o pedido de reserva — o app aceitaria sozinho um pelo outro.
+    #[test]
+    fn o_aceite_da_principal_nao_aceita_o_pedido_da_reserva() {
+        let mut m = Maquinas::default();
+        let o = oferta(25565);
+        let pedido = m.pedir_como(MOD, HASH, "mc-1", Papel::Reserva, B, GESTORA, &o);
+        let Pedido::Guardado { resumo_hex, .. } = pedido else {
+            panic!("{pedido:?}");
+        };
+        assert_eq!(resumo_hex, resumo_como(Papel::Reserva, "mc-1", &o));
+        assert_ne!(resumo_hex, resumo("mc-1", &o));
+        assert!(
+            m.aceitar(B, 20, MOD, "mc-1", &resumo("mc-1", &o)).is_err(),
+            "o resumo da principal aceitou o pedido da reserva"
+        );
+        assert_eq!(
+            m.aceitar(B, 20, MOD, "mc-1", &resumo_hex)
+                .expect("aceita")
+                .papel,
+            Papel::Reserva
+        );
     }
 
     /// **Duas máquinas aceitas para o mesmo servidor de jogo, e só a dona

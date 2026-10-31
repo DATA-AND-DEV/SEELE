@@ -1458,6 +1458,7 @@ mod tests {
                 instalar: None,
                 por_sistema: vec![],
             }),
+            papel: seele_proto::maquina::PapelDaMaquina::Reserva,
         };
 
         let passos = ligacao.chegou(&do_servidor(&pedido));

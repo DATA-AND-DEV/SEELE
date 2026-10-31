@@ -229,6 +229,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
                 instalar: None,
                 por_sistema: vec![],
             }),
+            papel: seele_proto::maquina::PapelDaMaquina::Reserva,
         }),
     );
     controle.insert(

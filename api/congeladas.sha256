@@ -184,4 +184,11 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   chamar de volta quem o quintal diz que rodava (e2e da API 8, passo 16).
 #   Acréscimo: nenhum nome mudou. Conferido em 31/10/2026 no release (`curl`
 #   do CLAUDE.md): a mais nova é a v0.18.3, e a v8 segue sem release.
-3da6947f30d7791de78efc2f769d7ebe1760341becfb51003f7ed383d7c4eb8e  v8.json
+# - Emenda do papel no pedido (31/10/2026, `desenho/api-8-sobre-0.19`): o
+#   PedidoDeMaquina leva o papel (principal ou reserva) até a máquina, a tela
+#   do aceite diz quando é a reserva, e o resumo do aceite amarra o papel (um
+#   aceite de reserva não liga sozinho o pedido de principal). Acréscimo: uma
+#   frase no fim de mundo.maquinas.pedir, nenhum nome mudou. Conferido em
+#   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
+#   v8 segue sem release.
+b980efbbec57784a030997a64dabd02a65c2dbfc0530593dccfb39ec7b04234f  v8.json

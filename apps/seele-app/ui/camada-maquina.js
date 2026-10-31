@@ -119,10 +119,10 @@ function origemDoArtefato(artefato) {
 function linhasDoPedido(pedido) {
   const oferta = pedido.oferta;
   const F = FRASES_DA_MAQUINA;
-  const linhas = [
-    F.mod(pedido.mod_nome, pedido.mod_id),
-    F.jogo(oferta.titulo, oferta.versao_do_jogo),
-  ];
+  const linhas = [];
+  // A reserva primeiro: é o que muda o sentido de todas as linhas de baixo.
+  if (pedido.papel === "reserva") linhas.push(F.comoReserva);
+  linhas.push(F.mod(pedido.mod_nome, pedido.mod_id), F.jogo(oferta.titulo, oferta.versao_do_jogo));
   if (oferta.receita) linhas.push(F.receita(oferta.receita, oferta.versao_da_receita));
   linhas.push(F.pedidoPor(pedido.pedido_por, pedido.servidor_seele || pedido.alvo));
   for (const tunel of oferta.tuneis ?? []) linhas.push(F.porta(String(tunel.nome ?? ""), tunel.porta, tunel.protocolo));
@@ -195,7 +195,15 @@ function desenharOPedido(pedido) {
   $("maquina-portas").textContent = (pedido.oferta.tuneis ?? [])
     .map((tunel) => `${tunel.porta}/${String(tunel.protocolo).toUpperCase()}`)
     .join(" · ");
-  $("maquina-titulo").textContent = F.titulo(pedido.pedido_por);
+  // O papel no alto, num chip, e no título: a reserva não roda o jogo agora, e
+  // a pessoa precisa saber disso sem rolar. Um papel que a tela não conhece vai
+  // ao registro e a tela diz o da principal, que é o padrão do fio.
+  const reserva = pedido.papel === "reserva";
+  if (pedido.papel !== undefined && pedido.papel !== "reserva" && pedido.papel !== "principal") {
+    registrarNoAnfitriao("maquina", `a tela não conhece o papel «${pedido.papel}»`, "aviso");
+  }
+  $("maquina-papel").textContent = reserva ? F.papelReserva : "";
+  $("maquina-titulo").textContent = (reserva ? F.tituloReserva : F.titulo)(pedido.pedido_por);
   $("maquina-sua-conta").textContent = F.suaConta;
 
   const mudou = $("maquina-mudou");
@@ -409,8 +417,13 @@ function desenharUmaMaquina(entrada) {
     );
   }
   bloco.append(linha);
-  // **Sem quem hospeda, a máquina segue rodando** e diz até quando espera.
-  if (entrada.ligada && entrada.motivo === "sem-anfitriao") bloco.append(elemento("p", "maquina-sem-anfitriao", F.semAnfitriao));
+  // **Sem quem hospeda, a máquina segue de pé** e diz até quando espera. «O
+  // jogo segue rodando aqui» só com o jogo de pé (`maquina-jogo`): a reserva
+  // que esperava, ou o jogo que caiu, não têm jogo que siga.
+  if (entrada.ligada && entrada.motivo === "sem-anfitriao") {
+    const rodando = jogosRodando.get(chaveDaMaquina(entrada.alvo, entrada.modId, entrada.servidor)) === true;
+    bloco.append(elemento("p", "maquina-sem-anfitriao", rodando ? F.semAnfitriao : F.semAnfitriaoSemJogo));
+  }
   if (entrada.falha) bloco.append(elemento("p", "maquina-nota", entrada.falha));
 
   const botao = elemento("button", entrada.ligada ? "maquina-desligar" : "maquina-dispensar", entrada.ligada ? F.desligar : F.dispensar);

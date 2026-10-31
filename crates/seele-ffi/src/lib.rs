@@ -5587,6 +5587,7 @@ async fn drive(
                         servidor,
                         pedido_por,
                         oferta,
+                        papel,
                         resumo,
                     } => {
                         shared.notify(&Event::MachineRequest {
@@ -5595,6 +5596,7 @@ async fn drive(
                             servidor,
                             pedido_por: pedido_por.0,
                             oferta: Box::new(OfertaDeMaquinaFfi::from(&*oferta)),
+                            papel: papel.nome().to_owned(),
                             resumo,
                         });
                     }

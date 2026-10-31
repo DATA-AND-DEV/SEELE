@@ -1855,6 +1855,12 @@ const FRASES_DO_TUNEL = Object.freeze({
  */
 const FRASES_DA_MAQUINA = Object.freeze({
   titulo: (quem) => `${quem} pede para rodar um servidor de jogo neste computador`,
+  // **A reserva diz que é a reserva** (API 8 parte 7): o pedido traz o papel,
+  // e o resumo o amarra. Ser a reserva é guardar uma cópia do mundo e só rodar
+  // o jogo se a principal sair — outra coisa que a pessoa aceita.
+  tituloReserva: (quem) => `${quem} pede que este computador seja a reserva de um servidor de jogo`,
+  papelReserva: "RESERVA",
+  comoReserva: "como reserva: este computador só roda o jogo se a máquina principal sair, com uma cópia do mundo",
   // O nome só quando ele diz algo além do id (e2e de 31/10: «seele/multiplayer
   // (seele/multiplayer)»).
   mod: (nome, id) => (!nome || nome === id ? `MOD: ${id}` : `MOD: ${nome} (${id})`),
@@ -1908,6 +1914,10 @@ const FRASES_DA_MAQUINA = Object.freeze({
   desligar: "DESLIGAR",
   revogar: "REVOGAR",
   semAnfitriao: "quem hospeda o SEELE saiu: o jogo segue rodando aqui, e quem joga pela ligação direta continua jogando; se ele não chamar esta máquina de volta em 10 minutos, o jogo é salvo e parado",
+  // **Sem jogo de pé, não há o que siga rodando** (a reserva que esperava, o
+  // jogo que caiu): a faixa diz o que acontece com a máquina, e não com um
+  // jogo que não existe.
+  semAnfitriaoSemJogo: "quem hospeda o SEELE saiu, e o jogo não está rodando aqui; se ele não chamar esta máquina de volta em 10 minutos, ela é desligada",
   paradas: Object.freeze({ "pelo-dono": "desligado por você", "revogada": "aceite revogado por você", "app-fechou": "o app fechou",
     "metade-falhou": "a metade de máquina do MOD falhou; veja o registro", "mod-desligado": "o MOD foi desligado no servidor",
     "outro-pedido": "o servidor passou este jogo para outra máquina", "sem-aceite": "o servidor não reconhece mais o seu aceite",
@@ -1919,7 +1929,8 @@ const FRASES_DA_MAQUINA = Object.freeze({
     versao_do_jogo: "a versão do jogo", tuneis: "as portas", artefatos: "o que se baixa", pack: "o pack",
     origens: "de onde se baixa", dominios_do_jogo: "de onde o jogo baixa sozinho", rodar: "o programa e os argumentos",
     disco_maximo: "o teto de disco", termos: "os termos", pacote: "a versão do MOD",
-    instalar: "o instalador e os argumentos dele", por_sistema: "os comandos de cada sistema" }),
+    instalar: "o instalador e os argumentos dele", por_sistema: "os comandos de cada sistema",
+    papel: "o papel deste computador (principal ou reserva)" }),
 
   // O que a brevidade do texto acima não cobre: a leitura dos termos, a lista de
   // aceites e a falha de cada verbo, dita em frase em vez do nome cru.

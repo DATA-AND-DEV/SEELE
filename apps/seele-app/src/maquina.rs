@@ -120,6 +120,9 @@ pub(crate) struct PedidoRecebido {
     /// O hash do pacote que o servidor tem ligado.
     pub(crate) hash: String,
     pub(crate) oferta: OfertaDeMaquinaFfi,
+    /// Em que papel a pessoa é chamada (`principal` ou `reserva`), como o fio
+    /// trouxe: a tela diz que é a reserva, e o aceite guarda o papel.
+    pub(crate) papel: String,
     /// O resumo que o núcleo calculou da oferta, em hex.
     pub(crate) resumo: String,
     /// O apelido de quem pediu, já trocado ([`apelido_de`]).
@@ -162,6 +165,11 @@ pub(crate) fn decidir(
     let mut mudou = campos_que_mudaram(&guardado.oferta, &pedido.oferta);
     if guardado.hash != pedido.hash {
         mudou.push("pacote");
+    }
+    // O papel entra no resumo; a tela diz quando é ele que mudou (a pessoa
+    // aceitou ser a reserva, e agora é chamada a principal, ou o contrário).
+    if guardado.papel != pedido.papel {
+        mudou.push("papel");
     }
     Decisao::Mostrar { mudou: Some(mudou) }
 }
@@ -1133,6 +1141,7 @@ struct ChegadoCedo {
     servidor: String,
     pedido_por: u64,
     oferta: OfertaDeMaquinaFfi,
+    papel: String,
     resumo: String,
     /// A ordem de chegada, dada na thread do enlace ([`Estado::numerar`]).
     numero: u64,
@@ -1435,6 +1444,10 @@ pub(crate) struct PedidoNaTela {
     /// O apelido, ou «alguém deste servidor».
     pub(crate) pedido_por: String,
     pub(crate) oferta: OfertaDeMaquinaFfi,
+    /// `principal` ou `reserva`: a tela diz, no alto e numa linha, que este
+    /// computador é a reserva — só roda o jogo se a principal sair, com uma
+    /// cópia do mundo.
+    pub(crate) papel: String,
     pub(crate) resumo: String,
     /// Onde a parte 4 vai pôr o jogo (`pasta_do_servidor_de_jogo`).
     pub(crate) pasta: String,
@@ -1605,6 +1618,7 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
             servidor,
             pedido_por,
             oferta,
+            papel,
             resumo,
         } => {
             let Some(estado) = sessoes(app) else {
@@ -1628,6 +1642,7 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
                 servidor: servidor.clone(),
                 pedido_por: *pedido_por,
                 oferta: (**oferta).clone(),
+                papel: papel.clone(),
                 resumo: resumo.clone(),
                 numero,
             };
@@ -1892,6 +1907,7 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
         chave: chave.clone(),
         hash: chegado.hash,
         oferta: chegado.oferta,
+        papel: chegado.papel,
         resumo: chegado.resumo,
         pedido_por: apelido_de(&conexao, chegado.pedido_por),
         sessao: chegado.sessao,
@@ -1998,6 +2014,7 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
                 servidor_seele: conexao.snapshot().server,
                 pedido_por: pedido.pedido_por.clone(),
                 oferta: pedido.oferta.clone(),
+                papel: pedido.papel.clone(),
                 resumo: pedido.resumo.clone(),
                 pasta,
                 mudou,
@@ -2302,6 +2319,7 @@ pub(crate) fn aceitar<R: tauri::Runtime>(
         mod_id: chave.mod_id.clone(),
         hash: pedido.hash.clone(),
         servidor: chave.servidor.clone(),
+        papel: pedido.papel.clone(),
         resumo: pedido.resumo.clone(),
         oferta: pedido.oferta.clone(),
         pedido_por: pedido.pedido_por.clone(),
@@ -2597,6 +2615,7 @@ mod testes {
             chave: Chave::de("casa", "x/jogo", "mundo"),
             hash: hash.to_owned(),
             oferta,
+            papel: "principal".to_owned(),
             resumo: resumo.to_owned(),
             pedido_por: "ana".to_owned(),
             sessao: 1,
@@ -2610,6 +2629,7 @@ mod testes {
             mod_id: "x/jogo".to_owned(),
             hash: hash.to_owned(),
             servidor: "mundo".to_owned(),
+            papel: "principal".to_owned(),
             resumo: resumo.to_owned(),
             oferta,
             pedido_por: "ana".to_owned(),
@@ -2687,6 +2707,22 @@ mod testes {
         assert_eq!(
             decidir(&pedido(oferta(), "aaaa", "h1"), None),
             Decisao::Mostrar { mudou: None }
+        );
+    }
+
+    /// **O aceite de principal não liga sozinho o pedido de reserva**, e a
+    /// tela diz que foi o papel que mudou. O resumo já difere (o papel entra
+    /// nele); o `mudou` é o que a pessoa lê.
+    #[test]
+    fn outro_papel_pede_tela_e_diz_que_o_papel_mudou() {
+        let mut como_reserva = pedido(oferta(), "bbbb", "h1");
+        como_reserva.papel = "reserva".to_owned();
+        assert_eq!(
+            decidir(&como_reserva, Some(&guardado(oferta(), "aaaa", "h1"))),
+            Decisao::Mostrar {
+                mudou: Some(vec!["papel"])
+            },
+            "a tela não diz que o pedido de agora é o da reserva"
         );
     }
 
@@ -4322,6 +4358,7 @@ mod testes {
             mod_id: "seele/multiplayer".to_owned(),
             hash: "h1".to_owned(),
             servidor: servidor.clone(),
+            papel: "principal".to_owned(),
             resumo: "r1".to_owned(),
             oferta: oferta.clone(),
             pedido_por: "ana".to_owned(),

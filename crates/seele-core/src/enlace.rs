@@ -385,6 +385,9 @@ pub enum Aviso {
         pedido_por: PersonId,
         /// Tudo o que a pessoa vê antes de aceitar.
         oferta: Box<seele_proto::maquina::OfertaDeMaquina>,
+        /// Em que papel a pessoa é chamada: a tela diz que é a reserva, e o
+        /// resumo o amarra.
+        papel: seele_proto::maquina::PapelDaMaquina,
         /// O resumo da oferta, em hex: o que se aceita.
         resumo: String,
     },
@@ -480,6 +483,7 @@ impl std::fmt::Debug for Aviso {
                 mod_id,
                 servidor,
                 pedido_por,
+                papel,
                 resumo,
                 ..
             } => f
@@ -487,6 +491,7 @@ impl std::fmt::Debug for Aviso {
                 .field("mod_id", mod_id)
                 .field("servidor", servidor)
                 .field("pedido_por", pedido_por)
+                .field("papel", papel)
                 .field("resumo", resumo)
                 .finish_non_exhaustive(),
             Self::AvisoParaMaquina {
@@ -5191,6 +5196,7 @@ impl Motor {
                 servidor,
                 pedido_por,
                 oferta,
+                papel,
             } => {
                 if !self.lado_da_maquina.com_tela() {
                     // Desvio 5: sem tela não há quem leia a oferta. Recusar na
@@ -5205,22 +5211,24 @@ impl Motor {
                     tracing::info!(%mod_id, %servidor, %pedido_por, motivo = "sem-tela", saiu = ?saiu, "máquina: pedido recusado sozinho: este enlace não tem tela");
                     return None;
                 }
-                let resumo = seele_proto::maquina::resumo_em_hex(
-                    &seele_proto::maquina::resumo_da_oferta(&mod_id, &hash, &servidor, &oferta),
-                );
+                let resumo =
+                    seele_proto::maquina::resumo_em_hex(&seele_proto::maquina::resumo_da_oferta(
+                        &mod_id, &hash, &servidor, papel, &oferta,
+                    ));
                 if !self.lado_da_maquina.avisar(&mod_id, &servidor, &resumo) {
                     // O servidor pode mandar o mesmo pedido duas vezes na
                     // mesma conexão; a casca já o tem e ainda não respondeu.
                     tracing::debug!(%mod_id, %servidor, %resumo, "máquina: o mesmo pedido de novo; a casca já o tem");
                     return None;
                 }
-                tracing::info!(%mod_id, %servidor, %pedido_por, %resumo, "máquina: pedido à casca");
+                tracing::info!(%mod_id, %servidor, %pedido_por, papel = papel.nome(), %resumo, "máquina: pedido à casca");
                 let _ = self.avisos.send(Aviso::PedidoDeMaquina {
                     mod_id,
                     hash,
                     servidor,
                     pedido_por,
                     oferta,
+                    papel,
                     resumo,
                 });
                 None
@@ -11698,7 +11706,7 @@ mod a_maquina {
     use super::*;
     use seele_proto::maquina::{
         resumo_da_oferta, resumo_em_hex, ComandoOferecido, MotivoDaDispensa,
-        MotivoDaRecusaDeMaquina, OfertaDeMaquina, TunelOferecido,
+        MotivoDaRecusaDeMaquina, OfertaDeMaquina, PapelDaMaquina, TunelOferecido,
     };
 
     const MOD: &str = "seele/jogo";
@@ -11741,6 +11749,7 @@ mod a_maquina {
             servidor: SERVIDOR.into(),
             pedido_por: PersonId(3),
             oferta: Box::new(oferta()),
+            papel: PapelDaMaquina::Reserva,
         }
     }
 
@@ -11924,13 +11933,20 @@ mod a_maquina {
         servidor.manda.send(pedido()).unwrap();
 
         let avisos = avisos_da_maquina(&mut enlace, Duration::from_secs(2)).await;
-        let esperado = resumo_em_hex(&resumo_da_oferta(MOD, &hash(), SERVIDOR, &oferta()));
+        let esperado = resumo_em_hex(&resumo_da_oferta(
+            MOD,
+            &hash(),
+            SERVIDOR,
+            PapelDaMaquina::Reserva,
+            &oferta(),
+        ));
         let [Aviso::PedidoDeMaquina {
             mod_id,
             hash: hash_do_aviso,
             servidor: servidor_do_aviso,
             pedido_por,
             oferta: oferta_do_aviso,
+            papel,
             resumo,
         }] = avisos.as_slice()
         else {
@@ -11941,6 +11957,11 @@ mod a_maquina {
         assert_eq!(servidor_do_aviso, SERVIDOR);
         assert_eq!(*pedido_por, PersonId(3));
         assert_eq!(**oferta_do_aviso, oferta());
+        assert_eq!(
+            *papel,
+            PapelDaMaquina::Reserva,
+            "o papel do fio não chegou à casca"
+        );
         assert_eq!(*resumo, esperado);
         assert_eq!(
             servidor.ouvir_da_maquina(Duration::from_millis(300)).await,

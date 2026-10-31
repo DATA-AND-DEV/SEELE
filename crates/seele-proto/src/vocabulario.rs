@@ -620,6 +620,7 @@ mod tests {
                 instalar: None,
                 por_sistema: vec![],
             }),
+            papel: crate::maquina::PapelDaMaquina::Principal,
         };
         assert_eq!(desde(&pedido), 12);
     }

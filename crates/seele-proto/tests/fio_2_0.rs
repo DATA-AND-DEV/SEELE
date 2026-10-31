@@ -59,7 +59,7 @@ use seele_proto::ids::{
 use seele_proto::maquina::{
     AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, ComandosDoSistema, HashDeArtefato,
     MotivoDaDispensa, MotivoDaParadaDeMaquina, MotivoDaRecusaDeMaquina, OfertaDeMaquina,
-    TermoOferecido, TunelOferecido,
+    PapelDaMaquina, TermoOferecido, TunelOferecido,
 };
 use seele_proto::mods::{ModAnunciado, Plataforma, PlataformasDoMod};
 use seele_proto::perfil::{
@@ -1093,6 +1093,7 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 servidor: "mc-1".into(),
                 pedido_por: PersonId(42),
                 oferta: Box::new(oferta_cheia()),
+                papel: PapelDaMaquina::Reserva,
             },
         ),
         (
