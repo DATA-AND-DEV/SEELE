@@ -882,3 +882,13 @@
 @media(max-width: 700px) {
   :where(:root[data-casca="celular"]) .sessao-contexto { font-size: calc(12px * var(--cel-escala)); }
 }
+
+/* redesenho-019-mods.css */
+:where(:root[data-casca="celular"]) .mods-seletor { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #lista-apresentacoes .mods-id { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #lista-apresentacoes .mods-versao { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mods-radio .mods-estado { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-controle { font-size: calc(14px * var(--cel-escala)); }
+@media (min-width: 1241px) {
+  :where(:root[data-casca="celular"]) .pessoas-mini-item { font-size: calc(13px * var(--cel-escala)); }
+}

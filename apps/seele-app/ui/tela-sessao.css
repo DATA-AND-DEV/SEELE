@@ -928,12 +928,19 @@ button.voice_room-nome:hover { text-decoration: underline; }
   z-index: -1;
   background-size: cover;
   background-position: center;
+  background-repeat: no-repeat;
+  /* **Cortada no raio de quem a veste** (0.19): a capa é fundo e só fundo. A
+     caixa tem a altura do conteúdo dela; a imagem cobre, centrada, e nunca
+     passa do canto arredondado do cartão nem o faz crescer. */
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 .capa-camada::after {
   content: "";
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   background: color-mix(in srgb, var(--seele-negro-painel) 55%, transparent);
 }
 

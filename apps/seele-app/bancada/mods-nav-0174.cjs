@@ -29,23 +29,34 @@ const {servir,respostas,retrato}=require('./telas.cjs');
    }
    redesenharAsEntradasDeMod();
   },retrato());
-  const nav=page.locator('.abas-superiores'),mesa=nav.getByRole('button',{name:'Mesa — de bancada/mesa'}),conversa=nav.getByRole('button',{name:'Conversa',exact:true});
+  // 0.19: sem barra superior. As entradas moram na coluna de canais, sob «DOS
+  // MODS»; a volta à conversa é escolher um canal. Em janela estreita a coluna
+  // é a gaveta, e a porta dela (`.linha-canais`) a abre.
+  assert.equal(await page.locator('.abas-superiores').count(),0,'a barra superior voltou no desktop');
+  const nav=page.locator('.painel-canais #lista-mods-navegacao');
+  const abrirAColuna=async()=>{const porta=page.locator('.linha-canais');if(await porta.isVisible().catch(()=>false)&&await porta.getAttribute('aria-expanded')!=='true')await porta.click();};
+  const marca=(id)=>page.evaluate(i=>document.querySelector(`#lista-mods-navegacao [data-mod-da-acao="${i}"]`)?.getAttribute('aria-current')??null,id);
+  const mesa=nav.getByRole('button',{name:'Mesa — de bancada/mesa'}),perfis=nav.getByRole('button',{name:'Perfis — de bancada/perfis'});
   assert.equal(await nav.locator('.entrada-de-mod').count(),3);
-  assert.equal(await page.locator('.painel-canais #lista-mods-navegacao').count(),0);
+  await abrirAColuna();assert.equal(await page.locator('#cabeca-mods-navegacao').isHidden(),false,'o rótulo DOS MODS não aparece');
   await mesa.click();await page.getByRole('heading',{name:'Mesa de demonstração'}).waitFor({state:'visible'});
-  await conversa.click();assert.equal(await page.locator('#palco-de-paginas').isVisible(),false);
-  await mesa.click();await page.getByRole('heading',{name:'Mesa de demonstração'}).waitFor({state:'visible'});
+  assert.equal(await marca('bancada/mesa'),'page','a entrada da página aberta não está marcada');
+  await abrirAColuna();await page.locator('#lista-linhas button[data-linha]').first().click();
+  await page.waitForTimeout(150);assert.equal(await page.locator('#palco-de-paginas').isVisible(),false,'escolher um canal não voltou à conversa');
+  assert.equal(await marca('bancada/mesa'),null);
+  await abrirAColuna();await mesa.click();await page.getByRole('heading',{name:'Mesa de demonstração'}).waitFor({state:'visible'});
   assert.equal(await page.locator('#palco-de-paginas [data-mod="bancada/mesa"]').count(),1,'reabrir deixou DOM duplicado');
-  await page.waitForTimeout(100);await mesa.focus();await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(100);await abrirAColuna();await mesa.focus();await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(()=>document.activeElement.dataset.modDaAcao),'bancada/perfis', await page.evaluate(()=>document.activeElement.outerHTML));
   await page.keyboard.press('Enter');await page.getByRole('heading',{name:'Perfis de demonstração'}).waitFor({state:'visible'});
-  await page.waitForTimeout(100);await nav.getByRole('button',{name:'Perfis — de bancada/perfis'}).focus();await page.keyboard.press('Home');assert.equal(await conversa.evaluate(el=>el===document.activeElement),true);
-  await page.keyboard.press('End');assert.equal(await mesa.evaluate(el=>el===document.activeElement),true);
-  await page.keyboard.press('Enter');await page.getByRole('heading',{name:'Mesa de demonstração'}).waitFor({state:'visible'});
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,'MOD causou overflow horizontal');
+  assert.equal(await marca('bancada/perfis'),'page');
+  const alvo=await mesa.boundingBox();assert.ok(alvo&&alvo.height>=44,`a entrada tem menos de 44px: ${JSON.stringify(alvo)}`);
+  await page.waitForTimeout(100);await abrirAColuna();await mesa.focus();await page.keyboard.press('Enter');await page.getByRole('heading',{name:'Mesa de demonstração'}).waitFor({state:'visible'});
+  const largo=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(n=>n.getBoundingClientRect().right>innerWidth+1&&n.getClientRects().length).slice(0,6).map(n=>{const c=getComputedStyle(n);return `${n.tagName}.${n.className}#${n.id}:${Math.round(n.getBoundingClientRect().left)}-${Math.round(n.getBoundingClientRect().right)} w=${c.width} min=${c.minWidth} max=${c.maxWidth} pos=${c.position} vw=${innerWidth}`}));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,'MOD causou overflow horizontal: '+JSON.stringify(largo));
   assert.deepEqual(erros,[]);
   await page.screenshot({path:path.join(pasta,`mods-mesa-${width}.png`)});
-  console.log(`${width}: 3 contribuições, Mesa/Conversa/Mesa, Arrow/Home/End/Enter, foco e overflow PASS`);
+  console.log(`${width}: 3 contribuições em DOS MODS, Mesa/canal/Mesa, Tab/Enter, aria-current, 44px e overflow PASS`);
   await page.close();
  }}finally{await browser.close();server.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

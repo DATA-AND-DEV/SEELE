@@ -751,7 +751,9 @@ function linhaDaGestao(pagina, ponto) {
     return {
       estado: item?.querySelector(".mods-versao")?.textContent ?? "(sem linha)",
       nota: item?.querySelector(".nota")?.textContent ?? "",
-      botoes: [...(item?.querySelectorAll("button") ?? [])].map((b) => b.textContent),
+      // As ações oferecidas: as opções do seletor que não são a escolha em
+      // vigor (0.19: um seletor por lugar, no lugar de um botão por ação).
+      botoes: [...(item?.querySelectorAll("select.mods-seletor option:not([data-atual])") ?? [])].map((o) => o.dataset.rotulo),
     };
   }, ponto);
 }

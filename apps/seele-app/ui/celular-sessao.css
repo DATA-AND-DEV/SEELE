@@ -2285,3 +2285,27 @@
 :root[data-casca="celular"] #tela-server .server-titulo::first-letter {
   text-transform: uppercase;
 }
+
+/* ------------------------------------------------ DOS MODS (0.19, `Cel-servidor`)
+ *
+ * As páginas que um MOD registra ficam na aba SERVIDOR, sob «DOS MODS», como os
+ * canais: a peça no lugar do `#` e a origem (do produto) à direita. Sem a faixa
+ * de abas de cima: tocar numa entrada abre a página na aba CONVERSA
+ * (`celular-servidor.js`), e a página ocupa a aba inteira até o VOLTAR dela, ou
+ * até se escolher um canal. */
+:root[data-casca="celular"] #cabeca-mods-navegacao:not([hidden]) { display: flex; }
+:root[data-casca="celular"] #lista-mods-navegacao .entrada-de-mod {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+}
+:root[data-casca="celular"] #lista-mods-navegacao .linha-rotulo { flex: 1 1 auto; min-width: 0; }
+:root[data-casca="celular"] #lista-mods-navegacao .entrada-de-mod-origem { flex: 0 1 auto; max-width: 40%; color: var(--seele-rotulo-painel); }
+:root[data-casca="celular"] #tela-sessao .paineis > .palco-de-paginas:not([hidden]) {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+:root[data-casca="celular"] #tela-sessao:not([data-aba="conversa"]) .paineis > .palco-de-paginas { display: none; }
+:root[data-casca="celular"] #tela-sessao .palco-de-paginas > .pagina-de-mod:not([hidden]) { flex: 1 1 auto; }

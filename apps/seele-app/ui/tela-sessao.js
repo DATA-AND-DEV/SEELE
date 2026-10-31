@@ -3514,7 +3514,13 @@ function redesenharAsEntradasDeMod() {
     // **O rótulo é do MOD; a origem é do produto.** Uma entrada que diga
     // «Configurações» sem dizer de quem ela é seria indistinguível das do
     // SEELE, e é aí que uma tela de confiança vira falsificável.
+    // A peça do canvas `Main` antes do rótulo, como o `#` antes de um canal:
+    // decoração, sem nome acessível (o nome é o `aria-label` abaixo).
+    const icone = elemento("span", "entrada-de-mod-icone");
+    icone.setAttribute("aria-hidden", "true");
+    icone.append(glifo("peca"));
     botao.append(
+      icone,
       elemento("span", "linha-rotulo", contribuicao.rotulo || contribuicao.mod),
       elemento("span", "entrada-de-mod-origem", contribuicao.mod),
     );

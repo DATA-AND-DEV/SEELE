@@ -333,6 +333,21 @@ const GLIFOS = {
       { d: "M9 2.5v3h3", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
     ],
   ],
+
+  // A peça de quebra-cabeça do canvas `Main`: o que vem de um MOD na coluna de
+  // canais («DOS MODS»). Um quadrado com dois encaixes, vazado como o anexo.
+  peca: [
+    [
+      "path",
+      {
+        d: "M3 5.5h2.2a1.4 1.4 0 1 1 2.6 0H10v2.3a1.4 1.4 0 1 1 0 2.6V13H3Z",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.3",
+        "stroke-linejoin": "round",
+      },
+    ],
+  ],
 };
 
 /**

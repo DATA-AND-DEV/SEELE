@@ -1066,16 +1066,46 @@ function desenharApresentacoes() {
     if (nota) texto.append(elemento("p", "nota", nota));
     item.append(texto);
 
+    // **Um seletor por lugar** (canvas `Config-mods`, 0.19): a escolha em vigor
+    // é a opção marcada, e as outras são exatamente as que `oQueAGestaoDiz`
+    // oferece — a mesma ação (`escolherApresentacao`), sem opção que não mude
+    // nada. O rótulo de cada ação continua em `data-rotulo`, para quem a lê.
     const caixa = elemento("div", "mods-linha-botoes");
+    const seletor = elemento("select", "mods-seletor");
+    const idDoNome = `mods-ponto-${linha.ponto.replace(/[^a-z0-9]+/gi, "-")}`;
+    texto.firstChild.id = idDoNome;
+    seletor.setAttribute("aria-labelledby", idDoNome);
+    const doTema = linha === doServidor;
+    const atual = (doTema ? modPreferidoPara("servidor.aparencia") : preferidos.get(linha.ponto)) ?? "";
+    const opcao = (valor, rotulo, marcada) => {
+      const no = elemento("option", "", rotuloDaEscolha(valor, doTema));
+      no.value = valor;
+      no.dataset.rotulo = rotulo;
+      if (marcada) { no.selected = true; no.dataset.atual = "sim"; }
+      return no;
+    };
+    seletor.append(opcao(atual, "", true));
     for (const { rotulo, escolha } of botoes) {
-      const botao = elemento("button", "botao-fantasma", rotulo);
-      botao.type = "button";
-      botao.addEventListener("click", () => escolherApresentacao(linha.ponto, escolha));
-      caixa.append(botao);
+      if (escolha === atual) continue;
+      seletor.append(opcao(escolha, rotulo, false));
     }
+    seletor.disabled = seletor.options.length < 2;
+    seletor.addEventListener("change", () => escolherApresentacao(linha.ponto, seletor.value));
+    caixa.append(seletor);
     item.append(caixa);
     return item;
   }));
+}
+
+/**
+ * O texto de uma opção do seletor de QUEM DESENHA O QUE, em caixa de frase
+ * como o canvas o escreve: «decidir automaticamente», «usar seele/perfis»,
+ * «apresentação do SEELE». O valor é a escolha gravada, e não o texto.
+ */
+function rotuloDaEscolha(valor, doTema) {
+  if (valor === APRESENTACAO_NATIVA) return "apresentação do SEELE";
+  if (valor === "") return doTema ? "usar o tema do servidor" : "decidir automaticamente";
+  return `usar ${valor}`;
 }
 
 /**
@@ -1927,23 +1957,30 @@ function desenharAEscolhaDoTema(instalados, hospedando) {
   const { pergunta, nota, linhas } = aEscolhaDoTema(instalados, hospedando);
   secao.hidden = !pergunta;
   $("mods-aparencia-nota").textContent = nota;
-  repovoar($("lista-aparencia-do-servidor"), linhas.map(({ id, pinta }) => {
-    const item = elemento("li", "server-dispositivo mods-linha-gestao");
-    const texto = elemento("div", "mods-linha-texto");
+  // **Linhas de rádio** (canvas `Config-mods`, 0.19): uma escolha entre N é um
+  // grupo de rádio, e não N botões. A ação é a mesma (`escolherQuemPinta`); o
+  // que já pinta é o marcado, e marcá-lo de novo não manda nada.
+  const lista = $("lista-aparencia-do-servidor");
+  lista.setAttribute("role", "radiogroup");
+  lista.setAttribute("aria-label", "Quem pinta este servidor");
+  repovoar(lista, linhas.map(({ id, pinta }) => {
+    const item = elemento("li", "server-dispositivo mods-linha-gestao mods-linha-radio");
+    const rotulo = elemento("label", "mods-radio");
+    const radio = elemento("input", "mods-radio-marca");
+    radio.type = "radio";
+    radio.name = "mods-quem-pinta";
+    radio.value = id;
+    radio.checked = pinta;
+    radio.disabled = escolhendoQuemPinta;
+    radio.addEventListener("change", () => {
+      if (!radio.checked || pinta) return;
+      escolherQuemPinta(id).catch((falha) => console.warn("escolher quem pinta:", falha));
+    });
+    const texto = elemento("span", "mods-linha-texto");
     texto.append(elemento("span", "mods-id", id));
     if (pinta) texto.append(elemento("span", "mods-estado", "PINTA ESTE SERVIDOR"));
-    item.append(texto);
-    // **Nenhum botão para o que já pinta**: um botão que não muda nada é uma
-    // pergunta sem resposta.
-    if (!pinta) {
-      const botao = elemento("button", "botao-fantasma", "PINTAR COM ESTE");
-      botao.type = "button";
-      botao.disabled = escolhendoQuemPinta;
-      botao.addEventListener("click", () => {
-        escolherQuemPinta(id).catch((falha) => console.warn("escolher quem pinta:", falha));
-      });
-      item.append(botao);
-    }
+    rotulo.append(radio, texto);
+    item.append(rotulo);
     return item;
   }));
 }

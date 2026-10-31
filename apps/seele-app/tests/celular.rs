@@ -220,7 +220,10 @@ fn toda_regra_das_cascas_do_navegador_comeca_pela_marca() {
 /// nunca põe a marca, então a regra vale sempre ali; no celular ela se desliga e
 /// a folha dele (`celular-sessao.css`) manda.
 const FORA_DO_CELULAR: &str = ":root:not([data-casca=\"celular\"])";
-const COM_O_DESKTOP_FORA_DO_CELULAR: &[&str] = &["tela-sessao.css", "tela-chamada.css"];
+// `redesenho-019-mods.css` (a terceira passada do 0.19: os MODs e a chamada) é
+// só do desktop e se escreve inteira na forma negativa, como as duas de cima; a
+// leitura positiva da marca continua reprovada nela.
+const COM_O_DESKTOP_FORA_DO_CELULAR: &[&str] = &["tela-sessao.css", "tela-chamada.css", "redesenho-019-mods.css"];
 
 const LEITURAS_DA_MARCA: &[&str] = &[
     "data-casca",

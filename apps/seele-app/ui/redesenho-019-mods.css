@@ -1,0 +1,727 @@
+/* ======================================================================
+   Redesign 0.19, terceira passada: os MODs dentro do desenho novo, e a
+   chamada do canvas `Chamada`.
+
+   Fonte: os canvas `Main`, `Config-mods`, `Chamada` e `Cel-servidor`. O que
+   esta folha faz é **conter**: o que um MOD desenha continua sendo o que ele
+   declarou, e o produto só decide a moldura em volta — o recorte no raio da
+   linha, o véu que segura a leitura sobre uma capa, a pílula de um chip, o
+   lugar de uma marca. Nenhuma regra daqui alcança dentro da árvore de um MOD
+   além do que a casca já alcançava (rótulo, campo, botão, seletor de arquivo,
+   que são do produto e o MOD só nomeia).
+
+   Fora do celular, que tem as folhas dele (`celular-*.css`). Cores: só
+   tokens, `rgba` e `color-mix`.
+   ====================================================================== */
+
+/* ---------------------------------------------------------------- DOS MODS
+   As páginas que um MOD registra moram na coluna de canais, sob o rótulo
+   «DOS MODS», como os canais: a mesma linha, a peça no lugar do `#`, e a
+   origem (do produto) à direita, onde a sala diz «ninguém aqui». */
+:root:not([data-casca="celular"]) #cabeca-mods-navegacao:not([hidden]) { display: flex; margin-top: 12px; }
+:root:not([data-casca="celular"]) #lista-mods-navegacao {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+:root:not([data-casca="celular"]) #lista-mods-navegacao[hidden] { display: none; }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  min-height: 44px;
+}
+.entrada-de-mod-icone {
+  flex: 0 0 auto;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--seele-rotulo-painel);
+}
+.entrada-de-mod-icone .glifo { width: 16px; height: 16px; }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .linha-rotulo { flex: 1 1 auto; min-width: 0; font-family: var(--seele-mono); }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod-origem {
+  flex: 0 1 auto;
+  max-width: 34%;
+  font-family: var(--seele-mono);
+  font-size: 10px;
+  color: var(--seele-rotulo-painel);
+}
+/* A página aberta acende como o canal aberto; o canal, enquanto a página o
+   cobre, deixa de ser «onde se está». */
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod[aria-current="page"] {
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+  color: var(--seele-osso);
+}
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod[aria-current="page"] .entrada-de-mod-icone { color: var(--seele-laranja-nerv); }
+:root:not([data-casca="celular"]) #tela-sessao.com-pagina-de-mod #lista-linhas .linha.aberto {
+  background: none;
+  border-color: transparent;
+  color: var(--seele-osso-apagado);
+}
+:root:not([data-casca="celular"]) #tela-sessao.com-pagina-de-mod #lista-linhas .linha.aberto .linha-cerquilha { color: var(--seele-rotulo-painel); }
+:root:not([data-casca="celular"]) :is(#lista-mods-navegacao .entrada-de-mod, #lista-linhas .linha):focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+/* A coluna inteira rola acima do cartão do operador: com várias entradas, o
+   «DOS MODS» não empurra o operador para fora da coluna. */
+:root:not([data-casca="celular"]) #tela-sessao .painel-canais > .canais-rolagem,
+:root:not([data-casca="celular"]) #tela-sessao .painel-canais { min-height: 0; }
+
+/* ------------------------------------------------- a trilha: as marcas
+   As marcas de uma sessão (VOZ, AQUI, NO AR, a volta) montam na borda da
+   placa, meio dentro e meio fora, e não por cima do ícone: a imagem do
+   servidor continua inteira. Fundo opaco, para o texto não depender dela. */
+:root:not([data-casca="celular"]) .trilha-outros > li { padding: 6px 0; }
+:root:not([data-casca="celular"]) .trilha-marca {
+  font-family: var(--seele-mono);
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: var(--seele-raio-pilula);
+  white-space: nowrap;
+  z-index: 1;
+}
+:root:not([data-casca="celular"]) .trilha-marca-voz,
+:root:not([data-casca="celular"]) .trilha-marca-noar {
+  left: 50%;
+  right: auto;
+  top: auto;
+  bottom: -7px;
+  transform: translateX(-50%);
+}
+:root:not([data-casca="celular"]) .trilha-marca-aqui {
+  left: 50%;
+  right: auto;
+  top: -7px;
+  bottom: auto;
+  transform: translateX(-50%);
+}
+:root:not([data-casca="celular"]) .trilha-marca-voz { background: color-mix(in srgb, var(--seele-fosforo-fraco) 85%, var(--seele-negro-absoluto)); }
+:root:not([data-casca="celular"]) :is(.trilha-marca-aqui, .trilha-marca-noar) { background: color-mix(in srgb, var(--seele-azul-fraco) 85%, var(--seele-negro-absoluto)); }
+:root:not([data-casca="celular"]) .trilha-marca-enlace { top: -6px; right: -6px; }
+
+/* ------------------------------------------------------- a capa, contida
+   A capa de uma pessoa é fundo e só fundo: cortada no raio de quem a veste
+   (`border-radius: inherit`), cobrindo a caixa e centrada. A caixa tem a
+   altura do conteúdo dela — a imagem não cresce, não encolhe e não empurra
+   nada (`position: absolute; inset: 0` já era assim; faltava o recorte). */
+/* (O recorte em si mora na regra da camada, em `tela-sessao.css`.) */
+
+/* O operador com capa: o véu mais firme do núcleo, e o cartão no raio dele. */
+:root:not([data-casca="celular"]) .operador[data-com-capa] { overflow: hidden; }
+:root:not([data-casca="celular"]) .operador[data-com-capa] > .capa-camada::after {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--nucleo-painel, var(--seele-negro-painel)) 70%, transparent),
+    color-mix(in srgb, var(--nucleo-painel, var(--seele-negro-painel)) 88%, transparent));
+}
+
+/* O cartão de uma pessoa que um MOD apresenta: o que ele desenha fica na
+   linha, cortado no raio dela, e a imagem que ele declarar como fundo cobre
+   a caixa dele sem a esticar. A coluna do «⋯» continua do produto. */
+:root:not([data-casca="celular"]) #lista-roster .pessoa-miolo {
+  border-radius: var(--seele-raio-icone);
+  overflow: hidden;
+}
+:root:not([data-casca="celular"]) #lista-roster .pessoa-apresentada-porta {
+  border-radius: var(--seele-raio-icone);
+}
+:root:not([data-casca="celular"]) #lista-roster .pessoa-apresentada-porta:focus-visible {
+  outline-offset: 2px;
+}
+:root:not([data-casca="celular"]) #lista-roster .pessoa-miolo [data-forma="caixa"][style*="background-image"] {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+:root:not([data-casca="celular"]) #lista-roster .pessoa:is(.pessoa-apresentada, .pessoa-com-detalhes) {
+  padding-right: 60px;
+  --pessoa-espaco-acoes: 60px;
+}
+:root:not([data-casca="celular"]) #lista-roster .pessoa-nativo-resumo {
+  top: 50%;
+  margin-top: -22px;
+  right: 8px;
+  border-radius: var(--seele-raio-icone);
+}
+:root:not([data-casca="celular"]) #lista-roster .pessoa-nativo[open] .pessoa-nativo-resumo { top: 22px; margin-top: -22px; }
+/* O retrato que um MOD põe na linha: o quadrado de 12px de canto do desenho. */
+:root:not([data-casca="celular"]) :is(#lista-roster, .operador, .chamada-cartao) span.regiao-de-mod-parte[data-forma="retrato"] {
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* O cartão da chamada com capa: o halo de quem fala é o do desenho (fósforo),
+   como o do cartão sem capa, e não uma moldura laranja dura por cima da foto.
+   O véu de quem fala continua diferente do de quem cala (`capa.cjs`). */
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] { overflow: hidden; }
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] > .capa-camada::after {
+  background: color-mix(in srgb, var(--seele-negro-painel) 72%, transparent);
+}
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa][data-fala="sim"] > .capa-camada::after {
+  background: color-mix(in srgb, color-mix(in srgb, var(--seele-negro-painel) 88%, var(--seele-fosforo)) 74%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--seele-fosforo) 55%, transparent);
+}
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa][data-fala="sim"] { --fundo-da-placa: var(--seele-negro-absoluto); }
+/* As placas sobre a capa (medidas em `capa.cjs`) ganham o canto e a folga de
+   uma etiqueta, em vez de um retângulo colado no texto. */
+/* O retrato, os botões de volume e as pastilhas sobre a capa: fundo opaco, e
+   não o vidro translúcido do cartão sem capa (que somaria a imagem ao texto). */
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-avatar {
+  background-color: color-mix(in srgb, var(--seele-osso) 8%, var(--seele-negro-painel));
+}
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-vol-passo { background-color: var(--seele-negro-absoluto); }
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-pastilha {
+  background-color: color-mix(in srgb, var(--seele-fosforo-fraco) 80%, var(--seele-negro-absoluto));
+}
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-pastilha:not([data-estado="fala"]) {
+  background-color: var(--seele-negro-absoluto);
+}
+:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] :where(.chamada-cartao-nome, .nota, .chamada-cartao-valor, .chamada-vol-valor) {
+  padding: 0 4px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+/* ------------------------------------- o cabeçalho, o compositor e o rodapé
+   O que um MOD acrescenta ao cabeçalho do canal é um chip («MOD · 2
+   fixadas»): uma pílula, com o prefixo MOD do produto, e nunca mais larga
+   que um terço da barra. */
+:root:not([data-casca="celular"]) .canal-cabecalho-mods > .contribuicao-de-mod {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(360px, 34vw);
+  min-height: 36px;
+  padding: 2px 4px 2px 12px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso-apagado);
+  overflow: hidden;
+  white-space: nowrap;
+}
+:root:not([data-casca="celular"]) .canal-cabecalho-mods > .contribuicao-de-mod::before {
+  content: "MOD ·";
+  flex: 0 0 auto;
+  color: var(--seele-rotulo-painel);
+}
+:root:not([data-casca="celular"]) .canal-cabecalho-mods > .contribuicao-de-mod > * { min-width: 0; }
+:root:not([data-casca="celular"]) .canal-cabecalho-mods :is(button, a) {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--seele-raio-pilula);
+  font-size: 11px;
+}
+
+/* As ferramentas de um MOD no compositor: pílulas ao lado do anexo. */
+:root:not([data-casca="celular"]) .compositor-ferramentas :is(button, .acao-de-mod) {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+/* O que um MOD põe na barra de baixo: mais uma pílula da barra. Só a pele —
+   o encolher primeiro, o recorte e o `contain` são os de `tela-sessao.css`. */
+:root:not([data-casca="celular"]) .telemetria-mods:not([hidden]) {
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+}
+
+/* ------------------------------------- a tela de um MOD (diálogo amplo)
+   Um diálogo modal de 800 px ou mais abre na casca da Configuração: a coluna
+   com o nome, a origem e o VOLTAR no pé, e o conteúdo num painel de vidro ao
+   lado. O véu, o furo do véu (o operador, a porta e quem liga ficam de fora)
+   e o foco preso são os de todo modal: `mods-superficies.js`. */
+:root:not([data-casca="celular"]) .camada-de-mod[data-apresentacao="tela"] {
+  align-items: stretch;
+  justify-content: stretch;
+  padding-top: calc(16px + var(--seele-barra-janela, 0px) + var(--recorte-cima, 0px));
+  padding-right: 16px;
+  padding-bottom: calc(16px + var(--recorte-baixo, 0px));
+  padding-left: calc(16px + var(--recorte-esquerda, 0px));
+  background-color: color-mix(in srgb, var(--seele-negro-absoluto) 94%, transparent);
+  background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+  background-size: 6px 6px;
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] {
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"]:has(> .dialogo-de-mod-rodape[hidden]) {
+  grid-template-rows: minmax(0, 1fr) 0;
+  row-gap: 0;
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] > .dialogo-de-mod-cabecalho {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 0;
+  padding: 22px 14px 14px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+  overflow: hidden;
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] .dialogo-de-mod-origem {
+  order: -1;
+  padding: 0 12px;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] .dialogo-de-mod-origem::before { content: "MOD · "; }
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] .dialogo-de-mod-titulo {
+  padding: 0 12px;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 26px;
+  line-height: 1.1;
+  letter-spacing: -0.045em;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+/* O VOLTAR no pé da coluna, sempre à vista: a coluna não rola. */
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] .superficie-de-mod-sair {
+  margin: auto 0 0;
+  min-height: 44px;
+  width: 100%;
+  justify-content: center;
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] > .dialogo-de-mod-corpo {
+  grid-column: 2;
+  grid-row: 1;
+  padding: 28px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] > .dialogo-de-mod-rodape {
+  grid-column: 2;
+  grid-row: 2;
+  padding: 12px 16px;
+  align-items: center;
+  background: color-mix(in srgb, var(--seele-laranja-carga) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 30%, transparent);
+  border-radius: var(--seele-raio-painel);
+}
+/* Janela estreita: a coluna vira a faixa de cima, com o VOLTAR à direita. */
+@media (max-width: 860px) {
+  :root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  :root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] > .dialogo-de-mod-cabecalho {
+    grid-row: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 12px 14px;
+  }
+  :root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] .superficie-de-mod-sair { margin: 0 0 0 auto; width: auto; padding: 0 18px; }
+  :root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] > .dialogo-de-mod-corpo { grid-column: 1; grid-row: 2; padding: 16px; }
+  :root:not([data-casca="celular"]) .dialogo-de-mod[data-apresentacao="tela"] > .dialogo-de-mod-rodape { grid-column: 1; grid-row: 3; }
+}
+
+/* A página de um MOD ocupa a célula inteira da conversa, como a conversa. */
+:root:not([data-casca="celular"]) .palco-de-paginas > .pagina-de-mod:not([hidden]) { flex: 1 1 auto; }
+
+/* Configuração › MODs: numa linha de MOD exigido, o fato (EXIGIDO POR ESTE
+   SERVIDOR) e o APAGAR MOD não dividem a mesma célula da grade. */
+@media (min-width: 701px) {
+  #painel-mods #lista-mods .mods-linha-gestao:has(> .mods-exigido) > .botao-fantasma { grid-column: 4; }
+}
+
+/* A página de um MOD: o cabeçalho com o VOLTAR em pílula, como o da tela. */
+:root:not([data-casca="celular"]) .pagina-de-mod-cabecalho .superficie-de-mod-sair,
+:root:not([data-casca="celular"]) :is(.folha-de-mod, .painel-de-mod, .dialogo-de-mod) .superficie-de-mod-sair {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-ui);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+:root:not([data-casca="celular"]) .pagina-de-mod-origem,
+:root:not([data-casca="celular"]) .folha-de-mod-origem,
+:root:not([data-casca="celular"]) .dialogo-de-mod:not([data-apresentacao="tela"]) .dialogo-de-mod-origem {
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+/* -------------------------- os formulários que um MOD declara, em 0.19
+   Os controles são do produto; o MOD só os nomeia. Por isso a gramática é a
+   do produto inteiro: rótulo em Inter e caixa de frase, campo de 48px com
+   canto de 16px em Inter, botões em pílula (um laranja, o resto de vidro), o
+   seletor de arquivo uma pílula com o tipo dito ao lado. O que o MOD estiliza
+   pela `estilo` dele continua ganhando (é estilo em linha). */
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-rotulo {
+  display: block;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: lowercase;
+  color: var(--seele-osso);
+}
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-rotulo::first-letter { text-transform: uppercase; }
+:root:not([data-casca="celular"]) .superficie-de-mod label.regiao-de-mod-parte:not([data-forma="interruptor"]) { gap: 8px; }
+:root:not([data-casca="celular"]) .superficie-de-mod :is(.regiao-de-mod-caixa, .regiao-de-mod-area, select.regiao-de-mod-escolha) {
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  letter-spacing: 0;
+  border-radius: var(--seele-raio);
+  border: 1px solid var(--seele-campo-borda);
+  background-color: var(--seele-campo);
+  color: var(--seele-osso);
+}
+:root:not([data-casca="celular"]) .superficie-de-mod :is(.regiao-de-mod-caixa, select.regiao-de-mod-escolha) { min-height: 48px; padding-left: 16px; }
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-area { padding: 12px 16px; line-height: 1.5; }
+:root:not([data-casca="celular"]) .superficie-de-mod :is(.regiao-de-mod-caixa, .regiao-de-mod-area, select.regiao-de-mod-escolha):focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-opcao { font-family: var(--seele-ui); }
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-contador { font-family: var(--seele-mono); font-size: 11px; color: var(--seele-rotulo-painel); }
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-cor { width: 48px; height: 48px; border-radius: var(--seele-raio); }
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte,
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-acoes-do-formulario > :is(.botao, .botao-fantasma) {
+  min-height: 44px;
+  padding: 0 20px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte:not(:disabled):hover,
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-acoes-do-formulario > .botao-fantasma:hover { background: var(--seele-controle-hover); }
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte[data-variante="primaria"],
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-acoes-do-formulario > .botao {
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-tinta-no-acento);
+}
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-acoes-do-formulario > .botao:not(:disabled):hover { background: var(--seele-laranja-hover); }
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte[data-variante="discreta"] { background: transparent; }
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte[data-variante="perigo"] {
+  border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 55%, transparent);
+  color: var(--seele-vermelho-claro);
+}
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte:focus-visible,
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-acoes-do-formulario > :focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+/* O seletor de arquivo: uma pílula com o clipe, o nome em caixa de frase e o
+   que ele aceita depois, apagado. */
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte[data-forma="arquivo"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  text-transform: lowercase;
+}
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte[data-forma="arquivo"]::first-letter { text-transform: uppercase; }
+:root:not([data-casca="celular"]) .superficie-de-mod button.regiao-de-mod-parte[data-forma="arquivo"][data-exigencia]::after {
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 11px;
+  text-transform: none;
+  color: var(--seele-osso-apagado);
+}
+:root:not([data-casca="celular"]) .superficie-de-mod form.regiao-de-mod-parte { gap: 20px; }
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-acoes-do-formulario { gap: 10px; padding-top: 4px; }
+:root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-parte[data-forma="separador"] { border-color: var(--seele-vidro-borda); }
+
+/* ------------------------------------------------ a Configuração: VOLTAR
+   O VOLTAR fica no pé da coluna, sempre à vista: preso à caixa da grade
+   (`.server`, posicionada), e não à janela — um `fixed` dentro de quem tem
+   contenção ou filtro deixa de ser da janela e some com a rolagem. A coluna
+   reserva o espaço dele e esmaece o que rola por baixo. */
+@media (min-width: 701px) {
+  .camada-server > .server { position: relative; }
+  .server-voltar:not(.server-so-celular) {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    width: 220px;
+  }
+  .server-coluna {
+    padding-bottom: 84px;
+    scroll-padding-bottom: 84px;
+    -webkit-mask-image: linear-gradient(to bottom, var(--seele-negro-absoluto) calc(100% - 80px), transparent calc(100% - 62px));
+    mask-image: linear-gradient(to bottom, var(--seele-negro-absoluto) calc(100% - 80px), transparent calc(100% - 62px));
+  }
+}
+
+/* ------------------------------- Configuração › MODs: seletores e rádios */
+.mods-seletor {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0 36px 0 14px;
+  border: 1px solid var(--seele-campo-borda);
+  border-radius: var(--seele-raio-icone);
+  background-color: var(--seele-campo);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: 13px;
+}
+.mods-seletor:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 1px; }
+.mods-seletor:disabled { opacity: 0.6; }
+#lista-apresentacoes > .mods-linha-gestao {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 16px;
+}
+#lista-apresentacoes > .mods-linha-gestao > .mods-linha-botoes { justify-self: end; }
+#lista-apresentacoes .mods-id { font-family: var(--seele-ui); font-weight: 500; font-size: 14px; }
+#lista-apresentacoes .mods-versao { font-size: 12px; color: var(--seele-osso-apagado); }
+.mods-linha-radio { padding: 0; }
+.mods-radio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 8px;
+  border-radius: var(--seele-raio-icone);
+  cursor: pointer;
+}
+.mods-radio:hover { background: var(--seele-controle); }
+.mods-radio:focus-within { outline: 2px solid var(--seele-laranja-nerv); outline-offset: -2px; }
+.mods-radio-marca {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--seele-laranja-nerv);
+}
+.mods-radio .mods-linha-texto { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.mods-radio .mods-estado { font-family: var(--seele-mono); font-size: 11px; color: var(--seele-fosforo); }
+
+/* ======================================================= a chamada (0.19)
+   `Chamada`: a trilha, o painel da chamada e o de pessoas. A coluna de canais
+   sai de cena enquanto a chamada está à vista — o CHAT do cabeçalho volta à
+   conversa, e a trilha leva a outro servidor. A ligação pessoal tem a casca
+   dela (`camada-sala.css`) e não muda aqui. */
+:root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .paineis > .painel-canais { display: none; }
+@media (min-width: 1241px) {
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .paineis {
+    grid-template-columns: 72px minmax(0, 1fr) minmax(280px, 300px) auto;
+    grid-template-areas: "trilha linha pessoas painelmod";
+  }
+  :root:not([data-casca="celular"]) #tela-sessao[data-pessoas-recolhidas="sim"]:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .paineis {
+    grid-template-columns: 72px minmax(0, 1fr) 72px auto;
+  }
+}
+@media (min-width: 901px) and (max-width: 1240px) {
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .paineis {
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    grid-template-areas: "trilha linha painelmod";
+  }
+}
+/* A fileira estreita de cima sai: a barra de baixo leva os mesmos comandos. */
+:root:not([data-casca="celular"]) #vista-chamada:has(> #chamada-controles) > .chamada-acoes-estreitas { display: none; }
+/* A vista inteira rola (a tela, a grade); a barra de baixo fica grudada no pé. */
+:root:not([data-casca="celular"]) #vista-chamada { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+:root:not([data-casca="celular"]) #vista-chamada[hidden] { display: none; }
+:root:not([data-casca="celular"]) #vista-chamada > #chamada-grade { flex: 0 0 auto; }
+
+/* O cabeçalho: o rótulo, o nome da sala, os chips e o CHAT. */
+:root:not([data-casca="celular"]) #vista-chamada .chamada-chat {
+  grid-row: 1 / 3;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+:root:not([data-casca="celular"]) #vista-chamada .chamada-chat:hover { background: var(--seele-controle-hover); }
+:root:not([data-casca="celular"]) #vista-chamada .chamada-chat:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+:root:not([data-casca="celular"]) #vista-chamada .chamada-chat .glifo { width: 16px; height: 16px; }
+:root:not([data-casca="celular"]) #vista-chamada .chamada-campo .rotulo { font-size: 0; }
+:root:not([data-casca="celular"]) #vista-chamada .chamada-campo .rotulo::before { content: "NO AR ·"; font-size: 11px; }
+
+/* A grade: quatro colunas, como o canvas. */
+@media (min-width: 1100px) {
+  :root:not([data-casca="celular"]) #vista-chamada #chamada-grade { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* A barra de baixo: uma pílula com os comandos, centrada. */
+.chamada-controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: auto 22px 16px;
+  padding: 8px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: color-mix(in srgb, var(--seele-negro-painel) 88%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  bottom: 16px;
+  z-index: 2;
+}
+.chamada-controle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+  font-family: var(--seele-ui);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.chamada-controle[hidden] { display: none; }
+.chamada-controle:hover { background: var(--seele-controle-hover); }
+.chamada-controle:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+.chamada-controle .glifo { width: 18px; height: 18px; }
+.chamada-controle-icone { width: 44px; padding: 0; }
+.chamada-controle[aria-pressed="true"] { color: var(--seele-laranja-nerv); border-color: color-mix(in srgb, var(--seele-laranja-nerv) 55%, transparent); }
+.chamada-controle[data-indisponivel="sim"],
+.chamada-controle[aria-disabled="true"] { opacity: 0.55; }
+.chamada-controle-primario {
+  background: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-tinta-no-acento);
+}
+.chamada-controle-primario:hover { background: var(--seele-laranja-hover); }
+
+/* As pessoas recolhidas numa faixa de 72px: o alternador e os retratos. */
+.pessoas-recolher,
+.pessoas-mini { display: none; }
+@media (min-width: 1241px) {
+  :root:not([data-casca="celular"]) .painel-pessoas { position: relative; }
+  :root:not([data-casca="celular"]) .pessoas-recolher {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid color-mix(in srgb, var(--seele-tinta-no-acento) 35%, transparent);
+    border-radius: var(--seele-raio-pilula);
+    background: color-mix(in srgb, var(--seele-tinta-no-acento) 8%, transparent);
+    color: var(--seele-tinta-no-acento);
+    cursor: pointer;
+  }
+  :root:not([data-casca="celular"]) .pessoas-recolher:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+  :root:not([data-casca="celular"]) .pessoas-recolher .glifo { width: 16px; height: 16px; }
+  :root:not([data-casca="celular"]) .painel-pessoas .pessoas-cartela { min-height: 64px; padding-right: 64px; }
+  :root:not([data-casca="celular"]) #tela-sessao[data-pessoas-recolhidas="sim"] .paineis {
+    grid-template-columns: 72px minmax(264px, 316px) minmax(0, 1fr) 72px auto;
+  }
+  :root:not([data-casca="celular"]) #tela-sessao[data-pessoas-recolhidas="sim"] .painel-pessoas { overflow: hidden; }
+  :root:not([data-casca="celular"]) #tela-sessao[data-pessoas-recolhidas="sim"] .pessoas-recolher {
+    position: static;
+    margin: 12px auto 8px;
+    background: var(--seele-laranja-nerv);
+    border-color: var(--seele-laranja-nerv);
+  }
+  :root:not([data-casca="celular"]) #tela-sessao[data-pessoas-recolhidas="sim"] .painel-pessoas > :not(.pessoas-recolher):not(.pessoas-mini) { display: none; }
+  :root:not([data-casca="celular"]) #tela-sessao[data-pessoas-recolhidas="sim"] .pessoas-mini {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 4px 0 12px;
+    list-style: none;
+    overflow-y: auto;
+  }
+  .pessoas-mini-item {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--seele-raio-icone);
+    background-color: var(--seele-controle-hover);
+    background-size: cover;
+    background-position: center;
+    color: var(--seele-osso);
+    font-family: var(--seele-mono);
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .pessoas-mini-item[data-fala="sim"] { box-shadow: 0 0 0 2px var(--seele-fosforo); }
+}
+
+/* A gaveta de canais (janela estreita) nunca passa da janela: em 320px ela
+   tinha 268px a partir dos 60px da trilha, e a página rolava de lado — agora
+   que as entradas dos MODs moram nela, é ela que se abre para chegar a elas. */
+@media (max-width: 900px) {
+  :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"] .paineis > .painel-canais { min-width: 0; width: min(268px, calc(100vw - 88px)); max-width: calc(100vw - 88px); box-sizing: border-box; }
+}

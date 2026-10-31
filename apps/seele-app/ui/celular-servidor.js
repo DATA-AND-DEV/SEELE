@@ -158,6 +158,12 @@
     if (evento.target.closest("button[data-linha]")) CELULAR.ajudante("abrirAba")("conversa");
   });
 
+  // **As páginas dos MODs** («DOS MODS», canvas `Cel-servidor`): a entrada abre
+  // a página no lugar da conversa, e é para a aba da conversa que se vai.
+  doDesktop("lista-mods-navegacao")?.addEventListener("click", (evento) => {
+    if (evento.target.closest("button.entrada-de-mod")) CELULAR.ajudante("abrirAba")("conversa");
+  });
+
   CASCA.vestirASala = (item, sala) => adaptarSala(item, sala);
 
   CASCA.depoisDeDesenhar.push((snapshot) => {

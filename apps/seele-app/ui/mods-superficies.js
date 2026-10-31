@@ -148,9 +148,14 @@ function foraDoModal() {
   const porta = achar("#tela-sessao .linha-canais");
   const toque = achar("#toque");
   const portaria = achar("#portaria-batendo");
+  // **A barra da chamada** (0.19): na vista da chamada a coluna de canais sai
+  // de cena, e com ela a barra do operador. A barra de baixo da chamada leva os
+  // mesmos comandos (microfone, som, sair), e por isso fica acordada e fora do
+  // véu como a do operador — o que um MOD nunca cobre continua alcançável.
+  const daChamada = achar("#chamada-controles");
   return {
-    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta, toque, portaria].filter(deVerdade),
-    recortes: [achar("#tela-sessao .operador"), porta, toque, portaria].filter(deVerdade),
+    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), daChamada, porta, toque, portaria].filter(deVerdade),
+    recortes: [achar("#tela-sessao .operador"), daChamada, porta, toque, portaria].filter(deVerdade),
   };
 }
 
@@ -311,6 +316,13 @@ function devolverSuperficie(raiz) {
   if (focoAnterior) superficie.focoAnterior = focoAnterior;
   return true;
 }
+
+/**
+ * A largura pedida a partir da qual um diálogo modal abre como tela, na casca
+ * da Configuração (ver `montarCasca`). Os diálogos curtos — confirmar, criar
+ * uma coisa pequena — continuam um cartão no meio do véu.
+ */
+const LARGURA_DE_TELA = 800;
 
 /** Os tipos de superfície, e o que cada um exige do host. */
 const TIPOS_DE_SUPERFICIE = Object.freeze({
@@ -525,6 +537,19 @@ class SuperficieDeMod {
       // impede que o fechamento fique fora da tela.
       const largura = Math.min(Math.max(Number(descricao?.tamanho?.largura) || 560, 280), 1600);
       this.raiz.style.setProperty("--largura-pedida", `${largura}px`);
+      // **O diálogo amplo é uma tela, como a Configuração** (0.19). Um modal
+      // que pede 800 px ou mais é uma tarefa de ajuste — a aparência do
+      // servidor, o editor de perfil —, e o canvas a desenha com a casca da
+      // Configuração: coluna à esquerda com o nome e o VOLTAR no pé, e o
+      // conteúdo num painel ao lado. É só apresentação: continua `dialog`
+      // modal, com o foco preso, o Escape, o véu e o furo do véu (o operador,
+      // a porta e quem liga ficam de fora, como em todo modal). No celular a
+      // casca já põe todo diálogo na tela cheia (`celular-folhas.css`).
+      this.emTela = this.modal && largura >= LARGURA_DE_TELA && !globalThis.CELULAR;
+      if (this.emTela) {
+        this.camada.dataset.apresentacao = "tela";
+        this.raiz.dataset.apresentacao = "tela";
+      }
       this.camada.append(this.raiz);
     } else if (this.tipo === "pagina") {
       this.raiz = elemento("section", "superficie-de-mod pagina-de-mod");
@@ -577,11 +602,11 @@ class SuperficieDeMod {
     cabeca.append(origem);
 
     // A saída. Montada aqui, e não pelo MOD: ver o cabeçalho deste arquivo.
-    const sair = elemento("button", "superficie-de-mod-sair", this.tipo === "pagina" ? "VOLTAR" : "FECHAR");
+    const sair = elemento("button", "superficie-de-mod-sair", this.tipo === "pagina" || this.emTela ? "VOLTAR" : "FECHAR");
     sair.type = "button";
     sair.setAttribute("aria-label", this.tipo === "pagina"
       ? "Voltar à conversa"
-      : `Fechar ${nome}`);
+      : this.emTela ? `Voltar — fechar ${nome}` : `Fechar ${nome}`);
     this.aoSair = () => this.pedirFechamento("saida-do-produto");
     sair.addEventListener("click", this.aoSair);
     this.botaoDeSaida = sair;

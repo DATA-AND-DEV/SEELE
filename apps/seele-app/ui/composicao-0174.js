@@ -78,50 +78,33 @@
   }
   const sessao = document.getElementById("tela-sessao");
   const lista = document.getElementById("lista-mods-navegacao");
-  if (sessao && lista) {
-    const abas = document.createElement("nav");
-    abas.className = "abas-superiores";
-    abas.setAttribute("aria-label", "Conversa e MODs do servidor");
-    abas.addEventListener("keydown", event => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      const botoes = [...abas.querySelectorAll("button")].filter(el => !el.disabled && el.getClientRects().length);
-      const atual = botoes.indexOf(document.activeElement);
-      if (atual < 0 || !botoes.length) return;
-      event.preventDefault();
-      const indice = event.key === "Home" ? 0 : event.key === "End" ? botoes.length - 1
-        : (atual + (event.key === "ArrowRight" ? 1 : -1) + botoes.length) % botoes.length;
-      botoes[indice].focus();
-    });
-    const conversa = document.createElement("button");
-    conversa.type = "button"; conversa.textContent = "Conversa";
-    conversa.setAttribute("aria-current", "page");
-    conversa.addEventListener("click", () => {
-      // A saída pública de cada superfície devolve o palco à conversa.
-      const palco = document.getElementById("palco-de-paginas");
-      const fechar = palco?.querySelector(".superficie-de-mod-sair");
-      if (fechar) fechar.click();
-    });
-    const marca = document.createElement("span"); marca.className = "sessao-assinatura"; marca.textContent = "SEELE";
-    const contexto = document.createElement("span"); contexto.className = "sessao-contexto";
-    const fonte = document.getElementById("barra-servidor-nome");
-    const copiarContexto = () => { contexto.textContent = fonte?.textContent || "Conversa"; };
-    copiarContexto();
-    if (fonte) new MutationObserver(copiarContexto).observe(fonte, { childList: true, characterData: true, subtree: true });
-    abas.append(marca, contexto, conversa, lista);
-    const paineis = sessao.querySelector(".paineis");
-    if (paineis) sessao.prepend(abas);
-    const atualizar = () => {
-      const ativa = !document.getElementById("palco-de-paginas")?.hidden;
+  const palcoDePaginas = document.getElementById("palco-de-paginas");
+  // A entrada da página aberta fica marcada como o canal aberto: `aria-current`
+  // é o estado, e o CSS o pinta igual ao do canal. Vale nas duas cascas.
+  const marcarAPaginaAberta = (conversa) => {
+    if (!lista) return;
+    const ativa = palcoDePaginas ? !palcoDePaginas.hidden : false;
+    if (conversa) {
       if (ativa) conversa.removeAttribute("aria-current");
       else conversa.setAttribute("aria-current", "page");
-      const pagina = document.getElementById("palco-de-paginas")?.querySelector('[data-mod]:not([hidden])');
-      for (const entrada of lista.querySelectorAll(".entrada-de-mod")) {
-        if (ativa && pagina?.dataset.mod === entrada.dataset.modDaAcao) entrada.setAttribute("aria-current", "page");
-        else entrada.removeAttribute("aria-current");
-      }
-    };
-    const palco = document.getElementById("palco-de-paginas");
-    if (palco) new MutationObserver(atualizar).observe(palco, { attributes: true, attributeFilter: ["hidden"], childList: true, subtree: true });
+    }
+    const pagina = palcoDePaginas?.querySelector('[data-mod]:not([hidden])');
+    for (const entrada of lista.querySelectorAll(".entrada-de-mod")) {
+      if (ativa && pagina?.dataset.mod === entrada.dataset.modDaAcao) entrada.setAttribute("aria-current", "page");
+      else entrada.removeAttribute("aria-current");
+    }
+    // O canal aberto deixa de ser «onde se está» enquanto uma página o cobre.
+    sessao?.classList.toggle("com-pagina-de-mod", ativa);
+  };
+  // **Sem barra superior (0.19), nas duas cascas.** As páginas dos MODs ficam
+  // na coluna de canais, sob «DOS MODS», onde `index.html` as declara — no
+  // celular, a coluna é a aba SERVIDOR (canvas `Cel-servidor`). A volta à
+  // conversa é escolher um canal (`alternarCanal` fecha a página) ou o VOLTAR
+  // da própria página, que é do produto.
+  if (sessao && lista) {
+    const observar = () => marcarAPaginaAberta(null);
+    if (palcoDePaginas) new MutationObserver(observar).observe(palcoDePaginas, { attributes: true, attributeFilter: ["hidden"], childList: true, subtree: true });
+    new MutationObserver(observar).observe(lista, { childList: true, subtree: true });
   }
   const codigoEstado = document.getElementById("boot-codigo-estado");
   if (codigo && codigoEstado && PONTE_NO_LUGAR_DO_TAURI) {
@@ -160,5 +143,152 @@
       acoes.append(botao);
     }
     chamada.querySelector(".vista-chamada-barra")?.after(acoes);
+  }
+
+  // ------------------------------------------------- a chamada do canvas 0.19
+  //
+  // `Chamada`: na vista da chamada a coluna de canais sai de cena (o CSS a
+  // esconde enquanto `#vista-chamada` está à vista), e a chamada traz o que
+  // a coluna trazia: um CHAT que devolve à conversa do canal aberto, e a barra
+  // de baixo com microfone, som, COMPARTILHAR, SAIR DA SALA e SAIR DO SERVIDOR.
+  //
+  // **Nenhum comando novo.** Cada botão daqui aperta o controle original do
+  // operador (ou chama a mesma função que ele chama), e copia dele o estado —
+  // rótulo, `aria-pressed`, `hidden`, `disabled` —, como a fileira estreita de
+  // cima já fazia. O furo do véu dos MODs conta esta barra (`foraDoModal`, em
+  // `mods-superficies.js`): com a coluna escondida, é ela que leva o microfone
+  // e a saída, e nenhum modal de MOD a cobre.
+  if (chamada && !celular) {
+    const barra = chamada.querySelector(".vista-chamada-barra");
+    if (barra && typeof fecharChamada === "function") {
+      const chat = document.createElement("button");
+      chat.type = "button";
+      chat.id = "chamada-chat";
+      chat.className = "chamada-chat";
+      chat.title = "voltar à conversa do canal aberto, sem sair da sala";
+      if (typeof glifo === "function") chat.append(glifo("linhas"));
+      chat.append("CHAT");
+      chat.addEventListener("click", () => fecharChamada());
+      barra.append(chat);
+    }
+    const controles = document.createElement("div");
+    controles.id = "chamada-controles";
+    controles.className = "chamada-controles";
+    controles.setAttribute("role", "toolbar");
+    controles.setAttribute("aria-label", "Controles da chamada");
+    const espelhar = (botao, original, { icone = false, rotulo = null, mostrar = () => !original.hidden } = {}) => {
+      const atualizar = () => {
+        botao.hidden = !mostrar();
+        botao.disabled = original.disabled;
+        const desligado = original.getAttribute("aria-disabled");
+        if (desligado !== null) botao.setAttribute("aria-disabled", desligado);
+        const pressionado = original.getAttribute("aria-pressed");
+        if (pressionado !== null) botao.setAttribute("aria-pressed", pressionado);
+        if (original.title) botao.title = original.title;
+        if (icone) {
+          // O desenho do original (o glifo com ou sem o corte) e o nome dele.
+          botao.replaceChildren(...[...original.childNodes].map((no) => no.cloneNode(true)));
+          botao.setAttribute("aria-label", original.getAttribute("aria-label") || original.title || "");
+        } else if (rotulo) {
+          const texto = rotulo();
+          if (botao.lastChild?.nodeType === Node.TEXT_NODE) botao.lastChild.textContent = texto;
+          else botao.append(texto);
+        }
+      };
+      atualizar();
+      new MutationObserver(atualizar).observe(original, { attributes: true, childList: true, subtree: true, characterData: true });
+      return atualizar;
+    };
+    const comGlifo = (nome) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      if (nome && typeof glifo === "function") b.append(glifo(nome));
+      return b;
+    };
+    const mudo = document.getElementById("botao-mudo");
+    const surdo = document.getElementById("botao-surdo");
+    const vista = document.getElementById("operador-vista");
+    const sair = document.getElementById("operador-sair");
+    if (mudo && surdo && vista && sair) {
+      const bMudo = comGlifo(null); bMudo.className = "chamada-controle chamada-controle-icone";
+      bMudo.addEventListener("click", () => mudo.click());
+      espelhar(bMudo, mudo, { icone: true });
+      const bSurdo = comGlifo(null); bSurdo.className = "chamada-controle chamada-controle-icone";
+      bSurdo.addEventListener("click", () => surdo.click());
+      espelhar(bSurdo, surdo, { icone: true });
+      const bVista = comGlifo("aparencia"); bVista.className = "chamada-controle";
+      bVista.addEventListener("click", () => vista.click());
+      espelhar(bVista, vista, { rotulo: () => vista.textContent.trim() || "COMPARTILHAR" });
+      // SAIR DO SERVIDOR: a mesma função do SAIR do operador fora de sala.
+      const bServidor = comGlifo(null); bServidor.className = "chamada-controle";
+      bServidor.textContent = "SAIR DO SERVIDOR";
+      bServidor.title = "sair deste servidor e voltar à tela de entrada";
+      bServidor.addEventListener("click", () => {
+        if (typeof sairDoServidorParaAEntrada === "function") sairDoServidorParaAEntrada();
+      });
+      // A saída da sala é o primário laranja: é o «desligar» de uma sala de
+      // servidor. O rótulo e o alvo são os do botão do operador.
+      const bSala = comGlifo("desligar"); bSala.className = "chamada-controle chamada-controle-primario";
+      bSala.addEventListener("click", () => sair.click());
+      espelhar(bSala, sair, {
+        rotulo: () => sair.textContent.trim(),
+        mostrar: () => sair.dataset.alvo === "sala",
+      });
+      controles.append(bMudo, bSurdo, bVista, bServidor, bSala);
+      chamada.append(controles);
+    }
+
+    // A lista de pessoas recolhe numa faixa de 72px (o alternador do canvas).
+    const pessoas = document.querySelector("#tela-sessao .painel-pessoas");
+    const cartela = pessoas?.querySelector(".pessoas-cartela");
+    if (pessoas && cartela) {
+      const alternar = document.createElement("button");
+      alternar.type = "button";
+      alternar.id = "pessoas-recolher";
+      alternar.className = "pessoas-recolher";
+      const desenhar = () => {
+        const recolhida = sessao?.dataset.pessoasRecolhidas === "sim";
+        alternar.setAttribute("aria-expanded", recolhida ? "false" : "true");
+        alternar.setAttribute("aria-label", recolhida ? "Abrir a lista de pessoas" : "Recolher a lista de pessoas");
+        alternar.title = recolhida ? "abrir a lista de pessoas" : "recolher a lista de pessoas";
+        alternar.replaceChildren(typeof glifo === "function" ? glifo(recolhida ? "recuar" : "avancar") : "");
+      };
+      // Recolhida, a faixa mostra um quadrado por pessoa: as iniciais (ou o
+      // retrato) e o nome no `title`, lidos da lista de verdade — o produto
+      // desenha, e não o MOD que apresenta a linha. Quem fala ganha o anel.
+      const roster = document.getElementById("lista-roster");
+      const mini = document.createElement("ul");
+      mini.className = "pessoas-mini";
+      mini.setAttribute("aria-label", "Pessoas no servidor");
+      const redesenharMini = () => {
+        if (sessao?.dataset.pessoasRecolhidas !== "sim" || !roster) return;
+        const linhas = [...roster.querySelectorAll("li.pessoa[data-pessoa-id]")];
+        mini.replaceChildren(...linhas.map((linha) => {
+          const item = document.createElement("li");
+          const quadro = linha.querySelector("[data-pessoa-do-avatar]");
+          const nome = (linha.querySelector(".pessoa-nome")?.textContent || "").trim();
+          const falando = linha.classList.contains("falando");
+          item.className = "pessoas-mini-item";
+          item.dataset.fala = falando ? "sim" : "nao";
+          item.title = falando ? `${nome} · falando` : nome;
+          item.setAttribute("aria-label", item.title);
+          const imagem = quadro?.style.backgroundImage;
+          if (imagem && imagem !== "none") item.style.backgroundImage = imagem;
+          else item.textContent = (quadro?.dataset.iniciaisDoAvatar || nome).slice(0, 1).toUpperCase();
+          return item;
+        }));
+      };
+      if (roster) new MutationObserver(redesenharMini).observe(roster, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+      alternar.addEventListener("click", () => {
+        if (!sessao) return;
+        if (sessao.dataset.pessoasRecolhidas === "sim") delete sessao.dataset.pessoasRecolhidas;
+        else sessao.dataset.pessoasRecolhidas = "sim";
+        desenhar();
+        redesenharMini();
+      });
+      desenhar();
+      cartela.after(alternar);
+      alternar.after(mini);
+    }
   }
 })();

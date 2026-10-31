@@ -72,7 +72,8 @@ function aPergunta(aba) {
       linhas: [...secao.querySelectorAll("li")].map((li) => ({
         id: li.querySelector(".mods-id")?.textContent ?? "",
         texto: li.textContent,
-        botao: li.querySelector("button")?.textContent ?? null,
+        // 0.19: linhas de rádio. O que não está marcado é o que se oferece.
+        botao: li.querySelector("input[type=radio]:not(:checked)") ? "PINTAR COM ESTE" : null,
       })),
     };
   });
@@ -159,7 +160,7 @@ function aLinhaDoMod(aba, id) {
       window.__chamadas = [];
       [...document.querySelectorAll("#mods-aparencia-do-servidor li")]
         .find((li) => li.querySelector(".mods-id")?.textContent === "seele/noite")
-        .querySelector("button").click();
+        .querySelector("input[type=radio]").click();
     });
     await aba.waitForFunction(() =>
       [...document.querySelectorAll("#mods-aparencia-do-servidor li")]
@@ -209,7 +210,8 @@ function aLinhaDoMod(aba, id) {
     await desenharCom(aba, [structuredClone(ESTILO), structuredClone(NOITE)]);
     await aba.evaluate(() => {
       window.__recusa = { Recusado: { motivo: "sem-porta-de-tema" } };
-      [...document.querySelectorAll("#mods-aparencia-do-servidor li button")][0].click();
+      // 0.19: o rádio não marcado é o que se oferece.
+      [...document.querySelectorAll("#mods-aparencia-do-servidor li input[type=radio]:not(:checked)")][0].click();
     });
     await aba.waitForTimeout(300);
     const erro = await aba.evaluate(() => {
