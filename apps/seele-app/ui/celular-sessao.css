@@ -2351,3 +2351,8 @@
   background-position: center;
   background-size: cover;
 }
+
+/* O alvo da ficha da pessoa (0.19) cobre a linha; a seta já é desta folha. */
+:root[data-casca="celular"] #lista-roster .pessoa > .pessoa-abrir::after { content: none; }
+/* A conta de bytes do compositor é da fileira larga do desktop. */
+:root[data-casca="celular"] .compor-bytes { display: none; }

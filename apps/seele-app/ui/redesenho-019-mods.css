@@ -18,7 +18,7 @@
    As páginas que um MOD registra moram na coluna de canais, sob o rótulo
    «DOS MODS», como os canais: a mesma linha, a peça no lugar do `#`, e a
    origem (do produto) à direita, onde a sala diz «ninguém aqui». */
-:root:not([data-casca="celular"]) #cabeca-mods-navegacao:not([hidden]) { display: flex; margin-top: 12px; }
+:root:not([data-casca="celular"]) #cabeca-mods-navegacao:not([hidden]) { display: flex; }
 :root:not([data-casca="celular"]) #lista-mods-navegacao {
   display: flex;
   flex-direction: column;
@@ -28,13 +28,24 @@
   list-style: none;
 }
 :root:not([data-casca="celular"]) #lista-mods-navegacao[hidden] { display: none; }
+/* **O nome do MOD inteiro, e a origem embaixo, menor** (0.19, «Aparência do
+   servi…  seele/esti…»): as duas na mesma fileira cortavam as duas. A peça à
+   esquerda, o rótulo na primeira linha e o id do MOD — a origem, que é do
+   produto e não sai — na segunda. */
 :root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod {
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  column-gap: 10px;
+  row-gap: 0;
+  padding: 5px 10px;
   min-height: 44px;
+  text-align: left;
 }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod > .entrada-de-mod-icone { grid-column: 1; grid-row: 1 / span 2; }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod > .linha-rotulo { grid-column: 2; grid-row: 1; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.35; }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod > .entrada-de-mod-origem { grid-column: 2; grid-row: 2; line-height: 1.3; }
 .entrada-de-mod-icone {
   flex: 0 0 auto;
   display: inline-flex;
@@ -46,7 +57,7 @@
 :root:not([data-casca="celular"]) #lista-mods-navegacao .linha-rotulo { flex: 1 1 auto; min-width: 0; font-family: var(--seele-mono); }
 :root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod-origem {
   flex: 0 1 auto;
-  max-width: 34%;
+  max-width: 100%;
   font-family: var(--seele-mono);
   font-size: 10px;
   color: var(--seele-rotulo-painel);
@@ -725,3 +736,15 @@
 @media (max-width: 900px) {
   :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"] .paineis > .painel-canais { min-width: 0; width: min(268px, calc(100vw - 88px)); max-width: calc(100vw - 88px); box-sizing: border-box; }
 }
+
+/* ---------------------------------------- o ritmo da coluna de canais (0.19)
+   «Grandes vãos verticais entre CANAIS, Perfis e DOS MODS»: a coluna rolava
+   com 16px entre TODO filho — rótulo e lista inclusive — mais 12px de margem
+   própria em Perfis e em DOS MODS. O canvas `Main` põe 16px entre as SEÇÕES e
+   4px entre o rótulo e a lista dele. */
+:root:not([data-casca="celular"]) #tela-sessao .painel-canais > .canais-rolagem { gap: 0; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .canais-cabeca-linhas,
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > #cabeca-mods-navegacao { margin-top: 16px; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > #lista-perfis-navegacao { margin-top: 4px; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .relatorio-perfis:not([hidden]) { margin-bottom: 16px; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .canais { gap: 2px; }

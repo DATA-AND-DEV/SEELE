@@ -218,7 +218,7 @@
       espelhar(bSurdo, surdo, { icone: true });
       const bVista = comGlifo("aparencia"); bVista.className = "chamada-controle";
       bVista.addEventListener("click", () => vista.click());
-      espelhar(bVista, vista, { rotulo: () => vista.textContent.trim() || "COMPARTILHAR" });
+      espelhar(bVista, vista, { rotulo: () => vista.textContent.trim() || vista.getAttribute("aria-label") || "COMPARTILHAR" });
       // SAIR DO SERVIDOR: a mesma função do SAIR do operador fora de sala.
       const bServidor = comGlifo(null); bServidor.className = "chamada-controle";
       bServidor.textContent = "SAIR DO SERVIDOR";
@@ -231,7 +231,8 @@
       const bSala = comGlifo("desligar"); bSala.className = "chamada-controle chamada-controle-primario";
       bSala.addEventListener("click", () => sair.click());
       espelhar(bSala, sair, {
-        rotulo: () => sair.textContent.trim(),
+        // O botão do operador virou ícone (0.19): a palavra está no nome acessível.
+        rotulo: () => sair.textContent.trim() || sair.getAttribute("aria-label") || "",
         mostrar: () => sair.dataset.alvo === "sala",
       });
       controles.append(bMudo, bSurdo, bVista, bServidor, bSala);

@@ -78,9 +78,11 @@ const engines = require('./playwright.cjs');
         const linha=page.locator('li.pessoa-apresentada[data-pessoa-id="2"]').first();
         assert.equal(await linha.locator('.pessoa-apresentada-faixa .pessoa-nome').count(),0);
         assert.equal(await linha.locator('.pessoa-miolo').innerText(),'THORFINN');
-        assert.equal(await linha.locator(':scope > details').getAttribute('open'),null);
-        await linha.locator(':scope > details > summary').click();
-        assert.ok((await linha.locator('.pessoa-nativo .pessoa-nome').innerText()).includes('Lia'));
+        // 0.19: a linha não expande; o «⋯» do produto abre a ficha da pessoa.
+        assert.equal(await linha.locator(':scope > details').count(),0);
+        await linha.locator(':scope > button[data-ficha-pessoa]').click();
+        assert.ok((await page.locator('#ficha-pessoa-titulo').innerText()).includes('Lia'));
+        await page.keyboard.press('Escape');
         await page.evaluate(()=>{contribuicoesDosMods.revogar(handle,{id:'teste/perfis',instancia:i});desenhar(testTable.snapshot);});
         assert.equal(await page.locator('li.pessoa-apresentada[data-pessoa-id="2"]').count(),0);
         assert.ok(await page.locator('#lista-roster').innerText().then(t=>t.includes('Lia')));

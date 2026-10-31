@@ -1568,8 +1568,9 @@
           <button id="operador-sair" class="operador-glifo" type="button"
                   aria-label="SAIR DO SERVIDOR"
                   title="sair deste servidor e voltar à tela de entrada"></button>
-          <button id="operador-vista" class="botao-fantasma" type="button" hidden
-                  title="mostrar um monitor ou uma janela sua para quem está na sala">COMPARTILHAR</button>
+          <button id="operador-vista" class="operador-glifo" type="button" hidden
+                  aria-label="COMPARTILHAR" data-glifo="tela"
+                  title="mostrar um monitor ou uma janela sua para quem está na sala"></button>
           <!--
             Só na vista da ligação pessoal (0.17), onde esta fileira vira a
             barra da chamada: o CHAT abre a conversa num painel sobreposto, e
@@ -2056,7 +2057,7 @@
           <button id="botao-anexar" class="compor-anexar" type="button"
                   aria-label="Escolher um arquivo"
                   title="escolher um arquivo; colar e arrastar também anexam"
-                  data-glifo="anexo"></button>
+                  data-glifo="clipe"></button>
           <!--
             **O botão ENVIAR voltou** — U17.
 
@@ -2096,6 +2097,14 @@
             para revisao de quem escreve; ela nao envia nada.
           -->
           <span id="compositor-ferramentas" class="compositor-ferramentas"></span>
+          <!--
+            A conta de bytes à vista (o canvas `Main`: «0 / 4000 bytes»), na
+            fileira de baixo, antes do ENVIAR. `medirOCorpo` a escreve com o
+            teto lido do Rust; o aviso de quando passa continua sendo o
+            `#campo-mensagem-tamanho`, que é `role="status"`. Esta não anuncia
+            a cada letra: é a régua, e não o alarme.
+          -->
+          <span id="compor-bytes" class="compor-bytes" hidden></span>
           <button id="botao-enviar" class="compor-enviar" type="submit"
                   aria-label="Enviar a mensagem">ENVIAR<svg class="compor-enviar-seta" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
         </form>
@@ -4656,6 +4665,22 @@
   </div>
 </div>
 
+<!--
+  A ficha de uma pessoa (0.19, pedido do dono): o toque numa linha de PESSOAS
+  abre este modal, e a linha não expande mais. O perfil oficial, o estado, o
+  volume (de quem está na sua sala), o MODERAR (com a permissão) e o que os
+  MODs acrescentam à pessoa. `fichaDaPessoa`, em `tela-sessao.js`.
+-->
+<div id="ficha-pessoa" class="camada-ficha" role="dialog" aria-modal="true"
+     aria-labelledby="ficha-pessoa-titulo" tabindex="-1" hidden>
+  <div class="ficha-caixa">
+    <div class="ficha-cabeca">
+      <h2 id="ficha-pessoa-titulo" class="ficha-titulo"></h2>
+      <button id="ficha-pessoa-fechar" class="ficha-fechar" type="button"><span class="ficha-tecla">esc</span> fecha</button>
+    </div>
+    <div id="ficha-pessoa-corpo" class="ficha-corpo"></div>
+  </div>
+</div>
 <div id="nomear" class="camada-nomear" role="dialog" aria-modal="true"
      aria-labelledby="nomear-titulo" tabindex="-1" hidden>
   <div class="nomear-caixa">

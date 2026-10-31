@@ -922,7 +922,13 @@ function desenharORodapeDoOperador(voice_room) {
   // um botão desabilitado prometeria que existe um jeito de habilitá-lo aqui.
   outro.hidden = !dentro;
   if (dentro) {
-    if (outro.textContent !== "COMPARTILHAR") outro.textContent = "COMPARTILHAR";
+    // **Ícone também** (0.19, pedido do dono): a fileira do operador é uma
+    // linha só de ícones iguais, e «COMPARTILHAR» por extenso a quebrava. A
+    // palavra fica no nome acessível, como a das saídas.
+    if (outro.getAttribute("aria-label") !== "COMPARTILHAR" || !outro.firstElementChild) {
+      outro.setAttribute("aria-label", "COMPARTILHAR");
+      outro.replaceChildren(glifo("tela"));
+    }
     // **Indisponível, e dito** (caso 12): sem a captura (o navegador que não
     // a tem), o botão fica à vista, apagado, com o porquê; o clique abre a
     // caixa, que diz o mesmo — nada começa e quebra no meio.

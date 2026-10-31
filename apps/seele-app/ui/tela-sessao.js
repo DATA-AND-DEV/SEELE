@@ -1786,8 +1786,12 @@ function rotuloDoDia(segundos) {
   const data = new Date(segundos * 1000);
   const meiaNoite = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const dias = Math.round((meiaNoite(new Date()) - meiaNoite(data)) / 86400000);
-  if (dias === 0) return "HOJE";
-  if (dias === 1) return "ONTEM";
+  // Com o dia ao lado (o canvas `Main`: «── hoje · 31 out ──»): «hoje» diz
+  // quando, e a data diz qual, para quem lê a conversa depois da meia-noite.
+  const MESES = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"];
+  const curta = `${data.getDate()} ${MESES[data.getMonth()]}`;
+  if (dias === 0) return `HOJE · ${curta}`;
+  if (dias === 1) return `ONTEM · ${curta}`;
   return data
     .toLocaleDateString([], { day: "2-digit", month: "2-digit", year: "numeric" })
     .toUpperCase();
@@ -2502,24 +2506,6 @@ function nosDeMod(nos) {
   return nos.map(noDeMod);
 }
 
-/**
- * **O `pessoa.detalhes` de uma pessoa, para a linha dela** — o único lugar que
- * o acrescenta, para as duas linhas, a nativa e a apresentada (decisão da
- * orquestradora, 16/10). Com `CASCA.detalhesNaLinha` falso, nada: o celular o
- * monta só na folha da pessoa, e um nó por pessoa fica num lugar só.
- *
- * Cada seção leva **o nome do MOD por cima**, escrito pelo produto e fora do
- * nó dele, e o nó numa caixa que recorta o que ele desenha: sem dono, uma
- * seção ao lado do MODERAR podia ser um MODERAR falso.
- */
-function detalhesDaPessoaNaLinha(pessoa) {
-  if (!CASCA.detalhesNaLinha || pessoa.id === undefined || pessoa.id === null) return [];
-  return conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id)).flatMap((no) => {
-    const caixa = elemento("div", "contribuicao-de-mod-caixa");
-    caixa.append(noDeMod(no));
-    return [elemento("p", "contribuicao-de-mod-origem", no.dataset.mod ?? ""), caixa];
-  });
-}
 
 /**
  * **A lista de pessoas reconciliada pelo id, e não repovoada** (pendência 63,
@@ -2803,6 +2789,8 @@ function desenharPessoas(snapshot) {
     ...snapshot.voice_rooms.flatMap((sala) => sala.people.map((pessoa) => pessoa.id)),
   ])));
   const ordenar = (linhas, pessoas) => emGrupos(linhas, pessoas, arranjo, "OUTRAS PESSOAS", "roster-subgrupo");
+  // Refeito a cada quadro: a ficha aberta lê daqui quem a pessoa é agora.
+  pessoasDaLista.clear();
 
   const grupos = snapshot.voice_rooms
     .filter((voice_room) => voice_room.people.length > 0)
@@ -2832,6 +2820,7 @@ function desenharPessoas(snapshot) {
               // nada, porque a própria voz nunca entra na mistura
               // (`specs/03-audio.md`).
               volume: pessoa.is_self ? null : pessoa.nickname,
+              nossaSala: voice_room.occupied_by_us,
               moderar: quemPodeSerModerado(pessoa, snapshot),
             },
             snapshot.audio_available,
@@ -2921,6 +2910,9 @@ function desenharPessoas(snapshot) {
               atField: pessoa.muted,
               isolado: pessoa.total_isolation,
               volume: null,
+              // A ficha oferece o MODERAR também a quem está fora das salas:
+              // expulsar e banir não dependem de sala nenhuma.
+              moderar: quemPodeSerModerado(pessoa, snapshot),
             },
             snapshot.audio_available,
           ),
@@ -2941,6 +2933,7 @@ function desenharPessoas(snapshot) {
   reconciliarALista($("lista-roster"), grupos);
   // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
   ligarAcoesDeApresentacao($("lista-roster"));
+  conferirAFichaAberta();
 
   // Duas contagens, e a de fora existe porque a de dentro sozinha mentia por
   // omissão: `12 EM SALAS DE VOZ` ao lado de `PESSOAS` era lido como a
@@ -2961,7 +2954,7 @@ function desenharPessoas(snapshot) {
  * polegar de quem o move, que é o mesmo cuidado de `desenharSomDoPalco`.
  */
 function pintarVolumesDoRoster() {
-  for (const deslizante of $("lista-roster").querySelectorAll("input.volume")) {
+  for (const deslizante of document.querySelectorAll("#lista-roster input.volume, #ficha-pessoa input.volume")) {
     if (deslizante === document.activeElement) continue;
     deslizante.value = String(volumesLidos.get(deslizante.dataset.pessoa) ?? 100);
   }
@@ -3145,19 +3138,16 @@ function linhaDoRoster(pessoa, temAudio) {
   // **`pessoa.detalhes` na linha nativa** (achado do passo 7 da auditoria do
   // v6; decisão da orquestradora, 16/10): ele só tinha lugar na linha
   // apresentada por um MOD, e numa nativa a contribuição era aceita e não
-  // aparecia. Aqui, um «⋯» como o da apresentada — só quando há o que pôr nele:
-  // sem contribuição, a linha é a de sempre.
-  if (!cartao) {
-    const deMods = detalhesDaPessoaNaLinha(pessoa);
-    if (deMods.length) {
-      const detalhes = elemento("details", "pessoa-nativo");
-      const resumo = elemento("summary", "pessoa-nativo-resumo", "⋯");
-      resumo.setAttribute("aria-label", `Detalhes de ${pessoa.nome}`);
-      resumo.title = `Detalhes de ${pessoa.nome}`;
-      detalhes.append(resumo, ...deMods);
-      item.classList.add("pessoa-com-detalhes");
-      item.append(detalhes);
-    }
+  // aparecia.
+  //
+  // **0.19, pedido do dono: a linha não expande mais.** O `pessoa.detalhes`,
+  // as ações de MOD, o volume e a moderação foram para a ficha da pessoa
+  // (`abrirFichaDaPessoa`), que o toque na linha abre. Na linha nativa o alvo
+  // é a linha inteira (`botaoDaFicha`, esticado sobre ela); na apresentada por
+  // um MOD, um «⋯» do produto ao lado do cartão (`linhaSubstituida`).
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    pessoasDaLista.set(String(pessoa.id), { pessoa, temAudio });
+    if (!cartao) item.append(botaoDaFicha(pessoa));
   }
 
   // **Mas o acesso ao MOD não some junto.** Quem não tem perfil é exatamente
@@ -3254,16 +3244,27 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   // **O diagnóstico nativo não some: ele recolhe.** U15 pediu que sinal e
   // detalhes fossem recolhíveis «mantendo acesso ao diagnóstico nativo», e
   // recolher é diferente de tirar.
-  const detalhes = elemento("details", "pessoa-nativo");
-  const resumo = elemento("summary", "pessoa-nativo-resumo", "⋯");
-  resumo.setAttribute("aria-label", `Detalhes de ${pessoa.nome}`);
-  resumo.title = `Detalhes de ${pessoa.nome}`;
-  detalhes.append(resumo, linhaNativaDoRoster(pessoa, temAudio, true));
-  // **`pessoa.detalhes`** — seções que o MOD acrescenta ao perfil detalhado.
-  // Dentro do mesmo `<details>` da identidade verificável: quem abre para ver
-  // quem a pessoa é encontra as duas coisas no mesmo gesto.
-  detalhes.append(...detalhesDaPessoaNaLinha(pessoa));
-  item.append(detalhes);
+  //
+  // 0.19: ele não expande mais a linha. O «⋯» é um botão do produto que abre a
+  // ficha da pessoa (`abrirFichaDaPessoa`): a identidade verificável, o
+  // `pessoa.detalhes` do MOD, o volume e a moderação, num modal só — o mesmo
+  // da linha nativa, e não um desenho que um terceiro escolhe.
+  // O estado fica ao lado da pessoa também aqui: o cartão é do MOD, e
+  // MUDO ou TRANSMITINDO é do produto.
+  // E o apelido verificável, escrito pelo produto fora do cartão: o MOD pode
+  // apresentar a pessoa como quiser, e não pode fazê-la passar por outra.
+  const rodape = elemento("div", "pessoa-rodape pessoa-apresentada-estado");
+  rodape.append(nomeDaPessoa(pessoa));
+  // **`pessoa.identidade`** ao lado do apelido verificável, como na linha
+  // nativa: pronome, distintivo, marca de papel.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    rodape.append(...nosDeMod(conteudoDasContribuicoes("pessoa.identidade", String(pessoa.id))));
+  }
+  rodape.append(estadosDaPessoa(pessoa));
+  item.append(rodape);
+  const mais = botaoDaFicha(pessoa, "⋯");
+  mais.classList.add("pessoa-nativo-resumo");
+  item.append(mais);
   return item;
 }
 
@@ -3293,16 +3294,191 @@ function cartaoDeContribuicao(contribuicao, id) {
  * apresentada por um MOD.
  */
 function nomeDaPessoa(pessoa) {
-  const nome = pessoa.nome;
-  const porta = elemento(pessoa.moderar ? "button" : "span",
-    pessoa.moderar ? "pessoa-nome pessoa-nome-porta" : "pessoa-nome", nome);
-  if (pessoa.moderar) {
-    porta.type = "button";
-    porta.dataset.moderarPessoa = pessoa.moderar;
-    porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
-    porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
+  // **Texto, e não mais a porta da moderação** (0.19): a linha inteira abre a
+  // ficha da pessoa, e é nela que o MODERAR mora, nomeado. Um botão dentro do
+  // alvo da linha seria dois gestos diferentes no mesmo nome.
+  return elemento("span", "pessoa-nome", pessoa.nome);
+}
+
+/**
+ * **As pessoas da lista, pelo id**, com o que a ficha precisa delas: o objeto
+ * que a linha desenhou no último quadro. Refeito a cada `desenharPessoas`.
+ */
+const pessoasDaLista = new Map();
+
+/**
+ * O alvo que abre a ficha de uma pessoa. Sem `rotulo`, ele é a linha inteira
+ * (esticado por cima dela pela folha); com, um botão visível («⋯»).
+ */
+function botaoDaFicha(pessoa, rotulo = null) {
+  const botao = elemento("button", "pessoa-abrir", rotulo ?? undefined);
+  botao.type = "button";
+  botao.dataset.fichaPessoa = String(pessoa.id);
+  const nome = String(pessoa.nome ?? "");
+  botao.setAttribute("aria-label", FRASES_DA_FICHA.abrir(nome));
+  botao.title = FRASES_DA_FICHA.abrir(nome);
+  botao.setAttribute("aria-haspopup", "dialog");
+  return botao;
+}
+
+/**
+ * As pastilhas de estado de uma pessoa — MUDO, TRANSMITINDO, EM ESCUTA, e o
+ * ISOLAMENTO TOTAL junto quando for o caso. Uma montagem só, na linha nativa,
+ * na apresentada por um MOD e na ficha: o estado é do produto, e fica ao lado
+ * da pessoa em todo lugar em que ela aparece.
+ */
+function estadosDaPessoa(pessoa, classe = "pessoa-estados", tag = "span") {
+  const estados = elemento(tag, classe);
+  // **Capturar não é transmitir** — U15: `speaking` dentro de uma sala é voz
+  // indo para quem está lá; fora de sala, só o microfone aberto.
+  const estado = pessoa.atField
+    ? "MUDO"
+    : pessoa.falando
+      ? (pessoa.emSala ? "TRANSMITINDO" : "MICROFONE ABERTO")
+      : "EM ESCUTA";
+  const pastilha = elemento("span", "pastilha", estado);
+  pastilha.dataset.estado = pessoa.atField ? "at" : pessoa.falando ? "fala" : "escuta";
+  estados.append(pastilha);
+  // Segunda pastilha, e não uma troca da primeira: estar surdo e estar
+  // transmitindo são dois fatos ao mesmo tempo.
+  if (pessoa.isolado) {
+    const surdez = elemento("span", "pastilha", "ISOLAMENTO TOTAL");
+    surdez.dataset.estado = "surdo";
+    estados.append(surdez);
   }
-  return porta;
+  return estados;
+}
+
+/** A ficha aberta: de quem, e o foco de antes, para devolvê-lo. */
+let fichaAberta = { id: null, focoAntes: null };
+
+/**
+ * **O conteúdo da ficha de uma pessoa** — o mesmo no modal do desktop e na
+ * folha do celular. O perfil oficial (capa, foto, nome exibido, apelido#tag,
+ * pronomes, status, bio) quando o servidor tem perfis; sem eles, o quadrado de
+ * iniciais e o apelido. Depois, o que antes ficava escondido na linha: o
+ * volume (só de quem está na sua sala), o MODERAR (só com a permissão), as
+ * ações e as seções que um MOD acrescenta à pessoa.
+ *
+ * O sinal não entra: a pessoa é quem ela é, e a medida da conexão é do
+ * rodapé e do cartão da chamada.
+ */
+function fichaDaPessoa(id) {
+  const registro = pessoasDaLista.get(String(id));
+  const pessoa = registro?.pessoa ?? { id, nome: String(id) };
+  const temAudio = registro?.temAudio ?? false;
+  const nos = [];
+  const comPerfis = typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis()
+    && typeof conteudoDaFolhaDoPerfil === "function";
+  if (!comPerfis) {
+    const cabeca = elemento("div", "ficha-identidade");
+    const avatar = elemento("span", "pessoa-avatar ficha-avatar", iniciaisDoApelido(String(pessoa.nome ?? "")));
+    avatar.setAttribute("aria-hidden", "true");
+    vestirAvatar(avatar, pessoa.id);
+    // O nome já é o título do modal: ao lado das iniciais vai o estado, e não
+    // o nome de novo (o dono viu «ana» duas vezes, uma embaixo da outra).
+    cabeca.append(avatar, estadosDaPessoa(pessoa, "ficha-estados", "p"));
+    nos.push(cabeca);
+  } else {
+    nos.push(...conteudoDaFolhaDoPerfil(id));
+    // O estado em palavra, como na linha.
+    nos.push(estadosDaPessoa(pessoa, "ficha-estados", "p"));
+  }
+
+  // Volume por pessoa (`specs/03-audio.md`): só de quem está na sua sala, que
+  // é de quem esta máquina recebe voz.
+  if (pessoa.volume !== null && pessoa.volume !== undefined && pessoa.nossaSala && temAudio) {
+    const campo = elemento("label", "ficha-volume");
+    const valor = volumesLidos.get(pessoa.volume) ?? 100;
+    const leitura = elemento("span", "ficha-volume-valor", `${valor}%`);
+    const volume = document.createElement("input");
+    volume.type = "range";
+    volume.className = "volume";
+    volume.min = "0";
+    volume.max = "200";
+    volume.step = "10";
+    volume.value = String(valor);
+    volume.dataset.pessoa = pessoa.volume;
+    volume.setAttribute("aria-label", FRASES_DA_FICHA.volumeDe(String(pessoa.nome ?? "")));
+    volume.addEventListener("input", () => { leitura.textContent = `${volume.value}%`; });
+    campo.append(elemento("span", "ficha-volume-rotulo", FRASES_DA_FICHA.volume), volume, leitura);
+    nos.push(campo);
+  }
+
+  // As ações e as seções dos MODs, com o dono escrito pelo produto.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    const acoes = acoesDasContribuicoes("pessoa.acoes", String(pessoa.id), { pessoa: pessoa.id });
+    if (acoes.length) {
+      const caixa = elemento("div", "faixa-de-acoes-de-mod ficha-acoes-de-mod");
+      caixa.append(...acoes);
+      nos.push(caixa);
+    }
+    for (const no of conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id))) {
+      // O nó em si, e não o marcador de `noDeMod`: a ficha não passa por
+      // `reconciliarALista`, que é quem troca o marcador pelo nó.
+      const caixa = elemento("div", "contribuicao-de-mod-caixa");
+      caixa.append(no);
+      nos.push(elemento("p", "contribuicao-de-mod-origem", no.dataset.mod ?? ""), caixa);
+    }
+  }
+
+  // MODERAR, com a permissão (`quemPodeSerModerado`). No celular, a moderação
+  // é pelo SEELE no computador, e a ficha diz isso em vez do botão.
+  if (pessoa.moderar) {
+    if (globalThis.CELULAR) {
+      nos.push(elemento("p", "nota ficha-moderar-fora", FRASES_DA_FICHA.moderarFora));
+    } else {
+      const moderar = elemento("button", "botao-fantasma ficha-moderar", FRASES_DA_FICHA.moderar);
+      moderar.type = "button";
+      moderar.dataset.moderarPessoa = pessoa.moderar;
+      moderar.setAttribute("aria-label", FRASES_DA_FICHA.moderarDe(String(pessoa.nome ?? "")));
+      moderar.title = `expulsar, banir ou mover ${pessoa.nome}`;
+      nos.push(moderar);
+    }
+  }
+  return { pessoa, nos };
+}
+
+/** Abre a ficha: um modal no desktop, a folha que sobe da borda no celular. */
+function abrirFichaDaPessoa(id) {
+  if (id === null || id === undefined) return;
+  const { pessoa, nos } = fichaDaPessoa(id);
+  const exibido = (typeof perfilOficial === "function" ? perfilOficial(id)?.nome_exibido : "") || String(pessoa.nome ?? "");
+  const folha = globalThis.CELULAR?.ajudante?.("folhaDeConteudo") ?? null;
+  if (folha) {
+    folha({ id: "cel-folha-pessoa", titulo: exibido, conteudo: nos });
+    const corpo = document.querySelector("#cel-folha-pessoa");
+    if (corpo) ligarAcoesDeApresentacao(corpo);
+    return;
+  }
+  const camada = $("ficha-pessoa");
+  if (!camada) return;
+  if (camada.hidden) fichaAberta.focoAntes = document.activeElement;
+  fichaAberta.id = String(id);
+  $("ficha-pessoa-titulo").textContent = exibido;
+  $("ficha-pessoa-fechar").setAttribute("aria-label", FRASES_DA_FICHA.fecharDe(exibido));
+  $("ficha-pessoa-corpo").replaceChildren(...nos);
+  camada.hidden = false;
+  $("ficha-pessoa-fechar").focus();
+}
+
+function fecharFichaDaPessoa({ devolverOFoco = true } = {}) {
+  const camada = $("ficha-pessoa");
+  if (!camada || camada.hidden) return;
+  camada.hidden = true;
+  $("ficha-pessoa-corpo").replaceChildren();
+  fichaAberta.id = null;
+  const antes = fichaAberta.focoAntes;
+  fichaAberta.focoAntes = null;
+  if (devolverOFoco && antes && document.contains(antes)) antes.focus();
+}
+
+/**
+ * Quem saiu do servidor com a ficha aberta: ela fecha, em vez de seguir
+ * mostrando uma pessoa que não está mais aqui.
+ */
+function conferirAFichaAberta() {
+  if (fichaAberta.id !== null && !pessoasDaLista.has(fichaAberta.id)) fecharFichaDaPessoa({ devolverOFoco: false });
 }
 
 function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
@@ -3356,22 +3532,11 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que
   // o v3 veio tirar desta tela.
 
-  const numero = elemento("span", "pessoa-sync");
-  // A marca de bloco antes do número, pela mesma razão que na média: a Saira
-  // desenha o número e não tem o bloco.
-  if (medido) {
-    numero.append(
-      elemento("span", "sync-marca", marcaSync(pessoa.faixa)),
-      // Inteiro, e não `98.4`: `signal` é `u8` em todo ponto onde existe, e
-      // uma casa decimal aqui seria precisão inventada no último passo.
-      elemento("span", "pessoa-sync-valor", String(pessoa.ratio)),
-    );
-  } else {
-    numero.append(elemento("span", "pessoa-sync-valor", SEM_MEDIDA));
-  }
+  // **O sinal saiu da linha** (0.19, pedido do dono): o número e a barra de
+  // cada pessoa eram a medida da conexão dela, desenhada como se fosse quem
+  // ela é. A medida fica no rodapé (a nossa) e no cartão da chamada.
 
-  // O número desce para o diagnóstico recolhível — ver abaixo. O cabeçalho
-  // fica com a identidade sozinha, que é o que U15 pediu como hierarquia.
+  // O cabeçalho fica com a identidade, que é o que U15 pediu como hierarquia.
   // **`pessoa.identidade`** — o MOD acrescenta ou decora a identidade sem
   // assumir o cartão inteiro. Ao lado do nome, dentro do mesmo nó, porque é
   // disso que o ponto fala: pronome, distintivo, cor, marca de papel.
@@ -3380,98 +3545,22 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   }
   cabeca.append(identidade);
 
-  const barra = elemento("span", "barra", medido ? blocos(pessoa.ratio, 20) : "");
-  barra.setAttribute("aria-hidden", "true");
-
   // O `ATRASO` por pessoa do comp não entra. `Telemetry` é a **nossa** conexão:
   // `rtt_ms` é um número só, e latência por par não atravessa a fronteira nem é
   // derivável de nada que atravesse (inventário v3 §1.3). O rodapé fica com o
   // que existe.
   const rodape = elemento("span", "pessoa-rodape");
-  const estados = elemento("span", "pessoa-estados");
-  // A pastilha do comp: bloco sólido com texto no negro absoluto, e não texto
-  // colorido. `PLUG EJETADO` é o quarto estado do comp e não aparece aqui —
-  // quem sai some de `voice_room.people`, e manter a lápide exigiria ou um campo de
-  // estado no `Person`, ou esta casca lembrando de quem estava ali, que é
-  // exatamente o estado derivado que o topo de `base.js` proíbe.
-  // **Capturar não é transmitir** — U15: «diferenciar microfone capturando de
-  // voz enviada à sala».
-  //
-  // `speaking` diz que o microfone desta pessoa está captando. Dentro de uma
-  // sala isso é voz indo para quem está lá, e `TRANSMITINDO` é exato. Fora de
-  // sala não há para onde transmitir — a auditoria viu `TRANSMITINDO` numa
-  // linha de quem não estava em sala nenhuma —, e a palavra passa a dizer o que
-  // de fato se sabe: o microfone está aberto.
-  const estado = pessoa.atField
-    ? "MUDO"
-    : pessoa.falando
-      ? (pessoa.emSala ? "TRANSMITINDO" : "MICROFONE ABERTO")
-      : "EM ESCUTA";
-  const pastilha = elemento("span", "pastilha", estado);
-  pastilha.dataset.estado = pessoa.atField ? "at" : pessoa.falando ? "fala" : "escuta";
-  estados.append(pastilha);
+  // A pastilha do comp: MUDO, TRANSMITINDO ou EM ESCUTA, e o ISOLAMENTO TOTAL
+  // ao lado (`estadosDaPessoa`). `PLUG EJETADO` não aparece: quem sai some de
+  // `voice_room.people`, e a lápide seria estado derivado nesta casca.
+  rodape.append(estadosDaPessoa(pessoa));
 
-  // O isolamento total não existe no comp e existe no produto. Segunda
-  // pastilha, e não uma troca da primeira: estar surdo e estar transmitindo são
-  // dois fatos ao mesmo tempo, e um deles apagando o outro esconderia metade.
-  if (pessoa.isolado) {
-    const surdez = elemento("span", "pastilha", "ISOLAMENTO TOTAL");
-    surdez.dataset.estado = "surdo";
-    estados.append(surdez);
-  }
-
-  rodape.append(estados);
-
-  // **`pessoa.acoes`** — ações contextuais que o MOD oferece sobre esta
-  // pessoa. Os botões são do produto e carregam o ID real; o MOD diz o rótulo
-  // e recebe o `id` de volta no evento.
-  if (pessoa.id !== undefined && pessoa.id !== null) {
-    const acoes = acoesDasContribuicoes("pessoa.acoes", String(pessoa.id), { pessoa: pessoa.id });
-    if (acoes.length) {
-      const caixa = elemento("span", "faixa-de-acoes-de-mod");
-      caixa.append(...acoes);
-      rodape.append(caixa);
-    }
-  }
-
-  // **A identidade primeiro; o diagnóstico recolhe** — U15.
-  //
-  // «A identidade domina pouco a faixa de pessoas; um sinal 100 e
-  // "TRANSMITINDO" dominam inclusive fora de sala de voz.» A medida estava na
-  // folha: o número do sinal era 26px e peso 900, e o nome da pessoa era o
-  // corpo de dado, pequeno. A linha dizia a medida e sussurrava de quem ela era.
-  //
-  // O sinal, a barra e as pastilhas descem para um `<details>`. Recolher não é
-  // tirar: quem precisa do número continua a um toque dele, e `specs/06` não
-  // perde nada — o estado continua em palavra, dentro.
-  //
-  // 0.17.4: o estado fica sempre ao lado da pessoa; as medidas detalhadas
-  // ficam recolhidas, salvo sinal crítico. Recolher mantém nome, fala e mudo.
-  const interessante = medido && pessoa.faixa === "Critical";
-  const diagnostico = elemento("details", "pessoa-diagnostico");
-  if (interessante) diagnostico.open = true;
-  const resumo = elemento("summary", "pessoa-diagnostico-resumo");
-  resumo.append(
-    elemento("span", "pessoa-diagnostico-rotulo", "Diagnóstico"),
-    // O valor no resumo: recolhido, a linha continua dizendo o essencial sem
-    // que seja preciso abrir para saber se vale a pena abrir.
-    elemento("span", "pessoa-diagnostico-valor", medido ? String(pessoa.ratio) : SEM_MEDIDA),
-  );
-  diagnostico.append(resumo);
-  // **Ao expandir, o perfil** (0.19, §5.3): pronomes · status e «Ver perfil»,
-  // que abre a folha da pessoa no lugar deste painel. Só com perfis oficiais.
-  if (!comoDetalhe && pessoa.id !== undefined && pessoa.id !== null
-    && typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis()) {
-    if (linhaDoOficial) diagnostico.append(elemento("span", "pessoa-perfil-linha", linhaDoOficial));
-    const ver = elemento("button", "pessoa-ver-perfil", FRASES_DOS_PERFIS.verPerfil);
-    ver.type = "button";
-    ver.dataset.verPerfil = String(pessoa.id);
-    ver.setAttribute("aria-label", FRASES_DOS_PERFIS.verPerfilDe(exibido || pessoa.nome));
-    diagnostico.append(ver);
-  }
-  diagnostico.append(numero, barra);
-
-  item.append(cabeca, rodape, diagnostico);
+  // **A linha não expande** (0.19, pedido do dono). O `<details>` do
+  // diagnóstico saiu: o sinal não é mais desenhado por pessoa, e o que ele
+  // guardava de alcançável — o perfil, o volume, o MODERAR e o que um MOD
+  // acrescenta à pessoa (`pessoa.acoes`, `pessoa.detalhes`) — está na ficha
+  // da pessoa, que o toque na linha abre (`fichaDaPessoa`).
+  item.append(cabeca, rodape);
 
   // **A capa parada ao fundo da linha** (0.19, §5.3): recortada na área dela, e
   // sempre o quadro parado — numa lista de 250, nenhuma linha anima; o teto de
@@ -3480,20 +3569,6 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   if (!comoDetalhe && pessoa.id !== undefined && pessoa.id !== null && capaDaPessoa(String(pessoa.id))) {
     item.dataset.capaSempreParada = "sim";
     vestirCapa(item, pessoa.id);
-  }
-
-  // Volume por pessoa (`specs/03-audio.md`).
-  if (pessoa.volume !== null && temAudio) {
-    const volume = document.createElement("input");
-    volume.type = "range";
-    volume.className = "volume";
-    volume.min = "0";
-    volume.max = "200";
-    volume.step = "10";
-    volume.value = String(volumesLidos.get(pessoa.volume) ?? 100);
-    volume.title = `volume de ${pessoa.nome}`;
-    volume.dataset.pessoa = pessoa.volume;
-    item.append(volume);
   }
 
   return item;
@@ -3881,6 +3956,16 @@ invoke("limite_da_mensagem")
 function medirOCorpo() {
   const campo = $("campo-mensagem");
   const aviso = $("campo-mensagem-tamanho");
+  // A conta à vista, ao lado do ENVIAR (o canvas `Main`: «0 / 4000 bytes»): o
+  // teto é o que o Rust disse, em bytes, e sem ele a conta não aparece.
+  const conta = $("compor-bytes");
+  if (conta) {
+    conta.hidden = limiteDaMensagem === null;
+    if (limiteDaMensagem !== null) {
+      const texto = `${bytesDe(campo.value.trim())} / ${limiteDaMensagem} bytes`;
+      if (conta.textContent !== texto) conta.textContent = texto;
+    }
+  }
   if (!aviso) return;
   if (limiteDaMensagem === null) {
     aviso.hidden = true;
@@ -4944,6 +5029,10 @@ function esquecerOEstadoDaSessao() {
   // marca do quadro agendado volta junto.
   falouPorUltimo.clear();
   capasAgendadas = false;
+  // A ficha de uma pessoa é deste servidor: fecha, e quem estava na lista sai.
+  fecharFichaDaPessoa({ devolverOFoco: false });
+  pessoasDaLista.clear();
+  fichaAberta = { id: null, focoAntes: null };
   // O `atualizar()` que um evento deixou para o próximo quadro: ele pediria o
   // retrato depois da saída. O quadro pendente também é recurso.
   if (quadroDaAtualizacao) cancelAnimationFrame(quadroDaAtualizacao);
@@ -5694,6 +5783,73 @@ $("lista-roster").addEventListener("input", (evento) => {
     console.warn("set_volume:", falha);
   });
 });
+
+// **A ficha da pessoa** (0.19): o toque na linha — ou Enter/Espaço no alvo
+// dela — abre o modal. Por delegação, na lista inteira: as linhas são
+// reconciliadas a cada quadro, e o alvo é o botão do produto
+// (`data-ficha-pessoa`), nunca o que um MOD desenhou.
+$("lista-roster").addEventListener("click", (evento) => {
+  const alvo = evento.target.closest?.("button[data-ficha-pessoa]");
+  if (!alvo) return;
+  abrirFichaDaPessoa(alvo.dataset.fichaPessoa);
+});
+
+if ($("ficha-pessoa")) {
+  $("ficha-pessoa-fechar").addEventListener("click", () => fecharFichaDaPessoa());
+  // O véu fecha, como nas outras camadas: o clique fora da caixa.
+  fecharAoClicarFora("ficha-pessoa", () => fecharFichaDaPessoa());
+  // EDITAR SEU PERFIL (na sua própria ficha): a ficha sai, o editor entra.
+  $("ficha-pessoa").addEventListener("click", (evento) => {
+    if (evento.target.closest?.(".perfis-editar-o-seu")) fecharFichaDaPessoa({ devolverOFoco: false });
+  });
+  // MODERAR: a ficha sai e a moderação entra, com o mesmo alvo da linha.
+  $("ficha-pessoa").addEventListener("click", (evento) => {
+    const alvo = evento.target.closest?.("button[data-moderar-pessoa]");
+    if (!alvo) return;
+    const quem = alvo.dataset.moderarPessoa;
+    fecharFichaDaPessoa({ devolverOFoco: false });
+    abrirModeracao(quem);
+  });
+  // O volume, pelo mesmo caminho do deslizante de antes: `marcarVolume` e o
+  // comando, e uma leitura de antes do gesto não o desfaz.
+  $("ficha-pessoa").addEventListener("input", (evento) => {
+    const alvo = evento.target;
+    if (!alvo.classList.contains("volume")) return;
+    const percent = Number(alvo.value);
+    marcarVolume(alvo.dataset.pessoa, percent);
+    invoke("set_volume", { nickname: alvo.dataset.pessoa, percent }).catch((falha) => {
+      console.warn("set_volume:", falha);
+    });
+  });
+  ligarAcoesDeApresentacao($("ficha-pessoa"));
+  // Esc fecha, e o Tab não sai da caixa (`aria-modal`).
+  window.addEventListener("keydown", (evento) => {
+    const camada = $("ficha-pessoa");
+    if (camada.hidden) return;
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      fecharFichaDaPessoa();
+      return;
+    }
+    if (evento.key !== "Tab") return;
+    const lista = [...camada.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter((e) => !e.disabled && !e.closest("[hidden]") && e.getClientRects().length > 0);
+    if (lista.length === 0) return;
+    const primeiro = lista[0];
+    const ultimo = lista[lista.length - 1];
+    const ativo = document.activeElement;
+    if (!camada.contains(ativo)) {
+      evento.preventDefault();
+      (evento.shiftKey ? ultimo : primeiro).focus();
+    } else if (evento.shiftKey && (ativo === primeiro || ativo === camada)) {
+      evento.preventDefault();
+      ultimo.focus();
+    } else if (!evento.shiftKey && ativo === ultimo) {
+      evento.preventDefault();
+      primeiro.focus();
+    }
+  });
+}
 
 // O modo de voz é escolhido na configuração, sob `MODO DE VOZ` — três botões
 // nomeados, um por modo, em `tela-server.js`. O operador tinha um quarto botão

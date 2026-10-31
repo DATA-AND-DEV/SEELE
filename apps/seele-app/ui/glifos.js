@@ -347,6 +347,31 @@ const GLIFOS = {
     ],
   ],
 
+  // 📎 — anexar, o verbo (o canvas `Main`, no compositor). O clipe, e não a
+  // folha do `anexo`: a folha marca o arquivo que já está na mensagem; o clipe
+  // é o gesto de pôr um. Vazado, no traço dos outros.
+  clipe: [
+    [
+      "path",
+      {
+        d: "M13 7.3 8 12.3a3.2 3.2 0 0 1-4.5-4.5l5.2-5.2a2.2 2.2 0 0 1 3.1 3.1L6.6 10.9a1.2 1.2 0 0 1-1.7-1.7L9.4 4.7",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.3",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+      },
+    ],
+  ],
+
+  // ⧉ — compartilhar a tela: o monitor com a seta saindo dele. É o que o
+  // botão faz — mostrar esta tela para a sala —, e não o ◧ da aparência.
+  tela: [
+    ["rect", { x: "1.8", y: "2.8", width: "12.4", height: "8.4", rx: "1.2", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M5.5 13.6h5M8 11.2v2.4", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round" }],
+    ["path", { d: "M8 8.8V5.2M6.4 6.6 8 5l1.6 1.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }],
+  ],
+
   // A peça de quebra-cabeça do canvas `Main`: o que vem de um MOD na coluna de
   // canais («DOS MODS»). Um quadrado com dois encaixes, vazado como o anexo.
   peca: [

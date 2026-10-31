@@ -535,7 +535,9 @@ class SuperficieDeMod {
       // **O tamanho pedido entra como token, e o CSS decide o que cabe.** Um
       // MOD pode pedir 2000 px; `max-width: min(pedido, 100vw - 32px)` é o que
       // impede que o fechamento fique fora da tela.
-      const largura = Math.min(Math.max(Number(descricao?.tamanho?.largura) || 560, 280), 1600);
+      // Sem pedido, 640 (0.19, «os modais estão muito pequenos»): a medida dos
+      // diálogos do canvas vai de 560 a 980, e 560 era o piso, não o meio.
+      const largura = Math.min(Math.max(Number(descricao?.tamanho?.largura) || 640, 280), 1600);
       this.raiz.style.setProperty("--largura-pedida", `${largura}px`);
       // **O diálogo amplo é uma tela, como a Configuração** (0.19). Um modal
       // que pede 800 px ou mais é uma tarefa de ajuste — a aparência do

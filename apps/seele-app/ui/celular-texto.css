@@ -528,6 +528,12 @@
 :where(:root[data-casca="celular"]) .painel-de-mod-titulo,
 :where(:root[data-casca="celular"]) .folha-de-mod-titulo { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .dialogo-de-mod-titulo { font-size: calc(26px * var(--cel-escala)); }
+@media (min-width: 700px) {
+  :where(:root[data-casca="celular"]) .dialogo-de-mod-titulo { font-size: calc(30px * var(--cel-escala)); }
+}
+@media (min-width: 700px) {
+  :where(:root[data-casca="celular"]) .dialogo-de-mod .superficie-de-mod-sair { font-size: calc(13px * var(--cel-escala)); }
+}
 :where(:root[data-casca="celular"]) .superficie-de-mod-sair { font-size: calc(var(--seele-t-dado, 11px) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .aviso-de-mod { font-size: calc(var(--seele-t-dado, 11px) * var(--cel-escala)); }
 
@@ -929,3 +935,11 @@
 :where(:root[data-casca="celular"]) .relatorio-perfis-nota { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .relatorio-perfis-detalhes summary { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .relatorio-perfis-ocorrencias { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo) { font-size: 0; }
+:where(:root[data-casca="celular"]) #lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo)::after { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-titulo { font-size: calc(30px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-fechar { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-identidade .ficha-avatar { font-size: calc(22px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-nome { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-volume { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-apresentada-estado > .pessoa-nome { font-size: calc(12px * var(--cel-escala)); }

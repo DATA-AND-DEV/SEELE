@@ -14891,10 +14891,24 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
         "a linha apresentada por um MOD passou a montar o próprio alvo de \
          clique, e a garantia do ID real deixou de ter um lugar só: {substituida}"
     );
+    // 0.19 (pedido do dono): a linha não expande mais. O que o «⋯» recolhia —
+    // a identidade verificável e a moderação — mora na ficha da pessoa, e a
+    // linha apresentada por um MOD continua tendo o alvo do PRODUTO até ela,
+    // com o id real: a moderação não depende do que um terceiro desenhou.
     assert!(
-        substituida.contains("linhaNativaDoRoster(pessoa, temAudio, true)"),
-        "o diagnóstico nativo sumiu de uma linha apresentada por um MOD, em vez \
-         de recolher: {substituida}"
+        substituida.contains("botaoDaFicha(pessoa"),
+        "a linha apresentada por um MOD perdeu o caminho do produto até a ficha \
+         da pessoa (identidade verificável e moderação): {substituida}"
+    );
+    let botao = js_function(&sessao, "function botaoDaFicha(");
+    assert!(
+        botao.contains("botao.dataset.fichaPessoa = String(pessoa.id)"),
+        "o alvo da ficha deixou de carregar o id real da pessoa: {botao}"
+    );
+    let ficha = js_function(&sessao, "function fichaDaPessoa(");
+    assert!(
+        ficha.contains("moderar.dataset.moderarPessoa = pessoa.moderar"),
+        "a ficha da pessoa deixou de oferecer a moderação a quem tem a permissão: {ficha}"
     );
     assert!(
         porta.contains("porta.setAttribute(") && porta.contains("aria-label"),
@@ -18921,13 +18935,19 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
         ),
         "a chamada não relê os volumes a cada quadro"
     );
-    let cartao = body_of(
-        &scripts,
-        "function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false)",
-    );
+    // 0.19: o deslizante de cada pessoa saiu da linha e mora na ficha dela.
+    let cartao = body_of(&scripts, "function fichaDaPessoa(id)");
     assert!(
         cartao.contains("volumesLidos.get(pessoa.volume)"),
-        "o deslizante do roster não nasce da leitura do Rust:\n{cartao}"
+        "o deslizante da ficha da pessoa não nasce da leitura do Rust:\n{cartao}"
+    );
+    let ficha = body_of(
+        &without_comments(&read("ui/tela-sessao.js")),
+        "$(\"ficha-pessoa\").addEventListener(\"input\", (evento) => {",
+    );
+    assert!(
+        ficha.contains("marcarVolume(") && !ficha.contains("volumesLidos.set("),
+        "o deslizante da ficha escreve o volume do gesto sem passar por `marcarVolume`:\n{ficha}"
     );
     assert!(
         body_of(&scripts, "function pintarVolume(cartao, apelido)")

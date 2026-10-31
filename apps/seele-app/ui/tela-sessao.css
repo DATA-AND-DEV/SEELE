@@ -3511,6 +3511,27 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .operador > .voz-foco { order: 7; flex: 1 0 100%; }
 :root:not([data-casca="celular"]) .operador-fileira > button { min-height: 44px; font-size: 13px; padding: 0 14px; }
 :root:not([data-casca="celular"]) #ligacao-barra-dica { order: 9; }
+/* A seta da ficha (`perfis.css`) mora à direita da linha: a pastilha não a cobre. */
+:root:not([data-casca="celular"]) #lista-roster .pessoa:has(> .pessoa-abrir:not(.pessoa-nativo-resumo)) { padding-right: 30px; }
+/* **A fileira de controles ocupa o cartão inteiro** (0.19, pedido do dono: «os
+   botões do operador não estão bem distribuídos no espaço e deixam uma lacuna
+   muito grande»). Microfone, fone, ajustes, sair e — numa sala —
+   compartilhar: colunas iguais, cada controle esticado em pílula de 44px. Fora
+   da vista da ligação, que tem a barra dela (`camada-sala.css`). */
+#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-topo > :is(#botao-mudo, #botao-surdo, #botao-server-sessao),
+#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-fileira > :is(#operador-sair, #operador-vista) {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--seele-raio-pilula);
+}
+#tela-sessao:not([data-vista="ligacao"]) .operador :is(#operador-sair, #operador-vista, #botao-server-sessao) .glifo { width: 1.15em; height: 1.15em; }
 
 /* ---------- a conversa: cabeçalho ---------- */
 :root:not([data-casca="celular"]) .linha-barra { flex-wrap: wrap; }
@@ -3585,10 +3606,16 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) #form-mensagem > label > span { color: var(--seele-osso); }
 :root:not([data-casca="celular"]) .compor > .compor-caixa { grid-area: caixa; position: relative; margin: 10px 12px 0; padding: 0; border: 0; background: none; min-height: 36px; }
 :root:not([data-casca="celular"]) .compor-caixa .prompt { font-family: var(--seele-mono); color: var(--seele-laranja-nerv); white-space: nowrap; }
+/* O `alex ❯` na linha do texto: o campo tem 8px de respiro em cima, e o
+   prompt tinha 12 — ficava meia letra abaixo do que se escreve. */
+:root:not([data-casca="celular"]) .compor-caixa:has(textarea) .prompt { padding-top: 8px; }
 :root:not([data-casca="celular"]) .compor-caixa textarea { font-size: 15px; min-height: 36px; }
 :root:not([data-casca="celular"]) .compor > #botao-anexar { grid-area: anexar; position: relative; margin: 0 0 10px 12px; width: 44px; min-height: 44px; border-radius: var(--seele-raio-pilula); }
 :root:not([data-casca="celular"]) .compor > .compositor-ferramentas { grid-area: ferr; position: relative; margin: 0 0 10px; display: flex; gap: 8px; }
 :root:not([data-casca="celular"]) .compor > #botao-enviar { grid-area: enviar; position: relative; margin: 0 12px 10px 0; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 18px; border-radius: var(--seele-raio-pilula); font-family: var(--seele-ui); font-weight: 600; font-size: 14px; letter-spacing: 0; }
+:root:not([data-casca="celular"]) .compor > .compor-bytes { grid-area: tam; justify-self: end; position: relative; margin: 0 0 10px; font-family: var(--seele-mono); font-size: 12px; color: var(--seele-rotulo-painel); white-space: nowrap; font-variant-numeric: tabular-nums; }
+:root:not([data-casca="celular"]) .compor > .compor-bytes[hidden] { display: none; }
+:root:not([data-casca="celular"]) .compor > #botao-anexar .glifo { width: 18px; height: 18px; }
 :root:not([data-casca="celular"]) #botao-enviar > svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---------- as pessoas ---------- */

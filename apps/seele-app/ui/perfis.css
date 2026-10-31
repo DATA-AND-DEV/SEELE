@@ -575,3 +575,144 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 
 /* ---------------------------------- a gestão de MODs: o PERFIS incorporado */
 .mods-incorporado { color: var(--seele-laranja-nerv); }
+
+/* ------------------------------------------- a ficha de uma pessoa (0.19)
+   Pedido do dono: a linha de PESSOAS não expande mais; o toque nela abre UM
+   modal com a pessoa. A gramática dos diálogos da 0.19 (o «Seu perfil» do
+   canvas): 560px, canto de 28px, 30px × 32px de respiro, título de 30px. */
+
+/* O alvo da linha: um botão do produto esticado sobre ela inteira. O conteúdo
+   da linha fica embaixo, visível; o que um MOD pôs de clicável fica por cima. */
+#lista-roster .pessoa { position: relative; }
+#lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo) {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: transparent;
+  font-size: 0;
+  cursor: pointer;
+}
+#lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo)::after {
+  content: "\25B8";
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
+}
+#lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo):hover {
+  background: color-mix(in srgb, var(--seele-osso) 4%, transparent);
+}
+#lista-roster .pessoa > .pessoa-abrir:hover::after { color: var(--seele-osso); }
+#lista-roster .pessoa > .pessoa-abrir:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+#lista-roster .pessoa > :is(button, a, input, select):not(.pessoa-abrir),
+#lista-roster .pessoa > .pessoa-apresentada-faixa { position: relative; z-index: 2; }
+#lista-roster .pessoa > .pessoa-abrir.pessoa-nativo-resumo { z-index: 3; }
+
+.camada-ficha {
+  position: fixed;
+  inset: 0;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--seele-negro-absoluto) 80%, transparent);
+}
+.camada-ficha[hidden] { display: none; }
+.ficha-caixa {
+  position: relative;
+  box-sizing: border-box;
+  width: 560px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 30px 32px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
+}
+.ficha-cabeca { display: flex; align-items: center; gap: 12px; }
+.ficha-titulo {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 30px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: none;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+.ficha-fechar {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 4px;
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-rotulo-painel);
+  background: transparent;
+  border: 0;
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+}
+.ficha-tecla {
+  padding: 0 8px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 8px;
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+}
+.ficha-fechar:hover .ficha-tecla { background: var(--seele-controle-hover); }
+.ficha-fechar:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+.ficha-corpo { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ficha-identidade { display: flex; align-items: center; gap: 14px; }
+.ficha-identidade .ficha-avatar { width: 64px; height: 64px; border-radius: 18px; font-size: 22px; }
+.ficha-nome { font-family: var(--seele-ui); font-weight: 600; font-size: 18px; color: var(--seele-osso); overflow-wrap: anywhere; }
+.ficha-estados { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.ficha-volume {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 16px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 16px;
+  background: var(--seele-controle);
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
+}
+.ficha-volume .volume { flex: 1 1 auto; min-width: 0; min-height: 44px; margin: 0; opacity: 1; accent-color: var(--seele-laranja-nerv); }
+.ficha-volume-rotulo { flex: 0 0 auto; }
+.ficha-moderar-fora { margin: 0; }
+.ficha-volume-valor { flex: 0 0 5ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--seele-osso); }
+.ficha-acoes-de-mod { display: flex; flex-wrap: wrap; gap: 8px; }
+.ficha-moderar, .ficha-corpo .perfis-editar-o-seu { align-self: flex-start; min-height: 44px; }
+.ficha-corpo .perfil-cartao { margin: 0; }
+/* O estado do produto embaixo do cartão de um MOD (0.19): a linha não expande,
+   e MUDO ou TRANSMITINDO continuam ao lado da pessoa. */
+.pessoa-apresentada-estado { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; }
+.pessoa-apresentada-estado > .pessoa-nome { font-size: 12px; color: var(--seele-osso-apagado); }

@@ -3253,6 +3253,20 @@ const FRASES_DOS_PERFIS = Object.freeze({
   incorporadoBotao: "NO PRODUTO",
 });
 
+/**
+ * **A ficha de uma pessoa** (0.19): o modal que o toque na linha abre, no
+ * lugar da linha que expandia. Ver `fichaDaPessoa` em `tela-sessao.js`.
+ */
+const FRASES_DA_FICHA = Object.freeze({
+  abrir: (quem) => `Abrir a ficha de ${quem}`,
+  fecharDe: (quem) => `Fechar a ficha de ${quem}`,
+  volume: "volume",
+  volumeDe: (quem) => `Volume de ${quem}`,
+  moderar: "MODERAR",
+  moderarDe: (quem) => `Moderar ${quem}: expulsar, banir ou mover`,
+  moderarFora: "Moderar é pelo SEELE no computador.",
+});
+
 /** A frase de um `ErroDoPerfil` (ou de um `PerfilRecusado`) para uma imagem. */
 function fraseDaImagemDoPerfil(erro) {
   const f = FRASES_DOS_PERFIS.imagem;

@@ -470,6 +470,14 @@ const folhaDoPerfil = { id: null, focoAntes: null };
  */
 function abrirPerfilDaPessoa(id) {
   if (id === null || id === undefined) return;
+  // **0.19, pedido do dono: um modal, e não a folha à direita.** A ficha da
+  // pessoa (`abrirFichaDaPessoa`, em `tela-sessao.js`) traz este mesmo
+  // conteúdo (`conteudoDaFolhaDoPerfil`) num modal centrado no desktop, e na
+  // folha que sobe da borda no celular — com o volume e o MODERAR junto.
+  if (typeof abrirFichaDaPessoa === "function") {
+    abrirFichaDaPessoa(id);
+    return;
+  }
   const folha = folhaDoCelular();
   if (folha) {
     const { apelido } = apelidoETagDe(id);
@@ -483,13 +491,6 @@ function abrirPerfilDaPessoa(id) {
   }
   folhaDoPerfil.focoAntes = document.activeElement;
   folhaDoPerfil.id = String(id);
-  const tela = $("tela-sessao");
-  // A gaveta de pessoas, nas larguras em que ela recolhe, abre com a folha.
-  if (typeof alternarPessoas === "function" && tela?.dataset.pessoas !== "abertas"
-    && getComputedStyle(document.querySelector(".painel-pessoas")).display !== "none"
-    && matchMedia("(max-width: 1240px)").matches) {
-    alternarPessoas(true);
-  }
   $("perfil-folha").hidden = false;
   desenharFolhaDoPerfil();
   $("perfil-folha-fechar").focus();
