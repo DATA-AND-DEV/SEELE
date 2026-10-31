@@ -44,9 +44,14 @@ function desenharEstadoDaSala() {
   const frase = fraseDaSala(estadoDaSala);
   const codigoEstado = estadoDoCodigoPessoal();
   const recebeDireto = codigoEstado === estadoDaSalaDireta && codigoEstado?.estado === "NoAr";
+  // **Só onde a pessoa cuida das ligações** (pedido do dono, 31/10): o
+  // perfil e o bloco SEU CÓDIGO dizem o estado da recepção; a barra do
+  // operador e a linha da entrada não, porque ali o aviso parecia um erro do
+  // servidor em que ela está. O motivo segue no seele.log.
   for (const id of ["boot-sala-estado", "sala-estado", "perfil-sala-estado"]) {
     const linha = $(id);
-    const dizer = recebeDireto ? (id === "perfil-sala-estado" ? fraseDoCodigo(codigoEstado) : null) : frase;
+    const dizer = id !== "perfil-sala-estado" ? null
+      : recebeDireto ? fraseDoCodigo(codigoEstado) : frase;
     linha.textContent = dizer ?? "";
     linha.hidden = !dizer;
   }

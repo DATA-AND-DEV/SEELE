@@ -21986,7 +21986,8 @@ for (const registro of ["SemPonto", "Esperando", "SemResposta", "CookieRecusado"
   confere(registro + " marcou recebendo", bloco.dataset.recebe === "nao");
 }
 confere("SemPonto não diz só a mesma rede", /mesma rede/.test(diz({ estado: "NoAr", registro: { registro: "SemPonto" } })));
-confere("a porta ocupada promete ligação", /NINGUÉM CONSEGUE TE LIGAR/.test(diz({ estado: "Falhou", motivo: "PortaOcupada" })));
+confere("a porta ocupada não diz o motivo", /porta 8385 está em uso/.test(diz({ estado: "Falhou", motivo: "PortaOcupada" })));
+confere("a barra do operador ainda mostra o estado das ligações", m.$("sala-estado").hidden === true && m.$("sala-estado").textContent === "");
 confere("subindo não apresenta inicialização", /iniciando/i.test(diz({ estado: "Subindo" })));
 
 // O código existe sem a sala: sem resposta do `meu_codigo` (o navegador), nada aparece.

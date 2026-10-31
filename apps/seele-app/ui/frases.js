@@ -2492,11 +2492,11 @@ const SALA_PESSOAL = Object.freeze({
   /** `FalhaDaSala`: por que a sala não subiu. */
   falhou: Object.freeze({
     PortaOcupada:
-      "NINGUÉM CONSEGUE TE LIGAR AGORA: a porta 8385 está em uso, talvez por outro SEELE aberto neste computador.",
+      "Ligações pelo código paradas: a porta 8385 está em uso, talvez por outro SEELE aberto neste computador.",
     IdentidadeIndisponivel:
-      "NINGUÉM CONSEGUE TE LIGAR AGORA: a chave deste computador não abriu.",
+      "Ligações pelo código paradas: a chave deste computador não abriu.",
     NaoSubiu:
-      "NINGUÉM CONSEGUE TE LIGAR AGORA: a sala não subiu. O motivo está no seele.log.",
+      "Ligações pelo código paradas. O motivo está no seele.log.",
   }),
 
   /**
@@ -2559,7 +2559,7 @@ const SALA_PESSOAL = Object.freeze({
     procurando: "Verificando alcance…",
     subindo: "Iniciando recepção…",
     desligada: "Recepção desligada.",
-    falhou: "NINGUÉM CONSEGUE TE LIGAR AGORA: a sala não subiu.",
+    falhou: "Ligações pelo código paradas.",
     falhouNoNavegador: "Não foi possível receber chamadas.",
     semNoticia: "Verificando recepção…",
   }),
