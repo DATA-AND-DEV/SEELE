@@ -3586,13 +3586,14 @@ button.linha-nome:hover { text-decoration: underline; }
   /* **Enter envia; o anexo fica ao lado da linha** (0.19, pedido do dono): o
      ENVIAR sai do computador — o Enter já envia e a dica diz isso —, e o
      anexo, só o ícone, sem borda, vai para a ponta direita da linha de
-     escrever. Embaixo ficam só as ferramentas dos MODs e o contador. No
-     celular o ENVIAR continua: lá o Enter do teclado quebra a linha. */
+     escrever. Embaixo ficam só as ferramentas dos MODs, sem contador nem
+     limite à vista (pedido do dono). No celular o ENVIAR continua: lá o
+     Enter do teclado quebra a linha. */
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
     "rotulo rotulo"
     "caixa anexar"
-    "ferr tam";
+    "ferr ferr";
   align-items: center;
   gap: 8px;
   padding: 10px 8px 8px;
@@ -3615,8 +3616,6 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .compor > #botao-anexar:hover { color: var(--seele-osso); background: none; }
 :root:not([data-casca="celular"]) .compor > #botao-enviar { display: none; }
 :root:not([data-casca="celular"]) .compor > .compositor-ferramentas { grid-area: ferr; position: relative; margin: 0 0 4px 12px; display: flex; gap: 8px; }
-:root:not([data-casca="celular"]) .compor > .compor-bytes { grid-area: tam; justify-self: end; position: relative; margin: 0 14px 4px 0; font-family: var(--seele-mono); font-size: 12px; color: var(--seele-rotulo-painel); white-space: nowrap; font-variant-numeric: tabular-nums; }
-:root:not([data-casca="celular"]) .compor > .compor-bytes[hidden] { display: none; }
 :root:not([data-casca="celular"]) .compor > #botao-anexar .glifo { width: 18px; height: 18px; }
 :root:not([data-casca="celular"]) #botao-enviar > svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 

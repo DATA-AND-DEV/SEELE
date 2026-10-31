@@ -3956,16 +3956,6 @@ invoke("limite_da_mensagem")
 function medirOCorpo() {
   const campo = $("campo-mensagem");
   const aviso = $("campo-mensagem-tamanho");
-  // A conta à vista, ao lado do ENVIAR (o canvas `Main`: «0 / 4000 bytes»): o
-  // teto é o que o Rust disse, em bytes, e sem ele a conta não aparece.
-  const conta = $("compor-bytes");
-  if (conta) {
-    conta.hidden = limiteDaMensagem === null;
-    if (limiteDaMensagem !== null) {
-      const texto = `${bytesDe(campo.value.trim())} / ${limiteDaMensagem} bytes`;
-      if (conta.textContent !== texto) conta.textContent = texto;
-    }
-  }
   if (!aviso) return;
   if (limiteDaMensagem === null) {
     aviso.hidden = true;
@@ -3975,7 +3965,9 @@ function medirOCorpo() {
   const passou = bytes > limiteDaMensagem;
   aviso.hidden = !passou;
   if (passou) {
-    aviso.textContent = `${bytes} de ${limiteDaMensagem} bytes — corte o texto`;
+    // Sem o número (0.19, pedido do dono: «não exiba limite»). O aviso só
+    // aparece quando o texto passou, porque sem ele a recusa viria sem razão.
+    aviso.textContent = "Mensagem longa demais. Corte o texto para enviar.";
   }
   // O botão continua clicável de propósito: a recusa aparece junto da mensagem,
   // com o número, em vez de um botão morto que não diz por que não funciona.
