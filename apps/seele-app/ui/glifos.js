@@ -150,6 +150,19 @@ const GLIFOS = {
     ],
   ],
 
+  // **A porta com a seta para fora**: sair do servidor (0.19). O batente
+  // aberto à esquerda e a seta saindo à direita, no mesmo traço de 1,3.
+  porta: [
+    ["path", { d: "M7 3H3.5v10H7", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M7.5 8h6M11 5.5L13.5 8L11 10.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+  ],
+
+  // **O ×**: sair da sala de voz (0.19). Duas diagonais, sem círculo: o
+  // botão redondo já é a moldura.
+  xis: [
+    ["path", { d: "M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+  ],
+
   // O lápis: o corpo em diagonal, a ponta embaixo à esquerda e a virola em cima.
   //
   // **Ele existe porque o nome clicável não bastou.** Renomear um canal era

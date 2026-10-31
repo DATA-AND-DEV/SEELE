@@ -904,9 +904,15 @@ function desenharORodapeDoOperador(voice_room) {
   const sair = $("operador-sair");
   sair.dataset.alvo = dentro ? "sala" : "servidor";
   const rotuloDaSaida = dentro ? "SAIR DA SALA" : "SAIR DO SERVIDOR";
-  // No WebKit, trocar o nó de texto entre down e up perde o clique.
-  // O snapshot repinta este rodapé mesmo quando a sala não mudou.
-  if (sair.textContent !== rotuloDaSaida) sair.textContent = rotuloDaSaida;
+  // **Ícone, e o rótulo em palavras para quem não vê** (0.19, pedido do dono):
+  // por extenso, os dois botões ficavam fora de proporção ao lado do microfone
+  // e do fone. A porta com seta sai do servidor; o × sai da sala.
+  // No WebKit, trocar o nó entre down e up perde o clique, e o snapshot repinta
+  // este rodapé mesmo quando a sala não mudou: só troca quando o ofício muda.
+  if (sair.getAttribute("aria-label") !== rotuloDaSaida || !sair.firstElementChild) {
+    sair.setAttribute("aria-label", rotuloDaSaida);
+    sair.replaceChildren(glifo(dentro ? "xis" : "porta"));
+  }
   sair.title = dentro
     ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
     : "sair deste servidor e voltar à tela de entrada";

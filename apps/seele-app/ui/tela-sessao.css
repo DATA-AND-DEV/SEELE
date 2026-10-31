@@ -3503,7 +3503,7 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) #botao-mudo { order: 1; }
 :root:not([data-casca="celular"]) #botao-surdo { order: 2; }
 :root:not([data-casca="celular"]) #botao-server-sessao { order: 3; }
-:root:not([data-casca="celular"]) #operador-sair { order: 4; margin-left: auto; }
+:root:not([data-casca="celular"]) #operador-sair { order: 4; }
 :root:not([data-casca="celular"]) #operador-vista { order: 5; }
 :root:not([data-casca="celular"]) .operador > #voz-estado,
 :root:not([data-casca="celular"]) .operador > #sala-estado { order: 8; flex: 1 0 100%; margin: 0; font-size: 11px; color: var(--seele-rotulo-painel); }

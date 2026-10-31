@@ -788,9 +788,19 @@ input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, 
   background: var(--seele-campo);
 }
 textarea { padding: 12px 16px; }
+/* A borda laranja no foco, e **o anel do teclado preservado**: a primeira
+   versão desta regra apagava o `outline` em todo foco e, por vir depois e ser
+   mais específica, levava junto o `input:focus-visible` de cima — a bancada de
+   área útil achou 38 paradas de Tab sem anel. */
 input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:focus {
-  outline: none;
   border-color: var(--seele-laranja-nerv);
+}
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus:not(:focus-visible), textarea:focus:not(:focus-visible), select:focus:not(:focus-visible) {
+  outline: none;
+}
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
 }
 input::placeholder, textarea::placeholder { color: var(--seele-rotulo-painel); }
 .botao, .botao-fantasma, .botao-secundario {

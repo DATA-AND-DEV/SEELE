@@ -23,7 +23,8 @@
 
 .pessoal-web input, .pessoal-web textarea { font: inherit; color: inherit; background: var(--seele-campo); border: var(--seele-b) solid var(--seele-campo-borda); border-radius: var(--seele-raio); padding: 0 16px; min-width: 0; box-sizing: border-box; }
 .pessoal-web textarea { padding: 12px 16px; }
-.pessoal-web input:focus, .pessoal-web textarea:focus { outline: none; border-color: var(--seele-laranja-nerv); }
+.pessoal-web input:focus, .pessoal-web textarea:focus { border-color: var(--seele-laranja-nerv); }
+.pessoal-web input:focus:not(:focus-visible), .pessoal-web textarea:focus:not(:focus-visible) { outline: none; }
 .pessoal-web-convite { width: 100%; }
 .pessoal-web-link { flex: 1 1 260px; }
 
