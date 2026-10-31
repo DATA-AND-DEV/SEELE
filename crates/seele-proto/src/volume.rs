@@ -200,7 +200,10 @@ impl crate::control::Validate for PedidoDeImagem {
         match self {
             Self::Enviar { cabecalho, bytes } => {
                 cabecalho.validate()?;
-                if *bytes == 0 || *bytes > crate::midia_de_mod::TETO_DE_ARQUIVO as u64 {
+                // O teto do fio é o maior dos tipos (o do `.mrpack`, API 8
+                // parte 6); o de cada tipo é conferido pelo servidor contra a
+                // espera, antes do primeiro byte.
+                if *bytes == 0 || *bytes > crate::pack::TETO_DO_PACK {
                     return Err(crate::control::ControlError::FieldOutOfRange {
                         field: "volume_bytes",
                     });
@@ -230,7 +233,7 @@ pub struct RespostaDeImagem {
 }
 impl crate::control::Validate for RespostaDeImagem {
     fn validate(&self) -> Result<(), crate::control::ControlError> {
-        if self.bytes > crate::midia_de_mod::TETO_DE_ARQUIVO as u64
+        if self.bytes > crate::pack::TETO_DO_PACK
             || self.erro.as_ref().is_some_and(|e| e.len() > 1024)
         {
             return Err(crate::control::ControlError::FieldOutOfRange {

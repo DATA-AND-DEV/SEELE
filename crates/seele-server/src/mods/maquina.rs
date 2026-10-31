@@ -322,6 +322,7 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
             "rodar",
             "disco_maximo",
             "termos",
+            "instalar",
         ],
     )?;
     let tuneis = lista(o, "tuneis", "tuneis")?
@@ -366,17 +367,22 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
         None | Some(Value::Null) => None,
         Some(h) => Some(hash(h, "pack")?),
     };
-    let rodar = match o.get("rodar") {
-        None | Some(Value::Null) => None,
-        Some(r) => {
-            let r = objeto(r, "rodar")?;
-            so_as_chaves(r, &["comando", "argumentos"])?;
-            Some(ComandoOferecido {
-                comando: texto(r, "comando", "comando")?,
-                argumentos: textos(r, "argumentos", "argumentos")?,
-            })
+    let comando = |campo: &str| -> Result<Option<ComandoOferecido>, String> {
+        match o.get(campo) {
+            None | Some(Value::Null) => Ok(None),
+            Some(r) => {
+                let r = objeto(r, campo)?;
+                so_as_chaves(r, &["comando", "argumentos"])?;
+                Ok(Some(ComandoOferecido {
+                    comando: texto(r, "comando", "comando")?,
+                    argumentos: textos(r, "argumentos", "argumentos")?,
+                }))
+            }
         }
     };
+    let rodar = comando("rodar")?;
+    // O passo de instalar (API 8 parte 6), opcional, com a forma do `rodar`.
+    let instalar = comando("instalar")?;
     let termos = lista(o, "termos", "termos")?
         .iter()
         .map(|t| {
@@ -401,6 +407,7 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
         rodar,
         disco_maximo: numero(o, "disco_maximo", "disco_maximo")?,
         termos,
+        instalar,
     };
     oferta.validate().map_err(|erro| match erro {
         seele_proto::control::ControlError::FieldTooLong { field, .. }

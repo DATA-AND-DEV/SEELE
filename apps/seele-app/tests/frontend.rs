@@ -20932,11 +20932,12 @@ fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
             "o prelúdio da metade de máquina pede `{tipo}`, e `tratar` não o atende"
         );
     }
-    // Os quatro da parte 3 (`maquina-pedir` e os três `porta-*`) e os sete do
-    // poder `programa` da parte 4.
+    // Os quatro da parte 3 (`maquina-pedir` e os três `porta-*`), os sete do
+    // poder `programa` da parte 4 e os dois da parte 6 (`programa-trazer`,
+    // `programa-ler`).
     assert_eq!(
         tipos_da_maquina.len(),
-        11,
+        13,
         "a leitura dos tipos da metade de máquina quebrou: {tipos_da_maquina:?}"
     );
 

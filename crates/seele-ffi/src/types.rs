@@ -2808,6 +2808,9 @@ pub struct OfertaDeMaquinaFfi {
     pub disco_maximo: u64,
     /// O que a pessoa precisa aceitar além da oferta.
     pub termos: Vec<TermoOferecidoFfi>,
+    /// O passo de instalar, antes de `rodar` (o instalador do loader).
+    #[serde(default)]
+    pub instalar: Option<ComandoOferecidoFfi>,
 }
 
 /// A recusa de máquina de um nome em kebab-case
@@ -2933,6 +2936,10 @@ impl From<&seele_core::maquina::OfertaDeMaquina> for OfertaDeMaquinaFfi {
                     url: t.url.clone(),
                 })
                 .collect(),
+            instalar: oferta.instalar.as_ref().map(|r| ComandoOferecidoFfi {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
         }
     }
 }
@@ -2995,6 +3002,10 @@ impl OfertaDeMaquinaFfi {
                     url: t.url.clone(),
                 })
                 .collect(),
+            instalar: self.instalar.as_ref().map(|r| ComandoOferecido {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
         };
         oferta.validate().map_err(|_| "oferta-invalida")?;
         Ok(oferta)
@@ -3054,6 +3065,10 @@ mod a_oferta_de_maquina {
                 titulo: "EULA".into(),
                 url: "https://aka.ms/MinecraftEULA".into(),
             }],
+            instalar: Some(ComandoOferecido {
+                comando: "java".into(),
+                argumentos: vec!["-jar".into(), "instalador.jar".into()],
+            }),
         }
     }
 

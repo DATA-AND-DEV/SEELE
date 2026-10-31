@@ -37,6 +37,8 @@
 // 15. (parte 4) cada artefato deste computador, com nome, origem e tamanho; a
 //     soma só deles; os de outros sistemas ditos e fora da soma; e as origens
 //     de onde mais arquivos podem vir.
+// 16. (parte 6) o pack pelo hash, o instalador do loader antes do servidor, e
+//     os domínios de onde o loader baixa sozinho.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/aceite-da-maquina.cjs
 
@@ -490,8 +492,32 @@ async function caso(motor, numero, prova) {
           ], `${motor}: 15 · ${linhas.join(" | ")}`);
         });
 
+        // 16. (parte 6) o modpack: o pack pelo hash, os dois comandos — o
+        //     instalador do loader antes do servidor — e os domínios de onde o
+        //     loader baixa sozinho, ditos como «o jogo baixa por conta própria».
+        await caso(motor, "16", async () => {
+          await zerar();
+          await emitirPedido({}, {
+            pack: { algoritmo: "sha512", hex: "57764c105ff999ced4c7e2069e36dcf2".repeat(4) },
+            instalar: { comando: "java/bin/java", argumentos: ["-jar", "fabric-installer.jar", "server", "-mcversion", "1.21.4"] },
+            rodar: { comando: "java/bin/java", argumentos: ["-jar", "fabric-server-launch.jar", "nogui"] },
+            dominios_do_jogo: ["maven.fabricmc.net", "meta.fabricmc.net"],
+          });
+          await esperarTela("FULANO");
+          const linhas = await pagina.evaluate(() => [...$("maquina-detalhes").children].map((li) => li.innerText));
+          const de = (re) => linhas.filter((l) => re.test(l));
+          assert.deepEqual(de(/pack do modpack/), ["o pack do modpack, conferido pelo sha512 57764c105ff999ce…"], `${motor}: 16 · o pack: ${linhas.join(" | ")}`);
+          assert.deepEqual(de(/vai rodar/), [
+            "antes, para instalar, vai rodar: java/bin/java -jar fabric-installer.jar server -mcversion 1.21.4",
+            "vai rodar: java/bin/java -jar fabric-server-launch.jar nogui",
+          ], `${motor}: 16 · os dois comandos: ${linhas.join(" | ")}`);
+          assert.deepEqual(de(/por conta própria/), [
+            "o jogo baixa por conta própria de maven.fabricmc.net, meta.fabricmc.net, sem o SEELE conferir",
+          ], `${motor}: 16 · ${linhas.join(" | ")}`);
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 16, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 17, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

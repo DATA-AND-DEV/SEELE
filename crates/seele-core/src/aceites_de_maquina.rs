@@ -326,6 +326,7 @@ mod tests {
             }),
             disco_maximo: 1024,
             termos: vec![],
+            instalar: None,
         }
     }
 

@@ -191,6 +191,7 @@ async fn o_jogo_de_pe(
         ));
         if let Some(d) = pacote {
             let aberto = programa.desempacotar(&PedidoDeDesempacotar {
+                mesclar: false,
                 arquivo: destino,
                 destino: a["destino"].as_str().unwrap().to_owned(),
                 raiz: d["raiz"].as_str().unwrap().to_owned(),
@@ -200,6 +201,81 @@ async fn o_jogo_de_pe(
                 aberto.arquivos, aberto.bytes, aberto.links_pulados
             ));
         }
+    }
+    // **Com mods** (parte 6): o pack de prova (`ferramentas/pack-de-prova.cjs`
+    // do MOD, Fabric 1.21.4), trazido como a máquina o traz (só com o hash do
+    // aceite), aberto, o índice lido, cada arquivo do servidor baixado com o
+    // sha512 (a segunda porta, pelas origens), os overrides e os
+    // server-overrides por cima, e o instalador do Fabric pelo `instalar`.
+    if let Some(pack) = plano["pack_local"].as_str() {
+        let relogio = Instant::now();
+        let trazido = programa.trazer("pack.mrpack", &std::fs::read(pack)?)?;
+        programa.desempacotar(&PedidoDeDesempacotar {
+            mesclar: false,
+            arquivo: "pack.mrpack".into(),
+            destino: "pack".into(),
+            raiz: String::new(),
+        })?;
+        let indice: serde_json::Value =
+            serde_json::from_str(&programa.ler("pack/modrinth.index.json")?)?;
+        let mut baixados = Vec::new();
+        for f in indice["files"].as_array().unwrap() {
+            if f["env"]["server"] == "unsupported" {
+                continue;
+            }
+            let feito = programa
+                .baixar(PedidoDeDownload {
+                    url: f["downloads"][0].as_str().unwrap().to_owned(),
+                    hashes: vec![HashDeclarado {
+                        algoritmo: seele_core::programa::AlgoritmoDeHash::Sha512,
+                        hex: f["hashes"]["sha512"].as_str().unwrap().to_owned(),
+                    }],
+                    tamanho: f["fileSize"].as_u64().unwrap(),
+                    destino: f["path"].as_str().unwrap().to_owned(),
+                })?
+                .terminar()
+                .await?;
+            baixados.push(format!("{} ({} bytes)", f["path"], feito.tamanho));
+        }
+        for raiz in ["overrides", "server-overrides"] {
+            programa.desempacotar(&PedidoDeDesempacotar {
+                mesclar: true,
+                arquivo: "pack.mrpack".into(),
+                destino: String::new(),
+                raiz: raiz.into(),
+            })?;
+        }
+        let instalar = &plano["oferta"]["instalar"];
+        let mut instalador = programa.rodar(&PedidoDeExecucao {
+            comando: instalar["comando"].as_str().unwrap().to_owned(),
+            argumentos: instalar["argumentos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a.as_str().unwrap().to_owned())
+                .collect(),
+            pasta: String::new(),
+        })?;
+        let fim = loop {
+            match tokio::time::timeout(Duration::from_secs(300), instalador.proximo()).await? {
+                Some(EventoDoProcesso::Terminou(fim)) => break fim,
+                Some(_) => {}
+                None => anyhow::bail!("o instalador sumiu sem fim"),
+            }
+        };
+        anyhow::ensure!(
+            fim.codigo == Some(0),
+            "o instalador do Fabric saiu com {fim:?}"
+        );
+        relatorio.push(format!(
+            "pack: trazido {} bytes (sha512 {}…), {} arquivo(s) do servidor: {}; overrides e server-overrides; instalador {:?} em {:?}",
+            trazido.tamanho,
+            &trazido.hash[..16],
+            baixados.len(),
+            baixados.join(", "),
+            fim.codigo,
+            relogio.elapsed()
+        ));
     }
     programa.escrever("eula.txt", "eula=true\n")?;
     programa.escrever(
@@ -224,6 +300,9 @@ async fn o_jogo_de_pe(
             .ok_or_else(|| anyhow::anyhow!("o jogo saiu antes do Done"))?;
         match evento {
             EventoDoProcesso::Saida(linha) | EventoDoProcesso::Erro(linha) => {
+                if linha.contains("Loading") && linha.contains("mods") {
+                    relatorio.push(format!("o jogo: {linha}"));
+                }
                 if linha.contains("]: Done (") {
                     relatorio.push(format!("Done em {:?}: {linha}", relogio.elapsed()));
                     break;

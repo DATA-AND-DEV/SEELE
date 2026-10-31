@@ -588,6 +588,7 @@ mod tests {
                 rodar: None,
                 disco_maximo: 0,
                 termos: vec![],
+                instalar: None,
             }),
         };
         assert_eq!(desde(&pedido), 12);

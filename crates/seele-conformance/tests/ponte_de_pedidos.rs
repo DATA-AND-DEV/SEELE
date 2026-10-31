@@ -1057,9 +1057,14 @@ async fn a_recusa_de_um_fluxo_de_imagem_chega_a_janela_pelo_nome() -> Result<()>
         .await
         .map(|_| ())
         .map_err(|erro| erro.to_string());
+    // Com o tamanho e o teto (API 8 parte 6), que a casca faz campos.
     assert_eq!(
         lido,
-        Err("arquivo-grande-demais".to_owned()),
+        Err(format!(
+            "arquivo-grande-demais:{}:{}",
+            seele_proto::midia_de_mod::TETO_DE_ARQUIVO + 1,
+            seele_proto::midia_de_mod::TETO_DE_ARQUIVO
+        )),
         "a leitura de um arquivo maior que o teto não chegou à janela pelo nome"
     );
 

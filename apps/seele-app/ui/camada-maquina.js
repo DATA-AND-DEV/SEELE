@@ -136,6 +136,15 @@ function linhasDoPedido(pedido) {
   }
   if (deOutros > 0) linhas.push(F.deOutrosSistemas(deOutros));
   if ((oferta.origens ?? []).length > 0) linhas.push(F.podeBaixarDe(oferta.origens.join(", ")));
+  // **O pack, pelo hash** (API 8 parte 6): é o que a máquina confere quando o
+  // traz da metade de servidor; o começo do hash basta para comparar a olho.
+  if (oferta.pack && oferta.pack.hex) {
+    linhas.push(F.pack(String(oferta.pack.algoritmo), String(oferta.pack.hex).slice(0, 16)));
+  }
+  // **Os dois comandos** (API 8 parte 6): o instalador do loader e o servidor.
+  if (oferta.instalar) {
+    linhas.push(F.instalar([oferta.instalar.comando, ...(oferta.instalar.argumentos ?? [])].join(" ")));
+  }
   if (oferta.rodar) {
     linhas.push(F.rodar([oferta.rodar.comando, ...(oferta.rodar.argumentos ?? [])].join(" ")));
   } else {

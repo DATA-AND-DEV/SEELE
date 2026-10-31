@@ -113,6 +113,8 @@ fn programa(der: &[u8], nome: &str) -> (Pasta, Programa) {
             de_outros_sistemas: vec![],
             origens: vec!["localhost".to_owned()],
             comando: None::<ComandoAceito>,
+            instalar: None,
+            pack: None,
             teto_de_disco: 1 << 30,
             raiz: pasta.0.join("jogo"),
         },

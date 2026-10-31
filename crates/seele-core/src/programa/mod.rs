@@ -32,7 +32,9 @@ mod caminho;
 mod desempacotar;
 mod escrever;
 mod hash;
+mod ler;
 mod rodar;
+mod trazer;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -48,10 +50,12 @@ pub use caminho::dentro_da_raiz;
 pub use desempacotar::{Desempacotado, PedidoDeDesempacotar, MAX_ENTRADAS_DESEMPACOTADAS};
 pub use escrever::MAX_BYTES_ESCRITOS;
 pub use hash::{o_mais_forte, AlgoritmoDeHash, HashDeclarado};
+pub use ler::MAX_BYTES_LIDOS;
 pub use rodar::{
     EventoDoProcesso, FimDoProcesso, PedidoDeExecucao, Processo, MAX_BYTES_POR_LINHA,
     MAX_LINHAS_NA_FILA,
 };
+pub use trazer::Trazido;
 
 /// O comando aceito: o programa, relativo à raiz, e os argumentos, um a um.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +102,13 @@ pub struct Politica {
     pub origens: Vec<String>,
     /// O comando que pode rodar. `None`: nenhum.
     pub comando: Option<ComandoAceito>,
+    /// **O passo de instalar** (API 8 parte 6): um segundo comando aceito,
+    /// com os argumentos exatos (o instalador do loader de um modpack). `rodar`
+    /// aceita um ou outro, e nada além dos dois.
+    pub instalar: Option<ComandoAceito>,
+    /// **O pack aceito, pelo hash** (`oferta.pack`). [`Programa::trazer`]
+    /// só grava bytes que tenham este hash; `None`: nenhum pack.
+    pub pack: Option<HashDeclarado>,
     /// O teto de disco da raiz, em bytes.
     pub teto_de_disco: u64,
     /// A pasta deste servidor de jogo, dentro da área do MOD. Criada se não
@@ -362,6 +373,29 @@ pub enum Recusa {
         /// A raiz pedida.
         raiz: String,
     },
+    /// O aceite não mostrou pack nenhum, e a metade pediu para trazer um.
+    #[error("o aceite não mostrou pack nenhum: nada a trazer para {destino}")]
+    SemPackAceito {
+        /// Onde a metade queria o pack.
+        destino: String,
+    },
+    /// Os bytes trazidos da metade de servidor não têm o hash do pack aceito.
+    /// Nada foi gravado.
+    #[error("o pack trazido não é o aceito: o {algoritmo} aceito era {esperado} e o dos bytes é {obtido}; nada foi gravado")]
+    PackDiferente {
+        /// O algoritmo do aceite.
+        algoritmo: AlgoritmoDeHash,
+        /// O hash que a tela mostrou.
+        esperado: String,
+        /// O hash dos bytes que chegaram.
+        obtido: String,
+    },
+    /// O arquivo pedido a `ler` não é texto UTF-8.
+    #[error("{arquivo} não é texto (UTF-8)")]
+    NaoETexto {
+        /// O arquivo pedido.
+        arquivo: String,
+    },
 }
 
 /// **Todo nome de [`Recusa`]**, na ordem do enum: o que `api/v8.json` escreve
@@ -399,6 +433,9 @@ pub const NOMES_DAS_RECUSAS: &[&str] = &[
     "formato-desconhecido",
     "pacote-invalido",
     "nada-sob-a-raiz",
+    "sem-pack-aceito",
+    "pack-diferente",
+    "nao-e-texto",
 ];
 
 impl Recusa {
@@ -438,6 +475,9 @@ impl Recusa {
             Self::FormatoDesconhecido { .. } => "formato-desconhecido",
             Self::PacoteInvalido { .. } => "pacote-invalido",
             Self::NadaSobARaiz { .. } => "nada-sob-a-raiz",
+            Self::SemPackAceito { .. } => "sem-pack-aceito",
+            Self::PackDiferente { .. } => "pack-diferente",
+            Self::NaoETexto { .. } => "nao-e-texto",
         }
     }
 }
@@ -739,6 +779,13 @@ mod tests {
                 arquivo: s(),
                 raiz: s(),
             },
+            Recusa::SemPackAceito { destino: s() },
+            Recusa::PackDiferente {
+                algoritmo: a,
+                esperado: s(),
+                obtido: s(),
+            },
+            Recusa::NaoETexto { arquivo: s() },
         ];
         let nomes: Vec<&str> = todas.iter().map(Recusa::nome).collect();
         assert_eq!(nomes, NOMES_DAS_RECUSAS);

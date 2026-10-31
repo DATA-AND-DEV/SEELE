@@ -116,6 +116,7 @@ fn oferta() -> OfertaDeMaquina {
         rodar: None,
         disco_maximo: 0,
         termos: vec![],
+        instalar: None,
     }
 }
 

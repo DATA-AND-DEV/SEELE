@@ -164,7 +164,8 @@ SeeleUI.contribuicoes.registrar({
 | `SeeleUI.tema(valores, { previa: true, superficie })` | a prévia de um tema, só nesta máquina e só enquanto a superfície estiver de pé. O tema que todos veem é o da metade de servidor (ver «O tema»). |
 | `SeeleUI.aoEvento(fn)` | o que a pessoa faz no que o MOD desenhou, o que muda na tela e o aviso da metade de servidor voltam por aqui, sem número e sem resposta. Um ouvinte só, e o último vence. |
 | `SeeleUI.pedaco(arquivo, inicio)` e `SeeleUI.soltar(arquivo)` | leem em pedaços o arquivo que alguém escolheu pela forma `arquivo`, e o devolvem. O MOD recebe identificador, papel e tamanho, e nunca o caminho. |
-| `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor uma imagem escolhida, até 10 MiB, por um fluxo próprio. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
+| `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor um arquivo escolhido, por um fluxo próprio. **Os tipos, cada um com o seu teto**: imagem (`png`, `jpeg`, `webp`, `gif`) e som (`wav`, `mp3`, `ogg`, `flac`, `m4a`) até 10 MiB; o **`.mrpack`** do Modrinth (`application/x-modrinth-modpack+zip`: um zip com `modrinth.index.json` na raiz, conferido pelos bytes) até 64 MiB, só quando o `arquivo` pede `tipos: ['pack']` e a espera aceita `mrpack`. Acima do teto, `arquivo-grande-demais` com `tamanho` e `teto`. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
+| `SeeleUI.salvar({ pedido, nome, canal })` | **só para o MOD da API 8 com o poder `porta`**, e só no app, de dentro de um clique (como o túnel). Entrega a quem joga um arquivo que a sua metade de servidor guardou no volume (o `.mrpack`), pelo **diálogo de salvar do sistema**: `pedido` vai ao seu `aoPedir`, que autoriza com `{ ok: true, volume: volume.servir(caminho) }`; `nome` é só a sugestão (limpa: sem barra, sem começar por ponto). Resolve com `{ bytes }`, ou `null` se a pessoa cancelou. **O caminho nunca volta ao MOD.** |
 | `SeeleUI.tunel.entrar(nome)` | **só existe para o MOD da API 8 que declara o poder `porta`**, e só no app. Abre a porta de quem joga até o jogo `nome` e resolve com o **número da porta em `127.0.0.1`** onde o jogo desta pessoa deve ligar (ver «A metade de máquina»). Só vale chamado de dentro do ouvinte de um `botao`, na mesma volta; as recusas que ele dá estão em «Os tetos e as recusas», na metade de máquina. |
 | `SeeleUI.capacidades()` | o que este build oferece ao seu MOD, nesta plataforma. `estilos` e `classes` estão na lista como rótulos: nada pergunta por eles, e o estilo de um nó vale onde a forma dele monta. |
 | `console` | cada chamada vira uma linha no `seele.log` da máquina que roda o MOD (ver «Quando o MOD não faz o que devia»). |
@@ -1111,6 +1112,16 @@ volume.apagar("retratos/coelho.png");                               // → true/
 - **Os tipos são `png`, `jpeg`, `webp` e `gif`**, e o que chega é conferido
   pelos bytes, e não pelo nome. Um HEIC rejeita a janela com `tipo-recusado` e
   `detectado: 'heic'`.
+- **E `mrpack`** (API 8 parte 6): o `.mrpack` do Modrinth, conferido pelos
+  bytes (um zip com `modrinth.index.json` na raiz), **até 64 MiB**; o teto de
+  uma espera é o do maior tipo que ela aceita (64 MiB com `mrpack`, 10 MiB no
+  resto), conferido antes do primeiro byte. A leitura de volta também vai até
+  64 MiB quando os bytes servidos são um `.mrpack`.
+- **`volume.pack(caminho)`** (só para o MOD com metade de máquina) devolve
+  `{ ok: true, bytes, sha512, indice }`: o tamanho, o SHA-512 dos bytes e o
+  texto do `modrinth.index.json`, que o produto tira do zip; ou `{ ok: false,
+  erro }` (`nao-existe`, `grande-demais`, `nao-e-pack`, `indice-ilegivel`). As
+  regras do índice são do MOD; o produto só o abre.
 - Do outro lado, a janela manda com `SeeleUI.enviar(arquivo, token)`, e a
   promessa resolve depois da gravação. **Ler de volta**: toda mídia de servidor
   aceita `doServidor: { canal, pedido: { …, transporte: 'volume' }, campo }`
@@ -1394,7 +1405,9 @@ ou `aceite-diferente`.
 - **`maquina.plataforma`**: o sistema deste computador, no nome das receitas.
 - **`baixar({ url, sha1 | sha256 | sha512, tamanho, destino, aoProgresso })`**
   resolve com `{ destino, tamanho, algoritmo, hash }` quando o arquivo chegou e
-  bateu. Só `https`. **Duas portas**: uma URL que é de um artefato aceito para
+  bateu. **Já está**: um `destino` que já tem o tamanho e o hash declarados
+  volta com `jaEstava: true`, sem pedir nada à rede (o MOD que sobe a cada
+  partida do app não baixa tudo de novo). Só `https`. **Duas portas**: uma URL que é de um artefato aceito para
   este computador só baixa com o hash (do mesmo algoritmo) e o tamanho que a
   tela mostrou (`diferente-do-aceito`); a de um artefato de outro sistema não
   baixa (`artefato-de-outro-sistema`); qualquer outra URL só baixa de um host das
@@ -1406,11 +1419,25 @@ ou `aceite-diferente`.
 - **`escrever({ destino, texto })`**: um texto de até 64 KiB, trocado de uma vez.
   É para o que o jogo lê e que não pede aceite novo (a configuração, o
   `eula.txt` que a pessoa aceitou na tela).
-- **`desempacotar({ arquivo, destino, raiz })`** abre um `.tar.gz` ou um `.zip`
+- **`desempacotar({ arquivo, destino, raiz, mesclar })`** abre um `.tar.gz` ou um `.zip`
   da pasta em `destino`, com só o que está sob `raiz` dentro do pacote. Links não
   são criados (`linksPulados`); uma entrada com `..` recusa o pacote inteiro.
+  Sem `mesclar`, o destino inteiro é trocado; **com `mesclar: true`**, o que sai
+  entra por cima, arquivo a arquivo, e o resto fica — é como os `overrides` e
+  os `server-overrides` de um modpack entram na pasta do jogo, onde já moram o
+  mundo e os mods (`destino: ""` é a própria pasta).
+- **`trazer({ pedido, destino })`** (parte 6): o pack que a sua metade de
+  servidor guardou no volume, pelo fluxo de volume (pela estrela): `pedido` vai
+  ao `aoPedir` dela, que autoriza com `{ ok: true, volume }`, e o produto **só
+  grava os bytes se tiverem o hash de `oferta.pack`** (`pack-diferente`, com
+  `esperado` e `obtido`; nada gravado). Um destino que já tem o hash aceito
+  volta `{ jaEstava: true }` sem pedir nada; o volume recusado volta
+  `pack-nao-veio` com o texto do servidor em `motivo`.
+- **`ler({ arquivo })`** (parte 6): um texto UTF-8 da pasta, até 4 MiB — o
+  `modrinth.index.json` do pack aberto.
 - **`rodar({ comando, argumentos, pasta })`**: só o comando e os argumentos
-  **exatos** do aceite; o comando é um caminho dentro da pasta do servidor de
+  **exatos** do aceite — o `rodar` da oferta, ou o `instalar` dela (o passo de
+  instalar, como o instalador do loader de um modpack), cada um com os seus; o comando é um caminho dentro da pasta do servidor de
   jogo (nunca procurado no `PATH`), e `pasta: ""` é ela mesma. O processo tem
   `numero`, `pid`, `aoLinha(fn(linha, fluxo))` (`saida` ou `erro`; o que chega
   antes do ouvinte fica guardado, até 256 linhas), `aoSair(fn(fim))` e `fim` (a
@@ -1432,6 +1459,35 @@ cada processo e cada download. Soltar o objeto do processo não o mata; quem mat
 
 **A pasta** é `<config>/jogos/<alvo>/<mod-id>/<servidor>/`, longe da identidade.
 Caminho absoluto e `..` são recusados, e um link que sai dela também.
+
+### Com mods: o `.mrpack`, o instalador e o pack de quem joga
+
+Um modpack do Modrinth chega à metade de servidor de dois jeitos, e os dois
+terminam no mesmo índice:
+
+- **Enviado**: o `arquivo` com `tipos: ['pack']` (até 64 MiB), a espera com
+  `volume.esperar(token, caminho, ['mrpack'], prazo)`, o `SeeleUI.enviar`, e
+  `volume.pack(caminho)` dá o `sha512` e o texto do `modrinth.index.json`.
+- **Pelo link**: `mundo.buscar` lê a API do Modrinth
+  (`/v2/project/<slug>/version`, que dá a URL do `.mrpack` no `cdn.modrinth.com`,
+  o `sha512` e o tamanho), e `mundo.buscarPack({ url, sha512, tamanho })` dá o
+  mesmo objeto de `volume.pack`, pelos tetos de `mundo.buscar` (2 s, 4 MiB; um
+  pack maior vai pelo envio). Nada passa pelo envio: a máquina baixa o `.mrpack`
+  direto do CDN, como artefato da oferta.
+
+A oferta leva `pack: { algoritmo: 'sha512', hex }` (o aceite prende o pack pelo
+hash) e, para o loader, **`instalar: { comando, argumentos }`**: o passo de
+instalar, que a tela mostra ao lado do `rodar` e que `rodar` aceita com os
+argumentos dele. Os domínios de onde o loader baixa sozinho vão em
+`dominios_do_jogo` («o jogo baixa por conta própria de: …»); os de onde os
+arquivos do pack vêm (`cdn.modrinth.com`, `github.com`...), em `origens`.
+
+Na máquina: `programa.trazer` (o enviado) ou `programa.baixar` (o do link),
+`desempacotar` do pack, `programa.ler` do índice, `baixar` de cada arquivo com o
+`sha512` dele (a segunda porta, pelas `origens`), `desempacotar` com `mesclar`
+dos `overrides` e depois dos `server-overrides` em `""`, e `rodar` do
+`instalar`. Quem joga recebe o mesmo pack com `SeeleUI.salvar({ pedido, nome })`,
+de dentro de um clique.
 
 ### O que o aceite prende
 

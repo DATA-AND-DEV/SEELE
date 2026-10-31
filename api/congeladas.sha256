@@ -134,4 +134,13 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   artefatos.plataformas. Conferido em 31/10/2026 no release (`curl` do
 #   CLAUDE.md): a v0.18.3 (17554c28) sai com o protocolo 11 e sem api/v8.json,
 #   e a v8 segue sem release.
-75bcb578bd10e1c2703749e7e20781f194fc348dbb2ac353c66ce969fd958fbc  v8.json
+# - Emenda do modpack (31/10/2026, parte 6): o .mrpack no volume (os tipos de
+#   SeeleUI.enviar por extenso, cada um com o teto: 10 MiB de imagem e som,
+#   64 MiB de pack, e o arquivo-grande-demais com tamanho e teto), SeeleUI.salvar
+#   e a capacidade salvar do poder porta, volume.pack e mundo.buscarPack (o
+#   índice do pack para a metade de servidor) com recusas.pack, o instalar da
+#   oferta, maquina.programa.trazer e .ler, o mesclar do desempacotar, o
+#   jaEstava do baixar, e as recusas novas do programa e da cola. Conferido em
+#   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
+#   v8 segue sem release.
+afd5d662e0cce1916526bb2d4d2d659dff5fffacd6618f85df2c648cddc872c8  v8.json

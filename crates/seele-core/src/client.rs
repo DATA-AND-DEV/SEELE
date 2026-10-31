@@ -3537,8 +3537,10 @@ impl Transfers {
             "{}",
             resposta.erro.unwrap_or_default()
         );
+        // O teto do fio é o do maior tipo (o `.mrpack`, 64 MiB; API 8 parte 6):
+        // o servidor confere o de cada tipo pelos bytes, antes de servir.
         let lidos = entrada
-            .read_to_end(seele_proto::midia_de_mod::TETO_DE_ARQUIVO)
+            .read_to_end(usize::try_from(seele_proto::pack::TETO_DO_PACK).unwrap_or(usize::MAX))
             .await?;
         // O nome da lista `recusas.volume`, e não uma frase: ele chega ao MOD
         // em `e.erro` (a auditoria do `v6.json`, B2).

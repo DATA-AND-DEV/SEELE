@@ -500,6 +500,14 @@ fn oferta_cheia() -> OfertaDeMaquina {
             titulo: "EULA".into(),
             url: "https://aka.ms/MinecraftEULA".into(),
         }],
+        instalar: Some(ComandoOferecido {
+            comando: "java".into(),
+            argumentos: vec![
+                "-jar".into(),
+                "fabric-installer.jar".into(),
+                "server".into(),
+            ],
+        }),
     }
 }
 

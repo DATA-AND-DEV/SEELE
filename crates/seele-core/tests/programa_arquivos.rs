@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use seele_core::programa::{
-    Origem, OrigemHttps, PedidoDeDesempacotar, Politica, Programa, Recusa, MAX_BYTES_ESCRITOS,
+    AlgoritmoDeHash, HashDeclarado, Origem, OrigemHttps, PedidoDeDesempacotar, Politica, Programa,
+    Recusa, MAX_BYTES_ESCRITOS, MAX_BYTES_LIDOS,
 };
 
 struct Pasta(PathBuf);
@@ -23,6 +24,10 @@ impl Drop for Pasta {
 }
 
 fn programa(nome: &str, teto: u64) -> (Pasta, Programa) {
+    programa_com_pack(nome, teto, None)
+}
+
+fn programa_com_pack(nome: &str, teto: u64, pack: Option<HashDeclarado>) -> (Pasta, Programa) {
     static N: AtomicU64 = AtomicU64::new(0);
     let caminho = std::env::temp_dir().join(format!(
         "seele-programa-arq-{nome}-{}-{}",
@@ -36,6 +41,8 @@ fn programa(nome: &str, teto: u64) -> (Pasta, Programa) {
         de_outros_sistemas: vec![],
         origens: vec![],
         comando: None,
+        instalar: None,
+        pack,
         teto_de_disco: teto,
         raiz: caminho.join("jogo"),
     };
@@ -204,6 +211,7 @@ fn zip(entradas: &[(&str, &[u8], bool)]) -> Vec<u8> {
 
 fn pedido(arquivo: &str, destino: &str, raiz: &str) -> PedidoDeDesempacotar {
     PedidoDeDesempacotar {
+        mesclar: false,
         arquivo: arquivo.to_owned(),
         destino: destino.to_owned(),
         raiz: raiz.to_owned(),
@@ -360,4 +368,192 @@ fn desempacotar_para_no_teto_de_disco() {
     }
     assert!(!programa.raiz().join("java").exists());
     assert!(sem_parcial(programa.raiz()));
+}
+
+// ------------------------------------------------------------ por cima
+
+/// **Os `overrides` entram por cima** (API 8 parte 6): o que sai do pacote
+/// troca o de mesmo nome, e o mundo e os mods que já estavam ficam. Sem
+/// `mesclar`, o destino inteiro é trocado (e o mundo sai junto) — o que torna
+/// o modo uma decisão, e não um detalhe.
+#[test]
+fn desempacotar_por_cima_troca_o_de_mesmo_nome_e_deixa_o_resto() {
+    let (_p, programa) = programa("mesclar", 1 << 30);
+    let raiz = programa.raiz().to_path_buf();
+    std::fs::create_dir_all(raiz.join("server/world")).unwrap();
+    std::fs::create_dir_all(raiz.join("server/mods")).unwrap();
+    std::fs::write(raiz.join("server/world/level.dat"), b"o mundo").unwrap();
+    std::fs::write(raiz.join("server/mods/velho.jar"), b"velho").unwrap();
+    std::fs::write(
+        raiz.join("pack.mrpack"),
+        zip(&[
+            ("modrinth.index.json", b"{}", false),
+            ("overrides/config/a.txt", b"config", true),
+            ("overrides/mods/velho.jar", b"novo", false),
+        ]),
+    )
+    .unwrap();
+    let feito = programa
+        .desempacotar(&PedidoDeDesempacotar {
+            mesclar: true,
+            ..pedido("pack.mrpack", "server", "overrides")
+        })
+        .unwrap();
+    assert_eq!(feito.arquivos, 2);
+    assert_eq!(
+        std::fs::read(raiz.join("server/world/level.dat")).unwrap(),
+        b"o mundo"
+    );
+    assert_eq!(
+        std::fs::read(raiz.join("server/mods/velho.jar")).unwrap(),
+        b"novo"
+    );
+    assert_eq!(
+        std::fs::read(raiz.join("server/config/a.txt")).unwrap(),
+        b"config"
+    );
+    assert!(sem_parcial(&raiz));
+
+    // Por cima da própria pasta do servidor de jogo (`""`), onde o jogo roda.
+    std::fs::write(raiz.join("server.jar"), b"jar").unwrap();
+    programa
+        .desempacotar(&PedidoDeDesempacotar {
+            mesclar: true,
+            ..pedido("pack.mrpack", "", "overrides")
+        })
+        .unwrap();
+    assert_eq!(std::fs::read(raiz.join("config/a.txt")).unwrap(), b"config");
+    assert_eq!(std::fs::read(raiz.join("server.jar")).unwrap(), b"jar");
+    assert!(sem_parcial(&raiz));
+    assert!(
+        !raiz
+            .parent()
+            .unwrap()
+            .read_dir()
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().contains("seele-parcial")),
+        "a parcial saiu da raiz"
+    );
+    // Sem `mesclar`, `""` não é destino: trocar a pasta inteira apagaria tudo.
+    assert_eq!(
+        programa
+            .desempacotar(&pedido("pack.mrpack", "", "overrides"))
+            .unwrap_err()
+            .nome(),
+        "caminho-vazio"
+    );
+
+    // O contraste: sem `mesclar`, o mundo vai embora.
+    programa
+        .desempacotar(&pedido("pack.mrpack", "server", "overrides"))
+        .unwrap();
+    assert!(!raiz.join("server/world/level.dat").exists());
+}
+
+// ------------------------------------------------------------ trazer
+
+fn sha512(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha512::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// **Só o pack aceito entra no disco** (spec §8): os bytes que a metade de
+/// servidor devolve são conferidos contra o hash do aceite; outros não são
+/// gravados, e a recusa diz os dois hashes. O que já está não é trazido de
+/// novo.
+#[test]
+fn trazer_so_grava_o_pack_aceito() {
+    let pack = b"PK um pack de verdade";
+    let (_p, programa) = programa_com_pack(
+        "trazer",
+        1 << 20,
+        Some(HashDeclarado {
+            algoritmo: AlgoritmoDeHash::Sha512,
+            hex: sha512(pack),
+        }),
+    );
+    assert_eq!(programa.pack_ja_esta("pack.mrpack").unwrap(), None);
+    match programa
+        .trazer("pack.mrpack", b"PK outro pack")
+        .unwrap_err()
+    {
+        Recusa::PackDiferente {
+            esperado, obtido, ..
+        } => {
+            assert_eq!(esperado, sha512(pack));
+            assert_eq!(obtido, sha512(b"PK outro pack"));
+        }
+        outra => panic!("{outra:?}"),
+    }
+    assert!(
+        !programa.raiz().join("pack.mrpack").exists(),
+        "o pack trocado foi gravado"
+    );
+    let trazido = programa.trazer("pack.mrpack", pack).unwrap();
+    assert!(!trazido.ja_estava);
+    assert_eq!(
+        std::fs::read(programa.raiz().join("pack.mrpack")).unwrap(),
+        pack
+    );
+    let ja = programa
+        .pack_ja_esta("pack.mrpack")
+        .unwrap()
+        .expect("já está");
+    assert!(ja.ja_estava);
+    assert_eq!(
+        programa.trazer("../fora.mrpack", pack).unwrap_err().nome(),
+        "caminho-com-pai"
+    );
+    assert_eq!(programa.recusas().get("pack-diferente"), Some(&1));
+}
+
+#[test]
+fn trazer_sem_pack_no_aceite_e_recusado() {
+    let (_p, programa) = programa("sem-pack", 1 << 20);
+    assert_eq!(
+        programa.trazer("p.mrpack", b"x").unwrap_err().nome(),
+        "sem-pack-aceito"
+    );
+    assert_eq!(
+        programa.pack_ja_esta("p.mrpack").unwrap_err().nome(),
+        "sem-pack-aceito"
+    );
+}
+
+// ------------------------------------------------------------ ler
+
+#[test]
+fn ler_devolve_texto_da_pasta_e_so_dela() {
+    let (_p, programa) = programa("ler", 1 << 30);
+    programa
+        .escrever("pack/modrinth.index.json", "{\"formatVersion\":1}")
+        .unwrap();
+    assert_eq!(
+        programa.ler("pack/modrinth.index.json").unwrap(),
+        "{\"formatVersion\":1}"
+    );
+    std::fs::write(programa.raiz().join("bin.dat"), [0xff_u8, 0xfe, 0x00]).unwrap();
+    assert_eq!(programa.ler("bin.dat").unwrap_err().nome(), "nao-e-texto");
+    std::fs::write(
+        programa.raiz().join("grande.json"),
+        vec![b'a'; usize::try_from(MAX_BYTES_LIDOS).unwrap() + 1],
+    )
+    .unwrap();
+    assert_eq!(
+        programa.ler("grande.json").unwrap_err().nome(),
+        "texto-grande-demais"
+    );
+    assert_eq!(
+        programa.ler("../fora").unwrap_err().nome(),
+        "caminho-com-pai"
+    );
+    assert_eq!(
+        programa.ler("/etc/hosts").unwrap_err().nome(),
+        "caminho-absoluto"
+    );
+    assert_eq!(programa.ler("nao-existe.json").unwrap_err().nome(), "disco");
 }

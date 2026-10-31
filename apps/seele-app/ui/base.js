@@ -3451,6 +3451,8 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   // O túnel de jogo (API 8): a capacidade é do poder `porta` do manifesto, e
   // não da versão. `podePedir` a soma quando o MOD declara o poder.
   "tunel-entrar": "tunel",
+  // `SeeleUI.salvar` (API 8 parte 6): do mesmo poder `porta`.
+  salvar: "salvar",
 });
 
 /**
@@ -3473,7 +3475,7 @@ function podePedir(mod, tipo) {
   // listas diferentes, e a lista por API continua a mesma. `poderes` vem de
   // `mods_instalados`, lido do manifesto do pacote cujo hash esta janela
   // conferiu — e nunca de um campo da mensagem.
-  const tem = temOPoderPorta(mod) ? [...daApi, "tunel"] : daApi;
+  const tem = temOPoderPorta(mod) ? [...daApi, "tunel", "salvar"] : daApi;
   return tem.includes(exigida);
 }
 
@@ -4130,6 +4132,12 @@ function recusaParaOMod(mod, falha) {
   if (campos && typeof campos === "object") return { ...campos, erro: nome };
   const corte = nome.indexOf(":");
   const base = corte < 0 ? nome : nome.slice(0, corte);
+  // **O tamanho e o teto** (API 8 parte 6): `arquivo-grande-demais:<t>:<teto>`
+  // chega como `{ erro, tamanho, teto }`, e a tela do MOD diz os dois.
+  if (base === "arquivo-grande-demais" && corte >= 0) {
+    const [tamanho, teto] = nome.slice(corte + 1).split(":").map(Number);
+    return { erro: base, tamanho, teto };
+  }
   const campo = SUFIXOS[base];
   if (corte < 0 || !campo) return { erro: nome };
   return { erro: base, [campo]: nome.slice(corte + 1) };
@@ -4477,6 +4485,27 @@ async function atenderOMod(mod, instancia, m) {
           }));
         }
         responder(true, { valor: aberta.porta });
+        break;
+      }
+      case "salvar": {
+        // **`SeeleUI.salvar`** (API 8 parte 6; spec §6): como o túnel, só
+        // dentro de um clique — o diálogo de salvar do sistema não abre sem a
+        // pessoa ter pedido. O caminho fica com ela; o MOD recebe `{ bytes }`
+        // ou `null` (cancelou).
+        if (!gastarGesto(instancia, m.gesto)) {
+          throw recusaAoMod(
+            "fora-de-um-clique",
+            `${mod.id}: salvar sem o bilhete de um clique (sem ele, vencido ou já gasto)`,
+          );
+        }
+        const salvo = await invoke("salvar_do_mod", {
+          geracao: instancia.geracao,
+          id: mod.id,
+          channel: Number(m.canal) || 0,
+          payload: JSON.stringify(m.pedido ?? null),
+          nome: String(m.nome ?? ""),
+        });
+        responder(true, { valor: salvo ?? null });
         break;
       }
       default:

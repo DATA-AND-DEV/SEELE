@@ -14,7 +14,7 @@ pub use seele_core::programa::{
     plataforma_desta_maquina, AlgoritmoDeHash, ArtefatoAceito, Baixado, ComandoAceito,
     Desempacotado, Download, EventoDoDownload, EventoDoProcesso, FimDoProcesso, HashDeclarado,
     Origem, OrigemHttps, PedidoDeDesempacotar, PedidoDeDownload, PedidoDeExecucao, Politica,
-    Processo, Programa, Recusa, MAX_BYTES_ESCRITOS, NOMES_DAS_RECUSAS,
+    Processo, Programa, Recusa, Trazido, MAX_BYTES_ESCRITOS, MAX_BYTES_LIDOS, NOMES_DAS_RECUSAS,
 };
 
 use crate::mods::AceiteDeMaquinaGuardado;

@@ -167,6 +167,8 @@ fn bancada(origem: Mentira, teto: u64) -> Bancada {
                 comando: "java/bin/java".to_owned(),
                 argumentos: vec![],
             }),
+            instalar: None,
+            pack: None,
             teto_de_disco: teto,
             raiz: pasta.caminho().join("jogo"),
         },
@@ -227,6 +229,7 @@ async fn baixa_confere_e_renomeia_com_progresso() {
             tamanho: 19,
             algoritmo: AlgoritmoDeHash::Sha256,
             hash: sha256(bytes).hex,
+            ja_estava: false,
         }))
     );
     assert_eq!(std::fs::read(&destino).unwrap(), bytes);
@@ -689,6 +692,8 @@ fn bancada_com_aceite(origem: Mentira, bytes: &[u8]) -> Bancada {
             de_outros_sistemas: vec!["https://github.com/win.zip".to_owned()],
             origens: vec!["cdn.modrinth.com".to_owned()],
             comando: None,
+            instalar: None,
+            pack: None,
             teto_de_disco: 1 << 20,
             raiz: pasta.caminho().join("jogo"),
         },
@@ -837,4 +842,75 @@ async fn as_tentativas_tem_teto_e_a_recusa_diz_quantas() {
         super::MAX_TENTATIVAS
     );
     assert_eq!(b.programa.recusas().get("origem-falhou"), Some(&1));
+}
+
+async fn ate_o_fim(mut download: Download) -> Vec<EventoDoDownload> {
+    let mut eventos = vec![];
+    while let Some(e) = download.proximo().await {
+        eventos.push(e);
+    }
+    eventos
+}
+
+/// **O arquivo que já está, com o tamanho e o hash declarados, não é baixado
+/// de novo** (API 8 parte 6): o MOD de multiplayer baixava ~105 MB a cada
+/// partida do app. Medido pelo número de pedidos à origem, e não suposto.
+#[tokio::test]
+async fn o_arquivo_que_ja_esta_nao_e_baixado_de_novo() {
+    let bytes = b"um servidor de jogo";
+    let b = bancada(Mentira::default().com(URL, corpo(bytes)), 1 << 20);
+    let primeiro = ate_o_fim(b.programa.baixar(pedido(bytes, "server.jar")).unwrap()).await;
+    assert!(
+        matches!(
+            primeiro.last(),
+            Some(EventoDoDownload::Pronto(Baixado {
+                ja_estava: false,
+                ..
+            }))
+        ),
+        "{primeiro:?}"
+    );
+    assert_eq!(b.origem.pedidos.load(Ordering::SeqCst), 1);
+
+    let segundo = ate_o_fim(b.programa.baixar(pedido(bytes, "server.jar")).unwrap()).await;
+    assert!(
+        matches!(
+            segundo.last(),
+            Some(EventoDoDownload::Pronto(Baixado {
+                ja_estava: true,
+                ..
+            }))
+        ),
+        "{segundo:?}"
+    );
+    assert_eq!(
+        b.origem.pedidos.load(Ordering::SeqCst),
+        1,
+        "o arquivo que já estava foi pedido à rede de novo"
+    );
+}
+
+/// **O que está no disco e não bate é baixado**: o «já está» confere o hash,
+/// e não só o nome e o tamanho.
+#[tokio::test]
+async fn o_arquivo_que_esta_mas_nao_bate_e_baixado() {
+    let bytes = b"um servidor de jogo";
+    let b = bancada(Mentira::default().com(URL, corpo(bytes)), 1 << 20);
+    std::fs::write(b.programa.raiz().join("server.jar"), b"um servidor de JOGO").unwrap();
+    let eventos = ate_o_fim(b.programa.baixar(pedido(bytes, "server.jar")).unwrap()).await;
+    assert!(
+        matches!(
+            eventos.last(),
+            Some(EventoDoDownload::Pronto(Baixado {
+                ja_estava: false,
+                ..
+            }))
+        ),
+        "{eventos:?}"
+    );
+    assert_eq!(b.origem.pedidos.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        std::fs::read(b.programa.raiz().join("server.jar")).unwrap(),
+        bytes
+    );
 }

@@ -118,6 +118,34 @@ pub struct Baixado {
     pub algoritmo: AlgoritmoDeHash,
     /// O hash, em minúsculas.
     pub hash: String,
+    /// **Já estava no destino**, com o tamanho e o hash declarados: nada foi
+    /// pedido à rede (API 8 parte 6). Sem isto, o MOD baixava de novo cada
+    /// artefato a cada partida do app (~105 MB no Minecraft).
+    pub ja_estava: bool,
+}
+
+/// O tamanho e o hash de `caminho` no `algoritmo`, ou `None` se ele não é um
+/// arquivo que se lê. Em blocos: um `server.jar` de 56 MB não vai inteiro à
+/// memória.
+pub(crate) fn hash_do_arquivo(caminho: &Path, algoritmo: AlgoritmoDeHash) -> Option<(u64, String)> {
+    use std::io::Read as _;
+    let metadados = std::fs::symlink_metadata(caminho).ok()?;
+    if !metadados.is_file() {
+        return None;
+    }
+    let mut arquivo = std::fs::File::open(caminho).ok()?;
+    let mut calculo = Calculo::novo(algoritmo);
+    let mut bloco = vec![0_u8; 256 * 1024];
+    let mut total = 0_u64;
+    loop {
+        let lidos = arquivo.read(&mut bloco).ok()?;
+        if lidos == 0 {
+            break;
+        }
+        calculo.somar(bloco.get(..lidos)?);
+        total = total.saturating_add(lidos as u64);
+    }
+    Some((total, calculo.hex()))
 }
 
 /// O que um download avisa enquanto corre.
@@ -452,6 +480,40 @@ async fn correr(
     tx: &mpsc::UnboundedSender<EventoDoDownload>,
 ) -> Result<Baixado, Recusa> {
     let tamanho = pedido.tamanho;
+    // **Já está aqui?** Antes da reserva e de qualquer pedido: o destino com
+    // o tamanho declarado e o hash do algoritmo mais forte declarado é o
+    // arquivo pedido, e baixá-lo de novo seria banda e tempo da pessoa.
+    // Conferido aqui, depois da política: um arquivo que já está não passa
+    // por cima de uma URL fora do aceite.
+    let ja_esta = {
+        let destino = destino.to_path_buf();
+        let algoritmo = hash.algoritmo;
+        tokio::task::spawn_blocking(move || {
+            std::fs::symlink_metadata(&destino)
+                .ok()
+                .filter(|m| m.is_file() && m.len() == tamanho)
+                .and_then(|_| hash_do_arquivo(&destino, algoritmo))
+        })
+        .await
+        .ok()
+        .flatten()
+    };
+    if let Some((tamanho_no_disco, obtido)) = ja_esta {
+        if tamanho_no_disco == tamanho && obtido == hash.hex.to_ascii_lowercase() {
+            tracing::info!(destino = %destino.display(), tamanho, "programa: o arquivo já estava, nada foi baixado");
+            let _ = tx.send(EventoDoDownload::Progresso {
+                recebidos: tamanho,
+                total: tamanho,
+            });
+            return Ok(Baixado {
+                destino: destino.to_path_buf(),
+                tamanho,
+                algoritmo: hash.algoritmo,
+                hash: obtido,
+                ja_estava: true,
+            });
+        }
+    }
     let _reserva = {
         let dono = Arc::clone(interior);
         let destino = destino.to_path_buf();
@@ -601,6 +663,7 @@ async fn correr(
         tamanho,
         algoritmo: hash.algoritmo,
         hash: obtido,
+        ja_estava: false,
     })
 }
 

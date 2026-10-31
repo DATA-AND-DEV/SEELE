@@ -1772,6 +1772,11 @@ const FRASES_DA_MAQUINA = Object.freeze({
   podeBaixarDe: (origens) => `e pode baixar outros arquivos, cada um com o hash conferido, de ${origens}`,
   nadaABaixar: "nada para baixar neste pedido",
   rodar: (linha) => `vai rodar: ${linha}`,
+  // O passo de instalar (API 8 parte 6): o instalador do loader, uma vez, antes
+  // do servidor. Os dois comandos são aceitos, e só eles.
+  instalar: (linha) => `antes, para instalar, vai rodar: ${linha}`,
+  // O pack do modpack, pelo hash: o que chega à máquina tem de ter este hash.
+  pack: (algoritmo, inicio) => `o pack do modpack, conferido pelo ${algoritmo} ${inicio}…`,
   nadaARodar: "nenhum programa: este pedido só abre a porta do jogo",
   disco: (teto, pasta) => `ocupa até ${teto} de disco, em ${pasta}`,
   oJogoBaixaSozinho: (dominios) => `o jogo baixa por conta própria de ${dominios}, sem o SEELE conferir`,
@@ -1794,7 +1799,8 @@ const FRASES_DA_MAQUINA = Object.freeze({
   campos: Object.freeze({ titulo: "o nome do jogo", receita: "a receita", versao_da_receita: "a versão da receita",
     versao_do_jogo: "a versão do jogo", tuneis: "as portas", artefatos: "o que se baixa", pack: "o pack",
     origens: "de onde se baixa", dominios_do_jogo: "de onde o jogo baixa sozinho", rodar: "o programa e os argumentos",
-    disco_maximo: "o teto de disco", termos: "os termos", pacote: "a versão do MOD" }),
+    disco_maximo: "o teto de disco", termos: "os termos", pacote: "a versão do MOD",
+    instalar: "o instalador e os argumentos dele" }),
 
   // O que a brevidade do texto acima não cobre: a leitura dos termos, a lista de
   // aceites e a falha de cada verbo, dita em frase em vez do nome cru.

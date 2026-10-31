@@ -116,11 +116,29 @@ pub(crate) fn programa_para(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PedidoDoPrograma {
     Baixar(PedidoDeDownload),
-    Escrever { destino: String, texto: String },
+    Escrever {
+        destino: String,
+        texto: String,
+    },
     Desempacotar(PedidoDeDesempacotar),
     Rodar(PedidoDeExecucao),
-    EscreverNoProcesso { processo: u64, texto: String },
-    Matar { processo: u64 },
+    /// O pack que a metade de servidor guardou (API 8 parte 6): `pedido` vai
+    /// ao `aoPedir` dela, que responde com o caminho no volume.
+    Trazer {
+        pedido: String,
+        destino: String,
+    },
+    /// Um texto da pasta do servidor de jogo (o índice do pack).
+    Ler {
+        arquivo: String,
+    },
+    EscreverNoProcesso {
+        processo: u64,
+        texto: String,
+    },
+    Matar {
+        processo: u64,
+    },
     Recusas,
 }
 
@@ -133,6 +151,8 @@ pub(crate) const TIPOS: &[&str] = &[
     "processo-escrever",
     "processo-matar",
     "programa-recusas",
+    "programa-trazer",
+    "programa-ler",
 ];
 
 /// Lê o pedido de um dos [`TIPOS`]; `pedido-invalido` quando falta um campo.
@@ -176,6 +196,10 @@ pub(crate) fn ler(tipo: &str, valor: &serde_json::Value) -> Result<PedidoDoProgr
             arquivo: texto("arquivo").ok_or(invalido)?,
             destino: texto("destino").ok_or(invalido)?,
             raiz: texto("raiz").unwrap_or_default(),
+            mesclar: valor
+                .get("mesclar")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
         }),
         "programa-rodar" => PedidoDoPrograma::Rodar(PedidoDeExecucao {
             comando: texto("comando").ok_or(invalido)?,
@@ -196,6 +220,14 @@ pub(crate) fn ler(tipo: &str, valor: &serde_json::Value) -> Result<PedidoDoProgr
             processo: numero("processo").ok_or(invalido)?,
         },
         "programa-recusas" => PedidoDoPrograma::Recusas,
+        "programa-trazer" => PedidoDoPrograma::Trazer {
+            pedido: serde_json::to_string(valor.get("pedido").unwrap_or(&serde_json::Value::Null))
+                .unwrap_or_else(|_| "null".to_owned()),
+            destino: texto("destino").ok_or(invalido)?,
+        },
+        "programa-ler" => PedidoDoPrograma::Ler {
+            arquivo: texto("arquivo").ok_or(invalido)?,
+        },
         _ => return Err("tipo-desconhecido"),
     })
 }
@@ -256,6 +288,18 @@ pub(crate) fn resposta_da_recusa(n: u64, recusa: &Recusa) -> serde_json::Value {
             declarado,
             alegado,
         } => serde_json::json!({ "url": url, "declarado": declarado, "alegado": alegado }),
+        Recusa::PackDiferente {
+            algoritmo,
+            esperado,
+            obtido,
+        } => {
+            serde_json::json!({ "algoritmo": algoritmo.nome(), "esperado": esperado, "obtido": obtido })
+        }
+        Recusa::TextoGrandeDemais { tamanho, teto } => {
+            serde_json::json!({ "tamanho": tamanho, "teto": teto })
+        }
+        Recusa::NaoETexto { arquivo } => serde_json::json!({ "arquivo": arquivo }),
+        Recusa::SemPackAceito { destino } => serde_json::json!({ "destino": destino }),
         _ => serde_json::Value::Null,
     };
     if let (Some(r), Some(campos)) = (r.as_object_mut(), campos.as_object()) {
@@ -454,6 +498,7 @@ pub(crate) fn atender(viva: &Arc<Viva>, n: u64, pedido: PedidoDoPrograma) {
                                     "tamanho": baixado.tamanho,
                                     "algoritmo": baixado.algoritmo.nome(),
                                     "hash": baixado.hash,
+                                    "jaEstava": baixado.ja_estava,
                                 })),
                             );
                             return;
@@ -514,6 +559,16 @@ pub(crate) fn atender(viva: &Arc<Viva>, n: u64, pedido: PedidoDoPrograma) {
                 vigiar(dela, processo, recebe).await;
             });
         }
+        PedidoDoPrograma::Trazer { pedido, destino } => {
+            let dela = Arc::clone(viva);
+            tauri::async_runtime::spawn(async move {
+                trazer(&dela, n, &programa, pedido, destino).await;
+            });
+        }
+        PedidoDoPrograma::Ler { arquivo } => match programa.ler(&arquivo) {
+            Ok(texto) => viva.responder(n, Ok(serde_json::Value::String(texto))),
+            Err(recusa) => recusar(viva, &recusa),
+        },
         PedidoDoPrograma::EscreverNoProcesso { processo, texto } => {
             let Some(manda) = viva.processos.mapa().get(&processo).cloned() else {
                 viva.recusas_da_cola.contar("processo-desconhecido");
@@ -558,6 +613,56 @@ pub(crate) fn atender(viva: &Arc<Viva>, n: u64, pedido: PedidoDoPrograma) {
             }
             viva.responder(n, Ok(serde_json::json!(todas)));
         }
+    }
+}
+
+/// **Traz o pack da metade de servidor** (API 8 parte 6; spec §8): o que já
+/// está no destino com o hash aceito volta sem rede; o resto vem pelo fluxo
+/// de volume (pela estrela), e o núcleo só o grava se o hash for o do aceite.
+/// Uma recusa do servidor chega à metade com o texto dele (`pack-nao-veio`),
+/// é contada e dita no log.
+async fn trazer(
+    viva: &Arc<Viva>,
+    n: u64,
+    programa: &Arc<Programa>,
+    pedido: String,
+    destino: String,
+) {
+    let pronto = |trazido: &seele_ffi::programa::Trazido| {
+        serde_json::json!({
+            "destino": destino,
+            "tamanho": trazido.tamanho,
+            "hash": trazido.hash,
+            "jaEstava": trazido.ja_estava,
+        })
+    };
+    match programa.pack_ja_esta(&destino) {
+        Ok(Some(trazido)) => return viva.responder(n, Ok(pronto(&trazido))),
+        Ok(None) => {}
+        Err(recusa) => return viva.entregar(&resposta_da_recusa(n, &recusa).to_string()),
+    }
+    let bytes = match viva.fio.ler_volume(&viva.chave.mod_id, pedido).await {
+        Ok(bytes) => bytes,
+        Err(motivo) => {
+            viva.recusas_da_cola.contar("pack-nao-veio");
+            tracing::warn!(mod_id = %viva.chave.mod_id, servidor = %viva.chave.servidor, motivo = %motivo, "metade de máquina: o pack não veio da metade de servidor");
+            return viva.entregar(
+                &serde_json::json!({
+                    "n": n, "ok": false, "erro": "pack-nao-veio",
+                    "frase": format!("o pack não veio da metade de servidor: {motivo}"),
+                    "motivo": motivo,
+                })
+                .to_string(),
+            );
+        }
+    };
+    let dele = Arc::clone(programa);
+    let alvo = destino.clone();
+    let feito = tokio::task::spawn_blocking(move || dele.trazer(&alvo, &bytes)).await;
+    match feito {
+        Ok(Ok(trazido)) => viva.responder(n, Ok(pronto(&trazido))),
+        Ok(Err(recusa)) => viva.entregar(&resposta_da_recusa(n, &recusa).to_string()),
+        Err(_) => viva.entregar(&resposta_da_recusa(n, &Recusa::Encerrado).to_string()),
     }
 }
 

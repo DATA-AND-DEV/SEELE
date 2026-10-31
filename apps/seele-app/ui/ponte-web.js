@@ -251,6 +251,8 @@ const COMANDOS_DA_PONTE = new Set([
   // O túnel de jogo é do aplicativo: aqui a entrada é recusada pelo nome, a
   // saída não tem o que fechar e a lista é vazia.
   "tunel_entrar", "tunel_sair_do_mod", "tuneis_abertos",
+  // `SeeleUI.salvar` é do mesmo poder que o túnel, e do aplicativo como ele.
+  "salvar_do_mod",
   // A máquina de jogo é do aplicativo, como o túnel: aqui o pedido é recusado pelo nome.
   "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas"
 ]);
@@ -2473,6 +2475,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // `porta` exige `plataformas: ["app"]` e nem sobe aqui; se um pedido chegar
   // mesmo assim, a recusa tem o nome, e não um erro de ponte.
   tunel_entrar: async () => {
+    throw { Recusado: { motivo: "so-no-app" } };
+  },
+  // `SeeleUI.salvar` (API 8 parte 6) é do poder `porta`, que não sobe aqui.
+  salvar_do_mod: async () => {
     throw { Recusado: { motivo: "so-no-app" } };
   },
   // Sem túnel não há o que fechar, e fechar nada não é falha.

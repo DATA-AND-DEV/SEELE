@@ -59,6 +59,8 @@ fn host_de(url: &str) -> Option<String> {
 ///   `de_outros_sistemas`, recusados pelo nome;
 /// - `origens`: as da oferta, de onde vale uma URL que não é artefato;
 /// - `comando`: o `rodar` da oferta, com os argumentos exatos;
+/// - `instalar`: o passo de instalar da oferta, com os argumentos exatos;
+/// - `pack`: o hash do pack, que `trazer` exige dos bytes;
 /// - `teto_de_disco`: o `disco_maximo`;
 /// - `raiz`: a pasta do servidor de jogo, que quem chama tira de
 ///   [`crate::aceites_de_maquina::pasta_do_servidor_de_jogo`].
@@ -105,6 +107,14 @@ pub fn politica_do_aceite(oferta: &OfertaDeMaquina, raiz: PathBuf, plataforma: &
             comando: r.comando.clone(),
             argumentos: r.argumentos.clone(),
         }),
+        instalar: oferta.instalar.as_ref().map(|r| ComandoAceito {
+            comando: r.comando.clone(),
+            argumentos: r.argumentos.clone(),
+        }),
+        pack: oferta.pack.as_ref().map(|h| HashDeclarado {
+            algoritmo: algoritmo(h.algoritmo),
+            hex: h.hex.clone(),
+        }),
         teto_de_disco: oferta.disco_maximo,
         raiz,
     }
@@ -145,7 +155,10 @@ mod tests {
                 ),
                 artefato("java-win", "https://github.com/a/win.zip", &["windows-x64"]),
             ],
-            pack: None,
+            pack: Some(HashDeArtefato {
+                algoritmo: AlgoritmoDoFio::Sha512,
+                hex: "d".repeat(128),
+            }),
             origens: vec!["release-assets.githubusercontent.com".into()],
             dominios_do_jogo: vec!["sessionserver.mojang.com".into()],
             rodar: Some(ComandoOferecido {
@@ -154,6 +167,10 @@ mod tests {
             }),
             disco_maximo: 1234,
             termos: vec![],
+            instalar: Some(ComandoOferecido {
+                comando: "java/bin/java".into(),
+                argumentos: vec!["-jar".into(), "fabric-installer.jar".into()],
+            }),
         };
         let p = politica_do_aceite(&oferta, PathBuf::from("/r"), "mac-aarch64");
         assert_eq!(
@@ -187,6 +204,20 @@ mod tests {
             Some(ComandoAceito {
                 comando: "java/bin/java".into(),
                 argumentos: vec!["-jar".into(), "server.jar".into()],
+            })
+        );
+        assert_eq!(
+            p.instalar,
+            Some(ComandoAceito {
+                comando: "java/bin/java".into(),
+                argumentos: vec!["-jar".into(), "fabric-installer.jar".into()],
+            })
+        );
+        assert_eq!(
+            p.pack,
+            Some(HashDeclarado {
+                algoritmo: AlgoritmoDeHash::Sha512,
+                hex: "d".repeat(128),
             })
         );
         assert_eq!(p.teto_de_disco, 1234);

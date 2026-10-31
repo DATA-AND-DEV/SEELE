@@ -48,6 +48,12 @@ pub struct PedidoDeDesempacotar {
     pub destino: String,
     /// O prefixo, dentro do pacote, do que se extrai; `""` é tudo.
     pub raiz: String,
+    /// **Por cima do que já está** (API 8 parte 6): o que sai do pacote entra
+    /// no destino arquivo a arquivo, trocando os de mesmo nome, e o resto do
+    /// destino fica. É como os `overrides` e os `server-overrides` de um
+    /// modpack entram na pasta do jogo, onde já moram o mundo e os mods. Sem
+    /// isto (`false`), o destino inteiro é trocado.
+    pub mesclar: bool,
 }
 
 /// Um pacote aberto.
@@ -420,7 +426,9 @@ impl Programa {
             return Err(Recusa::Encerrado);
         }
         let origem = caminho::dentro_da_raiz(&interior.raiz, &pedido.arquivo, false)?;
-        let destino = caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, false)?;
+        // Por cima, `""` é a própria pasta do servidor de jogo: é onde os
+        // `overrides` de um modpack entram (API 8 parte 6).
+        let destino = caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, pedido.mesclar)?;
         let disco = |caminho: &Path| {
             let caminho = caminho.to_path_buf();
             move |erro: std::io::Error| Recusa::Disco {
@@ -446,7 +454,11 @@ impl Programa {
             let reservado = interior.reservado.lock().map_or(0, |r| *r);
             let usado = caminho::ocupado(&interior.raiz, &super::baixar::e_parcial)
                 .saturating_add(reservado);
-            let substitui = if destino.is_dir() {
+            // Por cima, nada sai: o que se troca conta duas vezes (o lado
+            // seguro do teto).
+            let substitui = if pedido.mesclar {
+                0
+            } else if destino.is_dir() {
                 caminho::ocupado(&destino, &|_| false)
             } else {
                 std::fs::metadata(&destino).map_or(0, |m| m.len())
@@ -457,13 +469,23 @@ impl Programa {
                 .saturating_sub(usado.saturating_sub(substitui))
         };
 
-        let pasta = destino.parent().unwrap_or(&interior.raiz).to_path_buf();
+        // Por cima, a parcial fica **dentro da raiz**: o destino pode ser a
+        // própria raiz, e a pasta de cima dela não é do servidor de jogo.
+        let pasta = if pedido.mesclar {
+            interior.raiz.clone()
+        } else {
+            destino.parent().unwrap_or(&interior.raiz).to_path_buf()
+        };
         std::fs::create_dir_all(&pasta).map_err(disco(&pasta))?;
-        caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, false)?;
-        let nome = destino
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, pedido.mesclar)?;
+        let nome = if pedido.mesclar {
+            "mesclar".to_owned()
+        } else {
+            destino
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
         let mut parcial = PastaParcial {
             caminho: pasta.join(format!(
                 ".{nome}.{}.{}",
@@ -511,6 +533,24 @@ impl Programa {
                 raiz: pedido.raiz.clone(),
             });
         }
+        if pedido.mesclar && destino.is_dir() {
+            // Arquivo a arquivo, cada destino conferido de novo contra a
+            // raiz: uma pasta do jogo pode ter virado link depois da
+            // primeira conferência.
+            mesclar(
+                &interior.raiz,
+                &pedido.destino,
+                &parcial.caminho,
+                &parcial.caminho,
+            )?;
+            tracing::info!(
+                destino = %destino.display(),
+                arquivos = feito.arquivos,
+                bytes = feito.bytes,
+                "programa desempacotou por cima"
+            );
+            return Ok(feito);
+        }
         // O destino de antes sai só agora, com o novo inteiro ao lado.
         if let Ok(meta) = std::fs::symlink_metadata(&destino) {
             let saiu = if meta.is_dir() {
@@ -532,4 +572,49 @@ impl Programa {
         );
         Ok(feito)
     }
+}
+
+/// Move cada arquivo de `pasta` (sob `base`, a parcial) para o mesmo lugar sob
+/// `destino` (relativo a `raiz`), trocando o que houver com o mesmo nome.
+fn mesclar(raiz: &Path, destino: &str, base: &Path, pasta: &Path) -> Result<(), Recusa> {
+    let disco = |caminho: &Path| {
+        let caminho = caminho.to_path_buf();
+        move |erro: std::io::Error| Recusa::Disco {
+            caminho,
+            motivo: erro.to_string(),
+        }
+    };
+    for entrada in std::fs::read_dir(pasta).map_err(disco(pasta))? {
+        let entrada = entrada.map_err(disco(pasta))?;
+        let de = entrada.path();
+        let relativo = de
+            .strip_prefix(base)
+            .map_err(|_| Recusa::CaminhoInvalido {
+                caminho: de.display().to_string(),
+            })?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let junto = if destino.is_empty() {
+            relativo.clone()
+        } else {
+            format!("{destino}/{relativo}")
+        };
+        let alvo = caminho::dentro_da_raiz(raiz, &junto, false)?;
+        let tipo = entrada.file_type().map_err(disco(&de))?;
+        if tipo.is_dir() {
+            if !alvo.is_dir() {
+                if std::fs::symlink_metadata(&alvo).is_ok() {
+                    std::fs::remove_file(&alvo).map_err(disco(&alvo))?;
+                }
+                std::fs::create_dir_all(&alvo).map_err(disco(&alvo))?;
+            }
+            mesclar(raiz, destino, base, &de)?;
+        } else {
+            if alvo.is_dir() {
+                std::fs::remove_dir_all(&alvo).map_err(disco(&alvo))?;
+            }
+            std::fs::rename(&de, &alvo).map_err(disco(&alvo))?;
+        }
+    }
+    Ok(())
 }

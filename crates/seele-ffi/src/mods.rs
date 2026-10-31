@@ -554,6 +554,7 @@ mod tests_do_aceite_de_maquina {
                 rodar: None,
                 disco_maximo: 0,
                 termos: vec![],
+                instalar: None,
             },
             pedido_por: "marcela".into(),
             quando: 0,

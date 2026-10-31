@@ -200,17 +200,39 @@ impl Programa {
         if interior.encerrado.load(Ordering::SeqCst) {
             return Err(Recusa::Encerrado);
         }
-        let aceito = interior.politica.comando.as_ref();
-        let Some(aceito) = aceito.filter(|a| a.comando == pedido.comando) else {
+        // **Dois comandos aceitos, no máximo** (API 8 parte 6): o `rodar` e o
+        // passo de `instalar`. Vale o par inteiro — o comando e os argumentos
+        // de um deles —, e não um comando de um com os argumentos do outro:
+        // os dois costumam ser o mesmo `java/bin/java`.
+        let politica = &interior.politica;
+        let aceitos: Vec<&super::ComandoAceito> = politica
+            .comando
+            .iter()
+            .chain(politica.instalar.iter())
+            .collect();
+        let do_mesmo_programa: Vec<&&super::ComandoAceito> = aceitos
+            .iter()
+            .filter(|a| a.comando == pedido.comando)
+            .collect();
+        let Some(primeiro) = do_mesmo_programa.first() else {
             return Err(Recusa::ComandoForaDoAceito {
                 pedido: pedido.comando.clone(),
-                aceito: aceito.map(|a| a.comando.clone()),
+                aceito: (!aceitos.is_empty()).then(|| {
+                    aceitos
+                        .iter()
+                        .map(|a| a.comando.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ou ")
+                }),
             });
         };
-        if aceito.argumentos != pedido.argumentos {
+        if !do_mesmo_programa
+            .iter()
+            .any(|a| a.argumentos == pedido.argumentos)
+        {
             return Err(Recusa::ArgumentosForaDoAceito {
                 pedidos: pedido.argumentos.clone(),
-                aceitos: aceito.argumentos.clone(),
+                aceitos: primeiro.argumentos.clone(),
             });
         }
         let programa = resolver_executavel(caminho::dentro_da_raiz(

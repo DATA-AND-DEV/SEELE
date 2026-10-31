@@ -474,6 +474,15 @@ pub enum Detectado {
     Tipo(&'static str),
     /// Bytes de formato nenhum.
     FormatoNenhum,
+    /// **Maior que o teto do tipo que a espera aceita** (API 8 parte 6): 10
+    /// MiB de imagem, 64 MiB de `.mrpack`. Conferido antes do primeiro byte
+    /// quando o tamanho vem no pedido, e no corte quando não vem.
+    AcimaDoTeto {
+        /// O tamanho do que chegava.
+        bytes: u64,
+        /// O teto.
+        teto: u64,
+    },
 }
 
 impl From<seele_proto::volume::VolumeRefusal> for Recusa {
@@ -492,6 +501,12 @@ impl Recusa {
     pub fn nome_para_o_mod(self) -> String {
         use seele_proto::volume::VolumeRefusal;
         match (self.motivo, self.detectado) {
+            // O tamanho e o teto vão no nome, e a casca os faz campos
+            // (`tamanho`, `teto`): a tela do MOD diz os dois, e sugere o
+            // link do Modrinth para o pack.
+            (_, Detectado::AcimaDoTeto { bytes, teto }) => {
+                format!("arquivo-grande-demais:{bytes}:{teto}")
+            }
             (VolumeRefusal::SemEspera, _) => "sem-espera".to_owned(),
             (VolumeRefusal::TipoRecusado, Detectado::Tipo(tipo)) => format!("tipo-recusado:{tipo}"),
             (VolumeRefusal::TipoRecusado, Detectado::FormatoNenhum) => {
@@ -534,6 +549,18 @@ pub async fn receber_imagem(
 
     // Sem raiz não há onde gravar: este servidor é o de memória, e a recusa é
     // do disco e não do token — quem enviou precisa saber a diferença.
+    // **O teto é o do tipo que a espera aceita** (API 8 parte 6), e é
+    // conferido antes do primeiro byte quando o pedido diz o tamanho.
+    let teto = teto_da_espera(&espera);
+    if let Some(bytes) = tamanho.filter(|b| *b > teto) {
+        return Err((
+            token.clone(),
+            Recusa {
+                motivo: VolumeRefusal::Incompleto,
+                detectado: Detectado::AcimaDoTeto { bytes, teto },
+            },
+        ));
+    }
     let Some(raizes) = raizes else {
         return Err(errar(VolumeRefusal::NaoGravei));
     };
@@ -632,6 +659,13 @@ async fn escorrer(
         if tamanho.is_some_and(|total| bytes > total) {
             return Err(VolumeRefusal::Incompleto.into());
         }
+        let teto = teto_da_espera(espera);
+        if bytes > teto {
+            return Err(Recusa {
+                motivo: VolumeRefusal::Incompleto,
+                detectado: Detectado::AcimaDoTeto { bytes, teto },
+            });
+        }
         arquivo
             .write_all(pedaco)
             .await
@@ -649,10 +683,34 @@ async fn escorrer(
     // **O tipo vem dos bytes**, com a mesma tabela de quatro formatos que a
     // prévia de anexo usa — reúso, e não uma segunda cópia da regra. Decisão 2
     // do ADR 0048: o MOD não tem como conferir o que ele não vê.
-    let formato = seele_proto::imagem::sniff(&comeco).ok_or(Recusa {
-        motivo: VolumeRefusal::TipoRecusado,
-        detectado: Detectado::FormatoNenhum,
-    })?;
+    let Some(formato) = seele_proto::imagem::sniff(&comeco) else {
+        // **O `.mrpack`** (API 8 parte 6), também pelos bytes: um zip com o
+        // índice na raiz, e um índice que se abre — o arquivo de obras é
+        // lido de volta só no diretório central e na entrada do índice.
+        let aceita_pack = espera
+            .tipos
+            .iter()
+            .any(|t| t == seele_proto::pack::SUFIXO_DO_PACK);
+        let e_pack = aceita_pack
+            && std::fs::File::open(obras)
+                .ok()
+                .is_some_and(|mut f| crate::mods::pack::indice_de(&mut f, bytes).is_ok());
+        if !e_pack {
+            return Err(Recusa {
+                motivo: VolumeRefusal::TipoRecusado,
+                detectado: Detectado::FormatoNenhum,
+            });
+        }
+        return Ok(Chegou {
+            mod_id: String::new(),
+            pessoa: espera.pessoa,
+            token: String::new(),
+            caminho: String::new(),
+            bytes,
+            hash: hex(&soma.finish()),
+            tipo: seele_proto::pack::TIPO_DO_PACK,
+        });
+    };
     // O MOD declara os tipos como `png`, `jpeg`, `webp`, `gif` — o sufixo do
     // tipo de mídia, que é como o `data:` da janela já os escrevia.
     if !espera.tipos.iter().any(|t| t == formato.sufixo()) {
@@ -671,6 +729,34 @@ async fn escorrer(
         hash: hex(&soma.finish()),
         tipo: formato.media_type(),
     })
+}
+
+/// **O teto de uma espera**: o do maior tipo que ela aceita — 64 MiB se ela
+/// aceita `.mrpack`, 10 MiB de imagem no resto (API 8 parte 6).
+fn teto_da_espera(espera: &Espera) -> u64 {
+    if espera
+        .tipos
+        .iter()
+        .any(|t| t == seele_proto::pack::SUFIXO_DO_PACK)
+    {
+        seele_proto::pack::TETO_DO_PACK
+    } else {
+        seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64
+    }
+}
+
+/// O teto da leitura de `alvo`: 64 MiB se os bytes são um `.mrpack`, 10 MiB no
+/// resto. Lido do arquivo, e não do nome.
+fn teto_da_leitura(alvo: &std::path::Path, tamanho: u64) -> u64 {
+    let e_pack = tamanho <= seele_proto::pack::TETO_DO_PACK
+        && std::fs::File::open(alvo)
+            .ok()
+            .is_some_and(|mut f| crate::mods::pack::indice_de(&mut f, tamanho).is_ok());
+    if e_pack {
+        seele_proto::pack::TETO_DO_PACK
+    } else {
+        seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64
+    }
 }
 
 /// Hexadecimal minúsculo, como todo hash que uma pessoa compara a olho.
@@ -707,8 +793,15 @@ pub async fn atender_imagem(
                 let caminho = valor.get("volume").and_then(serde_json::Value::as_str).ok_or_else(|| anyhow::anyhow!("resposta sem volume"))?;
                 let raiz = server.mods_dir.as_ref().ok_or_else(|| anyhow::anyhow!("sem diretório de MODs"))?.dados_de(&mod_id).join(PASTA);
                 let alvo = crate::mods::arquivos::dentro(&raiz, caminho).ok_or_else(|| anyhow::anyhow!("caminho de volume inválido"))?;
-                let arquivo = tokio::fs::File::open(alvo).await?;
-                anyhow::ensure!(arquivo.metadata().await?.len() <= seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64, "arquivo-grande-demais");
+                let arquivo = tokio::fs::File::open(&alvo).await?;
+                let tamanho = arquivo.metadata().await?.len();
+                // O teto da leitura é o do tipo dos bytes (API 8 parte 6): o
+                // `.mrpack` vai até 64 MiB, para a máquina e para quem joga.
+                let teto = {
+                    let alvo = alvo.clone();
+                    tokio::task::spawn_blocking(move || teto_da_leitura(&alvo, tamanho)).await?
+                };
+                anyhow::ensure!(tamanho <= teto, "arquivo-grande-demais:{tamanho}:{teto}");
                 Ok(Some(arquivo))
             }
         }

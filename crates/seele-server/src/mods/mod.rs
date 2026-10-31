@@ -34,6 +34,7 @@ pub mod despacho;
 pub mod instalar;
 pub mod maquina;
 pub mod mundo;
+pub mod pack;
 pub mod pedidos;
 pub mod tema;
 pub mod volume;
@@ -751,6 +752,33 @@ impl Anfitriao {
             "apagar",
             Function::new(ctx.clone(), move |nome: String| arquivos::apagar(&p, &nome))?,
         )?;
+        // **O pack enviado** (API 8 parte 6; `mods::pack`): o tamanho, o
+        // `sha512` e o texto do índice de um `.mrpack` do volume, para a
+        // metade de servidor montar a oferta da máquina. Só para quem tem
+        // metade de máquina, como `mundo.maquinas`.
+        if portas.maquinas {
+            let p = pasta.join(volume::PASTA);
+            volume_js.set(
+                "pack",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          nome: String|
+                          -> rquickjs::Result<rquickjs::Value<'js>> {
+                        let lido = arquivos::dentro(&p, &nome)
+                            .ok_or(pack::NaoLido::NaoExiste)
+                            .and_then(|c| pack::ler_do_disco(&c));
+                        let resposta = match lido {
+                            Ok(lido) => serde_json::json!({
+                                "ok": true, "bytes": lido.bytes, "sha512": lido.sha512, "indice": lido.indice,
+                            }),
+                            Err(nao) => nao.resposta(),
+                        };
+                        ctx.json_parse(resposta.to_string())
+                    },
+                )?,
+            )?;
+        }
         let p = pasta.join(volume::PASTA);
         volume_js.set(
             "servir",
@@ -858,6 +886,39 @@ impl Anfitriao {
         // **lança**: um pedido mal escrito não é uma condição do momento que o
         // MOD trate, é um defeito dele, e a exceção diz onde.
         if portas.maquinas {
+            // **O pack do link do Modrinth** (API 8 parte 6; `mods::pack`):
+            // os bytes com o `sha512` e o tamanho declarados, pelos tetos de
+            // `mundo.buscar`, e o índice tirado do zip. Só para quem tem
+            // metade de máquina: é ela quem roda o pack.
+            mundo_js.set(
+                "buscarPack",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          pedido: rquickjs::Object<'js>|
+                          -> rquickjs::Result<rquickjs::Value<'js>> {
+                        let url: String = pedido.get("url").unwrap_or_default();
+                        let sha512: String = pedido.get("sha512").unwrap_or_default();
+                        let tamanho: f64 = pedido.get("tamanho").unwrap_or(0.0);
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let tamanho = if tamanho.is_finite() && tamanho > 0.0 {
+                            tamanho as u64
+                        } else {
+                            0
+                        };
+                        let resposta = match pack::buscar(&url, &sha512, tamanho) {
+                            Ok(lido) => serde_json::json!({
+                                "ok": true, "bytes": lido.bytes, "sha512": lido.sha512, "indice": lido.indice,
+                            }),
+                            Err(nao) => {
+                                tracing::info!(url = %url, recusa = ?nao, "mundo.buscarPack recusou");
+                                nao.resposta()
+                            }
+                        };
+                        ctx.json_parse(resposta.to_string())
+                    },
+                )?,
+            )?;
             let maquinas_js = rquickjs::Object::new(ctx.clone())?;
             let declarado = Arc::clone(&self.maquinas);
             maquinas_js.set(

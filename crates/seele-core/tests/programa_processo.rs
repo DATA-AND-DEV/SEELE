@@ -62,6 +62,8 @@ fn programa(nome: &str, argumentos: &[&str]) -> (Pasta, Programa) {
             comando: COMANDO.to_owned(),
             argumentos: argumentos.iter().map(|a| (*a).to_owned()).collect(),
         }),
+        instalar: None,
+        pack: None,
         teto_de_disco: 1 << 30,
         raiz,
     };
@@ -244,6 +246,8 @@ async fn comando_aceito_com_pai_e_recusado_mesmo_assim() {
             comando: "../fora".to_owned(),
             argumentos: vec![],
         }),
+        instalar: None,
+        pack: None,
         teto_de_disco: 1,
         raiz: p.0.join("jogo"),
     };
@@ -430,4 +434,65 @@ async fn linha_longa_chega_cortada_e_a_seguinte_inteira() {
     assert_eq!(saidas[1].len(), MAX_BYTES_POR_LINHA);
     assert_eq!(saidas[2], "salvo");
     assert_eq!(fim.linhas_cortadas, 1);
+}
+
+/// **O passo de instalar é um segundo comando aceito** (API 8 parte 6): o
+/// instalador do loader roda com os argumentos dele, o servidor com os dele, e
+/// nada que misture os dois (o mesmo programa com outros argumentos) passa.
+#[tokio::test]
+async fn o_passo_de_instalar_e_um_segundo_comando_aceito_e_so_ele() {
+    let (p, _) = programa("instalar", &["eco"]);
+    let raiz = p.0.join("jogo");
+    let politica = Politica {
+        dominios: vec![],
+        artefatos: vec![],
+        de_outros_sistemas: vec![],
+        origens: vec![],
+        comando: Some(ComandoAceito {
+            comando: COMANDO.to_owned(),
+            argumentos: vec!["eco".to_owned()],
+        }),
+        instalar: Some(ComandoAceito {
+            comando: COMANDO.to_owned(),
+            argumentos: vec!["argumentos".to_owned(), "instalado".to_owned()],
+        }),
+        pack: None,
+        teto_de_disco: 1 << 30,
+        raiz,
+    };
+    let origem: Arc<dyn Origem> = Arc::new(OrigemHttps::nova().unwrap());
+    let programa = Programa::novo(politica, origem).unwrap();
+
+    let mut instalador = programa
+        .rodar(&pedido(&["argumentos", "instalado"], ""))
+        .unwrap();
+    let (linhas, fim) = esperar_o_fim(&mut instalador).await;
+    assert_eq!(fim.codigo, Some(0));
+    assert_eq!(
+        linhas,
+        vec![EventoDoProcesso::Saida("instalado".to_owned())]
+    );
+
+    let mut servidor = programa.rodar(&pedido(&["eco"], "server")).unwrap();
+    servidor.escrever("sair 0").await.unwrap();
+    let _ = esperar_o_fim(&mut servidor).await;
+
+    assert_eq!(
+        programa
+            .rodar(&pedido(&["argumentos", "outra-coisa"], ""))
+            .unwrap_err()
+            .nome(),
+        "argumentos-fora-do-aceito"
+    );
+    assert_eq!(
+        programa
+            .rodar(&PedidoDeExecucao {
+                comando: "bin/outro".to_owned(),
+                ..pedido(&["eco"], "")
+            })
+            .unwrap_err()
+            .nome(),
+        "comando-fora-do-aceito"
+    );
+    assert_eq!(programa.processos_vivos(), 0);
 }

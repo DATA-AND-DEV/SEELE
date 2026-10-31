@@ -468,6 +468,22 @@ pub const PRELUDIO: &str = r#"
     entrar: async (nome) => pedir('tunel-entrar', { nome: String(nome ?? ''), gesto: gestoDaVolta }),
   }));
 
+  // **`SeeleUI.salvar`** (API 8 parte 6; spec §6), do mesmo poder `porta`:
+  // quem joga recebe um arquivo que a metade de servidor guardou (o
+  // `.mrpack`) pelo diálogo de salvar do sistema. `pedido` vai ao `aoPedir`
+  // dela, que autoriza respondendo `{ ok, volume }`; `nome` é só a sugestão —
+  // o caminho é da pessoa e não volta. Como o túnel, só dentro de um clique
+  // (o bilhete da volta). Resolve com `{ bytes }`, ou `null` se a pessoa
+  // cancelou.
+  const salvar = capacidades.has('salvar')
+    ? async (arquivo) => pedir('salvar', {
+      canal: Number(arquivo?.canal) || 0,
+      pedido: arquivo?.pedido ?? null,
+      nome: String(arquivo?.nome ?? ''),
+      gesto: gestoDaVolta,
+    })
+    : null;
+
   if (!daMaquina) globalThis.SeeleUI = Object.freeze({
     // **Sem `regiao` e sem `cartoes`** (decisão do dono de 08/10): a região é
     // um ponto de contribuição, e o cartão de uma pessoa é o `pessoa.cartao`.
@@ -486,6 +502,7 @@ pub const PRELUDIO: &str = r#"
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
     ...(tunel ? { tunel } : {}),
+    ...(salvar ? { salvar } : {}),
     // A lista, legível pelo próprio MOD: um pacote que queira degradar em vez
     // de falhar precisa poder perguntar, e perguntar a `SeeleUI.superficies`
     // já é a resposta — mas um nome explícito evita o truque.
@@ -667,11 +684,26 @@ pub const PRELUDIO: &str = r#"
           destino: String(pedido?.destino ?? ''),
           texto: String(pedido?.texto ?? ''),
         }),
+        // `mesclar: true` (API 8 parte 6) entra por cima do que já está no
+        // destino, arquivo a arquivo (os `overrides` de um modpack); sem ele,
+        // o destino inteiro é trocado.
         desempacotar: (pedido) => pedir('programa-desempacotar', {
           arquivo: String(pedido?.arquivo ?? ''),
           destino: String(pedido?.destino ?? ''),
           raiz: String(pedido?.raiz ?? ''),
+          mesclar: pedido?.mesclar === true,
         }),
+        // **O pack da metade de servidor** (API 8 parte 6): `pedido` vai ao
+        // `aoPedir` dela, que autoriza respondendo `{ ok, volume }`; os bytes
+        // vêm pelo fluxo de volume, e o anfitrião só os grava se tiverem o
+        // hash do pack aceito. Resolve com `{ destino, tamanho, hash,
+        // jaEstava }`.
+        trazer: (pedido) => pedir('programa-trazer', {
+          pedido: pedido?.pedido ?? null,
+          destino: String(pedido?.destino ?? ''),
+        }),
+        // Um texto da pasta do servidor de jogo (o índice do pack), até 4 MiB.
+        ler: (pedido) => pedir('programa-ler', { arquivo: String(pedido?.arquivo ?? '') }),
         rodar: async (pedido) => objetoDoProcesso(await pedir('programa-rodar', {
           comando: String(pedido?.comando ?? ''),
           argumentos: Array.isArray(pedido?.argumentos) ? pedido.argumentos.map(String) : [],

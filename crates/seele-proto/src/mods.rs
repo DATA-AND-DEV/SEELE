@@ -261,6 +261,10 @@ pub fn capacidades_de(api: u32, poderes: &[Poder]) -> Vec<&'static str> {
     let mut capacidades = capacidades_da_api(api).to_vec();
     if poderes.contains(&Poder::Porta) {
         capacidades.push("tunel");
+        // `SeeleUI.salvar` (API 8 parte 6, spec §6): quem joga recebe o pack
+        // pelo diálogo de salvar do sistema. Do mesmo poder que o túnel, como
+        // a spec diz dos dois.
+        capacidades.push("salvar");
     }
     capacidades
 }

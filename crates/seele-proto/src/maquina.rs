@@ -222,6 +222,15 @@ pub struct OfertaDeMaquina {
     pub disco_maximo: u64,
     /// O que a pessoa precisa aceitar além da oferta.
     pub termos: Vec<TermoOferecido>,
+    /// **O passo de instalar, antes de `rodar`** (API 8 parte 6): o
+    /// instalador do loader de um modpack (Fabric, Quilt, Forge, NeoForge),
+    /// que monta as bibliotecas e o lançador do servidor uma vez. É um
+    /// segundo comando aceito, com os argumentos exatos, e a tela mostra os
+    /// dois. Nasceu no 12, neste ramo, e nunca saiu: entra no fim da struct
+    /// pelo precedente do `plataformas` (decisão Q3 da parte 4), e o ouro do
+    /// fio é regerado só na linha da oferta.
+    #[serde(default)]
+    pub instalar: Option<ComandoOferecido>,
 }
 
 fn fora(field: &'static str) -> ControlError {
@@ -344,7 +353,9 @@ impl Validate for OfertaDeMaquina {
             host("dominios_do_jogo", d)?;
         }
 
-        if let Some(rodar) = &self.rodar {
+        // O passo de instalar segue a régua do `rodar`: um comando é um
+        // comando, e o aceite prende os dois do mesmo jeito.
+        for rodar in self.rodar.iter().chain(self.instalar.iter()) {
             texto("comando", &rodar.comando, MAX_TEXTO)?;
             check_bounds("argumentos", rodar.argumentos.len(), MAX_ARGUMENTOS)?;
             for argumento in &rodar.argumentos {
@@ -545,6 +556,14 @@ mod tests {
                 titulo: "EULA".into(),
                 url: "https://aka.ms/MinecraftEULA".into(),
             }],
+            instalar: Some(ComandoOferecido {
+                comando: "java".into(),
+                argumentos: vec![
+                    "-jar".into(),
+                    "fabric-installer.jar".into(),
+                    "server".into(),
+                ],
+            }),
         }
     }
 
@@ -594,7 +613,18 @@ mod tests {
         assert_eq!(r, resumo_da_oferta("x/jogo", HASH_A, "mc-1", &base.clone()));
 
         type Mexe = fn(&mut OfertaDeMaquina);
-        let casos: [(&str, Mexe); 23] = [
+        let casos: [(&str, Mexe); 26] = [
+            ("instalar", |o| o.instalar = None),
+            ("instalar.comando", |o| {
+                if let Some(i) = o.instalar.as_mut() {
+                    i.comando = "java21".into();
+                }
+            }),
+            ("instalar.argumento", |o| {
+                if let Some(i) = o.instalar.as_mut() {
+                    i.argumentos[2] = "client".into();
+                }
+            }),
             ("artefatos.plataformas", |o| {
                 o.artefatos[0].plataformas = vec!["mac-aarch64".into()];
             }),
@@ -744,6 +774,16 @@ mod tests {
             ("comando vazio", |o| {
                 if let Some(r) = o.rodar.as_mut() {
                     r.comando.clear();
+                }
+            }),
+            ("comando de instalar vazio", |o| {
+                if let Some(i) = o.instalar.as_mut() {
+                    i.comando.clear();
+                }
+            }),
+            ("argumento de instalar com controle", |o| {
+                if let Some(i) = o.instalar.as_mut() {
+                    i.argumentos[0] = "a\nb".into();
                 }
             }),
             ("argumentos demais", |o| {

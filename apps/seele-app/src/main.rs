@@ -6566,6 +6566,7 @@ fn recusado(motivo: String) -> FalhaNoMod {
 
 /// O teto deste pedido de escolha — ver
 /// [`seele_ffi::escolhidos::teto_do_escolhido`].
+#[cfg(test)]
 fn teto_do_escolhido(limite_de_bytes: Option<usize>) -> usize {
     seele_ffi::escolhidos::teto_do_escolhido(limite_de_bytes)
 }
@@ -7054,6 +7055,157 @@ fn recusa_da_sessao_do_tunel(erro: &ConnectionError) -> FalhaNoMod {
     };
     FalhaNoMod::Recusado {
         motivo: motivo.to_owned(),
+    }
+}
+
+/// O que a janela recebe quando quem joga salvou um arquivo do MOD.
+#[derive(serde::Serialize)]
+struct SalvoParaOMod {
+    /// Quantos bytes foram gravados. **O caminho não volta**: ele é da pessoa.
+    bytes: usize,
+}
+
+/// **O nome que o diálogo sugere**, do que o MOD propôs: só letras, números,
+/// espaço, `.`, `-`, `_` e parênteses, até 80 caracteres, sem começar por `.`
+/// (nada de arquivo escondido), e `arquivo` quando não sobra nada. O MOD
+/// sugere; quem escolhe o nome e a pasta é a pessoa, no diálogo do sistema.
+fn nome_sugerido_ao_salvar(nome: &str) -> String {
+    let limpo: String = nome
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '.' | '-' | '_' | '(' | ')'))
+        .take(80)
+        .collect();
+    let limpo = limpo.trim().trim_start_matches('.').trim();
+    if limpo.is_empty() {
+        "arquivo".to_owned()
+    } else {
+        limpo.to_owned()
+    }
+}
+
+/// Grava `bytes` em `destino` **de uma vez**: num parcial ao lado, renomeado
+/// no fim. Um salvamento que cai no meio não deixa meio `.mrpack` com o nome
+/// que a pessoa escolheu.
+fn gravar_o_salvo(destino: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut parcial = destino.as_os_str().to_owned();
+    parcial.push(".seele-parcial");
+    let parcial = std::path::PathBuf::from(parcial);
+    let gravado = std::fs::write(&parcial, bytes).and_then(|()| std::fs::rename(&parcial, destino));
+    if gravado.is_err() {
+        let _ = std::fs::remove_file(&parcial);
+    }
+    gravado
+}
+
+/// **`SeeleUI.salvar`** (API 8 parte 6; spec §6): quem joga recebe um arquivo
+/// que a metade de servidor guardou (o `.mrpack`), pelo diálogo de salvar do
+/// sistema. **O MOD nunca escolhe o caminho**: ele sugere um nome, e o caminho
+/// fica com a pessoa e não volta a ele.
+///
+/// Só para o MOD de pé com o poder `porta` (a capacidade `salvar`, conferida
+/// aqui com o que o Rust leu do pacote); o clique é conferido pela janela,
+/// como o do túnel. Os bytes vêm pelo fluxo de volume de sempre: `payload` vai
+/// ao `aoPedir` da metade de servidor, que autoriza respondendo o caminho.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] com `mod-sem-porta`, `sessao-encerrada`, o texto
+/// do servidor (`arquivo-grande-demais:<t>:<teto>`, a recusa do MOD), ou
+/// `nao-gravei` quando o disco recusou o caminho escolhido.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn salvar_do_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    channel: u32,
+    payload: String,
+    nome: String,
+) -> Result<Option<SalvoParaOMod>, FalhaNoMod> {
+    use tauri_plugin_dialog::DialogExt as _;
+    session.recusar_se_morta(geracao)?;
+    let pode = session
+        .mods_nativos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+        .pode(geracao, &id, "salvar");
+    if !pode {
+        tracing::warn!(mod_id = %id_no_registro(&id), geracao, "o MOD pediu para salvar um arquivo e não está de pé com o poder porta");
+        return Err(FalhaNoMod::Recusado {
+            motivo: "mod-sem-porta".to_owned(),
+        });
+    }
+    let sugerido = nome_sugerido_ao_salvar(&nome);
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title("Salvar o arquivo que este MOD oferece")
+        .set_file_name(&sugerido)
+        .save_file(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+    // **Cancelar é uma resposta**: `null`, e o MOD sabe.
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(None);
+    };
+    let Ok(destino) = escolha.into_path() else {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "caminho-invalido".to_owned(),
+        });
+    };
+    session.recusar_se_morta(geracao)?;
+    let conexao = session.connection().map_err(|_| FalhaNoMod::Recusado {
+        motivo: "sessao-encerrada".to_owned(),
+    })?;
+    let bytes = conexao
+        .ler_imagem_mod(id.clone(), channel, payload)
+        .await
+        .map_err(|motivo| {
+            tracing::warn!(mod_id = %id_no_registro(&id), motivo = %motivo, "salvar: o servidor recusou o arquivo");
+            FalhaNoMod::Recusado { motivo }
+        })?;
+    let quantos = bytes.len();
+    let gravado = tauri::async_runtime::spawn_blocking(move || gravar_o_salvo(&destino, &bytes))
+        .await
+        .map_err(|_| FalhaNoMod::Recusado {
+            motivo: "nao-gravei".to_owned(),
+        })?;
+    if let Err(erro) = gravado {
+        tracing::warn!(mod_id = %id_no_registro(&id), %erro, "salvar: o disco recusou o caminho escolhido");
+        return Err(FalhaNoMod::Recusado {
+            motivo: "nao-gravei".to_owned(),
+        });
+    }
+    tracing::info!(mod_id = %id_no_registro(&id), geracao, bytes = quantos, "arquivo de MOD salvo pela pessoa");
+    Ok(Some(SalvoParaOMod { bytes: quantos }))
+}
+
+#[cfg(test)]
+mod salvar_testes {
+    #![allow(clippy::unwrap_used)]
+
+    /// O MOD sugere, e o produto limpa: sem barra (nada de caminho), sem
+    /// arquivo escondido, com teto.
+    #[test]
+    fn o_nome_sugerido_nao_vira_caminho() {
+        assert_eq!(super::nome_sugerido_ao_salvar("Casa do SEELE.mrpack"), "Casa do SEELE.mrpack");
+        assert_eq!(super::nome_sugerido_ao_salvar("../../.zshrc"), "zshrc");
+        assert_eq!(super::nome_sugerido_ao_salvar("a/b\\c.mrpack"), "abc.mrpack");
+        assert_eq!(super::nome_sugerido_ao_salvar("..."), "arquivo");
+        assert_eq!(super::nome_sugerido_ao_salvar(&"x".repeat(200)).len(), 80);
+    }
+
+    #[test]
+    fn o_salvo_entra_de_uma_vez_e_sem_parcial() {
+        let pasta = std::env::temp_dir().join(format!("seele-salvar-{}", std::process::id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let destino = pasta.join("pack.mrpack");
+        super::gravar_o_salvo(&destino, b"PK pack").unwrap();
+        assert_eq!(std::fs::read(&destino).unwrap(), b"PK pack");
+        assert!(!pasta.join("pack.mrpack.seele-parcial").exists());
+        assert!(super::gravar_o_salvo(&pasta.join("nao/existe/x"), b"x").is_err());
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 }
 
@@ -10756,6 +10908,7 @@ fn imagem_lida_dita(
 /// `tipo-recusado:heic` (rascunho da API 6, §7.1), no molde do
 /// `papel-nao-serve:<papel>`; o resto que não é um dos formatos é
 /// `formato-desconhecido`.
+#[cfg(test)]
 fn tipo_do_escolhido(bytes: &[u8]) -> Result<seele_ffi::mods::TipoLido, FalhaNoMod> {
     seele_ffi::escolhidos::tipo_do_escolhido(bytes).map_err(recusado)
 }
@@ -10849,10 +11002,13 @@ async fn escolher_para_o_mod(
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "arquivo-ilegivel".to_owned(),
         })?;
-    // O teto do produto vale sempre; o que o MOD declarou só o aperta.
-    if tamanho > teto_do_escolhido(limite_de_bytes) {
+    // O teto do produto vale sempre; o que o MOD declarou só o aperta. O do
+    // `.mrpack` (64 MiB, API 8 parte 6) só para o MOD que pediu o papel
+    // `pack`; a recusa diz o tamanho e o teto.
+    let teto = seele_ffi::escolhidos::teto_do_pedido(limite_de_bytes, papeis.as_deref());
+    if tamanho > teto {
         return Err(FalhaNoMod::Recusado {
-            motivo: "arquivo-grande-demais".to_owned(),
+            motivo: seele_ffi::escolhidos::grande_demais(tamanho, teto),
         });
     }
     let bytes = std::fs::read(&caminho).map_err(|_| FalhaNoMod::Recusado {
@@ -10861,7 +11017,8 @@ async fn escolher_para_o_mod(
 
     // **O tipo sai dos bytes**, como o da mídia do pacote. A extensão que a
     // pessoa tem no disco é texto, e texto não escolhe decodificador.
-    let lida = tipo_do_escolhido(&bytes)?;
+    let lida = seele_ffi::escolhidos::tipo_do_escolhido_para(&bytes, papeis.as_deref())
+        .map_err(recusado)?;
 
     // **E o papel provado é conferido contra o que o MOD pediu.** Sem isto, um
     // MOD que precisa de retrato recebia um som e só descobria ao tentar usá-lo
@@ -14739,6 +14896,7 @@ fn main() {
             som_do_mod,
             enviar_imagem_mod,
             ler_imagem_mod,
+            salvar_do_mod,
             escolher_para_o_mod,
             pedaco_do_escolhido,
             soltar_escolhido,
@@ -16908,6 +17066,7 @@ mod a_supervisao_dos_mods_nativos {
             ("fn midia_em_bytes(", 1),
             ("async fn enviar_imagem_mod(", 2),
             ("async fn ler_imagem_mod(", 2),
+            ("async fn salvar_do_mod(", 2),
             ("async fn escolher_para_o_mod(", 2),
             ("fn pedaco_do_escolhido(", 1),
         ] {

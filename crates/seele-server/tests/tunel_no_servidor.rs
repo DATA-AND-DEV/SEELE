@@ -274,6 +274,7 @@ async fn aceitar_como_maquina(
         rodar: None,
         disco_maximo: 0,
         termos: vec![],
+        instalar: None,
     };
     let fim = Instant::now() + PRAZO;
     let resumo = loop {

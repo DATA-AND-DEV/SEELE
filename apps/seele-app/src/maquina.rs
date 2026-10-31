@@ -187,6 +187,7 @@ pub(crate) fn campos_que_mudaram(
         rodar,
         disco_maximo,
         termos,
+        instalar,
     } = antes;
     let mut mudou = Vec::new();
     let mut se = |diferente: bool, nome: &'static str| {
@@ -212,6 +213,7 @@ pub(crate) fn campos_que_mudaram(
     se(*rodar != agora.rodar, "rodar");
     se(*disco_maximo != agora.disco_maximo, "disco_maximo");
     se(*termos != agora.termos, "termos");
+    se(*instalar != agora.instalar, "instalar");
     mudou
 }
 
@@ -316,7 +318,9 @@ pub(crate) fn tratar(oferta: &OfertaDeMaquinaFfi, capacidades: &[&str], json: &s
         | "programa-rodar"
         | "processo-escrever"
         | "processo-matar"
-        | "programa-recusas")
+        | "programa-recusas"
+        | "programa-trazer"
+        | "programa-ler")
             if com_programa =>
         {
             debug_assert!(programa::TIPOS.contains(&t));
@@ -397,6 +401,10 @@ pub(crate) trait Fio: Send + Sync {
     /// `MaquinaParada`, com o motivo em kebab-case.
     fn parar_maquina(&self, mod_id: &str, servidor: &str, motivo: &str)
         -> Result<(), &'static str>;
+    /// **Um arquivo do volume da metade de servidor** (API 8 parte 6), pelo
+    /// fluxo de volume de sempre: `payload` vai ao `aoPedir` dela, que
+    /// autoriza respondendo o caminho. O erro é o texto do servidor.
+    fn ler_volume(&self, mod_id: &str, payload: String) -> Futuro<Result<Vec<u8>, String>>;
 }
 
 /// O fio de verdade: a conexão da sessão em que o pedido chegou.
@@ -456,6 +464,12 @@ impl Fio for FioDaConexao {
     ) -> Result<(), &'static str> {
         self.0
             .parar_maquina(mod_id.to_owned(), servidor.to_owned(), motivo)
+    }
+
+    fn ler_volume(&self, mod_id: &str, payload: String) -> Futuro<Result<Vec<u8>, String>> {
+        let conexao = Arc::clone(&self.0);
+        let mod_id = mod_id.to_owned();
+        Box::pin(async move { conexao.ler_imagem_mod(mod_id, 0, payload).await })
     }
 }
 
@@ -2072,6 +2086,7 @@ mod testes {
             rodar: None,
             disco_maximo: 2_000_000_000,
             termos: Vec::new(),
+            instalar: None,
         }
     }
 
@@ -2347,6 +2362,8 @@ mod testes {
         anotado: Mutex<Vec<String>>,
         /// Quanto o `servir` demora no fio.
         atraso_do_servir: Duration,
+        /// O que o volume da metade de servidor devolve (`None`: recusa).
+        volume: Mutex<Option<Vec<u8>>>,
     }
 
     impl FioDeMentira {
@@ -2402,6 +2419,11 @@ mod testes {
         fn parar_maquina(&self, _: &str, _: &str, motivo: &str) -> Result<(), &'static str> {
             self.anotar(format!("parar-maquina {motivo}"));
             Ok(())
+        }
+        fn ler_volume(&self, _: &str, payload: String) -> Futuro<Result<Vec<u8>, String>> {
+            self.anotar(format!("ler-volume {payload}"));
+            let bytes = self.volume.lock().unwrap().clone();
+            Box::pin(async move { bytes.ok_or_else(|| "leitura recusada pelo MOD".to_owned()) })
         }
     }
 
@@ -2834,6 +2856,103 @@ mod testes {
         viva
     }
 
+    /// **O pack vem da metade de servidor, e só o aceito entra no disco**
+    /// (API 8 parte 6; spec §8): pela metade de máquina de verdade (QuickJS e
+    /// prelúdio), `maquina.programa.trazer` pede o volume ao fio, e o núcleo
+    /// confere os bytes contra o `pack` do aceite guardado. Bytes trocados no
+    /// servidor voltam `pack-diferente` com os dois hashes, e nada é gravado;
+    /// o volume recusado volta `pack-nao-veio` com o texto do servidor; e o
+    /// pack que já está não é buscado de novo.
+    #[test]
+    fn o_pack_trazido_so_entra_com_o_hash_do_aceite() {
+        use sha2::Digest as _;
+        let casa = pasta_do_teste("trazer");
+        let home = casa.0.to_string_lossy().into_owned();
+        let pack = b"PK\x03\x04 um pack de verdade".to_vec();
+        let hex: String = sha2::Sha512::digest(&pack)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut oferta = oferta_com_programa("java/bin/java", &["-jar", "server.jar"]);
+        oferta.pack = Some(seele_ffi::types::HashDeArtefatoFfi {
+            algoritmo: "sha512".to_owned(),
+            hex: hex.clone(),
+        });
+        let aceite = guardado(oferta, "aaaa", "h1");
+        let caps = ["maquina", "maquina.programa"];
+        let rodar = |volume: Option<Vec<u8>>| {
+            let programa = programa::programa_para(&caps, "aaaa", "h1", Some(&aceite), &home)
+                .expect("o aceite monta o programa");
+            let raiz = programa.raiz().to_path_buf();
+            let fio = Arc::new(FioDeMentira {
+                volume: Mutex::new(volume),
+                ..FioDeMentira::default()
+            });
+            let _viva = subir_com_programa(
+                &fio,
+                aceite.oferta.clone(),
+                Ok(programa),
+                "maquina.programa.trazer({ pedido: { op: 'pack' }, destino: 'pack.mrpack' })\
+                   .then((r) => maquina.pedir('trouxe ' + r.jaEstava + ' ' + r.tamanho + ' ' + r.hash.slice(0, 8)),\
+                         (e) => maquina.pedir('recusou ' + e.erro + ' ' + (e.esperado || e.motivo || '').slice(0, 26) + ' ' + (e.obtido || '').slice(0, 8)));",
+            );
+            let anotado = fio.esperar("pedir ");
+            (anotado, raiz)
+        };
+
+        let (anotado, raiz) = rodar(Some(b"PK\x03\x04 outro pack".to_vec()));
+        let trocado: String = sha2::Sha512::digest(b"PK\x03\x04 outro pack")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert!(
+            anotado
+                .iter()
+                .any(|l| l.starts_with(r#"ler-volume {"op":"pack"}"#)),
+            "{anotado:?}"
+        );
+        let ultima = anotado.iter().find(|l| l.starts_with("pedir ")).unwrap();
+        assert_eq!(
+            ultima,
+            &format!(
+                "pedir \"recusou pack-diferente {} {}\"",
+                &hex[..26],
+                &trocado[..8]
+            )
+        );
+        assert!(
+            !raiz.join("pack.mrpack").exists(),
+            "o pack trocado foi gravado"
+        );
+
+        let (anotado, _) = rodar(None);
+        let ultima = anotado.iter().find(|l| l.starts_with("pedir ")).unwrap();
+        assert_eq!(
+            ultima,
+            "pedir \"recusou pack-nao-veio leitura recusada pelo MOD \""
+        );
+
+        let (anotado, raiz) = rodar(Some(pack.clone()));
+        let ultima = anotado.iter().find(|l| l.starts_with("pedir ")).unwrap();
+        assert_eq!(
+            ultima,
+            &format!("pedir \"trouxe false {} {}\"", pack.len(), &hex[..8])
+        );
+        assert_eq!(std::fs::read(raiz.join("pack.mrpack")).unwrap(), pack);
+
+        // Já está: sem pedir o volume.
+        let (anotado, _) = rodar(None);
+        assert!(
+            !anotado.iter().any(|l| l.starts_with("ler-volume")),
+            "{anotado:?}"
+        );
+        let ultima = anotado.iter().find(|l| l.starts_with("pedir ")).unwrap();
+        assert_eq!(
+            ultima,
+            &format!("pedir \"trouxe true {} {}\"", pack.len(), &hex[..8])
+        );
+    }
+
     /// **Sem o aceite, nenhum `baixar` e nenhum `rodar`** (spec, «Como provar
     /// que funciona»). Sem aceite guardado, `programa_para` não monta nada; a
     /// metade sobe sem `Programa`, e cada pedido volta `sem-aceite`, contado,
@@ -3185,6 +3304,8 @@ mod testes {
     /// falha anotados com a hora.
     struct FioDoMinecraft {
         plano: serde_json::Value,
+        /// O `.mrpack` que o volume da metade de servidor guardaria.
+        pack: Option<String>,
         comeco: Instant,
         anotado: Mutex<Vec<(Duration, String)>>,
     }
@@ -3250,6 +3371,17 @@ mod testes {
             self.anotar(format!("parar-maquina {motivo}"));
             Ok(())
         }
+        /// O pack «enviado»: os bytes do `.mrpack` que o plano aponta, como a
+        /// metade de servidor os serviria pelo volume.
+        fn ler_volume(&self, _: &str, payload: String) -> Futuro<Result<Vec<u8>, String>> {
+            self.anotar(format!("ler-volume {payload}"));
+            let lido = self
+                .pack
+                .as_ref()
+                .ok_or_else(|| "sem pack no plano".to_owned())
+                .and_then(|c| std::fs::read(c).map_err(|e| e.to_string()));
+            Box::pin(async move { lido })
+        }
     }
 
     /// **Um Minecraft Vanilla de verdade pela metade de máquina de verdade**
@@ -3306,8 +3438,64 @@ mod testes {
         let programa = programa::programa_para(&caps, "r1", "h1", Some(&aceite), &casa)
             .expect("o aceite monta o programa");
         eprintln!("pasta do servidor de jogo: {}", programa.raiz().display());
+        let raiz = programa.raiz().to_path_buf();
+        // **Os netos** (parte 6): o `programa` mata o filho, e não a árvore. A
+        // cada 250 ms, a lista de processos do sistema: os que rodam da pasta
+        // deste servidor de jogo, e quem tem um deles como pai.
+        let vigia_ligada = Arc::new(AtomicBool::new(true));
+        let vistos: Arc<Mutex<BTreeMap<u32, (u32, String)>>> = Arc::default();
+        let amostrador = {
+            let (ligada, vistos, raiz) = (
+                Arc::clone(&vigia_ligada),
+                Arc::clone(&vistos),
+                raiz.display().to_string(),
+            );
+            std::thread::spawn(move || {
+                while ligada.load(Ordering::Relaxed) {
+                    if let Ok(saida) = std::process::Command::new("ps")
+                        .args(["-axo", "pid=,ppid=,command="])
+                        .output()
+                    {
+                        let texto = String::from_utf8_lossy(&saida.stdout).into_owned();
+                        let linhas: Vec<(u32, u32, String)> = texto
+                            .lines()
+                            .filter_map(|l| {
+                                let mut p = l.split_whitespace();
+                                Some((
+                                    p.next()?.parse().ok()?,
+                                    p.next()?.parse().ok()?,
+                                    p.collect::<Vec<_>>().join(" "),
+                                ))
+                            })
+                            .collect();
+                        let do_jogo: Vec<u32> = linhas
+                            .iter()
+                            .filter(|(_, _, c)| c.contains(&raiz))
+                            .map(|(p, _, _)| *p)
+                            .collect();
+                        let mut v = vistos.lock().unwrap();
+                        for (pid, pai, cmd) in linhas {
+                            if do_jogo.contains(&pid) || do_jogo.contains(&pai) {
+                                // O começo é a pasta; o que diz quem é, o fim.
+                                let fim: String = cmd
+                                    .chars()
+                                    .rev()
+                                    .take(110)
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                    .rev()
+                                    .collect();
+                                v.insert(pid, (pai, fim));
+                            }
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            })
+        };
         let fio = Arc::new(FioDoMinecraft {
             plano: lido["plano"].clone(),
+            pack: lido["pack_local"].as_str().map(str::to_owned),
             comeco: Instant::now(),
             anotado: Mutex::default(),
         });
@@ -3342,10 +3530,67 @@ mod testes {
             "o motd não é o da configuração: {status}"
         );
 
+        // Com mods: o que o Fabric carregou, e o que o pack deixou na pasta.
+        if lido.get("pack_local").is_some() {
+            let log =
+                std::fs::read_to_string(raiz.join("logs").join("latest.log")).unwrap_or_default();
+            for linha in log
+                .lines()
+                .filter(|l| l.contains("Loading") && l.contains("mod"))
+            {
+                eprintln!("log do jogo: {linha}");
+            }
+            let mods: Vec<String> = std::fs::read_dir(raiz.join("mods"))
+                .map(|d| {
+                    d.flatten()
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            eprintln!("mods/ na pasta: {mods:?}");
+            eprintln!(
+                "config/seele-prova.txt: {:?}; config/so-overrides.txt: {:?}",
+                std::fs::read_to_string(raiz.join("config/seele-prova.txt")).ok(),
+                std::fs::read_to_string(raiz.join("config/so-overrides.txt")).ok()
+            );
+            assert!(
+                mods.iter().any(|m| m.starts_with("fabric-api")),
+                "sem a Fabric API: {mods:?}"
+            );
+            assert!(
+                !mods.iter().any(|m| m.starts_with("sodium")),
+                "o mod só do cliente foi baixado: {mods:?}"
+            );
+            assert!(log.contains("lithium"), "o Fabric não carregou o Lithium");
+        }
+
         let parada = Instant::now();
         assert!(viva.encerrar(Fim::PeloDono));
         let levou = parada.elapsed();
         assert_eq!(viva.processos_vivos(), 0);
+        vigia_ligada.store(false, Ordering::Relaxed);
+        let _ = amostrador.join();
+        let vistos = vistos.lock().unwrap().clone();
+        let do_jogo: Vec<u32> = vistos.keys().copied().collect();
+        let netos: Vec<(u32, u32, String)> = vistos
+            .iter()
+            .filter(|(_, (pai, _))| do_jogo.contains(pai))
+            .map(|(pid, (pai, cmd))| (*pid, *pai, cmd.clone()))
+            .collect();
+        eprintln!("processos da pasta do jogo vistos: {}", vistos.len());
+        for (pid, (pai, cmd)) in &vistos {
+            eprintln!("  pid {pid} (pai {pai}): {cmd}");
+        }
+        eprintln!("netos (filhos de um processo da pasta): {netos:?}");
+        // Algum sobreviveu à parada?
+        std::thread::sleep(Duration::from_millis(500));
+        for (pid, (_, cmd)) in &vistos {
+            let vivo = std::process::Command::new("ps")
+                .args(["-p", &pid.to_string()])
+                .output()
+                .is_ok_and(|o| o.status.success());
+            eprintln!("  depois da parada, pid {pid} vivo: {vivo} ({cmd})");
+        }
         let porta_fechada = std::net::TcpStream::connect(("127.0.0.1", porta)).is_err();
         eprintln!(
             "medidas: baixando {:?}, pronto {:?}, ligando {:?}, servir {:?}, a parada pelo dono levou {levou:?}, a porta do jogo fechou: {porta_fechada}",

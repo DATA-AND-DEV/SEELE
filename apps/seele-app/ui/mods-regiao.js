@@ -569,7 +569,13 @@ function pessoaNomeada(fonte) {
 const PAPEIS_DE_ARQUIVO = Object.freeze({
   imagem: Object.freeze(["png", "jpg", "jpeg", "webp", "gif"]),
   som: Object.freeze(["wav", "mp3", "ogg", "flac", "m4a"]),
+  // O `.mrpack` do Modrinth (API 8 parte 6): conferido pelos bytes no Rust (um
+  // zip com `modrinth.index.json` na raiz), até 64 MiB, só para quem o pede.
+  pack: Object.freeze(["mrpack"]),
 });
+
+/** O teto do pack (`seele_proto::pack::TETO_DO_PACK`). */
+const TETO_DO_PACK = 64 * 1024 * 1024;
 
 /**
  * Os papéis que este `arquivo` pede, dentro dos que a API conhece.
@@ -589,7 +595,8 @@ function papeisDeArquivo(no) {
 function tetoDeArquivo(no) {
   const n = Number(no?.limiteDeBytes);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(Math.round(n), LIMITES_DA_REGIAO.bytesDeMidia);
+  const teto = papeisDeArquivo(no).includes("pack") ? TETO_DO_PACK : LIMITES_DA_REGIAO.bytesDeMidia;
+  return Math.min(Math.round(n), teto);
 }
 
 /** O texto de um rótulo declarado por `rotulo` ou por `dentro`, quando é texto. */
