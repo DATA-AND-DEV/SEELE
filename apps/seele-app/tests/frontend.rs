@@ -25856,8 +25856,11 @@ fn os_alertas_sonoros_carregam_antes_de_quem_os_chama() {
             motor < posicao(quem),
             "alertas-sonoros.js carrega depois de {quem}, que o chama"
         );
+        // `alertasSonoros?.` nos ganchos do fluxo (ligação, sala, porta): um som
+        // que falta não derruba a chamada. As duas formas contam como gancho.
+        let fonte = read(&format!("ui/{quem}"));
         assert!(
-            read(&format!("ui/{quem}")).contains("alertasSonoros."),
+            fonte.contains("alertasSonoros.") || fonte.contains("alertasSonoros?."),
             "{quem} deixou de usar o motor dos alertas: o gancho sumiu"
         );
     }
