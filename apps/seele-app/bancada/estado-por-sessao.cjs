@@ -103,9 +103,10 @@ const sessao = (id, nome) => ({
     assert.equal(emB.termo, "", "o termo da busca de A ficou em B");
     assert.equal(emB.aceite, false, "a pergunta dos MODs de A aparece em B");
 
-    // ENVIAR em B: nada sai com o texto nem o arquivo de A.
+    // Enviar em B (Enter no campo: o ENVIAR saiu do computador na 0.19): nada
+    // sai com o texto nem o arquivo de A.
     await page.waitForFunction(() => linhaAberta !== null);
-    await page.click("#botao-enviar");
+    await page.focus("#campo-mensagem");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(300);
     const saidas = await page.evaluate(() => recebidos.filter((r) => ["send_message", "enviar_anexo"].includes(r.cmd)));

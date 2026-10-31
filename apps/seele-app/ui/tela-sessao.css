@@ -798,12 +798,12 @@ button.voice_room-nome:hover { text-decoration: underline; }
    `botaoDeApagarVoiceRoom`), e não na cor (medido na auditoria do v6, 8:78;
    D-api-10). */
 .voice_room-apagar:disabled {
-  color: var(--seele-linha-forte);
-  border-color: var(--seele-linha);
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.voice_room-apagar:disabled:hover { color: var(--seele-linha-forte); background: none; }
+.voice_room-apagar:disabled:hover { background: var(--seele-controle); }
+.voice_room-apagar .glifo { width: 14px; height: 14px; }
 
 /* A fileira da Linha, quando ela tem controles ao lado. Sem eles o `<li>`
    continua sendo o que era: um único botão de largura cheia. */
@@ -942,6 +942,18 @@ button.voice_room-nome:hover { text-decoration: underline; }
   inset: 0;
   border-radius: inherit;
   background: color-mix(in srgb, var(--seele-negro-painel) 55%, transparent);
+}
+
+/* **Sem capa, a cor do perfil** (0.19, pedido do dono): a mesma camada, com
+   um degradê da cor que a pessoa escolheu — já escurecido na mistura com o
+   painel, para que o véu de cada superfície, por cima, deixe o texto com 4,5:1
+   ou mais no pior ponto do degradê, nas oito amostras do editor (medido em
+   `bancada/cor-do-perfil.cjs`). A cor chega pela propriedade `--cor-do-perfil`,
+   posta por `aplicarCapa`. */
+[data-capa-de-cor] > .capa-camada {
+  background-image: linear-gradient(135deg,
+    color-mix(in srgb, var(--cor-do-perfil, var(--seele-laranja-nerv)) 60%, var(--seele-negro-painel)),
+    color-mix(in srgb, var(--cor-do-perfil, var(--seele-laranja-nerv)) 25%, var(--seele-negro-painel)));
 }
 
 [data-fala="sim"] > .capa-camada::after {
@@ -3463,7 +3475,7 @@ button.linha-nome:hover { text-decoration: underline; }
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
-:root:not([data-casca="celular"]) .voice_room-apagar { width: 22px; height: 22px; font-size: 12px; }
+:root:not([data-casca="celular"]) .voice_room-apagar { width: 28px; height: 28px; }
 :root:not([data-casca="celular"]) .voice_room-dentro { padding-left: 6px; gap: 2px; font-size: 13px; }
 :root:not([data-casca="celular"]) .voice_room-pessoa { gap: 8px; font-size: 13px; color: var(--seele-osso); }
 :root:not([data-casca="celular"]) .voice_room-pessoa::before { content: "\251C"; color: var(--seele-rotulo-painel); }
@@ -3503,14 +3515,49 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) #botao-mudo { order: 1; }
 :root:not([data-casca="celular"]) #botao-surdo { order: 2; }
 :root:not([data-casca="celular"]) #botao-server-sessao { order: 3; }
-:root:not([data-casca="celular"]) #operador-sair { order: 4; margin-left: auto; }
+:root:not([data-casca="celular"]) #operador-sair { order: 4; }
 :root:not([data-casca="celular"]) #operador-vista { order: 5; }
-:root:not([data-casca="celular"]) .operador > #voz-estado,
 :root:not([data-casca="celular"]) .operador > #sala-estado { order: 8; flex: 1 0 100%; margin: 0; font-size: 11px; color: var(--seele-rotulo-painel); }
+/* **«microfone aberto · ouvindo» sai da vista** (0.19, pedido do dono): os
+   ícones do microfone e do fone já dizem o estado, com a barra quando
+   desligados. A frase continua lá para o leitor de tela — é `role="status"`, e
+   é ela que anuncia a troca —, só fora da tela. */
+:root:not([data-casca="celular"]) .operador > #voz-estado {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 :root:not([data-casca="celular"]) .operador > #sessao-ficou-para-tras,
 :root:not([data-casca="celular"]) .operador > .voz-foco { order: 7; flex: 1 0 100%; }
 :root:not([data-casca="celular"]) .operador-fileira > button { min-height: 44px; font-size: 13px; padding: 0 14px; }
 :root:not([data-casca="celular"]) #ligacao-barra-dica { order: 9; }
+/* A seta da ficha (`perfis.css`) mora à direita da linha: a pastilha não a cobre. */
+:root:not([data-casca="celular"]) #lista-roster .pessoa:has(> .pessoa-abrir:not(.pessoa-nativo-resumo)) { padding-right: 30px; }
+/* **A fileira de controles ocupa o cartão inteiro** (0.19, pedido do dono: «os
+   botões do operador não estão bem distribuídos no espaço e deixam uma lacuna
+   muito grande»). Microfone, fone, ajustes, sair e — numa sala —
+   compartilhar: colunas iguais, cada controle esticado em pílula de 44px. Fora
+   da vista da ligação, que tem a barra dela (`camada-sala.css`). */
+#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-topo > :is(#botao-mudo, #botao-surdo, #botao-server-sessao),
+#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-fileira > :is(#operador-sair, #operador-vista) {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--seele-raio-pilula);
+}
+#tela-sessao:not([data-vista="ligacao"]) .operador :is(#operador-sair, #operador-vista, #botao-server-sessao) .glifo { width: 1.15em; height: 1.15em; }
 
 /* ---------- a conversa: cabeçalho ---------- */
 :root:not([data-casca="celular"]) .linha-barra { flex-wrap: wrap; }
@@ -3562,33 +3609,40 @@ button.linha-nome:hover { text-decoration: underline; }
 /* ---------- o compositor: bandeja, rótulo e caixa escura ---------- */
 :root:not([data-casca="celular"]) .compor {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  /* **Enter envia; o anexo fica ao lado da linha** (0.19, pedido do dono): o
+     ENVIAR sai do computador — o Enter já envia e a dica diz isso —, e o
+     anexo, só o ícone, sem borda, vai para a ponta direita da linha de
+     escrever. Embaixo ficam só as ferramentas dos MODs, sem contador nem
+     limite à vista (pedido do dono). No celular o ENVIAR continua: lá o
+     Enter do teclado quebra a linha. */
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
-    "rotulo rotulo rotulo rotulo"
-    "caixa caixa caixa caixa"
-    "anexar ferr tam enviar";
+    "rotulo rotulo"
+    "caixa anexar"
+    "ferr ferr";
   align-items: center;
   gap: 8px;
   padding: 10px 8px 8px;
   border-radius: 22px;
 }
-:root:not([data-casca="celular"]) .compor::before {
-  content: "";
-  grid-column: 1 / -1;
-  grid-row: 2 / 4;
-  align-self: stretch;
-  margin: 0 8px;
-  border-radius: var(--seele-raio);
-  background: color-mix(in srgb, var(--seele-negro-absoluto) 85%, transparent);
-}
+/* **Sem a caixa preta** (0.19, pedido do dono depois do teste do 0.19.0-4): o
+   canvas punha a linha de escrever e as ações numa caixa negra a 85% dentro da
+   bandeja, e ela pesava. Fica uma bandeja de vidro só, e o foco acende a
+   bandeja inteira. */
+:root:not([data-casca="celular"]) .compor:focus-within { border-color: var(--seele-laranja-nerv); }
 :root:not([data-casca="celular"]) #form-mensagem > label { grid-area: rotulo; padding: 0 14px; font-family: var(--seele-ui); font-weight: 500; font-size: 13px; color: var(--seele-osso-apagado); }
 :root:not([data-casca="celular"]) #form-mensagem > label > span { color: var(--seele-osso); }
-:root:not([data-casca="celular"]) .compor > .compor-caixa { grid-area: caixa; position: relative; margin: 10px 12px 0; padding: 0; border: 0; background: none; min-height: 36px; }
+:root:not([data-casca="celular"]) .compor > .compor-caixa { grid-area: caixa; position: relative; margin: 2px 0 0 12px; padding: 0; border: 0; border-radius: 0; background: none; min-height: 44px; }
 :root:not([data-casca="celular"]) .compor-caixa .prompt { font-family: var(--seele-mono); color: var(--seele-laranja-nerv); white-space: nowrap; }
+/* O `alex ❯` na linha do texto: o campo tem 8px de respiro em cima, e o
+   prompt tinha 12 — ficava meia letra abaixo do que se escreve. */
+:root:not([data-casca="celular"]) .compor-caixa:has(textarea) .prompt { padding-top: 8px; }
 :root:not([data-casca="celular"]) .compor-caixa textarea { font-size: 15px; min-height: 36px; }
-:root:not([data-casca="celular"]) .compor > #botao-anexar { grid-area: anexar; position: relative; margin: 0 0 10px 12px; width: 44px; min-height: 44px; border-radius: var(--seele-raio-pilula); }
-:root:not([data-casca="celular"]) .compor > .compositor-ferramentas { grid-area: ferr; position: relative; margin: 0 0 10px; display: flex; gap: 8px; }
-:root:not([data-casca="celular"]) .compor > #botao-enviar { grid-area: enviar; position: relative; margin: 0 12px 10px 0; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 18px; border-radius: var(--seele-raio-pilula); font-family: var(--seele-ui); font-weight: 600; font-size: 14px; letter-spacing: 0; }
+:root:not([data-casca="celular"]) .compor > #botao-anexar { grid-area: anexar; align-self: start; position: relative; margin: 0 8px 0 0; width: 44px; min-height: 44px; padding: 0; border: 0; background: none; color: var(--seele-osso-apagado); border-radius: var(--seele-raio-pilula); }
+:root:not([data-casca="celular"]) .compor > #botao-anexar:hover { color: var(--seele-osso); background: none; }
+:root:not([data-casca="celular"]) .compor > #botao-enviar { display: none; }
+:root:not([data-casca="celular"]) .compor > .compositor-ferramentas { grid-area: ferr; position: relative; margin: 0 0 4px 12px; display: flex; gap: 8px; }
+:root:not([data-casca="celular"]) .compor > #botao-anexar .glifo { width: 18px; height: 18px; }
 :root:not([data-casca="celular"]) #botao-enviar > svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---------- as pessoas ---------- */
@@ -3618,7 +3672,18 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .metrica .rotulo { text-transform: lowercase; }
 
 /* ---------- ajustes da segunda passada, depois da primeira comparação ---------- */
-:root:not([data-casca="celular"]) .voice_room .canal-cabeca { flex-wrap: wrap; row-gap: 6px; }
+/* **A fileira da sala é uma linha só** (0.19, pedido do dono: «o nome do
+   usuário está apontando para uma bolinha vazia, deveria ser para a sala»).
+   Ela quebrava, e o botão de apagar descia sozinho para uma linha própria — a
+   árvore das pessoas parecia pendurada nele. Agora o nome cede (reticências), o
+   chip encolhe para «AQUI», e a contagem e o botão ficam onde estão. */
+:root:not([data-casca="celular"]) .voice_room .canal-cabeca { flex-wrap: nowrap; }
+:root:not([data-casca="celular"]) .voice_room { container-type: inline-size; }
+:root:not([data-casca="celular"]) .voice_room-aqui { flex: 0 1 auto; min-width: 0; }
+.voice_room-aqui-longo { display: none; }
+@container (min-width: 21rem) {
+  .voice_room-aqui-longo { display: inline; }
+}
 :root:not([data-casca="celular"]) .voice_room-nome { flex: 0 1 auto; min-width: 0; }
 :root:not([data-casca="celular"]) .operador-fileira > button { flex: 0 0 auto; padding: 0 12px; }
 :root:not([data-casca="celular"]) .roster-sala::before { content: none; }
@@ -3673,4 +3738,52 @@ button.linha-nome:hover { text-decoration: underline; }
   position: relative;
   padding-right: var(--pessoa-espaco-acoes);
   min-height: var(--pessoa-altura-minima);
+}
+
+/* ---------- o nome ganha da pastilha na lista de pessoas ----------
+   0.19, pedido do dono: «Cria de G…» — o chip TRANSMITINDO, ao lado, ficava com
+   a largura e deixava ao nome 88px. A pastilha desce para baixo do nome, no
+   alinhamento dele (depois do retrato), e o nome ocupa a largura da linha: um
+   nome de até 20 letras com o «(você)» aparece inteiro a 1280 e a 1440
+   (`bancada/area-util.cjs` conta os cortes), e um nome maior quebra em duas
+   linhas antes das reticências. */
+:root:not([data-casca="celular"]) #lista-roster li.pessoa:not(.pessoa-apresentada):not(.pessoa-com-detalhes) {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0;
+}
+:root:not([data-casca="celular"]) #lista-roster li.pessoa .pessoa-nome {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+:root:not([data-casca="celular"]) #lista-roster li.pessoa:not(.pessoa-apresentada):not(.pessoa-com-detalhes) .pessoa-cabeca { min-height: 36px; }
+:root:not([data-casca="celular"]) #lista-roster li.pessoa:not(.pessoa-apresentada):not(.pessoa-com-detalhes) .pessoa-rodape {
+  justify-content: flex-start;
+  padding: 0 0 4px 42px;
+  margin-top: -2px;
+}
+:root:not([data-casca="celular"]) #lista-roster li.pessoa .pessoa-estados { justify-content: flex-start; }
+
+/* ---------- a lista de pessoas não escreve TRANSMITINDO ----------
+   0.19, pedido do dono («tira o transmitindo da aba de perfis»), como o cartão
+   da chamada: quem fala ganha o contorno verde da linha (`li.pessoa.falando`)
+   e o repouso não ganha nada. A palavra fica para o leitor de tela — a
+   pastilha sai da vista e não do documento (`specs/06-clientes-gui.md`: o
+   estado nunca é só cor) — e escrita na ficha da pessoa. MUDO e ISOLAMENTO
+   TOTAL continuam à vista: são a exceção, e é deles que alguém precisa saber. */
+#lista-roster .pessoa-estados .pastilha:is([data-estado="fala"], [data-estado="escuta"]) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+}
+:root:not([data-casca="celular"]) #lista-roster li.pessoa:not(.pessoa-apresentada):not(.pessoa-com-detalhes) .pessoa-rodape:not(:has(.pastilha:is([data-estado="at"], [data-estado="surdo"]))) {
+  padding-bottom: 0;
 }

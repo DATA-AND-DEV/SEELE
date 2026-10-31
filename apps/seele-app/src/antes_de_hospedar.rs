@@ -912,7 +912,13 @@ mod tags_migracao_testes {
         let bytes = std::fs::read(&caminho).unwrap();
         let antes = conferir(config, None, &caminho);
         assert!(antes.converte && antes.vai_copiar && antes.verificado);
-        assert_eq!(antes.esquema_desta_versao, 20);
+        // O esquema desta build é o da última migração (20 desde os perfis da
+        // 0.19); o que o teste prende é que ele passa do 18 do banco gravado.
+        assert_eq!(
+            antes.esquema_desta_versao,
+            seele_server::persistence::schema::MIGRATIONS.last().unwrap().version
+        );
+        assert!(antes.esquema_desta_versao > 18);
         assert_eq!(std::fs::read(&caminho).unwrap(), bytes);
         assert_eq!(esquema_de(&caminho), Esquema::Gravado(18));
         // A confirmação chama o portão; só depois de copiar ele abre o banco.
@@ -927,7 +933,10 @@ mod tags_migracao_testes {
             &seele_server::persistence::Location::File(caminho.clone()),
         )
         .unwrap();
-        assert_eq!(db.schema_version().unwrap(), 20);
+        assert_eq!(
+            db.schema_version().unwrap(),
+            seele_server::persistence::schema::MIGRATIONS.last().unwrap().version
+        );
         drop(db);
         let c = rusqlite::Connection::open(&caminho).unwrap();
         let (nome, tag): (String, String) = c

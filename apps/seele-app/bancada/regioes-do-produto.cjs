@@ -52,9 +52,10 @@ const REGIOES = [
   {
     ponto: "compositor",
     conteiner: "#compositor-mods",
-    // A caixa de escrever, o anexo e o ENVIAR: quem envia é a pessoa.
+    // A caixa de escrever e o anexo: quem envia é a pessoa (o Enter, desde a
+    // 0.19; o ENVIAR saiu do computador e segue no celular).
     doProduto: ["#campo-mensagem", "#botao-anexar", "#botao-enviar"],
-    teto: { aVista: ["#campo-mensagem", "#botao-enviar"], descobertos: ["#campo-mensagem", "#botao-enviar"] },
+    teto: { aVista: ["#campo-mensagem", "#botao-anexar"], descobertos: ["#campo-mensagem", "#botao-anexar"] },
   },
   {
     ponto: "status.barra",
@@ -350,9 +351,12 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const achar = () => document.querySelector('li.pessoa-apresentada[data-apresentada-por="mod/linha"]');
-      const apelidoDe = (li) => li?.querySelector(".pessoa-nativo .pessoa-nome");
-      const recolhido = !achar()?.querySelector("details")?.open;
-      achar().querySelector("details").open = true;
+      // 0.19: a linha não expande; o apelido verificável e o MODERAR moram na
+      // ficha da pessoa, que o «⋯» do produto abre.
+      const apelidoDe = () => document.querySelector("#ficha-pessoa :is(#ficha-pessoa-titulo, .ficha-nome, .perfil-cartao-apelido)");
+      const recolhido = !achar()?.querySelector("details");
+      achar().querySelector("button[data-ficha-pessoa]").click();
+      await quadro();
       // A mira: do canto do miolo até o centro do apelido nos detalhes.
       const miolo = achar()?.querySelector(".pessoa-miolo")?.getBoundingClientRect();
       const alvo = apelidoDe(achar())?.getBoundingClientRect();
@@ -370,26 +374,29 @@ const REGIOES = [
         await quadro();
       }
       const li = achar();
-      li.querySelector("details").open = true;
+      fecharFichaDaPessoa();
+      li.querySelector("button[data-ficha-pessoa]").click();
+      await quadro();
       const apelido = apelidoDe(li);
       const caixa = apelido?.getBoundingClientRect();
       const noCentro = caixa ? document.elementFromPoint(caixa.left + caixa.width / 2, caixa.top + caixa.height / 2) : null;
-      const moderar = li?.querySelector(`.pessoa-nativo [data-moderar-pessoa="${lia.id}"]`);
+      const moderar = document.querySelector(`#ficha-pessoa [data-moderar-pessoa="${lia.id}"]`);
       const medido = {
         achou: Boolean(li),
         recolhido,
         duplicado: Boolean(li.querySelector(".pessoa-apresentada-faixa .pessoa-nome")),
         apelido: apelido?.textContent ?? null,
         esperado: lia.nickname,
-        escondido: Boolean(apelido?.closest("details:not([open])")),
+        escondido: Boolean(apelido?.closest("[hidden]")),
         naVista: Boolean(caixa && caixa.width > 0 && caixa.height > 0 && caixa.top >= 0 && caixa.bottom <= innerHeight),
         descoberto: Boolean(noCentro && apelido?.contains(noCentro)),
-        moderar: Boolean(moderar && !moderar.closest("details:not([open])")),
+        moderar: Boolean(moderar && !moderar.closest("[hidden]")),
         cartaoNoMiolo: Boolean(li?.querySelector(".pessoa-miolo")?.textContent.includes(nomeFalso)),
         // O apelido verdadeiro é um nó do produto, fora da raiz do MOD.
         foraDoMiolo: Boolean(apelido && !apelido.closest(".pessoa-miolo") && !apelido.closest("[data-escopo-de-mod]")),
         nomeDeOutraPessoa: Boolean(outra),
       };
+      fecharFichaDaPessoa();
       contribuicoesDosMods.revogar(handle, { id: "mod/linha", instancia });
       modsCarregados.delete("mod/linha");
       desenhar(r);
@@ -425,15 +432,16 @@ const REGIOES = [
       const aberto = r.channels.find((c) => c.open);
       const outroCanal = r.channels.find((c) => !c.open) ?? aberto;
       const linhaDe = (no) => no.closest("li.pessoa")?.querySelector(".pessoa-nome")?.textContent.trim();
+      const fichaDe = () => $("ficha-pessoa").hidden ? null : $("ficha-pessoa-titulo").textContent.trim();
       const casos = [
         { ponto: "pessoa.identidade", alvo: lia.id, lugar: (no) => !!no.closest(".pessoa-identidade") && linhaDe(no) === lia.nickname },
-        // Nas duas linhas: a nativa ganhou o «⋯» dela (decisão da orquestradora,
-        // 16/10), e a apresentada o tinha.
-        { ponto: "pessoa.detalhes", alvo: lia.id,
-          lugar: (no) => !!no.closest("li.pessoa:not(.pessoa-apresentada) > details.pessoa-nativo .contribuicao-de-mod-caixa") && linhaDe(no) === lia.nickname },
-        { ponto: "pessoa.detalhes", alvo: lia.id, comCartao: true,
-          lugar: (no) => !!no.closest("li.pessoa-apresentada details.pessoa-nativo") && linhaDe(no) === lia.nickname },
-        { ponto: "pessoa.acoes", alvo: lia.id, acao: true, lugar: (no) => !!no.closest(".pessoa-rodape") && linhaDe(no) === lia.nickname },
+        // 0.19: a linha não expande; o `pessoa.detalhes` e o `pessoa.acoes`
+        // moram na ficha da pessoa, com a linha nativa e com a apresentada.
+        { ponto: "pessoa.detalhes", alvo: lia.id, ficha: true,
+          lugar: (no) => !!no.closest("#ficha-pessoa-corpo .contribuicao-de-mod-caixa") && fichaDe() === lia.nickname },
+        { ponto: "pessoa.detalhes", alvo: lia.id, comCartao: true, ficha: true,
+          lugar: (no) => !!no.closest("#ficha-pessoa-corpo .contribuicao-de-mod-caixa") && fichaDe() === lia.nickname },
+        { ponto: "pessoa.acoes", alvo: lia.id, acao: true, ficha: true, lugar: (no) => !!no.closest("#ficha-pessoa .ficha-acoes-de-mod") && fichaDe() === lia.nickname },
         { ponto: "canal.item", alvo: outroCanal.id, lugar: (no) => !!no.closest(`#lista-linhas button[data-linha="${outroCanal.id}"]`) },
         { ponto: "canal.cabecalho", alvo: aberto.id, lugar: (no) => !!no.closest("#canal-cabecalho-mods") },
         { ponto: "canal.cabecalho", alvo: aberto.id, acao: true, lugar: (no) => !!no.closest("#canal-cabecalho-mods") },
@@ -459,9 +467,14 @@ const REGIOES = [
           : { ...pedido, conteudo: [{ forma: "texto", chave: "marca", dentro: marca }] });
         desenhar(r);
         await quadro();
+        if (caso.ficha) {
+          abrirFichaDaPessoa(String(caso.alvo));
+          await quadro();
+        }
         const achados = [...document.querySelectorAll("body *")]
           .filter((no) => no.children.length === 0 && no.textContent.trim() === marca);
         medidos.push({ marca, achados: achados.length, noLugar: achados.filter(caso.lugar).length });
+        fecharFichaDaPessoa();
         contribuicoesDosMods.revogar(handle, { id: "mod/pontos", instancia });
         if (cartao) contribuicoesDosMods.revogar(cartao, { id: "mod/pontos", instancia });
       }
@@ -506,9 +519,10 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const li = linhaDeLia();
-      const detalhes = li?.querySelector(":scope > details.pessoa-nativo");
-      if (detalhes) detalhes.open = true;
+      // 0.19: o toque na linha abre a ficha da pessoa, onde a seção mora.
+      li?.querySelector(":scope > button[data-ficha-pessoa]")?.click();
       await quadro();
+      const detalhes = $("ficha-pessoa-corpo");
       const origem = detalhes?.querySelector(":scope > .contribuicao-de-mod-origem");
       const caixa = origem?.nextElementSibling;
       const centro = origem?.getBoundingClientRect();
@@ -528,18 +542,17 @@ const REGIOES = [
         temaNaoAlcanca: coresSemTema !== null && coresSemTema === coresComTema,
         idNaLinha: li?.dataset.pessoaId === String(lia.id),
       };
-      // Com a linha sem o ponto (o celular), nada dele na lista.
-      CASCA.detalhesNaLinha = false;
+      // A linha não o monta: só a ficha, e só aberta.
+      fecharFichaDaPessoa();
       desenhar(r);
       await quadro();
-      medido.semALinha = !$("lista-roster").textContent.includes("seção do MOD") && !linhaDeLia()?.querySelector("details.pessoa-nativo");
-      CASCA.detalhesNaLinha = true;
+      medido.semALinha = !$("lista-roster").textContent.includes("seção do MOD") && !linhaDeLia()?.querySelector("details");
       contribuicoesDosMods.revogar(handle, { id: "mod/detalhes", instancia });
       modsCarregados.delete("mod/detalhes");
       desenhar(r);
       await quadro();
       medido.voltou = linhaDeLia()?.outerHTML === semNada;
-      medido.semNadaSemDetalhes = Boolean(semNada) && !semNada.includes("pessoa-nativo") && !semNada.includes("pessoa-com-detalhes");
+      medido.semNadaSemDetalhes = Boolean(semNada) && !semNada.includes("<details") && !semNada.includes("pessoa-com-detalhes");
       return medido;
     }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
     if (comDono.erro) falhas.push(`pessoa.detalhes com dono: ${comDono.erro}`);
@@ -569,13 +582,18 @@ const REGIOES = [
       await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
       return { id: String(lia.id), apelido: lia.nickname };
     });
-    const resumo = `#lista-roster li.pessoa[data-pessoa-id="${deLia.id}"] > details.pessoa-nativo > summary`;
+    // 0.19: o alvo da linha (o botão do produto esticado sobre ela) abre a
+    // ficha com o Enter, e o nome dele diz de quem é.
+    const resumo = `#lista-roster li.pessoa[data-pessoa-id="${deLia.id}"] > button[data-ficha-pessoa]`;
     await page.focus(resumo);
+    const nome = await page.evaluate((resumo) => document.querySelector(resumo)?.getAttribute("aria-label") ?? "", resumo);
+    const focado = await page.evaluate((resumo) => document.activeElement === document.querySelector(resumo), resumo);
     await page.keyboard.press("Enter");
-    const pelaTecla = await page.evaluate((resumo) => {
-      const el = document.querySelector(resumo);
-      return { focado: document.activeElement === el, aberto: Boolean(el?.parentElement.open), nome: el?.getAttribute("aria-label") ?? "" };
-    }, resumo);
+    const pelaTecla = await page.evaluate(({ nome, focado }) => ({
+      focado, nome,
+      aberto: !$("ficha-pessoa").hidden && $("ficha-pessoa-corpo").textContent.includes("pelo teclado"),
+    }), { nome, focado });
+    await page.keyboard.press("Escape");
     await page.evaluate(async () => {
       contribuicoesDosMods.revogar(window.__teclado, { id: "mod/teclado", instancia: modsCarregados.get("mod/teclado") });
       modsCarregados.delete("mod/teclado");
@@ -705,7 +723,13 @@ const REGIOES = [
       // **O menu de moderação continua do produto** (`regioes.pessoas.lista.
       // produto[0]`; a auditoria do v6, tabela 5): a porta de cada nome,
       // contada sem e com a substituição.
-      const portas = () => $("lista-roster").querySelectorAll("button[data-moderar-pessoa]").length;
+      // 0.19: a porta mora na ficha de cada pessoa, aberta pelo alvo da linha.
+      const portas = () => [...$("lista-roster").querySelectorAll("button[data-ficha-pessoa]")].filter((alvo) => {
+        abrirFichaDaPessoa(alvo.dataset.fichaPessoa);
+        const tem = Boolean(document.querySelector("#ficha-pessoa button[data-moderar-pessoa]"));
+        fecharFichaDaPessoa();
+        return tem;
+      }).length;
       const portasAntes = portas();
       const instancia = new InstanciaDeMod("mod/lista", "h", geracaoDaSessao, {
         pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},

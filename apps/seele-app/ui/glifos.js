@@ -150,6 +150,29 @@ const GLIFOS = {
     ],
   ],
 
+  // **A porta com a seta para fora**: sair do servidor (0.19). O batente
+  // aberto à esquerda e a seta saindo à direita, no mesmo traço de 1,3.
+  porta: [
+    ["path", { d: "M7 3H3.5v10H7", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M7.5 8h6M11 5.5L13.5 8L11 10.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+  ],
+
+  // **O ×**: sair da sala de voz (0.19). Duas diagonais, sem círculo: o
+  // botão redondo já é a moldura.
+  xis: [
+    ["path", { d: "M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+  ],
+
+  // A lixeira: apagar a sala de voz (0.19). Era um × de texto num círculo, e
+  // numa sala que não se pode apagar (a única do servidor) o círculo apagado
+  // parecia vazio — «uma bolinha vazia» —, com a árvore de pessoas pendurada
+  // nele. Desenho, e não caractere: tampa, alça e corpo, traço 1,3 como os
+  // outros contornados.
+  lixeira: [
+    ["path", { d: "M3 4.5h10M6.5 4.5V3h3v1.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }],
+    ["path", { d: "M4.5 4.5l.6 8.5h5.8l.6-8.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linejoin": "round" }],
+  ],
+
   // O lápis: o corpo em diagonal, a ponta embaixo à esquerda e a virola em cima.
   //
   // **Ele existe porque o nome clicável não bastou.** Renomear um canal era
@@ -332,6 +355,31 @@ const GLIFOS = {
       "path",
       { d: "M9 2.5v3h3", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
     ],
+  ],
+
+  // 📎 — anexar, o verbo (o canvas `Main`, no compositor). O clipe, e não a
+  // folha do `anexo`: a folha marca o arquivo que já está na mensagem; o clipe
+  // é o gesto de pôr um. Vazado, no traço dos outros.
+  clipe: [
+    [
+      "path",
+      {
+        d: "M13 7.3 8 12.3a3.2 3.2 0 0 1-4.5-4.5l5.2-5.2a2.2 2.2 0 0 1 3.1 3.1L6.6 10.9a1.2 1.2 0 0 1-1.7-1.7L9.4 4.7",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.3",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+      },
+    ],
+  ],
+
+  // ⧉ — compartilhar a tela: o monitor com a seta saindo dele. É o que o
+  // botão faz — mostrar esta tela para a sala —, e não o ◧ da aparência.
+  tela: [
+    ["rect", { x: "1.8", y: "2.8", width: "12.4", height: "8.4", rx: "1.2", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M5.5 13.6h5M8 11.2v2.4", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round" }],
+    ["path", { d: "M8 8.8V5.2M6.4 6.6 8 5l1.6 1.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }],
   ],
 
   // A peça de quebra-cabeça do canvas `Main`: o que vem de um MOD na coluna de

@@ -239,9 +239,10 @@ const TEMA_CLARO = {
           medir(".mensagens .corpo"),
           medir("#operador-sair"),
           medir(".roster .pessoa-nome"),
-          // As cores de estado, derivadas do tema (tarefa 17e): o número da
-          // sincronia, em fósforo, e o nome de quem usa, no azul.
-          medir(".pessoa-sync-valor"),
+          // As cores de estado, derivadas do tema (tarefa 17e): a pastilha de
+          // estado da pessoa (o número da sincronia saiu da linha na 0.19), e o
+          // nome de quem usa, no azul.
+          medir(".roster .pastilha"),
           medir("#operador-nome"),
         ],
       };

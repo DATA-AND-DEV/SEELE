@@ -564,6 +564,12 @@
 :where(:root[data-casca="celular"]) .painel-de-mod-titulo,
 :where(:root[data-casca="celular"]) .folha-de-mod-titulo { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .dialogo-de-mod-titulo { font-size: calc(26px * var(--cel-escala)); }
+@media (min-width: 700px) {
+  :where(:root[data-casca="celular"]) .dialogo-de-mod-titulo { font-size: calc(30px * var(--cel-escala)); }
+}
+@media (min-width: 700px) {
+  :where(:root[data-casca="celular"]) .dialogo-de-mod .superficie-de-mod-sair { font-size: calc(13px * var(--cel-escala)); }
+}
 :where(:root[data-casca="celular"]) .superficie-de-mod-sair { font-size: calc(var(--seele-t-dado, 11px) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .aviso-de-mod { font-size: calc(var(--seele-t-dado, 11px) * var(--cel-escala)); }
 
@@ -621,15 +627,7 @@
 :where(:root[data-casca="celular"]) .chamada-palco-acao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-aperto { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-vazio { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-nome { font-size: calc(16px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-pastilha { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-linha .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-marca { font-size: 11px; }
-:where(:root[data-casca="celular"]) .chamada-cartao-valor { font-size: calc(16px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-barra { font-size: 11px; }
-:where(:root[data-casca="celular"]) .chamada-volume .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-vol-passo { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-vol-valor { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao-nome { font-size: calc(18px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-acao { font-size: inherit; }
 :where(:root[data-casca="celular"]) .chamada-acao-glifo { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-acao-titulo { font-size: calc(16px * var(--cel-escala)); }
@@ -654,10 +652,10 @@
 :where(:root[data-casca="celular"]) .chamada-palco-aperto,
 :where(:root[data-casca="celular"]) .chamada-palco-parada { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-cartao .nota { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-cartao-linha .rotulo { font-size: calc(11px * var(--cel-escala)); }
 @media(max-width:900px) {
   :where(:root[data-casca="celular"]) .chamada-acoes-estreitas > button { font-size: calc(12px * var(--cel-escala)); }
 }
+:where(:root[data-casca="celular"]) .chamada-cartao-abrir { font-size: inherit; }
 
 /* pessoal-web.css */
 :where(:root[data-casca="celular"]) .pessoal-web-participante-nome { font-size: calc(18px * var(--cel-escala)); }
@@ -924,7 +922,6 @@
 :where(:root[data-casca="celular"]) #lista-apresentacoes .mods-id { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #lista-apresentacoes .mods-versao { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mods-radio .mods-estado { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .chamada-controle { font-size: calc(14px * var(--cel-escala)); }
 @media (min-width: 1241px) {
   :where(:root[data-casca="celular"]) .pessoas-mini-item { font-size: calc(13px * var(--cel-escala)); }
 }
@@ -941,7 +938,6 @@
 :where(:root[data-casca="celular"]) .perfis-diretorio-titulo { font-size: calc(30px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .perfis-diretorio-sub { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .perfil-folha-titulo { font-size: calc(18px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) #lista-roster .pessoa-identidade-com-exibido .pessoa-nome { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #lista-roster .pessoa-perfil-linha { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #lista-roster .pessoa-ver-perfil { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .rotulo,
@@ -955,6 +951,8 @@
 :where(:root[data-casca="celular"]) #perfil .perfil-capa-amostra { font-size: calc(34px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-bloco-formato { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-bloco-estado { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-padrao-linha { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-padrao-usar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil input:not([type="checkbox"]):not([type="range"]),
 :where(:root[data-casca="celular"]) #perfil textarea { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-contador { font-size: calc(12px * var(--cel-escala)); }
@@ -965,3 +963,12 @@
 :where(:root[data-casca="celular"]) .relatorio-perfis-nota { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .relatorio-perfis-detalhes summary { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .relatorio-perfis-ocorrencias { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo) { font-size: 0; }
+:where(:root[data-casca="celular"]) #lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo)::after { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-titulo { font-size: calc(30px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-fechar { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-identidade .ficha-avatar { font-size: calc(22px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-nome { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-apelido { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ficha-volume { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-apresentada-estado > .pessoa-nome { font-size: calc(12px * var(--cel-escala)); }

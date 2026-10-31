@@ -3287,14 +3287,21 @@ fn the_alert_box_does_not_spend_the_red_reserved_for_a_dropped_link() {
 }
 
 #[test]
-fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
+fn a_person_card_is_simple_and_never_measures_anything_itself() {
     // Two failures in one function, both silent.
     //
-    // The first is the one `crates/seele-ffi/src/types.rs:58-79` argues against
-    // by name: the comp calls `corSync(media)` in the shell, and a shell that
-    // knows "85 is nominal" is a shell that will disagree with the terminal the
-    // day one of the two is updated. The band arrives decided; this card may
-    // only pass it on.
+    // **The card is simple** (0.19, owner: «tem que ficar bem simples o card»):
+    // the background, the avatar and the name. The signal bar, the number and
+    // the band that used to sit there left the card, and this guard says so —
+    // a bar drawn again would be the card getting heavy again, and nobody would
+    // notice in a diff. Where the band is still shown (the footer, the roster)
+    // it arrives decided by the core.
+    //
+    // The first failure is the one `crates/seele-ffi/src/types.rs:58-79` argues
+    // against by name: the comp calls `corSync(media)` in the shell, and a shell
+    // that knows "85 is nominal" is a shell that will disagree with the
+    // terminal the day one of the two is updated. The band arrives decided;
+    // this card does not even pass it on any more.
     //
     // The second is drawing what nobody measured. `Telemetry.input_level` is a
     // scalar and it is *ours* — amplitude per person does not cross — and
@@ -3312,10 +3319,13 @@ fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
         body_of(&script, "function pintarCartao")
     );
 
-    assert!(
-        body.contains("pessoa.sync_band"),
-        "the card no longer reads the band the core decided"
-    );
+    for drawn in ["pessoa.signal", "sync_band", "blocos(", "chamada-cartao-barra"] {
+        assert!(
+            !body.contains(drawn),
+            "the card draws `{drawn}` again: the signal left the card (owner's \
+             decision, «bem simples»)"
+        );
+    }
     for threshold in ["Nominal", "Degraded", "Critical"] {
         assert!(
             !body.contains(threshold),
@@ -3358,89 +3368,58 @@ fn a_person_card_passes_the_band_through_and_never_measures_anything_itself() {
 #[test]
 fn the_state_of_a_person_is_a_word_and_never_only_a_colour() {
     // `specs/06-clientes-gui.md` forbids information carried by colour alone, and
-    // who is transmitting is information: the comp marks it with an orange halo
-    // around the card and nothing else. A halo is invisible to anybody who does
-    // not see the hue, and this card carries three facts that way — the
-    // microphone, the voice, and the ears.
+    // who is speaking is information: the green ring around the card is
+    // invisible to anybody who does not see the hue, and the card carries three
+    // facts that way — the microphone, the voice, and the ears.
     //
-    // The v3 answer is two registers of the same fact, and this guard is that
-    // both exist: the chip, in one word, and the plain sentence beside the name,
-    // which is what `LEGENDAS SIMPLES` is for.
+    // **The 0.19 card is simple** (owner: no «FALANDO» chip, no signal): the
+    // words left the face of the card, and the guard that cared for them moved
+    // with the purpose. Speaking is the ring and nothing else on the face;
+    // muted and deafened are a cut microphone and a cut headphone on the
+    // avatar's corner; and all three are told in words in the card's accessible
+    // name — «Cria de GRU, falando». This guard is that all of those exist.
     let script = scripts();
     let paint = body_of(&script, "function pintarCartao");
-    let sentence = body_of(&script, "function fraseDoEstado");
+    let words = body_of(&script, "function estadoEmPalavras");
 
-    // The chip, and what it says. Reaching for the element is not enough — an
-    // empty chip is a card marked by paint alone, and it looks fine in a
-    // screenshot taken by somebody who sees the orange. So the statement that
-    // fills it has to branch on the microphone and on the voice, and every
-    // branch has to be a word.
-    let chips: Vec<&str> = paint
-        .split(';')
-        .filter(|statement| statement.contains("pastilha") && statement.contains("textContent"))
-        .collect();
+    // The accessible name is written from the words, per card, on every repaint.
     assert!(
-        !chips.is_empty(),
-        "the card writes no state chip, so the halo is the only thing marking who \
-         is speaking"
-    );
-    // A statement that tells the three states apart in words: it has to look at
-    // the microphone and at the voice, and have a word for each way out.
-    let tells_them_apart = |statement: &str| {
-        statement.contains("muted")
-            && statement.contains("speaking")
-            && statement
-                .split('"')
-                .skip(1)
-                .step_by(2)
-                .filter(|word| !word.trim().is_empty())
-                .count()
-                >= 3
-    };
-
-    // Either the chip is written with the words in place, or it is written from
-    // a local that carries them. Following the local matters: assigning `""` to
-    // the chip while a perfectly good ternary sits unused above it is the exact
-    // shape of "marked by paint alone", and it would read as fine in a diff.
-    let straight = chips.iter().copied().any(tells_them_apart);
-    let through_a_local = paint.split(';').any(|declaration| {
-        tells_them_apart(declaration)
-            && declaration
-                .split('=')
-                .next()
-                .and_then(|left| left.split_whitespace().last())
-                .is_some_and(|name| {
-                    chips.iter().any(|chip| {
-                        chip.split('=')
-                            .nth(1)
-                            .is_some_and(|value| value.contains(name))
-                    })
-                })
-    });
-    assert!(
-        straight || through_a_local,
-        "no state chip on this card is written from a value that branches on both \
-         the microphone and the voice with a word for each. Either a state is \
-         being told apart by paint alone, or two of them come out reading the \
-         same:\n{}",
-        chips.join("\n")
+        paint.contains("aria-label") && paint.contains("estadoEmPalavras("),
+        "the card no longer writes the person's state into its accessible name, \
+         so a screen reader gets the name and none of who is speaking or muted"
     );
 
-    assert!(
-        paint.contains("fraseDoEstado"),
-        "the card no longer writes the state as a sentence beside the name, which \
-         is the half a newcomer reads"
-    );
-
-    // All three facts, in the sentence. The colour version of any one of them
+    // All three facts, in the words. The colour version of any one of them
     // would be a fact only some readers get.
     for fact in ["muted", "speaking", "total_isolation"] {
         assert!(
-            sentence.contains(fact),
-            "the sentence beside the name never mentions `{fact}`, so that state \
-             reaches the screen as paint and nothing else"
+            words.contains(fact),
+            "the state words never mention `{fact}`, so that state reaches the \
+             screen as paint and nothing else"
         );
     }
+    assert!(
+        words.split('"').skip(1).step_by(2).filter(|w| !w.trim().is_empty()).count() >= 4,
+        "the state words do not tell the ways out apart: {words}"
+    );
+
+    // The muted and deafened states keep a drawn form (a cut glyph, not a
+    // colour), only when they are true.
+    assert!(
+        paint.contains("glifoComEstado(") && paint.contains("pessoa.muted")
+            && paint.contains("pessoa.total_isolation"),
+        "mute and deafen are no longer drawn as cut icons on the card"
+    );
+    // The ring: speaking is a data attribute the sheet paints.
+    assert!(
+        paint.contains("dataset.fala"),
+        "the card no longer marks who is speaking, so the ring has nothing to hang from"
+    );
+    // And no word chip came back on the face.
+    assert!(
+        !paint.contains("pastilha"),
+        "the state chip came back to the card, which the owner took off"
+    );
 }
 
 #[test]
@@ -3451,11 +3430,14 @@ fn the_volume_control_does_not_hide_behind_the_pointer() {
     // keyboard, it never appears under touch, and whoever did not sweep the
     // pointer across that row by accident never learned it was there.
     //
-    // Two halves, because either alone passes with the defect present. The
-    // control has to *exist* — minus, plus, and cells that are real buttons —
-    // and no rule of this sheet may use the pointer to bring anything into
-    // being. Highlighting on hover stays legal; that is what `background` and
-    // `border-color` in those rules are.
+    // **0.19: the volume left the call card** (owner: «bem simples»). It lives
+    // in the person's sheet (`#ficha-pessoa`), and the whole card is the button
+    // that opens it. Two halves, because either alone passes with the defect
+    // present: the way there has to *exist* — a real button on every card, wired
+    // to the sheet — and the sheet has to carry an always-visible slider that
+    // sends `set_volume`. And no rule of the call sheet may use the pointer to
+    // bring anything into being. Highlighting on hover stays legal; that is what
+    // `background` and `border-color` in those rules are.
     let script = scripts();
     // Comments stripped, and that is load-bearing rather than tidy: the sheet
     // has to be able to write down *why* nothing here hangs off `:hover`, and
@@ -3463,26 +3445,27 @@ fn the_volume_control_does_not_hide_behind_the_pointer() {
     // broken as a guard a comment can satisfy.
     let sheet = without_comments(&read("ui/tela-chamada.css"));
 
-    let build = body_of(&script, "function controleDeVolume");
-    // U+2212, which the embedded face does have — the inventory measured it
-    // (§5). The ASCII hyphen is a different character and a different width in a
-    // monospaced face, beside a `+` that is ASCII.
+    let build = body_of(&script, "function cartaoDoPersono");
     assert!(
-        build.contains('\u{2212}') && build.contains('+'),
-        "the volume control no longer offers a minus and a plus"
+        build.contains("elemento(\"button\", \"chamada-cartao-abrir\")"),
+        "the call card is no longer a button, so the person's sheet — where the \
+         volume lives — is neither clickable nor reachable by keyboard from the \
+         grid"
     );
+    let grade = without_comments(&read("ui/tela-chamada.js"));
+    let ouvinte = grade
+        .split("$(\"chamada-grade\").addEventListener(\"click\"")
+        .nth(1)
+        .and_then(|resto| resto.split("});").next())
+        .unwrap_or_default();
     assert!(
-        build.contains("CELULAS_DE_VOLUME"),
-        "the volume control no longer draws a row of cells to click"
+        ouvinte.contains("abrirFichaDaPessoa("),
+        "a click on a call card no longer opens the person's sheet:\n{ouvinte}"
     );
+    let ficha = body_of(&script, "function fichaDaPessoa(id)");
     assert!(
-        build
-            .split(';')
-            .any(|statement| statement.contains("elemento(\"button\"")
-                && statement.contains("vol-cela")),
-        "the volume cells are not buttons, so they are neither clickable nor \
-         reachable by keyboard — which is the hidden control again, wearing the \
-         shape of the fix"
+        ficha.contains("ficha-volume") && ficha.contains("range"),
+        "the person's sheet no longer carries the volume slider"
     );
     assert!(
         scripts().contains("set_volume"),
@@ -13459,9 +13442,12 @@ fn sem_nome_o_primeiro_conectar_pergunta_antes() {
     // tela só a ouvia ao fechar, quando não dava mais para responder; e a nota
     // de sempre do campo («O que você já disse continua com o nome de então»)
     // falava com quem nunca disse nada.
+    // O campo também é descrito pela recusa dele (`perfil-apelido-erro`, o
+    // nome único da 0.19); a nota de quem fecha sem nome continua lá.
     let campo = tag_with_id(&read("ui/index.html"), "perfil-apelido");
     assert!(
-        attribute(&campo, "aria-describedby").as_deref() == Some("perfil-sem-nome"),
+        attribute(&campo, "aria-describedby")
+            .is_some_and(|ids| ids.split_whitespace().any(|id| id == "perfil-sem-nome")),
         "o campo do apelido não é descrito pela nota de quem fecha sem nome, e o \
          leitor de tela só a diz depois de a caixa fechar:\n{campo}"
     );
@@ -13829,6 +13815,67 @@ fn o_rodape_do_operador_muda_de_oficio_com_a_sala() {
     assert!(
         !chamada.contains("naGrade ? \"CONVERSA\""),
         "o alternador `CONVERSA`/`CHAMADA` voltou ao rodapé"
+    );
+}
+
+#[test]
+fn compartilhar_a_tela_tem_uma_porta_so_e_ela_e_a_barra_da_chamada() {
+    // **A U28 pedia duas portas para o mesmo comando** — o rodapé do operador e
+    // um botão dentro do palco vazio — e o dono ficou com uma (0.19: «o
+    // compartilhamento tá redundante em dois lugares, deixe somente na barra»).
+    // O que a U28 protegia continua protegido, e é isto que o guarda cobra:
+    //
+    //   - **alcançável**: a barra da chamada tem o ícone de COMPARTILHAR, que
+    //     aperta o botão do operador (o mesmo comando, `abrirCompartilhar`);
+    //   - **indisponível, e dito**: o ícone herda o `aria-disabled` e o `title`
+    //     do botão do operador, que escreve o porquê (`porQueNaoHaTela`);
+    //   - **uma porta só**: o botão dentro do palco não existe mais, nem no HTML
+    //     nem no script;
+    //   - **sem transmissão, sem caixa**: o palco some quando ninguém compartilha.
+    let html = read("ui/index.html");
+    assert!(
+        !html.contains("id=\"palco-compartilhar\""),
+        "o botão COMPARTILHAR ESTA TELA voltou ao palco: são duas portas de novo"
+    );
+    let chamada = without_comments(&read("ui/tela-chamada.js"));
+    assert!(
+        !chamada.contains("palco-compartilhar"),
+        "o script da chamada ainda fala de um botão de compartilhar no palco"
+    );
+    assert!(
+        chamada.contains("$(\"operador-vista\").addEventListener(\"click\""),
+        "o botão do operador deixou de abrir o compartilhar, e a barra aperta ele"
+    );
+
+    let barra = without_comments(&read("ui/composicao-0174.js"));
+    assert!(
+        barra.contains("espelhar(bVista, vista, { icone: true })"),
+        "a barra da chamada não tem mais o ícone de COMPARTILHAR espelhando o botão do operador"
+    );
+    let espelhar = barra
+        .split("const espelhar = ")
+        .nth(1)
+        .and_then(|resto| resto.split("const comGlifo").next())
+        .unwrap_or_default();
+    assert!(
+        espelhar.contains("aria-disabled") && espelhar.contains("botao.title"),
+        "a barra não repassa o `aria-disabled` e o `title` do operador: o COMPARTILHAR \
+         indisponível ficaria mudo, sem dizer por quê:\n{espelhar}"
+    );
+    let rodape = body_of(&chamada, "function desenharORodapeDoOperador");
+    assert!(
+        rodape.contains("porQueNaoHaTela()") && rodape.contains("aria-disabled"),
+        "o botão do operador não diz mais por que compartilhar está indisponível"
+    );
+
+    let palco = body_of(&chamada, "function desenharPalco(snapshot, voice_room)");
+    assert!(
+        palco.contains("palco.hidden = !(") && palco.contains("palco.hidden = false"),
+        "o palco não some sem transmissão (ou não volta com ela): a caixa preta vazia voltou"
+    );
+    assert!(
+        without_comments(&read("ui/tela-chamada.css")).contains(".chamada-palco[hidden] { display: none; }"),
+        "o `display: flex` do palco vence o `hidden`, e a caixa vazia volta"
     );
 }
 
@@ -14893,10 +14940,24 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
         "a linha apresentada por um MOD passou a montar o próprio alvo de \
          clique, e a garantia do ID real deixou de ter um lugar só: {substituida}"
     );
+    // 0.19 (pedido do dono): a linha não expande mais. O que o «⋯» recolhia —
+    // a identidade verificável e a moderação — mora na ficha da pessoa, e a
+    // linha apresentada por um MOD continua tendo o alvo do PRODUTO até ela,
+    // com o id real: a moderação não depende do que um terceiro desenhou.
     assert!(
-        substituida.contains("linhaNativaDoRoster(pessoa, temAudio, true)"),
-        "o diagnóstico nativo sumiu de uma linha apresentada por um MOD, em vez \
-         de recolher: {substituida}"
+        substituida.contains("botaoDaFicha(pessoa"),
+        "a linha apresentada por um MOD perdeu o caminho do produto até a ficha \
+         da pessoa (identidade verificável e moderação): {substituida}"
+    );
+    let botao = js_function(&sessao, "function botaoDaFicha(");
+    assert!(
+        botao.contains("botao.dataset.fichaPessoa = String(pessoa.id)"),
+        "o alvo da ficha deixou de carregar o id real da pessoa: {botao}"
+    );
+    let ficha = js_function(&sessao, "function fichaDaPessoa(");
+    assert!(
+        ficha.contains("moderar.dataset.moderarPessoa = pessoa.moderar"),
+        "a ficha da pessoa deixou de oferecer a moderação a quem tem a permissão: {ficha}"
     );
     assert!(
         porta.contains("porta.setAttribute(") && porta.contains("aria-label"),
@@ -19005,11 +19066,8 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
             "ui/tela-sessao.js",
             "$(\"lista-roster\").addEventListener(\"input\", (evento) => {",
         ),
-        (
-            "o controle da chamada",
-            "ui/tela-chamada.js",
-            "$(\"chamada-grade\").addEventListener(\"click\", (evento) => {",
-        ),
+        // 0.19: o cartão da chamada não escreve volume; ele abre a ficha, e o
+        // deslizante da ficha é conferido logo abaixo.
     ] {
         let corpo = body_of(&without_comments(&read(arquivo)), ouvinte);
         assert!(
@@ -19032,19 +19090,22 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
         ),
         "a chamada não relê os volumes a cada quadro"
     );
-    let cartao = body_of(
-        &scripts,
-        "function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false)",
-    );
+    // 0.19: o deslizante de cada pessoa saiu da linha e mora na ficha dela.
+    let cartao = body_of(&scripts, "function fichaDaPessoa(id)");
     assert!(
         cartao.contains("volumesLidos.get(pessoa.volume)"),
-        "o deslizante do roster não nasce da leitura do Rust:\n{cartao}"
+        "o deslizante da ficha da pessoa não nasce da leitura do Rust:\n{cartao}"
+    );
+    let ficha = body_of(
+        &without_comments(&read("ui/tela-sessao.js")),
+        "$(\"ficha-pessoa\").addEventListener(\"input\", (evento) => {",
     );
     assert!(
-        body_of(&scripts, "function pintarVolume(cartao, apelido)")
-            .contains("volumesLidos.get(apelido)"),
-        "o controle de volume da chamada não desenha a leitura do Rust"
+        ficha.contains("marcarVolume(") && !ficha.contains("volumesLidos.set("),
+        "o deslizante da ficha escreve o volume do gesto sem passar por `marcarVolume`:\n{ficha}"
     );
+    // 0.19: o cartão da chamada não tem mais controle de volume; ele abre a
+    // ficha da pessoa, que é o deslizante acima, lido do Rust.
 }
 
 /// **A casca veste a sessão com o que está gravado em disco, logo depois do
@@ -27021,7 +27082,7 @@ m.$("perfis-entrada").removeAttribute = () => {};
 m.$("perfis-diretorio").hidden = true;
 m.$("perfil-folha").hidden = true;
 carregar(m, "frases.js", "perfis.js");
-for (const nome of ["aplicarAvatar", "aplicarCapa", "capaDaPessoa"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+for (const nome of ["aplicarAvatar", "aplicarCapa", "capaDaPessoa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
 vm.runInContext("sincronizarPerfis({ perfis_revision: 1, me: 1 })", m.ctx);
 await tick();
 const quadrado = comEstilo(new El("q"));
@@ -27056,7 +27117,784 @@ capaDoMod = null;
 lista = [{ ...lista[0], revisao: 3, capa: null }];
 vm.runInContext("perfisOficiais.marca = null; sincronizarPerfis({ perfis_revision: 3, me: 1 })", m.ctx);
 await tick();
-confere("sem capa em lugar nenhum, a camada ficou", capa() === "");
+// Sem capa em lugar nenhum, a imagem sai; quem tem perfil fica com a cor dele
+// (0.19, `a_cor_do_perfil_entra_no_lugar_da_capa_so_sem_capa`).
+confere("sem capa em lugar nenhum, a imagem ficou", capa() === "" && quadro.dataset.capaDeCor === "sim");
 "##,
+    );
+}
+
+/// **Um servidor, uma placa** (0.19). O dono viu o servidor que hospeda duas
+/// vezes na trilha: em ABERTAS, com o ícone, e de novo em NO AR, só com a
+/// sigla. Com a conversa no servidor hospedado aberta, o grupo NO AR some; sem
+/// ela, ele continua sendo o caminho até o servidor no ar.
+#[test]
+fn o_servidor_hospedado_aparece_uma_vez_so_na_trilha() {
+    rodar_node(
+        "a trilha sem o servidor repetido",
+        r##"
+const codigo = funcao("camada-sessoes.js", "desenharSessoes");
+confere("desenharSessoes sumiu de camada-sessoes.js", codigo.length > 0);
+const montar = (sessoes) => {
+  const nos = {};
+  const ctx = vm.createContext({
+    $: (id) => (nos[id] ??= { hidden: false, title: "", childElementCount: 0 }),
+    variasSessoes: () => true,
+    sessoesNaTela: sessoes,
+    hospedadoNaTela: { nome: "El Serve Dor", alvo: "seele://127.0.0.1:8383" },
+    repovoar: (no, filhos) => { no.filhos = filhos; },
+    placaDaSessao: (s) => ({ sessao: s }),
+    placaDoHospedado: () => ({ hospedado: true }),
+    desenhado: null,
+    trilhaDesenhada: null,
+  });
+  vm.runInContext(codigo + "\ndesenharSessoes();", ctx);
+  return nos;
+};
+const sozinho = montar([{ onde: "Outro", carimbo: { sessao: 1 } }]);
+confere("hospedando sem conversar nele, o grupo NO AR sumiu", sozinho["trilha-hospedando"].hidden === false && sozinho["trilha-hospedando"].filhos.length === 1);
+const junto = montar([{ onde: "Guardado", carimbo: { sessao: 2 } }]);
+confere("com a conversa no servidor hospedado aberta, NO AR repete o servidor", junto["trilha-hospedando"].hidden === true && junto["trilha-hospedando-titulo"].hidden === true);
+const encerrada = montar([{ onde: "Guardado", encerrada: true, carimbo: { sessao: 3 } }]);
+confere("uma conversa encerrada no hospedado escondeu o caminho até ele", encerrada["trilha-hospedando"].hidden === false);
+"##,
+    );
+}
+
+/// **O mundo do perfil padrão** (0.19, «Padrão + ajuste por servidor»): um
+/// servidor 12 simulado — a lista `Perfis`, o `GravarPerfil` com a revisão
+/// conferida como o servidor confere (`RevisaoVelha` quando não bate, zero para
+/// quem não tem linha), a subida das imagens e o `PerfilRecusado` —, o registro
+/// por servidor desta máquina, e `perfis.js` com `perfil-padrao.js` rodando
+/// inteiros.
+const MUNDO_DO_PADRAO: &str = r##"
+const PADRAO = { revisao: 2, nome_exibido: "Maya", pronomes: "ela/dela", status: "no ar", bio: "oi", cor: "#b48cff", efeito: "Brilho",
+  foto: { hash: "f".repeat(64), tipo: "image/png", bytes: 10, url: "data:foto" }, capa: { hash: "c".repeat(64), tipo: "image/png", bytes: 10, url: "data:capa" } };
+const espera = async (cond, n = 80) => { for (let i = 0; i < n && !cond(); i += 1) await tick(); return cond(); };
+El.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
+El.prototype.focus = function () {};
+function servidorDoPadrao({ perfis = [], seguimento = null, recusar = null, padrao = PADRAO, protocolo = 12, listaVelha = false } = {}) {
+  const srv = { perfis: new Map(perfis.map((p) => [p.pessoa, structuredClone(p)])), marca: protocolo >= 12 ? 1 : 0,
+    seguimento: seguimento ?? { segue: false, revisao_aplicada: 0, assinatura: null }, padrao: structuredClone(padrao), recusar, registro: [] };
+  let m = null;
+  const ressincronizar = () => { srv.marca += 1; vm.runInContext(`sincronizarPerfis({ perfis_revision: ${srv.marca}, me: 1 })`, m.ctx); };
+  const recusa = (motivo) => setTimeout(() => m.ouvintes["seele://event"]({ payload: { PerfilRecusado: { motivo, campos: [] } } }), 1);
+  m = mundo({
+    perfis: () => (listaVelha ? [] : [...srv.perfis.values()].map((p) => structuredClone(p))),
+    perfil_padrao: () => structuredClone(srv.padrao),
+    seguimento_do_perfil_padrao: () => ({ servidor: "impressao-a", ...srv.seguimento }),
+    guardar_seguimento_do_perfil_padrao: ({ segue, revisaoAplicada, assinatura }) => { srv.seguimento = { segue, revisao_aplicada: revisaoAplicada, assinatura }; return null; },
+    gravar_perfil: ({ revisao, entrada }) => {
+      if (srv.recusar) { recusa(srv.recusar); return null; }
+      const atual = srv.perfis.get(1);
+      if ((atual?.revisao ?? 0) !== revisao) { recusa("RevisaoVelha"); return null; }
+      srv.perfis.set(1, { pessoa: 1, foto: null, capa: null, ...atual, ...entrada, revisao: revisao + 1 });
+      setTimeout(ressincronizar, 1);
+      return null;
+    },
+    enviar_imagem_do_perfil_padrao: ({ lado, hash }) => {
+      const p = srv.perfis.get(1);
+      p[lado === "Capa" ? "capa" : "foto"] = { hash, tipo: "image/png", bytes: 10 };
+      p.revisao += 1;
+      setTimeout(ressincronizar, 1);
+      return null;
+    },
+    tirar_imagem_do_perfil: ({ lado }) => {
+      const p = srv.perfis.get(1);
+      p[lado === "Capa" ? "capa" : "foto"] = null;
+      p.revisao += 1;
+      setTimeout(ressincronizar, 1);
+      return null;
+    },
+  });
+  const comEstilo = (no) => Object.assign(no, { style: { setProperty() {}, removeProperty() {} }, prepend() {}, remove() {}, removeAttribute() {}, querySelector: () => null, querySelectorAll: () => [] });
+  Object.assign(m.ctx, {
+    requestAnimationFrame: (f) => setTimeout(f, 0), clearTimeout, matchMedia: () => ({ matches: false }), Image: class {},
+    window: { addEventListener() {} },
+    elemento: (tag, classe, texto) => { const e = comEstilo(new El("")); e.className = classe ?? ""; if (texto !== undefined) e.textContent = texto; return e; },
+    anunciar: () => {}, iniciaisDoApelido: (a) => (a ?? "?").slice(0, 1),
+    vestirAvatar: (no) => no, vestirCapa: (no) => no,
+    vistaDaJanela: { sessao: 5, geracao: 1 },
+    registrarNoAnfitriao: (onde, oQue) => srv.registro.push(`${onde}: ${oQue}`),
+  });
+  m.ctx.document.querySelectorAll = () => [];
+  m.ctx.document.querySelector = () => null;
+  m.ctx.document.addEventListener = () => {};
+  m.$("tela-sessao").classList = { toggle() {} };
+  m.$("perfis-entrada").removeAttribute = () => {};
+  m.$("perfis-diretorio").hidden = true;
+  m.$("perfil-folha").hidden = true;
+  for (const id of ["perfil-previa-cartao", "perfil-foto-amostra", "perfil-capa-amostra", "perfil", "perfil-amostras", "perfil-efeitos"]) comEstilo(m.$(id));
+  carregar(m, "frases.js", "perfis.js", "perfil-padrao.js");
+  const entrar = () => vm.runInContext(`sincronizarPerfis({ perfis_revision: ${srv.marca}, me: 1 })`, m.ctx);
+  const meu = () => srv.perfis.get(1) ?? null;
+  const contas = () => ({ gravar: so(m, "gravar_perfil").length, enviar: so(m, "enviar_imagem_do_perfil_padrao").length });
+  return { m, srv, entrar, meu, contas, ressincronizar };
+}
+"##;
+
+fn rodar_o_padrao(titulo: &str, corpo: &str) {
+    rodar_node(titulo, &format!("{MUNDO_DO_PADRAO}\n{corpo}"));
+}
+
+/// **Entrar num servidor 12 onde você não tem perfil aplica o padrão** — os
+/// textos com a revisão zero, depois a foto e a capa —, e o servidor passa a
+/// segui-lo. **Num servidor onde você já tem perfil, nada sai**, e um perfil
+/// vazio (uma linha sem nada escrito) é um perfil: não é «sem perfil».
+///
+/// Provado revertendo: com a decisão tratando qualquer perfil como ausente
+/// (`if (!meu)` → `if (!meu || !meu.nome_exibido)`), o perfil vazio é
+/// sobrescrito e este guarda reprova.
+#[test]
+fn o_padrao_e_aplicado_ao_entrar_so_onde_nao_ha_perfil() {
+    rodar_o_padrao(
+        "o padrão ao entrar",
+        r##"
+// Sem perfil: aplicado.
+const a = servidorDoPadrao();
+a.entrar();
+await espera(() => a.srv.seguimento.revisao_aplicada === 2);
+const p = a.meu();
+confere("o padrão não foi aplicado a quem não tinha perfil: " + JSON.stringify(p), p?.nome_exibido === "Maya" && p.status === "no ar" && p.efeito === "Brilho");
+confere("a foto e a capa não subiram: " + JSON.stringify(p), p?.foto?.hash === PADRAO.foto.hash && p?.capa?.hash === PADRAO.capa.hash);
+confere("a primeira gravação não foi com a revisão zero", so(a.m, "gravar_perfil")[0]?.args.revisao === 0);
+confere("o servidor não passou a seguir o padrão: " + JSON.stringify(a.srv.seguimento), a.srv.seguimento.segue === true && typeof a.srv.seguimento.assinatura === "string");
+// A lista seguinte não aplica de novo.
+const antes = a.contas();
+a.ressincronizar();
+await tick(); await tick(); await tick();
+confere("o padrão em dia foi aplicado de novo", JSON.stringify(a.contas()) === JSON.stringify(antes));
+
+// Perfil vazio: é perfil, e não é tocado.
+const vazio = { pessoa: 1, revisao: 4, nome_exibido: "", pronomes: "", status: "", bio: "", cor: "#f2521f", efeito: "Nenhum", foto: null, capa: null };
+const b = servidorDoPadrao({ perfis: [vazio] });
+b.entrar();
+await espera(() => so(b.m, "seguimento_do_perfil_padrao").length > 0);
+await tick(); await tick();
+confere("o perfil vazio foi tratado como «sem perfil» e sobrescrito", b.contas().gravar === 0 && b.contas().enviar === 0 && b.meu().revisao === 4);
+confere("um servidor com perfil passou a seguir o padrão", b.srv.seguimento.segue === false);
+
+// A lista velha (sem a linha que existe): o servidor recusa a revisão zero, e nada é sobrescrito.
+const c = servidorDoPadrao({ listaVelha: true });
+c.srv.perfis.set(1, { ...vazio, nome_exibido: "Minha" });
+c.entrar();
+await espera(() => so(c.m, "gravar_perfil").length > 0 && so(c.m, "guardar_seguimento_do_perfil_padrao").length >= 2);
+await tick(); await tick();
+confere("a lista velha fez o padrão sobrescrever um perfil: " + JSON.stringify(c.meu()), c.meu().nome_exibido === "Minha" && c.contas().enviar === 0);
+confere("o servidor que já tinha perfil ficou seguindo o padrão", c.srv.seguimento.segue === false);
+confere("a recusa de quem já tinha perfil virou falha dita", vm.runInContext("estadoDoPadrao.falhas.size", c.m.ctx) === 0);
+"##,
+    );
+}
+
+/// **Quem segue o padrão recebe o padrão novo; quem personalizou, nunca.** O
+/// padrão muda (o status e a foto): o servidor que segue recebe os textos e só
+/// a foto nova (a capa, de mesmo hash, não sobe de novo). Depois a pessoa
+/// edita o perfil dentro do servidor (`deixarDeSeguirOPadrao`, o que o editor
+/// chama): o padrão muda de novo, e o perfil de lá fica como ela deixou. Um
+/// perfil que mudou por outro caminho (outro aparelho) também deixa de seguir.
+///
+/// Provado revertendo: sem o `if (!seguimento.segue)` da decisão, o perfil
+/// personalizado é sobrescrito; sem a conferência da assinatura, o mudado por
+/// fora é sobrescrito — e este guarda reprova nos dois.
+#[test]
+fn quem_segue_recebe_o_padrao_novo_e_quem_personalizou_nunca() {
+    rodar_o_padrao(
+        "seguir e personalizar",
+        r##"
+const a = servidorDoPadrao();
+a.entrar();
+await espera(() => a.srv.seguimento.revisao_aplicada === 2);
+const novo = { ...PADRAO, revisao: 3, status: "de férias", foto: { ...PADRAO.foto, hash: "e".repeat(64) } };
+a.srv.padrao = novo;
+vm.runInContext(`padraoMudou(${JSON.stringify(novo)})`, a.m.ctx);
+await espera(() => a.srv.seguimento.revisao_aplicada === 3);
+confere("o servidor que segue não recebeu o padrão novo: " + JSON.stringify(a.meu()), a.meu().status === "de férias" && a.meu().foto.hash === "e".repeat(64));
+const capas = so(a.m, "enviar_imagem_do_perfil_padrao").filter((c) => c.args.lado === "Capa").length;
+confere("a capa de mesmo hash subiu de novo: " + capas, capas === 1);
+
+// Personalizado aqui: o editor salvou, e o padrão muda outra vez.
+a.srv.perfis.get(1).bio = "a minha daqui";
+a.srv.perfis.get(1).revisao += 1;
+a.ressincronizar();
+vm.runInContext("deixarDeSeguirOPadrao()", a.m.ctx);
+await espera(() => a.srv.seguimento.segue === false);
+confere("editar dentro do servidor não desligou o seguir", a.srv.seguimento.segue === false);
+const antes = a.contas();
+const outro = { ...novo, revisao: 4, status: "voltei" };
+a.srv.padrao = outro;
+vm.runInContext(`padraoMudou(${JSON.stringify(outro)})`, a.m.ctx);
+await tick(); await tick(); await tick(); await tick();
+a.ressincronizar();
+await tick(); await tick(); await tick();
+confere("o perfil personalizado foi sobrescrito pelo padrão: " + JSON.stringify(a.meu()), a.meu().bio === "a minha daqui" && a.meu().status === "de férias");
+confere("um servidor personalizado recebeu pedido do padrão", JSON.stringify(a.contas()) === JSON.stringify(antes));
+
+// Mudado por fora (outro aparelho): a assinatura não bate, e deixa de seguir sem ser tocado.
+const b = servidorDoPadrao();
+b.entrar();
+await espera(() => b.srv.seguimento.revisao_aplicada === 2);
+b.srv.perfis.get(1).pronomes = "ele/dele";
+b.srv.perfis.get(1).revisao += 1;
+const depois = b.contas();
+// A lista nova chega primeiro (o `PerfilMudou` do outro aparelho), e o padrão muda depois.
+b.ressincronizar();
+await espera(() => vm.runInContext("perfilOficial(1)?.pronomes", b.m.ctx) === "ele/dele");
+await tick(); await tick();
+b.srv.padrao = { ...PADRAO, revisao: 3, status: "x" };
+vm.runInContext(`padraoMudou(${JSON.stringify(b.srv.padrao)})`, b.m.ctx);
+await espera(() => b.srv.seguimento.segue === false);
+await tick(); await tick(); await tick();
+confere("o perfil mudado por outro caminho foi sobrescrito: " + JSON.stringify(b.meu()), b.meu().pronomes === "ele/dele" && b.meu().status === "no ar");
+confere("o perfil mudado por fora continuou seguindo", b.srv.seguimento.segue === false && JSON.stringify(b.contas()) === JSON.stringify(depois));
+"##,
+    );
+}
+
+/// **USAR MEU PERFIL PADRÃO** (a pílula do editor, dentro do servidor) aplica
+/// o padrão num servidor personalizado e volta a segui-lo; o editor diz, numa
+/// linha, que ele segue. Antes, a linha não diz isso, e a pílula aparece.
+///
+/// Provado revertendo: com o `forcar` ignorado na conferência, a pílula não
+/// aplica nada e este guarda reprova.
+#[test]
+fn usar_meu_perfil_padrao_aplica_e_volta_a_seguir() {
+    rodar_o_padrao(
+        "usar meu perfil padrão",
+        r##"
+const meu = { pessoa: 1, revisao: 7, nome_exibido: "Só daqui", pronomes: "", status: "", bio: "", cor: "#2f8fe0", efeito: "Nenhum", foto: null, capa: null };
+const a = servidorDoPadrao({ perfis: [meu] });
+a.entrar();
+await espera(() => so(a.m, "seguimento_do_perfil_padrao").length > 0);
+await tick(); await tick();
+vm.runInContext("editorDoPerfil.aberto = true; editorDoPerfil.modo = 'oficial'; desenharFaixaDoPadrao()", a.m.ctx);
+confere("o editor de um servidor personalizado não mostra USAR MEU PERFIL PADRÃO", a.m.$("perfil-padrao-usar").hidden === false && a.m.$("perfil-padrao-faixa").hidden === false);
+confere("o editor de um servidor personalizado diz que ele segue o padrão", !/segue o seu perfil padrão/.test(a.m.$("perfil-padrao-linha").textContent));
+await a.m.$("perfil-padrao-usar").click();
+await espera(() => a.srv.seguimento.segue === true && a.srv.seguimento.revisao_aplicada === 2);
+confere("USAR MEU PERFIL PADRÃO não aplicou o padrão: " + JSON.stringify(a.meu()), a.meu().nome_exibido === "Maya" && a.meu().foto?.hash === PADRAO.foto.hash && a.meu().capa?.hash === PADRAO.capa.hash);
+confere("USAR MEU PERFIL PADRÃO não gravou com a revisão de agora", so(a.m, "gravar_perfil")[0]?.args.revisao === 7);
+confere("USAR MEU PERFIL PADRÃO não voltou a seguir", a.srv.seguimento.segue === true);
+vm.runInContext("desenharFaixaDoPadrao()", a.m.ctx);
+confere("o editor não diz que o servidor segue o padrão: " + a.m.$("perfil-padrao-linha").textContent, /segue o seu perfil padrão/.test(a.m.$("perfil-padrao-linha").textContent) && a.m.$("perfil-padrao-linha").hidden === false);
+confere("a pílula continua com o servidor já seguindo", a.m.$("perfil-padrao-usar").hidden === true);
+"##,
+    );
+}
+
+/// **Num servidor 0.18 (protocolo 11), nada**: sem a lista `Perfis`, nenhum
+/// pedido do padrão sai — nem a leitura do registro —, e o caminho do MOD fica
+/// intocado. E um padrão nunca salvo (revisão zero) não é aplicado em lugar
+/// nenhum.
+///
+/// Provado revertendo: sem o `if (!disponivel)` de `decidirOPadrao`, a decisão
+/// manda aplicar num servidor 11 e este guarda reprova.
+#[test]
+fn o_padrao_nao_toca_um_servidor_onze_nem_sai_sem_ter_sido_salvo() {
+    rodar_o_padrao(
+        "o padrão e o servidor 11",
+        r##"
+const a = servidorDoPadrao({ protocolo: 11 });
+vm.runInContext("sincronizarPerfis({ perfis_revision: 0, me: 1 })", a.m.ctx);
+await tick(); await tick(); await tick();
+confere("o servidor 11 recebeu pedido do perfil padrão: " + a.m.chamadas.map((c) => c.cmd).join(","),
+  so(a.m, "gravar_perfil").length === 0 && so(a.m, "enviar_imagem_do_perfil_padrao").length === 0 && so(a.m, "guardar_seguimento_do_perfil_padrao").length === 0);
+const decisao = vm.runInContext("decidirOPadrao({ disponivel: false, meu: null, padrao: PADRAO_T, seguimento: { servidor: 'x' } })", Object.assign(a.m.ctx, { PADRAO_T: PADRAO }));
+confere("a decisão aplica num servidor 11: " + JSON.stringify(decisao), decisao.acao === "nada");
+
+const b = servidorDoPadrao({ padrao: { ...PADRAO, revisao: 0 } });
+b.entrar();
+await tick(); await tick(); await tick(); await tick();
+confere("um padrão nunca salvo foi aplicado", so(b.m, "gravar_perfil").length === 0 && b.meu() === null);
+"##,
+    );
+}
+
+/// **A falha de aplicar é dita, e não vira laço**: o servidor recusa o perfil
+/// (`Campos`), e o editor daquele servidor diz que o padrão não foi aplicado e
+/// por quê (com a pílula para tentar de novo), o aviso da coluna aparece, e o
+/// registro ganha a linha. A lista seguinte não tenta de novo na mesma sessão.
+///
+/// Provado revertendo: com o `dizerAFalhaDoPadrao` trocado por um
+/// `console.warn` só, o editor e o aviso ficam calados e este guarda reprova.
+#[test]
+fn a_falha_de_aplicar_o_padrao_e_dita_no_editor_no_aviso_e_no_registro() {
+    rodar_o_padrao(
+        "a falha do padrão",
+        r##"
+const a = servidorDoPadrao({ recusar: "SemPastaDePerfis" });
+const avisos = [];
+a.m.ctx.console = { ...console, warn: (...x) => avisos.push(x.join(" ")), info() {} };
+a.entrar();
+await espera(() => vm.runInContext("estadoDoPadrao.falhas.size", a.m.ctx) > 0);
+await tick(); await tick();
+vm.runInContext("editorDoPerfil.aberto = true; editorDoPerfil.modo = 'oficial'; desenharFaixaDoPadrao(); desenharEntradaDosPerfis()", a.m.ctx);
+const linha = a.m.$("perfil-padrao-linha");
+confere("o editor não diz que o padrão não foi aplicado: " + linha.textContent, /não foi aplicado aqui/.test(linha.textContent) && linha.dataset.tom === "erro" && linha.hidden === false);
+confere("o editor não diz o motivo: " + linha.textContent, /banco em memória/.test(linha.textContent));
+confere("a pílula para tentar de novo não apareceu", a.m.$("perfil-padrao-usar").hidden === false);
+confere("o aviso da coluna ficou calado: " + a.m.$("perfis-pendencia").textContent, a.m.$("perfis-pendencia").hidden === false && /perfil padrão/.test(a.m.$("perfis-pendencia").textContent));
+confere("o registro não ganhou a linha: " + JSON.stringify(a.srv.registro), a.srv.registro.some((l) => /perfil-padrao/.test(l)));
+confere("o console não disse: " + JSON.stringify(avisos), avisos.some((l) => /não foi aplicado/.test(l)));
+const tentativas = so(a.m, "gravar_perfil").length;
+a.ressincronizar();
+await tick(); await tick(); await tick();
+confere("a falha virou laço na mesma sessão", so(a.m, "gravar_perfil").length === tentativas);
+"##,
+    );
+}
+
+/// **O «Seu perfil» da tela inicial edita o padrão**: fora de sessão, com o
+/// padrão lido, o editor abre no modo `padrao` com os campos dele; o SALVAR vai
+/// ao `gravar_perfil_padrao`, e a recusa da regra do servidor volta **por
+/// campo**, antes de qualquer servidor.
+///
+/// Provado revertendo: sem o desvio do `gravarOPerfilOficial` para o padrão,
+/// o SALVAR da tela inicial não grava nada e este guarda reprova.
+#[test]
+fn o_seu_perfil_da_tela_inicial_edita_o_padrao_e_recusa_por_campo() {
+    rodar_o_padrao(
+        "o editor do padrão",
+        r##"
+const a = servidorDoPadrao();
+let recusar = true;
+a.m.ctx.invoke = async (cmd, args) => {
+  a.m.chamadas.push({ cmd, args });
+  if (cmd === "perfil_padrao") return structuredClone(PADRAO);
+  if (cmd === "gravar_perfil_padrao") {
+    if (recusar) throw { Campos: { campos: [{ campo: "NomeExibido", motivo: "Longo" }] } };
+    return { ...PADRAO, ...args.entrada, revisao: 3 };
+  }
+  throw "sem-comando";
+};
+const padrao = await vm.runInContext("lerOPerfilPadrao()", a.m.ctx);
+a.m.ctx.P = padrao;
+vm.runInContext("prepararOEditorDoPerfil(null, 'maya', P)", a.m.ctx);
+confere("o editor da tela inicial não abriu no modo do padrão", vm.runInContext("editorDoPerfil.modo", a.m.ctx) === "padrao" && a.m.$("perfil").dataset.modo === "padrao");
+// Um nome só (0.19): o campo do nome mostra o nome do padrão, e não o apelido.
+confere("os campos não vieram do padrão", a.m.$("perfil-apelido").value === "Maya" && a.m.$("perfil-status").value === "no ar");
+confere("a tela inicial não diz que edita o padrão", /perfil padrão/.test(a.m.$("perfil-padrao-linha").textContent));
+a.m.$("perfil-apelido").value = "N".repeat(50);
+const recusado = await vm.runInContext("gravarOPerfilOficial()", a.m.ctx);
+confere("o campo longo não voltou ao campo", recusado === false && a.m.$("perfil-apelido-erro").hidden === false && /40/.test(a.m.$("perfil-apelido-erro").textContent));
+recusar = false;
+a.m.$("perfil-apelido").value = "Maya B";
+const salvo = await vm.runInContext("gravarOPerfilOficial()", a.m.ctx);
+const pedido = so(a.m, "gravar_perfil_padrao").pop();
+confere("o SALVAR da tela inicial não gravou o padrão", salvo === true && pedido?.args.entrada.nome_exibido === "Maya B");
+confere("o SALVAR da tela inicial falou com um servidor", so(a.m, "gravar_perfil").length === 0);
+confere("o padrão salvo não ficou guardado na janela", vm.runInContext("perfilPadraoAtual().nome_exibido", a.m.ctx) === "Maya B");
+"##,
+    );
+}
+
+/// **Um nome só** (0.19, pedido do dono: «se o usuário troca o nome, troca
+/// também no registro do server»). O editor dentro do servidor tem um campo
+/// «Nome», que mostra o nome exibido do perfil (e não o apelido) quando os dois
+/// divergem; o SALVAR manda o `SetNickname` **e depois** o `GravarPerfil` com o
+/// `nome_exibido` igual; a recusa do servidor ao nome (o `PedidoRecusado` do
+/// `SetNickname`) é dita no campo e **o perfil não é gravado**; e um nome que a
+/// regra mais estrita recusa não sai.
+///
+/// `perfis.js`, `perfil-padrao.js` e o SALVAR de `camada-nomear.js`
+/// (`salvarOPerfil`, `guardarOApelido`) rodam de verdade, sobre o servidor
+/// simulado do padrão. Provado revertendo: com o `GravarPerfil` antes do
+/// `SetNickname` (`gravarOPerfilOficial` antes de `guardarOApelido`), com o
+/// `if (!desfecho.ok)` tirado (o perfil gravado depois da recusa), ou com o
+/// campo voltando a mostrar o apelido, este guarda reprova.
+#[test]
+fn o_nome_unico_vai_ao_registro_e_depois_ao_perfil_e_para_na_recusa() {
+    rodar_o_padrao(
+        "o nome único",
+        r##"
+const meu = { pessoa: 1, revisao: 3, nome_exibido: "Cria de GRU", pronomes: "", status: "", bio: "", cor: "#4fd1c5", efeito: "Nenhum", foto: null, capa: null };
+const a = servidorDoPadrao({ perfis: [meu], padrao: { ...PADRAO, revisao: 0 } });
+let respostaDoNome = "aceita";
+const ordem = [];
+const invocar = a.m.ctx.invoke;
+a.m.ctx.invoke = async (cmd, args) => {
+  if (cmd === "snapshot") return { me: 1 };
+  if (cmd === "escolher_apelido") {
+    a.m.chamadas.push({ cmd, args });
+    ordem.push("SetNickname");
+    if (respostaDoNome === "aceita") setTimeout(() => { a.m.ctx.identidadesApresentadas = { "1": [args.apelido, "4F2A"] }; }, 5);
+    else setTimeout(() => a.m.ouvintes["seele://event"]({ payload: { NoticeRaised: { notice: { reason: { PedidoRecusado: { pedido: "SetNickname", causa: "NomeTomado" } } } } } }), 5);
+    return null;
+  }
+  if (cmd === "gravar_perfil") ordem.push("GravarPerfil");
+  return invocar(cmd, args);
+};
+Object.assign(a.m.ctx, {
+  passaDoTeto: async (campo, texto) => (campo === "apelido" && Buffer.byteLength(texto) > 32 ? "passa do teto" : null),
+  fraseDeErro: (f) => String(f),
+});
+for (const nome of ["guardarOApelido", "salvarOPerfil"]) vm.runInContext(funcao("camada-nomear.js", nome), a.m.ctx);
+a.entrar();
+await espera(() => vm.runInContext("perfilOficial(1) !== null", a.m.ctx));
+await tick(); await tick();
+// O servidor diz quem a pessoa é depois da lista: a conferência da entrada
+// (o alinhamento do registro, parte (5)) não age antes de saber.
+a.m.ctx.identidadesApresentadas = { "1": ["teste", "4F2A"] };
+vm.runInContext("prepararOEditorDoPerfil({ me: 1 }, 'teste', null)", a.m.ctx);
+confere("o editor do servidor não abriu no modo oficial", vm.runInContext("editorDoPerfil.modo", a.m.ctx) === "oficial");
+confere("o campo do nome mostrou o apelido, e não o nome exibido: " + a.m.$("perfil-apelido").value, a.m.$("perfil-apelido").value === "Cria de GRU");
+confere("abrir com o nome exibido diferente do apelido já contou como alteração", vm.runInContext("perfilTemAlteracoes()", a.m.ctx) === false);
+const salvar = () => vm.runInContext("salvarOPerfil()", a.m.ctx);
+
+// (1) A regra mais estrita, antes de qualquer pedido.
+for (const [nome, porque] of [["", "vazio"], ["Nov\u202eo", "controle de direção"], ["é".repeat(17), "34 bytes"]]) {
+  a.m.$("perfil-apelido").value = nome;
+  const ok = await salvar();
+  confere(`o nome recusado pela regra (${porque}) foi salvo`, ok === false && a.m.$("perfil-apelido-erro").hidden === false);
+}
+confere("um nome que a regra recusa saiu: " + ordem.join(), ordem.length === 0);
+
+// (2) O servidor recusa o nome: dito no campo, e o perfil não é gravado.
+respostaDoNome = "recusa";
+a.m.$("perfil-apelido").value = "Novo Nome";
+const recusado = await salvar();
+confere("a recusa do nome fechou o editor", recusado === false);
+confere("a recusa do nome não foi dita no campo: " + a.m.$("perfil-apelido-erro").textContent,
+  a.m.$("perfil-apelido-erro").hidden === false && /outra pessoa/.test(a.m.$("perfil-apelido-erro").textContent));
+confere("o perfil foi gravado com o nome que o registro recusou: " + ordem.join(), ordem.join() === "SetNickname");
+confere("o perfil mudou depois da recusa: " + a.meu().nome_exibido, a.meu().nome_exibido === "Cria de GRU");
+
+// (3) Aceito: o registro primeiro, o perfil depois, com o mesmo nome.
+respostaDoNome = "aceita";
+ordem.length = 0;
+const salvo = await salvar();
+confere("o nome aceito não fechou o editor", salvo === true);
+confere("a ordem não foi SetNickname e depois GravarPerfil: " + ordem.join(), ordem.join() === "SetNickname,GravarPerfil");
+const pedido = so(a.m, "escolher_apelido").pop();
+confere("o SetNickname não levou o nome do campo", pedido?.args.apelido === "Novo Nome");
+confere("o perfil não ficou com o mesmo nome: " + a.meu().nome_exibido, a.meu().nome_exibido === "Novo Nome");
+
+// A lista nova do (3) passa pela conferência do padrão: ela termina antes.
+await tick(); await tick();
+await espera(() => vm.runInContext("!estadoDoPadrao.aplicando", a.m.ctx));
+
+// (4) Um perfil cujo nome exibido diverge do apelido: salvar sem mexer alinha o registro.
+a.m.ctx.identidadesApresentadas = { "1": ["teste", "4F2A"] };
+ordem.length = 0;
+vm.runInContext("prepararOEditorDoPerfil({ me: 1 }, 'teste', null)", a.m.ctx);
+const alinhado = await salvar();
+confere("salvar sem mexer não alinhou o registro ao nome exibido: " + ordem.join(), alinhado === true && ordem.join() === "SetNickname" && so(a.m, "escolher_apelido").pop()?.args.apelido === "Novo Nome");
+
+// (5) A conexão seguinte volta com o apelido desta máquina no `Hello`: a
+// conferência da lista alinha o registro ao nome do perfil, uma vez.
+a.m.ctx.identidadesApresentadas = { "1": ["teste", "4F2A"] };
+ordem.length = 0;
+await vm.runInContext("conferirOPadrao()", a.m.ctx);
+await vm.runInContext("conferirOPadrao()", a.m.ctx);
+confere("a conferência não alinhou o registro ao nome do perfil (ou alinhou duas vezes): " + ordem.join(), ordem.join() === "SetNickname" && so(a.m, "escolher_apelido").pop()?.args.apelido === "Novo Nome");
+"##,
+    );
+}
+
+/// **O nome recusa os mesmos caracteres que o perfil**: a conferência do
+/// editor (`caractereRecusadoNoNome`, `perfis.js`) é a de
+/// `seele_proto::perfil::e_recusado` fora da bio, código a código até U+3000.
+/// Provado revertendo: sem o U+061C (ou sem o intervalo U+2066–2069) na
+/// conferência, este guarda reprova.
+#[test]
+fn o_nome_recusa_os_mesmos_caracteres_que_o_perfil() {
+    let recusados: Vec<u32> = (0u32..0x3000)
+        .filter_map(char::from_u32)
+        .filter(|c| seele_proto::perfil::e_recusado(*c, false))
+        .map(u32::from)
+        .collect();
+    rodar_node(
+        "os caracteres do nome",
+        &format!(
+            r##"
+const m = mundo({{}});
+vm.runInContext(funcao("perfis.js", "caractereRecusadoNoNome"), m.ctx);
+const doRust = new Set({recusados:?});
+const diferentes = [];
+for (let n = 0; n < 0x3000; n += 1) {{
+  if (n >= 0xd800 && n <= 0xdfff) continue;
+  m.ctx.c = String.fromCodePoint(n);
+  if (vm.runInContext("caractereRecusadoNoNome(c)", m.ctx) !== doRust.has(n)) diferentes.push(n.toString(16));
+}}
+confere("o nome e o perfil discordam nestes códigos: " + diferentes.join(" "), diferentes.length === 0);
+"##
+        ),
+    );
+}
+
+/// **A linha de pessoa mostra um nome só** (0.19, pedido do dono: «dentro do
+/// server, tem que tirar o nome teste de baixo»): com perfil oficial, o nome
+/// exibido com o «(você)» junto, e o apelido não aparece de novo embaixo; sem
+/// perfil, o apelido de sempre. E **sem capa, a linha veste a cor do perfil**
+/// (`aplicarCapa`), e não veste nada para quem não tem perfil.
+///
+/// `linhaNativaDoRoster`, `nomeDaPessoa` e `nomeNaLinha` vêm de
+/// `tela-sessao.js`. Provado revertendo: com a linha do apelido de volta ao
+/// lado do nome exibido, ou com a condição da capa só pela imagem
+/// (`capaDaPessoa`), este guarda reprova.
+#[test]
+fn a_linha_de_pessoa_mostra_um_nome_so_e_veste_a_cor_sem_capa() {
+    rodar_node(
+        "um nome na linha",
+        r##"
+const m = mundo({});
+let perfis = { "1": { nome_exibido: "Cria de GRU", cor: "#4fd1c5" } };
+const vestidas = [];
+Object.assign(m.ctx, {
+  elemento: (tag, classe, texto) => { const e = new El(""); e.tag = tag; e.className = classe ?? ""; if (texto !== undefined) e.textContent = texto; e.classList = { add() {} }; return e; },
+  perfilOficial: (id) => perfis[String(id)] ?? null,
+  linhaDoPerfil: () => "", iniciaisDoApelido: (a) => a.slice(0, 2), vestirAvatar: (n) => n,
+  nosDeMod: () => [], conteudoDasContribuicoes: () => [], estadosDaPessoa: () => new El("estados"),
+  capaDaPessoa: () => null, vestirCapa: (no, id) => { vestidas.push(String(id)); return no; },
+});
+for (const nome of ["nomeDaPessoa", "nomeNaLinha", "corDoPerfilDe", "linhaNativaDoRoster"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+const textos = (no) => [no.textContent, ...(no.children ?? []).flatMap(textos)].filter(Boolean);
+const linha = (pessoa) => { m.ctx.p = pessoa; return vm.runInContext("linhaNativaDoRoster(p, true)", m.ctx); };
+
+const eu = linha({ id: 1, nome: "teste (você)", eu: true });
+const nomes = textos(eu);
+confere("a linha não mostra o nome exibido com o (você): " + JSON.stringify(nomes), nomes.includes("Cria de GRU (você)"));
+confere("a linha ainda mostra o apelido embaixo do nome: " + JSON.stringify(nomes), !nomes.some((t) => /teste/.test(t)));
+confere("a linha não vestiu a cor do perfil sem capa", vestidas.join() === "1");
+
+perfis = {};
+const sem = textos(linha({ id: 2, nome: "ana" }));
+confere("sem perfil, a linha não mostra o apelido: " + JSON.stringify(sem), sem.includes("ana"));
+confere("sem perfil, a linha vestiu uma cor", vestidas.join() === "1");
+"##,
+    );
+}
+
+/// **A cor do perfil no lugar da capa** (0.19, pedido do dono: «tem que ter a
+/// cor do banner escolhido como fundo, caso não tenha imagem»): `aplicarCapa`
+/// põe a camada com `data-capa-de-cor` e a cor em `--cor-do-perfil` quando o
+/// perfil não tem capa; com capa, a imagem e nenhuma cor; sem perfil, nada; e
+/// a faixa do cartão do perfil (`data-cor-propria`), que pinta a cor do
+/// rascunho, não ganha a camada. Provado revertendo: com o `cor` de
+/// `aplicarCapa` em `null`, ou sem a conferência do `corPropria`, reprova.
+#[test]
+fn a_cor_do_perfil_entra_no_lugar_da_capa_so_sem_capa() {
+    rodar_node(
+        "a cor no lugar da capa",
+        r##"
+let perfis = { "7": { cor: "#4FD1C5" } };
+let capa = null;
+const m = mundo({});
+const comEstilo = (no) => Object.assign(no, {
+  style: { backgroundImage: "", props: {}, setProperty(k, v) { this.props[k] = v; }, removeProperty(k) { if (k === "background-image") this.backgroundImage = ""; delete this.props[k]; } },
+  prepend(c) { c.pai = this; this.children.unshift(c); },
+  remove() { if (this.pai) this.pai.children = this.pai.children.filter((x) => x !== this); },
+  querySelector() { return this.children.find((c) => c.className === "capa-camada") ?? null; },
+});
+Object.assign(m.ctx, {
+  matchMedia: () => ({ matches: false }),
+  elemento: (tag, classe) => { const e = comEstilo(new El("")); e.className = classe ?? ""; return e; },
+  capaDaPessoa: () => capa,
+  perfilOficial: (id) => perfis[String(id)] ?? null,
+});
+for (const nome of ["aplicarCapa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+const quadro = comEstilo(new El("q"));
+quadro.dataset.pessoaDaCapa = "7";
+const aplicar = () => { m.ctx.q = quadro; vm.runInContext("aplicarCapa(q)", m.ctx); return quadro; };
+
+aplicar();
+confere("sem capa, a cor do perfil não entrou", quadro.dataset.capaDeCor === "sim" && quadro.dataset.comCapa === "sim" && quadro.style.props["--cor-do-perfil"] === "#4fd1c5" && quadro.querySelector() !== null);
+capa = { url: "data:capa", estatico: "data:capa" };
+aplicar();
+confere("com capa, a cor ficou por cima da imagem", quadro.dataset.capaDeCor === undefined && !("--cor-do-perfil" in quadro.style.props) && /data:capa/.test(quadro.querySelector()?.style.backgroundImage));
+capa = null; perfis = {};
+aplicar();
+confere("sem perfil e sem capa, sobrou camada", quadro.querySelector() === null && quadro.dataset.comCapa === undefined && quadro.dataset.capaDeCor === undefined);
+perfis = { "7": { cor: "#4fd1c5" } };
+const faixa = comEstilo(new El("f"));
+faixa.dataset.pessoaDaCapa = "7"; faixa.dataset.corPropria = "sim";
+m.ctx.q = faixa; vm.runInContext("aplicarCapa(q)", m.ctx);
+confere("a faixa do cartão, que pinta a cor do rascunho, ganhou a camada de cor", faixa.querySelector() === null && faixa.dataset.capaDeCor === undefined);
+"##,
+    );
+}
+
+/// **O ANTES DE HOSPEDAR não oferece ATUALIZAR para um MOD que o produto
+/// incorporou** (0.19; `docs/0.19/perfis-oficiais.md`, §4).
+///
+/// Até a 0.18, quem chegava com o PERFIS 3.3.1 (API 5) ligado lia ATUALIZAR
+/// PARA 4.0.0 — e na 0.19 o 4.0.0 é um MOD que o servidor recusa. Roda de
+/// verdade no `node`, sobre as fontes reais:
+///
+/// (a) `desenharSaidasDeQuemHospeda`, com o catálogo oferecendo o 4.0.0: a
+///     linha do PERFIS diz «Perfis agora faz parte do SEELE (0.19). Os perfis
+///     deste servidor serão trazidos.» e não tem botão nenhum; a de outro MOD
+///     de API antiga continua com ATUALIZAR e DESLIGAR (o propósito do guarda
+///     de antes: as saídas dos outros não mudam);
+/// (b) `confirmarEHospedar` estagia «seguir sem ele» (`saida: "incorporado"`)
+///     **antes** de chamar o `hospedar`, e não hospeda quando a escolha não se
+///     guarda;
+/// (c) a lista da janela é a do servidor (`INCORPORADOS`).
+///
+/// O teste de ponta a ponta (o banco, a cópia, o cancelar e os perfis trazidos)
+/// é `perfis_incorporado_testes.rs`, em `src/`.
+#[test]
+fn o_antes_de_hospedar_diz_que_o_perfis_e_do_produto_e_nao_oferece_o_4_0_0() {
+    use std::io::Write;
+    // (c) A lista da janela, contra a do servidor.
+    let frases = read("ui/frases.js");
+    let declarada = without_comments(&frases);
+    let lista = declarada
+        .split_once("const MODS_INCORPORADOS_AO_PRODUTO = new Map(")
+        .and_then(|(_, depois)| depois.split_once(");"))
+        .map(|(lista, _)| lista.to_owned())
+        .expect("`MODS_INCORPORADOS_AO_PRODUTO` sumiu do frases.js");
+    let esperada = format!(
+        "[{}]",
+        seele_server::mods::incorporados::INCORPORADOS
+            .iter()
+            .map(|(id, desde)| format!("[\"{id}\", \"{desde}\"]"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert_eq!(
+        lista, esperada,
+        "a lista de MODs incorporados da janela não é a do servidor (`incorporados.rs`)"
+    );
+
+    let boot = read("ui/tela-boot.js");
+    let antes = read("ui/tela-antes-de-hospedar.js");
+    let fontes = serde_json::json!({
+        "frases": frases,
+        "saidas": format!(
+            "async function desenharSaidasDeQuemHospeda(mods, servidor, opcoesDaTela) {}",
+            js_function(&boot, "async function desenharSaidasDeQuemHospeda(")
+        ),
+        "hospedar": format!(
+            "async function confirmarEHospedar() {}",
+            js_function(&antes, "async function confirmarEHospedar(")
+        ),
+    })
+    .to_string();
+    let script = r#"
+const vm = require("vm");
+const fontes = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const falhas = [];
+const confere = (nome, ok) => { if (!ok) falhas.push(nome); };
+function no(tag, classe, texto) {
+  return { tag, className: classe ?? "", textContent: texto ?? "", dataset: {}, filhos: [], hidden: false,
+    append(...f) { this.filhos.push(...f); }, replaceChildren(...f) { this.filhos = f; },
+    setAttribute() {}, addEventListener() {}, focus() {}, scrollIntoView() {}, remove() {},
+    querySelector() { return null; }, querySelectorAll() { return []; } };
+}
+const todos = (n) => [n, ...(n.filhos ?? []).flatMap(todos)];
+function contexto(invoke) {
+  const elementos = {};
+  const ctx = { console, Map, Set, Promise, Object, invoke,
+    $: (id) => (elementos[id] ??= no("div")), elementos, chamadas: [],
+    elemento: no, versaoParaEsteApp: (v) => v?.[0] ?? null, APIS_QUE_ESTE_APLICATIVO_ACEITA: [7, 6],
+    geracaoDasSaidas: 0, fraseDaVersao: (f) => String(f), voltarParaTela() {}, servidorEscolhido: undefined };
+  vm.createContext(ctx);
+  vm.runInContext(fontes.frases, ctx);
+  return ctx;
+}
+(async () => {
+  // (a) As linhas: o PERFIS sem saída, o outro com as duas.
+  const catalogo = { mods: [
+    { id: "seele/perfis", versoes: [{ versao: "4.0.0", hash: "h4", api: 6 }] },
+    { id: "ana/outro", versoes: [{ versao: "2.0.0", hash: "h2", api: 7 }] },
+  ] };
+  const a = contexto(async (cmd) => (cmd === "catalogo_de_mods" ? catalogo : null));
+  vm.runInContext(fontes.saidas, a);
+  await vm.runInContext(`desenharSaidasDeQuemHospeda([["seele/perfis", 5], ["ana/outro", 4]], null,
+    { incorporados: new Map([["seele/perfis", "0.19"]]) })`, a);
+  const linhas = todos(a.elementos["boot-saidas"]).filter((n) => n.tag === "li");
+  const perfis = linhas.find((l) => l.dataset.mod === "seele/perfis");
+  const outro = linhas.find((l) => l.dataset.mod === "ana/outro");
+  confere("(a) a linha do PERFIS sumiu", Boolean(perfis));
+  const botoes = (l) => todos(l ?? { filhos: [] }).filter((n) => n.tag === "button").map((n) => n.dataset.saida);
+  confere(`(a) o PERFIS ainda tem saída: ${botoes(perfis)}`, botoes(perfis).length === 0);
+  confere("(a) o PERFIS não diz que agora faz parte do SEELE",
+    todos(perfis ?? { filhos: [] }).some((n) => n.textContent === "Perfis agora faz parte do SEELE (0.19). Os perfis deste servidor serão trazidos."));
+  confere("(a) o 4.0.0 aparece na linha do PERFIS", !todos(perfis ?? { filhos: [] }).some((n) => /4\.0\.0/.test(n.textContent)));
+  confere(`(a) o outro MOD perdeu ATUALIZAR ou DESLIGAR: ${botoes(outro)}`,
+    botoes(outro).includes("atualizar") && botoes(outro).includes("desligar"));
+
+  // (b) O HOSPEDAR do fim estagia o incorporado antes de subir.
+  const ordem = [];
+  const b = contexto(async (cmd, args) => { ordem.push([cmd, args?.saida, args?.id]); });
+  b.antesDeHospedar = { servidor: null, aSeguirSem: new Set(["seele/perfis"]), geracao: 0 };
+  b.hospedar = async () => { ordem.push(["hospedar"]); };
+  vm.runInContext(fontes.hospedar, b);
+  await vm.runInContext("confirmarEHospedar()", b);
+  confere(`(b) a ordem não é estagiar e depois hospedar: ${JSON.stringify(ordem)}`,
+    JSON.stringify(ordem) === JSON.stringify([["resolver_mod_de_api_antiga", "incorporado", "seele/perfis"], ["hospedar"]]));
+  const c = contexto(async () => { throw "NaoGuardou"; });
+  let hospedou = false;
+  c.antesDeHospedar = { servidor: null, aSeguirSem: new Set(["seele/perfis"]), geracao: 0 };
+  c.hospedar = async () => { hospedou = true; };
+  vm.runInContext(fontes.hospedar, c);
+  await vm.runInContext("confirmarEHospedar()", c);
+  confere("(b) hospedou com a escolha não guardada", !hospedou);
+  confere("(b) a escolha não guardada não foi dita", c.elementos["antes-erro"]?.hidden === false);
+  if (falhas.length) { console.log(falhas.join("\n")); process.exit(1); }
+})().catch((e) => { console.log(e.stack); process.exit(1); });
+"#;
+    let mut filho = match std::process::Command::new("node")
+        .args(["-e", script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(filho) => filho,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda do PERFIS incorporado não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    filho
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(fontes.as_bytes())
+        .expect("as fontes ao node");
+    let saida = filho.wait_with_output().expect("node");
+    assert!(
+        saida.status.success(),
+        "o ANTES DE HOSPEDAR oferece o 4.0.0 ao PERFIS, ou hospeda sem estagiar:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+#[test]
+fn the_people_list_does_not_write_transmitindo_but_still_says_it() {
+    // 0.19, owner: «tira o transmitindo da aba de perfis». The speaking and the
+    // resting chip leave the people list's view — the green outline of
+    // `li.pessoa.falando` carries speaking, as on the call card — while MUDO and
+    // ISOLAMENTO TOTAL stay visible, because they are the exception.
+    //
+    // Two halves, both silent if lost. Hidden from view, not deleted: the word
+    // is what a screen reader hears (`specs/06-clientes-gui.md`: never colour
+    // alone), so `estadosDaPessoa` must keep writing it. And the hiding rule
+    // must target exactly fala/escuta: a selector that also caught `at` or
+    // `surdo` would hide that somebody cannot hear you.
+    let css = styles();
+    let seletor = "#lista-roster .pessoa-estados .pastilha:is([data-estado=\"fala\"], [data-estado=\"escuta\"])";
+    let corpo = css
+        .split(seletor)
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("the people list must hide the TRANSMITINDO / EM ESCUTA chip from view");
+    assert!(
+        corpo.contains("clip-path: inset(50%)") && corpo.contains("position: absolute"),
+        "the chip must leave the view and stay in the document, for the screen reader: {corpo}"
+    );
+    assert!(
+        !css.contains("[data-estado=\"at\"]) {") && !css.contains("data-estado=\"surdo\"], [data-estado"),
+        "MUDO and ISOLAMENTO TOTAL must stay visible in the people list"
+    );
+    let script = scripts();
+    let estados = body_of(&script, "function estadosDaPessoa");
+    assert!(
+        estados.contains("\"TRANSMITINDO\"") && estados.contains("dataset.estado"),
+        "the word is still written, for the screen reader and the person's modal"
     );
 }

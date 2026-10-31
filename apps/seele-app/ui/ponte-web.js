@@ -261,7 +261,12 @@ const COMANDOS_DA_PONTE = new Set([
   // O perfil público (0.19, `perfis.js`): a lista e os dois verbos pelo `.wasm`
   // da sessão; as imagens pelo fluxo bidirecional, como no desktop.
   "perfis", "gravar_perfil", "tirar_imagem_do_perfil", "enviar_imagem_do_perfil",
-  "imagem_do_perfil"
+  "imagem_do_perfil",
+  // O perfil padrão (0.19, `perfil-padrao.js`): guardado no IndexedDB desta
+  // origem, e subido pela sessão da vista como no desktop.
+  "perfil_padrao", "gravar_perfil_padrao", "escolher_imagem_do_perfil_padrao",
+  "tirar_imagem_do_perfil_padrao", "seguimento_do_perfil_padrao",
+  "guardar_seguimento_do_perfil_padrao", "enviar_imagem_do_perfil_padrao"
 ]);
 
 /**
@@ -2110,6 +2115,217 @@ async function enviarAImagemDoPerfil(lado) {
   return { escolheu: true, icone_nativo: iconeNativo };
 }
 
+// ------------------------------------------------------- o perfil padrão
+//
+// **O «Seu perfil» da tela inicial, guardado nesta origem** (0.19, «Padrão +
+// ajuste por servidor»; o desktop o guarda em `perfil_padrao.rs`). No
+// IndexedDB, como a identidade (`identidade-web.js`), e nunca no
+// `localStorage`: são até duas imagens de 10 MiB. Três lojas: `padrao` (os
+// textos validados, a revisão e o endereço de cada imagem), `imagens` (os
+// bytes, pelo SHA-256 — o endereço do servidor) e `servidores` (por impressão:
+// se segue o padrão, a revisão aplicada e a assinatura). A regra dos textos e
+// das imagens é a do servidor, pelo `.wasm` (`perfil_validar`,
+// `perfil_conferir`), sem sessão.
+
+const BANCO_DO_PADRAO = Object.freeze({ nome: "seele-perfil-padrao", versao: 1, lojas: ["padrao", "imagens", "servidores"] });
+
+/** Uma transação nas `lojas`; `fazer` devolve um pedido (o resultado dele volta) ou um valor. */
+function noBancoDoPadrao(lojas, modo, fazer) {
+  return new Promise((resolver, recusar) => {
+    let abertura;
+    try {
+      abertura = indexedDB.open(BANCO_DO_PADRAO.nome, BANCO_DO_PADRAO.versao);
+    } catch (falha) {
+      recusar(falha);
+      return;
+    }
+    abertura.onupgradeneeded = () => {
+      const banco = abertura.result;
+      for (const loja of BANCO_DO_PADRAO.lojas) if (!banco.objectStoreNames.contains(loja)) banco.createObjectStore(loja);
+    };
+    abertura.onerror = () => recusar(abertura.error);
+    abertura.onsuccess = () => {
+      const banco = abertura.result;
+      let transacao;
+      let devolvido;
+      try {
+        transacao = banco.transaction(lojas, modo);
+        devolvido = fazer(...lojas.map((loja) => transacao.objectStore(loja)));
+      } catch (falha) {
+        banco.close();
+        recusar(falha);
+        return;
+      }
+      transacao.oncomplete = () => {
+        banco.close();
+        resolver(devolvido instanceof IDBRequest ? devolvido.result : devolvido);
+      };
+      transacao.onerror = transacao.onabort = () => {
+        banco.close();
+        recusar(transacao.error);
+      };
+    };
+  });
+}
+
+/** O padrão vazio: revisão zero é «nunca salvo». */
+const PADRAO_VAZIO = Object.freeze({
+  revisao: 0, nome_exibido: "", pronomes: "", status: "", bio: "", cor: "#f2521f", efeito: "Nenhum", foto: null, capa: null,
+});
+
+async function padraoGuardado() {
+  return (await noBancoDoPadrao(["padrao"], "readonly", (loja) => loja.get("padrao"))) ?? { ...PADRAO_VAZIO };
+}
+
+/** As exportações do `.wasm` que valem o perfil sem sessão. */
+async function regraDoPadrao() {
+  const w = (await carregarOWasmDaPagina()).instancia.exports;
+  const memoria = () => new Uint8Array(w.memory.buffer);
+  const saida = () => new TextDecoder().decode(memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()));
+  const com = (bytes, fazer) => {
+    const p = w.alocar(bytes.length);
+    memoria().set(bytes, p);
+    try {
+      return fazer(p, bytes.length);
+    } finally {
+      w.liberar(p, bytes.length);
+    }
+  };
+  return {
+    validar(entrada) {
+      const codigo = com(new TextEncoder().encode(JSON.stringify(entrada)), (p, n) => w.perfil_validar(p, n));
+      return codigo === 0 ? { ok: JSON.parse(saida()) } : { falha: JSON.parse(saida()) };
+    },
+    conferir(bytes) {
+      const codigo = com(bytes, (p, n) => w.perfil_conferir(p, n));
+      return codigo === 0 ? { tipo: saida() } : { falha: JSON.parse(saida()) };
+    },
+  };
+}
+
+/** O SHA-256 em hexadecimal: o endereço com que o servidor guarda a imagem. */
+async function hashDaImagemDoPadrao(bytes) {
+  const digerido = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digerido].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function dataUriDe(bytes, tipo) {
+  let binario = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binario += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${tipo};base64,${btoa(binario)}`;
+}
+
+/** `perfil_padrao`: os textos, a revisão e as imagens em `data:`. */
+async function perfilPadraoNaOrigem() {
+  const padrao = await padraoGuardado();
+  const naTela = { ...padrao };
+  for (const lado of ["foto", "capa"]) {
+    const imagem = padrao[lado];
+    if (!imagem) continue;
+    const guardada = await noBancoDoPadrao(["imagens"], "readonly", (loja) => loja.get(imagem.hash));
+    if (!guardada) console.warn(`ponte: a ${lado} do perfil padrão sumiu do armazém desta origem`);
+    naTela[lado] = { ...imagem, url: guardada ? dataUriDe(guardada, imagem.tipo) : "" };
+  }
+  return naTela;
+}
+
+/** `gravar_perfil_padrao`: validado pela regra do servidor; a revisão sobe só quando algo mudou. */
+async function gravarOPerfilPadraoNaOrigem(entrada) {
+  const lido = (await regraDoPadrao()).validar(entrada ?? {});
+  if (lido.falha) throw lido.falha;
+  const validada = lido.ok;
+  const padrao = await padraoGuardado();
+  const campos = ["nome_exibido", "pronomes", "status", "bio", "cor", "efeito"];
+  if (padrao.revisao > 0 && campos.every((k) => padrao[k] === validada[k])) return perfilPadraoNaOrigem();
+  const novo = { ...padrao, ...Object.fromEntries(campos.map((k) => [k, validada[k]])), revisao: padrao.revisao + 1 };
+  try {
+    await noBancoDoPadrao(["padrao"], "readwrite", (loja) => loja.put(novo, "padrao"));
+  } catch (falha) {
+    console.warn("ponte: o perfil padrão não foi gravado nesta origem:", falha);
+    throw "NaoGravei";
+  }
+  return perfilPadraoNaOrigem();
+}
+
+/** Troca (ou tira, com `null`) a imagem de um lado, e apaga a velha que ficou sem uso. */
+async function trocarAImagemDoPadrao(lado, imagem, bytes) {
+  const chave = lado === "Capa" ? "capa" : "foto";
+  try {
+    await noBancoDoPadrao(["padrao", "imagens"], "readwrite", (padroes, imagens) => {
+      const pedido = padroes.get("padrao");
+      pedido.onsuccess = () => {
+        const padrao = pedido.result ?? { ...PADRAO_VAZIO };
+        const antes = padrao[chave];
+        if (!antes && !imagem) return;
+        if (imagem) imagens.put(bytes, imagem.hash);
+        const novo = { ...padrao, [chave]: imagem, revisao: padrao.revisao + 1 };
+        padroes.put(novo, "padrao");
+        const outro = novo[chave === "foto" ? "capa" : "foto"];
+        if (antes && antes.hash !== imagem?.hash && outro?.hash !== antes.hash) imagens.delete(antes.hash);
+      };
+      return null;
+    });
+  } catch (falha) {
+    console.warn("ponte: a imagem do perfil padrão não foi gravada nesta origem:", falha);
+    throw "NaoGravei";
+  }
+}
+
+/**
+ * `escolher_imagem_do_perfil_padrao`: o seletor dentro do gesto, a conferência
+ * do servidor (até 10 MiB, o tipo pelos bytes, o HEIC nomeado), e a imagem
+ * guardada pelo hash. A foto também vira o retrato desta origem (o ícone
+ * nativo que sobe em cada entrada), como no desktop.
+ */
+async function escolherAImagemDoPadrao(lado) {
+  const arquivo = await escolherUmaImagem();
+  if (!arquivo) return { escolheu: false };
+  if (arquivo.size > 10 * 1024 * 1024) throw { ImagemGrandeDemais: { limite_bytes: 10 * 1024 * 1024 } };
+  let bytes;
+  try {
+    bytes = new Uint8Array(await arquivo.arrayBuffer());
+  } catch {
+    throw "ArquivoIlegivel";
+  }
+  const conferido = (await regraDoPadrao()).conferir(bytes);
+  if (conferido.falha) throw conferido.falha;
+  const imagem = { hash: await hashDaImagemDoPadrao(bytes), tipo: conferido.tipo, bytes: bytes.length };
+  await trocarAImagemDoPadrao(lado, imagem, bytes);
+  if (lado === "Foto") {
+    const png = await encolherAImagem(arquivo);
+    if (!png || !gravarNaOrigem(CHAVES_DA_ORIGEM.retrato, dataUriDoPng(png))) {
+      console.warn("ponte: a foto do perfil padrão foi guardada, mas o retrato desta origem não");
+    }
+  }
+  return { escolheu: true };
+}
+
+/** O registro de um servidor (pela impressão); sem registro, não segue. */
+async function seguimentoNaOrigem(servidor) {
+  const vazio = { servidor, segue: false, revisao_aplicada: 0, assinatura: null };
+  if (!servidor) return vazio;
+  const guardado = await noBancoDoPadrao(["servidores"], "readonly", (loja) => loja.get(servidor));
+  return { ...vazio, ...(guardado ?? {}), servidor };
+}
+
+/**
+ * `enviar_imagem_do_perfil_padrao`: os bytes guardados, conferidos contra o
+ * hash pedido (`Mudou` quando o padrão trocou a imagem), pela subida de
+ * `enviarAImagemDoPerfil`, na sessão do pedido.
+ */
+async function enviarAImagemDoPadrao(sessao, lado, hash) {
+  if (!sessao) throw "NotConnected";
+  const padrao = await padraoGuardado();
+  const imagem = lado === "Capa" ? padrao.capa : padrao.foto;
+  if (!imagem || imagem.hash !== hash) throw "Mudou";
+  const bytes = await noBancoDoPadrao(["imagens"], "readonly", (loja) => loja.get(hash));
+  if (!bytes || (await hashDaImagemDoPadrao(bytes)) !== hash) throw "Mudou";
+  const montado = sessao.perfil.enviar(lado, bytes);
+  if (montado.falha) throw montado.falha;
+  await transferirAImagemDoPerfil(sessao, montado.pedido, bytes, "");
+  return null;
+}
+
 /** `imagem_do_perfil`: do cache pelo hash, ou pelo fluxo, em `data:`. */
 async function lerAImagemDoPerfil({ pessoa, lado, hash }) {
   const guardada = IMAGENS_DO_PERFIL_LIDAS.get(hash);
@@ -2590,6 +2806,34 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   tirar_imagem_do_perfil: pelaSessao("tirar_imagem_do_perfil"),
   enviar_imagem_do_perfil: ({ lado } = {}) => enviarAImagemDoPerfil(lado),
   imagem_do_perfil: (args) => lerAImagemDoPerfil(args ?? {}),
+  // **O perfil padrão** (0.19): os mesmos comandos, argumentos e respostas do
+  // desktop (`perfil_padrao.rs`). A sessão é pega antes de qualquer espera:
+  // a do pedido só vale na parte síncrona do atendimento.
+  perfil_padrao: () => perfilPadraoNaOrigem(),
+  gravar_perfil_padrao: ({ entrada } = {}) => gravarOPerfilPadraoNaOrigem(entrada),
+  escolher_imagem_do_perfil_padrao: ({ lado } = {}) => escolherAImagemDoPadrao(lado),
+  tirar_imagem_do_perfil_padrao: async ({ lado } = {}) => {
+    const tinha = Boolean((await padraoGuardado()).foto);
+    await trocarAImagemDoPadrao(lado, null, null);
+    if (lado === "Foto" && tinha && !gravarNaOrigem(CHAVES_DA_ORIGEM.retrato, null)) throw "NaoGravei";
+    return null;
+  },
+  seguimento_do_perfil_padrao: () =>
+    comASessao((sessao) => seguimentoNaOrigem(sessao.alvo?.impressao ?? null)),
+  guardar_seguimento_do_perfil_padrao: ({ segue, revisaoAplicada, assinatura } = {}) =>
+    comASessao(async (sessao) => {
+      const servidor = sessao.alvo?.impressao;
+      if (!servidor) throw "NaoGravei";
+      const registro = { segue: Boolean(segue), revisao_aplicada: Number(revisaoAplicada) || 0, assinatura: assinatura ?? null };
+      try {
+        await noBancoDoPadrao(["servidores"], "readwrite", (loja) => loja.put(registro, servidor));
+      } catch (falha) {
+        console.warn("ponte: o registro do perfil padrão não foi gravado nesta origem:", falha);
+        throw "NaoGravei";
+      }
+      return null;
+    }),
+  enviar_imagem_do_perfil_padrao: ({ lado, hash } = {}) => enviarAImagemDoPadrao(sessaoDaPonte.atual, lado, hash),
   // A geração que a casca guardou do `connect`: zero ou velha é a de uma
   // sessão que acabou (`confere_geracao`).
   // **Os MODs da sessão**: os pacotes no armazém da página, lidos pelas

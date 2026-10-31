@@ -328,7 +328,7 @@
      largura; ele recebe o que couber. */
   /* A área útil é a da camada, sem o recorte (`100%` da caixa de conteúdo
      dela), e não a janela inteira. */
-  max-width: min(var(--largura-pedida, 560px), 100%);
+  max-width: min(var(--largura-pedida, 640px), 100%);
   max-height: 100%;
   width: 100%;
   background: var(--seele-negro-painel);
@@ -354,6 +354,17 @@
 }
 
 .dialogo-de-mod-titulo { font-size: 26px; }
+
+/* **A gramática dos diálogos do canvas 0.19** («os modais estão muito
+   pequenos»): 32px da borda ao conteúdo, título de 30px e o FECHAR com o alvo
+   de 44px. Só onde há janela para isso; no celular ficam as medidas de cima. */
+@media (min-width: 700px) {
+  .dialogo-de-mod { --mod-margem: 32px; }
+  .dialogo-de-mod-cabecalho { padding: 24px var(--mod-margem) 20px; }
+  .dialogo-de-mod-titulo { font-size: 30px; }
+  .dialogo-de-mod-rodape { padding: 20px var(--mod-margem); }
+  .dialogo-de-mod .superficie-de-mod-sair { min-height: 44px; padding: 0 18px; font-size: 13px; }
+}
 
 .dialogo-de-mod-corpo {
   flex: 1 1 auto;

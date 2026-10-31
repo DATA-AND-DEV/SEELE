@@ -520,7 +520,15 @@ function desenharSessoes() {
   $("trilha-adicionar").title = varias
     ? "abre mais uma conversa pela entrada, sem fechar as abertas"
     : "sai deste servidor e volta à entrada para você digitar outro endereço";
-  const noAr = varias && hospedadoNaTela;
+  // **Um servidor, uma placa** (0.19: o dono viu o mesmo servidor em ABERTAS,
+  // com o ícone, e de novo em NO AR, só com a sigla). Com uma conversa aberta
+  // no servidor que esta máquina hospeda (achada como em
+  // `irAoServidorHospedado`), a placa dela já diz AQUI, e o grupo NO AR some;
+  // ele só aparece quando se hospeda sem conversar nele.
+  const conversaDoHospedado = varias && hospedadoNaTela
+    ? sessoesNaTela.find((s) => s.onde === "Guardado" && !s.encerrada) ?? null
+    : null;
+  const noAr = varias && hospedadoNaTela && !conversaDoHospedado;
   $("trilha-hospedando-titulo").hidden = !noAr;
   $("trilha-hospedando").hidden = !noAr;
   if (!varias) return;

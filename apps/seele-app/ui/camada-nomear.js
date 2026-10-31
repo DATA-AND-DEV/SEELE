@@ -227,9 +227,15 @@ async function abrirPerfil(titulo) {
   }
   $("perfil-apelido").value = apelido;
   // **Os campos do perfil oficial** (0.19, `perfis.js`): com perfis no servidor
-  // da vista, o «Seu perfil» ganha a prévia, a foto, a capa e os textos; sem
-  // eles (fora de sessão, ou num servidor 0.18), é o de sempre.
-  prepararOEditorDoPerfil(snapshot, apelido);
+  // da vista, o «Seu perfil» ganha a prévia, a foto, a capa e os textos. **Fora
+  // de sessão, os mesmos campos editam o perfil padrão desta máquina**
+  // (`perfil-padrao.js`), que vale em cada servidor onde ainda não há perfil.
+  // Num servidor 0.18 — e na pergunta do nome, que é só o nome —, é o de sempre.
+  let padrao = null;
+  if (!snapshot && !perguntandoONome && typeof lerOPerfilPadrao === "function") {
+    padrao = await lerOPerfilPadrao();
+  }
+  prepararOEditorDoPerfil(snapshot, apelido, padrao);
   // **A capa de quem usa no cabeçalho** (D-capa-1, do dono; rascunho da API 6,
   // §4, «o SEU PERFIL nativo, por um aplicador do produto»): dentro de uma
   // sessão, a do `me`; antes de conectar não há pessoa, e a camada sai. Com o
@@ -419,33 +425,12 @@ $("perfil-tirar").addEventListener("click", async () => {
  * A pergunta agora é feita a quem sabe respondê-la. Uma tela lida como estado é
  * um estado que muda quando alguém mexe no desenho.
  */
-async function guardarOApelido() {
-  const escolhido = $("perfil-apelido").value.trim();
-  // Com o perfil oficial, o apelido só vai quando mudou: o SALVAR é de tudo, e
-  // mandar o mesmo nome seria um `SetNickname` por nada. Vazio volta ao de
-  // antes sem reabrir — reabrir apagaria o que se escreveu nos outros campos.
-  if (editorDoPerfil.oficial && (escolhido === "" || escolhido === editorDoPerfil.apelido.trim())) {
-    $("perfil-apelido").value = editorDoPerfil.apelido;
-    return true;
-  }
-  if (escolhido === "") {
-    await abrirPerfil();
-    return false;
-  }
-  $("perfil-erro").hidden = true;
-
-  // **O teto do fio, em bytes, antes de mandar e antes de gravar** (pendência
-  // 58, item 55; lote C55 da F5). As duas portas têm o mesmo teto: o
-  // `SetNickname` da sessão e o apelido gravado nesta máquina, que vai no
-  // `Hello` da conexão seguinte. O gravado grande demais fazia o `connect`
-  // voltar `Unreachable`, e a pessoa lia NADA RESPONDEU NESSE ENDEREÇO com o
-  // servidor de pé. A caixa fica aberta, com o que se escreveu, para encurtar.
-  const grandeDemais = await passaDoTeto("apelido", escolhido);
-  if (grandeDemais) {
-    recusarPerfil(grandeDemais);
-    $("perfil-apelido").focus();
-    return false;
-  }
+async function guardarOApelido(escolhido) {
+  // Com o perfil (no servidor ou o padrão), o nome só vai ao registro quando
+  // mudou: o SALVAR é de tudo, e mandar o mesmo nome seria um `SetNickname`
+  // por nada. O nome exibido, se for outro, o `GravarPerfil` alinha depois.
+  const modo = editorDoPerfil.modo;
+  if (modo !== "nativo" && escolhido === editorDoPerfil.apelido.trim()) return true;
 
   let naSessao = false;
   try {
@@ -457,30 +442,56 @@ async function guardarOApelido() {
   }
 
   try {
-    if (naSessao) {
+    if (naSessao && modo === "oficial") {
+      // **O registro primeiro, e a espera do desfecho** (`perfis.js`): se o
+      // servidor recusa o nome, ele é dito no campo e o perfil não é gravado
+      // — um nome exibido que o registro não aceitou seria um nome divergente.
+      const desfecho = await mandarONomeAoServidor(escolhido);
+      if (!desfecho.ok) {
+        dizerNoNome(desfecho.frase);
+        return false;
+      }
+    } else if (naSessao) {
+      // Um servidor 0.18: o apelido de sempre, sem perfil para alinhar.
       await invoke("escolher_apelido", { apelido: escolhido });
     } else {
       await invoke("escolher_apelido_local", { apelido: escolhido });
+      // **A pergunta do nome semeia o padrão** (`perfil-padrao.js`): o nome
+      // com que se entra vira o nome do perfil padrão, se ele ainda não tem um.
+      if (modo === "nativo" && typeof semearONomeDoPadrao === "function") await semearONomeDoPadrao(escolhido);
     }
     anunciar(`Agora você é ${escolhido}.`);
     return true;
   } catch (falha) {
     console.warn("escolher_apelido:", falha);
-    // Sem reabrir o perfil (lote C55): `abrirPerfil` esconde `#perfil-erro` e
-    // põe de volta o apelido gravado, e a recusa sumia com o que se escreveu.
-    recusarPerfil(fraseDeErro(falha));
-    $("perfil-apelido").focus();
+    // Sem reabrir o perfil (lote C55): `abrirPerfil` esconde os erros e põe
+    // de volta o apelido gravado, e a recusa sumia com o que se escreveu.
+    dizerNoNome(fraseDeErro(falha));
     return false;
   }
 }
 
 /**
- * **SALVAR manda tudo** (0.19, §5.4): o apelido, se mudou (`SetNickname`), e
- * os textos do perfil (`GravarPerfil`, com a espera do desfecho). A foto e a
- * capa já foram, no ESCOLHER. `true` é poder fechar.
+ * **SALVAR manda tudo** (0.19, §5.4), e o nome é um só: a conferência pela
+ * regra mais estrita das duas (`conferirONome`), o registro do servidor
+ * (`SetNickname`) e, só se ele aceitou, os textos do perfil (`GravarPerfil`,
+ * com o `nome_exibido` igual ao nome). A foto e a capa já foram, no ESCOLHER.
+ * `true` é poder fechar.
  */
 async function salvarOPerfil() {
-  if (!(await guardarOApelido())) return false;
+  limparErrosDoEditor();
+  const nome = $("perfil-apelido").value.trim();
+  // **O teto do fio, em bytes, antes de mandar e antes de gravar** (pendência
+  // 58, item 55; lote C55 da F5), dentro de `conferirONome`. As duas portas
+  // têm o mesmo teto: o `SetNickname` da sessão e o apelido gravado nesta
+  // máquina, que vai no `Hello` da conexão seguinte. A caixa fica aberta, com
+  // o que se escreveu, para encurtar.
+  const recusa = await conferirONome(nome);
+  if (recusa) {
+    dizerNoNome(recusa);
+    return false;
+  }
+  if (!(await guardarOApelido(nome))) return false;
   return gravarOPerfilOficial();
 }
 

@@ -99,6 +99,9 @@ const COMANDOS_DA_SESSAO = new Set([
   // são da sessão da vista; uma resposta que chega depois da troca não vale.
   "perfis", "gravar_perfil", "tirar_imagem_do_perfil", "enviar_imagem_do_perfil",
   "imagem_do_perfil",
+  // O perfil padrão (0.19, `perfil-padrao.js`): o registro do servidor da vista
+  // e a subida da foto ou da capa guardadas nesta máquina.
+  "seguimento_do_perfil_padrao", "enviar_imagem_do_perfil_padrao",
 ]);
 
 /** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */
@@ -486,10 +489,9 @@ async function passaDoTeto(campo, texto) {
 //     o `li` e veste a mesma sala sempre do mesmo jeito: a reconciliação casa
 //     os filhos pela etiqueta e pela primeira classe, e um feitio que mudasse a
 //     cada quadro trocaria os nós. Uma chamada só, e no desktop não faz nada.
-//   - `detalhesNaLinha`: se a linha de uma pessoa acrescenta o `pessoa.detalhes`
-//     dela, no «⋯». O celular o tira da linha, e a folha da pessoa é o único
-//     lugar dele lá: um nó por pessoa, num lugar só (decisão da orquestradora,
-//     16/10; a linha o pede em `detalhesDaPessoaNaLinha`, no tela-sessao.js).
+//   (O `detalhesNaLinha` saiu na 0.19: a linha da pessoa não mostra mais o
+//   `pessoa.detalhes` em casca nenhuma; o lugar dele é a ficha da pessoa,
+//   `fichaDaPessoa` no tela-sessao.js, nas duas.)
 //
 // Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
 // campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
@@ -502,7 +504,6 @@ const CASCA = Object.seal({
   entradaDireta: (_veredito, _deOnde) => null,
   oferecerLinkDoNavegador: null,
   vestirASala: (_item, _sala, _snapshot) => {},
-  detalhesNaLinha: true,
 });
 
 // --------------------------------------------------------------- o snapshot

@@ -18,7 +18,7 @@
    As páginas que um MOD registra moram na coluna de canais, sob o rótulo
    «DOS MODS», como os canais: a mesma linha, a peça no lugar do `#`, e a
    origem (do produto) à direita, onde a sala diz «ninguém aqui». */
-:root:not([data-casca="celular"]) #cabeca-mods-navegacao:not([hidden]) { display: flex; margin-top: 12px; }
+:root:not([data-casca="celular"]) #cabeca-mods-navegacao:not([hidden]) { display: flex; }
 :root:not([data-casca="celular"]) #lista-mods-navegacao {
   display: flex;
   flex-direction: column;
@@ -28,13 +28,24 @@
   list-style: none;
 }
 :root:not([data-casca="celular"]) #lista-mods-navegacao[hidden] { display: none; }
+/* **O nome do MOD inteiro, e a origem embaixo, menor** (0.19, «Aparência do
+   servi…  seele/esti…»): as duas na mesma fileira cortavam as duas. A peça à
+   esquerda, o rótulo na primeira linha e o id do MOD — a origem, que é do
+   produto e não sai — na segunda. */
 :root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod {
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  column-gap: 10px;
+  row-gap: 0;
+  padding: 5px 10px;
   min-height: 44px;
+  text-align: left;
 }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod > .entrada-de-mod-icone { grid-column: 1; grid-row: 1 / span 2; }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod > .linha-rotulo { grid-column: 2; grid-row: 1; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.35; }
+:root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod > .entrada-de-mod-origem { grid-column: 2; grid-row: 2; line-height: 1.3; }
 .entrada-de-mod-icone {
   flex: 0 0 auto;
   display: inline-flex;
@@ -46,7 +57,7 @@
 :root:not([data-casca="celular"]) #lista-mods-navegacao .linha-rotulo { flex: 1 1 auto; min-width: 0; font-family: var(--seele-mono); }
 :root:not([data-casca="celular"]) #lista-mods-navegacao .entrada-de-mod-origem {
   flex: 0 1 auto;
-  max-width: 34%;
+  max-width: 100%;
   font-family: var(--seele-mono);
   font-size: 10px;
   color: var(--seele-rotulo-painel);
@@ -167,25 +178,10 @@
   background: color-mix(in srgb, color-mix(in srgb, var(--seele-negro-painel) 88%, var(--seele-fosforo)) 74%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--seele-fosforo) 55%, transparent);
 }
-:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa][data-fala="sim"] { --fundo-da-placa: var(--seele-negro-absoluto); }
-/* As placas sobre a capa (medidas em `capa.cjs`) ganham o canto e a folga de
-   uma etiqueta, em vez de um retângulo colado no texto. */
-/* O retrato, os botões de volume e as pastilhas sobre a capa: fundo opaco, e
-   não o vidro translúcido do cartão sem capa (que somaria a imagem ao texto). */
+/* O retrato sobre a capa: fundo opaco, e não o vidro translúcido do cartão sem
+   capa (que somaria a imagem às iniciais). */
 :root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-avatar {
   background-color: color-mix(in srgb, var(--seele-osso) 8%, var(--seele-negro-painel));
-}
-:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-vol-passo { background-color: var(--seele-negro-absoluto); }
-:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-pastilha {
-  background-color: color-mix(in srgb, var(--seele-fosforo-fraco) 80%, var(--seele-negro-absoluto));
-}
-:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] .chamada-pastilha:not([data-estado="fala"]) {
-  background-color: var(--seele-negro-absoluto);
-}
-:root:not([data-casca="celular"]) .chamada-cartao[data-com-capa] :where(.chamada-cartao-nome, .nota, .chamada-cartao-valor, .chamada-vol-valor) {
-  padding: 0 4px;
-  border-radius: 4px;
-  width: fit-content;
 }
 
 /* ------------------------------------- o cabeçalho, o compositor e o rodapé
@@ -482,23 +478,34 @@
 :root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-parte[data-forma="separador"] { border-color: var(--seele-vidro-borda); }
 
 /* ------------------------------------------------ a Configuração: VOLTAR
-   O VOLTAR fica no pé da coluna, sempre à vista: preso à caixa da grade
-   (`.server`, posicionada), e não à janela — um `fixed` dentro de quem tem
-   contenção ou filtro deixa de ser da janela e some com a rolagem. A coluna
-   reserva o espaço dele e esmaece o que rola por baixo. */
+   **No cabeçalho, ao lado do título, no fluxo** (0.19, depois do teste do
+   dono). O canvas o põe no pé da coluna, e as duas tentativas de levá-lo
+   para lá — `fixed`, depois `absolute` preso à grade — tiravam o botão da
+   faixa onde ele mora no DOM; no app do Mac ele sumiu nas duas (0.19.0-1 e
+   0.19.0-8), e nenhum navegador de bancada reproduziu. Sem posicionamento
+   nenhum, ele está onde o U33 já o tinha posto: grudado no alto, junto do
+   título, sempre à vista. A grade da faixa: contexto e título à esquerda, o
+   VOLTAR à direita, alinhado ao topo. */
 @media (min-width: 701px) {
-  .camada-server > .server { position: relative; }
-  .server-voltar:not(.server-so-celular) {
-    position: absolute;
-    left: 14px;
-    bottom: 14px;
-    width: 220px;
+  .server-faixa {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "contexto voltar"
+      "texto voltar";
+    column-gap: 16px;
+    align-items: start;
   }
-  .server-coluna {
-    padding-bottom: 84px;
-    scroll-padding-bottom: 84px;
-    -webkit-mask-image: linear-gradient(to bottom, var(--seele-negro-absoluto) calc(100% - 80px), transparent calc(100% - 62px));
-    mask-image: linear-gradient(to bottom, var(--seele-negro-absoluto) calc(100% - 80px), transparent calc(100% - 62px));
+  .server-faixa > .server-contexto { grid-area: contexto; }
+  .server-faixa > .server-faixa-texto { grid-area: texto; }
+  .server-voltar:not(.server-so-celular) {
+    position: static;
+    grid-area: voltar;
+    width: auto;
+    left: auto;
+    bottom: auto;
+    align-self: start;
+    padding: 0 18px;
   }
 }
 
@@ -600,25 +607,24 @@
 :root:not([data-casca="celular"]) #vista-chamada .chamada-campo .rotulo { font-size: 0; }
 :root:not([data-casca="celular"]) #vista-chamada .chamada-campo .rotulo::before { content: "NO AR ·"; font-size: 11px; }
 
-/* A grade: quatro colunas, como o canvas. */
-@media (min-width: 1100px) {
-  :root:not([data-casca="celular"]) #vista-chamada #chamada-grade { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-
-/* A barra de baixo: uma pílula com os comandos, centrada. */
+/* A barra de baixo (0.19, pedido do dono: «tire esse fundo preto»): uma
+   bandeja de vidro, a mesma do compositor do chat — `--seele-vidro`, a borda do
+   vidro e o raio de 22px —, sem o preto a 88% que a fazia pesar. Os comandos
+   são todos redondos de 44px e só ícone, como as saídas do cartão do operador;
+   a palavra de cada um está no `aria-label` e no `title`. */
 .chamada-controles {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin: auto 22px 16px;
-  padding: 8px;
+  gap: 12px;
+  width: fit-content;
+  max-width: calc(100% - 44px);
+  margin: auto auto 16px;
+  padding: 10px 14px;
   border: 1px solid var(--seele-vidro-borda);
-  border-radius: var(--seele-raio-pilula);
-  background: color-mix(in srgb, var(--seele-negro-painel) 88%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  border-radius: 22px;
+  background: var(--seele-vidro);
   position: sticky;
   bottom: 16px;
   z-index: 2;
@@ -627,33 +633,29 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  width: 44px;
+  height: 44px;
   min-height: 44px;
-  padding: 0 18px;
+  padding: 0;
   border: 1px solid var(--seele-controle-borda);
-  border-radius: var(--seele-raio-pilula);
+  border-radius: 50%;
   background: var(--seele-controle);
   color: var(--seele-osso);
-  font-family: var(--seele-ui);
-  font-weight: 600;
-  font-size: 14px;
-  letter-spacing: 0;
   cursor: pointer;
 }
 .chamada-controle[hidden] { display: none; }
 .chamada-controle:hover { background: var(--seele-controle-hover); }
 .chamada-controle:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
 .chamada-controle .glifo { width: 18px; height: 18px; }
-.chamada-controle-icone { width: 44px; padding: 0; }
 .chamada-controle[aria-pressed="true"] { color: var(--seele-laranja-nerv); border-color: color-mix(in srgb, var(--seele-laranja-nerv) 55%, transparent); }
+/* Sem captura de tela nesta máquina: apagado, e o porquê no `title`; o clique
+   abre a caixa que diz o mesmo (`desenharORodapeDoOperador`). */
 .chamada-controle[data-indisponivel="sim"],
 .chamada-controle[aria-disabled="true"] { opacity: 0.55; }
-.chamada-controle-primario {
-  background: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
-  color: var(--seele-tinta-no-acento);
-}
-.chamada-controle-primario:hover { background: var(--seele-laranja-hover); }
+/* SAIR DA SALA: o acento laranja no contorno e no × — a saída que se faz de
+   dentro da chamada —, sem o bloco cheio que era o primário. */
+.chamada-controle-sair { color: var(--seele-laranja-nerv); border-color: color-mix(in srgb, var(--seele-laranja-nerv) 55%, transparent); }
+.chamada-controle-sair:hover { background: var(--seele-laranja-fraco); }
 
 /* As pessoas recolhidas numa faixa de 72px: o alternador e os retratos. */
 .pessoas-recolher,
@@ -725,3 +727,15 @@
 @media (max-width: 900px) {
   :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"] .paineis > .painel-canais { min-width: 0; width: min(268px, calc(100vw - 88px)); max-width: calc(100vw - 88px); box-sizing: border-box; }
 }
+
+/* ---------------------------------------- o ritmo da coluna de canais (0.19)
+   «Grandes vãos verticais entre CANAIS, Perfis e DOS MODS»: a coluna rolava
+   com 16px entre TODO filho — rótulo e lista inclusive — mais 12px de margem
+   própria em Perfis e em DOS MODS. O canvas `Main` põe 16px entre as SEÇÕES e
+   4px entre o rótulo e a lista dele. */
+:root:not([data-casca="celular"]) #tela-sessao .painel-canais > .canais-rolagem { gap: 0; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .canais-cabeca-linhas,
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > #cabeca-mods-navegacao { margin-top: 16px; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > #lista-perfis-navegacao { margin-top: 4px; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .relatorio-perfis:not([hidden]) { margin-bottom: 16px; }
+:root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .canais { gap: 2px; }

@@ -1972,7 +1972,7 @@
   #painel-mods #mods-instalar {
     position: absolute;
     z-index: 1;
-    top: 36px;
+    top: 24px; /* o mesmo topo do VOLTAR da faixa, lado a lado */
     right: 28px;
     display: inline-flex;
     align-items: center;
@@ -1981,7 +1981,9 @@
     padding: 0 18px;
     border-radius: var(--seele-raio-pilula);
   }
-  .server-faixa { padding-right: 300px; }
+  /* O canto do INSTALAR DE UMA PASTA, só na página dos MODs: nas outras o
+     VOLTAR da faixa (redesenho-019-mods.css) vai até a ponta direita. */
+  .server-corpo:has(#painel-mods:not([hidden])) .server-faixa { padding-right: 320px; }
 }
 
 @media (min-width: 701px) {

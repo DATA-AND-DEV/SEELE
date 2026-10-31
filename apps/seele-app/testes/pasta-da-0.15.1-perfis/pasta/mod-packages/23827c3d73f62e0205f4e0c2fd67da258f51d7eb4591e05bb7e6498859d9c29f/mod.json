@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "seele/perfis",
+  "version": "3.3.1",
+  "api": 5,
+  "repo": "https://github.com/DATA-AND-DEV/PERFIS",
+  "reach": [
+    "regiao",
+    "perfis no servidor",
+    "arquivos de perfis"
+  ],
+  "client": "cliente/main.js",
+  "server": "servidor/main.js"
+}

@@ -881,6 +881,12 @@ function esconderSaidasDeQuemHospeda() {
  *    CONSEGUE ENTRAR, que diz quais MODs só rodam lá;
  * 3. **DESLIGAR**: os dados dele ficam (ADR 0045).
  *
+ * **Um MOD que o produto incorporou** (0.19, `opcoes.incorporados`, id →
+ * versão do SEELE) não tem saída nenhuma: o 4.0.0 do PERFIS existe no
+ * catálogo, e o servidor desta versão o recusa. A linha diz «Perfis agora faz
+ * parte do SEELE (0.19). Os perfis deste servidor serão trazidos.», e quem
+ * estagia o seguir sem ele é o HOSPEDAR do fim (`confirmarEHospedar`).
+ *
  * **Uma saída não hospeda mais sozinha.** Antes, ATUALIZAR E HOSPEDAR com um
  * segundo MOD ainda pendente subia, era recusado de novo e redesenhava a lista
  * com um a menos — a pessoa via a tela piscar sem saber o que tinha mudado.
@@ -896,6 +902,7 @@ async function desenharSaidasDeQuemHospeda(mods, servidor, opcoesDaTela) {
   const opcoes = opcoesDaTela ?? Object.create(null);
   const resolvido = typeof opcoes.aoResolver === "function" ? opcoes.aoResolver : () => {};
   const geracao = ++geracaoDasSaidas;
+  const incorporados = opcoes.incorporados instanceof Map ? opcoes.incorporados : new Map();
   const bloco = $("boot-saidas");
   const esperando = elemento("p", "nota", "consultando o catálogo de MODs…");
   esperando.dataset.esperando = "";
@@ -904,11 +911,17 @@ async function desenharSaidasDeQuemHospeda(mods, servidor, opcoesDaTela) {
 
   // A do catálogo pode falhar, e a falha é guardada para ser dita, e não
   // lançada.
+  // Só incorporados não pedem o catálogo: não há versão deles a oferecer, e
+  // a falha dele diria «não dá para atualizar» de quem não se atualiza.
   let catalogo;
-  try {
-    catalogo = { lido: await invoke("catalogo_de_mods") };
-  } catch (falha) {
-    catalogo = { falha };
+  if (mods.every(([id]) => incorporados.has(id))) {
+    catalogo = { lido: null };
+  } else {
+    try {
+      catalogo = { lido: await invoke("catalogo_de_mods") };
+    } catch (falha) {
+      catalogo = { falha };
+    }
   }
   if (geracao !== geracaoDasSaidas) return;
 
@@ -1008,6 +1021,17 @@ async function desenharSaidasDeQuemHospeda(mods, servidor, opcoesDaTela) {
   for (const [id, api] of mods) {
     const item = elemento("li", "antes-linha");
     item.dataset.mod = id;
+    if (incorporados.has(id)) {
+      // Nenhum botão: nem ATUALIZAR, nem DESLIGAR. A frase é a saída.
+      item.dataset.incorporado = "sim";
+      const texto = elemento("span", "antes-linha-texto");
+      texto.append(elemento("span", "antes-linha-nome", id));
+      texto.append(elemento("span", "antes-linha-sub antes-linha-incorporado",
+        FRASES_ANTES_DE_HOSPEDAR.modIncorporado(id, incorporados.get(id))));
+      item.append(texto);
+      lista.append(item);
+      continue;
+    }
     const texto = elemento("span", "antes-linha-texto");
     texto.append(elemento("span", "antes-linha-nome", id));
     texto.append(
@@ -1265,7 +1289,11 @@ async function hospedarDaLista(servidor) {
       return;
     }
   }
-  if (antes && (antes.converte || antes.futuro || antes.verificado === false || (antes.mods_de_api_antiga ?? []).length > 0)) {
+  // Um MOD que o produto incorporou (0.19) também abre a tela, mesmo da API
+  // 6 ou 7, que não impede: quem hospeda lê, antes de subir, que os dados dele
+  // serão trazidos — e não depois, num relatório.
+  if (antes && (antes.converte || antes.futuro || antes.verificado === false || (antes.mods_de_api_antiga ?? []).length > 0
+    || (antes.mods_incorporados ?? []).length > 0)) {
     await abrirAntesDeHospedar({ servidor: servidor.id, info: antes, origem: "tela-servidores" });
     return;
   }
@@ -1381,9 +1409,12 @@ async function desenharPerfilDaEntrada() {
   // consertou um nível acima.
   const quadrado = $("boot-perfil-inicial");
   quadrado.textContent = (apelido || "?").trim().charAt(0).toUpperCase();
-  let retrato = null;
+  // **A foto do perfil padrão vem primeiro** (0.19, `perfil-padrao.js`): é o
+  // rosto que o «Seu perfil» desta tela edita, e o que cada servidor novo vai
+  // mostrar. Sem ela, o retrato desta máquina, como sempre.
+  let retrato = typeof perfilPadraoAtual === "function" ? (perfilPadraoAtual()?.foto?.url || null) : null;
   try {
-    retrato = await invoke("meu_retrato");
+    retrato ??= await invoke("meu_retrato");
   } catch (falha) {
     console.warn("meu_retrato:", falha);
   }

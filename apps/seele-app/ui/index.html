@@ -1472,7 +1472,7 @@
                   aria-label="Personalizar seu perfil" title="sua imagem">
             <span id="operador-inicial" class="operador-inicial" aria-hidden="true"></span>
             <span class="operador-quem-texto">
-              <span class="operador-rotulo">OPERADOR</span>
+              <span class="operador-rotulo" hidden></span>
               <span id="operador-nome" class="operador-nome">—</span>
             </span>
           </button>
@@ -1578,10 +1578,12 @@
             terceiro caminho para o que dois cliques já faziam, e o pior dos
             três, porque não dizia de qual sala nem de qual canal falava.
           -->
-          <button id="operador-sair" class="botao-fantasma" type="button"
-                  title="sair deste servidor e voltar à tela de entrada">SAIR DO SERVIDOR</button>
-          <button id="operador-vista" class="botao-fantasma" type="button" hidden
-                  title="mostrar um monitor ou uma janela sua para quem está na sala">COMPARTILHAR</button>
+          <button id="operador-sair" class="operador-glifo" type="button"
+                  aria-label="SAIR DO SERVIDOR"
+                  title="sair deste servidor e voltar à tela de entrada"></button>
+          <button id="operador-vista" class="operador-glifo" type="button" hidden
+                  aria-label="COMPARTILHAR" data-glifo="tela"
+                  title="mostrar um monitor ou uma janela sua para quem está na sala"></button>
           <!--
             Só na vista da ligação pessoal (0.17), onde esta fileira vira a
             barra da chamada: o CHAT abre a conversa num painel sobreposto, e
@@ -1751,22 +1753,7 @@
               com o `palco-quem` que a chamada mantém.
             -->
             <p id="palco-falha" class="chamada-palco-falha" role="status" hidden></p>
-            <!--
-              **A acao fica junto do estado vazio** - U28.
-
-              A nota dizia «Use COMPARTILHAR, aqui em cima», e o botao esta na
-              base da coluna esquerda desde que saiu do cabecalho. Uma instrucao
-              que aponta para o canto errado e pior que nenhuma: quem a segue
-              conclui que o botao nao existe.
-
-              A auditoria pediu «botao proximo do estado vazio», e este e o
-              mesmo comando do rodape - `operador-vista` -, acionado daqui por
-              `tela-chamada.js`. Nao e um segundo caminho: e o mesmo, onde a
-              pessoa esta olhando quando precisa dele.
-            -->
             <p id="palco-nota" class="nota"></p>
-            <button id="palco-compartilhar" class="botao" type="button" hidden
-                    title="mostrar um monitor ou uma janela sua para quem está na sala">COMPARTILHAR ESTA TELA</button>
             <!--
               O motivo de uma transmissão parada chega por extenso do outro lado
               (`TelaEmCurso::parada`), e é a única frase desta janela escrita
@@ -2068,7 +2055,7 @@
           <button id="botao-anexar" class="compor-anexar" type="button"
                   aria-label="Escolher um arquivo"
                   title="escolher um arquivo; colar e arrastar também anexam"
-                  data-glifo="anexo"></button>
+                  data-glifo="clipe"></button>
           <!--
             **O botão ENVIAR voltou** — U17.
 
@@ -4517,6 +4504,17 @@
       -->
       <div id="perfil-previa-cartao" class="perfil-previa-cartao" aria-hidden="true" data-so-oficial hidden></div>
       <!--
+        O perfil padrão (0.19, «Padrão + ajuste por servidor», `perfil-padrao.js`):
+        na tela inicial, uma linha diz que o que se edita é o padrão; num
+        servidor, diz se ele segue o padrão, ou por que o padrão não foi
+        aplicado, e USAR MEU PERFIL PADRÃO o aplica de novo e volta a seguir.
+      -->
+      <div id="perfil-padrao-faixa" class="perfil-padrao-faixa" hidden>
+        <p id="perfil-padrao-linha" class="perfil-padrao-linha" role="status"></p>
+        <button id="perfil-padrao-usar" class="botao-fantasma perfil-padrao-usar" type="button"
+                aria-label="Usar meu perfil padrão neste servidor" hidden>Usar meu perfil padrão</button>
+      </div>
+      <!--
         A imagem desta máquina (o ícone nativo de 8 KiB), fora de sessão e num
         servidor 0.18. A prévia é a inicial do apelido quando não há imagem: é
         o que a lista de pessoas desenha para quem não pôs uma.
@@ -4568,24 +4566,28 @@
         bytes no apelido e code points nos campos do perfil, e quem confere é o
         Rust (`guardarOApelido`, `gravar_perfil`), com a recusa no campo.
       -->
-      <div class="perfil-par">
-        <label class="nomear-campo">
-          <span class="rotulo">Apelido<span class="perfil-rotulo-nota"> como as pessoas te veem</span></span>
-          <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
-                 name="apelido"
-                 spellcheck="false" autocomplete="off"
-                 placeholder="como as pessoas te veem">
-          <!--
-            ID mantido para o ciclo da pergunta do nome; a microdescrição foi removida.
-          -->
-          <span id="perfil-nota-do-apelido" class="nota" hidden></span>
-        </label>
-        <label class="nomear-campo" data-so-oficial hidden>
-          <span class="rotulo">Nome exibido</span>
-          <input id="perfil-nome-exibido" name="nome_exibido" autocomplete="off" aria-describedby="perfil-nome-exibido-erro">
-          <span id="perfil-nome-exibido-erro" class="perfil-campo-erro" hidden></span>
-        </label>
-      </div>
+      <!--
+        **Um nome só** (0.19, pedido do dono: «se o usuário troca o nome, troca
+        também no registro do server»). Eram dois campos — o apelido e o nome
+        exibido —, e a lista de pessoas mostrava os dois, um embaixo do outro.
+        Agora o SALVAR manda o mesmo nome ao registro do servidor
+        (`SetNickname`, que guarda a tag por chave: «Nome#4F2A» continua único)
+        e ao perfil (`GravarPerfil`, o `nome_exibido`), nessa ordem
+        (`salvarOPerfil`, `camada-nomear.js`). O id `perfil-apelido` ficou: a
+        pergunta do nome e a bancada o leem.
+      -->
+      <label class="nomear-campo perfil-campo-nome">
+        <span class="rotulo">Nome<span class="perfil-rotulo-nota"> como as pessoas te veem</span></span>
+        <input id="perfil-apelido" aria-describedby="perfil-sem-nome perfil-apelido-erro"
+               name="nome"
+               spellcheck="false" autocomplete="off"
+               placeholder="como as pessoas te veem">
+        <span id="perfil-apelido-erro" class="perfil-campo-erro" hidden></span>
+        <!--
+          ID mantido para o ciclo da pergunta do nome; a microdescrição foi removida.
+        -->
+        <span id="perfil-nota-do-apelido" class="nota" hidden></span>
+      </label>
       <!--
         Só na pergunta do nome, antes da primeira entrada desta execução
         (`perguntarONome`), e só com o campo vazio: diz o que acontece a quem
@@ -4682,6 +4684,22 @@
   </div>
 </div>
 
+<!--
+  A ficha de uma pessoa (0.19, pedido do dono): o toque numa linha de PESSOAS
+  abre este modal, e a linha não expande mais. O perfil oficial, o estado, o
+  volume (de quem está na sua sala), o MODERAR (com a permissão) e o que os
+  MODs acrescentam à pessoa. `fichaDaPessoa`, em `tela-sessao.js`.
+-->
+<div id="ficha-pessoa" class="camada-ficha" role="dialog" aria-modal="true"
+     aria-labelledby="ficha-pessoa-titulo" tabindex="-1" hidden>
+  <div class="ficha-caixa">
+    <div class="ficha-cabeca">
+      <h2 id="ficha-pessoa-titulo" class="ficha-titulo"></h2>
+      <button id="ficha-pessoa-fechar" class="ficha-fechar" type="button"><span class="ficha-tecla">esc</span> fecha</button>
+    </div>
+    <div id="ficha-pessoa-corpo" class="ficha-corpo"></div>
+  </div>
+</div>
 <div id="nomear" class="camada-nomear" role="dialog" aria-modal="true"
      aria-labelledby="nomear-titulo" tabindex="-1" hidden>
   <div class="nomear-caixa">
@@ -5461,6 +5479,7 @@
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
 <script src="perfis.js"></script>
+<script src="perfil-padrao.js"></script>
 <!--
   A moderação depois da operação porque ela lê `mensagens`, que é declarado lá —
   e só de dentro de um manipulador, que é sempre depois de todos os arquivos.

@@ -56,24 +56,6 @@
 
 "use strict";
 
-/** Quantos blocos a barra de sinal do cartão tem. */
-const BLOCOS_DA_BARRA = 24;
-
-/** Quantas células o controle de volume tem. */
-const CELULAS_DE_VOLUME = 10;
-
-/**
- * Até onde o volume por pessoa vai, e de quanto em quanto ele anda.
- *
- * `set_volume` aceita até 400 e o deslizante do roster sempre andou de 0 a 200
- * de dez em dez; estes são os mesmos números, para que o mesmo volume
- * signifique a mesma coisa nas duas telas. Dez células de vinte pontos põem o
- * normal exatamente na quinta.
- */
-const VOLUME_MAXIMO = 200;
-const VOLUME_NORMAL = 100;
-const PASSO_DE_VOLUME = 10;
-
 /**
  * Os eventos que **esta janela** viu passar, do mais novo para o mais velho.
  *
@@ -291,9 +273,14 @@ function desenharPalco(snapshot, voice_room) {
     const nota = $("palco-nota");
     nota.hidden = true;
     nota.textContent = "";
-    // O botão fica ao lado da frase, e só onde ele tem o que fazer: numa sala,
-    // e com o controle de tela disponível nesta máquina.
-    $("palco-compartilhar").hidden = !voice_room || !temControleDeTela();
+    // **Sem transmissão, sem caixa** (0.19, pedido do dono): uma moldura preta
+    // sobre uma sala em que ninguém compartilha parecia uma transmissão
+    // travada, e comia o lugar dos cartões. O palco só existe enquanto há tela
+    // — a que se assiste, ou a que a sala oferece e esta pessoa escolheu não
+    // ver (NÃO VER): aí a caixa fica, porque é nela que o VER mora. O texto e
+    // o estado continuam escritos nele (a bancada os lê), e COMPARTILHAR mora
+    // na barra de baixo, e só lá.
+    palco.hidden = !(snapshot && snapshot.transmissoes && snapshot.transmissoes.length > 0);
     $("palco-parada").hidden = true;
     $("palco-controles").hidden = true;
     $("palco-aperto").hidden = true;
@@ -302,6 +289,7 @@ function desenharPalco(snapshot, voice_room) {
   }
 
   palco.dataset.transmitindo = "sim";
+  palco.hidden = false;
 
   // `tela.de` é o identificador de quem compartilha, e o nome vem do roster da
   // sala. Sem casamento — a pessoa saiu entre dois quadros — a frase diz que
@@ -480,7 +468,7 @@ function desenharCartoes(snapshot, voice_room) {
 
   const cartoes = voice_room.people.map((pessoa) => {
     const cartao = existentes.get(pessoa.nickname) ?? cartaoDoPersono(pessoa);
-    pintarCartao(cartao, pessoa, snapshot.audio_available);
+    pintarCartao(cartao, pessoa);
     return cartao;
   });
 
@@ -496,102 +484,50 @@ function desenharCartoes(snapshot, voice_room) {
  * Só a forma mora aqui; o que ela mostra é `pintarCartao`. A divisão é o que
  * permite repintar sem refazer, e é ela que mantém o foco e o clique de pé
  * entre dois quadros.
+ *
+ * **O cartão é simples** (0.19, pedido do dono: «tem que ficar bem simples o
+ * card»): o fundo (a capa ou a cor do perfil), o retrato e o nome. Saíram as
+ * pastilhas de estado, a barra de sinal e o controle de volume. O que cada uma
+ * dizia continua dito, noutra forma: quem fala, pelo anel verde do cartão; o
+ * mudo e o sem som, por um ícone no canto do retrato; as três coisas, por
+ * extenso, no nome acessível do cartão; e o volume de cada pessoa, na ficha
+ * dela — o cartão inteiro é o botão que a abre.
  */
 function cartaoDoPersono(pessoa) {
   const cartao = elemento("li", "chamada-cartao");
   cartao.dataset.pessoa = pessoa.nickname;
 
-  // ---- topo: iniciais, nome, o estado em frase, o estado em palavra ----
-  const topo = elemento("div", "chamada-cartao-topo");
-  const identidade = elemento("div", "chamada-cartao-identidade");
+  const abrir = elemento("button", "chamada-cartao-abrir");
+  abrir.type = "button";
+  abrir.setAttribute("aria-haspopup", "dialog");
 
-  // As iniciais são decoração: elas repetem o nome que está do lado, em forma.
-  // Anunciá-las seria ler o nome duas vezes.
+  // O retrato leva o canto dos ícones de estado. As iniciais são decoração: o
+  // nome está logo abaixo, e anunciá-las seria ler o nome duas vezes.
+  const caixa = elemento("span", "chamada-avatar-caixa");
   const avatar = elemento("span", "chamada-avatar");
   avatar.setAttribute("aria-hidden", "true");
+  // Os ícones são desenho; quem não os vê lê o estado no nome acessível.
+  const estados = elemento("span", "chamada-avatar-estados");
+  estados.setAttribute("aria-hidden", "true");
+  caixa.append(avatar, estados);
 
-  const quem = elemento("div", "chamada-cartao-quem");
-  quem.append(elemento("span", "chamada-cartao-nome"), elemento("span", "nota"));
-  identidade.append(avatar, quem);
-
-  const estados = elemento("div", "chamada-cartao-estados");
-  estados.append(elemento("span", "chamada-pastilha"), elemento("span", "chamada-pastilha"));
-  topo.append(identidade, estados);
-
-  // ---- meio: o sinal ----
-  const sync = elemento("div", "chamada-cartao-sync");
-  const linha = elemento("div", "chamada-cartao-linha");
-  const numero = elemento("span", "chamada-cartao-numero");
-  numero.append(
-    elemento("span", "chamada-cartao-marca"),
-    elemento("span", "chamada-cartao-valor"),
-  );
-  linha.append(elemento("span", "rotulo", "SINAL"), numero);
-
-  const barra = elemento("span", "chamada-cartao-barra");
-  // A barra é a mesma medida que o número ao lado, em forma. Lida em voz alta
-  // ela é uma parede de blocos.
-  barra.setAttribute("aria-hidden", "true");
-  sync.append(linha, barra);
-
-  cartao.append(topo, sync, controleDeVolume());
+  abrir.append(caixa, elemento("span", "chamada-cartao-nome"));
+  cartao.append(abrir);
   return cartao;
-}
-
-/**
- * O controle de volume: `−`, dez células e `+`.
- *
- * O conserto de usabilidade que o v3 traz para esta tela. No v2 o volume por
- * pessoa era um deslizante que só aparecia quando o ponteiro passava por cima
- * da linha do roster — e um controle que só existe no hover é um controle
- * escondido: fora do caminho de quem usa teclado, invisível em toque, e
- * desconhecido de quem nunca passou o mouse ali por acaso.
- *
- * `−` é `U+2212` e `+` é ASCII, e os dois **existem** na face embarcada
- * (inventário §5): são os únicos glifos desta tela que podem ser digitados em
- * vez de desenhados.
- */
-function controleDeVolume() {
-  const volume = elemento("div", "chamada-volume");
-  volume.append(elemento("span", "rotulo", "VOLUME"));
-
-  const menos = elemento("button", "chamada-vol-passo", "−");
-  menos.type = "button";
-  menos.dataset.volAcao = "menos";
-
-  const celas = elemento("div", "chamada-vol-celas");
-  for (let indice = 0; indice < CELULAS_DE_VOLUME; indice += 1) {
-    const cela = elemento("button", "chamada-vol-cela");
-    cela.type = "button";
-    cela.dataset.volAcao = "cela";
-    cela.dataset.volAlvo = String(((indice + 1) * VOLUME_MAXIMO) / CELULAS_DE_VOLUME);
-    celas.append(cela);
-  }
-
-  const mais = elemento("button", "chamada-vol-passo", "+");
-  mais.type = "button";
-  mais.dataset.volAcao = "mais";
-
-  volume.append(menos, celas, mais, elemento("span", "chamada-vol-valor"));
-  return volume;
 }
 
 /**
  * Os valores de um cartão, escritos por cima do esqueleto.
  *
- * Duas coisas que esta função não faz, e que o comp faz: decidir a faixa da
- * sincronia — ela chega pronta do core, e uma casca que soubesse que 85 é
- * nominal discordaria do terminal no dia em que um dos dois fosse atualizado —
- * e desenhar amplitude por pessoa, que não atravessa a fronteira.
+ * A faixa do sinal e a decisão de qual é a banda continuam do core: esta
+ * função já não as desenha, e uma casca que soubesse que 85 é nominal
+ * discordaria do terminal no dia em que um dos dois fosse atualizado.
  */
-function pintarCartao(cartao, pessoa, temAudio) {
-  cartao.dataset.faixa = pessoa.sync_band;
+function pintarCartao(cartao, pessoa) {
   cartao.dataset.fala = pessoa.speaking ? "sim" : "nao";
 
   // As iniciais **e** o retrato: as primeiras são o que se vê de quem não pôs
-  // imagem, e `vestirAvatar` as substitui quando há uma. A grade da chamada era
-  // a terceira superfície que a comp desenha com avatar e a única que continuou
-  // só com letras — «ícone do usuário não aparece na chamada».
+  // imagem, e `vestirAvatar` as substitui quando há uma.
   const avatar = cartao.querySelector(".chamada-avatar");
   avatar.textContent = iniciaisDoCartao(apelidoApresentado(pessoa.id, pessoa.nickname));
   vestirAvatar(avatar, pessoa.id);
@@ -604,88 +540,43 @@ function pintarCartao(cartao, pessoa, temAudio) {
   // na escolha das capas que animam.
   if (pessoa.speaking) anotarQuemFala(pessoa.id);
   vestirCapa(cartao, pessoa.id);
-  // O nome exibido do perfil, quando há; o apelido segue no `title`, e é o
-  // que a lista de pessoas, ao lado, mostra junto.
+
+  // O nome exibido do perfil, quando há; o apelido segue no `title`. **O nome
+  // inteiro, com o «(você)»**: ele quebra em duas linhas antes de cortar
+  // (`tela-chamada.css`), e quem corta o nome do dono do cartão diz o nome de
+  // outra pessoa.
   const exibido = typeof perfilOficial === "function" ? perfilOficial(pessoa.id)?.nome_exibido?.trim() : "";
   const apelidoDoCartao = apelidoApresentado(pessoa.id, pessoa.nickname);
+  const nome = (exibido || apelidoDoCartao) + (pessoa.is_self ? " (você)" : "");
   const nomeDoCartao = cartao.querySelector(".chamada-cartao-nome");
-  nomeDoCartao.textContent = (exibido || apelidoDoCartao) + (pessoa.is_self ? " (você)" : "");
-  nomeDoCartao.title = exibido ? apelidoDoCartao : "";
-  // O estado em frase, ao lado do estado em palavra, e sempre visível: é o dado
-  // mais importante do cartão, e não havia versão desta tela em que escondê-lo
-  // fosse defensável.
-  cartao.querySelector(".nota").textContent = fraseDoEstado(pessoa);
+  if (nomeDoCartao.textContent !== nome) nomeDoCartao.textContent = nome;
 
-  // A palavra, e não só a cor. `specs/06-clientes-gui.md` proíbe informação
-  // transmitida só por cor, e o estado de quem está na sala é informação: o
-  // halo laranja de quem transmite e a pastilha dizem a mesma coisa, e são
-  // duas porque uma delas não chega a quem não vê a cor.
-  //
-  // `OUVINDO` some quando a pessoa está com o som desligado, e só então: as
-  // duas pastilhas ficam lado a lado, e `OUVINDO · SEM SOM` é uma contradição
-  // lida em meio segundo. Quem está surdo e calado tem um estado só a
-  // declarar, e é o segundo.
-  const pastilhas = cartao.querySelectorAll(".chamada-pastilha");
-  const microfone = pessoa.muted
-    ? "MUDO"
-    : pessoa.speaking
-      ? "FALANDO"
-      : pessoa.total_isolation
-        ? ""
-        : "OUVINDO";
-  pastilhas[0].textContent = microfone;
-  pastilhas[0].hidden = microfone === "";
-  pastilhas[0].dataset.estado = pessoa.muted ? "at" : pessoa.speaking ? "fala" : "escuta";
+  // **O estado, em palavra, para quem não vê o anel nem os ícones**:
+  // `specs/06-clientes-gui.md` proíbe informação que só a cor carregue, e quem
+  // fala, quem calou o microfone e quem ficou sem som é informação. O nome
+  // acessível do cartão diz os três — «Cria de GRU, falando» — e o `title`
+  // diz o que o toque faz.
+  const abrir = cartao.querySelector(".chamada-cartao-abrir");
+  abrir.dataset.fichaPessoa = String(pessoa.id);
+  abrir.setAttribute("aria-label", `${nome}, ${estadoEmPalavras(pessoa)}`);
+  abrir.title = exibido ? `${apelidoDoCartao} · abrir a ficha` : `abrir a ficha de ${nome}`;
 
-  // O isolamento total não existe no comp e existe no produto. Segunda
-  // pastilha, e não uma troca da primeira: estar surdo e estar transmitindo são
-  // dois fatos ao mesmo tempo, e um deles apagando o outro esconderia metade.
-  pastilhas[1].textContent = "SEM SOM";
-  pastilhas[1].dataset.estado = "surdo";
-  pastilhas[1].hidden = !pessoa.total_isolation;
-
-  cartao.querySelector(".chamada-cartao-marca").textContent = marcaSync(pessoa.sync_band);
-  // Inteiro, e não `98.4`: `signal` é `u8` em todo ponto onde existe, e a
-  // casa decimal do comp seria precisão inventada no último passo.
-  cartao.querySelector(".chamada-cartao-valor").textContent = String(pessoa.signal);
-  cartao.querySelector(".chamada-cartao-barra").textContent = blocos(
-    pessoa.signal,
-    BLOCOS_DA_BARRA,
-  );
-
-  // Baixar o próprio volume não faz nada, e sem áudio não há o que baixar. O
-  // controle some nos dois casos em vez de ficar desabilitado: um botão morto é
-  // uma pergunta ("por que não posso?") onde não havia pergunta nenhuma.
-  const volume = cartao.querySelector(".chamada-volume");
-  volume.hidden = pessoa.is_self || !temAudio;
-  if (!volume.hidden) pintarVolume(cartao, pessoa.nickname);
-}
-
-/**
- * As células, o número e os nomes acessíveis do controle de volume.
- *
- * O valor é o que **o Rust guardou** para esta pessoa (`volumes_locais`, lido
- * por `lerVolumes`), e é por isso que ele é a posição de um controle e não uma
- * medida: ninguém está dizendo aqui quanto o outro lado está tocando, e sim
- * onde este botão está. A leitura mora em `volumesLidos`, que a tela de
- * operação divide.
- */
-function pintarVolume(cartao, apelido) {
-  const nome = apelidoApresentado(cartao.dataset.pessoaDaCapa, apelido);
-  const valor = volumesLidos.get(apelido) ?? VOLUME_NORMAL;
-  const cheias = Math.round((valor / VOLUME_MAXIMO) * CELULAS_DE_VOLUME);
-
-  const celas = cartao.querySelectorAll(".chamada-vol-cela");
-  celas.forEach((cela, indice) => {
-    cela.dataset.cheia = indice < cheias ? "sim" : "nao";
-    cela.setAttribute("aria-label", `pôr o volume de ${nome} em ${cela.dataset.volAlvo}%`);
-  });
-
-  const passos = cartao.querySelectorAll(".chamada-vol-passo");
-  passos[0].setAttribute("aria-label", `diminuir o volume de ${nome}`);
-  passos[1].setAttribute("aria-label", `aumentar o volume de ${nome}`);
-
-  cartao.querySelector(".chamada-vol-valor").textContent = `${valor}%`;
+  // Mudo e sem som: o ícone cortado no canto do retrato, e só quando for o caso.
+  const estados = cartao.querySelector(".chamada-avatar-estados");
+  const faltas = [];
+  if (pessoa.muted) faltas.push(["microfone", "mudo"]);
+  if (pessoa.total_isolation) faltas.push(["fone", "sem som"]);
+  const chave = faltas.map(([desenho]) => desenho).join();
+  if (estados.dataset.chave !== chave) {
+    estados.dataset.chave = chave;
+    estados.replaceChildren(...faltas.map(([desenho, rotulo]) => {
+      const icone = elemento("span", "chamada-estado-icone");
+      icone.dataset.estado = desenho === "microfone" ? "mudo" : "surdo";
+      icone.append(glifoComEstado(desenho, true, rotulo));
+      return icone;
+    }));
+  }
+  estados.hidden = faltas.length === 0;
 }
 
 /**
@@ -702,22 +593,18 @@ function iniciaisDoCartao(apelido) {
 }
 
 /**
- * O estado de uma pessoa, em frase.
+ * O estado de uma pessoa, em palavras curtas, para o nome acessível do cartão.
  *
- * A mesma informação da pastilha, na língua de quem nunca leu o manual — é o
- * que `LEGENDAS SIMPLES` é (inventário §2). O microfone vem antes porque calar
- * é o que impede alguém de ser ouvido; o isolamento entra na mesma frase porque
- * são dois fatos ao mesmo tempo e escolher um esconderia o outro.
+ * O mesmo fato que o anel verde (quem fala) e os ícones do retrato (mudo, sem
+ * som) mostram, na língua de quem nunca os viu. O microfone vem antes porque
+ * calar é o que impede alguém de ser ouvido; o isolamento entra na mesma frase
+ * porque são dois fatos ao mesmo tempo e escolher um esconderia o outro.
  */
-function fraseDoEstado(pessoa) {
-  if (pessoa.total_isolation) {
-    if (pessoa.muted) return "está com o microfone desligado e não ouve ninguém";
-    if (pessoa.speaking) return "está falando agora, e não ouve ninguém";
-    return "não está ouvindo ninguém";
-  }
-  if (pessoa.muted) return "está com o microfone desligado";
-  if (pessoa.speaking) return "está falando agora";
-  return "está só ouvindo";
+function estadoEmPalavras(pessoa) {
+  const ouvido = pessoa.total_isolation ? "sem som" : null;
+  if (pessoa.muted) return ouvido ? "microfone desligado, sem som" : "microfone desligado";
+  if (pessoa.speaking) return ouvido ? "falando, sem som" : "falando";
+  return ouvido ?? "ouvindo";
 }
 
 /* `desenharMonitor` saiu com a tela.
@@ -904,9 +791,15 @@ function desenharORodapeDoOperador(voice_room) {
   const sair = $("operador-sair");
   sair.dataset.alvo = dentro ? "sala" : "servidor";
   const rotuloDaSaida = dentro ? "SAIR DA SALA" : "SAIR DO SERVIDOR";
-  // No WebKit, trocar o nó de texto entre down e up perde o clique.
-  // O snapshot repinta este rodapé mesmo quando a sala não mudou.
-  if (sair.textContent !== rotuloDaSaida) sair.textContent = rotuloDaSaida;
+  // **Ícone, e o rótulo em palavras para quem não vê** (0.19, pedido do dono):
+  // por extenso, os dois botões ficavam fora de proporção ao lado do microfone
+  // e do fone. A porta com seta sai do servidor; o × sai da sala.
+  // No WebKit, trocar o nó entre down e up perde o clique, e o snapshot repinta
+  // este rodapé mesmo quando a sala não mudou: só troca quando o ofício muda.
+  if (sair.getAttribute("aria-label") !== rotuloDaSaida || !sair.firstElementChild) {
+    sair.setAttribute("aria-label", rotuloDaSaida);
+    sair.replaceChildren(glifo(dentro ? "xis" : "porta"));
+  }
   sair.title = dentro
     ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
     : "sair deste servidor e voltar à tela de entrada";
@@ -916,7 +809,13 @@ function desenharORodapeDoOperador(voice_room) {
   // um botão desabilitado prometeria que existe um jeito de habilitá-lo aqui.
   outro.hidden = !dentro;
   if (dentro) {
-    if (outro.textContent !== "COMPARTILHAR") outro.textContent = "COMPARTILHAR";
+    // **Ícone também** (0.19, pedido do dono): a fileira do operador é uma
+    // linha só de ícones iguais, e «COMPARTILHAR» por extenso a quebrava. A
+    // palavra fica no nome acessível, como a das saídas.
+    if (outro.getAttribute("aria-label") !== "COMPARTILHAR" || !outro.firstElementChild) {
+      outro.setAttribute("aria-label", "COMPARTILHAR");
+      outro.replaceChildren(glifo("tela"));
+    }
     // **Indisponível, e dito** (caso 12): sem a captura (o navegador que não
     // a tem), o botão fica à vista, apagado, com o porquê; o clique abre a
     // caixa, que diz o mesmo — nada começa e quebra no meio.
@@ -927,18 +826,17 @@ function desenharORodapeDoOperador(voice_room) {
   }
 }
 
-// **Duas portas, um comando** — U28.
+// **Uma porta, um comando** — U28, decidido de novo pelo dono na 0.19.
 //
-// O botão do rodapé e o que fica ao lado do estado vazio da chamada chamam a
-// mesma função. Não é um segundo caminho: é o mesmo, no lugar onde a pessoa
-// está olhando quando precisa dele. Dois comandos com o mesmo rótulo é que
-// seria um problema — duas maneiras de fazer a mesma coisa, discordando no dia
-// em que uma delas mudar.
-for (const porta of ["operador-vista", "palco-compartilhar"]) {
-  $(porta).addEventListener("click", () => {
-    abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
-  });
-}
+// A U28 pedia o botão perto do estado vazio e deixou duas portas para o mesmo
+// ato: o rodapé do operador e um botão dentro do palco. O dono ficou com uma:
+// COMPARTILHAR é um ícone na barra da chamada (que aperta este mesmo botão do
+// operador), e o palco vazio nem aparece. O que a U28 protegia continua: o
+// compartilhar se alcança de dentro da chamada, e o «indisponível, e dito»
+// (`desenharORodapeDoOperador`) chega à barra com o `aria-disabled` e o `title`.
+$("operador-vista").addEventListener("click", () => {
+  abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
+});
 
 /**
  * Sair — da sala, ou do servidor, conforme onde se está.
@@ -984,40 +882,16 @@ $("operador-sair").addEventListener("click", async () => {
 
 
 /**
- * O volume, por delegação.
+ * O cartão abre a ficha da pessoa, que é onde o volume dela mora.
  *
- * Um ouvinte na grade e não um por botão: os cartões são repintados a cada meio
- * segundo e um ouvinte por botão teria que ser registrado de novo a cada
- * cartão novo. O `−`, o `+` e cada célula dizem no `dataset` o que fazem.
- *
- * A célula pinta na hora, antes da volta de IPC, e é o certo: o que ela mostra
- * é a posição de um controle que esta janela acabou de mover, não a leitura de
- * uma medida — som é o que confirma se o volume ficou onde devia.
+ * Um ouvinte na grade e não um por cartão: os cartões são repintados a cada
+ * meio segundo. O volume por pessoa saiu do cartão (0.19, «bem simples») e é o
+ * mesmo deslizante da ficha que a lista de pessoas abre — uma escolha, uma
+ * leitura do Rust (`marcarVolume`, em `tela-sessao.js`).
  */
 $("chamada-grade").addEventListener("click", (evento) => {
-  const alvo = evento.target.closest("[data-vol-acao]");
-  if (!alvo) return;
-
-  const cartao = alvo.closest(".chamada-cartao");
-  const apelido = cartao.dataset.pessoa;
-  const atual = volumesLidos.get(apelido) ?? VOLUME_NORMAL;
-
-  const pedido =
-    alvo.dataset.volAcao === "menos"
-      ? atual - PASSO_DE_VOLUME
-      : alvo.dataset.volAcao === "mais"
-        ? atual + PASSO_DE_VOLUME
-        : Number(alvo.dataset.volAlvo);
-  const valor = Math.max(0, Math.min(VOLUME_MAXIMO, pedido));
-
-  // A posição que o gesto acabou de mandar, até a próxima leitura do Rust
-  // confirmá-la — e uma leitura de antes dele não a desfaz. Ver `marcarVolume`,
-  // em `tela-sessao.js`.
-  marcarVolume(apelido, valor);
-  pintarVolume(cartao, apelido);
-  invoke("set_volume", { nickname: apelido, percent: valor }).catch((falha) => {
-    console.warn("set_volume:", falha);
-  });
+  const alvo = evento.target.closest("[data-ficha-pessoa]");
+  if (alvo) abrirFichaDaPessoa(alvo.dataset.fichaPessoa);
 });
 
 // Escape fecha, que é o que uma tela alcançada de dentro de outra faz. Só com

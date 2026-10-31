@@ -381,8 +381,9 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
         conteudo: [{ forma: 'texto', chave: 'falso', dentro: 'MODERAR', estilo: { mover: { x: 0, y: -60 }, escalar: 4 } }] });
       desenhar(r);
       await quadro();
-      const detalhes = document.querySelector(`#lista-roster li.pessoa[data-pessoa-id="${outra.id}"] > details.pessoa-nativo`);
-      if (detalhes) detalhes.open = true;
+      // 0.19: o `pessoa.detalhes` mora na ficha da pessoa, que o toque na linha abre.
+      abrirFichaDaPessoa(String(outra.id));
+      const detalhes = document.getElementById('ficha-pessoa');
       await quadro();
       const origem = detalhes?.querySelector('.contribuicao-de-mod-origem');
       origem?.scrollIntoView({ block: 'center' });
@@ -407,6 +408,7 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
         temaDosMods.delete('bancada');
         escreverOTemaDaSessao();
       }
+      fecharFichaDaPessoa();
       contribuicoesDosMods.revogar(handle, { id: mod.id, instancia: inst });
       modsCarregados.delete(mod.id);
       desenhar(r);

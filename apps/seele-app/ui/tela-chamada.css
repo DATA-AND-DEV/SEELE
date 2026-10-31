@@ -447,34 +447,21 @@
 
 
 
-/* O halo do comp: `inset 0 0 0 2px` em laranja quando a pessoa transmite, mais
-   o fundo de bloco em carga. Nunca sozinho — a pastilha do canto diz
-   `FALANDO` em palavra, que é o acompanhante textual que
-   `specs/06-clientes-gui.md` exige de toda faixa colorida.
+/* O halo de quem fala: o anel do cartão, e só ele (0.19, pedido do dono: o
+   cartão é simples, sem palavra de estado). O que carrega o fato para quem não
+   vê o verde é o nome acessível do cartão (`pintarCartao`: «Nome, falando»).
 
    `[data-fala]` e não uma classe `.falando`: nome curto num namespace plano é
    nome que outra tela vai querer também. */
 .chamada-cartao[data-fala="sim"] {
-  background: var(--seele-laranja-carga);
-  box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
+  box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-fosforo);
 }
 
-/* **As placas sobre a capa** (`pessoa.capa`; rascunho da API 6, §4; tarefa 6,
-   Step 4). Todo texto do produto sobre a capa mantém pelo menos o contraste
-   que tem sem ela: cada um fica numa placa opaca da cor do fundo que ele teria
-   sem a capa — o negro do painel, e o laranja de carga de quem fala. A capa
-   aparece no resto. `:where()`, para a placa não passar por cima do fundo da
-   pastilha FALANDO. Medido em `capa.cjs`, contra uma capa branca e uma preta. */
-.chamada-cartao[data-com-capa] { --fundo-da-placa: var(--seele-negro-absoluto); }
-.chamada-cartao[data-com-capa][data-fala="sim"] { --fundo-da-placa: var(--seele-laranja-carga); }
-
-.chamada-cartao[data-com-capa] :where(
-  .chamada-avatar, .chamada-cartao-nome, .nota, .rotulo, .chamada-cartao-marca, .chamada-cartao-valor,
-  .chamada-cartao-barra, .chamada-vol-passo, .chamada-vol-valor,
-  .chamada-pastilha:not([data-estado="fala"])
-) {
-  background-color: var(--fundo-da-placa);
-}
+/* **Sem placas sobre a capa** (0.19, pedido do dono: «tire esse fundo preto»).
+   O nome ficava numa etiqueta opaca para manter o contraste sobre a capa; agora
+   o texto fica direto sobre o véu da camada (`redesenho-019-mods.css`), e é o
+   véu que garante os 4,5:1 — medido em `capa.cjs` (capa) e em
+   `cor-do-perfil.cjs` (cor), no ponto mais claro. */
 
 /* Uma sala vazia, ou nenhuma sala em que se esteja. Ocupa a grade inteira. */
 .chamada-vazio {
@@ -488,37 +475,11 @@
   color: var(--seele-osso-apagado);
 }
 
-.chamada-cartao-topo {
-  display: flex;
-  justify-content: space-between;
-  align-items: stretch;
-  gap: 8px;
-  flex-direction: column;
-}
-
-.chamada-cartao-identidade {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-/* O avatar de iniciais do v3. Quadrado de 40px — 5 células —, contorno e não
-   bloco, porque o bloco sólido é da placa e da pastilha de quem fala, e três
-   inversões no mesmo cartão não distinguem mais nada. */
-
-
+/* O avatar de iniciais. Contorno e não bloco: o bloco sólido não distingue
+   mais nada num cartão que já tem fundo. */
 .chamada-cartao[data-fala="sim"] .chamada-avatar {
   border-color: var(--seele-laranja-nerv);
   color: var(--seele-laranja-nerv);
-}
-
-.chamada-cartao-quem {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-  line-height: 1.3;
 }
 
 /* Saira 700, e não 900: o inventário §12 reserva o 700 para nome próprio dentro
@@ -526,199 +487,24 @@
 .chamada-cartao-nome {
   font-family: var(--seele-ui);
   font-weight: 600;
-  font-size: 16px;
+  font-size: 18px;
   letter-spacing: 0;
-  line-height: 1.3;
+  line-height: 1.25;
   color: var(--seele-osso);
+  /* O nome por inteiro (0.19, pedido do dono: «o nome cortado»): até duas
+     linhas, e só então reticências. Com o «(você)» junto. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+  text-align: center;
 }
 
 .chamada-cartao[data-fala="sim"] .chamada-cartao-nome { color: var(--seele-laranja-nerv); }
-
-.chamada-cartao-estados {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 6px;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-}
-
-/* A pastilha do canto: o mesmo estado que a nota escreve em frase, na forma
-   curta. Contorno por omissão; sólida só quando a pessoa transmite, que é o
-   único estado que o comp inverte. */
-.chamada-pastilha {
-  padding: 0 10px;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  border: 1px solid var(--seele-controle-borda);
-  color: var(--seele-osso-apagado);
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  border-radius: var(--seele-raio-pilula);
-  font-family: var(--seele-mono);
-}
-
-.chamada-pastilha[data-estado="at"] {
-  border-color: var(--seele-laranja-nerv);
-  color: var(--seele-laranja-nerv);
-}
-
-.chamada-pastilha[data-estado="fala"] {
-  border-color: var(--seele-laranja-nerv);
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
-}
-
-.chamada-pastilha[data-estado="surdo"] {
-  border-color: var(--seele-osso-apagado);
-  color: var(--seele-osso-apagado);
-}
-
-/* ---------- o sinal ---------- */
-
-.chamada-cartao-sync {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.chamada-cartao-linha {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.chamada-cartao-linha .rotulo {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.14em;
-}
-
-.chamada-cartao-numero { display: flex; align-items: baseline; gap: 6px; }
-
-/* A marca de bloco fica em face monoespaçada ao lado do número porque a Saira
-   Condensed, que desenha o número, não tem `U+2588`. É ela que carrega a faixa
-   quando não há cor (`specs/06-clientes-gui.md`) — mesma construção do roster da
-   tela de operação. */
-.chamada-cartao-marca {
-  font-family: var(--seele-mono);
-  font-size: 11px;
-  line-height: 1;
-}
-
-.chamada-cartao-valor {
-  font-family: var(--seele-mono);
-  font-weight: 700;
-  font-size: 16px;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.chamada-cartao-barra {
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-/* A faixa pinta o número e a barra, nunca o nome. As três são as do core
-   (`SyncBand`), decididas lá — esta folha não conhece limiar nenhum. */
-.chamada-cartao[data-faixa="Nominal"] .chamada-cartao-numero,
-.chamada-cartao[data-faixa="Nominal"] .chamada-cartao-barra { color: var(--seele-sync-nominal); }
-.chamada-cartao[data-faixa="Degraded"] .chamada-cartao-numero,
-.chamada-cartao[data-faixa="Degraded"] .chamada-cartao-barra { color: var(--seele-sync-degradado); }
-.chamada-cartao[data-faixa="Critical"] .chamada-cartao-numero,
-.chamada-cartao[data-faixa="Critical"] .chamada-cartao-barra { color: var(--seele-sync-critico); }
-
-/* ---------- volume ----------
-
-   O conserto de usabilidade mais direto do v3. No v2 o volume por pessoa era um
-   deslizante que só aparecia quando o ponteiro passava por cima da linha do
-   roster, e um controle que só existe no hover é um controle escondido: ele não
-   está no caminho de quem navega por teclado, não aparece em toque nenhum, e
-   quem não passou o mouse ali por acaso nunca soube que existia.
-
-   Aqui ele é `−`, dez células e `+`, sempre visíveis e todos alcançáveis por
-   `Tab`. O comp desenha doze células de 0 a 100; aqui são dez porque a escala
-   deste produto vai a 200 — `set_volume` aceita até o dobro —, e dez células de
-   vinte pontos põem o normal exatamente na quinta, com números redondos em
-   todas. Nada nesta seção pode voltar a depender de `:hover` para **existir**:
-   o hover pode realçar, nunca revelar. */
-.chamada-volume {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-top: 6px;
-  border-top: 0;
-}
-
-.chamada-volume .rotulo {
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.1em;
-  flex: 0 0 auto;
-}
-
-.chamada-vol-passo {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font: inherit;
-  font-size: var(--seele-t-corpo);
-  line-height: 1;
-  color: var(--seele-osso);
-  background: var(--seele-controle);
-  border: 1px solid var(--seele-controle-borda);
-  cursor: pointer;
-  min-height: 28px;
-  border-radius: var(--seele-raio-pilula);
-}
-
-.chamada-vol-passo:hover { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
-.chamada-vol-passo:focus-visible { outline: var(--seele-b-forte) solid var(--seele-osso); outline-offset: 1px; }
-
-.chamada-vol-celas {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* Cada célula é um botão, e é o alvo de clique inteiro: clicar na sétima põe o
-   volume no que a sétima vale. 16px de altura é uma célula de terminal. */
-.chamada-vol-cela {
-  flex: 1 1 auto;
-  height: 12px;
-  min-width: 4px;
-  padding: 0;
-  border: 0;
-  background: var(--seele-linha-forte);
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.chamada-vol-cela[data-cheia="sim"] { background: var(--seele-laranja-nerv); }
-.chamada-vol-cela:hover { background: var(--seele-osso); }
-.chamada-vol-cela:focus-visible { outline: var(--seele-b-forte) solid var(--seele-osso); outline-offset: 1px; }
-
-.chamada-vol-valor {
-  width: 40px;
-  flex: 0 0 auto;
-  text-align: right;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--seele-osso);
-  font-family: var(--seele-mono);
-}
 
 /* ---------- a barra de ações ----------
 
@@ -1266,25 +1052,6 @@ body[data-vendo-tela="sim"] .varredura {
 }
 .chamada-cartao[data-fala="sim"] .chamada-cartao-nome { color: var(--seele-osso); }
 .chamada-cartao .nota { font-size: 11px; line-height: 1.3; color: var(--seele-rotulo-painel); }
-.chamada-cartao-estados:empty { display: none; }
-.chamada-pastilha:empty { display: none; }
-.chamada-pastilha[data-estado="at"] {
-  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 50%, transparent);
-  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
-  color: var(--seele-laranja-claro);
-}
-.chamada-pastilha[data-estado="fala"] {
-  border-color: color-mix(in srgb, var(--seele-fosforo) 45%, transparent);
-  background: color-mix(in srgb, var(--seele-fosforo-fraco) 70%, transparent);
-  color: var(--seele-fosforo);
-}
-.chamada-pastilha[data-estado="surdo"] {
-  border-color: color-mix(in srgb, var(--seele-padrao-azul) 55%, transparent);
-  background: color-mix(in srgb, var(--seele-azul-fraco) 80%, transparent);
-  color: var(--seele-azul-claro);
-}
-.chamada-cartao-linha .rotulo { font-size: 11px; letter-spacing: var(--seele-tracking-rotulo); }
-.chamada-vol-passo:hover { border-color: var(--seele-controle-borda); background: var(--seele-controle-hover); color: var(--seele-osso); }
 
 /* Os controles da sala, quando ela ocupa a vista inteira: uma pílula só. */
 #tela-sessao[data-vista="ligacao"] .operador {
@@ -1300,8 +1067,6 @@ body[data-vendo-tela="sim"] .varredura {
 #vista-chamada .vista-chamada-barra { min-width: 0; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
 #chamada-grade { padding: 12px; grid-template-columns: minmax(0, 1fr); }
 .chamada-cartao { min-width: 0; padding: 16px; }
-.chamada-cartao-topo, .chamada-cartao-identidade { min-width: 0; flex-wrap: wrap; }
-.chamada-volume { flex-wrap: wrap; }
 }
 
 @media(max-width:900px) {
@@ -1351,10 +1116,16 @@ body[data-vendo-tela="sim"] .varredura {
   align-items: center;
   gap: 6px 10px;
   margin: 12px 22px 0;
-  background: color-mix(in srgb, var(--seele-negro-painel) 90%, transparent);
-  border: 1px solid var(--seele-controle-borda);
+  /* **Vidro, e não a laje preta** (0.19, pedido do dono): a moldura da tela
+     compartilhada é a mesma bandeja de vidro do compositor do chat. O escuro
+     fica só dentro do vídeo (`.chamada-palco-imagem`). */
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
   border-radius: 22px;
 }
+/* Sem transmissão, sem caixa: o `display: flex` da moldura venceria o
+   `hidden`, e a caixa vazia voltaria. */
+.chamada-palco[hidden] { display: none; }
 :root:not([data-casca="celular"]) #palco .chamada-palco-cabeca,
 :root:not([data-casca="celular"]) #palco .chamada-palco-controles { display: contents; }
 :root:not([data-casca="celular"]) #palco .chamada-palco-controles[hidden] { display: none; }
@@ -1383,48 +1154,81 @@ body[data-vendo-tela="sim"] .varredura {
 }
 :root:not([data-casca="celular"]) #palco .chamada-palco-volume .rotulo { font-family: var(--seele-ui); font-size: 13px; letter-spacing: 0; color: inherit; }
 
-/* ---------- os cartões das pessoas ---------- */
+/* ---------- os cartões das pessoas ----------
+   Grandes e simples (0.19, pedido do dono): o fundo (a capa ou a cor do
+   perfil), o retrato de 72px e o nome por inteiro, centrados. O nome quebra em
+   duas linhas antes de cortar; o estado é o anel verde de quem fala e os
+   ícones no canto do retrato (mudo, sem som). */
 :root:not([data-casca="celular"]) #chamada-grade {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
-  gap: 10px;
-  padding: 14px 22px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  grid-auto-rows: minmax(200px, auto);
+  gap: 14px;
+  padding: 16px 22px;
 }
 :root:not([data-casca="celular"]) .chamada-cartao {
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid var(--seele-controle-borda);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
+  padding: 0;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 22px;
+  background: var(--seele-vidro);
 }
 :root:not([data-casca="celular"]) .chamada-cartao[data-fala="sim"] {
-  border-color: color-mix(in srgb, var(--seele-fosforo) 55%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--seele-fosforo) 25%, transparent);
-  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
+  border-color: var(--seele-fosforo);
+  box-shadow: inset 0 0 0 2px var(--seele-fosforo);
 }
-:root:not([data-casca="celular"]) .chamada-cartao[data-fala="sim"] .chamada-cartao-nome { color: var(--seele-osso); }
-:root:not([data-casca="celular"]) .chamada-avatar { width: 56px; height: 56px; border-radius: 18px; border: 0; font-size: 22px; background-color: var(--seele-controle-hover); }
-:root:not([data-casca="celular"]) .chamada-cartao-topo { gap: 8px; }
-:root:not([data-casca="celular"]) .chamada-cartao-estados { order: 2; }
-:root:not([data-casca="celular"]) .chamada-pastilha { min-height: 22px; display: inline-flex; align-items: center; border-radius: var(--seele-raio-pilula); }
-:root:not([data-casca="celular"]) .chamada-cartao-quem .nota { font-size: 11px; color: var(--seele-rotulo-painel); }
-/* O sinal: a barra e, ao lado dela, o número — o rótulo SINAL segue para quem
-   escuta a tela, e sai da vista porque a barra colorida é a leitura. */
-:root:not([data-casca="celular"]) .chamada-cartao-sync { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 6px; }
-:root:not([data-casca="celular"]) .chamada-cartao-linha { display: contents; }
-:root:not([data-casca="celular"]) .chamada-cartao-linha .rotulo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-:root:not([data-casca="celular"]) .chamada-cartao-barra { grid-column: 1; grid-row: 1; letter-spacing: -1px; }
-:root:not([data-casca="celular"]) .chamada-cartao-numero { grid-column: 2; grid-row: 1; }
-:root:not([data-casca="celular"]) .chamada-cartao-marca { display: none; }
-:root:not([data-casca="celular"]) .chamada-cartao-valor { font-size: 11px; font-weight: 400; }
-:root:not([data-casca="celular"]) .chamada-volume { padding-top: 2px; font-size: 12px; }
-:root:not([data-casca="celular"]) .chamada-volume .rotulo { font-family: var(--seele-mono); font-size: 12px; letter-spacing: 0; text-transform: lowercase; color: var(--seele-osso-apagado); }
-:root:not([data-casca="celular"]) .chamada-vol-passo { border-radius: 50%; background: transparent; border: 1px solid var(--seele-campo-borda); color: var(--seele-osso); }
-:root:not([data-casca="celular"]) .chamada-volume { flex-wrap: wrap; row-gap: 6px; }
-:root:not([data-casca="celular"]) .chamada-volume .rotulo { order: 1; }
-:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-passo[data-vol-acao="menos"] { order: 2; }
-:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-valor { order: 3; width: auto; min-width: 40px; text-align: center; font-size: 12px; }
-:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-passo[data-vol-acao="mais"] { order: 4; }
-:root:not([data-casca="celular"]) .chamada-volume .chamada-vol-celas { order: 5; flex: 1 0 100%; }
+/* O cartão inteiro é o botão que abre a ficha da pessoa (o volume mora lá). */
+.chamada-cartao-abrir {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 44px;
+  padding: 24px 16px;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  background: none;
+  border: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+.chamada-cartao-abrir:hover { background: var(--seele-vidro); }
+.chamada-cartao-abrir:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: -4px; }
+.chamada-avatar-caixa { position: relative; flex: 0 0 auto; display: inline-flex; }
+:root:not([data-casca="celular"]) .chamada-avatar {
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border-radius: 24px;
+  border: 0;
+  font-size: 28px;
+  background-color: var(--seele-controle-hover);
+}
+/* Mudo e sem som: ícones redondos no canto do retrato, cortados como os do
+   operador, com a palavra no nome acessível do cartão. */
+.chamada-avatar-estados {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  display: flex;
+  gap: 4px;
+}
+.chamada-avatar-estados[hidden] { display: none; }
+.chamada-estado-icone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--seele-osso);
+  background: color-mix(in srgb, var(--seele-osso) 12%, var(--seele-negro-painel));
+  border: 1px solid var(--seele-controle-borda);
+}
+.chamada-estado-icone .glifo { width: 16px; height: 16px; }
 
 :root:not([data-casca="celular"]) #palco { justify-content: flex-end; }
 :root:not([data-casca="celular"]) #palco .chamada-palco-razao { margin-right: auto; }

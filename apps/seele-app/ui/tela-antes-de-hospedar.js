@@ -66,6 +66,17 @@ const antesDeHospedar = {
   /** Os MODs que ainda impedem de subir, pelo id. */
   pendentes: new Set(),
   /**
+   * **Os MODs que o produto incorporou** (0.19; id → versão do SEELE): não
+   * pedem escolha, e a linha diz que os dados deles serão trazidos.
+   */
+  incorporados: new Map(),
+  /**
+   * Dos incorporados, os que o `hospedar` recusaria (de uma API antiga): o
+   * HOSPEDAR do fim estagia «seguir sem ele» para cada um antes de subir — é o
+   * clique dele a confirmação, e nada vai ao banco antes.
+   */
+  aSeguirSem: new Set(),
+  /**
    * Os MODs com uma escolha estagiada (pelo id): o backend as guarda, e o
    * `hospedar` as aplica depois da cópia; nenhuma vai ao banco antes do CTA.
    */
@@ -119,6 +130,8 @@ async function abrirAntesDeHospedar({ servidor = null, recusa = null, info, falh
     falhaDaLeitura: null,
     mods: [],
     pendentes: new Set(),
+    incorporados: new Map(),
+    aSeguirSem: new Set(),
     escolhas: new Set(),
     futuro: false,
     converte: false,
@@ -195,10 +208,20 @@ async function abrirAntesDeHospedar({ servidor = null, recusa = null, info, falh
   for (const par of [...(lida?.mods_de_api_antiga ?? []), ...(recusa?.ModsDeApiAntiga?.mods ?? [])]) {
     if (!dosMods.has(par[0])) dosMods.set(par[0], par);
   }
+  // **Os incorporados ao produto** (0.19): os que a pré-conferência diz, de
+  // qualquer API, e os da recusa que a lista da janela conhece. Um da API 6
+  // ou 7 não impede de subir, e entra na lista só para ser dito.
+  const incorporados = new Map(lida?.mods_incorporados ?? []);
+  for (const [id] of dosMods.values()) {
+    if (MODS_INCORPORADOS_AO_PRODUTO.has(id) && !incorporados.has(id)) incorporados.set(id, MODS_INCORPORADOS_AO_PRODUTO.get(id));
+  }
+  antesDeHospedar.aSeguirSem = new Set([...dosMods.keys()].filter((id) => incorporados.has(id)));
+  for (const id of incorporados.keys()) if (!dosMods.has(id)) dosMods.set(id, [id, null]);
+  antesDeHospedar.incorporados = incorporados;
   antesDeHospedar.mods = [...dosMods.values()];
   const desta = (linhas ?? []).find((l) => l.esta) ?? null;
 
-  antesDeHospedar.pendentes = new Set(antesDeHospedar.mods.map(([id]) => id));
+  antesDeHospedar.pendentes = new Set(antesDeHospedar.mods.map(([id]) => id).filter((id) => !incorporados.has(id)));
   antesDeHospedar.criadoNa = criadoNa;
   antesDeHospedar.desta = desta;
   antesDeHospedar.redesenharOsDados = () => desenharOsDados(lida, recusa, criadoNa, desta);
@@ -504,17 +527,22 @@ async function desenharOsMods(geracao) {
     esconderSaidasDeQuemHospeda();
     return;
   }
-  estadoDoPasso("antes-mods", "resolva");
-  $("antes-mods-frase").textContent = FRASES_ANTES_DE_HOSPEDAR.modsPendentes;
-  // As APIs, para quem quer saber por quê: no «mais», e não na linha.
-  repovoar($("antes-mods-apis"), mods.map(([id, api]) => elemento("li", null,
+  // As APIs, para quem quer saber por quê: no «mais», e não na linha. Um
+  // incorporado não tem API a explicar: a linha dele diz o que acontece.
+  const comApi = mods.filter(([id]) => !antesDeHospedar.incorporados.has(id));
+  repovoar($("antes-mods-apis"), comApi.map(([id, api]) => elemento("li", null,
     FRASES_ANTES_DE_HOSPEDAR.modApi(id, api, APIS_ACEITAS_DITAS_E, APIS_DO_SERVIDOR_0_15.includes(api) ? APIS_DO_SERVIDOR_0_15_DITAS : null))));
-  mais.hidden = false;
+  mais.hidden = comApi.length === 0;
   // **As escolhas ficam na tela até o botão do fim** (P1 do Codex): nada vai ao
   // banco agora. O estado do bloco diz «escolhido, a aplicar», e não «feito».
   const redesenharOsMods = () => {
     const n = antesDeHospedar.pendentes.size;
-    if (n === 0) {
+    if (n === 0 && antesDeHospedar.escolhas.size === 0 && antesDeHospedar.incorporados.size > 0) {
+      // Só incorporados: nada a decidir, e uma coisa a ler — o que o produto
+      // faz com os dados deles.
+      estadoDoPasso("antes-mods", "leia");
+      $("antes-mods-frase").textContent = FRASES_ANTES_DE_HOSPEDAR.modsSoIncorporados;
+    } else if (n === 0) {
       estadoDoPasso("antes-mods", "leia");
       $("antes-mods-frase").textContent = FRASES_ANTES_DE_HOSPEDAR.modsEscolhidos;
     } else {
@@ -524,8 +552,10 @@ async function desenharOsMods(geracao) {
     antesDeHospedar.redesenharAVersao?.();
     atualizarOHospedar();
   };
+  redesenharOsMods();
   await desenharSaidasDeQuemHospeda(mods, antesDeHospedar.servidor, {
     escolhidas: antesDeHospedar.info?.escolhas_pendentes ?? [],
+    incorporados: antesDeHospedar.incorporados,
     aoResolver: (id) => {
       if (geracao !== antesDeHospedar.geracao) return;
       antesDeHospedar.pendentes.delete(id);
@@ -666,9 +696,27 @@ function fecharAntesDeHospedar() {
   voltarParaTela(destino);
 }
 
-/** Hospeda o mesmo servidor; uma recusa nova volta para cá (`hospedar`). */
-function hospedarDeVerdade() {
+/**
+ * Hospeda o mesmo servidor; uma recusa nova volta para cá (`hospedar`).
+ *
+ * **Os incorporados primeiro** (0.19): para cada MOD que o produto incorporou
+ * e que o `hospedar` recusaria, estagia «seguir sem ele»
+ * (`resolver_mod_de_api_antiga`, saída `incorporado`), que não toca no banco.
+ * É este clique a confirmação de quem leu a frase; quem VOLTA não estagiou
+ * nada. Uma escolha que não se guarda é dita no alto, e nada sobe.
+ */
+async function confirmarEHospedar() {
   const servidor = antesDeHospedar.servidor;
+  for (const id of antesDeHospedar.aSeguirSem) {
+    try {
+      await invoke("resolver_mod_de_api_antiga", { servidor, id, saida: "incorporado" });
+    } catch (falha) {
+      $("antes-erro").textContent = fraseDeErro(falha);
+      $("antes-erro").hidden = false;
+      $("antes-erro").scrollIntoView({ block: "nearest" });
+      return;
+    }
+  }
   antesDeHospedar.geracao += 1;
   $("tela-antes-de-hospedar").hidden = true;
   $("tela-boot").hidden = false;
@@ -688,5 +736,5 @@ $("antes-hospedar").addEventListener("click", () => {
   // Convertendo, a cópia nova é do `hospedar` (o portão da conversão): ele a
   // cria, a verifica e só então converte; se ela não fica pronta, ele volta
   // com `CopiaDeSeguranca` e esta tela reabre dizendo a etapa.
-  hospedarDeVerdade();
+  confirmarEHospedar().catch((falha) => console.warn("hospedar:", falha));
 });

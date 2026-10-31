@@ -6,8 +6,8 @@
 //
 // 1. Registrada para uma pessoa, a capa pinta o cartão dela na chamada: o
 //    cartão ganha `data-pessoa-da-capa`, e a imagem é a do MOD.
-// 2. **O halo de quem fala e a pastilha ficam acima da capa**: no centro da
-//    pastilha, o elemento que recebe o clique é ela, e não a capa.
+// 2. **O halo de quem fala, o retrato e o nome ficam acima da capa**: no centro
+//    de cada um, o elemento que recebe o clique é ele, e não a capa.
 // 3. **A capa recusada** deixa o cartão com o fundo liso, e o MOD recebe o
 //    `midia` com o ponto e o alvo (rascunho §7.1).
 // 4. **Com movimento reduzido**, o cartão usa o quadro estático, e não a
@@ -207,7 +207,11 @@ const engines = require('./playwright.cjs');
         const com = await medir(cor);
         const sem = semCapa[sim ? 'falando' : 'calado'];
         for (const [texto, antes] of Object.entries(sem)) {
-          if ((com[texto] ?? 0) < antes - 0.01) pioras.push(`${texto} (${sim ? 'falando' : 'calado'}, capa ${nomeDaCapa}): ${antes} → ${com[texto]}`);
+          // Sem placas (0.19, pedido do dono: «tire esse fundo preto»), o texto
+          // fica direto sobre o véu da capa: o que se exige é o piso de 4,5:1 —
+          // ou o que o texto já tinha sem capa, se menos — contra as três capas
+          // de prova, e não mais o 14,5:1 que a placa opaca dava ao nome.
+          if ((com[texto] ?? 0) < Math.min(antes, 4.5) - 0.01) pioras.push(`${texto} (${sim ? 'falando' : 'calado'}, capa ${nomeDaCapa}): ${antes} → ${com[texto]}`);
         }
       }
     }
@@ -289,11 +293,11 @@ const engines = require('./playwright.cjs');
     await page.evaluate(() => fecharPerfil());
     assert.deepEqual(pioras, [], 'o título ou o FECHAR do SEU PERFIL perdeu contraste sobre a capa');
 
-    // 2. A pastilha e o nome ficam acima da capa: no centro de cada um, o
+    // 2. O retrato e o nome ficam acima da capa: no centro de cada um, o
     //    elemento que recebe o clique é ele (ou um filho dele).
     const porCima = await page.evaluate(seletor => {
       const el = document.querySelector(seletor);
-      return ['.chamada-pastilha:not([hidden])', '.chamada-cartao-nome'].map(alvoInterno => {
+      return ['.chamada-avatar', '.chamada-cartao-nome'].map(alvoInterno => {
         const no = el.querySelector(alvoInterno);
         if (!no) return `${alvoInterno}: ausente`;
         const caixa = no.getBoundingClientRect();
@@ -854,7 +858,7 @@ const engines = require('./playwright.cjs');
     ], `o MOD não ouviu o \`link\` de cada endereço como foi: ${JSON.stringify(links)}`);
 
     assert.deepEqual(errors, []);
-    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha.');
+    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre o véu (sem placas no cartão), o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

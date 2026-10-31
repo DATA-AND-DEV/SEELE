@@ -4,9 +4,8 @@
 //
 // A lista é a do desktop (`#lista-roster`, desenhada pelo tela-sessao.js e
 // reconciliada pelo id a cada quadro: a linha de uma pessoa é o mesmo nó de um
-// quadro ao seguinte, desde o lote AX). O celular muda o toque: na linha de uma
-// pessoa, ele abre a folha dela, com o sinal, o volume e onde se modera. No
-// desktop, o nome abre a moderação, que no celular é pelo SEELE no computador.
+// quadro ao seguinte, desde o lote AX). O toque numa linha abre a ficha da
+// pessoa (0.19), a mesma do desktop, numa folha que sobe da borda.
 
 "use strict";
 
@@ -15,56 +14,24 @@
 
   const lista = document.getElementById("lista-roster");
 
-  // O sinal fica à vista na linha (specs/06: número e barra, nunca só cor). O
-  // desktop recolhe o diagnóstico num `<details>`, e o celular o abre: o resumo
-  // dele é escondido pela folha de estilo, e o toque é da linha.
-  const abrirDiagnosticos = () => {
-    for (const detalhe of lista.querySelectorAll("details.pessoa-diagnostico:not([open])")) detalhe.open = true;
-  };
-  new MutationObserver(abrirDiagnosticos).observe(lista, { childList: true, subtree: true });
-  abrirDiagnosticos();
-
-  // A captura vem antes do ouvinte de moderação do desktop, que mora na mesma
-  // lista. Só o nome e as partes sem ação da linha abrem a folha: um botão ou
-  // um link que um MOD desenhou na linha continua fazendo o que é dele.
+  // **O toque na linha abre a ficha da pessoa** (0.19, pedido do dono): a
+  // mesma do desktop (`abrirFichaDaPessoa`, em `tela-sessao.js`), que no
+  // celular sobe da borda — o perfil, o estado, o volume de quem está na sua
+  // sala e o que os MODs acrescentam. O sinal não é mais desenhado por pessoa.
+  // A captura vem antes de qualquer outro ouvinte da lista. Um botão ou um
+  // link que um MOD desenhou na linha continua fazendo o que é dele.
   lista.addEventListener("click", (evento) => {
     const linha = evento.target.closest("li.pessoa");
     if (!linha) return;
-    const doNome = evento.target.closest("button[data-moderar-pessoa]");
-    if (!doNome && evento.target.closest("a, button, input, select, textarea")) return;
+    const daFicha = evento.target.closest("button[data-ficha-pessoa]");
+    if (!daFicha && evento.target.closest("a, button, input, select, textarea")) return;
     evento.stopPropagation();
     evento.preventDefault();
     abrirFolhaDaLinha(linha);
   }, true);
 
   function abrirFolhaDaLinha(linha) {
-    const deslizante = linha.querySelector("input.volume");
-    const apelido = deslizante?.getAttribute("data-pessoa") ?? null;
-    CELULAR.ajudante("folhaDaPessoa")({
-      // O id da pessoa, que a linha traz do mesmo `pessoa.id` da chave dela: é
-      // o alvo das contribuições `pessoa.detalhes`, que a folha mostra.
-      id: linha.dataset.pessoaId ?? null,
-      nome: linha.querySelector(".pessoa-nome")?.textContent ?? "",
-      iniciais: linha.querySelector(".pessoa-avatar")?.textContent ?? "",
-      sinal: linha.querySelector(".pessoa-sync-valor")?.textContent ?? "",
-      estado: linha.querySelector(".pastilha")?.textContent ?? "",
-      volume: deslizante ? Number(deslizante.value) : null,
-      // O deslizante da lista de agora, e não o do quadro em que a folha abriu.
-      mudarVolume: (valor) => {
-        const doDesktop = lista.querySelector(`input.volume[data-pessoa="${CSS.escape(apelido)}"]`);
-        if (!doDesktop) return;
-        doDesktop.value = String(valor);
-        doDesktop.dispatchEvent(new Event("input", { bubbles: true }));
-      },
-      // O desktop só desenha a porta do nome para quem pode ser moderado por
-      // quem usa o aparelho (`quemPodeSerModerado`): a regra é dele.
-      podeModerar: !!linha.querySelector("button[data-moderar-pessoa]"),
-      // VER PERFIL, só num servidor com perfis oficiais (0.19): num 0.18 com o
-      // MOD PERFIS, o perfil é o que o MOD desenha, como sempre.
-      verPerfil: linha.dataset.pessoaId && typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis()
-        ? () => abrirPerfilDaPessoa(linha.dataset.pessoaId)
-        : null,
-    });
+    if (linha.dataset.pessoaId) abrirFichaDaPessoa(linha.dataset.pessoaId);
   }
 
   // ------------------------------------------------------------- o filtro

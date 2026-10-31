@@ -72,8 +72,10 @@
 button.perfil-cartao { cursor: pointer; min-height: 0; white-space: normal; }
 button.perfil-cartao:hover { border-color: var(--seele-controle-borda); }
 button.perfil-cartao:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
-/* A faixa da capa: altura do produto, a imagem recortada dentro dela. Sem capa,
-   a cor da pessoa num degradê, para o cartão não parecer um buraco. */
+/* A faixa da capa: altura do produto, a imagem recortada dentro dela. **Sem
+   capa, a cor da pessoa** (0.19, pedido do dono): o mesmo degradê da camada de
+   cor das outras superfícies (`[data-capa-de-cor]`, `tela-sessao.css`), aqui
+   com a cor do rascunho, que a prévia do editor troca enquanto se escolhe. */
 .perfil-cartao-capa {
   position: relative;
   display: block;
@@ -81,7 +83,9 @@ button.perfil-cartao:focus-visible { outline: 2px solid var(--seele-laranja-nerv
   height: 96px;
   border-radius: 0;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--perfil-cor) 55%, var(--seele-negro-painel)), var(--seele-negro-painel) 85%);
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--perfil-cor) 60%, var(--seele-negro-painel)),
+      color-mix(in srgb, var(--perfil-cor) 25%, var(--seele-negro-painel)));
 }
 .perfil-cartao-capa > .capa-camada { border-radius: 0; }
 .perfil-cartao-capa > .capa-camada::after {
@@ -313,21 +317,8 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 .perfil-folha-vazia { margin: 0; }
 
 /* -------------------------------------------- a linha de uma pessoa */
-#lista-roster .pessoa-identidade-com-exibido { flex-wrap: wrap; row-gap: 0; }
-#lista-roster .pessoa-exibido {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-family: var(--seele-ui);
-  font-weight: 600;
-  color: var(--seele-osso);
-}
-/* O apelido fica pequeno e sempre à vista, ao lado do nome exibido. */
-#lista-roster .pessoa-identidade-com-exibido .pessoa-nome {
-  font-family: var(--seele-mono);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--seele-osso-apagado);
-}
+/* Um nome só na linha (0.19): o exibido, ou o apelido; o apelido com a tag
+   fica na ficha da pessoa (`.ficha-apelido`, `.perfil-cartao-apelido`). */
 #lista-roster .pessoa-perfil-linha {
   display: block;
   margin: 4px 0;
@@ -361,6 +352,18 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
     color-mix(in srgb, var(--seele-negro-painel) 90%, transparent),
     color-mix(in srgb, var(--seele-negro-painel) 70%, transparent));
 }
+/* Sem capa, a cor do perfil (`[data-capa-de-cor]`): o degradê já vem
+   escurecido, e o véu é um só, mais leve que o da imagem — a cor se vê na
+   linha inteira, e o texto mais apagado dela (o estado, «pronomes · status»)
+   fica com 4,5:1 ou mais nas oito amostras (`bancada/cor-do-perfil.cjs`). */
+#lista-roster .pessoa[data-capa-de-cor] > .capa-camada::after {
+  background: color-mix(in srgb, var(--seele-negro-painel) 58%, transparent);
+}
+/* O estado sobre a cor: a pastilha ganha o fundo do painel, como no cartão da
+   chamada com capa — o texto dela é o mais apagado da linha. */
+#lista-roster .pessoa[data-capa-de-cor] .pastilha[data-estado="escuta"] {
+  background-color: var(--seele-negro-painel);
+}
 
 /* ------------------------------------------------- o editor «Seu perfil»
    Na gramática da 0.19: painel de vidro, Inter com inicial maiúscula (fim do
@@ -387,8 +390,10 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 /* A ordem (o formulário e a sala pessoal dissolvem as caixas deles). */
 #perfil .perfil-painel { display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
 #perfil #perfil-previa-cartao { order: 0; }
+#perfil #perfil-padrao-faixa { order: 0; }
 #perfil #perfil-imagem, #perfil #perfil-imagens { order: 1; }
-#perfil .perfil-par { order: 2; }
+/* O nome: um campo só, o registro do servidor e o nome exibido juntos. */
+#perfil .perfil-campo-nome { order: 2; }
 #perfil #perfil-sem-nome { order: 3; }
 #perfil .perfil-par[data-so-oficial] { order: 4; }
 #perfil .perfil-campo-bio { order: 5; }
@@ -450,6 +455,41 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 #perfil .perfil-bloco-estado[data-tom="erro"] { color: color-mix(in srgb, var(--seele-vermelho-alerta) 70%, var(--seele-osso)); }
 #perfil .perfil-bloco-estado[data-tom="feito"] { color: var(--seele-fosforo); }
 #perfil .perfil-bloco-estado[data-tom="pendencia"] { color: var(--seele-laranja-nerv); }
+
+/* A faixa do perfil padrão: uma linha curta, e a pílula de vidro que o aplica
+   de novo neste servidor (`perfil-padrao.js`). */
+#perfil .perfil-padrao-faixa {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+#perfil .perfil-padrao-linha {
+  flex: 1 1 240px;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--seele-osso-apagado);
+}
+#perfil .perfil-padrao-linha[data-tom="erro"] { color: color-mix(in srgb, var(--seele-vermelho-alerta) 70%, var(--seele-osso)); }
+#perfil .perfil-padrao-usar {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: 44px;
+  padding: 0 20px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-osso);
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-pilula);
+}
+#perfil .perfil-padrao-usar:hover:not(:disabled) { background: var(--seele-controle-hover); border-color: var(--seele-controle-borda); }
+#perfil .perfil-padrao-usar:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
 
 /* Os campos: dois lado a lado onde o §5.4 pede, um por linha no estreito. */
 #perfil .perfil-par { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
@@ -575,3 +615,146 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 
 /* ---------------------------------- a gestão de MODs: o PERFIS incorporado */
 .mods-incorporado { color: var(--seele-laranja-nerv); }
+
+/* ------------------------------------------- a ficha de uma pessoa (0.19)
+   Pedido do dono: a linha de PESSOAS não expande mais; o toque nela abre UM
+   modal com a pessoa. A gramática dos diálogos da 0.19 (o «Seu perfil» do
+   canvas): 560px, canto de 28px, 30px × 32px de respiro, título de 30px. */
+
+/* O alvo da linha: um botão do produto esticado sobre ela inteira. O conteúdo
+   da linha fica embaixo, visível; o que um MOD pôs de clicável fica por cima. */
+#lista-roster .pessoa { position: relative; }
+#lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo) {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: transparent;
+  font-size: 0;
+  cursor: pointer;
+}
+#lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo)::after {
+  content: "\25B8";
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
+}
+#lista-roster .pessoa > .pessoa-abrir:not(.pessoa-nativo-resumo):hover {
+  background: color-mix(in srgb, var(--seele-osso) 4%, transparent);
+}
+#lista-roster .pessoa > .pessoa-abrir:hover::after { color: var(--seele-osso); }
+#lista-roster .pessoa > .pessoa-abrir:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+#lista-roster .pessoa > :is(button, a, input, select):not(.pessoa-abrir),
+#lista-roster .pessoa > .pessoa-apresentada-faixa { position: relative; z-index: 2; }
+#lista-roster .pessoa > .pessoa-abrir.pessoa-nativo-resumo { z-index: 3; }
+
+.camada-ficha {
+  position: fixed;
+  inset: 0;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--seele-negro-absoluto) 80%, transparent);
+}
+.camada-ficha[hidden] { display: none; }
+.ficha-caixa {
+  position: relative;
+  box-sizing: border-box;
+  width: 560px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 30px 32px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
+}
+.ficha-cabeca { display: flex; align-items: center; gap: 12px; }
+.ficha-titulo {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 30px;
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: none;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+.ficha-fechar {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 4px;
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-rotulo-painel);
+  background: transparent;
+  border: 0;
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+}
+.ficha-tecla {
+  padding: 0 8px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 8px;
+  background: var(--seele-controle);
+  color: var(--seele-osso);
+}
+.ficha-fechar:hover .ficha-tecla { background: var(--seele-controle-hover); }
+.ficha-fechar:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+.ficha-corpo { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ficha-identidade { display: flex; align-items: center; gap: 14px; }
+.ficha-identidade .ficha-avatar { width: 64px; height: 64px; border-radius: 18px; font-size: 22px; }
+.ficha-nome { font-family: var(--seele-ui); font-weight: 600; font-size: 18px; color: var(--seele-osso); overflow-wrap: anywhere; }
+.ficha-estados { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+/* A identidade verificável sob o título da ficha: o apelido com a tag. */
+.ficha-apelido { margin: 0; font-family: var(--seele-mono); font-size: 12px; color: var(--seele-osso-apagado); overflow-wrap: anywhere; }
+.ficha-volume {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 16px;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: 16px;
+  background: var(--seele-controle);
+  font-size: 13px;
+  color: var(--seele-osso-apagado);
+}
+.ficha-volume .volume { flex: 1 1 auto; min-width: 0; min-height: 44px; margin: 0; opacity: 1; accent-color: var(--seele-laranja-nerv); }
+.ficha-volume-rotulo { flex: 0 0 auto; }
+.ficha-moderar-fora { margin: 0; }
+.ficha-volume-valor { flex: 0 0 5ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--seele-osso); }
+.ficha-acoes-de-mod { display: flex; flex-wrap: wrap; gap: 8px; }
+.ficha-moderar, .ficha-corpo .perfis-editar-o-seu { align-self: flex-start; min-height: 44px; }
+.ficha-corpo .perfil-cartao { margin: 0; }
+/* O estado do produto embaixo do cartão de um MOD (0.19): a linha não expande,
+   e MUDO ou TRANSMITINDO continuam ao lado da pessoa. */
+.pessoa-apresentada-estado { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; }
+.pessoa-apresentada-estado > .pessoa-nome { font-size: 12px; color: var(--seele-osso-apagado); }

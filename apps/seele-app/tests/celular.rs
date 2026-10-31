@@ -494,11 +494,6 @@ const NO_TAMANHO_DO_DESKTOP: &[(&str, &str)] = &[
     (".pessoa .barra", "a mesma barra, na lista de PESSOAS"),
     (".sync-marca", "o pedaço vazio da barra"),
     (
-        ".chamada-cartao-barra",
-        "a barra do sinal no cartão da CHAMADA",
-    ),
-    (".chamada-cartao-marca", "o pedaço vazio dela"),
-    (
         ".server-atualizacao-barra",
         "a barra do progresso da atualização",
     ),
@@ -856,24 +851,16 @@ fn a_casca_veste_a_sala_uma_vez_e_antes_da_reconciliacao() {
     );
 }
 
-/// G9. O `pessoa.detalhes` tem um dono por casca (aprovado pela orquestradora em
-/// 16/10). A contribuição é um nó por pessoa (o cache de `montarContribuicao`),
-/// e um nó não mora em dois lugares: no desktop e na larga, a linha da pessoa o
-/// monta; no celular, só a folha. Quem decide é o `CASCA.detalhesNaLinha`,
-/// **consultado num lugar só** do `tela-sessao.js`, onde as duas linhas (a
-/// nativa e a apresentada) o acrescentam; e ninguém mais monta `pessoa.detalhes`.
-/// Uma segunda consulta, ou um terceiro lugar que o monte, é a porta para o nó
-/// voltar a ser disputado (a folha o tirava da linha, e a linha o tomava de volta
-/// a cada quadro: o caso `detalhes-da-pessoa` da bancada mede isso).
+/// G9. O `pessoa.detalhes` tem **um** dono (aprovado pela orquestradora em
+/// 16/10; desde a 0.19, um só nas duas cascas). A contribuição é um nó por
+/// pessoa (o cache de `montarContribuicao`), e um nó não mora em dois lugares:
+/// a ficha da pessoa (`fichaDaPessoa`, em `tela-sessao.js`) o monta, no modal
+/// do desktop e na folha do celular, e ninguém mais. Um segundo lugar que o
+/// monte é a porta para o nó voltar a ser disputado (a folha o tirava da linha,
+/// e a linha o tomava de volta a cada quadro: o caso `detalhes-da-pessoa` da
+/// bancada mediu isso).
 #[test]
 fn o_detalhe_da_pessoa_tem_um_dono_por_casca() {
-    let sessao = codigo_de("tela-sessao.js", &ler("tela-sessao.js"));
-    let consultas = sessao.matches("CASCA.detalhesNaLinha").count();
-    assert_eq!(
-        consultas, 1,
-        "tela-sessao.js consulta o CASCA.detalhesNaLinha {consultas} vezes, e não uma"
-    );
-
     let montagem = "conteudoDasContribuicoes(\"pessoa.detalhes\"";
     let mut onde = Vec::new();
     for entrada in std::fs::read_dir(ui()).expect("ui/ ilegível") {
@@ -893,19 +880,18 @@ fn o_detalhe_da_pessoa_tem_um_dono_por_casca() {
     onde.sort();
     assert_eq!(
         onde,
-        ["celular-folhas.js ×1", "tela-sessao.js ×1"],
-        "o pessoa.detalhes é montado fora dos dois lugares combinados (a linha, pelo ponto, e a folha do celular)"
+        ["tela-sessao.js ×1"],
+        "o pessoa.detalhes é montado fora do lugar combinado (a ficha da pessoa)"
     );
-
-    let base = codigo_de("base.js", &ler("base.js"));
+    let sessao = codigo_de("tela-sessao.js", &ler("tela-sessao.js"));
+    let ficha = sessao
+        .split("function fichaDaPessoa(id)")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default();
     assert!(
-        base.contains("detalhesNaLinha: true"),
-        "o CASCA do base.js tem de declarar o detalhesNaLinha verdadeiro: no desktop, a linha monta"
-    );
-    let folhas = codigo_de("celular-folhas.js", &ler("celular-folhas.js"));
-    assert!(
-        folhas.contains("CASCA.detalhesNaLinha = false"),
-        "o celular tem de desligar o detalhesNaLinha: lá, só a folha monta"
+        ficha.contains(montagem),
+        "o pessoa.detalhes saiu da ficha da pessoa, que é o lugar dele nas duas cascas"
     );
 }
 

@@ -1601,6 +1601,55 @@ pub unsafe extern "C" fn perfil_icone(ptr: *const u8, len: usize) -> u32 {
     }
 }
 
+/// **O perfil padrão do navegador, validado** (0.19, o «Seu perfil» da tela
+/// inicial): `{"nome_exibido", "pronomes", "status", "bio", "cor", "efeito"}`,
+/// pela mesma `seele_proto::perfil::validar` do servidor
+/// (`seele_sessao::perfil::entrada_validada`), **sem sessão**. Devolve 0 com a
+/// entrada aparada (a cor em minúsculas), que a página guarda; ou 1 com o
+/// `ErroDoPerfil` (`{"Campos": …}`), que o editor mostra por campo.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_validar(ptr: *const u8, len: usize) -> u32 {
+    use seele_sessao::perfil::{entrada_validada, EntradaDoPerfil, ErroDoPerfil};
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let lido: Option<EntradaDoPerfil> = serde_json::from_slice(unsafe { entrada(ptr, len) }).ok();
+    let Some(lido) = lido else {
+        // Um JSON que não é a entrada é um campo que a página escreveu errado:
+        // a cor é o campo que leva o formato, e o editor o mostra ali.
+        return erro_do_perfil(&ErroDoPerfil::Campos {
+            campos: vec![seele_proto::perfil::ErroDeCampo {
+                campo: seele_proto::perfil::CampoDoPerfil::Cor,
+                motivo: seele_proto::perfil::MotivoDoCampo::Formato,
+            }],
+        });
+    };
+    match entrada_validada(&lido) {
+        Ok(validada) => dizer(serde_json::json!(validada).to_string().into_bytes(), 0),
+        Err(erro) => erro_do_perfil(&erro),
+    }
+}
+
+/// **A imagem do perfil padrão, conferida antes de guardar**: tamanho (até
+/// 10 MiB) e tipo pelos bytes, com o HEIC nomeado — a mesma conferência de um
+/// envio (`seele_sessao::perfil::conferir_imagem`), sem sessão. Devolve 0 com
+/// o tipo de mídia (`image/png`…), ou 1 com o `ErroDoPerfil`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_conferir(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    match seele_sessao::perfil::conferir_imagem(bytes) {
+        Ok(tipo) => dizer(seele_sessao::perfil::tipo_de_midia(tipo).as_bytes().to_vec(), 0),
+        Err(erro) => erro_do_perfil(&erro),
+    }
+}
+
 /// A chave do catálogo que esta página confere: a embutida, ou a da prova.
 fn chave_do_catalogo() -> String {
     CHAVE_DO_CATALOGO.with(|c| {

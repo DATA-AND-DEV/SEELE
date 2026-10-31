@@ -200,7 +200,10 @@ pub(crate) fn aplicar(
                     .map_err(|recusa| format!("{}: {recusa}", escolha.id))?;
                 seele_server::persistence::mods::enable(persistence, &linha)
             }
-            SaidaDoModAntigo::Desligar => {
+            // O incorporado sai do conjunto como o desligado; os perfis dele
+            // são trazidos pela subida (`perfis::migracao::na_subida`), que lê
+            // o quintal ligado ou não, e o quintal fica (ADR 0045).
+            SaidaDoModAntigo::Desligar | SaidaDoModAntigo::Incorporado => {
                 seele_server::persistence::mods::disable(persistence, &escolha.id)
             }
         };
