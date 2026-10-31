@@ -81,6 +81,18 @@
   --seele-sync-critico: var(--seele-vermelho-alerta);
 }
 
+/* **O fundo do tema chega à sessão** (0.19). Até a 0.18 as colunas pintavam o
+   fundo do tema; na 0.19 elas são vidro (`--seele-vidro`), e o que havia atrás
+   delas era o `body`, com a cor da raiz: sob um tema claro, o texto escuro do
+   tema ficava sobre o negro do produto (`bancada/tema-do-servidor.cjs`, §11).
+   O mesmo fundo do `body` — a cor e a grade de pontos —, lido em `#tela-sessao`,
+   onde o tema escreve: sem tema, o desenho não muda. */
+:root:not([data-casca="celular"]) #tela-sessao {
+  background-color: var(--seele-negro-absoluto);
+  background-image: radial-gradient(var(--seele-grade-pontos) 1px, transparent 1px);
+  background-size: 6px 6px;
+}
+
 /* ---------- topo ----------
 
    56px e blocos divididos por borda, como o comp: cada bloco tem a altura toda
@@ -992,6 +1004,11 @@ button.voice_room-nome:hover { text-decoration: underline; }
      cada seção do «⋯». O apagado ficava a 4,11:1, abaixo dos 4,5 de uma letra de
      10 px (medido pela F8 na folha do celular, 16/10). */
   --nucleo-rotulo: var(--seele-rotulo-claro);
+  /* Os que a pele da 0.19 usa no núcleo (o vidro dos ícones, a pílula acesa e
+     o chip laranja do veredito), resolvidos aqui pelo mesmo motivo: o tema
+     escreve os `--seele-*` em `#tela-sessao`, e não os alcança. */
+  --nucleo-tinta-no-acento: var(--seele-tinta-no-acento);
+  --nucleo-acento-claro: var(--seele-laranja-claro);
 }
 
 #voz-estado {
@@ -3061,21 +3078,25 @@ button.linha-nome:hover { text-decoration: underline; }
   color: var(--seele-osso);
 }
 .linha.aberto .linha-cerquilha { color: var(--seele-laranja-nerv); }
+/* O MUDO e o fone são do núcleo (tarefa 9): o vidro da 0.19 com as cores
+   `--nucleo-*`, que o tema não alcança (`bancada/nucleo.cjs`). */
 .operador-glifo, .operador-config {
   width: 44px;
   height: 44px;
   border: 1px solid var(--seele-controle-borda);
   border-radius: var(--seele-raio-pilula);
   background: var(--seele-controle);
-  color: var(--seele-osso);
+  color: var(--nucleo-texto);
 }
-.operador-glifo:hover, .operador-config:hover { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
+.operador-glifo:hover, .operador-config:hover { background: var(--seele-controle-hover); color: var(--nucleo-texto); border-color: var(--seele-controle-borda); }
 .operador-glifo[data-ativo="sim"] {
-  background: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
-  color: var(--seele-tinta-no-acento);
+  background: var(--nucleo-acento);
+  border-color: var(--nucleo-acento);
+  color: var(--nucleo-tinta-no-acento);
 }
-#voz-estado { background-color: transparent; }
+/* O «no ar» mantém a placa opaca do núcleo (`--nucleo-painel`, acima): fora da
+   vista no computador desde a 0.19, ele continua sendo o que o leitor de tela
+   anuncia, e um fundo transparente o punha sobre o fundo do tema. */
 #operador-sair { background-color: var(--seele-controle); }
 .operador-fileira > button { min-height: 44px; font-size: 13px; padding: 0 14px; }
 /* ---------- a conversa ---------- */
@@ -3183,15 +3204,23 @@ button.linha-nome:hover { text-decoration: underline; }
 @media (max-width: 1240px) { .telemetria { border-radius: var(--seele-raio-painel); } }
 
 /* ---------- os avisos que descem do alto ---------- */
+/* O veredito é do núcleo: o chip laranja nas cores `--nucleo-*`, que o tema
+   não alcança (`bancada/nucleo.cjs`). O aviso do fone, que não é do núcleo,
+   segue o tema. */
 .veredito, #aviso-fone {
   margin: 4px 16px 0;
   padding: 8px 8px 8px 18px;
-  border: 1px solid color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nucleo-acento) 45%, transparent);
   border-radius: var(--seele-raio-cartao);
-  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
-  color: var(--seele-laranja-claro);
+  background: color-mix(in srgb, var(--nucleo-acento-fraco) 60%, transparent);
+  color: var(--nucleo-acento-claro);
 }
-#aviso-fone { color: var(--seele-osso-apagado); min-height: 44px; }
+#aviso-fone {
+  border-color: color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 60%, transparent);
+  color: var(--seele-osso-apagado);
+  min-height: 44px;
+}
 
 @media (max-width: 1240px) {
   /* `relative` porque a gaveta de pessoas se posiciona contra esta caixa. */

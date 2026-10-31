@@ -239,6 +239,12 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
       const dentro = [];
       const cobertos = [];
       const ausentes = [];
+      // **Fora da vista de propósito** (0.19, `b8dec1f8`): no computador, o «no
+      // ar» saiu da tela — os ícones do MUDO e do fone dizem o estado — e ficou
+      // só para o leitor de tela (`clip-path: inset(50%)`, 1 px). Um item assim
+      // não tem centro que um MOD cubra; o guarda o separa, pelo nome, e exige
+      // que ele continue sendo o `role="status"` que anuncia a troca.
+      const foraDaVista = [];
       for (const [item, seletor] of Object.entries(ITENS)) {
         const el = document.querySelector(seletor);
         if (!el) { ausentes.push(item); continue; }
@@ -246,6 +252,11 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
           if (el.matches(conteiner) || el.closest(conteiner)) dentro.push(`${item} dentro de ${ponto} (${conteiner})`);
         }
         if (el.closest('[hidden]') || !el.getClientRects().length) continue;
+        const caixa = el.getBoundingClientRect();
+        if (getComputedStyle(el).clipPath === 'inset(50%)' && caixa.width <= 1 && caixa.height <= 1) {
+          foraDaVista.push(`${item} (${el.getAttribute('role')})`);
+          continue;
+        }
         // **O veredito é uma faixa da largura da janela**, e o centro dela é
         // fundo: o que precisa ficar livre é o que ele diz e o botão. Medido
         // em 11/10: a 1400, a faixa do toque cai sobre o meio vazio dela, com
@@ -261,7 +272,7 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
         }
       }
       return {
-        dentro, cobertos, ausentes,
+        dentro, cobertos, ausentes, foraDaVista,
         comCapa: Boolean(document.querySelector('#tela-sessao .operador[data-com-capa]')),
         // Uma faixa escondida passaria pelo (b) sem ser medida: ela tem de
         // estar à vista, e o ATENDER tem de dizer de onde sai.
@@ -286,6 +297,9 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     assert.deepEqual(guarda.ausentes, [], 'um item do núcleo sumiu do DOM, e o guarda não o mede');
     assert.deepEqual(guarda.dentro, [], 'um item do núcleo mora dentro do contêiner de um ponto de contribuição');
     assert.deepEqual(guarda.cobertos, [], 'uma contribuição cobre um item do núcleo');
+    // Só o «no ar» sai da vista, e como o status que o leitor de tela anuncia:
+    // outro item escondido assim seria um item do núcleo que o guarda não mede.
+    assert.deepEqual(guarda.foraDaVista, ['noAr (status)'], 'um item do núcleo saiu da vista sem ser o «no ar» anunciado');
     assert.equal(guarda.atribuicaoDiz, 'teste/nucleo', 'o cabeçalho da superfície não diz de qual MOD ela é');
 
     // 2b. **Os itens que a seção 2 só via escondidos** (`nucleo-de-confianca.

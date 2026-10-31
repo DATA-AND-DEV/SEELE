@@ -281,18 +281,29 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
 
     // 9. QUEM DESENHA O QUE tem a linha da aparência com o tema do servidor, a
     //    troca reaplica na hora, e o DIAGNÓSTICO o chama pelo nome.
+    //
+    //    **Um seletor por lugar** (0.19, canvas `Config-mods`): as ações que
+    //    eram botões são as opções do seletor que não são a marcada, com o
+    //    rótulo da ação em `data-rotulo`; escolher uma é o `change` dele. A
+    //    promessa é a mesma: a linha oferece exatamente estas ações, e escolher
+    //    vale na hora.
     const aparencia = () => page.evaluate(() => {
       desenharApresentacoes();
       const item = $('lista-apresentacoes').querySelector('li[data-ponto="servidor.aparencia"]');
+      const seletor = item?.querySelector('select.mods-seletor');
       return {
         secao: !$('mods-apresentacao').hidden,
         texto: item?.querySelector('.mods-linha-texto')?.textContent ?? null,
-        botoes: item ? [...item.querySelectorAll('button')].map((b) => b.textContent) : [],
+        botoes: seletor ? [...seletor.options].filter((o) => o.dataset.atual !== 'sim').map((o) => o.dataset.rotulo) : [],
+        // Uma ação oferecida num seletor desligado não se escolhe.
+        ligado: seletor ? !seletor.disabled : false,
       };
     });
     const apertar = (rotulo) => page.evaluate((rotulo) => {
-      [...$('lista-apresentacoes').querySelectorAll('li[data-ponto="servidor.aparencia"] button')]
-        .find((b) => b.textContent === rotulo).click();
+      const seletor = $('lista-apresentacoes').querySelector('li[data-ponto="servidor.aparencia"] select.mods-seletor');
+      const opcao = [...seletor.options].find((o) => o.dataset.rotulo === rotulo && o.dataset.atual !== 'sim');
+      seletor.value = opcao.value;
+      seletor.dispatchEvent(new Event('change'));
     }, rotulo);
     // A instância de pé desde a seção 7 guarda os eventos em `eventosDoTema`.
     const diagnostico = () => page.evaluate(() =>
@@ -303,6 +314,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
       `QUEM DESENHA O QUE não tem a linha da aparência com o tema do servidor: ${JSON.stringify(linhaDaAparencia)}`);
     assert.match(linhaDaAparencia.texto, /pintada pelo tema deste servidor, de seele\/estilo/);
     assert.deepEqual(linhaDaAparencia.botoes, ['USAR APRESENTAÇÃO DO SEELE']);
+    assert.ok(linhaDaAparencia.ligado, 'o seletor da aparência está desligado, e a ação não se escolhe');
     const frasesComOTema = await diagnostico();
     assert.ok(frasesComOTema.some((f) => /tema deste servidor, de seele\/estilo/.test(f)),
       `o DIAGNÓSTICO não diz que o tema do servidor pinta a aparência: ${JSON.stringify(frasesComOTema)}`);
@@ -317,6 +329,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     linhaDaAparencia = await aparencia();
     assert.match(linhaDaAparencia.texto, /o SEELE desenha, por escolha desta máquina/);
     assert.deepEqual(linhaDaAparencia.botoes, ['USAR O TEMA DO SERVIDOR']);
+    assert.ok(linhaDaAparencia.ligado, 'o seletor da aparência está desligado, e voltar ao tema não se escolhe');
     await apertar('USAR O TEMA DO SERVIDOR');
     assert.equal((await tokens()).fundo, CLARO.fundo, 'voltar ao tema do servidor só valeu no retrato seguinte');
     assert.equal((await ultimoEvento())?.estado, 'aplicado', 'o MOD não soube, na hora, que o tema voltou');
@@ -355,16 +368,34 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
         pessoas: cor('.painel-pessoas', 'backgroundColor'),
         nomeDaPessoa: cor('.painel-pessoas .pessoa-nome', 'color'),
         canais: cor('.painel-canais', 'backgroundColor'),
+        // O primeiro fundo opaco atrás da coluna de canais: na 0.19 as colunas
+        // são vidro (`--seele-vidro`) sobre o fundo da sessão, e é por ele que
+        // o tema chega a elas.
+        atrasDosCanais: (() => {
+          for (let n = document.querySelector('.painel-canais'); n; n = n.parentElement) {
+            const c = getComputedStyle(n).backgroundColor;
+            if (!/rgba\(0, 0, 0, 0\)|transparent|rgba\([^)]*, 0\.\d+\)/.test(c)) return c;
+          }
+          return null;
+        })(),
         fracoDaRegiao: document.querySelector('.painel-pessoas').style.getPropertyValue('--seele-laranja-fraco'),
         sair: cor('#operador-sair', 'color'),
       };
     });
     const semRegiao = await pintura();
+    // O mesmo tema sem regiões: é contra ele que «não vazou» se mede.
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify(CLARO) });
+    const soOTema = await pintura();
+    assert.equal(soOTema.atrasDosCanais, rgb(CLARO.fundo), `o tema não chegou à coluna de canais: ${JSON.stringify(soOTema)}`);
     await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, regioes: { 'pessoas.lista': ESCURA, 'operador.barra': ESCURA } }) });
     const comRegiao = await pintura();
     assert.equal(comRegiao.pessoas, rgb(ESCURA.fundo), `a lista de pessoas não ficou com o fundo da região: ${JSON.stringify(comRegiao)}`);
     assert.equal(comRegiao.nomeDaPessoa, rgb(ESCURA.texto), `o nome na lista não ficou com o texto da região: ${JSON.stringify(comRegiao)}`);
-    assert.equal(comRegiao.canais, rgb(CLARO.painel), `a região vazou para a coluna de canais: ${JSON.stringify(comRegiao)}`);
+    // **A região não vaza para a coluna de canais.** Até a 0.18 as colunas
+    // tinham o painel do tema; na 0.19 são vidro sobre o fundo da sessão, e a
+    // coluna de canais tem de ficar exatamente como o tema sem regiões a pinta.
+    assert.deepEqual({ canais: comRegiao.canais, atras: comRegiao.atrasDosCanais }, { canais: soOTema.canais, atras: soOTema.atrasDosCanais },
+      `a região vazou para a coluna de canais: ${JSON.stringify({ comRegiao, soOTema })}`);
     assert.match(comRegiao.fracoDaRegiao, /^#[0-9a-f]{6}$/i, 'o preenchimento do acento não foi derivado para a região');
     assert.equal(comRegiao.sair, semRegiao.sair, `o SAIR, do núcleo, mudou de cor com a região: ${JSON.stringify(comRegiao)}`);
     // Uma região abaixo do piso recusa o tema inteiro, e o MOD sabe qual.
@@ -415,7 +446,12 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     // O tema sem regiões as tira do contêiner.
     await desenharCom(comoVeio);
     const depois = await pintura();
-    assert.equal(depois.pessoas, rgb(CLARO.painel), `sem regiões, a lista de pessoas ficou com a cor da região: ${JSON.stringify(depois)}`);
+    // De volta ao que o tema sem regiões pinta (o vidro sobre o fundo dele, na
+    // 0.19), e não à região: o fundo, o texto e o que há atrás.
+    assert.deepEqual({ pessoas: depois.pessoas, nome: depois.nomeDaPessoa, atras: depois.atrasDosCanais },
+      { pessoas: soOTema.pessoas, nome: soOTema.nomeDaPessoa, atras: soOTema.atrasDosCanais },
+      `sem regiões, a lista de pessoas ficou com a cor da região: ${JSON.stringify({ depois, soOTema })}`);
+    assert.notEqual(depois.pessoas, rgb(ESCURA.fundo), `sem regiões, a lista de pessoas ficou com o fundo da região: ${JSON.stringify(depois)}`);
     assert.equal(depois.fracoDaRegiao, '', 'sem regiões, o preenchimento da região ficou no contêiner');
 
     // 4. Sair da sessão o tira.

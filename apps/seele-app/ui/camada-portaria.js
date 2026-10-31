@@ -668,6 +668,22 @@ function chavesDe(pendentes) {
 }
 
 /**
+ * **A altura da faixa, para os avisos de MOD subirem acima dela** (0.19). A
+ * faixa é do núcleo e mora embaixo, ao centro; os avisos de MOD moram embaixo,
+ * à direita (`.avisos-de-mod`, z 70). Com a pele da 0.19 a faixa ficou larga o
+ * bastante para entrar na coluna deles, e um aviso cobria o DEPOIS
+ * (`bancada/nucleo.cjs`). Os avisos sobem enquanto ela está acesa
+ * (`mods-superficies.css`), por esta altura medida, e não por um número: a
+ * faixa quebra em duas linhas numa janela estreita.
+ */
+function medirAFaixaDaPortaria() {
+  const faixa = $("portaria-batendo");
+  const altura = faixa.hidden ? 0 : Math.ceil(faixa.getBoundingClientRect().height);
+  document.documentElement.style.setProperty("--portaria-altura", `${altura}px`);
+}
+if (typeof ResizeObserver === "function") new ResizeObserver(medirAFaixaDaPortaria).observe($("portaria-batendo"));
+
+/**
  * Mostra, esconde e — uma vez por aparição — diz em voz alta que há gente
  * esperando.
  *
@@ -705,6 +721,7 @@ function avisarQueBatem(pendentes) {
     globalThis.alertasSonoros?.tocar("bateu-a-porta");
   }
   faixa.hidden = !mostrar;
+  medirAFaixaDaPortaria();
 }
 
 /** Cala a faixa para ESTES pedidos, e só para eles. */

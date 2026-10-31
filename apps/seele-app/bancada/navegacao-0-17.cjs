@@ -187,8 +187,9 @@ const CENAS = [
     resposta: { meu_servidor: { nome: "CASA DO LAGO", alvo: "127.0.0.1:8383" } } },
   { nome: "app-entrada-primeira-abertura", casca: "app",
     resposta: { estado_da_primeira_abertura: { dados: { Guardados: null } } } },
-  { nome: "app-entrada-detalhes", casca: "app",
-    passos: `document.querySelector(".boot-detalhes").open = true; document.getElementById("boot-nome-publico").open = true;` },
+  // A cena «app-entrada-detalhes» (os `<details>` «O que este programa é, por
+  // dentro» e «Tenho um nome apontado») saiu com eles: a 0.19 tirou os dois da
+  // entrada (`01364d19`), e é `entrada-simples.cjs` que prova que não voltam.
   { nome: "app-conectar", casca: "app",
     resposta: { conhecidos: [
       { alvo: "lia.exemplo.br:8383", apelido: "Alex", visto_em: agora - 86400, nome: "Oficina da Lia" },

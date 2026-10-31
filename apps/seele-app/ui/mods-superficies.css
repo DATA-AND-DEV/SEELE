@@ -436,6 +436,13 @@
   pointer-events: none;
 }
 
+/* **Acima da faixa de quem bate à porta**, enquanto ela está acesa: a faixa é
+   do núcleo e mora embaixo, ao centro, e na pele da 0.19 ela entra na coluna
+   dos avisos. A altura vem de `camada-portaria.js` (`--portaria-altura`). */
+:root:has(#portaria-batendo:not([hidden])) .avisos-de-mod {
+  bottom: calc(var(--seele-e6) + var(--portaria-altura, 0px) + 8px);
+}
+
 .aviso-de-mod {
   /* **Sem contêiner.** O aviso é também uma `.superficie-de-mod`, que declara
      `container: … / inline-size`; a contenção de largura zera o tamanho de

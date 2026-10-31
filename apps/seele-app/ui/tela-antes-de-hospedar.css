@@ -679,6 +679,19 @@
   #tela-antes-de-hospedar .boot-caixa.area { flex: 1 0 auto; }
   .antes-rodape .boot-saidas > button { min-height: 44px; }
 }
+/* **A decisão fica à vista** (o esqueleto `.area` de `base.css`: o conteúdo
+   rola na própria linha, e nada empurra a barra). O painel ocupa a altura da
+   janela, e não mais que ela: com `flex: 1 0 auto` ele crescia com o conteúdo
+   — três passos e a lista de MODs de um servidor antigo —, a tela inteira
+   rolava, e o HOSPEDAR e o VOLTAR ficavam abaixo da janela
+   (`bancada/hospedagem-config-0174.cjs`). Quem rola agora é o corpo.
+   **Só numa janela com altura para isso**: abaixo de 420px (o 1024×768 a
+   200%, um celular deitado) a cabeça e a barra comeriam o corpo inteiro, e a
+   tela volta a rolar inteira, como antes (`bancada/area-util.cjs`). */
+@media (min-height: 420px) {
+  #tela-antes-de-hospedar .boot-caixa.area { flex: 1 1 0; min-height: 0; }
+  #tela-antes-de-hospedar .antes-corpo { min-height: 0; overflow-y: auto; }
+}
 #tela-antes-de-hospedar .antes-corpo { align-content: start; }
 .antes-estado {
   text-transform: uppercase;
