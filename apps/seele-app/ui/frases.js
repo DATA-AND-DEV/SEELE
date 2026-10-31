@@ -1800,10 +1800,15 @@ const FRASES_DO_TUNEL = Object.freeze({
  */
 const FRASES_DA_MAQUINA = Object.freeze({
   titulo: (quem) => `${quem} pede para rodar um servidor de jogo neste computador`,
-  mod: (nome, id) => `MOD: ${nome} (${id})`,
+  // O nome só quando ele diz algo além do id (e2e de 31/10: «seele/multiplayer
+  // (seele/multiplayer)»).
+  mod: (nome, id) => (!nome || nome === id ? `MOD: ${id}` : `MOD: ${nome} (${id})`),
   jogo: (titulo, versao) => versao ? `jogo: ${titulo}, versão ${versao}` : `jogo: ${titulo}`,
   receita: (nome, versao) => `receita: ${nome} ${versao}`,
-  pedidoPor: (quem, servidor) => `pedido por ${quem}, no servidor ${servidor}`,
+  // O servidor do SEELE pelo nome; o do jogo já está na linha «jogo:», com o
+  // título que o MOD deu (e2e de 31/10: «no servidor minecraft-1» era o id do
+  // jogo dito como se fosse o servidor do SEELE).
+  pedidoPor: (quem, servidorSeele) => `pedido por ${quem}, no servidor do SEELE «${servidorSeele}»`,
   // O nome do túnel, como o MOD o chama (revisão final, M2): um túnel de
   // cópia do mundo (`<servidor>-copia`) leva o mundo inteiro entre membros, e
   // a tela dizia só «o jogo escuta», como se fosse mais uma porta do jogo.
@@ -1831,7 +1836,20 @@ const FRASES_DA_MAQUINA = Object.freeze({
   mudou: (campos) => `isto mudou desde o seu aceite: ${campos}. Por isso o SEELE pergunta de novo.`,
   aceitar: "ACEITAR E LIGAR",
   recusar: "RECUSAR",
-  faixa: (titulo, mod) => `este computador serve ${titulo} (${mod})`,
+  // **A faixa diz se o jogo roda** (e2e de 31/10, passo 13): «serve» com a
+  // metade de pé e nenhum processo era dizer o que não estava acontecendo (a
+  // principal depois de passar à reserva, o jogo que caiu).
+  faixa: (titulo, mod) => `este computador serve ${titulo} (${mod}): o jogo está rodando aqui`,
+  faixaSemJogo: (titulo, mod) => `este computador está pronto para servir ${titulo} (${mod}), e o jogo não está rodando aqui`,
+  // **O jogo que sobrou** de um app que fechou sem desligá-lo (e2e de 31/10,
+  // passo 14): achado ao abrir, parado, e dito com o desfecho. O MOD não roda
+  // nessa hora: quem pede para salvar é o SEELE, pelo sinal de término.
+  sobra: (titulo, mod, pid) => `${titulo} (${mod}) seguia rodando neste computador (processo ${pid}) desde que o SEELE fechou sem desligá-lo`,
+  sobras: Object.freeze({
+    saiu: (segundos) => `o SEELE pediu ao jogo para salvar e sair, e ele saiu em ${segundos} s`,
+    forcada: (segundos) => `o SEELE pediu ao jogo para salvar e sair; ele não saiu em ${segundos} s e foi encerrado à força, e o que não estava salvo se perdeu`,
+    "nao-parou": (motivo) => `o SEELE não conseguiu pará-lo (${motivo}): ele segue rodando, com o mundo e a porta; encerre-o pelo Monitor de Atividade`,
+  }),
   desligar: "DESLIGAR",
   revogar: "REVOGAR",
   semAnfitriao: "quem hospeda o SEELE saiu: o jogo segue rodando aqui, e quem joga pela ligação direta continua jogando; se ele não chamar esta máquina de volta em 10 minutos, o jogo é salvo e parado",

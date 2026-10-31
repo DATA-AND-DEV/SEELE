@@ -50,6 +50,12 @@ const maquinasNaFaixa = new Map();
 const titulosDeMaquinas = new Map();
 
 /**
+ * Se o jogo de cada máquina ligada roda agora (`maquina-jogo`, e `jogo` de
+ * `maquinas_aceitas`): a faixa diz «serve» só com o jogo de pé.
+ */
+const jogosRodando = new Map();
+
+/**
  * O que, vindo de `maquina-estado`, também desfaz um pedido que ainda espera
  * resposta: o pedido deixou de existir, e aceitá-lo já não leva a nada. O Rust
  * só diz isso por uma chave que tinha pedido pendente ou máquina de pé
@@ -118,7 +124,7 @@ function linhasDoPedido(pedido) {
     F.jogo(oferta.titulo, oferta.versao_do_jogo),
   ];
   if (oferta.receita) linhas.push(F.receita(oferta.receita, oferta.versao_da_receita));
-  linhas.push(F.pedidoPor(pedido.pedido_por, pedido.servidor));
+  linhas.push(F.pedidoPor(pedido.pedido_por, pedido.servidor_seele || pedido.alvo));
   for (const tunel of oferta.tuneis ?? []) linhas.push(F.porta(String(tunel.nome ?? ""), tunel.porta, tunel.protocolo));
 
   // **Só o que este computador baixa** (API 8 parte 4): o Rust separa, pela
@@ -383,8 +389,19 @@ function desenharUmaMaquina(entrada) {
   // o único motivo é seguir sem quem hospeda (`sem-anfitriao`): laranja.
   if (entrada.motivo) bloco.dataset.motivo = entrada.motivo;
   const linha = elemento("p", "maquina-linha");
-  if (entrada.ligada) {
-    linha.append(elemento("span", "maquina-marca", F.faixa(entrada.titulo, entrada.modId)));
+  if (entrada.sobra) {
+    // O jogo que sobrou de um app que fechou sem desligá-lo: o que se achou e o
+    // que se fez, numa frase só.
+    const s = entrada.sobra;
+    const fim = F.sobras[s.desfecho];
+    const desfecho = typeof fim === "function"
+      ? fim(s.desfecho === "nao-parou" ? String(s.motivo ?? "") : (Number(s.segundos) || 0).toFixed(1).replace(".", ","))
+      : fraseDaListaDaMaquina("sobras", s.desfecho);
+    linha.append(elemento("span", "maquina-marca", F.sobra(entrada.titulo, entrada.modId, s.pid)), `: ${desfecho}.`);
+  } else if (entrada.ligada) {
+    const rodando = jogosRodando.get(chaveDaMaquina(entrada.alvo, entrada.modId, entrada.servidor)) === true;
+    bloco.dataset.jogo = rodando ? "rodando" : "parado";
+    linha.append(elemento("span", "maquina-marca", (rodando ? F.faixa : F.faixaSemJogo)(entrada.titulo, entrada.modId)));
   } else {
     linha.append(
       elemento("span", "maquina-marca", `${entrada.titulo} (${entrada.modId})`),
@@ -441,6 +458,8 @@ function aplicarOEstadoDaMaquina(estado) {
     motivo: estado.motivo ?? null,
     falha: null,
   };
+  // A metade que parou levou o jogo junto (`encerrar_tudo`).
+  if (!entrada.ligada) jogosRodando.delete(chave);
   maquinasNaFaixa.delete(chave);
   maquinasNaFaixa.set(chave, entrada);
   desenharAFaixaDeMaquinas();
@@ -498,6 +517,7 @@ async function relerAsMaquinasLigadas() {
   for (const aceita of aceitas ?? []) {
     const chave = chaveDaMaquina(aceita.alvo, aceita.mod_id, aceita.servidor);
     titulosDeMaquinas.set(chave, aceita.titulo);
+    if (aceita.ligada && typeof aceita.jogo === "boolean" && !jogosRodando.has(chave)) jogosRodando.set(chave, aceita.jogo);
     if (!aceita.ligada || maquinasNaFaixa.has(chave)) continue;
     maquinasNaFaixa.set(chave, {
       alvo: aceita.alvo, modId: aceita.mod_id, servidor: aceita.servidor,
@@ -605,4 +625,31 @@ listen("maquina-estado", ({ payload }) => {
   aplicarOEstadoDaMaquina(payload);
 });
 
+// O jogo começou ou acabou neste computador: a linha da máquina passa a dizer.
+listen("maquina-jogo", ({ payload }) => {
+  if (!payload || typeof payload !== "object") return;
+  const chave = chaveDoEvento(payload);
+  jogosRodando.set(chave, payload.rodando === true);
+  if (maquinasNaFaixa.get(chave)?.ligada) desenharAFaixaDeMaquinas();
+});
+
+/** Um jogo que sobrou de um app anterior, na faixa (uma linha por processo). */
+function aplicarASobra(sobra) {
+  if (!sobra || typeof sobra !== "object") return;
+  const chave = `sobra\u0000${sobra.pid}`;
+  if (maquinasNaFaixa.has(chave)) return;
+  maquinasNaFaixa.set(chave, {
+    alvo: sobra.alvo, modId: sobra.mod_id || "MOD", servidor: sobra.servidor,
+    titulo: sobra.titulo || sobra.servidor || "um servidor de jogo",
+    ligada: false, motivo: sobra.desfecho === "saiu" ? "sobra" : "sobra-forcada", falha: null, sobra,
+  });
+  desenharAFaixaDeMaquinas();
+}
+
+listen("maquina-sobra", ({ payload }) => aplicarASobra(payload));
+
 relerAsMaquinasLigadas();
+// As sobras que o Rust já achou antes de esta página ouvir o evento.
+invoke("maquinas_sobras").then((lista) => {
+  for (const sobra of Array.isArray(lista) ? lista : []) aplicarASobra(sobra);
+}).catch((falha) => registrarNoAnfitriao("maquina", `maquinas_sobras falhou — ${codigoDaFalhaDaMaquina(falha)}`, "aviso"));

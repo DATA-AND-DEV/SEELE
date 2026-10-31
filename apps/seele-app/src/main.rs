@@ -7058,6 +7058,13 @@ fn maquinas_aceitas(app: AppHandle) -> Result<Vec<maquina::MaquinaAceita>, Strin
     maquina::aceitas(&app)
 }
 
+/// Os jogos de uma execução anterior do app que esta achou rodando ao abrir,
+/// e o que fez com cada um (e2e de 31/10, passo 14).
+#[tauri::command]
+fn maquinas_sobras(app: AppHandle) -> Vec<maquina::SobraNaTela> {
+    maquina::sobras(&app)
+}
+
 /// A recusa de um comando de túnel que não achou a sessão do carimbo: ela
 /// acabou (`sessao-encerrada`), ou é outra a razão (`falhou`, dita no registro).
 fn recusa_da_sessao_do_tunel(erro: &ConnectionError) -> FalhaNoMod {
@@ -9681,6 +9688,34 @@ mod o_conjunto_recusa_o_incorporado {
     }
 }
 
+#[cfg(test)]
+mod o_sim_de_quem_hospeda_vem_antes_da_queda {
+    use super::*;
+
+    /// **O sim de quem hospeda é gravado com o banco ainda na mão** (e2e de
+    /// 31/10, passo 1). A sessão dele cai com `ModsMudaram` assim que o banco
+    /// é solto, e a volta sozinha (`voltarSozinhoSeOConjuntoEMeu`) só passa se
+    /// o sim já está no disco. Gravado depois do cadeado, a queda podia chegar
+    /// antes, e quem ouviu «você não será perguntado de novo» lia «entre de
+    /// novo». Mover a gravação para depois do `drop(persistence)` reprova.
+    #[test]
+    fn o_sim_e_gravado_antes_de_soltar_o_banco() {
+        let fonte = fonte_sem_comentarios();
+        let corpo = corpo_de(&fonte, concat!("async fn aplicar_conjunto_de_mods", "("));
+        let define = corpo.find(concat!("definir_", "conjunto("));
+        let grava = corpo.find(concat!("gravar_o_sim_de_quem_", "hospeda("));
+        let solta = corpo.find(concat!("drop(", "persistence)"));
+        assert!(
+            define.is_some() && grava.is_some() && solta.is_some(),
+            "o comando mudou de forma: {corpo}"
+        );
+        assert!(
+            define < grava && grava < solta,
+            "o sim de quem hospeda não é gravado entre a escrita do conjunto e a soltura do banco"
+        );
+    }
+}
+
 /// O texto deste arquivo, para os guardas que afirmam sobre ele.
 #[cfg(test)]
 const FONTE_DESTE_ARQUIVO: &str = include_str!("main.rs");
@@ -11283,18 +11318,28 @@ async fn aplicar_conjunto_de_mods(
         // Lida depois da escrita, e pela mesma função que o anúncio usa — a
         // mesma razão de `aplicar_mod`: uma segunda definição de «o mesmo
         // conjunto» discordaria da primeira no dia em que um campo entrasse.
-        seele_server::mods::anuncio::conjunto_exigido(&persistence)
+        let identidade = seele_server::mods::anuncio::conjunto_exigido(&persistence)
             .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
-            .identidade
-    };
+            .identidade;
 
-    // **Um sim, para o conjunto resultante.** Salvar já é a decisão informada
-    // do operador sobre o conjunto que vai valer; perguntar de novo, logo
-    // depois, seria perguntar o que acabou de ser respondido. Isto não autoriza
-    // mudança futura, e não dispensa o aceite de quem entra. E só ao servidor
-    // daqui (lote X, rodada 1): ver `gravar_o_sim_de_quem_hospeda`.
-    gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
-        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+        // **Um sim, para o conjunto resultante.** Salvar já é a decisão
+        // informada do operador sobre o conjunto que vai valer; perguntar de
+        // novo, logo depois, seria perguntar o que acabou de ser respondido.
+        // Isto não autoriza mudança futura, e não dispensa o aceite de quem
+        // entra. E só ao servidor daqui (lote X, rodada 1): ver
+        // `gravar_o_sim_de_quem_hospeda`.
+        //
+        // **Ainda com o banco na mão** (e2e de 31/10, passo 1): a sessão de
+        // quem hospeda cai com `ModsMudaram` como a de todo mundo, e só lê o
+        // conjunto novo depois deste cadeado. Com o sim já no disco, a volta
+        // dela (`voltarSozinhoSeOConjuntoEMeu`, em `tela-fim.js`) passa direto;
+        // gravado depois, a queda podia chegar antes do sim, e quem acabou de
+        // ouvir «você não será perguntado de novo» lia «entre de novo».
+        gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
+            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+        drop(persistence);
+        identidade
+    };
     Ok(identidade)
 }
 
@@ -15342,6 +15387,13 @@ fn main() {
             // `trocar_o_sair_do_mac`.
             #[cfg(target_os = "macos")]
             trocar_o_sair_do_mac(app.handle());
+            // **O jogo que um app anterior deixou rodando** (e2e de 31/10,
+            // passo 14): achado pelo registro, parado, e dito na faixa.
+            maquina::procurar_sobras(app.handle().clone());
+            // **E um `SIGTERM` de fora passa pela mesma saída** que fechar a
+            // janela: sem isto, o `java` do jogo ficava órfão.
+            #[cfg(unix)]
+            sair_despedindo_nos_sinais(app.handle().clone());
             // O módulo de vídeo passa a morar ao lado do banco, e não dentro do
             // pacote.
             //
@@ -15536,6 +15588,7 @@ fn main() {
             maquina_desligar,
             maquina_revogar,
             maquinas_aceitas,
+            maquinas_sobras,
             tunel_sair_do_mod,
             tuneis_abertos,
             aceite_de_mods,
@@ -15698,6 +15751,75 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+/// **A saída de quem recebeu um sinal** (`SIGTERM`, `SIGINT`, `SIGHUP`; e2e
+/// de 31/10, passo 14): a mesma despedida de fechar a última janela — as
+/// metades de máquina param o jogo (`aoParar("app-fechou")`, que salva), a
+/// sessão e as hospedagens se despedem — e só então o app sai.
+///
+/// Antes o sinal matava o processo na hora, e o `java` do jogo, num grupo
+/// próprio (decisão R8), seguia órfão com o mundo e a porta. Um segundo sinal
+/// durante a despedida sai na hora: quem manda dois quer sair, e o registro do
+/// jogo ([`maquina::procurar_sobras`]) cobre o que ficar.
+#[cfg(unix)]
+fn sair_despedindo_nos_sinais(handle: tauri::AppHandle) {
+    use tokio::signal::unix::{signal, SignalKind};
+    tauri::async_runtime::spawn(async move {
+        let sinais = [
+            (SignalKind::terminate(), "SIGTERM"),
+            (SignalKind::interrupt(), "SIGINT"),
+            (SignalKind::hangup(), "SIGHUP"),
+        ];
+        let (avisa, mut chegou) = tokio::sync::mpsc::unbounded_channel::<&'static str>();
+        for (tipo, nome) in sinais {
+            match signal(tipo) {
+                Ok(mut ouvinte) => {
+                    let avisa = avisa.clone();
+                    tauri::async_runtime::spawn(async move {
+                        while ouvinte.recv().await.is_some() {
+                            if avisa.send(nome).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
+                Err(erro) => {
+                    tracing::warn!(sinal = nome, %erro, "não consegui ouvir o sinal: ele mata o app sem despedida, e o jogo fica para a próxima abertura parar");
+                }
+            }
+        }
+        drop(avisa);
+        let Some(nome) = chegou.recv().await else {
+            return;
+        };
+        use tauri::Manager as _;
+        if handle
+            .state::<Session>()
+            .despedida_feita
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            // A despedida já corre (a janela fechou antes): o `exit` dela vem.
+            tracing::info!(sinal = nome, "sinal durante a saída: a despedida já corria");
+        } else {
+            tracing::info!(
+                sinal = nome,
+                "sinal recebido: o app se despede como ao fechar a janela, e sai"
+            );
+            let da_sessao = handle.clone();
+            let sessao = tauri::async_runtime::spawn_blocking(move || despedir_se(&da_sessao));
+            let estado = handle.state::<Session>();
+            let hospedagens = despedir_das_hospedagens(&estado, TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS);
+            // Um segundo sinal no meio sai na hora.
+            tokio::select! {
+                _ = async { let _ = tokio::join!(sessao, hospedagens); } => {}
+                segundo = chegou.recv() => {
+                    tracing::warn!(sinal = ?segundo, "segundo sinal durante a despedida: o app sai sem terminá-la");
+                }
+            }
+        }
+        handle.exit(0);
+    });
 }
 
 /// Avisa os MODs e o servidor de que esta máquina está saindo, antes de o

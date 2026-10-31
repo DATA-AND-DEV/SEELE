@@ -390,6 +390,11 @@ impl Processos {
     fn mapa(&self) -> std::sync::MutexGuard<'_, HashMap<u64, mpsc::UnboundedSender<Comando>>> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    /// Quantos processos dela estão vivos agora.
+    pub(crate) fn quantos(&self) -> usize {
+        self.mapa().len()
+    }
 }
 
 /// As recusas que a cola deu sozinha (sem `Programa`, pedido mal formado,
@@ -476,6 +481,7 @@ async fn vigiar(
                             tracing::warn!(mod_id = %mod_id, servidor = %servidor, processo = numero, codigo = ?fim.codigo, linhas_perdidas = fim.linhas_perdidas, linhas_cortadas = fim.linhas_cortadas, "processo do servidor de jogo terminou sozinho");
                         }
                         viva.processos.mapa().remove(&numero);
+                        viva.dizer_o_jogo();
                         let json = serde_json::json!({
                             "tipo": "processo-fim",
                             "processo": numero,
@@ -500,7 +506,10 @@ async fn vigiar(
             },
         }
     }
-    viva.processos.mapa().remove(&numero);
+    let tirado = viva.processos.mapa().remove(&numero).is_some();
+    if tirado {
+        viva.dizer_o_jogo();
+    }
 }
 
 /// **Faz o pedido do `programa`.** Responde `n` com o resultado ou com a
@@ -614,6 +623,7 @@ pub(crate) fn atender(viva: &Arc<Viva>, n: u64, pedido: PedidoDoPrograma) {
                 tracing::info!(mod_id = %dela.chave.mod_id, servidor = %dela.chave.servidor, processo = numero, pid = ?processo.pid(), comando = %pedido.comando, "processo do servidor de jogo começou");
                 let (manda, recebe) = mpsc::unbounded_channel();
                 dela.processos.mapa().insert(numero, manda);
+                dela.dizer_o_jogo();
                 // A resposta antes da primeira linha: a metade monta o objeto
                 // do processo com ela, e o prelúdio guarda o que chegar antes.
                 dela.responder(

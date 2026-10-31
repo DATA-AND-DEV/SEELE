@@ -109,7 +109,7 @@ const COMANDOS_DA_SESSAO = new Set([
 // de um servidor que não está na vista também precisa ser respondido.
 const SEM_CARIMBO_DA_VISTA = new Set([
   "connect", "sessoes", "foco_de_voz",
-  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas",
+  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas", "maquinas_sobras",
 ]);
 
 /** A vista passa a ser esta sessão (a resposta de `connect` ou `ver_sessao`). */

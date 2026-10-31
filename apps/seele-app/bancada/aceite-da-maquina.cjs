@@ -43,6 +43,14 @@
 //     frase; e (M2, no caso 1) cada porta vem com o nome do túnel.
 // 18. (Windows, W1) só os comandos deste computador, pelo `por_sistema`, e
 //     quantos outros sistemas têm comandos próprios.
+// 19. (e2e de 31/10, passo 13) a faixa diz «serve… o jogo está rodando aqui»
+//     só com o jogo de pé (`maquina-jogo`), e «pronto… não está rodando aqui»
+//     com a metade de pé e o jogo parado; a lista relida também.
+// 20. (e2e de 31/10, passo 14) o jogo que sobrou de um app que fechou sem
+//     desligá-lo: `maquina-sobra` e `maquinas_sobras` põem na faixa o que se
+//     achou e o que se fez, uma linha por processo.
+// 21. (e2e de 31/10, passo 5) o MOD sem o id repetido, e o servidor do SEELE
+//     pelo nome, e não o id do jogo.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/aceite-da-maquina.cjs
 
@@ -127,7 +135,7 @@ async function caso(motor, numero, prova) {
             };
             return {
               alvo: "127.0.0.1:7000", mod_id: "x/jogo", mod_nome: "x/jogo", servidor: "srv-1",
-              pedido_por: "Fulano", resumo: "resumo-1", pasta: "/home/eu/seele/jogos/x-jogo", mudou: null,
+              servidor_seele: "Casa E2E", pedido_por: "Fulano", resumo: "resumo-1", pasta: "/home/eu/seele/jogos/x-jogo", mudou: null,
               oferta: o, artefatos_daqui: daqui, de_outros_sistemas: o.artefatos.length - daqui.length,
               ...comandos,
               ...extra,
@@ -147,6 +155,7 @@ async function caso(motor, numero, prova) {
           filaDeMaquinas.length = 0;
           if (!$("maquina-aceite").hidden) fecharATela();
           maquinasNaFaixa.clear();
+          jogosRodando.clear();
           desenharAFaixaDeMaquinas();
         });
         const emitirPedido = (extra, oferta) => pagina.evaluate(([e, o]) => emitir("maquina-pedido", pedido(e, o)), [extra, oferta]);
@@ -163,7 +172,7 @@ async function caso(motor, numero, prova) {
           await esperarTela("Fulano");
           const texto = await pagina.evaluate(() => tela());
           assert.match(texto, /Fulano pede para rodar um servidor de jogo neste computador/, `${motor}: 1 · título: ${texto}`);
-          assert.match(texto, /MOD: x\/jogo \(x\/jogo\)/, `${motor}: 1 · ${texto}`);
+          assert.match(texto, /MOD: x\/jogo(?! \()/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /jogo: Minecraft, versão 1\.21/, `${motor}: 1 · ${texto}`);
           assert.match(texto, /porta 25565 \(tcp\)/, `${motor}: 1 · ${texto}`);
           // M2: o nome do túnel, para a cópia do mundo não passar por porta do jogo.
@@ -239,14 +248,14 @@ async function caso(motor, numero, prova) {
             emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: true });
           });
           const faixa = await pagina.evaluate(() => faixaDeMaquinas());
-          assert.match(faixa, /este computador serve Minecraft \(x\/jogo\)/, `${motor}: 4 · ${faixa}`);
+          assert.match(faixa, /este computador está pronto para servir Minecraft \(x\/jogo\)/, `${motor}: 4 · ${faixa}`);
           assert.match(faixa, /DESLIGAR/, `${motor}: 4 · ${faixa}`);
           await pagina.click(".maquina-desligar");
           assert.deepEqual(await pagina.evaluate(() => chamadasDe("maquina_desligar")), [
             { alvo: "127.0.0.1:7000", modId: "x/jogo", servidor: "srv-1" },
           ], `${motor}: 4 · as três chaves de maquina_desligar`);
           // Só o Rust diz que parou: a linha não muda antes do evento.
-          assert.match(await pagina.evaluate(() => faixaDeMaquinas()), /este computador serve/, `${motor}: 4 · a faixa mudou antes do evento`);
+          assert.match(await pagina.evaluate(() => faixaDeMaquinas()), /este computador está pronto/, `${motor}: 4 · a faixa mudou antes do evento`);
           await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "pelo-dono" }));
           const depois = await pagina.evaluate(() => faixaDeMaquinas());
           assert.match(depois, /Minecraft \(x\/jogo\): desligado por você/, `${motor}: 4 · ${depois}`);
@@ -265,7 +274,7 @@ async function caso(motor, numero, prova) {
             emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: true, motivo: "sem-anfitriao" });
           });
           const faixa = await pagina.evaluate(() => faixaDeMaquinas());
-          assert.match(faixa, /este computador serve Minecraft/, `${motor}: 4b · ${faixa}`);
+          assert.match(faixa, /este computador está pronto para servir Minecraft/, `${motor}: 4b · ${faixa}`);
           assert.match(faixa, /quem hospeda o SEELE saiu: o jogo segue rodando aqui/, `${motor}: 4b · ${faixa}`);
           assert.match(faixa, /DESLIGAR/, `${motor}: 4b · a órfã não oferece DESLIGAR`);
           const cor = await pagina.evaluate(() => getComputedStyle(document.querySelector(".maquina-bloco")).borderTopColor);
@@ -607,8 +616,75 @@ async function caso(motor, numero, prova) {
           await pagina.evaluate(() => { table.maquinas_aceitas = () => []; $("maquinas-aceitas-erro").hidden = true; });
         });
 
+        // 19. A faixa diz se o jogo roda, e não só que a metade vive.
+        await caso(motor, "19", async () => {
+          await zerar();
+          const chaves = { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1" };
+          await pagina.evaluate((c) => {
+            titulosDeMaquinas.set(chaveDaMaquina(c.alvo, c.mod_id, c.servidor), "Minecraft");
+            emitir("maquina-estado", { ...c, ligada: true });
+          }, chaves);
+          let faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /pronto para servir Minecraft \(x\/jogo\), e o jogo não está rodando aqui/, `${motor}: 19 · sem jogo: ${faixa}`);
+          assert.doesNotMatch(faixa, /este computador serve/, `${motor}: 19 · «serve» sem jogo: ${faixa}`);
+          await pagina.evaluate((c) => emitir("maquina-jogo", { ...c, rodando: true }), chaves);
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /este computador serve Minecraft \(x\/jogo\): o jogo está rodando aqui/, `${motor}: 19 · com jogo: ${faixa}`);
+          // O jogo caiu (ou passou à reserva): a metade segue, e a faixa diz.
+          await pagina.evaluate((c) => emitir("maquina-jogo", { ...c, rodando: false }), chaves);
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /o jogo não está rodando aqui/, `${motor}: 19 · depois de o jogo acabar: ${faixa}`);
+          assert.match(faixa, /DESLIGAR/, `${motor}: 19 · ${faixa}`);
+          // A janela que recarrega lê `jogo` da lista de aceites.
+          await zerar();
+          await pagina.evaluate(async (c) => {
+            table.maquinas_aceitas = () => [{ ...c, titulo: "Minecraft", pedido_por: "Fulano", quando: 1, ligada: true, jogo: true, tuneis: [] }];
+            await relerAsMaquinasLigadas();
+          }, chaves);
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /este computador serve Minecraft \(x\/jogo\): o jogo está rodando aqui/, `${motor}: 19 · relida: ${faixa}`);
+          await pagina.evaluate(() => { table.maquinas_aceitas = () => []; });
+        });
+
+        // 20. O jogo que sobrou de um app que fechou sem desligá-lo.
+        await caso(motor, "20", async () => {
+          await zerar();
+          const sobra = { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", titulo: "Minecraft 26.3", pid: 4242, desfecho: "saiu", segundos: 1.94 };
+          await pagina.evaluate((s) => emitir("maquina-sobra", s), sobra);
+          let faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /Minecraft 26\.3 \(x\/jogo\) seguia rodando neste computador \(processo 4242\) desde que o SEELE fechou sem desligá-lo/, `${motor}: 20 · ${faixa}`);
+          assert.match(faixa, /pediu ao jogo para salvar e sair, e ele saiu em 1,9 s/, `${motor}: 20 · ${faixa}`);
+          // A mesma sobra pelo comando (a janela que abriu depois) não repete a linha.
+          await pagina.evaluate(async (s) => { table.maquinas_sobras = () => [s, { ...s, pid: 4343, desfecho: "forcada", segundos: 20 }]; for (const x of await invoke("maquinas_sobras")) aplicarASobra(x); }, sobra);
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.equal((faixa.match(/processo 4242/g) ?? []).length, 1, `${motor}: 20 · linha repetida: ${faixa}`);
+          assert.match(faixa, /processo 4343.*não saiu em 20,0 s e foi encerrado à força/s, `${motor}: 20 · forçada: ${faixa}`);
+          assert.equal(await pagina.evaluate(() => document.querySelector('.maquina-bloco[data-motivo="sobra-forcada"]') !== null), true, `${motor}: 20 · a forçada não está em alerta`);
+          await pagina.evaluate(() => { table.maquinas_sobras = () => []; });
+        });
+
+        // 21. O MOD sem o id repetido; o servidor do SEELE pelo nome.
+        await caso(motor, "21", async () => {
+          await zerar();
+          await emitirPedido();
+          await esperarTela("Fulano");
+          let texto = await pagina.evaluate(() => tela());
+          assert.doesNotMatch(texto, /x\/jogo \(x\/jogo\)/, `${motor}: 21 · id repetido: ${texto}`);
+          assert.match(texto, /pedido por Fulano, no servidor do SEELE «Casa E2E»/, `${motor}: 21 · ${texto}`);
+          assert.doesNotMatch(texto, /no servidor srv-1/, `${motor}: 21 · o id do jogo como servidor: ${texto}`);
+          await pagina.click("#maquina-recusar");
+          await esperarFechada();
+          // Com um nome de exibição, o id vai entre parênteses.
+          await emitirPedido({ mod_nome: "Multiplayer" });
+          await esperarTela("Fulano");
+          texto = await pagina.evaluate(() => tela());
+          assert.match(texto, /MOD: Multiplayer \(x\/jogo\)/, `${motor}: 21 · ${texto}`);
+          await pagina.click("#maquina-recusar");
+          await esperarFechada();
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 19, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 22, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

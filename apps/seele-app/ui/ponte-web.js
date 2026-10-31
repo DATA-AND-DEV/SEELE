@@ -257,7 +257,7 @@ const COMANDOS_DA_PONTE = new Set([
   // `SeeleUI.salvar` é do mesmo poder que o túnel, e do aplicativo como ele.
   "salvar_do_mod",
   // A máquina de jogo é do aplicativo, como o túnel: aqui o pedido é recusado pelo nome.
-  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas",
+  "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas", "maquinas_sobras",
   // O perfil público (0.19, `perfis.js`): a lista e os dois verbos pelo `.wasm`
   // da sessão; as imagens pelo fluxo bidirecional, como no desktop.
   "perfis", "gravar_perfil", "tirar_imagem_do_perfil", "enviar_imagem_do_perfil",
@@ -2893,6 +2893,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   maquina_desligar: async () => { throw { Recusado: { motivo: "so-no-app" } }; },
   maquina_revogar: async () => { throw { Recusado: { motivo: "so-no-app" } }; },
   maquinas_aceitas: async () => [],
+  maquinas_sobras: async () => [],
   // **O seletor do MOD**: a pessoa escolhe, e o MOD recebe um número e lê os
   // bytes em pedaços. As regras e o guarda moram no `.wasm`; os bytes, aqui.
   escolher_para_o_mod: async ({ geracao, id, finalidade, papeis, extensoes, limiteDeBytes } = {}) => {

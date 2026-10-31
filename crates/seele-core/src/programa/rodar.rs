@@ -328,8 +328,29 @@ impl Programa {
         }
         let dono = Arc::clone(interior);
         let entrada_da_vigia = Arc::clone(&entrada);
+        // **O registro do processo, fora da raiz** (`sobras`; e2e de 31/10,
+        // passo 14): um app que morre sem parar o jogo deixa este arquivo, e o
+        // app reaberto acha o órfão por ele.
+        let anotacao = interior.anotacao.lock().ok().and_then(|a| a.clone());
         let tarefa = tokio::spawn(async move {
             let grupo = grupo;
+            let anotado = match (anotacao, pid) {
+                (Some((pasta, etiqueta)), Some(pid)) => {
+                    let feito = tokio::task::spawn_blocking(move || {
+                        super::sobras::anotar(&pasta, &super::sobras::registro_de(pid, &etiqueta))
+                    })
+                    .await;
+                    match feito {
+                        Ok(Ok(arquivo)) => Some(arquivo),
+                        Ok(Err(erro)) => {
+                            tracing::warn!(processo = numero, pid, %erro, "programa: o registro do processo não foi gravado; se o app morrer sem pará-lo, o app reaberto não o acha");
+                            None
+                        }
+                        Err(_) => None,
+                    }
+                }
+                _ => None,
+            };
             let (estado, morto_a_pedido) = tokio::select! {
                 estado = filho.wait() => (estado, false),
                 () = esperar_a_ordem(&mut morte) => {
@@ -343,6 +364,9 @@ impl Programa {
             // O filho saiu sozinho (o `stop` do `aoParar`): o que ele deixou
             // no grupo sai também.
             drop(grupo);
+            if let Some(arquivo) = anotado {
+                let _ = std::fs::remove_file(arquivo);
+            }
             let codigo = estado.ok().and_then(|s| s.code());
             // O resto da saída, com prazo.
             for leitura in leituras.into_iter().flatten() {

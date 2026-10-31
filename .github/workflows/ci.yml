@@ -616,6 +616,11 @@ jobs:
       - run: node apps/seele-app/bancada/aceite-da-maquina.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # Quem hospeda volta sozinho depois de salvar o conjunto de MODs (e2e de
+      # 31/10, passo 1): a queda `ModsMudaram` com o próprio sim já guardado.
+      - run: node apps/seele-app/bancada/volta-depois-de-salvar-o-conjunto.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
         if: ${{ !cancelled() }}
         timeout-minutes: 5

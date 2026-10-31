@@ -110,6 +110,53 @@ function mostrarFim(motivo) {
   // nomeado, o `data-anuncio` da tela já diz o que há para dizer — repeti-lo
   // aqui seria anunciar «enlace encerrado» duas vezes na mesma frase.
   abrirTela("tela-fim", frase ? `Enlace encerrado. ${frase}` : undefined);
+  if (motivo === "ModsMudaram" && alvoDoFim !== null) {
+    voltarSozinhoSeOConjuntoEMeu(alvoDoFim).catch((falha) => {
+      console.warn("a volta depois de salvar o conjunto falhou:", falha);
+    });
+  }
+}
+
+/** O que a tela diz enquanto volta sozinha ao servidor cujo conjunto quem hospeda acabou de salvar. */
+const FRASE_DA_VOLTA_DO_CONJUNTO =
+  "O CONJUNTO DE MODS QUE VOCÊ SALVOU PASSOU A VALER.\n" +
+  "Você já aceitou este conjunto ao salvar: voltando ao servidor.";
+
+/**
+ * **Quem hospeda não cai do próprio servidor ao salvar o conjunto** (e2e de
+ * 31/10, passo 1).
+ *
+ * Quem está dentro cai com `ModsMudaram` quando o conjunto muda — inclusive
+ * quem hospeda, que acabou de ler «Salvar também registra o seu sim» e então
+ * lia «entre de novo para ler a lista nova». A queda é do servidor, e é de
+ * propósito: a sessão volta para carregar os MODs novos. O que estava errado
+ * era pedir a quem já disse sim que voltasse à mão.
+ *
+ * Volta sozinha quando o sim guardado para este endereço é o conjunto que o
+ * servidor desta janela exige agora: é o sim que o SALVAR gravou
+ * (`aplicar_conjunto_de_mods`, antes de soltar o banco). Qualquer outro caso —
+ * um membro, um conjunto que mudou de novo, uma janela que não hospeda —
+ * fica na tela de sempre, com RECONECTAR.
+ *
+ * @returns {Promise<boolean>} se voltou.
+ */
+async function voltarSozinhoSeOConjuntoEMeu(alvo) {
+  let aceito;
+  let exigido;
+  try {
+    [aceito, exigido] = await Promise.all([
+      invoke("aceite_de_mods", { alvo }),
+      invoke("conjunto_exigido_agora"),
+    ]);
+  } catch {
+    return false;
+  }
+  if (typeof aceito !== "string" || !aceito || aceito !== exigido) return false;
+  // A pessoa pode ter saído por conta própria enquanto se perguntava.
+  if ($("tela-fim").hidden || alvoDoFim !== alvo) return false;
+  $("fim-motivo").textContent = FRASE_DA_VOLTA_DO_CONJUNTO;
+  await reconectar();
+  return true;
 }
 
 /**

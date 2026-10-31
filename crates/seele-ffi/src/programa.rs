@@ -16,6 +16,10 @@ pub use seele_core::programa::{
     Origem, OrigemHttps, PedidoDeDesempacotar, PedidoDeDownload, PedidoDeExecucao, Politica,
     Processo, Programa, Recusa, Trazido, MAX_BYTES_ESCRITOS, MAX_BYTES_LIDOS, NOMES_DAS_RECUSAS,
 };
+// O jogo que sobra de um app que morreu sem desligá-lo (e2e de 31/10, passo 14).
+pub use seele_core::programa::{
+    parar_sobras, prazo_das_sobras, DesfechoDaSobra, RegistroDeProcesso, SobraEncontrada,
+};
 // A cópia do mundo (API 8 parte 7).
 pub use seele_core::programa::{
     CopiaOferecida, CopiaRecebida, Empacotado, PedidoDeCopia, MAX_TENTATIVAS_DA_COPIA,

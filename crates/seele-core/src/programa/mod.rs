@@ -37,6 +37,7 @@ mod hash;
 mod ler;
 mod reservado;
 mod rodar;
+mod sobras;
 #[cfg(windows)]
 mod tarefa_windows;
 mod trazer;
@@ -63,6 +64,10 @@ pub use ler::MAX_BYTES_LIDOS;
 pub use rodar::{
     EventoDoProcesso, FimDoProcesso, PedidoDeExecucao, Processo, MAX_BYTES_POR_LINHA,
     MAX_LINHAS_NA_FILA,
+};
+pub use sobras::{
+    anotar as anotar_processo, inicio_do_processo, parar_sobras, prazo as prazo_das_sobras,
+    DesfechoDaSobra, RegistroDeProcesso, SobraEncontrada,
 };
 pub use trazer::Trazido;
 
@@ -641,6 +646,9 @@ pub(crate) struct Interior {
     /// A cópia do mundo que esta máquina oferece agora (API 8 parte 7): a
     /// escuta em `127.0.0.1`, uma só por vez.
     pub(crate) copia: Mutex<Option<tokio::task::AbortHandle>>,
+    /// **Onde cada processo deixa o seu registro, e com que etiqueta**
+    /// ([`Programa::anotar_processos_em`]; `sobras`). `None`: nenhum registro.
+    pub(crate) anotacao: Mutex<Option<(PathBuf, String)>>,
 }
 
 impl Interior {
@@ -714,6 +722,7 @@ impl Programa {
                 downloads: Mutex::new(HashMap::new()),
                 processos: Mutex::new(HashMap::new()),
                 copia: Mutex::new(None),
+                anotacao: Mutex::new(None),
             }),
         })
     }
@@ -732,6 +741,17 @@ impl Programa {
             .lock()
             .map(|c| c.clone())
             .unwrap_or_default()
+    }
+
+    /// **Cada processo que este `programa` rodar deixa um registro em
+    /// `pasta`**, com `etiqueta`, até terminar (e2e de 31/10, passo 14): é o
+    /// que deixa o app reaberto achar e parar o jogo de um app que morreu sem
+    /// desligá-lo ([`parar_sobras`]). A pasta é do app, e não da raiz: o MOD
+    /// escreve na raiz.
+    pub fn anotar_processos_em(&self, pasta: PathBuf, etiqueta: String) {
+        if let Ok(mut anotacao) = self.interior.anotacao.lock() {
+            *anotacao = Some((pasta, etiqueta));
+        }
     }
 
     /// Quantos processos estão vivos.

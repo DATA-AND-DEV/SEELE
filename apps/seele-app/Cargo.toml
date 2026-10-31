@@ -118,8 +118,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # `macros` pelo `tokio::join!` da saída do app (`despedir_das_hospedagens`):
 # as duas hospedagens se despedem ao mesmo tempo. `sync` e `time` pelo toque da
 # sala pessoal (`toque.rs`): os avisos da campainha chegam por um `broadcast`, e
-# o lembrete de atenção do macOS é um relógio.
-tokio = { version = "1.53.1", features = ["net", "rt", "macros", "sync", "time"] }
+# o lembrete de atenção do macOS é um relógio. `signal` pela saída de quem
+# recebe um `SIGTERM` (`sair_despedindo_nos_sinais`): o `signal-hook-registry`
+# já está na árvore, pelo tokio inteiro do `seele-server`.
+tokio = { version = "1.53.1", features = ["net", "rt", "macros", "sync", "time", "signal"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }

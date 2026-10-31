@@ -646,10 +646,18 @@ pub(crate) struct Viva {
     parando: AtomicBool,
     sinais: Mutex<Sinais>,
     acordar: Condvar,
+    /// **Quem ouve o jogo começar e acabar** (e2e de 31/10, passo 13): a
+    /// faixa dizia «este computador serve…» enquanto a metade vivia, com ou sem
+    /// o jogo rodando nela. Posto por [`ligar`]; `None` nas provas.
+    ao_jogo: Mutex<Option<AoJogo>>,
 }
 
 /// Quem é chamado quando a metade falha sozinha.
 pub(crate) type AoFalhar = Box<dyn Fn(&Arc<Viva>, String) + Send + Sync>;
+
+/// Quem é chamado quando o jogo desta metade começa ou acaba: a chave, e se
+/// algum processo do `programa` dela roda agora.
+pub(crate) type AoJogo = Box<dyn Fn(&Chave, bool) + Send + Sync>;
 
 impl Viva {
     /// Sobe o executor e a bomba, **sem código ainda**.
@@ -689,6 +697,7 @@ impl Viva {
             parando: AtomicBool::new(false),
             sinais: Mutex::new(Sinais::default()),
             acordar: Condvar::new(),
+            ao_jogo: Mutex::new(None),
         });
         let dela = Arc::clone(&viva);
         std::thread::Builder::new()
@@ -755,6 +764,31 @@ impl Viva {
             &serde_json::json!({ "tipo": "reconectar-maquina", "fora": fora.as_secs() })
                 .to_string(),
         );
+    }
+
+    /// Quem ouve o jogo começar e acabar ([`AoJogo`]).
+    pub(crate) fn ao_mudar_o_jogo(&self, ouvinte: AoJogo) {
+        *self.ao_jogo.lock().unwrap_or_else(PoisonError::into_inner) = Some(ouvinte);
+    }
+
+    /// **Algum processo que ela rodou ainda roda**: o jogo (ou o instalador
+    /// dele) está de pé neste computador.
+    pub(crate) fn jogo_rodando(&self) -> bool {
+        self.processos.quantos() > 0
+    }
+
+    /// Diz a quem ouve se o jogo roda agora; chamado quando um processo começa
+    /// e quando acaba.
+    pub(crate) fn dizer_o_jogo(&self) {
+        let rodando = self.jogo_rodando();
+        if let Some(ouvinte) = self
+            .ao_jogo
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            ouvinte(&self.chave, rodando);
+        }
     }
 
     /// Quantos processos do `programa` dela estão vivos.
@@ -1185,6 +1219,10 @@ pub(crate) struct Maquinas {
     vez: Mutex<()>,
     /// [`ESPERA_PELA_VOLTA`], ou outra (em ms) nas provas.
     espera_pela_volta_ms: std::sync::atomic::AtomicU64,
+    /// Os jogos de uma execução anterior que este app achou rodando e parou
+    /// ao abrir ([`procurar_sobras`]), para a faixa de uma janela que
+    /// recarrega.
+    sobras: Mutex<Vec<SobraNaTela>>,
 }
 
 impl Maquinas {
@@ -1237,6 +1275,14 @@ impl Maquinas {
     /// Esta chave está ligada agora?
     fn ligada(&self, chave: &Chave) -> bool {
         self.estado().ligadas.contains_key(chave)
+    }
+
+    /// O jogo desta chave roda agora neste computador?
+    fn jogo_rodando(&self, chave: &Chave) -> bool {
+        self.estado()
+            .ligadas
+            .get(chave)
+            .is_some_and(|l| l.viva.jogo_rodando())
     }
 
     /// **O que uma dispensa do servidor tira**, para encerrar e dizer fora do
@@ -1382,6 +1428,10 @@ pub(crate) struct PedidoNaTela {
     /// O manifesto não tem nome de exibição: vai o `autor/nome`.
     pub(crate) mod_nome: String,
     pub(crate) servidor: String,
+    /// **O nome do servidor do SEELE** de onde veio o pedido (e2e de 31/10,
+    /// passo 5): a tela dizia «no servidor minecraft-1», o id do jogo, como
+    /// se fosse o servidor do SEELE.
+    pub(crate) servidor_seele: String,
     /// O apelido, ou «alguém deste servidor».
     pub(crate) pedido_por: String,
     pub(crate) oferta: OfertaDeMaquinaFfi,
@@ -1432,7 +1482,36 @@ pub(crate) struct MaquinaAceita {
     pub(crate) pedido_por: String,
     pub(crate) quando: u64,
     pub(crate) ligada: bool,
+    /// Algum processo do jogo roda agora neste computador.
+    pub(crate) jogo: bool,
     pub(crate) tuneis: Vec<TunelOferecidoFfi>,
+}
+
+/// `maquina-jogo`: o jogo desta chave começou ou acabou neste computador.
+pub(crate) const EVENTO_DO_JOGO: &str = "maquina-jogo";
+
+/// `maquina-jogo`, como a casca o lê.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct JogoNaTela {
+    pub(crate) alvo: String,
+    pub(crate) mod_id: String,
+    pub(crate) servidor: String,
+    pub(crate) rodando: bool,
+}
+
+fn emitir_o_jogo<R: tauri::Runtime>(app: &AppHandle<R>, chave: &Chave, rodando: bool) {
+    let emitido = app.emit(
+        EVENTO_DO_JOGO,
+        JogoNaTela {
+            alvo: chave.alvo.clone(),
+            mod_id: chave.mod_id.clone(),
+            servidor: chave.servidor.clone(),
+            rodando,
+        },
+    );
+    if let Err(erro) = emitido {
+        tracing::warn!(mod_id = %chave.mod_id, servidor = %chave.servidor, rodando, %erro, "maquina-jogo não chegou à janela");
+    }
 }
 
 fn emitir_estado<R: tauri::Runtime>(
@@ -1916,6 +1995,7 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
                 mod_id: chave.mod_id.clone(),
                 mod_nome: chave.mod_id.clone(),
                 servidor: chave.servidor.clone(),
+                servidor_seele: conexao.snapshot().server,
                 pedido_por: pedido.pedido_por.clone(),
                 oferta: pedido.oferta.clone(),
                 resumo: pedido.resumo.clone(),
@@ -2064,7 +2144,14 @@ fn ligar<R: tauri::Runtime>(
     );
     match &programa {
         Ok(p) => {
-            tracing::info!(mod_id = %mod_id, servidor = %servidor, raiz = %p.raiz().display(), "programa da metade de máquina montado do aceite")
+            tracing::info!(mod_id = %mod_id, servidor = %servidor, raiz = %p.raiz().display(), "programa da metade de máquina montado do aceite");
+            // **Cada processo deixa um registro fora da raiz** (e2e de 31/10,
+            // passo 14): um app que morre sem desligar o jogo o deixa órfão, e
+            // o app reaberto o acha por este registro ([`procurar_sobras`]).
+            p.anotar_processos_em(
+                pasta_dos_processos(&home),
+                etiqueta_da_sobra(chave, &pedido.oferta.titulo),
+            );
         }
         Err(SemPrograma::SemOPoder) => {}
         Err(sem) => {
@@ -2096,6 +2183,12 @@ fn ligar<R: tauri::Runtime>(
             return Err(motivo.to_owned());
         }
     };
+    // **A faixa diz se o jogo roda**, e não só que a metade vive (e2e de
+    // 31/10, passo 13): cada processo que começa ou acaba é dito à tela.
+    let app_do_jogo = app.clone();
+    viva.ao_mudar_o_jogo(Box::new(move |chave, rodando| {
+        emitir_o_jogo(&app_do_jogo, chave, rodando);
+    }));
     // **No registro antes de o aceite sair** (e com a geração de agora, a da
     // conexão que o leva): o `sem-aceite` que volta de um aceite que o livro
     // não tomou pode chegar antes da linha seguinte, e precisa achá-la aqui.
@@ -2337,6 +2430,9 @@ pub(crate) fn aceitas<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<Vec<Maqui
             let chave = Chave::de(&a.alvo, &a.mod_id, &a.servidor);
             MaquinaAceita {
                 ligada: estado.as_ref().is_some_and(|e| e.maquinas.ligada(&chave)),
+                jogo: estado
+                    .as_ref()
+                    .is_some_and(|e| e.maquinas.jogo_rodando(&chave)),
                 alvo: a.alvo,
                 mod_id: a.mod_id,
                 servidor: a.servidor,
@@ -2347,6 +2443,122 @@ pub(crate) fn aceitas<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<Vec<Maqui
             }
         })
         .collect())
+}
+
+// --------------------------------------------- o jogo que sobrou
+
+/// Onde cada processo de jogo deixa o registro dele: na casa do app, fora da
+/// raiz de qualquer jogo (o MOD escreve na raiz).
+pub(crate) fn pasta_dos_processos(home: &str) -> std::path::PathBuf {
+    std::path::Path::new(home).join("processos-de-jogo")
+}
+
+/// A etiqueta que o registro leva: o que a faixa precisa para dizer de que
+/// jogo se trata, sem o MOD rodando.
+fn etiqueta_da_sobra(chave: &Chave, titulo: &str) -> String {
+    serde_json::json!({
+        "alvo": chave.alvo,
+        "mod_id": chave.mod_id,
+        "servidor": chave.servidor,
+        "titulo": titulo,
+    })
+    .to_string()
+}
+
+/// `maquina-sobra`: um jogo de uma execução anterior que o app achou rodando
+/// e parou, como a casca o lê.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub(crate) struct SobraNaTela {
+    pub(crate) alvo: String,
+    pub(crate) mod_id: String,
+    pub(crate) servidor: String,
+    pub(crate) titulo: String,
+    pub(crate) pid: u32,
+    /// `saiu` (com o pedido de salvar e sair), `forcada` (não saiu no prazo
+    /// e foi morto) ou `nao-parou`.
+    pub(crate) desfecho: &'static str,
+    /// Quanto se esperou, em segundos.
+    pub(crate) segundos: f64,
+    /// O que o sistema disse, quando não parou.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) motivo: Option<String>,
+}
+
+/// `maquina-sobra`.
+pub(crate) const EVENTO_DA_SOBRA: &str = "maquina-sobra";
+
+/// O que a tela recebe de uma sobra encontrada.
+pub(crate) fn sobra_na_tela(achada: &seele_ffi::programa::SobraEncontrada) -> SobraNaTela {
+    use seele_ffi::programa::DesfechoDaSobra;
+    let etiqueta: serde_json::Value =
+        serde_json::from_str(&achada.registro.etiqueta).unwrap_or_default();
+    let campo = |nome: &str| {
+        etiqueta
+            .get(nome)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let (desfecho, segundos, motivo) = match &achada.desfecho {
+        DesfechoDaSobra::SaiuAoPedido { levou } => ("saiu", levou.as_secs_f64(), None),
+        DesfechoDaSobra::Forcada { esperou } => ("forcada", esperou.as_secs_f64(), None),
+        DesfechoDaSobra::NaoParou { motivo } => ("nao-parou", 0.0, Some(motivo.clone())),
+    };
+    SobraNaTela {
+        alvo: campo("alvo"),
+        mod_id: campo("mod_id"),
+        servidor: campo("servidor"),
+        titulo: campo("titulo"),
+        pid: achada.registro.pid,
+        desfecho,
+        segundos,
+        motivo,
+    }
+}
+
+/// **Acha e para o jogo que um app anterior deixou rodando** (e2e de 31/10,
+/// passo 14), numa thread: o pedido de salvar e sair, o prazo, e então à
+/// força ([`seele_ffi::programa::parar_sobras`]). Cada um vai à faixa
+/// (`maquina-sobra`) e fica guardado para a janela que relê
+/// ([`sobras`]).
+pub(crate) fn procurar_sobras<R: tauri::Runtime>(app: AppHandle<R>) {
+    let pasta = pasta_dos_processos(&crate::config_dir(&app));
+    let feito = std::thread::Builder::new()
+        .name("jogos que sobraram".into())
+        .spawn(move || {
+            let achadas =
+                seele_ffi::programa::parar_sobras(&pasta, seele_ffi::programa::prazo_das_sobras());
+            for achada in &achadas {
+                let na_tela = sobra_na_tela(achada);
+                tracing::warn!(pid = na_tela.pid, mod_id = %na_tela.mod_id, servidor = %na_tela.servidor, desfecho = na_tela.desfecho, segundos = na_tela.segundos, "um jogo de uma execução anterior do app rodava sem ninguém; a faixa diz à pessoa");
+                if let Some(estado) = sessoes(&app) {
+                    estado
+                        .maquinas
+                        .sobras
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(na_tela.clone());
+                }
+                if let Err(erro) = app.emit(EVENTO_DA_SOBRA, na_tela) {
+                    tracing::warn!(%erro, "maquina-sobra não chegou à janela");
+                }
+            }
+        });
+    if let Err(erro) = feito {
+        tracing::error!(%erro, "a procura de jogos que sobraram não conseguiu thread: um jogo órfão segue rodando");
+    }
+}
+
+/// Os jogos que sobraram, achados e parados ao abrir.
+pub(crate) fn sobras<R: tauri::Runtime>(app: &AppHandle<R>) -> Vec<SobraNaTela> {
+    sessoes(app).map_or_else(Vec::new, |estado| {
+        estado
+            .maquinas
+            .sobras
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    })
 }
 
 #[cfg(test)]
@@ -3104,6 +3316,43 @@ mod testes {
         assert_eq!(viva.processos_vivos(), 1);
         assert_eq!(maquinas.estado().religadas, 1);
         parar_todas(maquinas.tirar_ligadas(|_, _| true));
+    }
+
+    /// **A faixa ouve o jogo acabar** (e2e de 31/10, passo 13): com a metade
+    /// de pé e o processo rodando, `jogo_rodando` diz que sim; quando o
+    /// processo acaba, quem ouve ([`Viva::ao_mudar_o_jogo`]) ouve `false`, e a
+    /// lista de aceites deixa de dizer que roda. Sem o aviso no fim do
+    /// processo (`vigiar`), a faixa diria «serve» para sempre.
+    #[test]
+    fn o_jogo_que_acaba_e_dito_a_quem_ouve() {
+        let casa = pasta_do_teste("jogo-acaba");
+        let (maquinas, _fio, viva, _raiz) = ligada_com_processo(
+            &casa,
+            O_QUE_BATE,
+            "maquina.programa.rodar({ comando: 'bin/servidor', argumentos: ARGUMENTOS, pasta: '' })               .then(() => maquina.pedir('rodou'), (e) => maquina.pedir('recusou ' + e.erro));",
+        );
+        assert!(
+            viva.jogo_rodando(),
+            "o processo roda e a metade diz que não"
+        );
+        assert!(maquinas.jogo_rodando(&viva.chave));
+        let ouvidos: Arc<Mutex<Vec<bool>>> = Arc::default();
+        let anota = Arc::clone(&ouvidos);
+        viva.ao_mudar_o_jogo(Box::new(move |_, rodando| {
+            anota.lock().unwrap().push(rodando);
+        }));
+        parar_todas(maquinas.tirar_ligadas(|_, _| true));
+        let fim = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < fim && !ouvidos.lock().unwrap().contains(&false) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let ouvidos = ouvidos.lock().unwrap().clone();
+        assert_eq!(
+            ouvidos.last(),
+            Some(&false),
+            "o fim do jogo não foi dito: {ouvidos:?}"
+        );
+        assert!(!viva.jogo_rodando());
     }
 
     /// **A órfã que ninguém chama de volta para, com o motivo**: o prazo dela
