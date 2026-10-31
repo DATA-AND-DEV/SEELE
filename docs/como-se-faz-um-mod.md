@@ -83,7 +83,7 @@ explica o porquê de cada uma):
 | `tema` | opcional: `true` abre a porta do tema do servidor, `mundo.tema`, na metade de servidor (ver «O tema»). Sem `server`, o manifesto é recusado (`tema-sem-metade-de-servidor`): sem quem a abra, a porta nunca pintaria nada. |
 | `plataformas` | opcional: onde o MOD roda. Os valores são `"app"` e `"navegador"`. **Ausente quer dizer as duas.** **Declarar exige `"api": 8`**: a chave num manifesto da 7 ou da 6 é recusada (`PlataformasPedemApiNova`, no shell `plataformas-pedem-api-nova`), e não ignorada, mesmo escrita como `[]`, porque o que se confere é a presença da chave. Escrita e vazia é recusada (`PlataformasVazias`, `plataformas-vazias`); repetir um valor também (`PlataformaRepetida { posicao }`, `plataforma-repetida`); um valor desconhecido faz o manifesto inteiro ser recusado como malformado. **O celular é o navegador**: um MOD só `"app"` não carrega nele. Uma casca que não está na lista pula o MOD e diz qual plataforma ele pede («só funciona no app», «só funciona no navegador»). |
 | `poderes` | opcional: o que o MOD pode fazer além de pintar e responder. Hoje, `"porta"`: o túnel de quem joga até o servidor de jogo de outra pessoa (`SeeleUI.tunel`, ver «A metade de máquina»). `"programa"` está **reservado à parte seguinte** e não faz nada nesta: é um nome que o manifesto já lê, e não um poder que o produto exerça. **Declarar exige `"api": 8`** (`PoderesPedemApiNova`, `poderes-pedem-api-nova`), e a chave escrita e vazia é recusada (`PoderesVazios`, `poderes-vazios`), como repetir um valor (`PoderRepetido { posicao }`, `poder-repetido`). **Exige `"plataformas": ["app"]`**: o túnel abre um socket na máquina de quem joga, o navegador não tem como, e um MOD que também rodasse lá (`plataformas` ausente quer dizer as duas) prometeria um poder que não existe (`PoderesExigemSoOApp`, `poderes-exigem-so-o-app`). **Exige a metade de máquina** (`poderes-sem-maquina`): um poder é o que a máquina faz, e sem ela ninguém o exerce. E `porta` exige a permissão `entrar-no-jogo` em `permissoes` (`PortaSemEntrarNoJogo`, `porta-sem-entrar-no-jogo`): uma porta que ninguém pode abrir é recusada na instalação, com o nome, e não calada. |
-| `maquina` | opcional: o caminho, dentro do pacote, do script que roda **na máquina de quem hospeda o jogo** (a metade de máquina, adiante). Fora do pacote é recusado (`MaquinaForaDoPacote`, `maquina-fora-do-pacote`); sem `poderes` também (`MaquinaSemPoderes`, `maquina-sem-poderes`); e sem a chave `server` também (`MaquinaSemServidor`, `maquina-sem-servidor`), porque quem pede ao dono da máquina que aceite é a metade de servidor. Numa API anterior à 8 é recusado (`poderes-pedem-api-nova`). |
+| `maquina` | opcional: o caminho, dentro do pacote, do script que roda **na máquina de quem hospeda o jogo** (a metade de máquina, adiante). Fora do pacote é recusado (`MaquinaForaDoPacote`, `maquina-fora-do-pacote`); sem `poderes` também (`MaquinaSemPoderes`, `maquina-sem-poderes`); e sem a chave `server` também (`MaquinaSemServidor`, `maquina-sem-servidor`), porque quem pede ao dono da máquina que aceite é a metade de servidor. Numa API anterior à 8 é recusado como `poderes-pedem-api-nova` (a mesma recusa de `poderes`). |
 | `state` | opcional: a versão do esquema dos seus dados, para as suas migrações. Lida, e ainda não usada pelo produto. |
 
 **Chave desconhecida é recusada, e é de propósito.** `vesion` com um `s` a menos
@@ -165,7 +165,7 @@ SeeleUI.contribuicoes.registrar({
 | `SeeleUI.aoEvento(fn)` | o que a pessoa faz no que o MOD desenhou, o que muda na tela e o aviso da metade de servidor voltam por aqui, sem número e sem resposta. Um ouvinte só, e o último vence. |
 | `SeeleUI.pedaco(arquivo, inicio)` e `SeeleUI.soltar(arquivo)` | leem em pedaços o arquivo que alguém escolheu pela forma `arquivo`, e o devolvem. O MOD recebe identificador, papel e tamanho, e nunca o caminho. |
 | `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor uma imagem escolhida, até 10 MiB, por um fluxo próprio. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
-| `SeeleUI.tunel.entrar(nome)` | **só existe para o MOD da API 8 que declara o poder `porta`**, e só no app. Abre a porta de quem joga até o jogo `nome` e resolve com o **número da porta em `127.0.0.1`** onde o jogo desta pessoa deve ligar (ver «A metade de máquina»). Só vale chamado de dentro do ouvinte de um `botao`, na mesma volta (ver «As recusas»). |
+| `SeeleUI.tunel.entrar(nome)` | **só existe para o MOD da API 8 que declara o poder `porta`**, e só no app. Abre a porta de quem joga até o jogo `nome` e resolve com o **número da porta em `127.0.0.1`** onde o jogo desta pessoa deve ligar (ver «A metade de máquina»). Só vale chamado de dentro do ouvinte de um `botao`, na mesma volta; as recusas que ele dá estão em «Os tetos e as recusas», na metade de máquina. |
 | `SeeleUI.capacidades()` | o que este build oferece ao seu MOD, nesta plataforma. `estilos` e `classes` estão na lista como rótulos: nada pergunta por eles, e o estilo de um nó vale onde a forma dele monta. |
 | `console` | cada chamada vira uma linha no `seele.log` da máquina que roda o MOD (ver «Quando o MOD não faz o que devia»). |
 | `setTimeout`, `setInterval` e os dois `clear` | a fachada do relógio do anfitrião, com até 256 de pé; acima disso devolvem `0`, que é o «não deu». |
@@ -1199,9 +1199,14 @@ globalThis.aoPedir = (contexto, pedido) => {
 };
 ```
 
-Os campos que faltam na oferta viram vazio (`""`, `[]`, `null` ou `0`), e o
-protocolo é `"tcp"` ou `"udp"`. Um erro de forma lança **na hora**, com o nome da
-regra (`oferta-invalida:tuneis`), e não na máquina da outra pessoa.
+Um campo ausente vira vazio (`""`, `[]`, `null` ou `0`), mas **nem todo campo
+pode ficar vazio**: `titulo`, `receita`, `versao_da_receita` e `versao_do_jogo`
+são textos não vazios; cada túnel tem `nome` válido, `porta` de 1 a 65535 e
+`protocolo` `"tcp"` ou `"udp"` (outro valor, ou ausente, é `tuneis`); cada
+artefato tem `tamanho` de pelo menos 1 e um `hash` válido (`sha1`, `sha256` ou
+`sha512`, com o `hex` do tamanho dele). Uma oferta que não passa **lança na
+hora**, com o nome da regra (`oferta-invalida:titulo`, `oferta-invalida:tuneis`,
+`oferta-invalida:artefato_hash`), e não na máquina da outra pessoa.
 
 **2. O dono vê a tela do produto.** O pedido chega ao app da pessoa chamada, e
 **quem desenha a tela é o SEELE, e não o MOD**: o texto do MOD (o título do jogo,
@@ -1290,13 +1295,19 @@ jogar desenha o botão, e **a porta se abre no clique**, e em nenhum outro lugar
 
 ```js
 // cliente/main.js
+const pagina = await SeeleUI.superficies.criar({ id: "jogo", tipo: "pagina", titulo: "Jogo" });
+await pagina.montar([
+  { forma: "botao", chave: "entrar", dentro: "ENTRAR NO JOGO" },
+  { forma: "texto", chave: "t", dentro: "" },
+]);
+
 SeeleUI.aoEvento(async (evento) => {
   if (evento.nome === "botao" && evento.chave === "entrar") {
     try {
       const porta = await SeeleUI.tunel.entrar("mc");   // a primeira linha do ouvinte
-      await pagina.atualizar({ t: { dentro: `Jogo em 127.0.0.1:${porta}` } });
+      await pagina.atualizar("t", { forma: "texto", chave: "t", dentro: `Jogo em 127.0.0.1:${porta}` });
     } catch (falha) {
-      await pagina.atualizar({ t: { dentro: `Não abriu: ${falha.erro}` } });
+      await pagina.atualizar("t", { forma: "texto", chave: "t", dentro: `Não abriu: ${falha.erro}` });
     }
   }
 });
@@ -1327,7 +1338,9 @@ o jogo a outra máquina (`outro-pedido`), o servidor deixa de reconhecer o aceit
 (`sem-aceite`), ou a própria metade de máquina falha (`metade-falhou`; aí o
 `aoParar` não é chamado, porque a metade já caiu). A tela da pessoa diz o motivo
 em frase; o `MaquinaParou` que o MOD lê leva o nome da lista da seção
-«aoAcontecer».
+«aoAcontecer». **Os nomes não são os mesmos nas duas pontas**: o `aoParar(motivo)`
+da metade de máquina recebe os do app (`servidor-saiu`, `sem-aceite`, …), e o
+`MaquinaParou` da metade de servidor diz `saiu` para a mesma causa.
 
 ### O que o aceite prende
 
