@@ -387,6 +387,7 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 /* A ordem (o formulário e a sala pessoal dissolvem as caixas deles). */
 #perfil .perfil-painel { display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
 #perfil #perfil-previa-cartao { order: 0; }
+#perfil #perfil-padrao-faixa { order: 0; }
 #perfil #perfil-imagem, #perfil #perfil-imagens { order: 1; }
 #perfil .perfil-par { order: 2; }
 #perfil #perfil-sem-nome { order: 3; }
@@ -450,6 +451,41 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 #perfil .perfil-bloco-estado[data-tom="erro"] { color: color-mix(in srgb, var(--seele-vermelho-alerta) 70%, var(--seele-osso)); }
 #perfil .perfil-bloco-estado[data-tom="feito"] { color: var(--seele-fosforo); }
 #perfil .perfil-bloco-estado[data-tom="pendencia"] { color: var(--seele-laranja-nerv); }
+
+/* A faixa do perfil padrão: uma linha curta, e a pílula de vidro que o aplica
+   de novo neste servidor (`perfil-padrao.js`). */
+#perfil .perfil-padrao-faixa {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+#perfil .perfil-padrao-linha {
+  flex: 1 1 240px;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--seele-osso-apagado);
+}
+#perfil .perfil-padrao-linha[data-tom="erro"] { color: color-mix(in srgb, var(--seele-vermelho-alerta) 70%, var(--seele-osso)); }
+#perfil .perfil-padrao-usar {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: 44px;
+  padding: 0 20px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--seele-osso);
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-pilula);
+}
+#perfil .perfil-padrao-usar:hover:not(:disabled) { background: var(--seele-controle-hover); border-color: var(--seele-controle-borda); }
+#perfil .perfil-padrao-usar:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
 
 /* Os campos: dois lado a lado onde o §5.4 pede, um por linha no estreito. */
 #perfil .perfil-par { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }

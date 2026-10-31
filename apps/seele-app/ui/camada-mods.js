@@ -1094,7 +1094,8 @@ function desenharApresentacoes() {
     const caixa = elemento("div", "mods-linha-botoes");
     const seletor = elemento("select", "mods-seletor");
     const idDoNome = `mods-ponto-${linha.ponto.replace(/[^a-z0-9]+/gi, "-")}`;
-    texto.firstChild.id = idDoNome;
+    const nomeDoPonto = texto.firstChild;
+    nomeDoPonto.id = idDoNome;
     seletor.setAttribute("aria-labelledby", idDoNome);
     const doTema = linha === doServidor;
     const atual = (doTema ? modPreferidoPara("servidor.aparencia") : preferidos.get(linha.ponto)) ?? "";

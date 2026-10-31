@@ -35,13 +35,17 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use seele_core::perfil::{
-    conferir_tamanho, erro_do_servidor, hash_da_imagem, montar_gravar,
+    conferir_tamanho, erro_do_servidor, montar_gravar,
     mensagem_de_tirar, portao_do_cliente, portao_do_pedido_de_imagem,
 };
 pub use seele_core::perfil::{
-    conferir_imagem, hash_de_hex, tipo_de_midia, EntradaDoPerfil, ErroDoPerfil, ImagemNaTela,
-    PerfilNaTela, NOME_DO_QUE_MUDOU,
+    conferir_imagem, entrada_validada, hash_de_hex, tipo_de_midia, EntradaDoPerfil, ErroDoPerfil,
+    ImagemNaTela, PerfilNaTela, NOME_DO_QUE_MUDOU,
 };
+/// O SHA-256 de uma imagem: o endereço com que o servidor a guarda, e com que
+/// o perfil padrão desta máquina guarda a dele (`apps/seele-app`), para saber
+/// sem subir de novo que o servidor já tem a mesma.
+pub use seele_core::perfil::hash_da_imagem;
 pub use seele_core::perfil_do_fio::{
     CampoDoPerfil, Efeito, ErroDeCampo, ImagemDoPerfil, LadoDoPerfil, MotivoDoCampo, PerfilPublico,
     RecusaDePerfil, TipoDaImagem, COR_PADRAO, MAX_BIO, MAX_NOME_EXIBIDO, MAX_PRONOMES, MAX_STATUS,

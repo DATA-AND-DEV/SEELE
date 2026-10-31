@@ -3198,6 +3198,8 @@ const FRASES_DOS_PERFIS = Object.freeze({
     ServidorAntigo: "Este servidor ainda não tem perfis (é anterior à 0.19).",
     NotConnected: "Sem conexão com o servidor.",
     RecusaDesconhecida: "O servidor recusou a imagem.",
+    NaoGravei: "Não deu para guardar nesta máquina.",
+    Mudou: "A imagem mudou no meio. Tente de novo.",
   }),
   // As recusas de campo, ao lado de cada campo.
   campo: Object.freeze({
@@ -3247,6 +3249,23 @@ const FRASES_DOS_PERFIS = Object.freeze({
       "Os dados antigos do MOD continuam guardados até a 0.20 (dá para voltar à 0.18). Apagá-los por aqui ainda não existe.",
     entendi: "ENTENDI",
     naoDispensou: "O relatório não pôde ser dispensado agora. Ele continua aqui.",
+  }),
+  // **O perfil padrão** (0.19, «Padrão + ajuste por servidor»): o «Seu perfil»
+  // da tela inicial, guardado nesta máquina e aplicado a cada servidor 0.19 em
+  // que você ainda não tem perfil (`perfil-padrao.js`).
+  padrao: Object.freeze({
+    naInicial: "Este é o seu perfil padrão: ele vale em cada servidor onde você ainda não tem perfil.",
+    segue: "Este servidor segue o seu perfil padrão.",
+    usar: "Usar meu perfil padrão",
+    usarRotulo: "Usar meu perfil padrão neste servidor",
+    aplicando: "Aplicando o seu perfil padrão…",
+    aplicado: "Seu perfil padrão vale aqui de novo.",
+    falhou: (motivo) => `Seu perfil padrão não foi aplicado aqui. ${motivo}`,
+    aviso: "Seu perfil padrão não foi aplicado aqui. Ver",
+    semResposta: "O servidor não confirmou o perfil.",
+    salvo: "Perfil padrão salvo.",
+    guardada: (lado) => (lado === "Capa" ? "Capa guardada no seu perfil padrão." : "Foto guardada no seu perfil padrão."),
+    removida: (lado) => (lado === "Capa" ? "Capa tirada do seu perfil padrão." : "Foto tirada do seu perfil padrão."),
   }),
   // A gestão de MODs de quem hospeda.
   incorporado: "Perfis agora faz parte do SEELE (0.19). Os perfis deste servidor foram trazidos.",

@@ -90,7 +90,11 @@ pub enum ErroDoPerfil {
 }
 
 /// Os campos do perfil como a casca os manda (o JSON do `invoke`).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+///
+/// `Serialize` também: o **perfil padrão** (o «Seu perfil» fora de qualquer
+/// servidor) guarda nesta máquina a entrada já validada
+/// ([`entrada_validada`]), e a devolve à casca no mesmo formato.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct EntradaDoPerfil {
     /// Nome exibido.
     pub nome_exibido: String,
@@ -131,6 +135,39 @@ pub fn montar_gravar(
         status: validado.status,
         bio: validado.bio,
         cor: validado.cor,
+        efeito: entrada.efeito,
+    })
+}
+
+/// **A entrada validada, sem fio nenhum**: os textos aparados e a cor em
+/// `#rrggbb` minúsculo, ou os erros por campo — a mesma [`validar`] que o
+/// servidor aplica, e que [`montar_gravar`] usa.
+///
+/// É o que o **perfil padrão** (o «Seu perfil» da tela inicial, guardado nesta
+/// máquina e aplicado a cada servidor 12 em que a pessoa ainda não tem perfil)
+/// grava: uma entrada que passou aqui é uma que o servidor aceita como está, e
+/// o `GravarPerfil` que a leva não muda nada nela. O desktop
+/// (`seele_ffi::perfis`) e o navegador (`seele-web`, `perfil_validar`) chamam
+/// esta, e nenhuma outra.
+///
+/// # Errors
+///
+/// [`ErroDoPerfil::Campos`], com todos os campos inválidos de uma vez.
+pub fn entrada_validada(entrada: &EntradaDoPerfil) -> Result<EntradaDoPerfil, ErroDoPerfil> {
+    let validado = validar(&EntradaDePerfil {
+        nome_exibido: &entrada.nome_exibido,
+        pronomes: &entrada.pronomes,
+        status: &entrada.status,
+        bio: &entrada.bio,
+        cor: &entrada.cor,
+    })
+    .map_err(|campos| ErroDoPerfil::Campos { campos })?;
+    Ok(EntradaDoPerfil {
+        nome_exibido: validado.nome_exibido,
+        pronomes: validado.pronomes,
+        status: validado.status,
+        bio: validado.bio,
+        cor: seele_proto::perfil::cor_em_texto(validado.cor),
         efeito: entrada.efeito,
     })
 }
@@ -409,6 +446,28 @@ mod testes {
         assert_eq!(cor, [0xf2, 0x52, 0x1f]);
         assert_eq!(efeito, Efeito::Aurora);
         assert_eq!(bio, "um\ndois", "a quebra de linha é da bio");
+    }
+
+    /// **A entrada validada é a que o `GravarPerfil` levaria**: aparada, a cor
+    /// em minúsculas, e montar o pedido com ela não muda nada. Os erros são os
+    /// mesmos, por campo.
+    #[test]
+    fn a_entrada_validada_e_a_que_o_servidor_gravaria() {
+        let validada = entrada_validada(&entrada()).unwrap();
+        assert_eq!(validada.nome_exibido, "Maya");
+        assert_eq!(validada.cor, "#f2521f");
+        assert_eq!(validada.bio, "um\ndois");
+        assert_eq!(
+            montar_gravar(3, &validada).unwrap(),
+            montar_gravar(3, &entrada()).unwrap(),
+            "a entrada validada mudou o pedido"
+        );
+        let mut ruim = entrada();
+        ruim.pronomes = "p".repeat(31);
+        assert!(matches!(
+            entrada_validada(&ruim),
+            Err(ErroDoPerfil::Campos { campos }) if campos.len() == 1
+        ));
     }
 
     /// **Os erros voltam por campo, todos de uma vez**, e nada é montado: o

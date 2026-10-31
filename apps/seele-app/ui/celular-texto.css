@@ -925,6 +925,8 @@
 :where(:root[data-casca="celular"]) #perfil .perfil-capa-amostra { font-size: calc(34px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-bloco-formato { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-bloco-estado { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-padrao-linha { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) #perfil .perfil-padrao-usar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil input:not([type="checkbox"]):not([type="range"]),
 :where(:root[data-casca="celular"]) #perfil textarea { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil .perfil-contador { font-size: calc(12px * var(--cel-escala)); }

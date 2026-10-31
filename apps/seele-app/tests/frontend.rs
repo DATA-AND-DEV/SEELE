@@ -26344,3 +26344,329 @@ confere("uma conversa encerrada no hospedado escondeu o caminho até ele", encer
 "##,
     );
 }
+
+/// **O mundo do perfil padrão** (0.19, «Padrão + ajuste por servidor»): um
+/// servidor 12 simulado — a lista `Perfis`, o `GravarPerfil` com a revisão
+/// conferida como o servidor confere (`RevisaoVelha` quando não bate, zero para
+/// quem não tem linha), a subida das imagens e o `PerfilRecusado` —, o registro
+/// por servidor desta máquina, e `perfis.js` com `perfil-padrao.js` rodando
+/// inteiros.
+const MUNDO_DO_PADRAO: &str = r##"
+const PADRAO = { revisao: 2, nome_exibido: "Maya", pronomes: "ela/dela", status: "no ar", bio: "oi", cor: "#b48cff", efeito: "Brilho",
+  foto: { hash: "f".repeat(64), tipo: "image/png", bytes: 10, url: "data:foto" }, capa: { hash: "c".repeat(64), tipo: "image/png", bytes: 10, url: "data:capa" } };
+const espera = async (cond, n = 80) => { for (let i = 0; i < n && !cond(); i += 1) await tick(); return cond(); };
+El.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
+El.prototype.focus = function () {};
+function servidorDoPadrao({ perfis = [], seguimento = null, recusar = null, padrao = PADRAO, protocolo = 12, listaVelha = false } = {}) {
+  const srv = { perfis: new Map(perfis.map((p) => [p.pessoa, structuredClone(p)])), marca: protocolo >= 12 ? 1 : 0,
+    seguimento: seguimento ?? { segue: false, revisao_aplicada: 0, assinatura: null }, padrao: structuredClone(padrao), recusar, registro: [] };
+  let m = null;
+  const ressincronizar = () => { srv.marca += 1; vm.runInContext(`sincronizarPerfis({ perfis_revision: ${srv.marca}, me: 1 })`, m.ctx); };
+  const recusa = (motivo) => setTimeout(() => m.ouvintes["seele://event"]({ payload: { PerfilRecusado: { motivo, campos: [] } } }), 1);
+  m = mundo({
+    perfis: () => (listaVelha ? [] : [...srv.perfis.values()].map((p) => structuredClone(p))),
+    perfil_padrao: () => structuredClone(srv.padrao),
+    seguimento_do_perfil_padrao: () => ({ servidor: "impressao-a", ...srv.seguimento }),
+    guardar_seguimento_do_perfil_padrao: ({ segue, revisaoAplicada, assinatura }) => { srv.seguimento = { segue, revisao_aplicada: revisaoAplicada, assinatura }; return null; },
+    gravar_perfil: ({ revisao, entrada }) => {
+      if (srv.recusar) { recusa(srv.recusar); return null; }
+      const atual = srv.perfis.get(1);
+      if ((atual?.revisao ?? 0) !== revisao) { recusa("RevisaoVelha"); return null; }
+      srv.perfis.set(1, { pessoa: 1, foto: null, capa: null, ...atual, ...entrada, revisao: revisao + 1 });
+      setTimeout(ressincronizar, 1);
+      return null;
+    },
+    enviar_imagem_do_perfil_padrao: ({ lado, hash }) => {
+      const p = srv.perfis.get(1);
+      p[lado === "Capa" ? "capa" : "foto"] = { hash, tipo: "image/png", bytes: 10 };
+      p.revisao += 1;
+      setTimeout(ressincronizar, 1);
+      return null;
+    },
+    tirar_imagem_do_perfil: ({ lado }) => {
+      const p = srv.perfis.get(1);
+      p[lado === "Capa" ? "capa" : "foto"] = null;
+      p.revisao += 1;
+      setTimeout(ressincronizar, 1);
+      return null;
+    },
+  });
+  const comEstilo = (no) => Object.assign(no, { style: { setProperty() {}, removeProperty() {} }, prepend() {}, remove() {}, removeAttribute() {}, querySelector: () => null, querySelectorAll: () => [] });
+  Object.assign(m.ctx, {
+    requestAnimationFrame: (f) => setTimeout(f, 0), clearTimeout, matchMedia: () => ({ matches: false }), Image: class {},
+    window: { addEventListener() {} },
+    elemento: (tag, classe, texto) => { const e = comEstilo(new El("")); e.className = classe ?? ""; if (texto !== undefined) e.textContent = texto; return e; },
+    anunciar: () => {}, iniciaisDoApelido: (a) => (a ?? "?").slice(0, 1),
+    vestirAvatar: (no) => no, vestirCapa: (no) => no,
+    vistaDaJanela: { sessao: 5, geracao: 1 },
+    registrarNoAnfitriao: (onde, oQue) => srv.registro.push(`${onde}: ${oQue}`),
+  });
+  m.ctx.document.querySelectorAll = () => [];
+  m.ctx.document.querySelector = () => null;
+  m.ctx.document.addEventListener = () => {};
+  m.$("tela-sessao").classList = { toggle() {} };
+  m.$("perfis-entrada").removeAttribute = () => {};
+  m.$("perfis-diretorio").hidden = true;
+  m.$("perfil-folha").hidden = true;
+  for (const id of ["perfil-previa-cartao", "perfil-foto-amostra", "perfil-capa-amostra", "perfil", "perfil-amostras", "perfil-efeitos"]) comEstilo(m.$(id));
+  carregar(m, "frases.js", "perfis.js", "perfil-padrao.js");
+  const entrar = () => vm.runInContext(`sincronizarPerfis({ perfis_revision: ${srv.marca}, me: 1 })`, m.ctx);
+  const meu = () => srv.perfis.get(1) ?? null;
+  const contas = () => ({ gravar: so(m, "gravar_perfil").length, enviar: so(m, "enviar_imagem_do_perfil_padrao").length });
+  return { m, srv, entrar, meu, contas, ressincronizar };
+}
+"##;
+
+fn rodar_o_padrao(titulo: &str, corpo: &str) {
+    rodar_node(titulo, &format!("{MUNDO_DO_PADRAO}\n{corpo}"));
+}
+
+/// **Entrar num servidor 12 onde você não tem perfil aplica o padrão** — os
+/// textos com a revisão zero, depois a foto e a capa —, e o servidor passa a
+/// segui-lo. **Num servidor onde você já tem perfil, nada sai**, e um perfil
+/// vazio (uma linha sem nada escrito) é um perfil: não é «sem perfil».
+///
+/// Provado revertendo: com a decisão tratando qualquer perfil como ausente
+/// (`if (!meu)` → `if (!meu || !meu.nome_exibido)`), o perfil vazio é
+/// sobrescrito e este guarda reprova.
+#[test]
+fn o_padrao_e_aplicado_ao_entrar_so_onde_nao_ha_perfil() {
+    rodar_o_padrao(
+        "o padrão ao entrar",
+        r##"
+// Sem perfil: aplicado.
+const a = servidorDoPadrao();
+a.entrar();
+await espera(() => a.srv.seguimento.revisao_aplicada === 2);
+const p = a.meu();
+confere("o padrão não foi aplicado a quem não tinha perfil: " + JSON.stringify(p), p?.nome_exibido === "Maya" && p.status === "no ar" && p.efeito === "Brilho");
+confere("a foto e a capa não subiram: " + JSON.stringify(p), p?.foto?.hash === PADRAO.foto.hash && p?.capa?.hash === PADRAO.capa.hash);
+confere("a primeira gravação não foi com a revisão zero", so(a.m, "gravar_perfil")[0]?.args.revisao === 0);
+confere("o servidor não passou a seguir o padrão: " + JSON.stringify(a.srv.seguimento), a.srv.seguimento.segue === true && typeof a.srv.seguimento.assinatura === "string");
+// A lista seguinte não aplica de novo.
+const antes = a.contas();
+a.ressincronizar();
+await tick(); await tick(); await tick();
+confere("o padrão em dia foi aplicado de novo", JSON.stringify(a.contas()) === JSON.stringify(antes));
+
+// Perfil vazio: é perfil, e não é tocado.
+const vazio = { pessoa: 1, revisao: 4, nome_exibido: "", pronomes: "", status: "", bio: "", cor: "#f2521f", efeito: "Nenhum", foto: null, capa: null };
+const b = servidorDoPadrao({ perfis: [vazio] });
+b.entrar();
+await espera(() => so(b.m, "seguimento_do_perfil_padrao").length > 0);
+await tick(); await tick();
+confere("o perfil vazio foi tratado como «sem perfil» e sobrescrito", b.contas().gravar === 0 && b.contas().enviar === 0 && b.meu().revisao === 4);
+confere("um servidor com perfil passou a seguir o padrão", b.srv.seguimento.segue === false);
+
+// A lista velha (sem a linha que existe): o servidor recusa a revisão zero, e nada é sobrescrito.
+const c = servidorDoPadrao({ listaVelha: true });
+c.srv.perfis.set(1, { ...vazio, nome_exibido: "Minha" });
+c.entrar();
+await espera(() => so(c.m, "gravar_perfil").length > 0 && so(c.m, "guardar_seguimento_do_perfil_padrao").length >= 2);
+await tick(); await tick();
+confere("a lista velha fez o padrão sobrescrever um perfil: " + JSON.stringify(c.meu()), c.meu().nome_exibido === "Minha" && c.contas().enviar === 0);
+confere("o servidor que já tinha perfil ficou seguindo o padrão", c.srv.seguimento.segue === false);
+confere("a recusa de quem já tinha perfil virou falha dita", vm.runInContext("estadoDoPadrao.falhas.size", c.m.ctx) === 0);
+"##,
+    );
+}
+
+/// **Quem segue o padrão recebe o padrão novo; quem personalizou, nunca.** O
+/// padrão muda (o status e a foto): o servidor que segue recebe os textos e só
+/// a foto nova (a capa, de mesmo hash, não sobe de novo). Depois a pessoa
+/// edita o perfil dentro do servidor (`deixarDeSeguirOPadrao`, o que o editor
+/// chama): o padrão muda de novo, e o perfil de lá fica como ela deixou. Um
+/// perfil que mudou por outro caminho (outro aparelho) também deixa de seguir.
+///
+/// Provado revertendo: sem o `if (!seguimento.segue)` da decisão, o perfil
+/// personalizado é sobrescrito; sem a conferência da assinatura, o mudado por
+/// fora é sobrescrito — e este guarda reprova nos dois.
+#[test]
+fn quem_segue_recebe_o_padrao_novo_e_quem_personalizou_nunca() {
+    rodar_o_padrao(
+        "seguir e personalizar",
+        r##"
+const a = servidorDoPadrao();
+a.entrar();
+await espera(() => a.srv.seguimento.revisao_aplicada === 2);
+const novo = { ...PADRAO, revisao: 3, status: "de férias", foto: { ...PADRAO.foto, hash: "e".repeat(64) } };
+a.srv.padrao = novo;
+vm.runInContext(`padraoMudou(${JSON.stringify(novo)})`, a.m.ctx);
+await espera(() => a.srv.seguimento.revisao_aplicada === 3);
+confere("o servidor que segue não recebeu o padrão novo: " + JSON.stringify(a.meu()), a.meu().status === "de férias" && a.meu().foto.hash === "e".repeat(64));
+const capas = so(a.m, "enviar_imagem_do_perfil_padrao").filter((c) => c.args.lado === "Capa").length;
+confere("a capa de mesmo hash subiu de novo: " + capas, capas === 1);
+
+// Personalizado aqui: o editor salvou, e o padrão muda outra vez.
+a.srv.perfis.get(1).bio = "a minha daqui";
+a.srv.perfis.get(1).revisao += 1;
+a.ressincronizar();
+vm.runInContext("deixarDeSeguirOPadrao()", a.m.ctx);
+await espera(() => a.srv.seguimento.segue === false);
+confere("editar dentro do servidor não desligou o seguir", a.srv.seguimento.segue === false);
+const antes = a.contas();
+const outro = { ...novo, revisao: 4, status: "voltei" };
+a.srv.padrao = outro;
+vm.runInContext(`padraoMudou(${JSON.stringify(outro)})`, a.m.ctx);
+await tick(); await tick(); await tick(); await tick();
+a.ressincronizar();
+await tick(); await tick(); await tick();
+confere("o perfil personalizado foi sobrescrito pelo padrão: " + JSON.stringify(a.meu()), a.meu().bio === "a minha daqui" && a.meu().status === "de férias");
+confere("um servidor personalizado recebeu pedido do padrão", JSON.stringify(a.contas()) === JSON.stringify(antes));
+
+// Mudado por fora (outro aparelho): a assinatura não bate, e deixa de seguir sem ser tocado.
+const b = servidorDoPadrao();
+b.entrar();
+await espera(() => b.srv.seguimento.revisao_aplicada === 2);
+b.srv.perfis.get(1).pronomes = "ele/dele";
+b.srv.perfis.get(1).revisao += 1;
+const depois = b.contas();
+// A lista nova chega primeiro (o `PerfilMudou` do outro aparelho), e o padrão muda depois.
+b.ressincronizar();
+await espera(() => vm.runInContext("perfilOficial(1)?.pronomes", b.m.ctx) === "ele/dele");
+await tick(); await tick();
+b.srv.padrao = { ...PADRAO, revisao: 3, status: "x" };
+vm.runInContext(`padraoMudou(${JSON.stringify(b.srv.padrao)})`, b.m.ctx);
+await espera(() => b.srv.seguimento.segue === false);
+await tick(); await tick(); await tick();
+confere("o perfil mudado por outro caminho foi sobrescrito: " + JSON.stringify(b.meu()), b.meu().pronomes === "ele/dele" && b.meu().status === "no ar");
+confere("o perfil mudado por fora continuou seguindo", b.srv.seguimento.segue === false && JSON.stringify(b.contas()) === JSON.stringify(depois));
+"##,
+    );
+}
+
+/// **USAR MEU PERFIL PADRÃO** (a pílula do editor, dentro do servidor) aplica
+/// o padrão num servidor personalizado e volta a segui-lo; o editor diz, numa
+/// linha, que ele segue. Antes, a linha não diz isso, e a pílula aparece.
+///
+/// Provado revertendo: com o `forcar` ignorado na conferência, a pílula não
+/// aplica nada e este guarda reprova.
+#[test]
+fn usar_meu_perfil_padrao_aplica_e_volta_a_seguir() {
+    rodar_o_padrao(
+        "usar meu perfil padrão",
+        r##"
+const meu = { pessoa: 1, revisao: 7, nome_exibido: "Só daqui", pronomes: "", status: "", bio: "", cor: "#2f8fe0", efeito: "Nenhum", foto: null, capa: null };
+const a = servidorDoPadrao({ perfis: [meu] });
+a.entrar();
+await espera(() => so(a.m, "seguimento_do_perfil_padrao").length > 0);
+await tick(); await tick();
+vm.runInContext("editorDoPerfil.aberto = true; editorDoPerfil.modo = 'oficial'; desenharFaixaDoPadrao()", a.m.ctx);
+confere("o editor de um servidor personalizado não mostra USAR MEU PERFIL PADRÃO", a.m.$("perfil-padrao-usar").hidden === false && a.m.$("perfil-padrao-faixa").hidden === false);
+confere("o editor de um servidor personalizado diz que ele segue o padrão", !/segue o seu perfil padrão/.test(a.m.$("perfil-padrao-linha").textContent));
+await a.m.$("perfil-padrao-usar").click();
+await espera(() => a.srv.seguimento.segue === true && a.srv.seguimento.revisao_aplicada === 2);
+confere("USAR MEU PERFIL PADRÃO não aplicou o padrão: " + JSON.stringify(a.meu()), a.meu().nome_exibido === "Maya" && a.meu().foto?.hash === PADRAO.foto.hash && a.meu().capa?.hash === PADRAO.capa.hash);
+confere("USAR MEU PERFIL PADRÃO não gravou com a revisão de agora", so(a.m, "gravar_perfil")[0]?.args.revisao === 7);
+confere("USAR MEU PERFIL PADRÃO não voltou a seguir", a.srv.seguimento.segue === true);
+vm.runInContext("desenharFaixaDoPadrao()", a.m.ctx);
+confere("o editor não diz que o servidor segue o padrão: " + a.m.$("perfil-padrao-linha").textContent, /segue o seu perfil padrão/.test(a.m.$("perfil-padrao-linha").textContent) && a.m.$("perfil-padrao-linha").hidden === false);
+confere("a pílula continua com o servidor já seguindo", a.m.$("perfil-padrao-usar").hidden === true);
+"##,
+    );
+}
+
+/// **Num servidor 0.18 (protocolo 11), nada**: sem a lista `Perfis`, nenhum
+/// pedido do padrão sai — nem a leitura do registro —, e o caminho do MOD fica
+/// intocado. E um padrão nunca salvo (revisão zero) não é aplicado em lugar
+/// nenhum.
+///
+/// Provado revertendo: sem o `if (!disponivel)` de `decidirOPadrao`, a decisão
+/// manda aplicar num servidor 11 e este guarda reprova.
+#[test]
+fn o_padrao_nao_toca_um_servidor_onze_nem_sai_sem_ter_sido_salvo() {
+    rodar_o_padrao(
+        "o padrão e o servidor 11",
+        r##"
+const a = servidorDoPadrao({ protocolo: 11 });
+vm.runInContext("sincronizarPerfis({ perfis_revision: 0, me: 1 })", a.m.ctx);
+await tick(); await tick(); await tick();
+confere("o servidor 11 recebeu pedido do perfil padrão: " + a.m.chamadas.map((c) => c.cmd).join(","),
+  so(a.m, "gravar_perfil").length === 0 && so(a.m, "enviar_imagem_do_perfil_padrao").length === 0 && so(a.m, "guardar_seguimento_do_perfil_padrao").length === 0);
+const decisao = vm.runInContext("decidirOPadrao({ disponivel: false, meu: null, padrao: PADRAO_T, seguimento: { servidor: 'x' } })", Object.assign(a.m.ctx, { PADRAO_T: PADRAO }));
+confere("a decisão aplica num servidor 11: " + JSON.stringify(decisao), decisao.acao === "nada");
+
+const b = servidorDoPadrao({ padrao: { ...PADRAO, revisao: 0 } });
+b.entrar();
+await tick(); await tick(); await tick(); await tick();
+confere("um padrão nunca salvo foi aplicado", so(b.m, "gravar_perfil").length === 0 && b.meu() === null);
+"##,
+    );
+}
+
+/// **A falha de aplicar é dita, e não vira laço**: o servidor recusa o perfil
+/// (`Campos`), e o editor daquele servidor diz que o padrão não foi aplicado e
+/// por quê (com a pílula para tentar de novo), o aviso da coluna aparece, e o
+/// registro ganha a linha. A lista seguinte não tenta de novo na mesma sessão.
+///
+/// Provado revertendo: com o `dizerAFalhaDoPadrao` trocado por um
+/// `console.warn` só, o editor e o aviso ficam calados e este guarda reprova.
+#[test]
+fn a_falha_de_aplicar_o_padrao_e_dita_no_editor_no_aviso_e_no_registro() {
+    rodar_o_padrao(
+        "a falha do padrão",
+        r##"
+const a = servidorDoPadrao({ recusar: "SemPastaDePerfis" });
+const avisos = [];
+a.m.ctx.console = { ...console, warn: (...x) => avisos.push(x.join(" ")), info() {} };
+a.entrar();
+await espera(() => vm.runInContext("estadoDoPadrao.falhas.size", a.m.ctx) > 0);
+await tick(); await tick();
+vm.runInContext("editorDoPerfil.aberto = true; editorDoPerfil.modo = 'oficial'; desenharFaixaDoPadrao(); desenharEntradaDosPerfis()", a.m.ctx);
+const linha = a.m.$("perfil-padrao-linha");
+confere("o editor não diz que o padrão não foi aplicado: " + linha.textContent, /não foi aplicado aqui/.test(linha.textContent) && linha.dataset.tom === "erro" && linha.hidden === false);
+confere("o editor não diz o motivo: " + linha.textContent, /banco em memória/.test(linha.textContent));
+confere("a pílula para tentar de novo não apareceu", a.m.$("perfil-padrao-usar").hidden === false);
+confere("o aviso da coluna ficou calado: " + a.m.$("perfis-pendencia").textContent, a.m.$("perfis-pendencia").hidden === false && /perfil padrão/.test(a.m.$("perfis-pendencia").textContent));
+confere("o registro não ganhou a linha: " + JSON.stringify(a.srv.registro), a.srv.registro.some((l) => /perfil-padrao/.test(l)));
+confere("o console não disse: " + JSON.stringify(avisos), avisos.some((l) => /não foi aplicado/.test(l)));
+const tentativas = so(a.m, "gravar_perfil").length;
+a.ressincronizar();
+await tick(); await tick(); await tick();
+confere("a falha virou laço na mesma sessão", so(a.m, "gravar_perfil").length === tentativas);
+"##,
+    );
+}
+
+/// **O «Seu perfil» da tela inicial edita o padrão**: fora de sessão, com o
+/// padrão lido, o editor abre no modo `padrao` com os campos dele; o SALVAR vai
+/// ao `gravar_perfil_padrao`, e a recusa da regra do servidor volta **por
+/// campo**, antes de qualquer servidor.
+///
+/// Provado revertendo: sem o desvio do `gravarOPerfilOficial` para o padrão,
+/// o SALVAR da tela inicial não grava nada e este guarda reprova.
+#[test]
+fn o_seu_perfil_da_tela_inicial_edita_o_padrao_e_recusa_por_campo() {
+    rodar_o_padrao(
+        "o editor do padrão",
+        r##"
+const a = servidorDoPadrao();
+let recusar = true;
+a.m.ctx.invoke = async (cmd, args) => {
+  a.m.chamadas.push({ cmd, args });
+  if (cmd === "perfil_padrao") return structuredClone(PADRAO);
+  if (cmd === "gravar_perfil_padrao") {
+    if (recusar) throw { Campos: { campos: [{ campo: "NomeExibido", motivo: "Longo" }] } };
+    return { ...PADRAO, ...args.entrada, revisao: 3 };
+  }
+  throw "sem-comando";
+};
+const padrao = await vm.runInContext("lerOPerfilPadrao()", a.m.ctx);
+a.m.ctx.P = padrao;
+vm.runInContext("prepararOEditorDoPerfil(null, 'maya', P)", a.m.ctx);
+confere("o editor da tela inicial não abriu no modo do padrão", vm.runInContext("editorDoPerfil.modo", a.m.ctx) === "padrao" && a.m.$("perfil").dataset.modo === "padrao");
+confere("os campos não vieram do padrão", a.m.$("perfil-nome-exibido").value === "Maya" && a.m.$("perfil-status").value === "no ar");
+confere("a tela inicial não diz que edita o padrão", /perfil padrão/.test(a.m.$("perfil-padrao-linha").textContent));
+a.m.$("perfil-nome-exibido").value = "N".repeat(50);
+const recusado = await vm.runInContext("gravarOPerfilOficial()", a.m.ctx);
+confere("o campo longo não voltou ao campo", recusado === false && a.m.$("perfil-nome-exibido-erro").hidden === false && /40/.test(a.m.$("perfil-nome-exibido-erro").textContent));
+recusar = false;
+a.m.$("perfil-nome-exibido").value = "Maya B";
+const salvo = await vm.runInContext("gravarOPerfilOficial()", a.m.ctx);
+const pedido = so(a.m, "gravar_perfil_padrao").pop();
+confere("o SALVAR da tela inicial não gravou o padrão", salvo === true && pedido?.args.entrada.nome_exibido === "Maya B");
+confere("o SALVAR da tela inicial falou com um servidor", so(a.m, "gravar_perfil").length === 0);
+confere("o padrão salvo não ficou guardado na janela", vm.runInContext("perfilPadraoAtual().nome_exibido", a.m.ctx) === "Maya B");
+"##,
+    );
+}

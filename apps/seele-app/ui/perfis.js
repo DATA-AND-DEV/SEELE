@@ -221,6 +221,13 @@ async function lerOsPerfis() {
   perfisOficiais.porPessoa = novo;
   agendarRedesenhoDosPerfis();
   avisarQuemEsperaOPerfil();
+  // **O perfil padrão** (`perfil-padrao.js`): com a lista nova, a conferência
+  // de «não tenho perfil aqui» e de «este servidor segue o padrão».
+  // Depois de quem esperava esta lista seguir (o SALVAR do editor, que desliga
+  // o «segue» deste servidor antes de a conferência o ler).
+  if (typeof conferirOPadrao === "function") {
+    setTimeout(() => conferirOPadrao().catch((falha) => console.warn("perfil padrão:", falha)), 0);
+  }
 }
 
 /** A sessão acabou: o armazém da próxima começa vazio. As imagens ficam (o hash é o endereço). */
@@ -231,6 +238,7 @@ function esquecerOsPerfis() {
   perfisOficiais.disponivel = false;
   perfisOficiais.pendencia = [];
   perfisOficiais.me = null;
+  if (typeof esquecerOPadraoDaSessao === "function") esquecerOPadraoDaSessao();
   fecharDiretorioDosPerfis();
   fecharFolhaDoPerfil();
   desenharEntradaDosPerfis();
@@ -309,8 +317,11 @@ function linhaDoPerfil(perfil) {
  *
  * `perfil` é o do armazém, ou o rascunho do editor (a prévia viva).
  */
-function montarCartaoDoPerfil(id, { perfil = perfilOficial(id), comoBotao = false, comBio = true } = {}) {
-  const { apelido, tag } = apelidoETagDe(id);
+function montarCartaoDoPerfil(id, { perfil = perfilOficial(id), comoBotao = false, comBio = true, apelido: apelidoDado = null, imagens = null } = {}) {
+  // `apelido` e `imagens` são do **perfil padrão** (`perfil-padrao.js`), que
+  // não é de pessoa nenhuma de servidor nenhum: o apelido vem do campo, e a
+  // foto e a capa, dos `data:` que esta máquina guarda.
+  const { apelido, tag } = apelidoDado === null ? apelidoETagDe(id) : { apelido: apelidoDado, tag: "" };
   const nome = perfil?.nome_exibido?.trim() || apelido;
   const raiz = elemento(comoBotao ? "button" : "article", "perfil-cartao");
   raiz.dataset.pessoa = String(id);
@@ -321,11 +332,18 @@ function montarCartaoDoPerfil(id, { perfil = perfilOficial(id), comoBotao = fals
   }
   const capa = elemento("span", "perfil-cartao-capa");
   capa.setAttribute("aria-hidden", "true");
-  vestirCapa(capa, id);
   const foto = elemento("span", "perfil-cartao-foto", iniciaisDoApelido(apelido));
   foto.setAttribute("aria-hidden", "true");
-  vestirAvatar(foto, id);
-  vestirMolduraDoPerfil(foto, id, perfil);
+  if (imagens) {
+    vestirComAsImagensDoPadrao(capa, foto, imagens);
+    vestirMolduraDoPerfil(foto, null, perfil);
+    // Sem a marca: o redesenho dos perfis relê a moldura pelo id, e o padrão não tem id.
+    delete foto.dataset.molduraDoPerfil;
+  } else {
+    vestirCapa(capa, id);
+    vestirAvatar(foto, id);
+    vestirMolduraDoPerfil(foto, id, perfil);
+  }
   const nomes = elemento("span", "perfil-cartao-nomes");
   nomes.append(
     elemento("span", "perfil-cartao-nome", nome),
@@ -339,6 +357,26 @@ function montarCartaoDoPerfil(id, { perfil = perfilOficial(id), comoBotao = fals
   if (comBio && perfil?.bio?.trim()) corpo.append(elemento("span", "perfil-cartao-bio", perfil.bio.trim()));
   raiz.append(capa, corpo);
   return raiz;
+}
+
+/**
+ * A foto e a capa do perfil padrão num cartão: direto, sem a precedência (o
+ * padrão não tem MOD nem ícone nativo por cima) e sem `data-pessoa-da-capa`,
+ * que o redesenho das capas releria por um id que o padrão não tem.
+ */
+function vestirComAsImagensDoPadrao(capa, foto, { foto: urlDaFoto = null, capa: urlDaCapa = null } = {}) {
+  if (urlDaCapa) {
+    const camada = elemento("span", "capa-camada");
+    camada.setAttribute("aria-hidden", "true");
+    camada.style.backgroundImage = `url(${urlDaCapa})`;
+    capa.prepend(camada);
+    capa.dataset.comCapa = "sim";
+  }
+  if (urlDaFoto) {
+    foto.style.backgroundImage = `url(${urlDaFoto})`;
+    foto.dataset.comRetrato = "sim";
+    foto.textContent = "";
+  }
 }
 
 // -------------------------------------------- a entrada «Perfis» e a pendência
@@ -360,8 +398,15 @@ function desenharEntradaDosPerfis() {
   const aviso = $("perfis-pendencia");
   if (aviso) {
     const lados = perfisOficiais.disponivel ? perfisOficiais.pendencia : [];
-    aviso.hidden = lados.length === 0;
-    aviso.textContent = lados.length ? FRASES_DOS_PERFIS.pendenciaAviso(lados) : "";
+    // A falha de aplicar o perfil padrão aqui (`perfil-padrao.js`) usa o mesmo
+    // aviso gentil quando a migração não deixou nada: o produto que sabe que
+    // não aplicou diz isso onde se olha, e não só no editor.
+    const falhaDoPadrao = perfisOficiais.disponivel && typeof falhaDoPadraoNaVista === "function"
+      ? falhaDoPadraoNaVista() : null;
+    const texto = lados.length ? FRASES_DOS_PERFIS.pendenciaAviso(lados)
+      : falhaDoPadrao ? FRASES_DOS_PERFIS.padrao.aviso : "";
+    aviso.hidden = texto === "";
+    aviso.textContent = texto;
   }
   $("tela-sessao")?.classList.toggle("com-diretorio-de-perfis", diretorioDosPerfisAberto());
 }
@@ -542,7 +587,14 @@ function fecharFolhaDoPerfil() {
  */
 const editorDoPerfil = {
   aberto: false,
+  /**
+   * `true` quando os campos do perfil aparecem: no servidor da vista com
+   * perfis oficiais (`modo` `"oficial"`) e na tela inicial, onde o que se
+   * edita é o perfil padrão desta máquina (`modo` `"padrao"`).
+   */
   oficial: false,
+  /** `"oficial"`, `"padrao"` ou `"nativo"` (o «Seu perfil» de sempre: imagem e apelido). */
+  modo: "nativo",
   base: null,
   apelido: "",
   esperando: [],
@@ -599,18 +651,23 @@ function perfilTemAlteracoes() {
 
 /**
  * **Prepara o editor ao abrir** (`abrirPerfil`). Com perfis oficiais, os
- * campos aparecem e começam com o perfil de agora; sem (fora de sessão, ou num
- * servidor 0.18), o «Seu perfil» é o de sempre: a imagem desta máquina e o
- * apelido.
+ * campos aparecem e começam com o perfil de agora. **Fora de sessão**, com o
+ * perfil padrão desta máquina lido (`padrao`, de `perfil-padrao.js`), os
+ * mesmos campos editam o padrão. Num servidor 0.18 (ou sem padrão legível), o
+ * «Seu perfil» é o de sempre: a imagem desta máquina e o apelido.
  */
-function prepararOEditorDoPerfil(snapshot, apelido) {
-  const oficial = Boolean(snapshot && perfisOficiais.disponivel && snapshot.me !== null && snapshot.me !== undefined);
+function prepararOEditorDoPerfil(snapshot, apelido, padrao = null) {
+  const noServidor = Boolean(snapshot && perfisOficiais.disponivel && snapshot.me !== null && snapshot.me !== undefined);
+  const modo = noServidor ? "oficial" : !snapshot && padrao ? "padrao" : "nativo";
+  const oficial = modo !== "nativo";
   editorDoPerfil.aberto = true;
   editorDoPerfil.oficial = oficial;
+  editorDoPerfil.modo = modo;
   editorDoPerfil.apelido = apelido ?? "";
   editorDoPerfil.estadoDaImagem = { Foto: "", Capa: "" };
   const raiz = $("perfil");
   raiz.dataset.oficial = oficial ? "sim" : "nao";
+  raiz.dataset.modo = modo;
   for (const no of raiz.querySelectorAll("[data-so-oficial]")) no.hidden = !oficial;
   $("perfil-imagem").hidden = oficial;
   mostrarRodapeDeSaida(false);
@@ -622,11 +679,23 @@ function prepararOEditorDoPerfil(snapshot, apelido) {
   }
   if (!oficial) {
     editorDoPerfil.base = null;
+    if (typeof desenharFaixaDoPadrao === "function") desenharFaixaDoPadrao();
     return;
   }
-  editorDoPerfil.base = { ...textosDoPerfil(perfilOficial(snapshot.me)), revisao: perfilOficial(snapshot.me)?.revisao ?? 0 };
+  const fonte = modo === "padrao" ? padrao : perfilOficial(snapshot.me);
+  editorDoPerfil.base = { ...textosDoPerfil(fonte), revisao: fonte?.revisao ?? 0 };
   preencherOEditor(editorDoPerfil.base);
   atualizarEditorDoPerfil();
+}
+
+/** As imagens que o editor mostra agora: as do perfil do servidor, ou as do padrão. */
+function imagensDoEditor() {
+  if (editorDoPerfil.modo === "padrao") {
+    const padrao = typeof perfilPadraoAtual === "function" ? perfilPadraoAtual() : null;
+    return { foto: padrao?.foto ?? null, capa: padrao?.capa ?? null, pessoa: null };
+  }
+  const atual = perfilOficial(perfisOficiais.me);
+  return { foto: atual?.foto ?? null, capa: atual?.capa ?? null, pessoa: atual?.pessoa ?? null };
 }
 
 function preencherOEditor(textos) {
@@ -643,6 +712,7 @@ function preencherOEditor(textos) {
 function soltarOEditorDoPerfil() {
   editorDoPerfil.aberto = false;
   editorDoPerfil.oficial = false;
+  editorDoPerfil.modo = "nativo";
   for (const esperando of editorDoPerfil.esperando.splice(0)) esperando({ fechou: true });
 }
 
@@ -671,24 +741,41 @@ function contarABio() {
 
 /** Redesenha a prévia, os blocos das imagens e a pendência com o armazém de agora. */
 function atualizarEditorDoPerfil() {
+  if (typeof desenharFaixaDoPadrao === "function") desenharFaixaDoPadrao();
   if (!editorDoPerfil.aberto || !editorDoPerfil.oficial) return;
   const me = perfisOficiais.me;
-  const atual = perfilOficial(me);
+  const imagens = imagensDoEditor();
   // A prévia viva: o rascunho dos textos, com as imagens que valem agora.
-  const rascunho = { ...entradaDoEditor(), foto: atual?.foto ?? null, capa: atual?.capa ?? null };
+  const rascunho = { ...entradaDoEditor(), foto: imagens.foto, capa: imagens.capa };
   if (!/^#[0-9a-f]{6}$/.test(rascunho.cor)) rascunho.cor = editorDoPerfil.base?.cor ?? COR_PADRAO_DO_PERFIL;
   const previa = $("perfil-previa-cartao");
-  previa.replaceChildren(montarCartaoDoPerfil(me, { perfil: rascunho }));
-  for (const lado of ["Foto", "Capa"]) desenharBlocoDaImagem(lado, atual);
+  const cartao = editorDoPerfil.modo === "padrao"
+    ? montarCartaoDoPerfil(null, {
+      perfil: rascunho,
+      apelido: $("perfil-apelido").value.trim() || editorDoPerfil.apelido || "?",
+      imagens: { foto: imagens.foto?.url || null, capa: imagens.capa?.url || null },
+    })
+    : montarCartaoDoPerfil(me, { perfil: rascunho });
+  previa.replaceChildren(cartao);
+  for (const lado of ["Foto", "Capa"]) desenharBlocoDaImagem(lado, imagens);
 }
 
-/** O bloco de uma imagem: a amostra, os botões, a nota de formato e o estado. */
-function desenharBlocoDaImagem(lado, atual) {
+/**
+ * O bloco de uma imagem: a amostra, os botões, a nota de formato e o estado.
+ * `imagens` é o que `imagensDoEditor` dá: as do servidor (pelo hash, pedidas
+ * pela ponte) ou as do padrão (já em `data:`).
+ */
+function desenharBlocoDaImagem(lado, imagens) {
   const prefixo = lado === "Capa" ? "perfil-capa" : "perfil-foto";
   const amostra = $(`${prefixo}-amostra`);
-  const imagem = lado === "Capa" ? atual?.capa : atual?.foto;
-  const pronta = imagem ? imagemOficialPronta(atual.pessoa, lado) : null;
-  const url = lado === "Capa" ? (pronta?.estatico ?? pronta?.url) : pronta?.url;
+  const imagem = lado === "Capa" ? imagens?.capa : imagens?.foto;
+  let url = null;
+  if (imagem && editorDoPerfil.modo === "padrao") {
+    url = imagem.url || null;
+  } else if (imagem) {
+    const pronta = imagemOficialPronta(imagens.pessoa, lado);
+    url = lado === "Capa" ? (pronta?.estatico ?? pronta?.url) : pronta?.url;
+  }
   if (url) {
     amostra.style.backgroundImage = `url(${url})`;
     amostra.dataset.tem = "sim";
@@ -704,7 +791,7 @@ function desenharBlocoDaImagem(lado, atual) {
   // da migração. Sempre no próprio bloco, onde se acabou de apertar.
   const estado = $(`${prefixo}-estado`);
   const frase = estado.dataset.frase ?? "";
-  const pendente = perfisOficiais.pendencia.includes(lado) && !imagem;
+  const pendente = editorDoPerfil.modo === "oficial" && perfisOficiais.pendencia.includes(lado) && !imagem;
   const texto = frase || (pendente ? FRASES_DOS_PERFIS.pendencia(lado) : "");
   estado.textContent = texto;
   estado.hidden = texto === "";
@@ -716,7 +803,7 @@ function dizerNoBlocoDaImagem(lado, frase, tom = "") {
   const estado = $(lado === "Capa" ? "perfil-capa-estado" : "perfil-foto-estado");
   estado.dataset.frase = frase;
   estado.dataset.tomDaFrase = tom;
-  desenharBlocoDaImagem(lado, perfilOficial(perfisOficiais.me));
+  desenharBlocoDaImagem(lado, imagensDoEditor());
 }
 
 /**
@@ -724,6 +811,8 @@ function dizerNoBlocoDaImagem(lado, frase, tom = "") {
  * diz «Enviando…» e depois «enviada», ou a recusa — o HEIC pelo nome.
  */
 async function escolherImagemDoPerfil(lado) {
+  // Na tela inicial, a imagem vai para o perfil padrão desta máquina.
+  if (editorDoPerfil.modo === "padrao") return escolherImagemDoPadrao(lado);
   editorDoPerfil.estadoDaImagem[lado] = "enviando";
   dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.enviando);
   let feito;
@@ -743,16 +832,51 @@ async function escolherImagemDoPerfil(lado) {
   const nota = lado === "Foto" && feito.icone_nativo ? ` ${FRASES_DOS_PERFIS.iconeAntigo}` : "";
   dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.enviada(lado) + nota, "feito");
   anunciar(FRASES_DOS_PERFIS.enviada(lado));
+  // Mexer no perfil aqui é personalizar este servidor: ele deixa de seguir o padrão.
+  if (typeof deixarDeSeguirOPadrao === "function") deixarDeSeguirOPadrao();
+}
+
+/** ESCOLHER na tela inicial: o seletor, a conferência, e a imagem guardada no padrão. */
+async function escolherImagemDoPadrao(lado) {
+  editorDoPerfil.estadoDaImagem[lado] = "enviando";
+  dizerNoBlocoDaImagem(lado, "");
+  let feito;
+  try {
+    feito = await invoke("escolher_imagem_do_perfil_padrao", { lado });
+    if (feito?.escolheu) await lerOPerfilPadrao();
+  } catch (falha) {
+    console.warn(`escolher_imagem_do_perfil_padrao (${lado}):`, falha);
+    editorDoPerfil.estadoDaImagem[lado] = "";
+    dizerNoBlocoDaImagem(lado, fraseDaImagemDoPerfil(falha), "erro");
+    return;
+  }
+  editorDoPerfil.estadoDaImagem[lado] = "";
+  if (!feito?.escolheu) {
+    dizerNoBlocoDaImagem(lado, "");
+    return;
+  }
+  dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.padrao.guardada(lado), "feito");
+  atualizarEditorDoPerfil();
+  anunciar(FRASES_DOS_PERFIS.padrao.guardada(lado));
 }
 
 async function removerImagemDoPerfil(lado) {
+  const doPadrao = editorDoPerfil.modo === "padrao";
   editorDoPerfil.estadoDaImagem[lado] = "enviando";
   dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.removendo);
   try {
-    await invoke("tirar_imagem_do_perfil", { lado });
+    if (doPadrao) {
+      await invoke("tirar_imagem_do_perfil_padrao", { lado });
+      await lerOPerfilPadrao();
+    } else {
+      await invoke("tirar_imagem_do_perfil", { lado });
+    }
     editorDoPerfil.estadoDaImagem[lado] = "";
-    dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.removida(lado), "feito");
-    anunciar(FRASES_DOS_PERFIS.removida(lado));
+    const frase = doPadrao ? FRASES_DOS_PERFIS.padrao.removida(lado) : FRASES_DOS_PERFIS.removida(lado);
+    dizerNoBlocoDaImagem(lado, frase, "feito");
+    anunciar(frase);
+    if (doPadrao) atualizarEditorDoPerfil();
+    else if (typeof deixarDeSeguirOPadrao === "function") deixarDeSeguirOPadrao();
   } catch (falha) {
     console.warn(`tirar_imagem_do_perfil (${lado}):`, falha);
     editorDoPerfil.estadoDaImagem[lado] = "";
@@ -812,6 +936,8 @@ function mostrarErroDoPerfil(frase, { recarregar = false } = {}) {
 /** Acorda quem espera o desfecho de um SALVAR, com o armazém novo. */
 function avisarQuemEsperaOPerfil(evento = null) {
   for (const esperando of [...editorDoPerfil.esperando]) esperando(evento);
+  // E quem aplica o perfil padrão (`perfil-padrao.js`), que espera o mesmo.
+  if (typeof avisarQuemAplicaOPadrao === "function") avisarQuemAplicaOPadrao(evento);
 }
 
 /**
@@ -859,6 +985,7 @@ function revisaoParaGravar() {
  */
 async function gravarOPerfilOficial() {
   if (!editorDoPerfil.oficial) return true;
+  if (editorDoPerfil.modo === "padrao") return gravarOPerfilPadrao();
   limparErrosDoEditor();
   const entrada = entradaDoEditor();
   if (mesmosTextos(entrada, editorDoPerfil.base)) return true;
@@ -875,6 +1002,8 @@ async function gravarOPerfilOficial() {
     }
     if (desfecho.ok) {
       anunciar(FRASES_DOS_PERFIS.salvo);
+      // Os textos mudaram aqui: este servidor passa a ter o perfil dele.
+      if (typeof deixarDeSeguirOPadrao === "function") deixarDeSeguirOPadrao();
       return true;
     }
     if (desfecho.fechou) return false;
@@ -901,6 +1030,34 @@ async function gravarOPerfilOficial() {
   }
 }
 
+/**
+ * **SALVAR na tela inicial**: os textos vão ao perfil padrão desta máquina,
+ * validados pela regra do servidor — a recusa volta por campo antes de
+ * qualquer servidor. Depois, quem segue o padrão o recebe (`perfil-padrao.js`).
+ */
+async function gravarOPerfilPadrao() {
+  limparErrosDoEditor();
+  const entrada = entradaDoEditor();
+  const salvar = $("perfil-salvar");
+  salvar.disabled = true;
+  try {
+    const salvo = await invoke("gravar_perfil_padrao", { entrada });
+    if (typeof padraoMudou === "function") padraoMudou(salvo);
+    anunciar(FRASES_DOS_PERFIS.padrao.salvo);
+    return true;
+  } catch (falha) {
+    if (falha?.Campos) {
+      mostrarErrosDeCampo(falha.Campos.campos);
+      return false;
+    }
+    console.warn("gravar_perfil_padrao:", falha);
+    mostrarErroDoPerfil(fraseDaImagemDoPerfil(falha));
+    return false;
+  } finally {
+    salvar.disabled = false;
+  }
+}
+
 async function mandarOPerfil(entrada) {
   const revisao = revisaoParaGravar();
   const desfecho = esperarODesfechoDoPerfil(entrada, revisao);
@@ -915,6 +1072,7 @@ async function mandarOPerfil(entrada) {
 
 /** RECARREGAR, depois de `RevisaoVelha`: o perfil que vale agora, nos campos. */
 function recarregarOEditorDoPerfil() {
+  if (!editorDoPerfil.aberto || editorDoPerfil.modo !== "oficial") return;
   const atual = perfilOficial(perfisOficiais.me);
   editorDoPerfil.base = { ...textosDoPerfil(atual), revisao: atual?.revisao ?? 0 };
   preencherOEditor(editorDoPerfil.base);

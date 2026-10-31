@@ -291,7 +291,7 @@ pub struct MidiaDeMod {
 }
 
 /// **O teto por arquivo de mídia de um MOD.**
-pub use seele_proto::midia_de_mod::TETO_DE_ARQUIVO as TETO_DE_MIDIA;
+pub use seele_proto::midia_de_mod::TETO_DE_MIDIA;
 
 /// Um formato que o produto reconhece e não aceita (o HEIC), para a recusa
 /// dizer o nome dele — ver [`seele_proto::imagem::reconhecido_e_nao_aceito`].

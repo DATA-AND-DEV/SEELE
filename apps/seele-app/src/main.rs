@@ -51,6 +51,7 @@ mod firewall;
 mod icone;
 mod ligar;
 mod mods;
+mod perfil_padrao;
 // A redução de imagem de MOD mora no `seele-sessao` desde a Tarefa 2.6 da F4.
 use seele_ffi::reducao;
 mod sala;
@@ -11661,6 +11662,221 @@ async fn imagem_do_perfil(
     ))
 }
 
+// ---- o perfil padrão desta máquina (0.19, «Padrão + ajuste por servidor») ---
+//
+// O «Seu perfil» da tela inicial edita o perfil inteiro, e o que se salva ali é
+// o padrão desta máquina (`perfil_padrao.rs`). Quem decide **quando** aplicá-lo
+// a um servidor é a tela (`ui/perfil-padrao.js`), a mesma no desktop e no
+// navegador: ela vê a lista `Perfis` de cada servidor, e é nela que «não tenho
+// perfil aqui» se distingue de «tenho um perfil vazio». Aqui mora o que é desta
+// máquina — o disco, o seletor — e a subida dos bytes guardados.
+
+/// O armazém do padrão, na pasta das preferências.
+fn armazem_do_padrao<R: tauri::Runtime>(app: &AppHandle<R>) -> perfil_padrao::Armazem {
+    perfil_padrao::Armazem::em(std::path::PathBuf::from(config_dir(app)).join("perfil-padrao"))
+}
+
+/// O perfil padrão desta máquina, com as imagens em `data:`. Revisão zero é
+/// «nunca salvo». Sem sessão: é o que a tela inicial edita.
+#[tauri::command]
+fn perfil_padrao(app: AppHandle) -> perfil_padrao::PerfilPadraoNaTela {
+    armazem_do_padrao(&app).na_tela()
+}
+
+/// Grava os textos do padrão, validados pela regra do servidor
+/// (`seele_proto::perfil::validar`): o erro volta **por campo**, antes de
+/// qualquer servidor. Devolve o padrão salvo.
+///
+/// # Errors
+///
+/// `Campos` ou `NaoGravei`.
+#[tauri::command]
+fn gravar_perfil_padrao(
+    app: AppHandle,
+    entrada: seele_ffi::perfis::EntradaDoPerfil,
+) -> Result<perfil_padrao::PerfilPadraoNaTela, perfil_padrao::FalhaNoPadrao> {
+    let armazem = armazem_do_padrao(&app);
+    armazem.gravar_textos(&entrada)?;
+    Ok(armazem.na_tela())
+}
+
+/// O que `escolher_imagem_do_perfil_padrao` fez.
+#[derive(serde::Serialize)]
+struct ImagemDoPadraoEscolhida {
+    /// `false` é ter fechado o seletor sem escolher.
+    escolheu: bool,
+}
+
+/// Abre o seletor e guarda a imagem como a foto ou a capa do padrão,
+/// conferida como num envio (até 10 MiB, o tipo pelos bytes, o HEIC nomeado).
+///
+/// **A foto do padrão também vira o retrato desta máquina** (o ícone nativo de
+/// 8 KiB que sobe em todo `connect`): é o rosto que os servidores 0.18 veem, e
+/// o da pílula da tela inicial. Uma foto que não decodifica aqui deixa o
+/// retrato como estava, e o registro diz.
+///
+/// # Errors
+///
+/// `ImagemGrandeDemais`, `Heic`, `TipoRecusado`, `ImagemVazia`,
+/// `ArquivoIlegivel`, `NaoGravei`.
+#[tauri::command]
+async fn escolher_imagem_do_perfil_padrao(
+    app: AppHandle,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+) -> Result<ImagemDoPadraoEscolhida, perfil_padrao::FalhaNoPadrao> {
+    use seele_ffi::perfis::{ErroDoPerfil, LadoDoPerfil};
+    use tauri_plugin_dialog::DialogExt as _;
+
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title(match lado {
+            LadoDoPerfil::Foto => "Escolha a foto do seu perfil padrão",
+            LadoDoPerfil::Capa => "Escolha a capa do seu perfil padrão",
+        })
+        .pick_file(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(ImagemDoPadraoEscolhida { escolheu: false });
+    };
+    let Ok(caminho) = escolha.into_path() else {
+        return Err(ErroDoPerfil::ArquivoIlegivel.into());
+    };
+    let armazem = armazem_do_padrao(&app);
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        seele_ffi::perfis::ler_o_arquivo_da_imagem(&caminho)
+    })
+    .await
+    .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
+    let para_o_retrato = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
+    armazem.guardar_imagem(lado, &bytes)?;
+    if let Some(bytes) = para_o_retrato {
+        let pronto = tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes))
+            .await
+            .ok()
+            .flatten();
+        match pronto {
+            Some(png) => {
+                if gravar_retrato(&app, Some(&png)).is_err() {
+                    tracing::warn!("a foto do perfil padrão foi guardada, mas o retrato desta máquina não");
+                }
+            }
+            None => tracing::warn!(
+                "a foto do perfil padrão não virou um retrato: os servidores 0.18 seguem vendo o de antes"
+            ),
+        }
+    }
+    Ok(ImagemDoPadraoEscolhida { escolheu: true })
+}
+
+/// Tira a foto ou a capa do padrão. Tirar a foto tira também o retrato desta
+/// máquina, que é feito dela.
+///
+/// # Errors
+///
+/// `NaoGravei`.
+#[tauri::command]
+fn tirar_imagem_do_perfil_padrao(
+    app: AppHandle,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+) -> Result<(), perfil_padrao::FalhaNoPadrao> {
+    let armazem = armazem_do_padrao(&app);
+    let tinha = armazem.ler().foto.is_some();
+    armazem.tirar_imagem(lado)?;
+    if lado == seele_ffi::perfis::LadoDoPerfil::Foto && tinha {
+        gravar_retrato(&app, None)?;
+    }
+    Ok(())
+}
+
+/// O que esta máquina sabe do servidor da sessão e do padrão.
+#[derive(serde::Serialize)]
+struct SeguimentoNaTela {
+    /// A impressão do servidor, que é a chave; `None` quando a conexão ainda
+    /// não a sabe — e então nada é aplicado, porque não haveria onde anotar.
+    servidor: Option<String>,
+    #[serde(flatten)]
+    seguimento: perfil_padrao::Seguimento,
+}
+
+/// Se o servidor da sessão segue o padrão, a revisão aplicada por último e a
+/// assinatura do que foi aplicado. Sem registro, não segue.
+///
+/// # Errors
+///
+/// `NotConnected`, `SessaoNaoConfere`.
+#[tauri::command]
+fn seguimento_do_perfil_padrao(
+    app: AppHandle,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<SeguimentoNaTela, ConnectionError> {
+    let servidor = session.conexao(carimbo)?.impressao_do_servidor();
+    let seguimento = servidor
+        .as_deref()
+        .map(|servidor| armazem_do_padrao(&app).seguimento(servidor))
+        .unwrap_or_default();
+    Ok(SeguimentoNaTela {
+        servidor,
+        seguimento,
+    })
+}
+
+/// Anota, para o servidor da sessão, se ele segue o padrão.
+///
+/// # Errors
+///
+/// `NotConnected`, `SessaoNaoConfere`, `NaoGravei` (inclusive quando a
+/// conexão não sabe a impressão do servidor).
+#[tauri::command]
+fn guardar_seguimento_do_perfil_padrao(
+    app: AppHandle,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    segue: bool,
+    revisao_aplicada: u64,
+    assinatura: Option<String>,
+) -> Result<(), perfil_padrao::FalhaNoPadrao> {
+    let servidor = session
+        .conexao(carimbo)?
+        .impressao_do_servidor()
+        .unwrap_or_default();
+    armazem_do_padrao(&app).guardar_seguimento(
+        &servidor,
+        perfil_padrao::Seguimento {
+            segue,
+            revisao_aplicada,
+            assinatura,
+        },
+    )
+}
+
+/// **Sobe a foto ou a capa do padrão** para o servidor da sessão, como se a
+/// pessoa a tivesse escolhido ali. `hash` é o que o `perfil_padrao` deu: se o
+/// padrão trocou a imagem no meio, volta `Mudou` e nada sobe.
+///
+/// # Errors
+///
+/// `Mudou`, os de `enviar_imagem_do_perfil` (a conferência, o portão de
+/// versão, a recusa do servidor), `NotConnected`.
+#[tauri::command]
+async fn enviar_imagem_do_perfil_padrao(
+    app: AppHandle,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+    hash: String,
+) -> Result<(), perfil_padrao::FalhaNoPadrao> {
+    let conexao = session.conexao(carimbo)?;
+    let armazem = armazem_do_padrao(&app);
+    let bytes = tauri::async_runtime::spawn_blocking(move || armazem.bytes_da_imagem(lado, &hash))
+        .await
+        .map_err(|_| seele_ffi::perfis::ErroDoPerfil::ArquivoIlegivel)??;
+    conexao.enviar_imagem_do_perfil(lado, bytes).await?;
+    Ok(())
+}
+
 /// O relatório da migração dos perfis do MOD PERFIS, para quem hospeda, ou
 /// nada quando não há (ou já foi dispensado). Fica no banco do servidor até ser
 /// dispensado.
@@ -14751,6 +14967,13 @@ fn main() {
             tirar_imagem_do_perfil,
             enviar_imagem_do_perfil,
             imagem_do_perfil,
+            perfil_padrao,
+            gravar_perfil_padrao,
+            escolher_imagem_do_perfil_padrao,
+            tirar_imagem_do_perfil_padrao,
+            seguimento_do_perfil_padrao,
+            guardar_seguimento_do_perfil_padrao,
+            enviar_imagem_do_perfil_padrao,
             ler_relatorio_da_migracao_de_perfis,
             dispensar_relatorio,
             escolher_apelido,

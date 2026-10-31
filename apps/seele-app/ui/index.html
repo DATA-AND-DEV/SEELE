@@ -4492,6 +4492,17 @@
       -->
       <div id="perfil-previa-cartao" class="perfil-previa-cartao" aria-hidden="true" data-so-oficial hidden></div>
       <!--
+        O perfil padrão (0.19, «Padrão + ajuste por servidor», `perfil-padrao.js`):
+        na tela inicial, uma linha diz que o que se edita é o padrão; num
+        servidor, diz se ele segue o padrão, ou por que o padrão não foi
+        aplicado, e USAR MEU PERFIL PADRÃO o aplica de novo e volta a seguir.
+      -->
+      <div id="perfil-padrao-faixa" class="perfil-padrao-faixa" hidden>
+        <p id="perfil-padrao-linha" class="perfil-padrao-linha" role="status"></p>
+        <button id="perfil-padrao-usar" class="botao-fantasma perfil-padrao-usar" type="button"
+                aria-label="Usar meu perfil padrão neste servidor" hidden>Usar meu perfil padrão</button>
+      </div>
+      <!--
         A imagem desta máquina (o ícone nativo de 8 KiB), fora de sessão e num
         servidor 0.18. A prévia é a inicial do apelido quando não há imagem: é
         o que a lista de pessoas desenha para quem não pôs uma.
@@ -5394,6 +5405,7 @@
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
 <script src="perfis.js"></script>
+<script src="perfil-padrao.js"></script>
 <!--
   A moderação depois da operação porque ela lê `mensagens`, que é declarado lá —
   e só de dentro de um manipulador, que é sempre depois de todos os arquivos.

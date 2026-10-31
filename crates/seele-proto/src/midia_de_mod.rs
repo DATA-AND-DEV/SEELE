@@ -61,6 +61,16 @@ impl TipoDeMidia {
 /// esse bolso é guardado e servido, mas não vira mídia na tela.
 pub const TETO_DE_ARQUIVO: usize = 100 * 1024 * 1024;
 
+/// **A maior mídia que um MOD mostra ou toca**: dez MiB, o teto de antes da
+/// 0.19, separado do [`TETO_DE_ARQUIVO`].
+///
+/// Os dois eram o mesmo número, e subir o de arquivo para cem MiB subiu junto
+/// o que a janela aceita decodificar: um MP3 de cem MiB passaria do teto do
+/// som decodificado (o guarda `um_mp3_que_passa_do_teto…` do app pegou), e o
+/// bolso de mídia da superfície continua sendo de dez. Guardar e baixar um
+/// item vai a cem; virar imagem ou som na tela, a dez.
+pub const TETO_DE_MIDIA: usize = 10 * 1024 * 1024;
+
 /// O que estes bytes são, ou nada.
 ///
 /// Nada é a resposta para «não reconheço», e é a mesma para um formato que não

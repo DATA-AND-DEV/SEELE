@@ -1381,9 +1381,12 @@ async function desenharPerfilDaEntrada() {
   // consertou um nível acima.
   const quadrado = $("boot-perfil-inicial");
   quadrado.textContent = (apelido || "?").trim().charAt(0).toUpperCase();
-  let retrato = null;
+  // **A foto do perfil padrão vem primeiro** (0.19, `perfil-padrao.js`): é o
+  // rosto que o «Seu perfil» desta tela edita, e o que cada servidor novo vai
+  // mostrar. Sem ela, o retrato desta máquina, como sempre.
+  let retrato = typeof perfilPadraoAtual === "function" ? (perfilPadraoAtual()?.foto?.url || null) : null;
   try {
-    retrato = await invoke("meu_retrato");
+    retrato ??= await invoke("meu_retrato");
   } catch (falha) {
     console.warn("meu_retrato:", falha);
   }

@@ -99,6 +99,9 @@ const COMANDOS_DA_SESSAO = new Set([
   // são da sessão da vista; uma resposta que chega depois da troca não vale.
   "perfis", "gravar_perfil", "tirar_imagem_do_perfil", "enviar_imagem_do_perfil",
   "imagem_do_perfil",
+  // O perfil padrão (0.19, `perfil-padrao.js`): o registro do servidor da vista
+  // e a subida da foto ou da capa guardadas nesta máquina.
+  "seguimento_do_perfil_padrao", "enviar_imagem_do_perfil_padrao",
 ]);
 
 /** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */

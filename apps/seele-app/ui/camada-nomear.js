@@ -227,9 +227,15 @@ async function abrirPerfil(titulo) {
   }
   $("perfil-apelido").value = apelido;
   // **Os campos do perfil oficial** (0.19, `perfis.js`): com perfis no servidor
-  // da vista, o «Seu perfil» ganha a prévia, a foto, a capa e os textos; sem
-  // eles (fora de sessão, ou num servidor 0.18), é o de sempre.
-  prepararOEditorDoPerfil(snapshot, apelido);
+  // da vista, o «Seu perfil» ganha a prévia, a foto, a capa e os textos. **Fora
+  // de sessão, os mesmos campos editam o perfil padrão desta máquina**
+  // (`perfil-padrao.js`), que vale em cada servidor onde ainda não há perfil.
+  // Num servidor 0.18 — e na pergunta do nome, que é só o nome —, é o de sempre.
+  let padrao = null;
+  if (!snapshot && !perguntandoONome && typeof lerOPerfilPadrao === "function") {
+    padrao = await lerOPerfilPadrao();
+  }
+  prepararOEditorDoPerfil(snapshot, apelido, padrao);
   // **A capa de quem usa no cabeçalho** (D-capa-1, do dono; rascunho da API 6,
   // §4, «o SEU PERFIL nativo, por um aplicador do produto»): dentro de uma
   // sessão, a do `me`; antes de conectar não há pessoa, e a camada sai. Com o
