@@ -138,6 +138,13 @@ v0.18.3. Nem o protocolo 12 nem a API 8 saíram; a v8 segue emendável.
   *Custo se errada:* um conjunto salvo que só troca outro MOD não repete o
   momento (o hash do de máquina não mudou); um MOD de máquina que volte a ser
   ligado depois de desligado ouve `codigo-novo`, e não `servidor-subiu`.
+  **Medido no app de verdade** (31/10, com o MOD `9594797`): Minecraft 26.3
+  de pé na máquina de um membro, PARAR DE HOSPEDAR e HOSPEDAR de novo; o
+  cartão disse «esperando a máquina», o membro reconectou e em 3 s o mesmo
+  processo java foi religado (`fora=28 s`, sem aceite na tela), o túnel
+  respondeu e DESLIGAR parou o jogo. O MOD precisou de um acerto que só o app
+  mostrou: o `MaquinaParou` com `saiu` que chega antes de o servidor descer
+  desligava o servidor de jogo (ver `DECISOES.md` do MOD).
 
 ## As provas dos guardas (revertidos um a um)
 
