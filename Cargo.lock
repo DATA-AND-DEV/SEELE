@@ -5291,6 +5291,9 @@ dependencies = [
  "ed25519-dalek",
  "if-addrs",
  "rand 0.10.2",
+ "rcgen",
+ "reqwest",
+ "rustls",
  "seele-audio",
  "seele-enlace",
  "seele-proto",
@@ -5298,9 +5301,12 @@ dependencies = [
  "seele-video",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2 0.10.9",
  "socket2",
  "thiserror 2.0.19",
  "tokio",
+ "tokio-rustls",
  "tracing",
 ]
 
