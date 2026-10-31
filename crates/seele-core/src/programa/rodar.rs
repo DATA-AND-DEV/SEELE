@@ -241,6 +241,19 @@ impl Programa {
             false,
         )?);
         let pasta = caminho::dentro_da_raiz(&interior.raiz, &pedido.pasta, true)?;
+        // **A pasta é presa** (I1): os argumentos aceitos (`-jar server.jar`)
+        // se leem a partir dela, e o que o aceite prende (`server.jar`) é
+        // conferido a partir da raiz. Numa pasta escolhida pelo MOD, o
+        // `server.jar` seria um que ele escreveu lá.
+        if pedido
+            .pasta
+            .split(['/', '\\'])
+            .any(|p| !p.is_empty() && p != ".")
+        {
+            return Err(Recusa::PastaForaDoAceite {
+                pasta: pedido.pasta.clone(),
+            });
+        }
 
         let mut comando = tokio::process::Command::new(&programa);
         comando

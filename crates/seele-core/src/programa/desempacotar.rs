@@ -32,6 +32,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
+use super::reservado::Escrita;
 use super::{caminho, Programa, Recusa};
 
 /// Quantas entradas um pacote pode ter: um JRE tem uns 300 arquivos; um
@@ -436,6 +437,16 @@ impl Programa {
                 motivo: erro.to_string(),
             }
         };
+        // **O que roda é o que foi aceito** (I1): um pacote que não tem os
+        // bytes de um artefato aceito não troca uma pasta que o aceite prende
+        // (`java/`), nem uma que contém um caminho preso. Por cima, cada
+        // entrada é conferida antes de qualquer uma entrar.
+        let aceito = super::reservado::e_artefato_aceito(&interior.politica, &origem);
+        if !aceito && !pedido.mesclar {
+            interior
+                .presos
+                .conferir(&interior.raiz, &destino, &pedido.destino, Escrita::Troca)?;
+        }
         let mut arquivo = File::open(&origem).map_err(disco(&origem))?;
         let mut magica = [0_u8; 4];
         let lidos = arquivo.read(&mut magica).map_err(disco(&origem))?;
@@ -533,6 +544,18 @@ impl Programa {
                 raiz: pedido.raiz.clone(),
             });
         }
+        if !aceito && pedido.mesclar {
+            if destino.is_dir() {
+                conferir_por_cima(interior, &destino, &pedido.destino, &parcial.caminho)?;
+            } else {
+                interior.presos.conferir(
+                    &interior.raiz,
+                    &destino,
+                    &pedido.destino,
+                    Escrita::Troca,
+                )?;
+            }
+        }
         if pedido.mesclar && destino.is_dir() {
             // Arquivo a arquivo, cada destino conferido de novo contra a
             // raiz: uma pasta do jogo pode ter virado link depois da
@@ -572,6 +595,44 @@ impl Programa {
         );
         Ok(feito)
     }
+}
+
+/// **Cada entrada que vai entrar por cima**, conferida contra o que o aceite
+/// prende (I1) **antes** de qualquer uma entrar: uma recusa no meio deixaria
+/// metade do pacote aplicada.
+fn conferir_por_cima(
+    interior: &super::Interior,
+    destino: &Path,
+    texto: &str,
+    pasta: &Path,
+) -> Result<(), Recusa> {
+    let disco = |erro: std::io::Error| Recusa::Disco {
+        caminho: pasta.to_path_buf(),
+        motivo: erro.to_string(),
+    };
+    for entrada in std::fs::read_dir(pasta).map_err(disco)? {
+        let entrada = entrada.map_err(disco)?;
+        let nome = entrada.file_name();
+        let alvo = destino.join(&nome);
+        let junto = if texto.is_empty() {
+            nome.to_string_lossy().into_owned()
+        } else {
+            format!("{texto}/{}", nome.to_string_lossy())
+        };
+        let e_pasta = entrada.file_type().map_err(disco)?.is_dir();
+        let escrita = if e_pasta {
+            Escrita::Pasta
+        } else {
+            Escrita::Troca
+        };
+        interior
+            .presos
+            .conferir(&interior.raiz, &alvo, &junto, escrita)?;
+        if e_pasta {
+            conferir_por_cima(interior, &alvo, &junto, &entrada.path())?;
+        }
+    }
+    Ok(())
 }
 
 /// Move cada arquivo de `pasta` (sob `base`, a parcial) para o mesmo lugar sob

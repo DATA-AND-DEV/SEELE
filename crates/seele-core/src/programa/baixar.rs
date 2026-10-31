@@ -37,6 +37,7 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::sync::mpsc;
 
 use super::hash::{o_mais_forte, Calculo, HashDeclarado};
+use super::reservado::Escrita;
 use super::{caminho, host_aceito, AlgoritmoDeHash, Interior, Politica, Programa, Recusa};
 
 /// Quantos redirecionamentos um download segue.
@@ -250,7 +251,7 @@ fn conferir_contra_o_aceite(
     pedido: &PedidoDeDownload,
     hash: &HashDeclarado,
     url: &reqwest::Url,
-) -> Result<(), Recusa> {
+) -> Result<bool, Recusa> {
     if let Some(aceito) = politica.artefatos.iter().find(|a| a.url == pedido.url) {
         let pedido_hex = hash.hex.to_ascii_lowercase();
         if aceito.hash.algoritmo != hash.algoritmo
@@ -271,7 +272,7 @@ fn conferir_contra_o_aceite(
                 pedido: pedido.tamanho.to_string(),
             });
         }
-        return Ok(());
+        return Ok(true);
     }
     if politica.de_outros_sistemas.contains(&pedido.url) {
         return Err(Recusa::ArtefatoDeOutroSistema {
@@ -287,7 +288,15 @@ fn conferir_contra_o_aceite(
             origens: politica.origens.clone(),
         });
     }
-    Ok(())
+    // Pela segunda porta, mas com os bytes de um artefato aceito (o mesmo
+    // Java por outra URL): o hash é conferido antes do arquivo aparecer, então
+    // o que fica no disco é o que a tela mostrou.
+    let hex = hash.hex.to_ascii_lowercase();
+    Ok(politica.artefatos.iter().any(|a| {
+        a.tamanho == pedido.tamanho
+            && a.hash.algoritmo == hash.algoritmo
+            && a.hash.hex.to_ascii_lowercase() == hex
+    }))
 }
 
 impl Programa {
@@ -324,8 +333,18 @@ impl Programa {
                     hex: hash.hex,
                 });
             }
-            conferir_contra_o_aceite(&interior.politica, &pedido, &hash, &url)?;
+            let aceito = conferir_contra_o_aceite(&interior.politica, &pedido, &hash, &url)?;
             let destino = caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, false)?;
+            // **O que roda é o que foi aceito** (I1): um arquivo que não é um
+            // artefato aceito não cai sobre o comando nem sobre os argumentos.
+            if !aceito {
+                interior.presos.conferir(
+                    &interior.raiz,
+                    &destino,
+                    &pedido.destino,
+                    Escrita::Troca,
+                )?;
+            }
             Ok((url, hash, destino))
         })();
         let (url, hash, destino) = conferido.map_err(|r| interior.recusar(r))?;

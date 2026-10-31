@@ -124,7 +124,7 @@ async fn esperar_o_primeiro_batimento(arquivo: &Path) {
 #[tokio::test]
 async fn le_a_saida_e_o_erro_escreve_na_entrada_e_diz_o_codigo() {
     let (_p, programa) = programa("eco", &["eco"]);
-    let mut processo = programa.rodar(&pedido(&["eco"], "server")).unwrap();
+    let mut processo = programa.rodar(&pedido(&["eco"], "")).unwrap();
     assert!(processo.pid().is_some());
 
     let mut vistos = vec![proximo(&mut processo).await, proximo(&mut processo).await];
@@ -227,6 +227,10 @@ async fn pasta_fora_da_raiz_e_recusada() {
         ("server/../..", "caminho-com-pai"),
         ("/tmp", "caminho-absoluto"),
         ("C:\\Windows", "caminho-absoluto"),
+        // E uma pasta dentro da raiz também: o comando aceito roda na raiz
+        // (revisão final, I1).
+        ("server", "pasta-fora-do-aceite"),
+        ("server/mundo/", "pasta-fora-do-aceite"),
     ] {
         let recusa = programa.rodar(&pedido(&["eco"], pasta)).unwrap_err();
         assert_eq!(recusa.nome(), nome, "{pasta}: {recusa:?}");
@@ -476,7 +480,7 @@ async fn o_passo_de_instalar_e_um_segundo_comando_aceito_e_so_ele() {
         vec![EventoDoProcesso::Saida("instalado".to_owned())]
     );
 
-    let mut servidor = programa.rodar(&pedido(&["eco"], "server")).unwrap();
+    let mut servidor = programa.rodar(&pedido(&["eco"], "")).unwrap();
     servidor.escrever("sair 0").await.unwrap();
     let _ = esperar_o_fim(&mut servidor).await;
 

@@ -527,6 +527,13 @@ async fn receber(
         ..pedido
     };
     let alvo = caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, false)?;
+    // A cópia do mundo não é um artefato aceito (I1).
+    interior.presos.conferir(
+        &interior.raiz,
+        &alvo,
+        &pedido.destino,
+        super::reservado::Escrita::Troca,
+    )?;
     let pasta = alvo.parent().unwrap_or(&interior.raiz).to_path_buf();
     std::fs::create_dir_all(&pasta).map_err(|erro| Recusa::Disco {
         caminho: pasta.clone(),

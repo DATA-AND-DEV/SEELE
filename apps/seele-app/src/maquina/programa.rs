@@ -360,6 +360,10 @@ pub(crate) fn resposta_da_recusa(n: u64, recusa: &Recusa) -> serde_json::Value {
         Recusa::CopiaNaoBate { esperado, obtido } => {
             serde_json::json!({ "esperado": esperado, "obtido": obtido })
         }
+        Recusa::ReservadoAoAceite { caminho, reservado } => {
+            serde_json::json!({ "caminho": caminho, "reservado": reservado })
+        }
+        Recusa::PastaForaDoAceite { pasta } => serde_json::json!({ "pasta": pasta }),
         _ => serde_json::Value::Null,
     };
     if let (Some(r), Some(campos)) = (r.as_object_mut(), campos.as_object()) {
