@@ -26307,3 +26307,40 @@ confere("sem capa em lugar nenhum, a camada ficou", capa() === "");
 "##,
     );
 }
+
+/// **Um servidor, uma placa** (0.19). O dono viu o servidor que hospeda duas
+/// vezes na trilha: em ABERTAS, com o ícone, e de novo em NO AR, só com a
+/// sigla. Com a conversa no servidor hospedado aberta, o grupo NO AR some; sem
+/// ela, ele continua sendo o caminho até o servidor no ar.
+#[test]
+fn o_servidor_hospedado_aparece_uma_vez_so_na_trilha() {
+    rodar_node(
+        "a trilha sem o servidor repetido",
+        r##"
+const codigo = funcao("camada-sessoes.js", "desenharSessoes");
+confere("desenharSessoes sumiu de camada-sessoes.js", codigo.length > 0);
+const montar = (sessoes) => {
+  const nos = {};
+  const ctx = vm.createContext({
+    $: (id) => (nos[id] ??= { hidden: false, title: "", childElementCount: 0 }),
+    variasSessoes: () => true,
+    sessoesNaTela: sessoes,
+    hospedadoNaTela: { nome: "El Serve Dor", alvo: "seele://127.0.0.1:8383" },
+    repovoar: (no, filhos) => { no.filhos = filhos; },
+    placaDaSessao: (s) => ({ sessao: s }),
+    placaDoHospedado: () => ({ hospedado: true }),
+    desenhado: null,
+    trilhaDesenhada: null,
+  });
+  vm.runInContext(codigo + "\ndesenharSessoes();", ctx);
+  return nos;
+};
+const sozinho = montar([{ onde: "Outro", carimbo: { sessao: 1 } }]);
+confere("hospedando sem conversar nele, o grupo NO AR sumiu", sozinho["trilha-hospedando"].hidden === false && sozinho["trilha-hospedando"].filhos.length === 1);
+const junto = montar([{ onde: "Guardado", carimbo: { sessao: 2 } }]);
+confere("com a conversa no servidor hospedado aberta, NO AR repete o servidor", junto["trilha-hospedando"].hidden === true && junto["trilha-hospedando-titulo"].hidden === true);
+const encerrada = montar([{ onde: "Guardado", encerrada: true, carimbo: { sessao: 3 } }]);
+confere("uma conversa encerrada no hospedado escondeu o caminho até ele", encerrada["trilha-hospedando"].hidden === false);
+"##,
+    );
+}
