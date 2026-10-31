@@ -95,3 +95,16 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   pedido de novo volta `JaAceito` e a metade na conexão nova não é religada até
   a velha cair (o item 4 do achado) — fica, porque só o fim da velha diz que
   ela era zumbi.
+- **Ruling R7 (I6): o portão da ponta conta quem o armou, e a ligação de
+  outra impressão vai a quem a espera.** `PontaDaSessao` ganha um `Balcao`:
+  `passar_a_atender` soma e `parar_de_atender` subtrai, e só o último fecha o
+  portão; cada `atender` deixa ali uma caixa pela impressão que espera, e a
+  ligação que chega com a impressão de outro que atende na mesma ponta vai à
+  caixa dele, em vez de ser fechada como impostora. Vale para os túneis e para
+  a tela emprestada, que passam pelo mesmo `atender`. — Por que não um laço de
+  aceite só por ponta: o mesmo efeito com uma tarefa a mais para viver e
+  morrer com a ponta; com a caixa, quem já espera na fila é quem despacha, e
+  nada roda quando ninguém atende. — Custo: uma ligação que chega com uma
+  impressão esperada por um `atender` que acabou de sair é fechada (como
+  antes), e quem disca tenta de novo até o prazo dele; um `passar_a_atender`
+  sem o seu `parar_de_atender` (só os testes fazem) deixa a ponta armada.

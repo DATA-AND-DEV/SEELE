@@ -66,6 +66,9 @@ pub struct PontaDaSessao {
     ponta: Ponta,
     identidade: CertificadoDtls,
     portao: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// **Quem espera um par nesta ponta** (revisão final, I6): várias
+    /// apresentações ao mesmo tempo dividem uma fila de chegadas e um portão.
+    balcao: std::sync::Arc<crate::par::Balcao>,
 }
 
 impl std::fmt::Debug for PontaDaSessao {
@@ -106,6 +109,11 @@ impl PontaDaSessao {
             .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Quem espera um par nesta ponta ([`crate::par::atender`]).
+    pub(crate) fn balcao(&self) -> &crate::par::Balcao {
+        &self.balcao
+    }
+
     /// Se o portão está aberto.
     #[must_use]
     pub fn armada(&self) -> bool {
@@ -142,6 +150,7 @@ pub(crate) fn abrir_ponta(
         ponta,
         identidade,
         portao,
+        balcao: std::sync::Arc::default(),
     })
 }
 
