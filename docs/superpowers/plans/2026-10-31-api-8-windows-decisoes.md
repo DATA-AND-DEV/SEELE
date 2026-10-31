@@ -124,11 +124,76 @@ hash de cada instalador conferido com o `.sha256` do Maven), código 0 nos dois:
   Ver `DECISOES.md` do MOD (W-mod-1). — Custo: dois jeitos de escrever o
   mesmo Java numa receita.
 
+- **Ruling W7: um arquivo que o jogo trava fica fora do pacote da cópia,
+  contado e nomeado.** Medido no PC Windows: a cópia da reserva
+  (`a_reserva_liga_com_o_mundo_da_principal`) caía nos quatro loaders com
+  `os error 33` (`ERROR_LOCK_VIOLATION`) — e a recusa nomeava o pacote
+  (`copias/mundo.tar.gz`), quando o arquivo que não se lia era o
+  `world/session.lock`, que o Minecraft segura com uma trava de intervalo
+  enquanto roda (no Mac e no Linux a trava é só aviso, e a leitura passa).
+  `empacotar` agora lê o primeiro byte de cada arquivo antes de escrever o
+  cabeçalho: falha por trava (32/33, só no Windows) deixa o arquivo de fora,
+  em `travados_pulados`/`travados` (até 16 nomes) e num `WARN`; qualquer
+  outra falha de leitura recusa com o caminho **do arquivo lido**. O
+  resultado JS ganha `travadosPulados` e `travados`. Provado: o teste
+  `o_arquivo_que_o_jogo_trava_fica_de_fora_e_e_dito` (roda nos dois
+  sistemas, cada metade no seu; revertido no Windows, falha com
+  `Disco { caminho: …\world\session.lock, os error 33 }`), e a prova B
+  real afirma que, no Windows, os travados são exatamente
+  `["world/session.lock"]` nos quatro loaders. — Por que pular, e não
+  recusar: o `session.lock` não é dado do mundo (a reserva cria o dela ao
+  subir), e copiar um arquivo que o dono trava sairia torto de qualquer
+  jeito; dizer o nome mantém a falha visível. — Custo: um jogo que trave
+  um arquivo de dado de verdade manda à reserva um mundo sem ele — dito no
+  resultado e no log, mas o MOD de multiplayer não o mostra na tela.
+
+## Medido no Windows de verdade (31/10/2026)
+
+PC do dono: Windows 11 (10.0.26300) x64, AMD Ryzen 7 5800X3D, 64 GB, VS Build
+Tools 2026, Rust 1.97.1 msvc. O código foi por `git bundle` (SEELE
+`077f5b68`, MOD `8f564f2`), tudo dentro de `C:\Users\aleta\seele-medida\`.
+O `seele-core`, o `seele-app` e o `seele-conformance` compilaram lá sem nada
+instalado a mais.
+
+- **Testes do `programa`, no Windows**: `seele-core --lib programa` 44/44
+  (com o `#[cfg(windows)]` `o_filho_entra_na_tarefa_e_morre_com_ela`),
+  `programa_processo` 13/13 (com `parar_mata_os_netos_por_todos_os_caminhos`,
+  agora fora do `cfg(unix)`), `programa_arquivos` 12/12, `programa_https`
+  2/2, `programa_copia` 10/10; `clippy -p seele-core --tests` limpo.
+- **Prova por reversão do W3 no Windows**: com a tarefa desligada,
+  `parar_mata_os_netos…` falha («matar: o neto seguiu batendo depois de o
+  filho parar»), e o `servidor.exe` neto ficou vivo (pai já morto) até ser
+  morto à mão — e segurando o pipe, o runtime do teste não terminou (637 s).
+- **A (a metade de máquina de verdade, app + MOD), os quatro**: Vanilla
+  1.21.4 pronto 5,4 s, túnel 18,5 s, parada 1,33 s; Fabric 0.16.14 (2 mods)
+  instalando 5,2 s, pronto 6,5 s, túnel 27,6 s, parada 1,13 s; **Forge
+  1.20.1-47.4.28** rodou `java/bin/java.exe -jar forge-installer.jar
+  --installServer` e `java/bin/java.exe -Xms1G -Xmx2G
+  @libraries/net/minecraftforge/forge/1.20.1-47.4.28/win_args.txt nogui`,
+  pronto 27,8 s, Done 11,2 s, túnel 52,2 s, 2 mods, parada 2,44 s;
+  **NeoForge 21.1.265** o mesmo com o `win_args.txt` dele, pronto 26,9 s,
+  túnel 41,9 s, parada 1,21 s. O Java baixado foi o da Adoptium
+  `windows-x64` (17.0.20.1 e 21.0.13). **A árvore**: cada `java.exe` (e o do
+  instalador) abre um `conhost.exe`; depois da parada pelo dono, nenhum
+  processo da árvore vivo (o teste agora reprova se houver), e `tasklist`
+  sem `java.exe` depois de cada prova.
+- **B (o túnel de verdade, e a reserva), os quatro**: status pelo direto e
+  pela estrela (3,8–9 ms depois do primeiro), `encerrar_tudo` matou 1
+  processo em 47–66 ms; a reserva ligou com o mundo da principal (o placar
+  `prova has 42 [reserva]`) em 10,7 s (Vanilla), 18,5 s (Fabric), 18,9 s
+  (Forge), 14,3 s (NeoForge), cópia pelo direto em 34–39 ms, com
+  `["world/session.lock"]` como o único travado. Antes do W7, as quatro
+  reservas caíam no `os error 33`.
+- **Não medido no Windows**: um cliente de Minecraft entrando (conta
+  Microsoft), REVOGAR pela tela do app (passa pelo mesmo `Grupo::matar` que
+  o DESLIGAR medido em A), o app caindo sem soltar o `Programa` (o
+  `KILL_ON_JOB_CLOSE` deveria matar a tarefa; não provado), e Quilt.
+
 ## O que não roda neste Mac
 
 - `cargo check --target x86_64-pc-windows-msvc -p seele-core` **não
-  compila daqui**: o `ring` (e o `openh264`, e o `opus`) compilam C para o
+  compila do Mac**: o `ring` (e o `openh264`, e o `opus`) compilam C para o
   alvo, e o `cc` do Mac não tem os cabeçalhos do MSVC (`'assert.h' file not
-  found`). O código do Windows foi compilado e medido no PC Windows (abaixo).
+  found`). O código do Windows foi compilado e medido no PC Windows (acima).
 - O `o_filho_entra_na_tarefa_e_morre_com_ela` é `#[cfg(windows)]`: no Mac
-  ele não existe, e não conta como prova aqui.
+  ele não existe; rodou no PC Windows (acima).
