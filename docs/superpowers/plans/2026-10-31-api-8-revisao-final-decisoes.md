@@ -85,3 +85,13 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   conta; contar pelo que está vivo fecha os dois. — Custo: um parcial deixado
   por um app que caiu passa a contar no teto até alguém o apagar (o lado
   seguro); um nome de arquivo com `:` no Mac ou no Linux é recusado também.
+- **Ruling R6 (I7): a conexão velha que cai de quem segue aqui por outra
+  publica `Voltou` logo depois do `Parou`.** `Maquinas::voltas_de_quem_segue`
+  tira de `ausentes` os lugares de quem ainda tem uma conexão no 12, e
+  `maquinas::saiu` os publica; o prazo da máquina que sumiu abre como antes
+  (é o mesmo par `Parou` → prazo → `Voltou` da volta comum). — Por que aqui, e
+  não no `chegou`: o `chegou` da conexão nova rodou com o lugar ocupado, e
+  nada mais roda depois. — Custo: enquanto a velha ainda vive (o zumbi), um
+  pedido de novo volta `JaAceito` e a metade na conexão nova não é religada até
+  a velha cair (o item 4 do achado) — fica, porque só o fim da velha diz que
+  ela era zumbi.

@@ -799,6 +799,21 @@ impl Maquinas {
             .collect()
     }
 
+    /// **Quem saiu por uma conexão e segue aqui por outra** (revisão final,
+    /// I7): a pessoa que piscou abre a conexão nova antes de a velha ser dada
+    /// por morta, e o `chegou` dela rodou com o lugar ainda ocupado — o
+    /// `voltou` dali não tinha o que dizer. Quando a velha enfim cai, os
+    /// lugares que ela deixou são de alguém que **já está aqui**: saem de
+    /// `ausentes` agora, para o `MaquinaVoltou` sair junto do `Parou`, em vez
+    /// de esperar uma chegada que já aconteceu.
+    pub fn voltas_de_quem_segue(&mut self, quem: PersonId) -> Vec<(String, String, Papel)> {
+        if self.no_doze.contains_key(&quem) {
+            self.voltou(quem)
+        } else {
+            Vec::new()
+        }
+    }
+
     /// **O prazo da máquina que sumiu venceu**: se o lugar ainda está vazio e
     /// na mesma vez de quando ela saiu, devolve `true` — ela não voltou nem foi
     /// trocada. É o que decide se `MaquinaSumiu` sai.
@@ -1531,10 +1546,11 @@ pub fn lembrar_a_recusa(
 /// a metade de servidor fica sabendo (`Parou { saiu }`). Os túneis são de
 /// `Tuneis::saiu`, que os encerra com `MaquinaSaiu`.
 pub fn saiu(server: &Arc<Server>, quem: PersonId, conexao: u64) {
-    let (sairam, caidos) = {
+    let (sairam, caidos, seguem) = {
         let mut livro = server.maquinas();
         let sairam = livro.saiu(quem, conexao);
-        (sairam, livro.sem_quem_veja(quem))
+        let caidos = livro.sem_quem_veja(quem);
+        (sairam, caidos, livro.voltas_de_quem_segue(quem))
     };
     for (mod_id, servidor, papel, motivo) in caidos {
         let nome = seele_proto::maquina::nome_da_recusa(&motivo);
@@ -1564,6 +1580,18 @@ pub fn saiu(server: &Arc<Server>, quem: PersonId, conexao: u64) {
             },
         );
         abrir_o_prazo(server, mod_id, servidor, papel, quem, "saiu", vez);
+    }
+    for (mod_id, servidor, papel) in seguem {
+        tracing::info!(mod_id = %mod_id, servidor = %servidor, papel = papel.nome(), quem = %quem, conexao, "máquina: a conexão velha de quem operava caiu, e a pessoa segue por outra; a metade de servidor decide");
+        publicar(
+            server,
+            MudancaDeMaquina::Voltou {
+                mod_id,
+                servidor,
+                papel,
+                quem,
+            },
+        );
     }
 }
 

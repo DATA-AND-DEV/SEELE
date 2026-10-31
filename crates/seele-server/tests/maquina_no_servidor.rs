@@ -1214,6 +1214,45 @@ async fn quem_operava_com_um_pedido_novo_recebe_uma_dispensa_so() -> Result<()> 
     Ok(())
 }
 
+/// **Quem volta antes de a conexão velha morrer ainda é dito** (revisão
+/// final, I7): Alice opera pela conexão 1 e abre a 2 (o app que piscou)
+/// antes de a 1 cair. Quando a 1 cai, a metade de servidor ouve `Parou` **e**
+/// `Voltou` — antes, só `Parou`, e `MaquinaSumiu` vinha no prazo para quem
+/// estava ali.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_volta_antes_da_conexao_velha_morrer_e_dito() -> Result<()> {
+    use seele_server::maquinas::MudancaDeMaquina;
+    use seele_server::server::Event;
+    let m = montar().await?;
+    let gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut alice = entrar(m.endereco, ALICE, 12).await?;
+    let resumo = pedir(&m, alice.pessoa, gestora.pessoa);
+    aceitar(&m, &mut alice, &resumo).await?;
+    let _alice_de_novo = entrar(m.endereco, ALICE, 12).await?;
+    let alice_id = alice.pessoa;
+    let mut eventos = m.daemon.server().events.subscribe();
+    drop(alice);
+    let mut parou = false;
+    let mut voltou = false;
+    let fim = Instant::now() + PRAZO;
+    while Instant::now() < fim && !voltou {
+        match tokio::time::timeout(Duration::from_millis(200), eventos.recv()).await {
+            Ok(Ok(Event::Maquina(MudancaDeMaquina::Parou { quem, .. }))) if quem == alice_id => {
+                parou = true;
+            }
+            Ok(Ok(Event::Maquina(MudancaDeMaquina::Voltou { quem, .. }))) if quem == alice_id => {
+                assert!(parou, "o Voltou veio antes do Parou");
+                voltou = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(parou, "a conexão velha caiu e o Parou não saiu");
+    assert!(voltou, "Alice segue aqui por outra conexão e o Voltou não saiu");
+    m.daemon.shutdown();
+    Ok(())
+}
+
 /// **O servidor que para o túnel diz à máquina** (revisão final, I4): um
 /// pedido a outra pessoa dispensa Alice e para o túnel que ela servia; quem jogava ouve
 /// `MaquinaParou`, **e Alice também** — sem isso a máquina dela seguia
