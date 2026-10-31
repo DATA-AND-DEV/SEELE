@@ -391,6 +391,27 @@
   :where(:root[data-casca="celular"]) .amigo-codigo { font-size: calc(12px * var(--cel-escala)); }
 }
 
+/* camada-hospedando.css */
+:where(:root[data-casca="celular"]) .hospedando-rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .hospedando-titulo { font-size: calc(32px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .hospedando-passo-nome { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .hospedando-passo-detalhe { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .hospedando-erro { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .hospedando-nota { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .hospedando-acoes > button { font-size: calc(15px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .hospedando-titulo { font-size: calc(24px * var(--cel-escala)); }
+}
+
+/* camada-sair-da-espera.css */
+:where(:root[data-casca="celular"]) .sair-espera-rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .sair-espera-titulo { font-size: calc(32px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .sair-espera-itens > li { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .sair-espera-acoes > button { font-size: calc(15px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .sair-espera-titulo { font-size: calc(24px * var(--cel-escala)); }
+}
+
 /* camada-moderar.css */
 :where(:root[data-casca="celular"]) .moderar-eyebrow { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-kanji { font-size: calc(32px * var(--cel-escala)); }
@@ -874,6 +895,12 @@
 :where(:root[data-casca="celular"]) .auth-parede { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-espera-frase { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-espera-fatos { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-espera-rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-espera-titulo { font-size: calc(44px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-espera-nao-e-erro { font-size: calc(17px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .auth-espera-titulo { font-size: calc(32px * var(--cel-escala)); }
+}
 :where(:root[data-casca="celular"]) .auth-servidor-cabecalho { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-server-nome { font-size: calc(26px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-server-sub { font-size: calc(11px * var(--cel-escala)); }

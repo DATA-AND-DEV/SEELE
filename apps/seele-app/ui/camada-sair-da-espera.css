@@ -1,0 +1,141 @@
+/* SEELE — sair da sala de espera (`#sair-da-espera`, 0.19;
+   `camada-sair-da-espera.js`).
+
+   A caixa do canvas da 0.19 (a do aceite, `camada-maquina.css`): opaca, 32px
+   de raio, a linha miúda com a marca, o título em Inter Tight e as ações à
+   direita, com a primária laranja. Laranja e não vermelho: esperar não é falha
+   nem queda, e sair também não (`tokens.css` guarda o vermelho para essas).
+
+   Oitenta e oito: acima da `#tela-auth` e de toda camada de MOD (60 e 70), e
+   abaixo do aceite da máquina (90), que é do produto e pede resposta própria.
+
+   Toda classe começa por `sair-espera-` ou `camada-sair-da-espera`. Nenhuma
+   cor literal: só tokens. */
+
+.camada-sair-da-espera {
+  position: fixed;
+  inset: 0;
+  z-index: 88;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.camada-sair-da-espera[hidden] { display: none; }
+
+.camada-sair-da-espera::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.85;
+}
+
+.sair-espera-caixa {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 620px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 36px 44px 32px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: 32px;
+  background: var(--seele-negro-painel);
+  font-family: var(--seele-ui);
+}
+
+.sair-espera-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.sair-espera-logo { width: 24px; height: 24px; flex: 0 0 auto; }
+.sair-espera-logo-cheio { fill: var(--seele-laranja-nerv); }
+.sair-espera-logo-vazio { fill: none; stroke: var(--seele-laranja-nerv); stroke-width: 6; }
+.sair-espera-logo-traco { fill: none; stroke: var(--seele-osso); stroke-width: 6; }
+
+.sair-espera-rotulo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+.sair-espera-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 32px;
+  line-height: 1.12;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+/* Cada consequência numa linha com o quadrado da marca em miniatura. A
+   primeira, «nada deu errado», é a que a pessoa veio perguntar: em destaque. */
+.sair-espera-itens {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sair-espera-itens > li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+
+.sair-espera-itens > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+}
+
+.sair-espera-itens > li:first-child {
+  color: var(--seele-osso);
+  font-weight: 600;
+}
+.sair-espera-itens > li:first-child::before { background: var(--seele-laranja-nerv); }
+
+.sair-espera-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.sair-espera-acoes > button {
+  min-height: 52px;
+  padding: 0 22px;
+  font-size: 15px;
+}
+
+@media (max-width: 700px) {
+  .camada-sair-da-espera { padding: 12px; align-items: flex-end; }
+  .sair-espera-caixa { padding: 24px 20px 20px; border-radius: var(--seele-raio-painel); gap: 14px; max-height: calc(100dvh - 24px); }
+  .sair-espera-titulo { font-size: 24px; }
+  .sair-espera-acoes { flex-direction: column-reverse; }
+  .sair-espera-acoes > button { min-height: 48px; }
+}

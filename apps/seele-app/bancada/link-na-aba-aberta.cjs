@@ -64,7 +64,7 @@ const {origemDoProduto} = require('./origem-do-produto.cjs');
         await consentimento(3);
         await page.locator('#cel-entrada-apelido').fill('bancada link');
         await page.getByRole('button', { name: 'ENTRAR', exact: true }).click();
-        await page.getByText('QUEM HOSPEDA AINDA NÃO DECIDIU', { exact: true }).waitFor();
+        await page.locator('.cel-entrada-espera-titulo', { hasText: 'Esperando a aprovação de quem hospeda' }).waitFor();
         assert.equal(await page.evaluate(() => entradas[0].endereco), '192.0.2.3:8383');
         assert.equal(await page.evaluate(() => entradas[0].token), 'AB'.repeat(32));
         await page.evaluate(() => { entradas.length = 0; });

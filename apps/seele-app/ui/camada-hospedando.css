@@ -1,0 +1,206 @@
+/* SEELE — hospedando (`#hospedando`, 0.19; `camada-hospedando.js`).
+
+   A caixa do canvas da 0.19 (a do aceite, `camada-maquina.css`: opaca, 32px de
+   raio, a linha miúda com a marca, o título em Inter Tight e as ações à
+   direita), com a lista de etapas dos «Detalhes da conexão» do `Auth.dc.html`:
+   o ponto laranja que pulsa no passo que anda, o verde-fósforo no que fechou, o
+   quadrado apagado no que ainda não começou e o vermelho só no que falhou.
+
+   Os marcadores são desenho (`::before`), e não glifos: a face de dados não
+   tem ✓ nem ●, e um glifo que ela não tem cai na monoespaçada do sistema.
+
+   Vinte e dois: acima da entrada, e abaixo da porta (25), do nome (26) e do
+   aceite dos MODs (27) — as perguntas que a entrada pode fazer no meio passam
+   por cima dela.
+
+   Toda classe começa por `hospedando-` ou `camada-hospedando`. Nenhuma cor
+   literal: só tokens. */
+
+.camada-hospedando {
+  position: fixed;
+  inset: 0;
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.camada-hospedando[hidden] { display: none; }
+
+.camada-hospedando::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.85;
+}
+
+.hospedando-caixa {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 640px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 36px 44px 32px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: 32px;
+  background: var(--seele-negro-painel);
+  font-family: var(--seele-ui);
+  outline: none;
+}
+
+.hospedando-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.hospedando-logo { width: 24px; height: 24px; flex: 0 0 auto; }
+.hospedando-logo-cheio { fill: var(--seele-laranja-nerv); }
+.hospedando-logo-vazio { fill: none; stroke: var(--seele-laranja-nerv); stroke-width: 6; }
+.hospedando-logo-traco { fill: none; stroke: var(--seele-osso); stroke-width: 6; }
+/* O traço da marca pulsa enquanto algo anda, como o enlace do «Reconectando». */
+.camada-hospedando[data-fase="subindo"] .hospedando-logo-traco,
+.camada-hospedando[data-fase="entrando"] .hospedando-logo-traco {
+  stroke-dasharray: 4 6;
+  animation: hospedando-pulso 1.4s ease-in-out infinite;
+}
+
+.hospedando-rotulo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+.hospedando-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 32px;
+  line-height: 1.12;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+.hospedando-passos {
+  margin: 0;
+  padding: 16px 20px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-osso) 9%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--seele-osso) 3.5%, transparent);
+}
+
+.hospedando-passo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 24px;
+}
+
+/* O marcador: um quadrado da marca em miniatura, e o estado pela forma e pela
+   cor juntas (`data-estado` também é dito no texto do detalhe). */
+.hospedando-passo::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  border: var(--seele-b) solid var(--seele-osso-apagado);
+}
+.hospedando-passo[data-estado="andando"]::before {
+  border-color: var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-laranja-nerv);
+  animation: hospedando-pulso 1.4s ease-in-out infinite;
+}
+.hospedando-passo[data-estado="feito"]::before {
+  border-color: var(--seele-fosforo);
+  background: var(--seele-fosforo);
+}
+.hospedando-passo[data-estado="falhou"]::before {
+  border-color: var(--seele-vermelho-alerta);
+  background: var(--seele-vermelho-alerta);
+}
+
+.hospedando-passo-nome {
+  font-family: var(--seele-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--seele-osso);
+}
+.hospedando-passo[data-estado="antes"] .hospedando-passo-nome { color: var(--seele-osso-apagado); }
+
+.hospedando-passo-detalhe {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+.hospedando-passo-detalhe:empty { display: none; }
+
+.hospedando-erro {
+  margin: 0;
+  padding: 12px 16px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent);
+  border-radius: var(--seele-raio);
+  background: color-mix(in srgb, var(--seele-vermelho-fraco) 85%, var(--seele-negro-absoluto));
+  color: var(--seele-osso);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.hospedando-nota {
+  margin: 0;
+  color: var(--seele-osso-apagado);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hospedando-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.hospedando-acoes > button {
+  min-height: 52px;
+  padding: 0 22px;
+  font-size: 15px;
+}
+
+@keyframes hospedando-pulso {
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hospedando-passo[data-estado="andando"]::before,
+  .camada-hospedando .hospedando-logo-traco { animation: none; }
+}
+
+@media (max-width: 700px) {
+  .camada-hospedando { padding: 12px; }
+  .hospedando-caixa { padding: 24px 20px 20px; border-radius: var(--seele-raio-painel); gap: 14px; max-height: calc(100dvh - 24px); }
+  .hospedando-titulo { font-size: 24px; }
+  .hospedando-acoes > button { flex: 1 1 140px; min-height: 48px; }
+}

@@ -11348,12 +11348,17 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // **E a exceção do `onCloseRequested`** (tarefa 21 da F7, decidida pela
     // orquestradora em 10/10, no molde da do `beforeunload`): fechar o SEELE com
     // o servidor guardado no ar tira todo mundo dele, e a página pergunta antes.
+    // **E, desde 31/10, com um pedido esperando na portaria de alguém** (decisão
+    // do dono, que substitui neste caso a regra do spec de 23/09, «a confirmação
+    // ao fechar vale só para o servidor guardado»; `docs/0.19/decisoes.md`):
+    // «muita gente confunde a espera com não ter dado certo».
     // O `close-requested` cru continua proibido. Cada chamada do `onCloseRequested`
-    // (direta ou `?.(`) tem de
-    // mostrar, **antes** do `preventDefault`: as duas credenciais esquecidas
-    // (`fecharAceiteDeMods()` e `esquecerARecusaDoApelido()`), e o veto só com o
-    // servidor guardado no ar: `invoke("meu_servidor")`, **depois** o `return`
-    // sem ele, e só então o `preventDefault`.
+    // (direta ou `?.(`) tem de mostrar, **antes** de todo `preventDefault`: as
+    // duas credenciais esquecidas (`fecharAceiteDeMods()` e
+    // `esquecerARecusaDoApelido()`) e a pergunta `invoke("meu_servidor")`. E o
+    // veto só em dois lugares: dentro do `if (!meu) {`, depois de
+    // `if (!esperaPendenteNaTela()) return;`, com o bloco terminando em
+    // `return;`; ou depois dele, com o servidor no ar.
     for nome in ui_files(".js") {
         let texto = without_comments(&read(&format!("ui/{nome}")));
         assert!(
@@ -11416,28 +11421,67 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 "fecharAceiteDeMods()",
                 "esquecerARecusaDoApelido()",
                 "invoke(\"meu_servidor\")",
-                "if (!meu) return;",
             ] {
                 assert!(
                     ouvinte.find(antes).is_some_and(|onde| onde < segura),
                     "`{nome}` segura o fechar da janela sem `{antes}` antes do \
                      `preventDefault`: ou a credencial da tentativa sobrevive na página \
-                     segurada, ou o fechar é segurado sem o servidor guardado no ar \
-                     (tarefa 21 da F7):\n{ouvinte}"
+                     segurada, ou o veto não sabe se há servidor no ar (tarefa 21 da \
+                     F7):\n{ouvinte}"
                 );
             }
-            // O `return` sem servidor só confere algo **depois** da pergunta: um
-            // escrito antes dela não sabe se há servidor, e o veto passa a
-            // depender do que `meu` valia antes.
+            // **Onde o veto pode estar.** O bloco sem servidor, pelas chaves
+            // balanceadas, depois da pergunta; dentro dele, só depois da
+            // conferência da espera pendente; e ele termina em `return;`, para o
+            // veto de baixo (o do servidor no ar) nunca rodar sem servidor.
             let pergunta = ouvinte.find("invoke(\"meu_servidor\")");
-            let sem_servidor = ouvinte.find("if (!meu) return;");
+            let Some(sem_meu) = ouvinte.find("if (!meu) {") else {
+                panic!(
+                    "`{nome}`: o ouvinte do fechar não tem o bloco sem servidor \
+                     (`if (!meu) {{`), e o veto pode acontecer sem servidor nem espera \
+                     (tarefa 21 da F7; decisão de 31/10):\n{ouvinte}"
+                );
+            };
             assert!(
-                pergunta.zip(sem_servidor).is_some_and(|(p, r)| p < r),
-                "`{nome}` sai do ouvinte do fechar (`if (!meu) return;`) antes de \
-                 perguntar se há servidor no ar (`invoke(\"meu_servidor\")`): o `return` \
-                 não confere nada, e o fechar pode ser segurado sem o servidor guardado \
-                 no ar (tarefa 21 da F7):\n{ouvinte}"
+                pergunta.is_some_and(|p| p < sem_meu),
+                "`{nome}` decide sem servidor (`if (!meu) {{`) antes de perguntar \
+                 (`invoke(\"meu_servidor\")`):\n{ouvinte}"
             );
+            let abre = sem_meu + "if (!meu) ".len();
+            let mut fundura = 0usize;
+            let fecha = ouvinte[abre..]
+                .char_indices()
+                .find_map(|(onde, c)| {
+                    match c {
+                        '{' => fundura += 1,
+                        '}' => {
+                            fundura -= 1;
+                            if fundura == 0 {
+                                return Some(abre + onde);
+                            }
+                        }
+                        _ => {}
+                    }
+                    None
+                })
+                .unwrap_or(ouvinte.len());
+            let bloco = &ouvinte[abre..fecha];
+            assert!(
+                bloco.trim_end().ends_with("return;"),
+                "`{nome}`: o bloco sem servidor do fechar não termina em `return;`, e o \
+                 veto do servidor no ar roda sem servidor:\n{bloco}"
+            );
+            let espera = bloco.find("if (!esperaPendenteNaTela()) return;");
+            for (onde, _) in ouvinte.match_indices("preventDefault") {
+                let dentro = onde > abre && onde < fecha;
+                assert!(
+                    if dentro { espera.is_some_and(|e| abre + e < onde) } else { onde > fecha },
+                    "`{nome}` segura o fechar sem servidor no ar e sem pedido pendente na \
+                     portaria: o veto sem servidor só vale depois de \
+                     `if (!esperaPendenteNaTela()) return;` (decisão do dono, 31/10), e \
+                     o outro só depois do bloco sem servidor (tarefa 21 da F7):\n{ouvinte}"
+                );
+            }
         }
         for (em, _) in texto.match_indices("\"beforeunload\"") {
             let ouvinte = &texto[em..];
@@ -23190,7 +23234,8 @@ confere("a entrada não mostra o ENTRAR antes de tocar", Boolean(entrar()));
 await entrar().onclick({});
 await tick(); await tick();
 confere("a espera da portaria caiu em «RECUSOU A ENTRADA»: " + corpo.texto().slice(0, 120), !/RECUSOU A ENTRADA/.test(corpo.texto()));
-confere("a espera não diz que quem hospeda ainda não decidiu: " + corpo.texto().slice(0, 160), /AINDA NÃO DECIDIU/.test(corpo.texto()));
+// Desde 31/10 (decisão do dono), o título da espera diz que só falta a aprovação.
+confere("a espera não diz que só espera a aprovação de quem hospeda: " + corpo.texto().slice(0, 160), /Esperando a aprovação de quem hospeda/.test(corpo.texto()));
 confere("a espera não diz que ENTRAR de novo entra: " + corpo.texto().slice(0, 240), /ENTRAR de novo/.test(corpo.texto()) && /convite não foi gasto/.test(corpo.texto()));
 confere("a espera tirou o ENTRAR", Boolean(entrar()));
 
@@ -27895,4 +27940,168 @@ fn the_people_list_does_not_write_transmitindo_but_still_says_it() {
         estados.contains("\"TRANSMITINDO\"") && estados.contains("dataset.estado"),
         "the word is still written, for the screen reader and the person's modal"
     );
+}
+
+/// **Do clique em HOSPEDAR até a sessão, a janela diz o que está fazendo** (0.19;
+/// pedido do dono: «tela de loading quando clicar em hospedar um server»).
+///
+/// O `hospedar` do Rust leva segundos (a cópia, o servidor e a escada da porta,
+/// com prazos de 1 a 3 s por degrau), e a entrada ficava parada e calada durante
+/// eles. Quatro metades, cada uma calada se se perde: a caixa abre **antes** do
+/// `invoke("hospedar")`; um segundo `hospedar()` volta antes de abrir outra (o
+/// HOSPEDAR do fim da tela ANTES DE HOSPEDAR, a lista e o lançador também
+/// chegam aqui); o primeiro passo fecha com o que o Rust devolveu; e a falha é
+/// dita na caixa, com o que ficou no ar perguntado ao `meu_servidor`. O
+/// comportamento é medido em `bancada/espera-e-carregando.cjs`.
+#[test]
+fn hospedar_diz_cada_passo_e_a_falha_de_cada_um_e_um_por_vez() {
+    let boot = read("ui/tela-boot.js");
+    let corpo = js_function(&boot, "async function hospedar(");
+    let abre = corpo.find("abrirHospedando()").expect("hospedar() não abre a caixa de hospedando");
+    let sobe = corpo.find("invoke(\"hospedar\"").expect("hospedar() não chama o Rust");
+    assert!(abre < sobe, "a caixa abre depois de o servidor subir, e a espera continua calada");
+    let um = corpo.find("if (hospedandoAgora)").expect("hospedar() não se recusa a correr duas vezes");
+    assert!(um < abre, "a recusa do segundo hospedar() vem depois de ele abrir a caixa");
+    let marca = corpo.find("hospedandoAgora = true").expect("hospedar() não marca que está em curso");
+    assert!(um < marca && marca < sobe);
+    let desmarca = corpo.rfind("hospedandoAgora = false").expect("hospedar() nunca devolve a vez");
+    assert!(corpo[..desmarca].contains("finally"), "a vez só volta no `finally`, ou uma falha a prende");
+    let subiu = corpo.find("servidorDeHospedarSubiu(").expect("o passo 1 nunca fecha");
+    assert!(sobe < subiu, "o passo 1 fecha antes de o Rust responder");
+    let falha = corpo.find("catch (falha)").expect("hospedar() perdeu o catch");
+    let dita = &corpo[falha..];
+    assert!(
+        dita.contains("invoke(\"meu_servidor\")") && dita.contains("hospedagemFalhou("),
+        "a falha de hospedar não chega à caixa, ou chega dizendo o que ficou no ar sem perguntar"
+    );
+    assert!(
+        corpo.contains("hospedagemFalhou(\"entrar\""),
+        "a entrada que parou depois de o servidor subir não é dita na caixa"
+    );
+
+    // A caixa não é diálogo de fechar apertando fora: sairia com o servidor
+    // subindo por baixo. E ela tranca o que está atrás.
+    let pagina = read("ui/index.html");
+    let caixa = tag_with_id(&pagina, "hospedando");
+    assert!(!caixa.contains("role=\"dialog\""), "a caixa de hospedando virou diálogo: {caixa}");
+    let camada = read("ui/camada-hospedando.js");
+    assert!(
+        js_function(&camada, "function abrirHospedando(").contains("$(\"tela-boot\").inert = true"),
+        "a entrada continua clicável por baixo da caixa de hospedando"
+    );
+    assert!(
+        js_function(&camada, "function fecharHospedando(").contains("$(\"tela-boot\").inert = false"),
+        "fechar a caixa deixa a entrada inerte"
+    );
+}
+
+/// **Sair de uma espera pendente pergunta antes** (0.19; pedido do dono: «um
+/// aviso quando uma pessoa tentar sair da tela de espera quando aguarda
+/// aprovação, para ela não pensar que deu errado»).
+///
+/// Os caminhos de saída de cada casca passam pela pergunta: o VOLTAR À ENTRADA
+/// e o Esc da `#tela-auth`, e o AGORA NÃO e o ‹ VOLTAR da «ENTRAR EM» do
+/// celular. O padrão é ficar (o foco nasce no CONTINUAR ESPERANDO), a caixa diz
+/// que nada deu errado, e a espera do celular deixou de vestir o vermelho do
+/// erro. A tela de espera diz, ela mesma, que esperar é normal.
+#[test]
+fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
+    let auth = without_comments(&read("ui/tela-auth.js"));
+    assert!(
+        auth.contains("$(\"auth-voltar\").addEventListener(\"click\", sairDaEspera);"),
+        "o VOLTAR À ENTRADA sai da espera sem perguntar"
+    );
+    let sair = js_function(&auth, "function sairDaEspera(");
+    assert!(
+        sair.contains("esperaPendenteNaTela()") && sair.contains("perguntarAntesDeSairDaEspera(\"sair\", voltarParaAEntrada)"),
+        "sair da espera não pergunta antes: {sair}"
+    );
+    let pendente = js_function(&auth, "function esperaPendenteNaTela(");
+    assert!(
+        pendente.contains("dataset.espera === \"pendente\""),
+        "a pergunta vale para toda espera, e diria «nada deu errado» com o servidor fora do ar: {pendente}"
+    );
+    let levar = js_function(&auth, "function levarParaAEspera(");
+    assert!(
+        levar.contains("tela.dataset.espera = recusado ? \"recusada\" : esperandoMesmo ? \"pendente\" : \"tentando\""),
+        "a espera não diz mais em que estado está, e a pergunta não sabe quando vale"
+    );
+
+    let caixa = read("ui/camada-sair-da-espera.js");
+    let perguntar = js_function(&caixa, "function perguntarAntesDeSairDaEspera(");
+    assert!(
+        perguntar.contains("$(\"sair-da-espera-ficar\").focus()") && perguntar.contains("f.nadaErrado"),
+        "a pergunta não nasce em CONTINUAR ESPERANDO, ou não diz que nada deu errado"
+    );
+    let scripts = scripts();
+    assert!(scripts.contains("fecharAoClicarFora(\"sair-da-espera\", continuarEsperando)"));
+
+    let celular = without_comments(&read("ui/celular-entrada.js"));
+    let entrar_em = js_function(&celular, "function entrarEm(");
+    assert!(
+        entrar_em.contains("const sair = naPortaria ? () => perguntarAntesDeSairDaEspera(\"aparelho\", agoraNao) : agoraNao;")
+            && entrar_em.contains("erro: !naPortaria"),
+        "a espera do celular sai sem perguntar, ou volta a vestir o vermelho do erro"
+    );
+    // Só a falha do armazenamento sai direto pelo AGORA NÃO: toda outra saída da
+    // «ENTRAR EM» passa pela pergunta quando há pedido na porta.
+    assert_eq!(
+        entrar_em.matches("agoraNao, \"botao-fantasma\"").count(),
+        1,
+        "um caminho novo da «ENTRAR EM» sai da espera sem perguntar"
+    );
+    assert!(entrar_em.contains("onclick: sair"), "o ‹ VOLTAR do celular sai da espera sem perguntar");
+
+    let frases = read("ui/frases.js");
+    let espera = js_const(&frases, "FRASES_DA_ESPERA");
+    for chave in [
+        "titulo:", "naoEErro:", "naoEErroCelular:", "tituloSair:", "nadaErrado:", "sair:", "fechar:",
+        "voltar:", "sairCelular:", "voltarCelular:", "ficar:", "sairMesmo:", "fecharMesmo:",
+    ] {
+        assert!(espera.contains(chave), "FRASES_DA_ESPERA perdeu `{chave}`");
+    }
+    assert!(
+        espera.to_lowercase().contains("nada deu errado") && espera.contains("não cancela o pedido"),
+        "a pergunta deixou de dizer que nada deu errado e que sair não cancela o pedido"
+    );
+    assert!(
+        espera.contains("\"Esperando a aprovação de quem hospeda\"")
+            && espera.contains("Não é carregamento nem erro"),
+        "a sala de espera deixou de dizer, no título, que só espera a aprovação de quem hospeda"
+    );
+
+    // **A cabeça da espera, acima de tudo** (decisão do dono, 31/10): na
+    // `#tela-auth`, antes do «Entrar no servidor», que some na espera pendente;
+    // e na «ENTRAR EM» do celular, antes do título dela.
+    let pagina = read("ui/index.html");
+    let entrada = pagina.split("<div class=\"auth-entrada\">").nth(1).expect("a coluna da entrada");
+    let cabeca = entrada.find("id=\"auth-espera-cabeca\"").expect("a sala de espera perdeu a cabeça");
+    assert!(
+        cabeca < entrada.find("class=\"auth-cabeca\"").expect("o título da entrada"),
+        "a cabeça da espera não está acima de tudo na tela de entrada"
+    );
+    assert!(auth.contains("$(\"auth-espera-titulo\").textContent = FRASES_DA_ESPERA.titulo;"));
+    let css = read("ui/tela-auth.css");
+    assert!(
+        css.contains("#tela-auth[data-modo=\"espera\"][data-espera=\"pendente\"] .auth-espera-cabeca {")
+            && css.contains("#tela-auth[data-modo=\"espera\"][data-espera=\"pendente\"] .auth-cabeca { display: none; }"),
+        "a cabeça da espera não aparece na espera pendente, ou o «Entrar no servidor» continua por cima dela"
+    );
+    let cabeca_cel = entrar_em.find("cabecaDaEspera,").expect("a «ENTRAR EM» não mostra a cabeça da espera");
+    assert!(
+        cabeca_cel < entrar_em.find("titulo(f.titulo").expect("o título da «ENTRAR EM»")
+            && entrar_em.contains("text: FRASES_DA_ESPERA.titulo"),
+        "no celular, a cabeça da espera não vem acima do título"
+    );
+
+    // **E fechar a janela com o pedido pendente pergunta** (decisão do dono,
+    // 31/10), pela mesma caixa: o veto e o resto das condições são do guarda da
+    // credencial; aqui, que ele existe e leva à pergunta.
+    let fechar = without_comments(&read("ui/camada-hospedagem.js"));
+    assert!(
+        fechar.contains("if (!esperaPendenteNaTela()) return;")
+            && fechar.contains("perguntarAntesDeSairDaEspera(\"fechar\","),
+        "fechar o SEELE com um pedido esperando na portaria não pergunta antes"
+    );
+    assert!(perguntar.contains("f.fecharMesmo") && perguntar.contains("f.fechar"));
 }

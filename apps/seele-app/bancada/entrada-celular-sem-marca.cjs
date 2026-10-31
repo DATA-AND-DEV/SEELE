@@ -81,7 +81,7 @@ const path = require('node:path');
       await page.locator('.cel-entrada-pe button').filter({ hasText: /^ENTRAR$/ }).click();
     }
     await page.waitForFunction(() => passos.includes('transporte'), { }, { timeout: 3000 });
-    await page.getByText('QUEM HOSPEDA AINDA NÃO DECIDIU', { exact: true }).waitFor();
+    await page.locator('.cel-entrada-espera-titulo', { hasText: 'Esperando a aprovação de quem hospeda' }).waitFor();
     assert.deepEqual(await page.evaluate(() => passos), ['persist', 'chave', 'transporte']);
     assert.equal(await page.locator('.cel-entrada-conectando').count(), 0);
     console.log('OK: ' + (process.argv.includes('--teclado') ? 'ações acima do teclado; Enter único; ' : '') + 'marca pendente não bloqueia persistência, chave, transporte e admissão na UI móvel');

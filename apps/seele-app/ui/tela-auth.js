@@ -623,6 +623,9 @@ function levarParaAEspera(falha, endereco, tentativa) {
   // Continuar batendo está certo nos três casos — um servidor que caiu volta —,
   // e o que muda aqui é só parar de afirmar o que não se sabe.
   const esperandoMesmo = razao === "AdmissionPending";
+  // O estado, também para quem pergunta antes de sair (`camada-sair-da-espera.js`):
+  // só a espera de verdade pede o aviso de que nada deu errado.
+  tela.dataset.espera = recusado ? "recusada" : esperandoMesmo ? "pendente" : "tentando";
   const botao = $("auth-botao");
   botao.textContent = recusado
     ? "ENTRADA NEGADA"
@@ -849,7 +852,43 @@ function voltarParaAEntrada() {
 
 $("auth-botao").addEventListener("click", entrarNoServidor);
 
-$("auth-voltar").addEventListener("click", voltarParaAEntrada);
+/**
+ * Se a `#tela-auth` está na frente com um pedido esperando a decisão de quem
+ * hospeda — o último `connect` voltou `AdmissionPending`. É o único estado em
+ * que sair pergunta antes: recusado, não há o que esperar; tentando de novo
+ * (o servidor não respondeu), «nada deu errado» seria mentira.
+ */
+function esperaPendenteNaTela() {
+  const tela = $("tela-auth");
+  return !tela.hidden && tela.dataset.modo === "espera" && tela.dataset.espera === "pendente" && esperando;
+}
+
+/**
+ * Sair da espera, perguntando antes quando há pedido esperando (0.19): quem
+ * sai precisa saber que nada deu errado e que o pedido continua guardado.
+ */
+function sairDaEspera() {
+  if (esperaPendenteNaTela()) perguntarAntesDeSairDaEspera("sair", voltarParaAEntrada);
+  else voltarParaAEntrada();
+}
+
+$("auth-voltar").addEventListener("click", sairDaEspera);
+
+// Esc numa espera pendente também é tentar sair, e ganha a mesma pergunta. Fora
+// dela não faz nada, como antes: o aperto de mão não tem saída, e a recusa sai
+// pelo botão.
+document.addEventListener("keydown", (evento) => {
+  if (evento.key !== "Escape" || evento.defaultPrevented || !esperaPendenteNaTela()) return;
+  if (!$("tela-auth").contains(document.activeElement) && document.activeElement !== document.body) return;
+  evento.preventDefault();
+  sairDaEspera();
+});
+
+// A cabeça da sala de espera: só falta a aprovação de quem hospeda. Escrita uma
+// vez; quem a mostra ou esconde é o `data-espera` (`tela-auth.css`).
+$("auth-espera-rotulo").textContent = FRASES_DA_ESPERA.rotulo;
+$("auth-espera-titulo").textContent = FRASES_DA_ESPERA.titulo;
+$("auth-espera-nao-e-erro").textContent = FRASES_DA_ESPERA.naoEErro;
 
 /*
  * A espera segue o olho.

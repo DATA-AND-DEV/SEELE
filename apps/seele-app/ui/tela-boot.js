@@ -592,6 +592,8 @@ function mostrarEtapa(frase) {
   // em que o texto muda não é anunciado. É a mesma ordem da faixa de veredito.
   linha.hidden = false;
   linha.textContent = frase;
+  // E no segundo passo da caixa de hospedando, quando ela está na frente.
+  etapaDeHospedar(frase);
 }
 
 // As etapas da chegada, enquanto ela acontece.
@@ -776,7 +778,21 @@ function mostrarAlcance(
  * conectar é o caminho de sempre, com o endereço que ele devolveu. Um servidor
  * hospedado aqui e um do outro lado do mundo entram pela mesma porta.
  */
+/**
+ * Se um `hospedar()` está em curso. **Um por vez** (0.19): o HOSPEDAR AQUI fica
+ * apagado, mas a tela ANTES DE HOSPEDAR, a lista de servidores e o pedido do
+ * lançador também chegam aqui, e um segundo clique no HOSPEDAR do fim da tela
+ * subia um segundo servidor na mesma porta enquanto o primeiro subia. O segundo
+ * não some calado: vai ao `seele.log`.
+ */
+let hospedandoAgora = false;
+
 async function hospedar() {
+  if (hospedandoAgora) {
+    registrarNoAnfitriao("hospedar", "um segundo HOSPEDAR chegou com o primeiro ainda subindo, e foi ignorado", "aviso");
+    return;
+  }
+  hospedandoAgora = true;
   const botao = $("botao-hospedar");
   const erro = $("boot-erro");
   botao.disabled = true;
@@ -785,6 +801,10 @@ async function hospedar() {
   // O servidor desta tentativa, para as saídas de um MOD de API antiga: elas
   // mexem no servidor que recusou, e não no que estiver escolhido depois.
   const servidor = servidorEscolhido;
+  // **A caixa de hospedando** (`camada-hospedando.js`): do clique até a sessão,
+  // a janela diz em que passo está, e a falha de cada um.
+  abrirHospedando();
+  let subiu = false;
 
   try {
     // Sem nome no pedido de lançamento, o backend escolhe o link padrão.
@@ -832,9 +852,20 @@ async function hospedar() {
     // e o diálogo promete isso por escrito. Um diálogo que prometesse um lugar
     // vazio seria pior que não prometer nada.
     guardarOLinkDaPorta(anfitriao.convite);
+    subiu = true;
+    servidorDeHospedarSubiu(fraseDeErro(anfitriao.alcance));
     abrirPorta($("convite-alcance").textContent);
 
     await conectar();
+    // **Como a entrada acabou**, lido da tela, que é onde `conectar` o deixa:
+    // dentro, a entrada sumiu; recusada, a linha vermelha dela tem a frase, e
+    // a caixa a repete com o que ficou no ar. Sem nenhuma das duas, uma
+    // pergunta tomou a frente (o aceite dos MODs, o nome), e é ela quem fala.
+    if (!$("tela-boot").hidden && !erro.hidden && erro.textContent.trim() !== "") {
+      hospedagemFalhou("entrar", erro.textContent, FRASES_DA_HOSPEDAGEM.carregando.ficouNoAr);
+    } else {
+      fecharHospedando();
+    }
   } catch (falha) {
     // **Um MOD que este app não roda, ou dados de uma versão mais nova: a tela
     // ANTES DE HOSPEDAR** (E2 da 0.17), e não a parede vermelha na entrada. A
@@ -843,6 +874,7 @@ async function hospedar() {
     if (falha?.ModsDeApiAntiga || falha?.BancoDoFuturo || falha?.DadosNaoVerificados || falha?.CopiaDeSeguranca
       || falha?.EscolhaDeModNaoAplicou) {
       erro.textContent = fraseDeErro(falha);
+      fecharHospedando();
       abrirAntesDeHospedar({ servidor, recusa: falha, origem: "tela-boot" }).catch((f) =>
         console.warn("antes de hospedar:", f),
       );
@@ -850,8 +882,19 @@ async function hospedar() {
     }
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
+    // O que ficou no ar é perguntado, e não suposto: uma falha depois da
+    // subida deixa o servidor de pé, e uma antes não deixa nada.
+    let noAr = null;
+    try {
+      noAr = await invoke("meu_servidor");
+    } catch {
+      noAr = null;
+    }
+    const f = FRASES_DA_HOSPEDAGEM.carregando;
+    hospedagemFalhou(subiu ? "entrar" : "subir", erro.textContent, noAr ? f.ficouNoAr : f.nadaNoAr);
   } finally {
     botao.disabled = false;
+    hospedandoAgora = false;
   }
 }
 

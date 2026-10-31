@@ -115,15 +115,20 @@ desenharMeuServidor().catch(() => {});
 // ------------------------------------------------- a confirmação ao fechar (21)
 //
 // **Fechar o SEELE com o servidor guardado no ar tira todo mundo dele** (tarefa
-// 21 da F7; spec de 23/09: «a confirmação ao fechar vale só para o servidor
-// guardado»). A sala pessoal não pergunta: ela se despede sozinha, e quem estava
+// 21 da F7). A sala pessoal não pergunta: ela se despede sozinha, e quem estava
 // nela lê «chamada encerrada».
 //
+// **E fechar com um pedido esperando na portaria de alguém também pergunta**
+// (decisão do dono em 31/10, que substitui, neste caso, a regra do spec de 23/09
+// «a confirmação ao fechar vale só para o servidor guardado»; ver
+// `docs/0.19/decisoes.md`): «muita gente confunde a espera com não ter dado
+// certo». A caixa é a de `camada-sair-da-espera.js`.
+//
 // **Um ouvinte só, para todo fechar da janela:** o botão da casca (`close()`
-// também pede o fechar), o botão vermelho do macOS e o Alt+F4 do Windows. O
-// Cmd+Q do macOS **não** passa por aqui (medido no runtime: o item Quit manda o
-// `terminate:`, e o `tao` vai direto ao `RunEvent::Exit`); ele é assunto do
-// `main.rs`.
+// também pede o fechar), o botão vermelho do macOS, o Alt+F4 do Windows e o
+// Cmd+Q do macOS, cujo Sair o `main.rs` troca por um que fecha a janela
+// (`trocar_o_sair_do_mac`). O Sair do Dock e o logout não passam por janela
+// nenhuma, e não perguntam.
 //
 // **É a exceção ao guarda da credencial** (lote R da F5, rodada 1, M2), decidida
 // pela orquestradora em 10/10 no molde da do `beforeunload`: segurar o fechar
@@ -131,7 +136,8 @@ desenharMeuServidor().catch(() => {});
 // qualquer veto, as duas credenciais da tentativa somem: a da pergunta dos MODs
 // (`fecharAceiteDeMods()`) e a que um apelido tomado deixou
 // (`esquecerARecusaDoApelido()`, de `tela-boot.js`, que é quem a guarda). E o
-// veto só acontece com o servidor guardado no ar.
+// veto só acontece com o servidor guardado no ar, ou com um pedido pendente na
+// portaria (`esperaPendenteNaTela()`).
 
 /** A pessoa disse sim: o pedido de fechar seguinte passa direto. */
 let fecharSemPerguntar = false;
@@ -152,8 +158,21 @@ Promise.resolve(
     } catch {
       meu = null;
     }
-    // Sem servidor no ar, fecha direto: não há o que perguntar.
-    if (!meu) return;
+    // **Sem servidor no ar, só segura com um pedido esperando na portaria de
+    // alguém** (decisão do dono, 31/10, por cima da regra de 23/09): quem fecha
+    // ali lê, antes, que só está esperando a aprovação e que nada deu errado
+    // (`camada-sair-da-espera.js`). Sem pedido, fecha direto. As duas
+    // credenciais já foram esquecidas acima, antes de qualquer veto.
+    if (!meu) {
+      if (!esperaPendenteNaTela()) return;
+      pedido.preventDefault();
+      perguntarAntesDeSairDaEspera("fechar", async () => {
+        fecharSemPerguntar = true;
+        await janelaDoApp.close();
+      });
+      return;
+    }
+    // Com o servidor no ar, a pergunta dele vale mais: ela diz quem cai junto.
     pedido.preventDefault();
     const nome = meu.nome || "O SEU SERVIDOR";
     abrirConfirmacao(

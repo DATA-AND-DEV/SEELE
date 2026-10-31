@@ -620,3 +620,54 @@
 :root[data-casca="celular"] #tela-auth .auth-selo { align-items: flex-start; }
 :root[data-casca="celular"] #tela-auth .auth-selo .auth-nota { text-align: left; }
 :root[data-casca="celular"] #tela-auth .cartela-padrao-rotulo { font-size: 12px; }
+
+/* **A cabeça da espera** (0.19; decisão do dono, 31/10): acima do «Entrar em»,
+   no tamanho do título, só quando a batida ficou na portaria. Laranja do que se
+   lê, e não o vermelho da falha: só falta a aprovação de quem hospeda. */
+:root[data-casca="celular"] .cel-entrada-espera {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 18px 16px;
+  border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 45%, transparent);
+  background: color-mix(in srgb, var(--seele-laranja-fraco) 70%, transparent);
+  border-radius: 22px;
+}
+
+:root[data-casca="celular"] .cel-entrada-espera-rotulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--seele-mono);
+  font-size: calc(11px * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] .cel-entrada-espera-rotulo::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] .cel-entrada-espera-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(30px * var(--cel-escala));
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-entrada-espera-nota {
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: calc(15px * var(--cel-escala));
+  line-height: 1.5;
+  color: var(--seele-osso);
+}
