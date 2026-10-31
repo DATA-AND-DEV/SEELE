@@ -855,3 +855,63 @@ async fn a_varredura_tira_so_o_que_nenhum_perfil_aponta() -> Result<()> {
     assert_eq!(casa.arquivos(), esperado);
     Ok(())
 }
+
+/// **A imagem que a migração do PERFIS não trouxe é dita à pessoa** (0.19):
+/// a cada sessão, até ela trocar a imagem. A falha morava só no livro da
+/// migração, e o editor nunca a mostrava.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_pendencia_da_migracao_chega_ate_a_pessoa_trocar_a_imagem() -> Result<()> {
+    let casa = casa().await?;
+    // A pessoa nasce na primeira entrada; o livro da migração é semeado depois.
+    let primeira = abrir(casa.endereco, 7, 12).await?;
+    let pessoa = primeira.pessoa;
+    drop(primeira);
+    {
+        use seele_server::persistence::perfis::{registrar_migracao, MigracaoDaPessoa, ResultadoDaImagem};
+        let perfil = seele_proto::perfil::validar(&seele_proto::perfil::EntradaDePerfil {
+            nome_exibido: "Lia",
+            pronomes: "",
+            status: "",
+            bio: "",
+            cor: "#f2521f",
+        })
+        .expect("perfil válido");
+        let db = casa.daemon.server().persistence.lock().await;
+        registrar_migracao(
+            &db,
+            &MigracaoDaPessoa {
+                pessoa,
+                revisao_no_mod: 3,
+                perfil: &perfil,
+                efeito: seele_proto::perfil::Efeito::Nenhum,
+                foto: ResultadoDaImagem::Nenhuma,
+                capa: ResultadoDaImagem::Falhou("fragmento-faltando".into()),
+            },
+        )?;
+    }
+
+    let mut segunda = abrir(casa.endereco, 7, 12).await?;
+    let faltou = segunda
+        .esperar(|m| match m {
+            ServerMessage::PendenciaDoPerfil { faltou } => Some(faltou.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(faltou, Some(vec![LadoDoPerfil::Capa]), "a pendência da migração não chegou à pessoa");
+
+    // Trocar a imagem é ter visto o aviso: a sessão seguinte não o repete.
+    let resposta = segunda.enviar_imagem(LadoDoPerfil::Capa, png(64, 1).len() as u64, png(64, 1)).await?;
+    assert_eq!(resposta.erro, None);
+    drop(segunda);
+    let mut terceira = abrir(casa.endereco, 7, 12).await?;
+    let de_novo = terceira
+        .esperar(|m| match m {
+            ServerMessage::PendenciaDoPerfil { .. } => Some(()),
+            ServerMessage::Perfis { ultima: true, .. } => None,
+            _ => None,
+        })
+        .await;
+    assert_eq!(de_novo, None, "a pendência voltou depois de a pessoa trocar a imagem");
+    casa.daemon.shutdown();
+    Ok(())
+}

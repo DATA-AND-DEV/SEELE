@@ -2631,6 +2631,28 @@ async fn run_session(
                 );
             }
         }
+        // **A imagem que a migração do PERFIS não trouxe** é dita à própria
+        // pessoa, a cada sessão, até ela trocar ou tirar a imagem (então
+        // `marcar_avisada`, em `perfis::imagens`). Sem isto a falha ficava só no
+        // livro da migração: o produto sabia e não contava.
+        let pendencias = {
+            let guard = server.persistence.lock().await;
+            crate::persistence::perfis::pendencias(&guard, session.person)
+        };
+        match pendencias {
+            Ok(pendencias) if !pendencias.is_empty() => {
+                let aviso = ServerMessage::PendenciaDoPerfil {
+                    faltou: pendencias.iter().map(|p| p.lado).collect(),
+                };
+                if entende_a_mensagem(&aviso, session.protocol_version) {
+                    escrever!(&aviso).await?;
+                }
+            }
+            Ok(_) => {}
+            Err(erro) => {
+                tracing::warn!(person = %session.person, %erro, "não deu para ler a pendência do perfil");
+            }
+        }
     }
 
     // E quanto a subida **desta máquina** carrega, que é a perna do teto do

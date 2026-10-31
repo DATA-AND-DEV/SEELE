@@ -394,7 +394,12 @@ pub async fn enviar(
 
     let troca = {
         let db = server.persistence.lock().await;
-        banco::trocar_imagem(&db, pessoa, lado, &chegou.imagem)
+        let troca = banco::trocar_imagem(&db, pessoa, lado, &chegou.imagem);
+        // A pessoa agiu sobre as imagens: o aviso da migração foi visto.
+        if troca.is_ok() {
+            let _ = banco::marcar_avisada(&db, pessoa);
+        }
+        troca
     };
     match troca {
         Ok(troca) => {
@@ -433,7 +438,9 @@ pub async fn tirar(server: &Server, pessoa: PersonId, lado: LadoDoPerfil) -> Res
     };
     let troca = {
         let db = server.persistence.lock().await;
-        banco::tirar_imagem(&db, pessoa, lado)?
+        let troca = banco::tirar_imagem(&db, pessoa, lado)?;
+        let _ = banco::marcar_avisada(&db, pessoa);
+        troca
     };
     let Some(anterior) = troca.anterior else {
         return Ok(());
