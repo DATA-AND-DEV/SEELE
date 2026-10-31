@@ -31,6 +31,7 @@ pub mod anuncio;
 pub mod arquivos;
 pub mod aviso;
 pub mod despacho;
+pub mod incorporados;
 pub mod instalar;
 pub mod mundo;
 pub mod pedidos;

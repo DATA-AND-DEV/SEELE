@@ -434,6 +434,25 @@ pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> 
     }
 }
 
+/// Onde as imagens dos perfis moram: `perfis/` ao lado de `seele.db`
+/// (`docs/0.19/perfis-oficiais.md`, §2), endereçadas pelo SHA-256.
+///
+/// O mesmo padrão de [`diretorio_de_anexos`], e pela mesma razão: ao lado, e não
+/// dentro do banco. Um banco em memória não tem pasta, e diz isso em vez de
+/// adivinhar — o envio é recusado com `SemPastaDePerfis`, e a migração marca a
+/// imagem como `falhou:nao-gravada`.
+#[must_use]
+pub fn diretorio_de_perfis(config: &ServerConfig) -> Option<std::path::PathBuf> {
+    match &config.database {
+        persistence::Location::File(path) => Some(
+            path.parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join(persistence::perfis::PASTA_DAS_IMAGENS),
+        ),
+        persistence::Location::Memory => None,
+    }
+}
+
 /// Creates the configured voice room and its Channel if they are not there yet.
 ///
 /// M2 kept these in the config struct; M3 keeps them in PERSISTENCE so a restart
@@ -663,6 +682,34 @@ impl Daemon {
                 None
             }
         };
+
+        // **Os perfis do MOD PERFIS viram perfis do produto** (0.19,
+        // `docs/0.19/perfis-oficiais.md`, §4), e o MOD sai desligado.
+        //
+        // **Antes do portão `ligados_de_outra_api`**, lá embaixo: um PERFIS de
+        // uma API que esta linha não roda, ligado num banco antigo, impediria a
+        // subida — e os perfis dele ficariam presos num servidor que não sobe.
+        // E antes do mutex, como os anexos: o banco ainda é só nosso, e nenhuma
+        // sessão pode ver um perfil pela metade. Não falha: um erro do banco
+        // vira o relatório «migração incompleta» para quem hospeda, e a
+        // próxima subida tenta de novo.
+        {
+            let dados_do_perfis = config
+                .mods_dir
+                .as_ref()
+                .map(|raizes| raizes.dados_de(perfis::migracao::MOD_DOS_PERFIS));
+            perfis::migracao::na_subida(
+                &persistence,
+                dados_do_perfis.as_deref(),
+                diretorio_de_perfis(&config).as_deref(),
+            );
+            // A varredura dos órfãos de `perfis/` **depois** da migração:
+            // antes, ela apagaria o que a migração copiou e ainda não gravou.
+            // Uma falha só deixa arquivos sobrando, e é dita.
+            if let Err(erro) = perfis::imagens::varrer_orfaos(&persistence) {
+                tracing::error!(%erro, "perfis: a varredura das imagens órfãs falhou");
+            }
+        }
 
         // **Antes do mutex**, pela mesma razão que os anexos acima: o banco
         // ainda é nosso sozinho aqui, e o número tem de estar de pé antes da
