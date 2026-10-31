@@ -27,6 +27,7 @@
 )]
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -614,22 +615,75 @@ async fn quem_sai_do_servidor_fecha_a_porta() -> Result<()> {
     Ok(())
 }
 
-/// **I1, de ponta a ponta.** O dono revoga `entrar-no-jogo` com o túnel aberto
-/// **pelo caminho direto**: o servidor, que não vê o que passa por ele, avisa a
-/// máquina (`TunelRetirado`), e é a máquina que acaba com a conexão viva (o
-/// motivo `SemPermissao` fica nas quedas dela, e não `CaminhoCaiu`, que seria
-/// a conta de quem joga fechando a ligação por conta própria) e derruba a
-/// ligação direta, que não tem mais nada permitido a essa pessoa.
+/// Um repasse UDP entre quem joga e o servidor, cuja **volta se cala**: calada,
+/// nada do que o servidor diz a quem joga chega (o `TunelEncerrado` entre o
+/// resto), e o que quem joga manda segue chegando ao servidor. A ligação
+/// direta não passa por aqui: é da porta de quem joga à da máquina.
 ///
-/// O corte de um canal **novo** numa ligação que o cliente não fecha (um
-/// cliente modificado) não cabe aqui, porque o cliente de verdade fecha a
-/// ligação sozinho ao saber do `TunelEncerrado`: esse caso está provado na
-/// máquina, em `seele-core::tunel`
-/// (`a_retirada_corta_o_canal_direto_vivo_o_novo_e_derruba_a_ligacao_vazia`).
-#[tokio::test(flavor = "multi_thread")]
-async fn revogar_entrar_no_jogo_corta_o_direto_na_maquina() -> Result<()> {
-    use seele_proto::cargos::{ChaveDeMod, PedidoDeCargo, Permissao, TODOS};
+/// É quem joga **sem cooperar** — um cliente modificado, ou um que só não
+/// ouviu — sem gancho nenhum no produto: o `Enlace` é o de verdade e só não
+/// fica sabendo, então só a máquina pode cortar o que vai pelo direto.
+struct VoltaQueSeCala {
+    endereco: SocketAddr,
+    calada: Arc<AtomicBool>,
+}
 
+impl VoltaQueSeCala {
+    async fn ate(servidor: SocketAddr) -> Result<Self> {
+        let frente = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+        let fundo = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+        // Conectado, o fundo só recebe do servidor.
+        fundo.connect(servidor).await?;
+        let endereco = frente.local_addr()?;
+        let calada = Arc::new(AtomicBool::new(false));
+        let (de_quem, quem_joga) = tokio::sync::watch::channel(None::<SocketAddr>);
+        {
+            let (frente, fundo) = (Arc::clone(&frente), Arc::clone(&fundo));
+            tokio::spawn(async move {
+                let mut buf = vec![0_u8; 64 * 1024];
+                while let Ok((n, origem)) = frente.recv_from(&mut buf).await {
+                    de_quem.send_replace(Some(origem));
+                    let _ = fundo.send(&buf[..n]).await;
+                }
+            });
+        }
+        {
+            let calada = Arc::clone(&calada);
+            tokio::spawn(async move {
+                let mut buf = vec![0_u8; 64 * 1024];
+                while let Ok(n) = fundo.recv(&mut buf).await {
+                    let destino = *quem_joga.borrow();
+                    if let (false, Some(destino)) = (calada.load(Ordering::SeqCst), destino) {
+                        let _ = frente.send_to(&buf[..n], destino).await;
+                    }
+                }
+            });
+        }
+        Ok(Self { endereco, calada })
+    }
+
+    fn calar(&self) {
+        self.calada.store(true, Ordering::SeqCst);
+    }
+}
+
+/// O túnel `eco-tcp` aberto **pelo caminho direto**, com uma conexão viva e o
+/// eco provado, num servidor com dono: o ponto de partida das revogações.
+struct DiretoVivo {
+    daemon: Arc<Daemon>,
+    maquina: Lado,
+    joga: Lado,
+    dono: Lado,
+    viva: TcpStream,
+    acabou: tokio::sync::mpsc::UnboundedReceiver<()>,
+    /// Por onde quem joga fala com o servidor, quando pedido.
+    volta: Option<VoltaQueSeCala>,
+    _temp: tempfile::TempDir,
+}
+
+/// Monta o [`DiretoVivo`]; com `pela_volta`, quem joga fala com o servidor
+/// por uma [`VoltaQueSeCala`].
+async fn direto_vivo(pela_volta: bool) -> Result<DiretoVivo> {
     let semente_do_dono = 9_u8;
     let impressao_do_dono = seele_proto::transport::key_fingerprint(
         &SigningKey::from_bytes(&[semente_do_dono; 32])
@@ -639,11 +693,17 @@ async fn revogar_entrar_no_jogo_corta_o_direto_na_maquina() -> Result<()> {
     let (endereco, daemon, conjunto, _temp) =
         servidor_com_dono(true, Some(impressao_do_dono)).await?;
     let mut maquina = Lado::novo(endereco, &conjunto, 1, "maquina").await?;
-    let mut joga = Lado::novo(endereco, &conjunto, 2, "joga").await?;
+    let volta = if pela_volta {
+        Some(VoltaQueSeCala::ate(endereco).await?)
+    } else {
+        None
+    };
+    let endereco_de_quem_joga = volta.as_ref().map_or(endereco, |v| v.endereco);
+    let mut joga = Lado::novo(endereco_de_quem_joga, &conjunto, 2, "joga").await?;
     let dono = Lado::novo(endereco, &conjunto, semente_do_dono, "dono").await?;
     esperar_as_identidades(&daemon, &maquina, &joga).await?;
 
-    let (jogo, mut acabou) = eco_tcp("").await;
+    let (jogo, acabou) = eco_tcp("").await;
     aceitar_como_maquina(
         &daemon,
         &mut maquina.enlace,
@@ -675,8 +735,22 @@ async fn revogar_entrar_no_jogo_corta_o_direto_na_maquina() -> Result<()> {
     tokio::time::timeout(PACIENCIA, viva.read_exact(&mut tres)).await??;
     assert_eq!(&tres, b"ola");
     assert_eq!(maquina.enlace.ligacoes_diretas_da_maquina(), 1);
+    Ok(DiretoVivo {
+        daemon,
+        maquina,
+        joga,
+        dono,
+        viva,
+        acabou,
+        volta,
+        _temp,
+    })
+}
 
-    // O dono tira `entrar-no-jogo` do @everyone, pelo fio.
+/// O dono tira `entrar-no-jogo` do @everyone, pelo fio.
+async fn revogar_entrar_no_jogo(daemon: &Daemon, dono: &Lado) -> Result<()> {
+    use seele_proto::cargos::{ChaveDeMod, PedidoDeCargo, Permissao, TODOS};
+
     let quadro = {
         let db = daemon.server().persistence.lock().await;
         seele_server::cargos::quadro(&db)?
@@ -703,39 +777,25 @@ async fn revogar_entrar_no_jogo_corta_o_direto_na_maquina() -> Result<()> {
             },
         )))
         .await
-        .map_err(|_| anyhow::anyhow!("o enlace do dono já tinha acabado"))?;
+        .map_err(|_| anyhow::anyhow!("o enlace do dono já tinha acabado"))
+}
 
-    // Quem joga fica sabendo, com o nome do motivo...
-    let fim = joga
-        .relatorio("o aviso do fim do túnel", "eco-tcp", |r| {
-            r.encerrado.is_some()
-        })
-        .await?;
-    assert_eq!(fim.encerrado, Some(Queda::SemPermissao), "{fim:?}");
-    // ...a conexão do jogo acaba dos dois lados...
+/// A conexão viva acaba dos dois lados: para quem joga e para o jogo.
+async fn a_conexao_acaba(d: &mut DiretoVivo) -> Result<()> {
     let mut sobra = [0_u8; 16];
-    let lida = tokio::time::timeout(PACIENCIA, viva.read(&mut sobra)).await?;
+    let lida = tokio::time::timeout(PACIENCIA, d.viva.read(&mut sobra))
+        .await
+        .map_err(|_| anyhow::anyhow!("a conexão de quem joga seguiu viva"))?;
     assert!(matches!(lida, Ok(0) | Err(_)), "a conexão seguiu viva");
-    tokio::time::timeout(PACIENCIA, acabou.recv())
-        .await?
-        .expect("o jogo não viu a conexão acabar");
-    // ...e a máquina **foi quem a cortou**, pelo aviso do servidor.
-    let fim_ate = Instant::now() + PACIENCIA;
-    loop {
-        let quedas = maquina.enlace.quedas_do_tunel_servido(MOD, "eco-tcp");
-        if quedas
-            .iter()
-            .any(|(q, n)| *q == Queda::SemPermissao && *n >= 1)
-        {
-            break;
-        }
-        assert!(
-            Instant::now() < fim_ate,
-            "a máquina não cortou a conexão por falta de permissão: {quedas:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    // A ligação direta dessa pessoa não tem mais nada permitido: cai.
+    tokio::time::timeout(PACIENCIA, d.acabou.recv())
+        .await
+        .map_err(|_| anyhow::anyhow!("o jogo não viu a conexão acabar"))?
+        .expect("o eco morreu");
+    Ok(())
+}
+
+/// A ligação direta de quem perdeu o túnel não tem mais nada permitido: cai.
+async fn a_ligacao_direta_cai(maquina: &Lado) {
     let fim_ate = Instant::now() + PACIENCIA;
     while maquina.enlace.ligacoes_diretas_da_maquina() != 0 {
         assert!(
@@ -744,6 +804,111 @@ async fn revogar_entrar_no_jogo_corta_o_direto_na_maquina() -> Result<()> {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// **I1, de ponta a ponta, com quem joga sem cooperar.** O dono revoga
+/// `entrar-no-jogo` com o túnel aberto **pelo caminho direto**: o servidor,
+/// que não vê o que passa por ele, avisa a máquina (`TunelRetirado`), e é a
+/// máquina que acaba com a conexão viva e derruba a ligação direta.
+///
+/// Quem joga **não ouve nada** depois da revogação ([`VoltaQueSeCala`]): o
+/// `TunelEncerrado` dele não chega, e ele não fecha coisa nenhuma. Sem isso a
+/// prova disputava uma corrida — o servidor manda os dois avisos no mesmo
+/// instante, e quando o fechamento de quem joga chegava à máquina pelo
+/// direto antes do `TunelRetirado` chegar a ela pelo servidor, a queda era
+/// `CaminhoCaiu` e o teste não dizia se a máquina teria cortado (2 em 10 numa
+/// máquina carregada). Aqui só a máquina pode cortar, e o motivo
+/// `SemPermissao` nas quedas dela diz que cortou.
+///
+/// O corte de um canal **novo** numa ligação que o cliente não fecha está
+/// provado na máquina, em `seele-core::tunel`
+/// (`a_retirada_corta_o_canal_direto_vivo_o_novo_e_derruba_a_ligacao_vazia`).
+#[tokio::test(flavor = "multi_thread")]
+async fn revogar_entrar_no_jogo_corta_o_direto_na_maquina() -> Result<()> {
+    let mut d = direto_vivo(true).await?;
+    // Daqui em diante quem joga não ouve o servidor.
+    d.volta.as_ref().expect("a volta").calar();
+    revogar_entrar_no_jogo(&d.daemon, &d.dono).await?;
+
+    // A máquina corta a conexão viva **por falta de permissão**...
+    let fim_ate = Instant::now() + PACIENCIA;
+    loop {
+        let quedas = d.maquina.enlace.quedas_do_tunel_servido(MOD, "eco-tcp");
+        if quedas
+            .iter()
+            .any(|(q, n)| *q == Queda::SemPermissao && *n >= 1)
+        {
+            assert!(
+                quedas.iter().all(|(q, _)| *q == Queda::SemPermissao),
+                "outra queda além da da máquina: {quedas:?}"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < fim_ate,
+            "a máquina não cortou a conexão por falta de permissão: {quedas:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // ...ela acaba dos dois lados, sem quem joga ter feito nada...
+    a_conexao_acaba(&mut d).await?;
+    // ...e a ligação direta dessa pessoa cai.
+    a_ligacao_direta_cai(&d.maquina).await;
+    // Quem joga de fato não soube: o corte foi só da máquina.
+    assert!(
+        d.joga.relatorios.iter().all(|r| r.encerrado.is_none()),
+        "quem joga ouviu o fim do túnel; a prova não é só da máquina"
+    );
+    Ok(())
+}
+
+/// **I1, com quem joga cooperando**, como no produto: quem joga fica sabendo
+/// do fim com o nome do motivo (`SemPermissao`), a conexão acaba dos dois
+/// lados e a ligação direta cai.
+///
+/// Quem corta primeiro aqui é uma corrida, e de propósito não se afirma: o
+/// servidor avisa os dois no mesmo instante, e quem joga também fecha o lado
+/// dele ao saber. A máquina conta a conexão uma vez só, com o motivo de quem
+/// chegou primeiro — `SemPermissao` (o aviso dela) ou `CaminhoCaiu` (o
+/// fechamento de quem joga). Que a máquina corta sozinha está provado em
+/// [`revogar_entrar_no_jogo_corta_o_direto_na_maquina`].
+#[tokio::test(flavor = "multi_thread")]
+async fn revogar_entrar_no_jogo_avisa_quem_joga_e_acaba_a_conexao() -> Result<()> {
+    let mut d = direto_vivo(false).await?;
+    revogar_entrar_no_jogo(&d.daemon, &d.dono).await?;
+
+    // Quem joga fica sabendo, com o nome do motivo...
+    let fim = d
+        .joga
+        .relatorio("o aviso do fim do túnel", "eco-tcp", |r| {
+            r.encerrado.is_some()
+        })
+        .await?;
+    assert_eq!(fim.encerrado, Some(Queda::SemPermissao), "{fim:?}");
+    // ...a conexão do jogo acaba dos dois lados...
+    a_conexao_acaba(&mut d).await?;
+    // ...a máquina a conta uma vez, por um dos dois motivos da corrida...
+    let fim_ate = Instant::now() + PACIENCIA;
+    loop {
+        let quedas = d.maquina.enlace.quedas_do_tunel_servido(MOD, "eco-tcp");
+        if !quedas.is_empty() {
+            assert!(
+                matches!(
+                    quedas.as_slice(),
+                    [(Queda::SemPermissao | Queda::CaminhoCaiu, 1)]
+                ),
+                "a máquina contou a conexão de outro jeito: {quedas:?}"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < fim_ate,
+            "a máquina não contou a conexão que acabou"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // ...e a ligação direta dessa pessoa cai.
+    a_ligacao_direta_cai(&d.maquina).await;
     Ok(())
 }
 
