@@ -233,7 +233,82 @@ testes de unidade); o pack trazido pelo volume **da estrela** na prova A (lá o
 fio é de mentira; o fluxo de volume foi medido à parte, em loopback); o
 `SeeleUI.salvar` no app inteiro (o diálogo do sistema e o comando Tauri — só
 as funções puras e a casca nos testes); Quilt, Forge e NeoForge; Windows e
-Linux; duas casas de verdade; um cliente com mods entrando no mundo.
+Linux; duas casas de verdade; um cliente com mods entrando no mundo (Forge e NeoForge: ver «Forge e NeoForge de verdade»).
+
+## Forge e NeoForge de verdade (31/10/2026, um Mac ARM)
+
+Medido depois da fusão da revisão final (`desenho/api-8-revisao`, com o I1)
+nesta linha, com o MOD em `desenho-0.19` (`d8c8c90`). As mesmas provas da
+parte 6: **A** é `minecraft_de_verdade_pela_metade_de_maquina` (o teste agora
+confere os mods de qualquer loader pelo `pack_esperado` do plano) e **B** é
+`minecraft_pelo_tunel` (agora aceita um pack sem `server-overrides`, como o
+MOD). O plano: `node ferramentas/plano-de-verdade.cjs plano.json --mods
+<pack.mrpack>` (o que as fixtures não têm — a versão, o Java, o instalador —
+a metade de servidor busca da rede).
+
+| Pack | MC / loader | Java | A, 1ª: pronto / túnel | Mods em `mods/` | Túnel (B) | Parada | A, 2ª: pronto / túnel |
+|---|---|---|---|---|---|---|---|
+| prova Forge (FerriteCore, Clumps; Embeddium só do cliente) | 1.20.1 / Forge 47.4.28 | 17.0.21 | 19,7 s / 32,3 s | 2 | direto 68 / 3,5 / 3,3 ms; estrela 3,0 / 3,2 / 2,9 ms | 1,72 s | 1,9 s / 9,2 s |
+| prova NeoForge (FerriteCore, Clumps; Sodium só do cliente) | 1.21.1 / NeoForge 21.1.265 | 21.0.13 | 24,3 s / 31,8 s | 2 | direto 30 / 3,3 / 2,7 ms; estrela 3,2 / 2,8 / 2,4 ms | 0,75 s | 2,1 s / 7,4 s |
+| **Create Live 5** 1.3.2.1 (Modrinth) | 1.20.1 / Forge 47.2.17 | 17.0.21 | 26,0 s / 42,6 s | 66 (95 no índice, 29 só do cliente) | direto 104 / 3,6 / 3,2 ms; estrela 3,5 / 3,4 / 3,1 ms | 3,92 s | 2,9 s / 21,1 s |
+| **Create 6: OneBlock** 1.3 (Modrinth) | 1.21.1 / NeoForge 21.1.228 | 21.0.13 | 25,6 s / 35,9 s | 41 | direto 21 / 2,4 / 1,8 ms; estrela 3,4 / 3,3 / 3,0 ms | 1,24 s | 2,2 s / 10,6 s |
+
+- **A, 1ª rodada** (pasta nova): o pack pedido ao volume aos ~5 s (depois do
+  `server.jar` e do Java), `instalando` aos 4,7–11,9 s, o instalador com o
+  código 0 (B: 14,9–19,6 s do pack ao fim do instalador, com os downloads), o
+  `Done` lido pelo padrão ancorado do MOD, o status em `127.0.0.1:25565` com o
+  nome da tela (`§bCasa §6com mods`, 4 vagas). O Forge responde com
+  `forgeData` (`fmlNetworkVersion: 3`, `mods: []`, `channels: []`, a lista
+  comprimida em `d`); o NeoForge 1.21.1 só com `isModded: true`. A pasta:
+  418–617 MB (`libraries/` 161–178 MB).
+- **A, 2ª rodada** (a mesma pasta): nada baixado, o pack não pedido ao volume,
+  o instalador não rodou (nenhum processo `-installer.jar` na amostra de `ps`;
+  a marca `.seele-loader` é `forge@47.4.28@1.20.1`), `pronto` em ~2 s.
+- **B**: `encerrar_tudo` matou 1 processo em 21–41 ms em todas.
+- **Os netos**: o servidor do Forge e do NeoForge abre o `jspawnhelper` do Java
+  e o `system_profiler` (o OSHI do loader); depois da parada, nenhum vivo.
+- **As linhas do console** (por pipe, sem terminal, como o `programa`), Forge
+  e NeoForge iguais no formato:
+  `[13:53:24] [Server thread/INFO] [minecraft/DedicatedServer]: Done (1.652s)! For help, type "help"`,
+  `[13:53:25] [Server thread/INFO] [minecraft/MinecraftServer]: Saved the game`,
+  `[13:53:25] [Server thread/INFO] [minecraft/MinecraftServer]: Stopping the server`.
+  O `save-all flush` levou 0,55 s (Forge) e 0,16 s (NeoForge); o `stop`,
+  1,19 s e 0,49 s até o processo sair (código 0). O NeoForge escreve as
+  linhas do `main/` com `ESC[32m` mesmo sem terminal (28 de 74).
+- **Entrar e sair**: um cliente vanilla mínimo (Node, modo offline, só para a
+  medida, fora do MOD; o login do Forge 1.20.1 e a fase de configuração do
+  1.21.1 com o pong) entrou nos dois packs de prova:
+  `[14:00:21] [Server thread/INFO] [minecraft/MinecraftServer]: Bia joined the game` e
+  `… Bia left the game`; os padrões `entrou` e `saiu` do MOD casam.
+- **A reserva** (`a_reserva_liga_com_o_mundo_da_principal`, os dois packs de
+  prova): Forge — salvo em 0,55 s, o pacote de 4,66 MB → 3,18 MB em 0,32 s, a
+  cópia pela malha em 73 ms, a reserva ligou com o mundo em 8,9 s e o placar
+  estava lá (`prova has 42 [reserva]`); NeoForge — 0,14 s, 0,67 → 0,51 MB em
+  56 ms, 21 ms, 6,0 s, o placar lá.
+- **O I1 não recusou nada de verdade**: o instalador escreve `libraries/` como
+  processo, e o `@libraries/…/unix_args.txt` preso é o que ele deixou; os
+  overrides dos dois packs publicados (`config/`, `kubejs/`, `defaultconfigs/`,
+  `default-server.properties`) não tocam caminho preso.
+
+**O que quebrou, e o conserto (no MOD):** o Create Live 5 traz o mod Default
+Server Properties, que na primeira subida troca o `server.properties` inteiro
+pelo `default-server.properties` do pack. Medido antes do conserto: o jogo
+subiu em `*:25565` (`server-ip=` vazio), com «A Minecraft Server» e 20 vagas,
+e a metade **serviu o túnel** — o motd da prova A não bateu, e foi assim que
+se viu. O MOD agora escreve as chaves da tela no `default-server.properties`
+do pack (o skyblock do pack segue: «Successfully generated spawn») e, no
+«Done», relê o `server.properties` e não serve o túnel se uma chave mudou
+(`config-trocada`). E dois menores: as cores do terminal saem antes do padrão,
+e o loader sem este sistema é recusado antes de baixar.
+
+**O Windows segue fora para o Forge e o NeoForge**: o `unix_args.txt` separa o
+classpath com `:`, o do Windows é o `win_args.txt`, e a oferta tem um `rodar`
+para todos os sistemas. Entrar pede um comando por sistema na oferta.
+
+**Não medido:** um cliente Forge/NeoForge de verdade (conta Microsoft); um pack
+acima de 64 MiB (o teto: o Prehistoric World tem 129 MB, o Cobblemon Official
+NeoForge 101 MB); a parada de um mundo grande dentro dos 15 s da metade;
+Linux; e o Quilt.
 
 ## A suíte
 
@@ -260,10 +335,10 @@ com mods novo) limpos.
 
 ## Aberto
 
-- **Forge e NeoForge**: a receita do MOD os declara (o instalador por Maven
-  Reposilite, o hash e o tamanho lidos), sem medida; rodam pelo `unix_args.txt`,
-  e por isso a receita os marca só para Mac e Linux. Um comando por sistema na
-  oferta (o `win_args.txt`) seria um campo novo.
+- **Forge e NeoForge**: medidos no Mac ARM (acima, «Forge e NeoForge de
+  verdade»); rodam pelo `unix_args.txt`, e por isso a receita os marca só
+  para Mac e Linux. Um comando por sistema na oferta (o `win_args.txt`) seria
+  um campo novo.
 - **O indexador** (`SEELE-MODS-INDEXER`) precisa aceitar `instalar` na oferta
   descrita, e o `mrpack` nos tipos, antes de o MOD sair.
 - **O navegador** não tem o papel `pack` no seletor (a ponte web não o lê); um
