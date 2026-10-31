@@ -263,6 +263,11 @@ impl Programa {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // **Um grupo de processos só dele** (I9): parar mata o grupo, e um
+        // `java` que o servidor relança, ou o ajudante que um mod do pack
+        // sobe, morre junto, em vez de seguir com a porta e o mundo.
+        #[cfg(unix)]
+        comando.process_group(0);
         // Sem isto, um programa de console iniciado pelo app de janela abre uma
         // janela de console própria no Windows.
         #[cfg(windows)]
@@ -274,6 +279,9 @@ impl Programa {
 
         let numero = interior.proximo_numero();
         let pid = filho.id();
+        // Daqui em diante, soltar o grupo mata o grupo: vale para a recusa logo
+        // abaixo, para a vigia que acaba e para a vigia que o runtime solta.
+        let grupo = Grupo { pid };
         let (tx, rx) = mpsc::channel(MAX_LINHAS_NA_FILA);
         let contas = Arc::new(Contas {
             perdidas: AtomicU64::new(0),
@@ -321,13 +329,20 @@ impl Programa {
         let dono = Arc::clone(interior);
         let entrada_da_vigia = Arc::clone(&entrada);
         let tarefa = tokio::spawn(async move {
+            let grupo = grupo;
             let (estado, morto_a_pedido) = tokio::select! {
                 estado = filho.wait() => (estado, false),
                 () = esperar_a_ordem(&mut morte) => {
+                    // O grupo antes do filho: com o filho ainda por colher, o
+                    // número do grupo não pode ter ido a outro processo.
+                    grupo.matar();
                     let _ = filho.start_kill();
                     (filho.wait().await, true)
                 }
             };
+            // O filho saiu sozinho (o `stop` do `aoParar`): o que ele deixou
+            // no grupo sai também.
+            drop(grupo);
             let codigo = estado.ok().and_then(|s| s.code());
             // O resto da saída, com prazo.
             for leitura in leituras.into_iter().flatten() {
@@ -376,6 +391,39 @@ impl Programa {
             matar,
             eventos: rx,
         })
+    }
+}
+
+/// **O grupo de processos de um filho** (I9): soltá-lo mata o grupo inteiro,
+/// o filho e os netos (no Unix; no Windows, só o filho — decisão R8).
+struct Grupo {
+    pid: Option<u32>,
+}
+
+impl Grupo {
+    fn matar(&self) {
+        #[cfg(unix)]
+        if let Some(pid) = self
+            .pid
+            .and_then(|p| i32::try_from(p).ok())
+            .filter(|p| *p > 1)
+        {
+            use nix::sys::signal::{killpg, Signal};
+            match killpg(nix::unistd::Pid::from_raw(pid), Signal::SIGKILL) {
+                Ok(()) => tracing::debug!(grupo = pid, "programa: o grupo do processo foi morto"),
+                // Ninguém mais no grupo: o filho e os netos já saíram.
+                Err(nix::errno::Errno::ESRCH) => {}
+                Err(erro) => {
+                    tracing::warn!(grupo = pid, %erro, "programa: o grupo do processo não morreu");
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Grupo {
+    fn drop(&mut self) {
+        self.matar();
     }
 }
 

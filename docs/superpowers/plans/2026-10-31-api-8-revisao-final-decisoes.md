@@ -108,3 +108,28 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   impressão esperada por um `atender` que acabou de sair é fechada (como
   antes), e quem disca tenta de novo até o prazo dele; um `passar_a_atender`
   sem o seu `parar_de_atender` (só os testes fazem) deixa a ponta armada.
+- **Ruling R8 (I9): no Unix, o filho de `rodar` nasce num grupo de processos
+  próprio, e parar mata o grupo; no Windows, só o filho, por ora.**
+  `process_group(0)` no `spawn`, e um `Grupo` que, ao ser solto, manda
+  `SIGKILL` ao grupo (`killpg`, pelo `nix` que já estava na árvore — o
+  workspace proíbe `unsafe`): na ordem de matar (DESLIGAR, REVOGAR, app
+  fechando, `encerrar_tudo`, `Programa` solto) antes de colher o filho, e
+  também quando o filho sai sozinho (o ajudante que ele deixou sai junto). Medido
+  no Mac com um filho que sobe um neto: `matar`, `encerrar_tudo`, soltar o
+  `Programa` e o filho que sai sozinho param o neto
+  (`parar_mata_os_netos_por_todos_os_caminhos`). — Por que não o Job Object
+  no Windows agora: pede o `windows-sys` com `Win32_System_JobObjects` e
+  `unsafe` numa exceção de lint, e nada aqui o roda — «existir não é
+  funcionar»; fica para quem puder medir no Windows. — Custo: (a) no Windows,
+  um neto segue vivo depois de DESLIGAR (o achado inteiro, lá); (b) o app que
+  cai sem soltar o `Programa` deixa o grupo vivo nos dois sistemas (só um
+  vigia de fora, ou o `PR_SET_PDEATHSIG` do Linux, fecharia isso); (c) a
+  varredura depois de o filho sair sozinho usa o número do grupo já colhido:
+  outro processo só o herdaria se o sistema desse a volta nos números de
+  processo nesse intervalo de microssegundos; (d) um processo que o servidor
+  de jogo queira deixar de pé de propósito morre com ele.
+- **Ruling R8b (a régua do batimento dos testes): ler de novo um arquivo
+  vazio.** O programa de teste reescreve o batimento com `fs::write` (trunca e
+  escreve); uma leitura no meio via `0` e dava o processo por morto. Visto
+  uma vez em `matar_a_pedido_para_o_processo_e_diz_que_foi_a_pedido` (passou
+  nas três seguintes), e sempre no laço novo do I9. — Custo: nenhum no produto.
