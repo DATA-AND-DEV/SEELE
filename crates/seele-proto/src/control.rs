@@ -1962,6 +1962,34 @@ pub enum ClientMessage {
         /// O JSON do MOD.
         payload: String,
     },
+    /// Grava o perfil **de quem pede** (SEELE 0.19, protocolo 12).
+    ///
+    /// Sem campo de pessoa, de propósito: o servidor grava a linha da sessão,
+    /// e ninguém edita o perfil de outro. `revisao` é a que o editor viu; se
+    /// ela não for a atual, volta `PerfilRecusado { RevisaoVelha }`. A cor
+    /// viaja em três bytes; a regra dos textos é `crate::perfil::validar`.
+    GravarPerfil {
+        /// A revisão esperada.
+        revisao: u32,
+        /// Até 40 code points.
+        nome_exibido: String,
+        /// Até 30 code points.
+        pronomes: String,
+        /// Até 60 code points.
+        status: String,
+        /// Até 280 code points, com quebras de linha.
+        bio: String,
+        /// `#rrggbb`.
+        cor: [u8; 3],
+        /// A moldura.
+        efeito: crate::perfil::Efeito,
+    },
+    /// Tira a foto ou a capa de quem pede. Trocar a imagem é pelo fluxo de
+    /// imagem (`PedidoDeImagem::EnviarAoPerfil`); tirar não tem bytes.
+    TirarImagemDoPerfil {
+        /// Qual das duas.
+        lado: crate::perfil::LadoDoPerfil,
+    },
 }
 
 /// Server to client.
@@ -2778,6 +2806,30 @@ pub enum ServerMessage {
         /// Quatro caracteres ASCII base36 maiúsculos.
         tag: String,
     },
+    /// Os perfis do servidor, em partes, logo depois do `Session`
+    /// (protocolo 12). No padrão de `Membros`: `ultima` fecha a lista, e uma
+    /// parte tem no máximo `perfil::MAX_PERFIS_POR_PARTE` perfis.
+    Perfis {
+        /// Uma parte da lista.
+        parte: Vec<crate::perfil::PerfilPublico>,
+        /// Esta é a última parte.
+        ultima: bool,
+    },
+    /// Um perfil mudou; difundido a todos depois do commit (protocolo 12).
+    PerfilMudou(crate::perfil::PerfilPublico),
+    /// Um pedido de perfil foi recusado; só para quem pediu (protocolo 12).
+    PerfilRecusado {
+        /// O motivo.
+        motivo: crate::perfil::RecusaDePerfil,
+        /// Os campos, quando o motivo é `Campos`; vazio nos outros.
+        campos: Vec<crate::perfil::ErroDeCampo>,
+    },
+    /// Só para a própria pessoa: a migração do perfil dela deixou imagens para
+    /// trás, e ela precisa escolher de novo (protocolo 12).
+    PendenciaDoPerfil {
+        /// As imagens que não puderam ser trazidas.
+        faltou: Vec<crate::perfil::LadoDoPerfil>,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2908,11 +2960,11 @@ pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
 }
 
 impl ListaDeCima for ClientMessage {
-    const CONHECIDAS: u32 = 45;
+    const CONHECIDAS: u32 = 47;
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 52;
+    const CONHECIDAS: u32 = 56;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3464,6 +3516,16 @@ impl Validate for ClientMessage {
                 }
                 check("mod_payload", payload.len(), MAX_CARGA_DE_MOD)
             }
+            // Só o teto de forma. Se o texto é aceito (controles, cor) é do
+            // `perfil::validar`, que o servidor aplica e responde por campo.
+            Self::GravarPerfil {
+                nome_exibido,
+                pronomes,
+                status,
+                bio,
+                ..
+            } => crate::perfil::conferir_tamanhos(nome_exibido, pronomes, status, bio),
+            Self::TirarImagemDoPerfil { .. } => Ok(()),
         }
     }
 }
@@ -3682,8 +3744,38 @@ impl Validate for ServerMessage {
                 }
                 _ => Ok(()),
             },
+            Self::Perfis { parte, .. } => {
+                check("perfis", parte.len(), crate::perfil::MAX_PERFIS_POR_PARTE)?;
+                parte.iter().try_for_each(validar_perfil_publico)
+            }
+            Self::PerfilMudou(perfil) => validar_perfil_publico(perfil),
+            Self::PerfilRecusado { campos, .. } => {
+                // Um erro por campo, e há cinco campos.
+                check("campos_do_perfil", campos.len(), 5)
+            }
+            Self::PendenciaDoPerfil { faltou } => check("faltou", faltou.len(), 2),
         }
     }
+}
+
+/// O teto de forma de um perfil que chega: os mesmos quatro textos, mais o
+/// tamanho de cada imagem. O servidor já validou; isto protege quem lê de um
+/// servidor que não o fez.
+fn validar_perfil_publico(perfil: &crate::perfil::PerfilPublico) -> Result<(), ControlError> {
+    crate::perfil::conferir_tamanhos(
+        &perfil.nome_exibido,
+        &perfil.pronomes,
+        &perfil.status,
+        &perfil.bio,
+    )?;
+    for imagem in [perfil.foto, perfil.capa].into_iter().flatten() {
+        if imagem.bytes == 0 || imagem.bytes as usize > crate::perfil::TETO_DA_IMAGEM {
+            return Err(ControlError::FieldOutOfRange {
+                field: "perfil_imagem",
+            });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -5386,14 +5478,14 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            44,
+            46,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            51,
+            55,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -5459,6 +5551,12 @@ mod o_vocabulario_e_a_versao {
         // `Permission` ganhou `ShareScreen` e `Administrator` no fim. O 10
         // ainda não saiu para ninguém, então não há par para trás.
         //
+        // **O perfil público nativo (0.19), no 12.** O cliente foi de 44 para
+        // 46: `GravarPerfil` e `TirarImagemDoPerfil`. O servidor, de 51 para
+        // 55: `Perfis`, `PerfilMudou`, `PerfilRecusado` e `PendenciaDoPerfil`.
+        // O 12 sobe por elas, e o portão é `vocabulario::desde` e
+        // `desde_do_cliente`: um par 11 não as recebe.
+        //
         // **`Telemetry` corrigida no rascunho do 10, em 24/10/2026** (decisão
         // do coordenador, pedido do E): `rtt_ms`, `jitter_ms` e
         // `loss_fraction` viraram `Option<f32>`, porque o anfitrião ICE-lite
@@ -5468,7 +5566,7 @@ mod o_vocabulario_e_a_versao {
         // As listas não mudaram de tamanho por isso.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            11,
+            12,
             "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
              de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
              a mesma história"

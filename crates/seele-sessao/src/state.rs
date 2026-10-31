@@ -1793,6 +1793,13 @@ impl Room {
             // mora aqui.
             ServerMessage::ModAviso { .. } => {}
 
+            // F2/F4: perfis. O perfil público nativo (protocolo 12) ainda não é
+            // dobrado aqui; chega com o `HashMap<PersonId, PerfilPublico>` da F4.
+            ServerMessage::Perfis { .. }
+            | ServerMessage::PerfilMudou(..)
+            | ServerMessage::PerfilRecusado { .. }
+            | ServerMessage::PendenciaDoPerfil { .. } => {}
+
             // **O tema do servidor** (rascunho da API 6, §9; tarefa 17d da F3):
             // guardado como veio, inclusive o `None`, que o tira. A casca o
             // aplica antes de desenhar a sessão — o `server` é a flag dela: o

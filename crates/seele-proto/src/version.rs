@@ -151,7 +151,18 @@ use thiserror::Error;
 /// faixa desta build, e um par dela não chega nem a mandar um `Hello`, porque
 /// não há transporte em comum — o ADR 0063 diz como as duas pontas ficam
 /// sabendo disso antes de tentar.
-pub const PROTOCOL_VERSION: u8 = 11;
+///
+/// **12 desde 31/10/2026: o perfil público, nativo do produto** (0.19).
+///
+/// O perfil que era do MOD PERFIS passa a ser mensagem: `GravarPerfil` e
+/// `TirarImagemDoPerfil` do cliente; `Perfis` (a lista, em partes),
+/// `PerfilMudou`, `PerfilRecusado` e `PendenciaDoPerfil` do servidor; e os
+/// pedidos `EnviarAoPerfil` e `LerDoPerfil` do fluxo de imagem. Tudo variante
+/// nova no fim das listas, então o postcard lê o que já existia igual. O portão
+/// é `vocabulario::desde` (servidor) e `desde_do_cliente` (cliente): um par 11
+/// nunca recebe um `Perfis`, que desalinharia o fluxo de controle dele. Ele
+/// continua vendo apelido e ícone nativo.
+pub const PROTOCOL_VERSION: u8 = 12;
 
 /// O primeiro número da linha 1. **Congelado** (ADR 0058), e desde a linha 2 o
 /// único número dela: a linha 1 não recebe versão nova (ADR 0063).
@@ -448,7 +459,7 @@ mod tests {
     /// `assert!` abaixo.
     #[test]
     fn a_linha_dois_fala_dez_e_onze_e_a_0_16_fica_de_fora() {
-        assert_eq!(PROTOCOL_VERSION, 11);
+        assert_eq!(PROTOCOL_VERSION, 12);
         assert_eq!(VERSAO_MINIMA, 10);
         assert!(
             confere_o_carimbo(8).is_err(),
@@ -460,7 +471,7 @@ mod tests {
         );
         assert!(confere_o_carimbo(10).is_ok());
         assert!(
-            confere_o_carimbo(12).is_err(),
+            confere_o_carimbo(PROTOCOL_VERSION + 1).is_err(),
             "um par do futuro foi aceito pelo carimbo"
         );
         assert_eq!(oldest_supported_version(), VERSAO_MINIMA);
@@ -600,7 +611,7 @@ mod tests {
     /// anúncio de MODs —, e de que o anúncio continua alcançado pela global.
     #[test]
     fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
-        assert_eq!(PROTOCOL_VERSION, 11);
+        assert_eq!(PROTOCOL_VERSION, 12);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
             5,

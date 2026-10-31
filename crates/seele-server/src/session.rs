@@ -2721,6 +2721,14 @@ async fn run_session(
                             escrever!(&ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
                         }
                     }
+                    // F2/F4: perfis. A gravação do perfil nativo ainda não existe
+                    // no servidor; recusa dito, e não calado.
+                    ClientMessage::GravarPerfil { .. } | ClientMessage::TirarImagemDoPerfil { .. } => {
+                        escrever!(&ServerMessage::PerfilRecusado {
+                            motivo: seele_proto::perfil::RecusaDePerfil::SemPastaDePerfis,
+                            campos: Vec::new(),
+                        }).await?;
+                    }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
                         let parts = crate::mods::pedidos::partes(&response);

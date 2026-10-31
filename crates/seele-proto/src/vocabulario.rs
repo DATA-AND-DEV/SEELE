@@ -21,7 +21,7 @@
 //! teste de integração dos bytes-ouro precisa dos nomes.
 //!
 //! Mora aqui também a tabela de **em que número cada variante nasceu**
-//! ([`desde`], [`desde_a_razao`], [`desde_o_alerta`], [`desde_a_causa`],
+//! ([`desde`], [`desde_do_cliente`], [`desde_o_pedido_de_imagem`], [`desde_a_razao`], [`desde_o_alerta`], [`desde_a_causa`],
 //! [`desde_a_recusa`]): o
 //! portão que decide o
 //! que o servidor pode escrever para um par, e que até a 0.15 era um `match`
@@ -30,8 +30,11 @@
 use std::cell::Cell;
 use std::fmt;
 
-use crate::control::{AlertReason, CausaDaRecusa, DisconnectReason, MessageRefusal, ServerMessage};
+use crate::control::{
+    AlertReason, CausaDaRecusa, ClientMessage, DisconnectReason, MessageRefusal, ServerMessage,
+};
 use crate::version::{PRIMEIRO_DA_LINHA_DOIS, PRIMEIRO_DA_LINHA_UM};
+use crate::volume::PedidoDeImagem;
 
 /// Os nomes das variantes do enum `T`, na ordem dos ordinais.
 ///
@@ -142,6 +145,89 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         ServerMessage::QuadroDeCargos(..)
         | ServerMessage::SuasPermissoes(..)
         | ServerMessage::CargoRecusado { .. } => PRIMEIRO_DA_LINHA_DOIS,
+        // O perfil público nativo (0.19): o 12. Um par 11 não os recebe, e vê
+        // apelido e ícone nativo como sempre.
+        ServerMessage::Perfis { .. }
+        | ServerMessage::PerfilMudou(..)
+        | ServerMessage::PerfilRecusado { .. }
+        | ServerMessage::PendenciaDoPerfil { .. } => 12,
+    }
+}
+
+/// Em que número de protocolo um verbo do **cliente** passou a existir.
+///
+/// A metade que faltava de [`desde`]: o servidor tem o portão de quem manda
+/// (`entende_a_mensagem`), e o cliente precisa do mesmo para **não mandar** a
+/// um servidor que negociou menos o que ele não conhece. Um cliente 12 diante
+/// de um servidor 11 não escreve `GravarPerfil`: o servidor 11 leria uma
+/// variante desconhecida e o fluxo de controle desalinharia.
+///
+/// Sem `_`, de propósito, pelo mesmo motivo de [`desde`]: o guarda
+/// `as_tabelas_tem_um_braco_por_variante` o confere contra a lista do `serde`.
+#[must_use]
+pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
+    match mensagem {
+        ClientMessage::Hello { .. }
+        | ClientMessage::Response { .. }
+        | ClientMessage::EnterVoiceRoom { .. }
+        | ClientMessage::LeaveVoiceRoom
+        | ClientMessage::JoinChannel { .. }
+        | ClientMessage::SendMessage { .. }
+        | ClientMessage::FetchHistory { .. }
+        | ClientMessage::SetMuted { .. }
+        | ClientMessage::SetTotalIsolation { .. }
+        | ClientMessage::SetPresence { .. }
+        | ClientMessage::Ping { .. }
+        | ClientMessage::CreateVoiceRoom { .. }
+        | ClientMessage::CreateChannel { .. }
+        | ClientMessage::RenameVoiceRoom { .. }
+        | ClientMessage::RenameChannel { .. }
+        | ClientMessage::KickPerson { .. }
+        | ClientMessage::BanPerson { .. }
+        | ClientMessage::RemoveMessage { .. }
+        | ClientMessage::MovePerson { .. }
+        | ClientMessage::DeleteVoiceRoom { .. }
+        | ClientMessage::DeleteChannel { .. }
+        | ClientMessage::WeighChannel { .. }
+        | ClientMessage::FetchAttachment { .. }
+        | ClientMessage::RenameServer { .. }
+        | ClientMessage::SetServerIcon { .. }
+        | ClientMessage::StartScreenShare
+        | ClientMessage::StopScreenShare
+        | ClientMessage::RequestKeyFrame { .. }
+        | ClientMessage::SetPersonIcon { .. }
+        | ClientMessage::SetNickname { .. }
+        | ClientMessage::WatchScreen { .. }
+        | ClientMessage::UnwatchScreen { .. }
+        | ClientMessage::EmprestarSubida { .. }
+        | ClientMessage::ParFalhou { .. }
+        | ClientMessage::AceitarMods { .. }
+        | ClientMessage::RecusarMods
+        | ClientMessage::ModRequest { .. } => PRIMEIRO_DA_LINHA_UM,
+        // Cargos e permissões (ADR 0064): as primeiras da linha 2.
+        ClientMessage::CriarCargo { .. }
+        | ClientMessage::EditarCargo { .. }
+        | ClientMessage::MoverCargo { .. }
+        | ClientMessage::ApagarCargo { .. }
+        | ClientMessage::AtribuirCargo { .. }
+        | ClientMessage::RevogarCargo { .. }
+        | ClientMessage::PedirCargos
+        | ClientMessage::AcaoDeMod { .. } => PRIMEIRO_DA_LINHA_DOIS,
+        // O perfil público nativo (0.19).
+        ClientMessage::GravarPerfil { .. } | ClientMessage::TirarImagemDoPerfil { .. } => 12,
+    }
+}
+
+/// Em que número um pedido do fluxo de imagem passou a existir.
+///
+/// O fluxo de imagem não é uma lista de cima, mas carrega o mesmo risco: um
+/// servidor 11 que lê `EnviarAoPerfil` não o conhece e falha o fluxo. Quem
+/// abre o fluxo pergunta isto antes de escrever o pedido.
+#[must_use]
+pub const fn desde_o_pedido_de_imagem(pedido: &PedidoDeImagem) -> u8 {
+    match pedido {
+        PedidoDeImagem::Enviar { .. } | PedidoDeImagem::Ler { .. } => PRIMEIRO_DA_LINHA_DOIS,
+        PedidoDeImagem::EnviarAoPerfil { .. } | PedidoDeImagem::LerDoPerfil { .. } => 12,
     }
 }
 
@@ -341,6 +427,16 @@ mod tests {
         for (tabela, tipo, lista) in [
             ("desde", "ServerMessage", variantes::<ServerMessage>()),
             (
+                "desde_do_cliente",
+                "ClientMessage",
+                variantes::<ClientMessage>(),
+            ),
+            (
+                "desde_o_pedido_de_imagem",
+                "PedidoDeImagem",
+                variantes::<PedidoDeImagem>(),
+            ),
+            (
                 "desde_a_razao",
                 "DisconnectReason",
                 variantes::<DisconnectReason>(),
@@ -415,6 +511,79 @@ mod tests {
         assert_eq!(maior(PRIMEIRO_DA_LINHA_UM, 10), 10);
         assert_eq!(maior(10, PRIMEIRO_DA_LINHA_UM), 10);
         assert_eq!(maior(PRIMEIRO_DA_LINHA_UM, PRIMEIRO_DA_LINHA_UM), 9);
+    }
+
+    /// **Um par 11 não recebe perfis.** O servidor só escreve a um par o que
+    /// `desde` diz que ele entende, e as quatro variantes de perfil valem 12:
+    /// quem negociou 11 teria o fluxo de controle desalinhado por um
+    /// `PerfilMudou` que ele não conhece. Reverter um braço `=> 12` (para o 11
+    /// ou para o 10) reprova aqui.
+    #[test]
+    fn um_par_onze_nao_recebe_perfis() {
+        use crate::ids::PersonId;
+        use crate::perfil::{Efeito, LadoDoPerfil, PerfilPublico, RecusaDePerfil};
+
+        let perfil = PerfilPublico {
+            pessoa: PersonId(1),
+            revisao: 1,
+            nome_exibido: String::new(),
+            pronomes: String::new(),
+            status: String::new(),
+            bio: String::new(),
+            cor: [0; 3],
+            efeito: Efeito::Nenhum,
+            foto: None,
+            capa: None,
+        };
+        let do_servidor = [
+            ServerMessage::Perfis {
+                parte: vec![],
+                ultima: true,
+            },
+            ServerMessage::PerfilMudou(perfil),
+            ServerMessage::PerfilRecusado {
+                motivo: RecusaDePerfil::RevisaoVelha,
+                campos: vec![],
+            },
+            ServerMessage::PendenciaDoPerfil { faltou: vec![] },
+        ];
+        for mensagem in &do_servidor {
+            assert_eq!(desde(mensagem), 12, "{mensagem:?}");
+            assert!(desde(mensagem) > 11, "um par 11 receberia {mensagem:?}");
+        }
+        let do_cliente = [
+            ClientMessage::GravarPerfil {
+                revisao: 0,
+                nome_exibido: String::new(),
+                pronomes: String::new(),
+                status: String::new(),
+                bio: String::new(),
+                cor: [0; 3],
+                efeito: Efeito::Nenhum,
+            },
+            ClientMessage::TirarImagemDoPerfil {
+                lado: LadoDoPerfil::Foto,
+            },
+        ];
+        for mensagem in &do_cliente {
+            assert_eq!(desde_do_cliente(mensagem), 12, "{mensagem:?}");
+        }
+        for pedido in [
+            PedidoDeImagem::EnviarAoPerfil {
+                lado: LadoDoPerfil::Capa,
+                bytes: 1,
+            },
+            PedidoDeImagem::LerDoPerfil {
+                pessoa: PersonId(1),
+                lado: LadoDoPerfil::Capa,
+                hash: [0; 32],
+            },
+        ] {
+            assert_eq!(desde_o_pedido_de_imagem(&pedido), 12, "{pedido:?}");
+        }
+        // O que já existia não subiu.
+        assert_eq!(desde_do_cliente(&ClientMessage::PedirCargos), 10);
+        assert_eq!(desde_do_cliente(&ClientMessage::RecusarMods), 9);
     }
 
     #[test]

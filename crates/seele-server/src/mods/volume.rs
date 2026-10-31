@@ -945,6 +945,11 @@ pub async fn atender_imagem(
                 anyhow::ensure!(arquivo.metadata().await?.len() <= seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64, "arquivo-grande-demais");
                 Ok(Some(arquivo))
             }
+            // F2/F4: perfis. As imagens de perfil chegam com o despacho de
+            // `perfis/imagens.rs`; até lá o pedido volta recusado.
+            PedidoDeImagem::EnviarAoPerfil { .. } | PedidoDeImagem::LerDoPerfil { .. } => {
+                Err(anyhow::anyhow!("perfis-ainda-nao-implementado"))
+            }
         }
     }.await;
     match resultado {

@@ -193,6 +193,28 @@ pub enum PedidoDeImagem {
         /// Pedido pequeno de autorização, sem bytes de mídia.
         payload: String,
     },
+    /// Troca a foto ou a capa de **quem pede** (protocolo 12, SEELE 0.19). Não
+    /// passa por MOD: o servidor confere o teto, grava em blocos, confere o
+    /// tipo pelos bytes e só então difunde `PerfilMudou`. O corpo segue o
+    /// cabeçalho, como em `Enviar`.
+    EnviarAoPerfil {
+        /// Qual das duas imagens.
+        lado: crate::perfil::LadoDoPerfil,
+        /// Tamanho conferido durante a escrita e no EOF; até
+        /// [`crate::perfil::TETO_DA_IMAGEM`], e não os 100 MiB do volume.
+        bytes: u64,
+    },
+    /// Lê a imagem de um perfil (protocolo 12). O hash é o endereço: se ele não
+    /// é mais o atual, o servidor responde `erro: "mudou"` e o cliente pede o
+    /// perfil de novo, em vez de receber bytes de outra imagem.
+    LerDoPerfil {
+        /// De quem é.
+        pessoa: crate::ids::PersonId,
+        /// Qual das duas imagens.
+        lado: crate::perfil::LadoDoPerfil,
+        /// SHA-256 que o cliente espera.
+        hash: [u8; 32],
+    },
 }
 
 impl crate::control::Validate for PedidoDeImagem {
@@ -215,6 +237,17 @@ impl crate::control::Validate for PedidoDeImagem {
                     });
                 }
             }
+            Self::EnviarAoPerfil { bytes, .. } => {
+                if *bytes == 0 || *bytes > crate::perfil::TETO_DA_IMAGEM as u64 {
+                    return Err(crate::control::ControlError::FieldOutOfRange {
+                        field: "perfil_bytes",
+                    });
+                }
+            }
+            // Pessoa, lado e hash têm tamanho fixo: não há o que conferir, e
+            // escrever isto em vez de um `_` é o que faz o compilador cobrar a
+            // próxima variante.
+            Self::LerDoPerfil { .. } => {}
         }
         Ok(())
     }

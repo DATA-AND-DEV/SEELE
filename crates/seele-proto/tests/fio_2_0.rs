@@ -57,6 +57,10 @@ use seele_proto::ids::{
     Ssrc, VoiceRoomId,
 };
 use seele_proto::mods::ModAnunciado;
+use seele_proto::perfil::{
+    CampoDoPerfil, Efeito, ErroDeCampo, ImagemDoPerfil, LadoDoPerfil, MotivoDoCampo, PerfilPublico,
+    RecusaDePerfil, TipoDaImagem,
+};
 use seele_proto::screen::{
     cabecalho_de_quadro, LeitorDeTela, LidoDaTela, ScreenCodec, ScreenHeader, ScreenSource,
     TipoDeQuadro, SCREEN_HEADER_VERSION,
@@ -379,7 +383,46 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
                 payload: "{}".into(),
             },
         ),
+        // O perfil público nativo (0.19, protocolo 12).
+        (
+            "GravarPerfil",
+            ClientMessage::GravarPerfil {
+                revisao: 3,
+                nome_exibido: "Maya".into(),
+                pronomes: "ela/dela".into(),
+                status: "ao vivo".into(),
+                bio: "oi\ntchau".into(),
+                cor: [0xf2, 0x52, 0x1f],
+                efeito: Efeito::Aurora,
+            },
+        ),
+        (
+            "TirarImagemDoPerfil",
+            ClientMessage::TirarImagemDoPerfil {
+                lado: LadoDoPerfil::Capa,
+            },
+        ),
     ]
+}
+
+/// O perfil dos exemplares: com foto e sem capa.
+fn perfil_publico() -> PerfilPublico {
+    PerfilPublico {
+        pessoa: PersonId(42),
+        revisao: 3,
+        nome_exibido: "Maya".into(),
+        pronomes: "ela/dela".into(),
+        status: "ao vivo".into(),
+        bio: "oi\ntchau".into(),
+        cor: [0xf2, 0x52, 0x1f],
+        efeito: Efeito::Brilho,
+        foto: Some(ImagemDoPerfil {
+            hash: [0xab; 32],
+            tipo: TipoDaImagem::Webp,
+            bytes: 2048,
+        }),
+        capa: None,
+    }
 }
 
 /// A chave de MOD dos exemplares.
@@ -842,6 +885,31 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 },
             },
         ),
+        // O perfil público nativo (0.19, protocolo 12).
+        (
+            "Perfis",
+            ServerMessage::Perfis {
+                parte: vec![perfil_publico()],
+                ultima: true,
+            },
+        ),
+        ("PerfilMudou", ServerMessage::PerfilMudou(perfil_publico())),
+        (
+            "PerfilRecusado",
+            ServerMessage::PerfilRecusado {
+                motivo: RecusaDePerfil::Campos,
+                campos: vec![ErroDeCampo {
+                    campo: CampoDoPerfil::Bio,
+                    motivo: MotivoDoCampo::Longo,
+                }],
+            },
+        ),
+        (
+            "PendenciaDoPerfil",
+            ServerMessage::PendenciaDoPerfil {
+                faltou: vec![LadoDoPerfil::Capa],
+            },
+        ),
     ]
 }
 
@@ -964,6 +1032,23 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
         .unwrap(),
     ));
     todos.push((
+        "fluxo:pedido-de-imagem:enviar-ao-perfil".to_owned(),
+        encode(&PedidoDeImagem::EnviarAoPerfil {
+            lado: LadoDoPerfil::Foto,
+            bytes: 2_048,
+        })
+        .unwrap(),
+    ));
+    todos.push((
+        "fluxo:pedido-de-imagem:ler-do-perfil".to_owned(),
+        encode(&PedidoDeImagem::LerDoPerfil {
+            pessoa: PersonId(42),
+            lado: LadoDoPerfil::Capa,
+            hash: [0xab; 32],
+        })
+        .unwrap(),
+    ));
+    todos.push((
         "fluxo:resposta-de-imagem".to_owned(),
         encode(&RespostaDeImagem {
             erro: None,
@@ -977,7 +1062,14 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
 fn exemplares() -> Vec<(String, Vec<u8>)> {
     let mut todos = Vec::new();
     for (nome, mensagem) in clientes() {
-        todos.push((format!("cliente:{nome}"), encode(&mensagem).unwrap()));
+        todos.push((
+            format!("cliente:{nome}"),
+            encode_em(
+                seele_proto::vocabulario::desde_do_cliente(&mensagem).max(10),
+                &mensagem,
+            )
+            .unwrap(),
+        ));
     }
     for (nome, mensagem) in servidores() {
         todos.push((
