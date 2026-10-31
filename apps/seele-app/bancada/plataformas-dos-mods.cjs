@@ -148,6 +148,27 @@ const CATALOGO = [
         assert.ok(!trocou.montados.includes("x/so-app"), `${motor}: montou o MOD só do app: ${JSON.stringify(trocou)}`);
         assert.equal(trocou.estado?.fase, "so-noutra-plataforma", `${motor}: ${JSON.stringify(trocou)}`);
 
+        // 6. **O MOD que o catálogo não lista diz o que fazer** (e2e da API 8,
+        //    31/10). Quem hospeda instalou o MOD de uma pasta, e quem entra não
+        //    tem de onde baixá-lo: a tela dizia «O CATÁLOGO NÃO LISTA «…».. Tente
+        //    de novo» — dois pontos, e um conselho que nunca dá certo. O produto
+        //    sabe que ele não foi publicado, e sabe o caminho que funciona: a
+        //    pasta do MOD, instalada aqui, com a revisão que o servidor exige.
+        const foraDoCatalogo = await pagina.evaluate(async () => {
+          table.mods_instalados = [];
+          table.instalar_mod_do_catalogo = () => { throw { NaoEstaNoCatalogo: "x/novo" }; };
+          const anunciados = [{ id: "x/novo", version: "1.0.0", hash: "6af8198a".padEnd(64, "0"), repo: "r", reach: [], no_servidor: false, tema: false }];
+          await abrirAceiteDeMods("srv.exemplo:1", anunciados, "conj-9", null);
+          await aceitarOsMods();
+          return $("mods-erro").textContent;
+        });
+        assert.match(foraDoCatalogo, /x\/novo/, `${motor}: ${foraDoCatalogo}`);
+        assert.match(foraDoCatalogo, /não foi publicado/, `${motor}: não disse que o MOD não foi publicado: ${foraDoCatalogo}`);
+        assert.match(foraDoCatalogo, /INSTALAR MOD DE UMA PASTA/, `${motor}: não disse como instalar: ${foraDoCatalogo}`);
+        assert.match(foraDoCatalogo, /6af8198a/, `${motor}: não disse a revisão exigida: ${foraDoCatalogo}`);
+        assert.doesNotMatch(foraDoCatalogo, /Tente de novo/, `${motor}: mandou tentar de novo o que não muda: ${foraDoCatalogo}`);
+        assert.doesNotMatch(foraDoCatalogo, /\.\./, `${motor}: ponto dobrado: ${foraDoCatalogo}`);
+
         assert.deepEqual(erros, [], `${motor}: erros na página`);
         console.log(JSON.stringify({ motor, ok: true }));
         await pagina.close();

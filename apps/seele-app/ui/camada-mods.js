@@ -444,8 +444,22 @@ async function obterOConjunto(mods) {
     } catch (falha) {
       // **Nomeia o MOD, a etapa e o próximo passo.** «Falhou» sozinho manda a
       // pessoa adivinhar qual dos três, e o que fazer a respeito.
+      //
+      // **Fora do catálogo, tentar de novo não muda nada** (e2e da API 8,
+      // 31/10): quem hospeda instalou o MOD de uma pasta, e ele nunca foi
+      // publicado. O caminho que funciona é a mesma pasta, instalada aqui; a
+      // revisão é o que o servidor confere (`temOExato`), então ela vai junto.
+      if (falha?.NaoEstaNoCatalogo) {
+        dizer(
+          `${m.id} ${m.version} não foi publicado no catálogo, e não há de onde baixá-lo. ` +
+            "Peça a pasta do MOD a quem hospeda e instale em CONFIGURAÇÕES · MODs · " +
+            `INSTALAR MOD DE UMA PASTA (revisão ${String(m.hash ?? "").slice(0, 8)}); ` +
+            "depois, TENTAR DE NOVO. Ou recuse a entrada.",
+        );
+        return false;
+      }
       dizer(
-        `não consegui obter ${m.id} ${m.version}: ${fraseDeErro(falha)}. ` +
+        `não consegui obter ${m.id} ${m.version}: ${fraseDeErro(falha).replace(/\.\s*$/, "")}. ` +
           "Tente de novo, ou recuse a entrada.",
       );
       return false;
