@@ -594,6 +594,38 @@ const { chromium } = require('./playwright.cjs');
     const descartado = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'editor').at(-1));
     assert.equal(descartado?.descartou, true, `descartar o editor sujo não disse descartou: ${JSON.stringify(descartado)}`);
 
+    // 10a. **Escape num modal sujo pergunta, e a pergunta fica.** A tecla abria
+    //      «FECHAR SEM GRAVAR?» no ouvinte do documento e seguia subindo até o
+    //      da janela, onde a moderação, vendo a caixa aberta, a cancelava: o
+    //      mesmo Escape abria e fechava a pergunta, e o modal ficava como
+    //      estava, sem dizer nada. Medido no app de verdade (e2e da API 8,
+    //      31/10), com a configuração do Multiplayer. Tecla de verdade, e não
+    //      um evento montado: é a subida do evento que está em jogo.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'modal-sujo', tipo: 'dialogo', modal: true, titulo: 'Configurar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'modal-sujo', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [{ forma: 'campo', chave: 'maximo', rotulo: 'Máximo', valor: '10' }],
+      }] });
+    });
+    await page.fill('[data-superficie="modal-sujo"] [data-chave-do-mod="maximo"] input', '7');
+    await page.keyboard.press('Escape');
+    const peloEscape = await page.evaluate(() => ({
+      perguntou: !$('moderar').hidden,
+      aberta: Boolean(document.querySelector('[data-superficie="modal-sujo"]')?.isConnected),
+    }));
+    assert.deepEqual(peloEscape, { perguntou: true, aberta: true },
+      `Escape no modal sujo não deixou a pergunta de pé: ${JSON.stringify(peloEscape)}`);
+    // E o Escape seguinte é da caixa: cancela, e o modal segue com o rascunho.
+    await page.keyboard.press('Escape');
+    const cancelou = await page.evaluate(() => ({
+      perguntou: !$('moderar').hidden,
+      aberta: Boolean(document.querySelector('[data-superficie="modal-sujo"]')?.isConnected),
+      valor: document.querySelector('[data-superficie="modal-sujo"] [data-chave-do-mod="maximo"] input')?.value,
+    }));
+    assert.deepEqual(cancelou, { perguntou: false, aberta: true, valor: '7' },
+      `o segundo Escape não cancelou só a pergunta: ${JSON.stringify(cancelou)}`);
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-descartar', superficie: 'modal-sujo' }));
+
     // 10b. **A superfície suja sempre pergunta antes de fechar** (D-api-8;
     //      `superficies.garantias-do-produto[5]`). Só perguntava com
     //      `fecharComAlteracoes: 'confirmar'`, que nenhum vN.json declara: por

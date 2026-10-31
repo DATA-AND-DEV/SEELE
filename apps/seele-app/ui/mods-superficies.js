@@ -681,6 +681,12 @@ class SuperficieDeMod {
         || acordadosPorPedido.size) return;
       if (evento.key === "Escape") {
         evento.preventDefault();
+        // **A tecla acaba aqui.** Com rascunho, `pedirFechamento` abre a
+        // confirmação da moderação, e o ouvinte dela mora na `window`: deixar
+        // o mesmo Escape subir até lá era vê-lo cancelar a pergunta que
+        // acabou de abrir, e o modal sujo não fechava nem perguntava (e2e da
+        // API 8, 31/10; `bancada/camadas.cjs`, 10a).
+        evento.stopPropagation?.();
         this.pedirFechamento("escape");
         return;
       }
