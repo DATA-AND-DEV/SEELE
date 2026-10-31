@@ -8,9 +8,9 @@
 //     computador rode o servidor de um jogo, o SEELE mostra o que vai baixar, o
 //     que vai rodar, quanto de disco ocupa, e os termos do jogo, e só liga se a
 //     pessoa disser que sim;
-//  2. a **faixa das máquinas ligadas** (`#maquinas`): uma linha por máquina de
-//     pé, com DESLIGAR, e a última parada com o motivo em frase;
-//  3. a **lista de aceites** nas configurações, com REVOGAR.
+//  2. a **faixa das máquinas ligadas** (`#maquinas`, global: em toda tela): uma
+//     linha por máquina de pé, com DESLIGAR, e a última parada com o motivo em frase;
+//  3. a **lista de aceites** nas configurações, com DESLIGAR (se ligada) e REVOGAR.
 //
 // # Por que fora das superfícies de MOD
 //
@@ -51,10 +51,12 @@ const titulosDeMaquinas = new Map();
 
 /**
  * O que, vindo de `maquina-estado`, também desfaz um pedido que ainda espera
- * resposta: o pedido deixou de existir, e aceitá-lo já não leva a nada. Os
- * outros motivos falam de uma máquina que estava de pé.
+ * resposta: o pedido deixou de existir, e aceitá-lo já não leva a nada. O Rust
+ * só diz isso por uma chave que tinha pedido pendente ou máquina de pé
+ * (`dizer_pedidos_desfeitos`, `encerrar_e_dizer`). Os outros motivos falam de
+ * uma máquina que estava de pé.
  */
-const MOTIVOS_QUE_DISPENSAM_O_PEDIDO = new Set(["mod-desligado", "sem-aceite", "servidor-saiu"]);
+const MOTIVOS_QUE_DISPENSAM_O_PEDIDO = new Set(["mod-desligado", "outro-pedido", "sem-aceite", "servidor-saiu"]);
 
 /** Erros de aceite/recusa que dizem que o pedido já não está lá para ser respondido. */
 const ERROS_DE_PEDIDO_QUE_SUMIU = new Set([
@@ -411,6 +413,12 @@ function aplicarOEstadoDaMaquina(estado) {
   maquinasNaFaixa.delete(chave);
   maquinasNaFaixa.set(chave, entrada);
   desenharAFaixaDeMaquinas();
+  // A lista das configurações, se está à vista, acompanha o que o Rust confirmou.
+  if ($("lista-maquinas-aceitas").offsetParent !== null) {
+    desenharMaquinasAceitas().catch((falha) => {
+      registrarNoAnfitriao("maquina", `a lista de aceites não redesenhou — ${String(falha?.message ?? falha)}`, "aviso");
+    });
+  }
 
   if (!entrada.ligada && MOTIVOS_QUE_DISPENSAM_O_PEDIDO.has(entrada.motivo)) {
     // O pedido deste servidor para esta máquina não existe mais: aceitá-lo daria
@@ -479,6 +487,16 @@ async function desenharMaquinasAceitas() {
       ].join(" · ")),
     );
     caixa.append(texto);
+    if (aceita.ligada) {
+      const desligar = elemento("button", "botao-fantasma", F.desligar);
+      desligar.type = "button";
+      desligar.addEventListener("click", () => {
+        desligarPelaLista(aceita).catch((falha) => {
+          registrarNoAnfitriao("maquina", `desligar falhou — ${String(falha?.message ?? falha)}`, "aviso", aceita.mod_id);
+        });
+      });
+      caixa.append(desligar);
+    }
     const botao = elemento("button", "botao-fantasma", F.revogar);
     botao.type = "button";
     botao.addEventListener("click", () => {
@@ -490,6 +508,19 @@ async function desenharMaquinasAceitas() {
     linha.append(caixa);
     return linha;
   }));
+}
+
+/** DESLIGAR na lista: o mesmo verbo da faixa, e o aceite continua guardado. */
+async function desligarPelaLista(aceita) {
+  const erro = $("maquinas-aceitas-erro");
+  erro.hidden = true;
+  try {
+    await invoke("maquina_desligar", { alvo: aceita.alvo, modId: aceita.mod_id, servidor: aceita.servidor });
+  } catch (falha) {
+    erro.hidden = false;
+    erro.textContent = fraseDaFalhaDaMaquina(falha);
+  }
+  await desenharMaquinasAceitas();
 }
 
 async function revogarUmaMaquina(aceita) {

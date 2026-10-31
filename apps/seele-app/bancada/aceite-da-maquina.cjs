@@ -26,7 +26,12 @@
 //  9. o que o MOD escolheu entra como texto, e nunca como marcação;
 // 10. clicar no véu não responde nada;
 // 11. a falha do aceite aparece na tela, em frase, e a tela continua lá;
-// 12. um pedido que o servidor desfez (`servidor-saiu`) sai da tela, e a faixa diz por quê.
+// 12. um pedido que o servidor desfez sai da tela, e a faixa diz por quê, com o
+//     payload exato que o Rust emite (`EstadoNaTela`: alvo, mod_id, servidor,
+//     ligada:false, motivo), e o mesmo para `outro-pedido`;
+// 13. a máquina ligada continua com DESLIGAR à vista e clicável quando a janela
+//     está na tela de entrada, e não só na da sessão;
+// 14. na lista de aceites, uma máquina ligada tem DESLIGAR ao lado de REVOGAR.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/aceite-da-maquina.cjs
 
@@ -367,21 +372,71 @@ async function caso(motor, numero, prova) {
           await pagina.evaluate(() => { table.maquina_aceitar = () => ({}); });
         });
 
-        // 12. O servidor desfez o pedido: a tela sai, e a faixa diz por quê.
+        // 12. O servidor desfez o pedido: a tela sai, e a faixa diz por quê. O
+        // payload é o que `dizer_pedidos_desfeitos` emite no Rust, sem mais nem menos.
         await caso(motor, "12", async () => {
+          for (const [motivo, frase] of [["servidor-saiu", /você saiu do servidor/], ["outro-pedido", /o servidor passou este jogo para outra máquina/]]) {
+            await zerar();
+            await emitirPedido();
+            await esperarTela("FULANO");
+            await pagina.evaluate((m) => {
+              titulosDeMaquinas.set(chaveDaMaquina("127.0.0.1:7000", "x/jogo", "srv-1"), "Minecraft");
+              emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: m });
+            }, motivo);
+            await esperarFechada();
+            assert.match(await pagina.evaluate(() => faixaDeMaquinas()), frase, `${motor}: 12 · ${motivo}: a faixa não diz por quê`);
+          }
+        });
+
+        // 13. A faixa é global: na tela de entrada, DESLIGAR segue à vista e funciona.
+        await caso(motor, "13", async () => {
           await zerar();
-          await emitirPedido();
-          await esperarTela("FULANO");
           await pagina.evaluate(() => {
             titulosDeMaquinas.set(chaveDaMaquina("127.0.0.1:7000", "x/jogo", "srv-1"), "Minecraft");
-            emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "servidor-saiu" });
+            emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: true });
+            $("tela-sessao").hidden = true;
+            $("tela-boot").hidden = false;
           });
-          await esperarFechada();
-          assert.match(await pagina.evaluate(() => faixaDeMaquinas()), /Minecraft \(x\/jogo\): você saiu do servidor/, `${motor}: 12 · a faixa não diz por quê`);
+          try {
+            const medida = await pagina.evaluate(() => {
+              const b = document.querySelector(".maquina-desligar");
+              const r = b.getBoundingClientRect();
+              const no = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return { w: r.width, h: r.height, topo: r.top, base: r.bottom, janela: innerHeight, alcanca: no === b || b.contains(no), tela: $("tela-boot").hidden };
+            });
+            assert.equal(medida.tela, false, `${motor}: 13 · a tela de entrada não está à vista`);
+            assert.ok(medida.w > 0 && medida.h > 0 && medida.topo >= 0 && medida.base <= medida.janela, `${motor}: 13 · DESLIGAR fora da janela: ${JSON.stringify(medida)}`);
+            assert.ok(medida.alcanca, `${motor}: 13 · algo cobre o DESLIGAR: ${JSON.stringify(medida)}`);
+            await pagina.click(".maquina-desligar");
+            assert.deepEqual(await pagina.evaluate(() => chamadasDe("maquina_desligar")), [
+              { alvo: "127.0.0.1:7000", modId: "x/jogo", servidor: "srv-1" },
+            ], `${motor}: 13 · DESLIGAR na tela de entrada`);
+          } finally {
+            await pagina.evaluate(() => { $("tela-boot").hidden = true; $("tela-sessao").hidden = false; });
+          }
+        });
+
+        // 14. A lista de aceites: DESLIGAR ao lado de REVOGAR, só para a que está ligada.
+        await caso(motor, "14", async () => {
+          await zerar();
+          await pagina.evaluate(() => {
+            table.maquinas_aceitas = () => [
+              { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", titulo: "Minecraft", pedido_por: "Fulano", quando: 1, ligada: true, tuneis: [] },
+              { alvo: "127.0.0.1:7000", mod_id: "x/outro", servidor: "srv-1", titulo: "Terraria", pedido_por: "Fulano", quando: 1, ligada: false, tuneis: [] },
+            ];
+          });
+          await pagina.evaluate(() => desenharMaquinasAceitas());
+          const rotulos = await pagina.evaluate(() => [...$("lista-maquinas-aceitas").querySelectorAll("li")].map((li) => [...li.querySelectorAll("button")].map((b) => b.textContent)));
+          assert.deepEqual(rotulos, [["DESLIGAR", "REVOGAR"], ["REVOGAR"]], `${motor}: 14 · botões da lista`);
+          await pagina.evaluate(() => [...$("lista-maquinas-aceitas").querySelectorAll("button")].find((b) => b.textContent === "DESLIGAR").click());
+          await pagina.waitForFunction(() => chamadas.some((c) => c.cmd === "maquina_desligar"), null, { timeout: 5000 });
+          assert.deepEqual(await pagina.evaluate(() => chamadasDe("maquina_desligar")), [
+            { alvo: "127.0.0.1:7000", modId: "x/jogo", servidor: "srv-1" },
+          ], `${motor}: 14 · as três chaves de maquina_desligar pela lista`);
         });
 
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 12, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 14, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

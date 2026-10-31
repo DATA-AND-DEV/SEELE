@@ -921,6 +921,25 @@ impl Maquinas {
             .collect()
     }
 
+    /// **Tira os pedidos que ainda esperam a tela** e diz quais eram.
+    ///
+    /// Quem tira é quem avisa: a tela só sabe que um pedido deixou de existir se
+    /// alguém lhe disser (`maquina-estado`), e só os que estavam aqui merecem o
+    /// aviso — uma chave sem pedido não tem diálogo aberto.
+    fn tirar_pendentes(&self, qual: impl Fn(&Chave, &PedidoRecebido) -> bool) -> Vec<Chave> {
+        let mut estado = self.estado();
+        let chaves: Vec<Chave> = estado
+            .pendentes
+            .iter()
+            .filter(|(chave, pedido)| qual(chave, pedido))
+            .map(|(chave, _)| chave.clone())
+            .collect();
+        for chave in &chaves {
+            estado.pendentes.remove(chave);
+        }
+        chaves
+    }
+
     /// Esta chave está ligada agora?
     fn ligada(&self, chave: &Chave) -> bool {
         self.estado().ligadas.contains_key(chave)
@@ -1110,16 +1129,12 @@ pub(crate) fn ao_evento<R: tauri::Runtime>(
             let Some(estado) = sessoes(app) else {
                 return true;
             };
-            {
-                let mut maquinas = estado.maquinas.estado();
-                if maquinas
-                    .pendentes
-                    .get(&chave)
-                    .is_some_and(|p| p.sessao == sessao)
-                {
-                    maquinas.pendentes.remove(&chave);
-                }
-            }
+            // O diálogo aberto para este pedido não sabe que ele acabou: o
+            // `maquina-estado` é o que o fecha.
+            let desfeitos = estado
+                .maquinas
+                .tirar_pendentes(|c, p| *c == chave && p.sessao == sessao);
+            dizer_pedidos_desfeitos(app, &desfeitos, fim);
             let vivas = estado
                 .maquinas
                 .tirar_ligadas(|c, l| *c == chave && l.sessao == sessao);
@@ -1143,6 +1158,14 @@ fn encerrar_e_dizer<R: tauri::Runtime>(app: &AppHandle<R>, vivas: Vec<Arc<Viva>>
                 emitir_estado(&app, &viva.chave, false, Some(fim.nome()));
             }
         });
+    }
+}
+
+/// **Diz à tela que estes pedidos acabaram**: `maquina-estado` desligada, com o
+/// motivo da dispensa (ou `servidor-saiu`), para cada chave que ainda esperava.
+fn dizer_pedidos_desfeitos<R: tauri::Runtime>(app: &AppHandle<R>, chaves: &[Chave], fim: Fim) {
+    for chave in chaves {
+        emitir_estado(app, chave, false, Some(fim.nome()));
     }
 }
 
@@ -1173,11 +1196,13 @@ pub(crate) fn sessao_saiu<R: tauri::Runtime>(app: &AppHandle<R>, sessao: u64) {
     let Some(estado) = sessoes(app) else {
         return;
     };
-    {
-        let mut maquinas = estado.maquinas.estado();
-        maquinas.pendentes.retain(|_, p| p.sessao != sessao);
-        maquinas.chegados_cedo.retain(|c| c.sessao != sessao);
-    }
+    let desfeitos = estado.maquinas.tirar_pendentes(|_, p| p.sessao == sessao);
+    estado
+        .maquinas
+        .estado()
+        .chegados_cedo
+        .retain(|c| c.sessao != sessao);
+    dizer_pedidos_desfeitos(app, &desfeitos, Fim::ServidorSaiu);
     let vivas = estado.maquinas.tirar_ligadas(|_, l| l.sessao == sessao);
     encerrar_e_dizer(app, vivas, Fim::ServidorSaiu);
 }
@@ -1706,6 +1731,42 @@ mod testes {
             pedido_por: "ana".to_owned(),
             quando: 1,
         }
+    }
+
+    #[test]
+    fn so_o_pedido_da_sessao_e_da_chave_dispensada_e_anunciado() {
+        let maquinas = Maquinas::default();
+        let mut daqui = pedido(oferta(), "aaaa", "h1");
+        let mut de_outra_sessao = pedido(oferta(), "aaaa", "h1");
+        de_outra_sessao.chave = Chave::de("casa", "x/jogo", "outro");
+        de_outra_sessao.sessao = 2;
+        daqui.sessao = 1;
+        {
+            let mut estado = maquinas.estado();
+            estado.pendentes.insert(daqui.chave.clone(), daqui.clone());
+            estado
+                .pendentes
+                .insert(de_outra_sessao.chave.clone(), de_outra_sessao.clone());
+        }
+        let chave = daqui.chave.clone();
+        // A dispensa nomeia uma chave e uma sessão: só ela sai e é anunciada.
+        let desfeitos = maquinas.tirar_pendentes(|c, p| *c == chave && p.sessao == 1);
+        assert_eq!(desfeitos, vec![chave.clone()]);
+        assert!(!maquinas.estado().pendentes.contains_key(&chave));
+        assert!(maquinas
+            .estado()
+            .pendentes
+            .contains_key(&de_outra_sessao.chave));
+        // Sem pedido na chave, não há o que anunciar: a tela não tem diálogo.
+        assert!(maquinas
+            .tirar_pendentes(|c, p| *c == chave && p.sessao == 1)
+            .is_empty());
+        // O fim da sessão leva os pedidos dela, todos, e diz cada um.
+        let desfeitos = maquinas.tirar_pendentes(|_, p| p.sessao == 2);
+        assert_eq!(desfeitos, vec![de_outra_sessao.chave.clone()]);
+        // O motivo que vai à tela é o nome da dispensa, ou `servidor-saiu`.
+        assert_eq!(Fim::da_dispensa("outro-pedido").map(Fim::nome), Some("outro-pedido"));
+        assert_eq!(Fim::ServidorSaiu.nome(), "servidor-saiu");
     }
 
     #[test]

@@ -1155,16 +1155,6 @@
   <div id="tuneis" class="camada-tuneis" role="status" aria-live="polite" hidden></div>
 
   <!--
-    **As máquinas de jogo ligadas neste computador** (API 8, parte 3): uma linha
-    por máquina de pé, com DESLIGAR, e a última parada com o motivo em frase.
-    Como a faixa das portas, **é do produto e fica fora de toda superfície de
-    MOD**: um programa rodando aqui é o que a pessoa mais precisa ver, e mais
-    precisa poder parar. Desenhada por `camada-maquina.js`; escondida sem
-    máquina nenhuma.
-  -->
-  <div id="maquinas" class="camada-maquina" role="status" aria-live="polite" hidden></div>
-
-  <!--
     As quatro colunas do comp v3, nas larguras dele — `60px 268px minmax(0,1fr)
     328px`: a trilha de servidores, os canais, o canal aberto, e as pessoas.
 
@@ -4759,6 +4749,20 @@
     <p id="travessia-erro" class="erro" role="alert" hidden></p>
   </div>
 </div>
+
+<!--
+  **As máquinas de jogo ligadas neste computador** (API 8, parte 3): uma linha
+  por máquina de pé, com DESLIGAR, e a última parada com o motivo em frase.
+  Como a faixa das portas, **é do produto e fica fora de toda superfície de
+  MOD**: um programa rodando aqui é o que a pessoa mais precisa ver, e mais
+  precisa poder parar.
+
+  **Global, fora de toda `section.tela`**, como o aceite: a máquina segue de pé
+  quando a janela volta à entrada ou à lista de servidores, e é ali que a faixa
+  prometida «no alto da tela» precisa estar. Fixa sob a barra da janela;
+  desenhada por `camada-maquina.js`; escondida sem máquina nenhuma.
+-->
+<div id="maquinas" class="camada-maquina" role="status" aria-live="polite" hidden></div>
 
 <!--
   **O aceite da máquina de jogo** (API 8, parte 3; `camada-maquina.js`).

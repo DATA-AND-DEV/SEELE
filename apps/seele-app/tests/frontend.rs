@@ -25921,6 +25921,42 @@ fn maquina_a_tela_e_do_produto_e_nao_passa_pela_regiao_de_mod() {
     );
 }
 
+/// **Toda saída de um pedido pendente é dita à tela**, e a faixa mora fora das
+/// telas. O Rust tira o pedido pendente numa dispensa e no fim da sessão; sem
+/// o `maquina-estado` dessas duas saídas, o diálogo aberto sobrevive ao pedido
+/// e ACEITAR dá `sem-pedido`. E uma máquina de pé tem DESLIGAR em toda tela:
+/// `#maquinas` fora de toda `section.tela`.
+#[test]
+fn maquina_a_saida_do_pedido_e_dita_e_a_faixa_e_de_toda_tela() {
+    let rust = read("src/maquina.rs");
+    let dispensa = rust
+        .split_once("Event::MachineDismissed {")
+        .and_then(|(_, r)| r.split_once("Event::Ended"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("a dispensa sumiu de maquina.rs");
+    assert!(
+        dispensa.contains("dizer_pedidos_desfeitos(app, &desfeitos, fim)"),
+        "a dispensa tira o pedido pendente e não diz à tela"
+    );
+    let saiu = rust
+        .split_once("pub(crate) fn sessao_saiu<")
+        .and_then(|(_, r)| r.split_once("\n}\n"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`sessao_saiu` sumiu de maquina.rs");
+    assert!(
+        saiu.contains("dizer_pedidos_desfeitos(app, &desfeitos, Fim::ServidorSaiu)"),
+        "o fim da sessão tira os pedidos pendentes e não diz à tela"
+    );
+    let pagina = read("ui/index.html");
+    let faixa = pagina.find("id=\"maquinas\"").expect("sem a faixa");
+    let ultima_secao_antes = pagina[..faixa].rfind("<section").unwrap_or(0);
+    let fechou_depois = pagina[ultima_secao_antes..faixa].contains("</section>");
+    assert!(
+        fechou_depois,
+        "`#maquinas` está dentro de uma `section.tela`: a faixa some quando a janela troca de tela"
+    );
+}
+
 /// **No navegador não se roda servidor de jogo**: a ponte recusa os verbos pelo
 /// nome, e a lista é vazia.
 #[test]
@@ -25992,7 +26028,8 @@ fn maquina_toda_parada_e_todo_campo_do_rust_tem_frase() {
     let campos_js = campos_js.split_once("ler:").map_or(campos_js, |(a, _)| a);
     for campo in &campos {
         assert!(
-            campos_js.contains(&format!("{campo}:")),
+            // A chave inteira: `receita:` também casa dentro de `versao_da_receita:`.
+            campos_js.contains(&format!(" {campo}:")) || campos_js.contains(&format!("{{ {campo}:")),
             "o campo «{campo}» do Rust não tem frase em `FRASES_DA_MAQUINA.campos`"
         );
     }
