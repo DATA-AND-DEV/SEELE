@@ -67,16 +67,6 @@ async fn montar_com_malha(
     todos: bool,
     malha_para_tuneis: bool,
 ) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
-    montar_completo(todos, malha_para_tuneis, true).await
-}
-
-/// Como [`montar_com_malha`], com também o interruptor de servir túneis na mão
-/// (`ServerConfig::servir_tuneis`, desligado no padrão do produto).
-async fn montar_completo(
-    todos: bool,
-    malha_para_tuneis: bool,
-    servir_tuneis: bool,
-) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
     let temp = tempfile::tempdir()?;
     let raizes = seele_server::RaizesDosMods {
         pacotes: temp.path().join("cache"),
@@ -113,7 +103,6 @@ async fn montar_completo(
         proprietario: Some(seele_proto::transport::key_fingerprint(&publica(GESTORA))),
         mods_dir: Some(raizes.clone()),
         malha_para_tuneis,
-        servir_tuneis,
         ..ServerConfig::default()
     };
     let daemon = Arc::new(Daemon::bind(config).await?);
@@ -239,6 +228,108 @@ fn servir() -> ClientMessage {
     }
 }
 
+/// O servidor de jogo cuja máquina estes testes aceitam.
+const SERVIDOR_DE_JOGO: &str = "eco-1";
+
+/// **Põe o aceite pelo livro**: o servidor pede a `maquina` que rode a máquina
+/// de [`SERVIDOR_DE_JOGO`] com uma oferta que traz só o túnel `nome`, e a
+/// sessão aceita pelo fio com o resumo dessa oferta. É o que a metade de
+/// servidor e a tela de aceite fazem de verdade; aqui o que está sob teste é o
+/// túnel, e não o pedido, e por isso o pedido entra direto no livro.
+///
+/// O pedido vai pelo barramento, e uma sessão recém-entrada pode ainda não o
+/// ouvir: sem o `PedidoDeMaquina` em pouco tempo, pede de novo (o livro troca o
+/// pendente pelo mesmo, e o reenvia).
+async fn aceitar_como_maquina(
+    daemon: &Daemon,
+    maquina: &mut Par,
+    mod_id: &str,
+    nome: &str,
+    protocolo: ProtocoloDeTunel,
+    porta: u16,
+) -> Result<()> {
+    let hash = {
+        let db = daemon.server().persistence.lock().await;
+        seele_server::persistence::mods::enabled(&db)?
+            .into_iter()
+            .find(|m| m.id == mod_id)
+            // Um MOD que não está ligado também pode ter máquina aceita: o
+            // livro não confere o pacote, e é o túnel que o recusa depois.
+            .map_or_else(|| "0".repeat(64), |m| m.hash)
+    };
+    let oferta = seele_proto::maquina::OfertaDeMaquina {
+        titulo: "Eco".into(),
+        receita: "eco".into(),
+        versao_da_receita: "1.0.0".into(),
+        versao_do_jogo: "1".into(),
+        tuneis: vec![seele_proto::maquina::TunelOferecido {
+            nome: nome.into(),
+            protocolo,
+            porta,
+        }],
+        artefatos: vec![],
+        pack: None,
+        origens: vec![],
+        dominios_do_jogo: vec![],
+        rodar: None,
+        disco_maximo: 0,
+        termos: vec![],
+    };
+    let fim = Instant::now() + PRAZO;
+    let resumo = loop {
+        let resumo = match seele_server::maquinas::pedir(
+            daemon.server(),
+            mod_id,
+            &hash,
+            SERVIDOR_DE_JOGO,
+            maquina.pessoa,
+            PersonId(0),
+            &oferta,
+        ) {
+            seele_server::maquinas::Pedido::Guardado { resumo_hex, .. } => resumo_hex,
+            outro => anyhow::bail!("o pedido não ficou pendente: {outro:?}"),
+        };
+        let veio = tokio::time::timeout(
+            Duration::from_millis(500),
+            esperar(&mut maquina.ligado.recebe, |q| {
+                matches!(q, ServerMessage::PedidoDeMaquina { .. }).then_some(())
+            }),
+        )
+        .await;
+        if matches!(veio, Ok(Some(()))) {
+            break resumo;
+        }
+        anyhow::ensure!(
+            Instant::now() < fim,
+            "o PedidoDeMaquina não chegou à máquina"
+        );
+    };
+    frame::write(
+        &mut maquina.ligado.envio,
+        &ClientMessage::AceiteDeMaquina {
+            mod_id: mod_id.into(),
+            servidor: SERVIDOR_DE_JOGO.into(),
+            resumo,
+        },
+    )
+    .await?;
+    while daemon
+        .server()
+        .maquinas()
+        .quem_opera(mod_id, SERVIDOR_DE_JOGO)
+        != Some(maquina.pessoa)
+    {
+        anyhow::ensure!(Instant::now() < fim, "o aceite não entrou no livro");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    Ok(())
+}
+
+/// [`aceitar_como_maquina`] do túnel de [`servir`].
+async fn aceitar_o_eco(daemon: &Daemon, maquina: &mut Par) -> Result<()> {
+    aceitar_como_maquina(daemon, maquina, MOD, NOME, ProtocoloDeTunel::Tcp, 25565).await
+}
+
 fn entrar_no_tunel() -> ClientMessage {
     ClientMessage::EntrarNoTunel {
         mod_id: MOD.into(),
@@ -337,6 +428,7 @@ async fn entrar_sem_a_acao_e_recusado_com_o_nome() -> Result<()> {
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
     let mut jogador = entrar(endereco, JOGADOR, 12).await?;
 
+    aceitar_o_eco(&daemon, &mut maquina).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
 
@@ -369,7 +461,17 @@ async fn quem_serve_sem_o_poder_porta_e_recusado() -> Result<()> {
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
-    // Um MOD que não está ligado não tem poder nenhum.
+    // Um MOD que não está ligado não tem poder nenhum. A máquina é aceita para
+    // ele, para que a recusa seja a do poder, e não a do aceite.
+    aceitar_como_maquina(
+        &daemon,
+        &mut maquina,
+        "x/outro",
+        NOME,
+        ProtocoloDeTunel::Tcp,
+        1,
+    )
+    .await?;
     frame::write(
         &mut maquina.ligado.envio,
         &ClientMessage::ServirTunel {
@@ -407,6 +509,7 @@ async fn quem_sai_do_tunel_ou_cai_e_dito_a_maquina() -> Result<()> {
     let _gestora = entrar(endereco, GESTORA, 12).await?;
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
     let mut jogador = entrar(endereco, JOGADOR, 12).await?;
+    aceitar_o_eco(&daemon, &mut maquina).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
 
@@ -441,22 +544,33 @@ async fn quem_sai_do_tunel_ou_cai_e_dito_a_maquina() -> Result<()> {
     Ok(())
 }
 
-/// **Servir é provisório e vem desligado** (`ServerConfig::servir_tuneis`): com
-/// ele desligado, uma sessão 12 qualquer não serve o nome de túnel de um MOD
-/// com `porta`, mesmo com o MOD ligado e o poder declarado. O padrão do
-/// produto é o desligado, e o teste o pega pelo `Default`.
+/// **Servir sem aceite é recusado.** O interruptor provisório saiu: uma
+/// sessão 12 qualquer, com o MOD ligado e o poder `porta` declarado, não serve
+/// o nome de túnel do MOD sem ser a máquina aceita — nem antes do pedido, nem
+/// aceita para **outro** túnel. (O pedido mostrado e ainda não aceito é de
+/// `maquina_no_servidor.rs::servir_sem_aceite_e_fora_do_aceite`.)
 #[tokio::test(flavor = "multi_thread")]
-async fn sem_o_interruptor_ninguem_serve_um_tunel() -> Result<()> {
-    assert!(
-        !ServerConfig::default().servir_tuneis,
-        "o padrão do produto tem de ser não servir túneis"
-    );
-    let (endereco, daemon, _temp) = montar_completo(true, true, false).await?;
+async fn servir_sem_aceite_e_recusado() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
-    // Sem o interruptor, quem decide é o aceite (`crate::maquinas`), e esta
-    // sessão não aceitou máquina nenhuma.
+    assert_eq!(
+        resposta_de_tunel(&mut maquina).await?,
+        Err(RecusaDeTunel::ForaDoAceite)
+    );
+    // Aceita, mas para outro túnel: o aceite não vale para um nome que a
+    // oferta não trazia.
+    aceitar_como_maquina(
+        &daemon,
+        &mut maquina,
+        MOD,
+        "outro",
+        ProtocoloDeTunel::Tcp,
+        25565,
+    )
+    .await?;
+    frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(
         resposta_de_tunel(&mut maquina).await?,
         Err(RecusaDeTunel::ForaDoAceite)
@@ -483,6 +597,7 @@ async fn revogar_entrar_no_jogo_fecha_o_tunel_aberto() -> Result<()> {
     } = gestora.ligado;
     let quadro = acompanhar_a_gestora(recebe_da_gestora);
 
+    aceitar_o_eco(&daemon, &mut maquina).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
     frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
@@ -586,6 +701,7 @@ async fn a_maquina_que_sai_encerra_o_tunel_de_quem_estava_dentro() -> Result<()>
     let _gestora = entrar(endereco, GESTORA, 12).await?;
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
     let mut jogador = entrar(endereco, JOGADOR, 12).await?;
+    aceitar_o_eco(&daemon, &mut maquina).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
     frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
@@ -619,6 +735,7 @@ async fn um_par_onze_nunca_recebe_mensagem_de_tunel() -> Result<()> {
             }
         });
     }
+    aceitar_o_eco(&daemon, &mut maquina).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
 
@@ -709,9 +826,19 @@ fn datagrama_de_dado(carga: &[u8]) -> Vec<u8> {
 /// Abre um túnel UDP servido pela máquina e deixa o jogador dentro dele.
 async fn udp_pronto(
     endereco: SocketAddr,
+    daemon: &Daemon,
 ) -> Result<(Par, Par, seele_enlace::Datagramas, AberturaDeTunel)> {
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
     let mut jogador = entrar(endereco, JOGADOR, 12).await?;
+    aceitar_como_maquina(
+        daemon,
+        &mut maquina,
+        MOD,
+        NOME,
+        ProtocoloDeTunel::Udp,
+        19132,
+    )
+    .await?;
     frame::write(
         &mut maquina.ligado.envio,
         &ClientMessage::ServirTunel {
@@ -747,7 +874,7 @@ async fn udp_pronto(
 async fn o_udp_vai_pela_estrela_com_a_abertura_marcada_e_a_carga_marcada() -> Result<()> {
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
-    let (maquina, jogador, mut dele, udp) = udp_pronto(endereco).await?;
+    let (maquina, jogador, mut dele, udp) = udp_pronto(endereco, &daemon).await?;
     dele.mandar(&seele_proto::tunel::datagrama_de_abertura(&udp)?)?;
     let CanalDeTunel::SemOrdem(mut da_maquina) =
         tokio::time::timeout(PRAZO, maquina.ligado.conexao.aceitar_tunel()).await??
@@ -797,7 +924,7 @@ async fn o_udp_vai_pela_estrela_com_a_abertura_marcada_e_a_carga_marcada() -> Re
 async fn carga_antes_da_abertura_nao_corta_o_canal_j_e_a_repeticao_chega_reescrita() -> Result<()> {
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
-    let (maquina, jogador, dele, udp) = udp_pronto(endereco).await?;
+    let (maquina, jogador, dele, udp) = udp_pronto(endereco, &daemon).await?;
 
     // A abertura «se perdeu»: o primeiro que o anfitrião vê é carga.
     dele.mandar(&datagrama_de_dado(b"cedo demais"))?;
@@ -863,7 +990,7 @@ async fn carga_antes_da_abertura_nao_corta_o_canal_j_e_a_repeticao_chega_reescri
 async fn abertura_malformada_no_canal_j_corta_e_conta() -> Result<()> {
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
-    let (_maquina, _jogador, dele, _udp) = udp_pronto(endereco).await?;
+    let (_maquina, _jogador, dele, _udp) = udp_pronto(endereco, &daemon).await?;
     let mut lixo = vec![seele_proto::tunel::TAG_DE_ABERTURA];
     lixo.extend_from_slice(&[0xff; 12]);
     dele.mandar(&lixo)?;
@@ -984,6 +1111,7 @@ async fn a_apresentacao_do_tunel_sai_depois_do_concedido() -> Result<()> {
     declarar(&mut maquina, 'a').await?;
     declarar(&mut jogador, 'b').await?;
     // O servidor lê a declaração antes do verbo seguinte (mesmo fluxo, em ordem).
+    aceitar_o_eco(&daemon, &mut maquina).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
     frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
@@ -1007,6 +1135,7 @@ async fn sem_malha_nao_ha_apresentacao() -> Result<()> {
     let mut jogador = entrar(endereco, JOGADOR, 12).await?;
     declarar(&mut maquina, 'a').await?;
     declarar(&mut jogador, 'b').await?;
+    aceitar_o_eco(&daemon, &mut maquina).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
     frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
@@ -1033,7 +1162,7 @@ async fn uma_pessoa_nao_esgota_os_canais_da_maquina() -> Result<()> {
     let teto = seele_server::tuneis::MAX_CANAIS_REPASSADOS_POR_PESSOA;
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
-    let (maquina, mut jogador, primeiro, udp) = udp_pronto(endereco).await?;
+    let (maquina, mut jogador, primeiro, udp) = udp_pronto(endereco, &daemon).await?;
     let mut outro = entrar(endereco, OUTRO, 12).await?;
     frame::write(&mut outro.ligado.envio, &entrar_no_tunel()).await?;
     assert_eq!(resposta_de_tunel(&mut outro).await?, Ok(19132));

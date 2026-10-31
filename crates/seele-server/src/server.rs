@@ -1652,9 +1652,6 @@ pub struct Server {
     /// A cópia de [`crate::ServerConfig::malha_para_tuneis`]: se o servidor
     /// apresenta as pontas de um túnel para o caminho direto.
     pub malha_para_tuneis: bool,
-    /// A cópia de [`crate::ServerConfig::servir_tuneis`]: se uma máquina pode
-    /// servir um túnel neste servidor.
-    pub servir_tuneis: bool,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
     /// `None` when this server has nowhere to keep blobs, which is the in-memory

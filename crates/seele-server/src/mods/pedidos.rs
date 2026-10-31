@@ -795,7 +795,6 @@ mod tests {
             tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
             maquinas: std::sync::Mutex::new(crate::maquinas::Maquinas::default()),
             malha_para_tuneis: true,
-            servir_tuneis: true,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,

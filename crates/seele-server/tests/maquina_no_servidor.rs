@@ -6,8 +6,8 @@
 //! (`seele_server::maquinas::pedir`); os da metade de servidor (Task 5) fazem
 //! o caminho inteiro: um `ModRequest` ao MOD de teste, cujo `aoPedir` chama
 //! `mundo.maquinas.pedir` e cujo `aoAcontecer` grava no quintal os momentos da
-//! máquina que vê. **`servir_tuneis` desligado em todos**: é o aceite, e não o
-//! interruptor, que está sob teste.
+//! máquina que vê. O aceite é o único portão de servir um túnel: não há
+//! interruptor que o contorne.
 
 #![allow(
     clippy::expect_used,
@@ -166,8 +166,7 @@ fn instalar(
 }
 
 /// Um servidor com o MOD `x/jogo` ligado (`poderes: ["porta"]`, `maquina`,
-/// `server` = [`METADE`], `entrar-no-jogo` dada a todos) e **`servir_tuneis`
-/// desligado**.
+/// `server` = [`METADE`], `entrar-no-jogo` dada a todos).
 async fn montar() -> Result<Montado> {
     montar_com(false).await
 }
@@ -214,7 +213,6 @@ async fn montar_com(eco: bool) -> Result<Montado> {
         database: banco,
         proprietario: Some(seele_proto::transport::key_fingerprint(&publica(GESTORA))),
         mods_dir: Some(raizes.clone()),
-        servir_tuneis: false,
         ..ServerConfig::default()
     };
     let daemon = Arc::new(Daemon::bind(config).await?);
@@ -379,10 +377,6 @@ async fn aceitar(m: &Montado, par: &mut Par, resumo: &str) -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn servir_sem_aceite_e_fora_do_aceite() -> Result<()> {
-    assert!(
-        !ServerConfig::default().servir_tuneis,
-        "o padrão do produto tem de ser o aceite, e não o interruptor"
-    );
     let m = montar().await?;
     let gestora = entrar(m.endereco, GESTORA, 12).await?;
     let mut alice = entrar(m.endereco, ALICE, 12).await?;

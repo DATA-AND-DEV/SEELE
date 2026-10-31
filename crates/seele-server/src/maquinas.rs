@@ -5,10 +5,11 @@
 //! # Por que um livro, e não uma pergunta ao cliente
 //!
 //! Até a parte 2, servir um túnel dependia só do MOD: qualquer sessão no 12
-//! podia servir o nome de túnel de qualquer MOD com o poder `porta`
-//! (`ServerConfig::servir_tuneis`). O aceite muda a pergunta de «o MOD pode?»
-//! para «**esta pessoa**, por **esta conexão**, aceitou **esta oferta**?» — e
-//! essa resposta só o servidor tem, porque foi ele quem mostrou a oferta.
+//! podia servir o nome de túnel de qualquer MOD com o poder `porta`, atrás
+//! de um interruptor provisório que a parte 3 tirou. O aceite muda a pergunta
+//! de «o MOD pode?» para «**esta pessoa**, por **esta conexão**, aceitou
+//! **esta oferta**?» — e essa resposta só o servidor tem, porque foi ele quem
+//! mostrou a oferta.
 //!
 //! # O que este módulo não decide
 //!

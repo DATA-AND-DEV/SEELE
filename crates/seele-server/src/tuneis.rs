@@ -784,8 +784,8 @@ async fn poderes_do_mod(server: &Server, mod_id: &str) -> Vec<Poder> {
 ///
 /// # Errors
 ///
-/// [`RecusaDeTunel::ForaDoAceite`] (com `servir_tuneis` desligado e o túnel
-/// fora do aceite de `maquina`), ou a recusa nomeada de [`Tuneis::servir`].
+/// [`RecusaDeTunel::ForaDoAceite`] (o túnel fora do aceite de `maquina`), ou
+/// a recusa nomeada de [`Tuneis::servir`].
 pub async fn atender_servir(
     server: &Server,
     maquina: PersonId,
@@ -795,10 +795,12 @@ pub async fn atender_servir(
 ) -> Result<(), RecusaDeTunel> {
     // O que vem de fora antes dos cadeados dos livros.
     let poderes = poderes_do_mod(server, pedido.mod_id).await;
-    // **O aceite**, ao lado do interruptor provisório (`ServerConfig::servir_tuneis`,
-    // que o Task 7 tira): só serve quem é a máquina aceita de um servidor de
-    // jogo deste MOD, pela conexão que aceitou, e só o túnel que a oferta
-    // aceita trazia, com a mesma porta e o mesmo protocolo.
+    // **O aceite é o único portão**: só serve quem é a máquina aceita de um
+    // servidor de jogo deste MOD, pela conexão que aceitou, e só o túnel que a
+    // oferta aceita trazia, com a mesma porta e o mesmo protocolo. Não há
+    // interruptor ao lado: um servidor que deixasse servir sem aceite deixaria
+    // qualquer sessão no 12 abrir uma porta na máquina de outra pessoa em nome
+    // de um MOD — e a pessoa nunca teria visto a oferta.
     //
     // `maquinas()` fica tomado até o túnel entrar no livro: uma parada que
     // corra agora ou vê o túnel e o para, ou tira o aceite antes e este pedido
@@ -806,26 +808,24 @@ pub async fn atender_servir(
     // já parou. A ordem é a do doc de `Server::maquinas`: `maquinas` antes de
     // `tuneis`, e o banco já lido.
     let maquinas = server.maquinas();
-    if !server.servir_tuneis {
-        if let Err(porque) = maquinas.conferir_tunel(
-            maquina,
-            id_da_conexao,
-            pedido.mod_id,
-            pedido.nome,
-            pedido.protocolo,
-            pedido.porta,
-        ) {
-            tracing::info!(
-                mod_id = %pedido.mod_id,
-                tunel = %pedido.nome,
-                quem = %maquina,
-                protocolo = ?pedido.protocolo,
-                porta = pedido.porta,
-                ?porque,
-                "túnel: servir fora do aceite"
-            );
-            return Err(RecusaDeTunel::ForaDoAceite);
-        }
+    if let Err(porque) = maquinas.conferir_tunel(
+        maquina,
+        id_da_conexao,
+        pedido.mod_id,
+        pedido.nome,
+        pedido.protocolo,
+        pedido.porta,
+    ) {
+        tracing::info!(
+            mod_id = %pedido.mod_id,
+            tunel = %pedido.nome,
+            quem = %maquina,
+            protocolo = ?pedido.protocolo,
+            porta = pedido.porta,
+            ?porque,
+            "túnel: servir fora do aceite"
+        );
+        return Err(RecusaDeTunel::ForaDoAceite);
     }
     let mut livro = server.tuneis();
     livro.servir(maquina, id_da_conexao, pedido, &poderes)?;

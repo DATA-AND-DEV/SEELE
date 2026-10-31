@@ -312,18 +312,6 @@ pub struct ServerConfig {
     /// Quem apresenta as pontas é [`crate::tuneis::apresentar`], que lê a cópia
     /// guardada em [`crate::server::Server`].
     pub malha_para_tuneis: bool,
-    /// Se este servidor aceita que uma máquina **sirva** um túnel de jogo.
-    /// **Padrão: desligado.**
-    ///
-    /// Provisório: a parte 3 da API 8 prende o `ServirTunel` ao aceite do
-    /// dono da máquina (`crate::maquinas`), e o Task 7 tira este interruptor.
-    /// Ligado, qualquer sessão no protocolo 12 serve o nome de túnel de
-    /// qualquer MOD com o poder `porta`: o servidor confere o MOD, e não quem o
-    /// pede. Desligado, só serve a máquina aceita, e só o túnel da oferta
-    /// aceita; o resto é recusado (`ForaDoAceite`) e vai para o log com
-    /// `mod_id=`, `tunel=` e qual das três coisas não bateu. As provas que
-    /// servem túneis sem máquina aceita o ligam.
-    pub servir_tuneis: bool,
 }
 
 impl Default for ServerConfig {
@@ -366,10 +354,6 @@ impl Default for ServerConfig {
             modo_local: false,
             // Ligada: a malha alivia o anfitrião, e a estrela cobre o resto.
             malha_para_tuneis: true,
-            // Desligado até a parte 3 (ver o campo): nada no produto serve
-            // túnel hoje, e um servidor de produção não deve aceitar quem o
-            // faça por conta própria.
-            servir_tuneis: false,
         }
     }
 }
@@ -785,7 +769,6 @@ impl Daemon {
             tuneis: std::sync::Mutex::new(tuneis::Tuneis::default()),
             maquinas: std::sync::Mutex::new(maquinas::Maquinas::default()),
             malha_para_tuneis: config.malha_para_tuneis,
-            servir_tuneis: config.servir_tuneis,
             anexos,
             caminho_bps: config.caminho_bps,
             versao_do_anuncio: config.versao_do_anuncio,

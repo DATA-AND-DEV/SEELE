@@ -18,6 +18,9 @@
 //!   (`despedir_da_sessao` → `encerrar_e_esperar`): a porta não sobrevive ao
 //!   app;
 //! - `a_recusa_chega_com_o_nome`: o nome em kebab-case, e nunca texto livre.
+//!
+//! A máquina serve **depois do aceite** (`maquina_de_jogo`): a metade de
+//! servidor pede, o núcleo mostra, e a máquina aceita a oferta do `eco-tcp`.
 
 #![allow(
     clippy::expect_used,
@@ -38,101 +41,32 @@ use seele_core::{MemoryPinStore, PinStore};
 use seele_ffi::{
     CaminhoDeTunel, ConnectConfig, Connection, Event, EventListener, RelatorioDeTunel,
 };
-use seele_proto::tunel::{ProtocoloDeTunel, ACAO_ENTRAR_NO_JOGO};
-use seele_server::persistence::Location;
-use seele_server::{Daemon, ServerConfig};
+use seele_proto::tunel::ProtocoloDeTunel;
+use seele_server::Daemon;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-mod porta;
-use porta::ligar_insistindo;
-
-const MOD: &str = "x/jogo";
+mod maquina_de_jogo;
+use maquina_de_jogo::{aceitar_como_maquina, MOD, SERVIDOR_DE_JOGO};
 
 /// Quanto se espera por qualquer coisa antes de dar o teste por falho. Larga
 /// porque o ping do canal de controle é de 2 s e uma máquina carregada é lenta.
 const PACIENCIA: Duration = Duration::from_secs(30);
 
-/// O servidor de teste: onde ele escuta, o daemon, a identidade do conjunto de
-/// MODs que quem entra tem de ter aceitado, e o diretório que o sustenta.
-type Servidor = (SocketAddr, Arc<Daemon>, String, tempfile::TempDir);
+use maquina_de_jogo::Servidor;
 
-/// Um servidor com o MOD `x/jogo` ligado: poder `porta`, plataforma `app` e a
-/// ação `entrar-no-jogo` dada a todos. A mesma montagem de
-/// `seele-server/tests/tunel_no_servidor.rs`.
+/// Um servidor com o MOD `x/jogo` ligado, com a metade de servidor que pede a
+/// máquina (ver `maquina_de_jogo::servidor`).
 async fn servidor(malha_para_tuneis: bool) -> Result<Servidor> {
-    let temp = tempfile::tempdir()?;
-    let raizes = seele_server::RaizesDosMods {
-        pacotes: temp.path().join("cache"),
-        dados: temp.path().join("dados"),
-    };
-    let manifesto = serde_json::json!({
-        "schema": 1, "id": MOD, "version": "1.0.0",
-        "api": seele_proto::mods::MOD_API_VERSION,
-        "repo": "https://github.com/x/jogo", "reach": [],
-        "client": "cliente.js",
-        "plataformas": ["app"], "poderes": ["porta"],
-        // A porta pede a metade de máquina, e ela a de servidor (API 8, parte 3).
-        "maquina": "maquina.js", "server": "servidor.js",
-        "permissoes": [{"acao": ACAO_ENTRAR_NO_JOGO, "nome": "Entrar no jogo", "todos": true}],
-    })
-    .to_string()
-    .into_bytes();
-    let mut arquivos = vec![
-        ("mod.json".to_owned(), manifesto),
-        ("cliente.js".to_owned(), b"void 0;".to_vec()),
-        ("maquina.js".to_owned(), b"void 0;".to_vec()),
-        ("servidor.js".to_owned(), b"void 0;".to_vec()),
-    ];
-    let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut arquivos));
-    let pacote = raizes.pacote_de(&hash);
-    std::fs::create_dir_all(&pacote)?;
-    for (nome, bytes) in arquivos {
-        std::fs::write(pacote.join(nome), bytes)?;
-    }
-    let config = ServerConfig {
-        name: "Casa".into(),
-        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-        database: Location::Memory,
-        mods_dir: Some(raizes.clone()),
-        malha_para_tuneis,
-        servir_tuneis: true,
-        ..ServerConfig::default()
-    };
-    let daemon = Arc::new(ligar_insistindo(config).await?);
-    let conjunto = {
-        let db = daemon.server().persistence.lock().await;
-        seele_server::persistence::mods::enable(
-            &db,
-            &seele_server::persistence::mods::EnabledMod {
-                id: MOD.into(),
-                version: "1.0.0".into(),
-                hash,
-                repo: "https://github.com/x/jogo".into(),
-                reach: vec![],
-                server_half: false,
-                api: seele_proto::mods::MOD_API_VERSION,
-                tema: false,
-                plataformas: Some(vec![seele_proto::mods::Plataforma::App]),
-            },
-        )?;
-        let queixas = seele_server::mods::gravar_permissoes_declaradas(&db, &raizes);
-        assert!(queixas.is_empty(), "{queixas:?}");
-        seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
-    };
-    let endereco = daemon.local_addr()?;
-    let atendendo = Arc::clone(&daemon);
-    tokio::spawn(async move {
-        let _ = atendendo.run().await;
-    });
-    Ok((endereco, daemon, conjunto, temp))
+    maquina_de_jogo::servidor(malha_para_tuneis, None).await
 }
 
 // ------------------------------------------------------------ a máquina
 
-/// A máquina do jogo: um `Enlace` que serve um eco TCP como `eco-tcp`.
-async fn maquina(endereco: SocketAddr, conjunto: &str) -> Result<Enlace> {
-    let enlace = Enlace::conectar_entre(
+/// A máquina do jogo: um `Enlace` que aceita ser a máquina e serve um eco TCP
+/// como `eco-tcp`.
+async fn maquina(daemon: &Daemon, endereco: SocketAddr, conjunto: &str) -> Result<Enlace> {
+    let mut enlace = Enlace::conectar_entre(
         vec![Destino {
             servidor: endereco,
             nome_tls: "localhost".into(),
@@ -164,6 +98,14 @@ async fn maquina(endereco: SocketAddr, conjunto: &str) -> Result<Enlace> {
             });
         }
     });
+    aceitar_como_maquina(
+        daemon,
+        &mut enlace,
+        MOD,
+        SERVIDOR_DE_JOGO,
+        &[("eco-tcp", ProtocoloDeTunel::Tcp, jogo)],
+    )
+    .await?;
     enlace
         .servir_tunel(MOD, "eco-tcp", ProtocoloDeTunel::Tcp, jogo)
         .await
@@ -282,7 +224,7 @@ async fn esperar_as_identidades(daemon: &Daemon, maquina: &Enlace) -> Result<()>
 #[tokio::test(flavor = "multi_thread")]
 async fn a_porta_abre_pela_ffi_e_o_relatorio_chega_a_casca_com_o_apelido() -> Result<()> {
     let (endereco, daemon, conjunto, temp) = servidor(true).await?;
-    let maquina = maquina(endereco, &conjunto).await?;
+    let maquina = maquina(&daemon, endereco, &conjunto).await?;
     let home = temp.path().join("joga");
     let (conexao, relatorios) = jogador(endereco, &home, &conjunto)?;
     esperar_as_identidades(&daemon, &maquina).await?;
@@ -351,7 +293,7 @@ async fn a_porta_abre_pela_ffi_e_o_relatorio_chega_a_casca_com_o_apelido() -> Re
 #[tokio::test(flavor = "multi_thread")]
 async fn fechar_os_tuneis_do_mod_fecha_a_porta_e_diz_o_motivo() -> Result<()> {
     let (endereco, daemon, conjunto, temp) = servidor(true).await?;
-    let maquina = maquina(endereco, &conjunto).await?;
+    let maquina = maquina(&daemon, endereco, &conjunto).await?;
     let (conexao, relatorios) = jogador(endereco, &temp.path().join("joga"), &conjunto)?;
     esperar_as_identidades(&daemon, &maquina).await?;
 
@@ -384,7 +326,7 @@ async fn fechar_os_tuneis_do_mod_fecha_a_porta_e_diz_o_motivo() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn encerrar_a_sessao_fecha_a_porta() -> Result<()> {
     let (endereco, daemon, conjunto, temp) = servidor(true).await?;
-    let maquina = maquina(endereco, &conjunto).await?;
+    let maquina = maquina(&daemon, endereco, &conjunto).await?;
     let (conexao, _) = jogador(endereco, &temp.path().join("joga"), &conjunto)?;
     esperar_as_identidades(&daemon, &maquina).await?;
 
@@ -411,7 +353,7 @@ async fn encerrar_a_sessao_fecha_a_porta() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_recusa_chega_com_o_nome() -> Result<()> {
     let (endereco, daemon, conjunto, temp) = servidor(true).await?;
-    let maquina = maquina(endereco, &conjunto).await?;
+    let maquina = maquina(&daemon, endereco, &conjunto).await?;
     let (conexao, _) = jogador(endereco, &temp.path().join("joga"), &conjunto)?;
     esperar_as_identidades(&daemon, &maquina).await?;
 
