@@ -575,25 +575,57 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
    */
   async function ligar(pedido = {}) {
     if (vivo.ctx) {
-      if (!pedido.somenteOuvir && !vivo.faixa) {
-        const minhaGeracao = geracaoDoAudio;
-        try { await abrirCaptura(pedido.microfone ?? null, minhaGeracao); }
-        catch (erro) { if (minhaGeracao === geracaoDoAudio) calarMicrofone(); throw erro; }
-      }
+      if (!pedido.somenteOuvir && !vivo.faixa) await abrirSoACaptura(pedido.microfone ?? null);
       return;
     }
     const minhaGeracao = geracaoDoAudio;
     try {
-      await abrirOAudio(pedido, minhaGeracao);
+      await abrirOAudio({ ...pedido, somenteOuvir: true }, minhaGeracao);
     } catch (erro) {
-      // Uma abertura pela metade (o microfone recusado, a saída que não
+      // Uma saída pela metade (o contexto, o worklet, o `play()` que não
       // tocou) não deixa contexto nem tag de áudio para trás. **Só a própria
       // geração**: se o áudio já foi fechado (o `pagehide`, o `desligar`), quem
       // fechou já levou o que esta abertura tinha registrado, e uma abertura
       // NOVA pode estar de pé, que este `catch` não pode derrubar.
       if (minhaGeracao === geracaoDoAudio) await desligar();
-      throw erro;
+      throw naEtapa(erro, erro?.etapaDaVoz ?? "saida");
     }
+    // **O microfone que não abre não leva a escuta junto** (0.19, o teste no
+    // Chrome do Android: entrou, permissões dadas, e não ouvia nem falava). A
+    // saída já toca; uma recusa ou uma faixa que não sobe solta só a captura,
+    // e o erro sai marcado `etapaDaVoz: "microfone"` para quem chamou dizer à
+    // pessoa que ela ouve a sala e ninguém a ouve.
+    if (!pedido.somenteOuvir) await abrirSoACaptura(pedido.microfone ?? null);
+  }
+
+  /** Abre a captura sobre uma saída que já toca; a falha solta só a captura. */
+  async function abrirSoACaptura(microfone) {
+    const minhaGeracao = geracaoDoAudio;
+    try {
+      await abrirCaptura(microfone, minhaGeracao);
+    } catch (erro) {
+      // Soltar a captura não troca o erro: o que a pessoa precisa saber é o do microfone.
+      if (minhaGeracao === geracaoDoAudio) {
+        try { calarMicrofone(); } catch (soltar) { falha("microfone", soltar); }
+      }
+      throw naEtapa(erro, "microfone");
+    }
+  }
+
+  /**
+   * Marca em que etapa da abertura o erro nasceu: `"saida"` (o contexto, o
+   * worklet, o `play()`) ou `"microfone"` (o `getUserMedia`, a faixa). Um
+   * `NotAllowedError` do `play()` e o de uma recusa do microfone têm o mesmo
+   * nome; só a etapa separa os dois.
+   */
+  function naEtapa(erro, etapa) {
+    // Objeto de outro reino (um `DOMException` de outro contexto) também é
+    // marcado no lugar: embrulhá-lo perderia o `name` (`NotAllowedError`).
+    const marcado = erro !== null && typeof erro === "object" ? erro : new Error(String(erro));
+    if (!marcado.etapaDaVoz) {
+      try { marcado.etapaDaVoz = etapa; } catch { /* um erro congelado segue sem a marca */ }
+    }
+    return marcado;
   }
 
   /**
@@ -911,7 +943,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     vivo.faixa = null;
     if (vivo.fonte) pararAsFaixas(vivo.fonte);
     if (faixa) faixa.stop();
-    if (vivo.captura) { vivo.captura.port.onmessage = null; vivo.captura.port.onmessageerror = null; vivo.captura.disconnect(); }
+    if (vivo.captura) { vivo.captura.port.onmessage = null; vivo.captura.port.onmessageerror = null; if (typeof vivo.captura.disconnect === "function") vivo.captura.disconnect(); }
     if (vivo.encoder && vivo.encoder.state !== "closed") vivo.encoder.close();
     Object.assign(vivo, { fonte: null, captura: null, encoder: null });
   }
@@ -966,7 +998,9 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     if (vivo.testando && !vivo.dentro) await fecharTeste();
     if (!vivo.ctx) {
       controles.supressao = supressao;
-      await ligar({ microfone, saida: aparelhoDeSaida });
+      // Fora da sala, a saída aberta só para o teste não fica de pé sem ele.
+      try { await ligar({ microfone, saida: aparelhoDeSaida }); }
+      catch (erro) { if (!vivo.dentro) await desligar(); throw erro; }
     }
     const comSupressao = vivo.supressaoAplicada ?? supressao;
     w.voz_teste_abrir(abertura, comSupressao ? 1 : 0);

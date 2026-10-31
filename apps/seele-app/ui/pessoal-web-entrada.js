@@ -8,7 +8,11 @@ function instalarConversasPessoaisWeb() {
   if (!entrada) return;
   let servico = null, preparando = null, voz = null, preparandoVoz = null, tela = null, par = null;
   let geracao = 0, geracaoDaRecepcao = 0, geracaoDaMidia = 0, microfone = false, abrindoMicrofone = false;
+  /** A captura pedida no gesto de chamar ou atender: o par a liga quando chega. */
+  let capturaDoGesto = null;
   let apelidoDaConversa = "";
+  const FRASE_DO_MICROFONE_FECHADO =
+    "O microfone não abriu. Você ouve a conversa, mas a outra pessoa não ouve você. Libere o microfone para este site no navegador e toque no microfone.";
   let diagnosticoDaConexao = null;
   let fase = "livre", linkDeEntrada = null, conviteNoServico = null, recebendoCodigo = true;
   let estadoDoCodigoDireto = { estado: "Subindo" }, criandoLink = false, preparoDoConvite = null;
@@ -27,7 +31,7 @@ function instalarConversasPessoaisWeb() {
     },
     async chamar(apelido) {
       apelidoDaConversa = apelido;
-      abrirSaidaNoGesto();
+      abrirAudioNoGesto();
       const vez = geracao, preparo = preparoDoConvite;
       // O clique conserva o gesto para a saída, mas o convite só pode ser
       // usado depois da recepção inicial e da leitura do link terminarem.
@@ -42,7 +46,7 @@ function instalarConversasPessoaisWeb() {
       vista.limpar({ preservarOperacao: true });
       return atual.chamar({ apelido });
     },
-    atender: () => { abrirSaidaNoGesto(); return servico?.atender({ apelido: nomeLocal() }); },
+    atender: () => { abrirAudioNoGesto(); return servico?.atender({ apelido: nomeLocal() }); },
     recusar: () => servico?.recusar(),
     encerrar: terminar,
     enviarTexto: texto => {
@@ -115,7 +119,7 @@ function instalarConversasPessoaisWeb() {
   }
   function soltarMidia(guardarVoz = false) {
     fecharMicrofone();
-    if (!guardarVoz) { selecaoDaSaida.invalidar(); void voz?.desligar().catch(() => {}); voz = null; preparandoVoz = null; }
+    if (!guardarVoz) { selecaoDaSaida.invalidar(); void voz?.desligar().catch(() => {}); voz = null; preparandoVoz = null; capturaDoGesto = null; }
     par = null;
     if (tela) tela.fechar();
     tela = null; vista.palco.replaceChildren(); vista.palco.hidden = true;
@@ -140,10 +144,32 @@ function instalarConversasPessoaisWeb() {
     preparandoVoz = promessa;
     return promessa;
   }
-  function abrirSaidaNoGesto() {
-    if (!voz) { vista.falha("O áudio está preparando. Toque no microfone depois de conectar para abrir a escuta."); return; }
-    // AudioContext nasce aqui, no gesto, sem solicitar getUserMedia.
-    void voz.ligar({ somenteOuvir: true }).then(() => { if (fase === "dentro") return selecaoDaSaida.restaurar(); }).catch(erro => vista.falha(`Não foi possível abrir a escuta: ${erro.message || erro}`));
+  /**
+   * **Entrar na chamada pede o microfone** (0.19): no gesto de chamar ou
+   * atender nascem a saída E a captura, e não no toque do botão do microfone,
+   * que no celular ficava para depois e a pessoa entrava sem falar. A captura
+   * fica muda até o par chegar (`receberPar`), que a liga. Um microfone que
+   * não abre não fecha a escuta: a pessoa ouve, e a tela diz que não é ouvida.
+   */
+  function abrirAudioNoGesto() {
+    if (!voz) { vista.falha("O áudio está preparando. Toque no microfone depois de conectar para falar."); return; }
+    const aberta = voz.ligar();
+    capturaDoGesto = aberta;
+    void aberta.then(() => { if (fase === "dentro") return selecaoDaSaida.restaurar(); }).catch(erro => {
+      if (capturaDoGesto === aberta) capturaDoGesto = null;
+      vista.falha(erro?.etapaDaVoz === "microfone" ? FRASE_DO_MICROFONE_FECHADO : `Não foi possível abrir a escuta: ${erro.message || erro}`);
+    });
+  }
+  /** Liga o microfone do gesto quando o par chega, se ele abriu. */
+  async function ligarMicrofoneDoGesto(estaVoz, enlace, meta, vez) {
+    const captura = capturaDoGesto;
+    capturaDoGesto = null;
+    if (!captura) return;
+    try { await captura; } catch { return; }
+    if (vez !== geracaoDaMidia || voz !== estaVoz || par?.enlace !== enlace || microfone) return;
+    estaVoz.mudo(false); estaVoz.modo(2);
+    estaVoz.entrar(enlace.transporteDaVoz, meta.papel === "quem-liga" ? 1 : 2);
+    microfone = true; vista.microfone(true);
   }
   async function receberPar(enlace, meta, minhaGeracao) {
     soltarMidia(true);
@@ -158,6 +184,7 @@ function instalarConversasPessoaisWeb() {
     preparada.mudo(true);
     preparada.entrar(enlace.transporteDaVoz, meta.papel === "quem-liga" ? 1 : 2);
     void selecaoDaSaida.restaurar();
+    void ligarMicrofoneDoGesto(preparada, enlace, meta, vez);
     tela = criarCompartilhamentoPessoalWeb({ servico: atual, transporte: enlace.tela,
       palco: vista.palco, enviarControle: controle => atual.enviarControle(controle),
       telaCheiaNativa: navegador ? null : ligada => chamarNativo("tela_cheia", { ligada }),
@@ -292,7 +319,7 @@ function instalarConversasPessoaisWeb() {
     get estadoDaSala() { return estadoDoCodigoDireto; },
     async chamarCodigo({ codigo, apelido } = {}) {
       if (apelido) apelidoDaConversa = apelido;
-      abrirSaidaNoGesto();
+      abrirAudioNoGesto();
       vista.abrir({ apelido: apelido || nomeLocal() }); vista.limpar();
       try { return await (await obterServico()).chamarCodigo({ codigo, apelido: apelido || nomeLocal() }); }
       catch (erro) {
@@ -303,7 +330,7 @@ function instalarConversasPessoaisWeb() {
         vista.falha(String(erro.message || erro)); throw erro;
       }
     },
-    atender: () => { abrirSaidaNoGesto(); return servico?.atender({ apelido: nomeLocal() }); }, recusar: () => servico?.recusar(), encerrar: terminar,
+    atender: () => { abrirAudioNoGesto(); return servico?.atender({ apelido: nomeLocal() }); }, recusar: () => servico?.recusar(), encerrar: terminar,
     async receber(receber) {
       const vez = ++geracaoDaRecepcao;
       recebendoCodigo = Boolean(receber);

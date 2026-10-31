@@ -18439,7 +18439,7 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
 /// um estado novo **não compila** até entrar aqui.
 fn todos_os_estados_da_abertura() -> Vec<seele_ffi::AberturaDoAudio> {
     use seele_ffi::AberturaDoAudio::{
-        Aberto, Abrindo, EmOutraSessao, ForaDeSala, NaoAbriuNoPrazo, SemAparelho,
+        Aberto, Abrindo, EmOutraSessao, ForaDeSala, NaoAbriuNoPrazo, SemAparelho, SoOuvindo,
     };
     // `EmOutraSessao` (E3 da 0.17): numa sala, com a voz da máquina noutra sessão.
     let todos = vec![
@@ -18449,10 +18449,12 @@ fn todos_os_estados_da_abertura() -> Vec<seele_ffi::AberturaDoAudio> {
         SemAparelho,
         NaoAbriuNoPrazo,
         EmOutraSessao,
+        SoOuvindo,
     ];
     for estado in &todos {
         match estado {
-            ForaDeSala | Abrindo | Aberto | SemAparelho | NaoAbriuNoPrazo | EmOutraSessao => {}
+            ForaDeSala | Abrindo | Aberto | SemAparelho | NaoAbriuNoPrazo | EmOutraSessao
+            | SoOuvindo => {}
         }
     }
     todos
@@ -24123,7 +24125,7 @@ for (const como of ["resolve", "rejeita"]) {
   confere("(c/" + como + ") a A, ao terminar, mexeu no estado da B: " + JSON.stringify(c.estado()), c.estado().dentro === true && c.estado().abertura === "aberto" && c.estado().numero === 9 && c.estado().ligando === true);
 }
 
-// (d) O erro da abertura VIGENTE ainda escreve o estado de erro (o caminho de erro de sempre).
+// (d) O microfone recusado na abertura VIGENTE (0.19): a escuta fica, a sala diz SÓ OUVINDO, e a recusa é do microfone.
 const d = montar({ segurarGum: [0] });
 await d.roda("aVozDaPonte()");
 d.roda("ligarOAudioNoGesto()");
@@ -24131,7 +24133,8 @@ d.eco("conferirAVozDaSessao", d.sessaoCom(7));
 await tick();
 d.recusarGum(0);
 await tick(); await tick();
-confere("(d) o erro da abertura vigente não escreveu o estado de erro: " + JSON.stringify(d.estado()), d.estado().dentro === false && d.estado().abertura === "sem_aparelho");
+confere("(d) o microfone recusado derrubou a escuta ou não disse SÓ OUVINDO: " + JSON.stringify(d.estado()), d.estado().dentro === true && d.estado().abertura === "so_ouvindo" && d.estado().numero === 7);
+confere("(d) a recusa do microfone não foi contada: " + d.roda("JSON.stringify(recusaDoMicrofone)"), d.roda("recusaDoMicrofone.nestaPagina") === true);
 corpoAcabou = true;
 "##,
     );

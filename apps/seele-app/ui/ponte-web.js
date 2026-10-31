@@ -1044,28 +1044,41 @@ function conferirAVozDaSessao(sessao) {
   const numero = lido.resposta.voz;
   vozDaSessao.numero = numero;
   const geracao = vozDaSessao.geracao;
+  const entrarNaVoz = (comMicrofone) => {
+    voz.mudo(comMicrofone ? vozDaSessao.mudo : true);
+    voz.isolar(vozDaSessao.isolado);
+    voz.modo(BYTE_DO_MODO[modoDeVozGuardado()] ?? 1);
+    voz.tecla(vozDaSessao.tecla);
+    const sensibilidade = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
+    voz.regua(sensibilidade === null ? 0 : Math.round(sensibilidade * 1000));
+    voz.volumeDaTela(vozDaSessao.volumeDaTela);
+    voz.calarATela(vozDaSessao.telaCalada);
+    voz.entrar(sessao.transporteDaVoz, numero);
+    // A recepção recomeça as alças: os ganhos se aplicam de novo.
+    ganhosAplicados.clear();
+    mudarAAbertura(comMicrofone ? "aberto" : "so_ouvindo");
+  };
   vozDaSessao.ligando.then(
     () => {
       if (geracao !== vozDaSessao.geracao || !vozDaSessao.dentro || sessao.acabou) return;
-      voz.mudo(vozDaSessao.mudo);
-      voz.isolar(vozDaSessao.isolado);
-      voz.modo(BYTE_DO_MODO[modoDeVozGuardado()] ?? 1);
-      voz.tecla(vozDaSessao.tecla);
-      const sensibilidade = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
-      voz.regua(sensibilidade === null ? 0 : Math.round(sensibilidade * 1000));
-      voz.volumeDaTela(vozDaSessao.volumeDaTela);
-      voz.calarATela(vozDaSessao.telaCalada);
-      voz.entrar(sessao.transporteDaVoz, numero);
-      // A recepção recomeça as alças: os ganhos se aplicam de novo.
-      ganhosAplicados.clear();
-      mudarAAbertura("aberto");
+      entrarNaVoz(true);
     },
     (falha) => {
       // De outra geração (a abertura velha que termina depois de a nova nascer): nada a escrever.
       if (geracao !== vozDaSessao.geracao) return;
+      const doMicrofone = falha?.etapaDaVoz === "microfone";
+      // Só a recusa do MICROFONE conta como recusa: o `play()` da saída que o
+      // navegador barra também se chama `NotAllowedError`.
+      if (doMicrofone && falha.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
+      console.warn(`ponte: a voz da sala não abriu (etapa: ${falha?.etapaDaVoz ?? "?"}):`, falha);
+      // **O microfone que não abriu não tira a escuta** (0.19): a saída do
+      // motor segue de pé, e a pessoa ouve a sala, com a tela dizendo que
+      // ninguém a ouve, em vez de ficar sem nada e sem saber por quê.
+      if (doMicrofone && vozDaSessao.dentro && !sessao.acabou) {
+        entrarNaVoz(false);
+        return;
+      }
       vozDaSessao.dentro = false;
-      if (falha && falha.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
-      console.warn("ponte: a voz da sala não abriu:", falha);
       mudarAAbertura("sem_aparelho");
     },
   );

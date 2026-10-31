@@ -646,6 +646,10 @@ pub enum AberturaDoAudio {
     /// a voz para cá é um ato explícito da pessoa, e a outra sessão para antes
     /// de esta abrir.
     EmOutraSessao,
+    /// Numa sala, **ouvindo e sem o microfone** (0.19): a saída abriu e a
+    /// captura não (a permissão recusada, a faixa que não subiu). A pessoa
+    /// ouve a sala e ninguém a ouve; a tela diz isso, em vez de calar tudo.
+    SoOuvindo,
 }
 
 /// Connection quality.

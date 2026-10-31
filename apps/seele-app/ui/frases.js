@@ -425,6 +425,13 @@ const ABERTURA_DO_AUDIO = {
     medidor: "— SEM ÁUDIO NESTA SALA",
     frase: "O ÁUDIO NÃO ABRIU A TEMPO. A conversa por escrito já funciona; para tentar a voz de novo, saia da sala e entre de novo.",
   },
+  // **Ouvindo, sem o microfone** (0.19): a saída abriu e a captura não. A
+  // pessoa ouve a sala; a frase diz que ninguém a ouve e o que fazer.
+  so_ouvindo: {
+    rodape: "SÓ OUVINDO",
+    medidor: "— MICROFONE FECHADO",
+    frase: "O MICROFONE NÃO ABRIU. Você ouve a sala, mas ninguém ouve você. Libere o microfone para este site no navegador, saia da sala e entre de novo.",
+  },
   // **A voz está noutra sessão** (E3 da 0.17; fronteiras.md §5). Um microfone
   // por máquina, e ele está com outro servidor: nada aqui abre aparelho, nada
   // sai e nada toca. Não é falta de áudio, e a palavra do rodapé não diz que é.
