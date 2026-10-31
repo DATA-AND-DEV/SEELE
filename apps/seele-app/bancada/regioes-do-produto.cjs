@@ -52,9 +52,10 @@ const REGIOES = [
   {
     ponto: "compositor",
     conteiner: "#compositor-mods",
-    // A caixa de escrever, o anexo e o ENVIAR: quem envia é a pessoa.
+    // A caixa de escrever e o anexo: quem envia é a pessoa (o Enter, desde a
+    // 0.19; o ENVIAR saiu do computador e segue no celular).
     doProduto: ["#campo-mensagem", "#botao-anexar", "#botao-enviar"],
-    teto: { aVista: ["#campo-mensagem", "#botao-enviar"], descobertos: ["#campo-mensagem", "#botao-enviar"] },
+    teto: { aVista: ["#campo-mensagem", "#botao-anexar"], descobertos: ["#campo-mensagem", "#botao-anexar"] },
   },
   {
     ponto: "status.barra",
