@@ -1355,11 +1355,13 @@ function desenharOperador(snapshot) {
   const exibidoDoOperador = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
   $("operador-nome").textContent = exibidoDoOperador || apelidoApresentado(snapshot.me, snapshot.nickname);
   // A linha de baixo do nome: onde a voz está. Só descreve o que o snapshot já
-  // diz (a sala em que esta janela está), e sem sala fica o rótulo de sempre.
+  // diz (a sala em que esta janela está). **Sem sala, nada** (0.19, pedido do
+  // dono): o rótulo «operador» não dizia nada a quem lê o próprio cartão.
   const salaDoOperador = snapshot.voice_rooms.find((c) => c.occupied_by_us);
   const rotuloDoOperador = document.querySelector("#tela-sessao .operador-rotulo");
-  const fraseDoOperador = salaDoOperador ? `a voz está aqui · ${salaDoOperador.name}` : "operador";
+  const fraseDoOperador = salaDoOperador ? `a voz está aqui · ${salaDoOperador.name}` : "";
   if (rotuloDoOperador.textContent !== fraseDoOperador) rotuloDoOperador.textContent = fraseDoOperador;
+  rotuloDoOperador.hidden = !salaDoOperador;
   // O apelido também abre a linha de escrever, como no canvas: `alex ❯`.
   const prompt = document.querySelector("#form-mensagem .prompt");
   const fraseDoPrompt = `${apelidoApresentado(snapshot.me, snapshot.nickname)} \u276f`;

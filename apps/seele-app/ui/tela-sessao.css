@@ -3517,8 +3517,22 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) #botao-server-sessao { order: 3; }
 :root:not([data-casca="celular"]) #operador-sair { order: 4; }
 :root:not([data-casca="celular"]) #operador-vista { order: 5; }
-:root:not([data-casca="celular"]) .operador > #voz-estado,
 :root:not([data-casca="celular"]) .operador > #sala-estado { order: 8; flex: 1 0 100%; margin: 0; font-size: 11px; color: var(--seele-rotulo-painel); }
+/* **«microfone aberto · ouvindo» sai da vista** (0.19, pedido do dono): os
+   ícones do microfone e do fone já dizem o estado, com a barra quando
+   desligados. A frase continua lá para o leitor de tela — é `role="status"`, e
+   é ela que anuncia a troca —, só fora da tela. */
+:root:not([data-casca="celular"]) .operador > #voz-estado {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 :root:not([data-casca="celular"]) .operador > #sessao-ficou-para-tras,
 :root:not([data-casca="celular"]) .operador > .voz-foco { order: 7; flex: 1 0 100%; }
 :root:not([data-casca="celular"]) .operador-fileira > button { min-height: 44px; font-size: 13px; padding: 0 14px; }
