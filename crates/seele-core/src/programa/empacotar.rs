@@ -9,6 +9,12 @@
 //!   origem** (ele se leria a si mesmo enquanto cresce);
 //! - **links não entram** (um link no mundo apontaria, na reserva, para onde
 //!   ele quisesse); são contados em [`Empacotado::links_pulados`];
+//! - **um arquivo que o jogo trava fica de fora, contado e nomeado**
+//!   ([`Empacotado::travados_pulados`], decisão W7): no Windows, o Minecraft
+//!   segura o `world/session.lock` com uma trava de intervalo enquanto roda, e
+//!   ler esse arquivo falha (`ERROR_LOCK_VIOLATION`, 33); no Mac e no Linux a
+//!   trava é só um aviso, e o arquivo entra. Uma leitura que falha por outra
+//!   razão para tudo, com o caminho **do arquivo lido**;
 //! - o que se escreve conta no **teto de disco**, e passar dele para no meio;
 //! - o pacote é escrito ao lado, num parcial, e só vira o nome pedido no fim.
 //!
@@ -44,6 +50,46 @@ pub struct Empacotado {
     pub bytes: u64,
     /// Quantos links da origem ficaram de fora.
     pub links_pulados: u64,
+    /// **Quantos arquivos travados pelo jogo ficaram de fora** (decisão W7): no
+    /// Windows, o `session.lock` do mundo enquanto o Minecraft roda.
+    pub travados_pulados: u64,
+    /// Os primeiros [`MAX_TRAVADOS_NOMEADOS`] deles, como entrariam no pacote
+    /// (`world/session.lock`).
+    pub travados: Vec<String>,
+}
+
+/// Quantos arquivos travados [`Empacotado::travados`] nomeia.
+pub const MAX_TRAVADOS_NOMEADOS: usize = 16;
+
+/// Se `erro` é a trava de outro processo sobre o arquivo: no Windows,
+/// `ERROR_LOCK_VIOLATION` (33) ou `ERROR_SHARING_VIOLATION` (32). No Unix, uma
+/// trava não impede a leitura, e isto nunca é verdade.
+fn e_trava(erro: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(erro.raw_os_error(), Some(32 | 33))
+}
+
+/// Um arquivo da origem, lido para o pacote: um erro de leitura sai marcado
+/// ([`Leitura`]), para a recusa nomear o arquivo lido, e não o pacote.
+struct Lido(std::fs::File);
+
+/// O erro de ler um arquivo da origem.
+#[derive(Debug)]
+struct Leitura(std::io::Error);
+
+impl std::fmt::Display for Leitura {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for Leitura {}
+
+impl std::io::Read for Lido {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0
+            .read(buf)
+            .map_err(|e| std::io::Error::new(e.kind(), Leitura(e)))
+    }
 }
 
 /// O que se escreve: conta os bytes contra o livre do teto e soma o sha256.
@@ -198,6 +244,8 @@ impl Programa {
             arquivos: 0,
             bytes: 0,
             links_pulados: 0,
+            travados_pulados: 0,
+            travados: Vec::new(),
         };
         let gz = flate2::write::GzEncoder::new(saida, flate2::Compression::fast());
         let mut pacote = tar::Builder::new(gz);
@@ -248,10 +296,42 @@ impl Programa {
                 } else if meta.is_dir() {
                     pendentes.push((caminho, dentro));
                 } else if meta.is_file() {
-                    let mut aberto = std::fs::File::open(&caminho).map_err(disco(&caminho))?;
+                    let aberto = match std::fs::File::open(&caminho) {
+                        Ok(aberto) => aberto,
+                        Err(erro) if e_trava(&erro) => {
+                            pular_travado(&mut feito, &dentro, &erro);
+                            continue;
+                        }
+                        Err(erro) => return Err(disco(&caminho)(erro)),
+                    };
+                    // **A trava se vê antes do cabeçalho** (W7): ler o
+                    // primeiro byte; com o cabeçalho já escrito, um arquivo
+                    // que não se lê deixaria o pacote torto.
+                    if meta.len() > 0 {
+                        let mut um = [0_u8; 1];
+                        match std::io::Read::read(&mut &aberto, &mut um) {
+                            Ok(_) => {}
+                            Err(erro) if e_trava(&erro) => {
+                                pular_travado(&mut feito, &dentro, &erro);
+                                continue;
+                            }
+                            Err(erro) => return Err(disco(&caminho)(erro)),
+                        }
+                        std::io::Seek::rewind(&mut &aberto).map_err(disco(&caminho))?;
+                    }
+                    // O cabeçalho do `append_file`, com o leitor que marca
+                    // o erro de leitura.
+                    let mut cabecalho = tar::Header::new_gnu();
+                    cabecalho.set_metadata(&meta);
                     pacote
-                        .append_file(&dentro, &mut aberto)
-                        .map_err(|e| erro_de_escrita(e, feito.bytes))?;
+                        .append_data(&mut cabecalho, &dentro, Lido(aberto))
+                        .map_err(|e| {
+                            if e.get_ref().is_some_and(|e| e.is::<Leitura>()) {
+                                disco(&caminho)(e)
+                            } else {
+                                erro_de_escrita(e, feito.bytes)
+                            }
+                        })?;
                     feito.arquivos += 1;
                     feito.bytes = feito.bytes.saturating_add(meta.len());
                 }
@@ -279,8 +359,20 @@ impl Programa {
             arquivos = feito.arquivos,
             bytes = feito.bytes,
             links_pulados = feito.links_pulados,
+            travados_pulados = feito.travados_pulados,
+            travados = ?feito.travados,
             "programa empacotou"
         );
         Ok(feito)
     }
+}
+
+/// Um arquivo travado pelo jogo fica de fora: contado, nomeado (até o teto) e
+/// dito no log.
+fn pular_travado(feito: &mut Empacotado, dentro: &str, erro: &std::io::Error) {
+    feito.travados_pulados += 1;
+    if feito.travados.len() < MAX_TRAVADOS_NOMEADOS {
+        feito.travados.push(dentro.to_owned());
+    }
+    tracing::warn!(arquivo = dentro, %erro, "programa: um arquivo travado pelo jogo ficou fora do pacote");
 }

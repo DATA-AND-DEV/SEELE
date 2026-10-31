@@ -645,6 +645,8 @@ pub(crate) fn atender(viva: &Arc<Viva>, n: u64, pedido: PedidoDoPrograma) {
                             "arquivos": feito.arquivos,
                             "bytes": feito.bytes,
                             "linksPulados": feito.links_pulados,
+                            "travadosPulados": feito.travados_pulados,
+                            "travados": feito.travados,
                         })),
                     ),
                     Ok(Err(recusa)) => recusar(&dela, &recusa),

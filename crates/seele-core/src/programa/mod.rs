@@ -56,7 +56,7 @@ pub use copia::{
     CopiaOferecida, CopiaRecebida, PedidoDeCopia, MAX_TENTATIVAS_DA_COPIA, PRAZO_SEM_BYTES_DA_COPIA,
 };
 pub use desempacotar::{Desempacotado, PedidoDeDesempacotar, MAX_ENTRADAS_DESEMPACOTADAS};
-pub use empacotar::Empacotado;
+pub use empacotar::{Empacotado, MAX_TRAVADOS_NOMEADOS};
 pub use escrever::MAX_BYTES_ESCRITOS;
 pub use hash::{o_mais_forte, AlgoritmoDeHash, HashDeclarado};
 pub use ler::MAX_BYTES_LIDOS;

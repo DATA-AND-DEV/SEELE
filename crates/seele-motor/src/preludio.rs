@@ -725,7 +725,8 @@ pub const PRELUDIO: &str = r#"
         })),
         // **A cópia do mundo** (API 8 parte 7). `empacotar` faz um `.tar.gz`
         // de uma pasta (depois do salvamento seguro da receita) e resolve com
-        // `{ arquivo, tamanho, sha256, arquivos, bytes, linksPulados }`;
+        // `{ arquivo, tamanho, sha256, arquivos, bytes, linksPulados,
+        // travadosPulados, travados }`;
         // `oferecerCopia` o serve na porta de um túnel TCP aceito e resolve com
         // `{ codigo, tamanho, sha256, porta }`; `receberCopia` entra no túnel
         // `tunel` da oferta, recebe, confere o sha256 e retoma, e resolve com

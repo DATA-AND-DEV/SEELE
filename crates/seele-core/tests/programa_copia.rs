@@ -410,3 +410,37 @@ async fn encerrar_corta_as_ligacoes_da_copia_que_ja_estavam() {
         "a ligação aberta antes de encerrar seguiu de pé depois dele"
     );
 }
+
+/// **Um arquivo que o jogo trava fica de fora, contado e nomeado** (decisão
+/// W7): o Minecraft segura o `world/session.lock` com uma trava enquanto
+/// roda. No Windows a trava impede a leitura (medido no PC: `os error 33`, e o
+/// pacote inteiro era recusado com o nome do pacote); no Unix ela é só um
+/// aviso, e o arquivo entra. As duas metades deste teste rodam, cada uma no
+/// seu sistema.
+#[test]
+fn o_arquivo_que_o_jogo_trava_fica_de_fora_e_e_dito() {
+    let (_a, principal) = programa("travado", 1 << 30, vec![]);
+    mundo(principal.raiz());
+    let trava = principal.raiz().join("world/session.lock");
+    std::fs::write(&trava, "\u{2603}").unwrap();
+    let segurado = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&trava)
+        .unwrap();
+    segurado.lock().unwrap();
+    let feito = principal.empacotar("world", "copias/t.tar.gz").unwrap();
+    if cfg!(windows) {
+        assert_eq!(feito.arquivos, 3, "{feito:?}");
+        assert_eq!(feito.travados_pulados, 1, "{feito:?}");
+        assert_eq!(feito.travados, vec!["world/session.lock".to_owned()]);
+    } else {
+        assert_eq!(feito.arquivos, 4, "{feito:?}");
+        assert_eq!(feito.travados_pulados, 0, "{feito:?}");
+        assert!(feito.travados.is_empty());
+    }
+    drop(segurado);
+    // Sem a trava, entra nos dois.
+    let solto = principal.empacotar("world", "copias/s.tar.gz").unwrap();
+    assert_eq!((solto.arquivos, solto.travados_pulados), (4, 0));
+}
