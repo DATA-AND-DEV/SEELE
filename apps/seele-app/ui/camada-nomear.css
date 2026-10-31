@@ -243,9 +243,24 @@
 #perfil .perfil-cartao-agenda { grid-column:1 / -1; min-height:0; padding-top:16px; border-top:1px solid var(--seele-linha); display:flex; flex-direction:column; gap:12px; }
 
 #perfil #perfil-agenda-vazia { margin:0; }
-#perfil .perfil-agenda { margin:0; padding:0; max-height:none; overflow:visible; }
-#perfil .perfil-agenda-linha { display:grid; grid-template-columns:minmax(120px,.8fr) minmax(150px,1fr) 166px 80px; gap:8px 12px; padding:12px 0; border-top:1px solid var(--seele-linha); }
-#perfil .perfil-agenda-linha:first-child { border-top:0; padding-top:0; }
+#perfil .perfil-agenda { margin:0; padding:0; max-height:none; overflow:visible; display:flex; flex-direction:column; gap:8px; list-style:none; }
+/* Cada contato é um cartão de duas linhas: o nome que eu dei e, embaixo, o apelido, o código e a direção; as duas ações à direita. Quatro colunas
+   fixas (as da 0.18) somavam mais de 520px numa caixa de 480 e faziam a agenda rolar de lado. */
+#perfil .perfil-agenda-linha {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-areas:"nome amigo" "quem bloquear";
+  align-items:center;
+  gap:6px 12px;
+  padding:10px 12px;
+  border:1px solid var(--seele-vidro-borda);
+  border-radius:var(--seele-raio-cartao);
+  background:var(--seele-vidro);
+}
+#perfil .perfil-agenda-linha > .perfil-agenda-nome { grid-area:nome; min-width:0; min-height:40px; }
+#perfil .perfil-agenda-linha > .perfil-agenda-quem { grid-area:quem; min-width:0; overflow-wrap:anywhere; color:var(--seele-osso-apagado); }
+#perfil .perfil-agenda-linha > :nth-child(3) { grid-area:amigo; justify-self:end; }
+#perfil .perfil-agenda-linha > :nth-child(4) { grid-area:bloquear; justify-self:end; }
 #perfil .perfil-agenda-linha button { margin:0; font-size:12px; letter-spacing:0; padding:8px 10px; }
 #perfil .perfil-agenda-quem { font-size:12px; line-height:1.5; }
 @media(max-width:719px) {
@@ -256,8 +271,8 @@
   #perfil .perfil-cartao-codigo { padding-top:16px; border-top:1px solid var(--seele-linha); }
   #perfil #perfil-codigo { font-size:16px; }
   #perfil button { min-height:44px; }
-  #perfil .perfil-agenda-linha { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
-  #perfil .perfil-agenda-nome, #perfil .perfil-agenda-quem { grid-column:1 / -1; }
+  #perfil .perfil-agenda-linha { grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-areas:"nome nome" "quem quem" "amigo bloquear"; }
+  #perfil .perfil-agenda-linha > :nth-child(3), #perfil .perfil-agenda-linha > :nth-child(4) { justify-self:stretch; }
 }
 @media(max-width:360px) {
   #perfil .perfil-sala-codigo { flex-wrap:wrap; }
