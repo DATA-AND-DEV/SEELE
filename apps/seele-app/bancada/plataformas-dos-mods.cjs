@@ -160,14 +160,31 @@ const CATALOGO = [
           const anunciados = [{ id: "x/novo", version: "1.0.0", hash: "6af8198a".padEnd(64, "0"), repo: "r", reach: [], no_servidor: false, tema: false }];
           await abrirAceiteDeMods("srv.exemplo:1", anunciados, "conj-9", null);
           await aceitarOsMods();
-          return $("mods-erro").textContent;
+          return { texto: $("mods-erro").textContent, botao: $("mods-aceitar").textContent };
         });
-        assert.match(foraDoCatalogo, /x\/novo/, `${motor}: ${foraDoCatalogo}`);
-        assert.match(foraDoCatalogo, /não foi publicado/, `${motor}: não disse que o MOD não foi publicado: ${foraDoCatalogo}`);
-        assert.match(foraDoCatalogo, /INSTALAR MOD DE UMA PASTA/, `${motor}: não disse como instalar: ${foraDoCatalogo}`);
-        assert.match(foraDoCatalogo, /6af8198a/, `${motor}: não disse a revisão exigida: ${foraDoCatalogo}`);
-        assert.doesNotMatch(foraDoCatalogo, /Tente de novo/, `${motor}: mandou tentar de novo o que não muda: ${foraDoCatalogo}`);
-        assert.doesNotMatch(foraDoCatalogo, /\.\./, `${motor}: ponto dobrado: ${foraDoCatalogo}`);
+        const texto = foraDoCatalogo.texto;
+        assert.match(texto, /x\/novo/, `${motor}: ${texto}`);
+        assert.match(texto, /não foi publicado/, `${motor}: não disse que o MOD não foi publicado: ${texto}`);
+        assert.match(texto, /INSTALAR DA PASTA/, `${motor}: não disse como instalar: ${texto}`);
+        assert.match(texto, /6af8198a/, `${motor}: não disse a revisão exigida: ${texto}`);
+        assert.doesNotMatch(texto, /Tente de novo/, `${motor}: mandou tentar de novo o que não muda: ${texto}`);
+        assert.doesNotMatch(texto, /\.\./, `${motor}: ponto dobrado: ${texto}`);
+        // **E o caminho que a frase dá existe ali mesmo**: fora de um servidor,
+        // as configurações nem têm a seção de MODs. O botão instala pela pasta
+        // e segue para o mesmo aceite, que confere o hash e entra.
+        assert.equal(foraDoCatalogo.botao, "INSTALAR DA PASTA", `${motor}: ${JSON.stringify(foraDoCatalogo)}`);
+        const pelaPasta = await pagina.evaluate(async () => {
+          chamadas.length = 0;
+          table.instalar_mod = () => {
+            table.mods_instalados.push({ id: "x/novo", hash: "6af8198a".padEnd(64, "0"), client: true });
+            return "x/novo";
+          };
+          table.instalar_mod_do_catalogo = () => { throw new Error("o catálogo não devia ser chamado de novo"); };
+          $("mods-aceitar").click();
+          for (let i = 0; i < 50 && !chamadas.some((c) => c.cmd === "aceitar_mods"); i++) await new Promise((r) => setTimeout(r, 20));
+          return chamadas.map((c) => c.cmd).filter((c) => ["instalar_mod", "instalar_mod_do_catalogo", "aceitar_mods"].includes(c));
+        });
+        assert.deepEqual(pelaPasta, ["instalar_mod", "aceitar_mods"], `${motor}: INSTALAR DA PASTA não instalou e entrou: ${JSON.stringify(pelaPasta)}`);
 
         assert.deepEqual(erros, [], `${motor}: erros na página`);
         console.log(JSON.stringify({ motor, ok: true }));

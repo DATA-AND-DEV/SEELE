@@ -243,6 +243,7 @@ async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
   $("mods-aceitar").textContent =
     mods.length === 1 ? "ACEITAR 1 MOD E ENTRAR" : `ACEITAR ${mods.length} MODS E ENTRAR`;
   $("mods-aceitar").disabled = false;
+  $("mods-aceitar").dataset.daPasta = "";
 
   camada.hidden = false;
   // O foco vai para **recusar**, e não para aceitar. Um Enter distraído numa
@@ -311,18 +312,25 @@ async function aceitarOsMods() {
   const pergunta = aceitePendente;
   if (!pergunta) return;
   const { alvo, conjunto, mods } = pergunta;
+  if ($("mods-aceitar").dataset.daPasta === "sim" && !(await instalarDaPasta())) return;
   const botao = $("mods-aceitar");
   const erro = $("mods-erro");
   botao.disabled = true;
   erro.hidden = true;
 
-  if (!(await obterOConjunto(mods ?? []))) {
+  const obtido = await obterOConjunto(mods ?? []);
+  if (obtido !== true) {
     // **Não entra.** Entrar sem os pacotes é chegar à sessão sem o que o
     // servidor exige e descobrir depois, pela cor que não mudou. A tela fica
     // aberta com o motivo, e os dois caminhos que o documento pede — tentar de
     // novo, ou sair — continuam à mão: o botão volta, e recusar fecha.
+    //
+    // **Fora do catálogo, o caminho é a pasta, e ele fica aqui** (e2e da API
+    // 8, 31/10): tentar de novo não muda nada, e fora de um servidor as
+    // configurações nem têm a seção de MODs. O botão vira INSTALAR DA PASTA.
     botao.disabled = false;
-    botao.textContent = "TENTAR DE NOVO";
+    botao.dataset.daPasta = obtido === "fora-do-catalogo" ? "sim" : "";
+    botao.textContent = obtido === "fora-do-catalogo" ? "INSTALAR DA PASTA" : "TENTAR DE NOVO";
     return;
   }
 
@@ -452,11 +460,10 @@ async function obterOConjunto(mods) {
       if (falha?.NaoEstaNoCatalogo) {
         dizer(
           `${m.id} ${m.version} não foi publicado no catálogo, e não há de onde baixá-lo. ` +
-            "Peça a pasta do MOD a quem hospeda e instale em CONFIGURAÇÕES · MODs · " +
-            `INSTALAR MOD DE UMA PASTA (revisão ${String(m.hash ?? "").slice(0, 8)}); ` +
-            "depois, TENTAR DE NOVO. Ou recuse a entrada.",
+            "Peça a pasta do MOD a quem hospeda e escolha-a em INSTALAR DA PASTA " +
+            `(o servidor exige a revisão ${String(m.hash ?? "").slice(0, 8)}), ou recuse a entrada.`,
         );
-        return false;
+        return "fora-do-catalogo";
       }
       dizer(
         `não consegui obter ${m.id} ${m.version}: ${fraseDeErro(falha).replace(/\.\s*$/, "")}. ` +
@@ -632,6 +639,32 @@ $("mods-aceitar").addEventListener("click", () => {
   const pergunta = aceitePendente;
   aceitarOsMods().catch((falha) => aceiteFalhou(pergunta, falha));
 });
+
+/**
+ * O MOD que o catálogo não lista, pela pasta que quem hospeda passou: o mesmo
+ * `instalar_mod` das configurações, antes do mesmo aceite. Quem confere se é o
+ * MOD certo é `obterOConjunto`, pelo hash: uma pasta de outra revisão volta a
+ * dizer qual o servidor exige. Fechar o diálogo do sistema não muda nada.
+ * `true` quando há o que conferir.
+ */
+async function instalarDaPasta() {
+  const botao = $("mods-aceitar");
+  botao.disabled = true;
+  let id;
+  try {
+    id = await invoke("instalar_mod");
+  } catch (falha) {
+    const erro = $("mods-erro");
+    erro.hidden = false;
+    erro.textContent = `não instalei o MOD desta pasta: ${fraseDeErro(falha)}`;
+    botao.disabled = false;
+    return false;
+  }
+  botao.disabled = false;
+  if (!id) return false;
+  botao.dataset.daPasta = "";
+  return true;
+}
 $("mods-recusar").addEventListener("click", fecharAceiteDeMods);
 
 // Apertar fora recusa, como em toda camada deste app. É o gesto que todo mundo
