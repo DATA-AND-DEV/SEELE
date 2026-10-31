@@ -4415,6 +4415,8 @@ async function atenderOMod(mod, instancia, m) {
         const superficie = superficieDoMod(mod, instancia, m.superficie);
         superficie.titulo = String(m.titulo ?? "").slice(0, 120);
         if (superficie.tituloNo) superficie.tituloNo.textContent = superficie.titulo;
+        // O nome acessível segue o título: o leitor de tela anuncia o que se vê.
+        superficie.raiz?.setAttribute("aria-label", superficie.titulo || `Conteúdo de ${superficie.id}`);
         responder(true, { valor: null });
         break;
       }

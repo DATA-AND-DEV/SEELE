@@ -128,3 +128,10 @@ cada:
   com a frase de até quando ela espera), e `sem-volta` é vermelha, entre as
   paradas que ninguém pediu. A classe nova é `.maquina-sem-anfitriao` (a
   `.maquina-aviso` já era do aceite), e `celular-texto.css` foi regerado.
+
+## O modal de um MOD com a gramática dos modais do app (31/10, pedido do dono)
+
+- Ruling: o diálogo modal comum de um MOD (não a tela, não o celular) usa a caixa dos modais do produto (`camada-maquina.css`, o aceite): uma superfície opaca, 32px de raio, 36/44 de respiro, sem faixa de cabeçalho nem de rodapé; a linha miúda com a marca do SEELE, a origem e o FECHAR; o título em Inter Tight 32; as ações à direita no pé — porque o dono viu o Multiplayer «não conversar» com os outros modais — se errada: um MOD que contava com o corpo preto (`negro-absoluto`) sob o conteúdo vê o painel (`negro-painel`).
+- Ruling: `superficie-titulo` atualiza também o `aria-label` da superfície — o leitor de tela anunciava o título da criação depois de o MOD trocá-lo — se errada: nenhuma conhecida.
+- Ruling: o furo do véu (API 6 §10) fica: o modal de um MOD nunca cobre a barra do operador, e por isso começa à direita dela, e não no centro da janela como os modais do produto — a decisão de centralizar (cobrindo o microfone e o sair) é do dono, à parte — se errada: o modal do MOD segue fora do centro.
+- Medido: `bancada/nucleo.cjs` e `bancada/tema-do-servidor.cjs` falham também na `entrega/0.19` (74732140), antes e depois desta mudança; não são desta mudança.

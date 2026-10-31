@@ -324,6 +324,32 @@ function devolverSuperficie(raiz) {
  */
 const LARGURA_DE_TELA = 800;
 
+/**
+ * A marca do SEELE (o quadrado cheio, o vazado e o traço), a mesma dos
+ * modais do produto (`maquina-logo` em `index.html`). Só desenho: escondida
+ * do leitor de tela, que já ouve a origem ao lado.
+ */
+function marcaDoSeele() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "superficie-de-mod-marca");
+  svg.setAttribute("viewBox", "0 0 96 96");
+  svg.setAttribute("width", "24");
+  svg.setAttribute("height", "24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const parte = (tipo, classe, atributos) => {
+    const no = document.createElementNS(ns, tipo);
+    no.setAttribute("class", classe);
+    for (const [nome, valor] of Object.entries(atributos)) no.setAttribute(nome, valor);
+    svg.append(no);
+  };
+  parte("rect", "superficie-de-mod-marca-cheio", { x: "12", y: "12", width: "24", height: "24" });
+  parte("rect", "superficie-de-mod-marca-vazio", { x: "62", y: "62", width: "20", height: "20" });
+  parte("path", "superficie-de-mod-marca-traco", { d: "M34 34L62 62" });
+  return svg;
+}
+
 /** Os tipos de superfície, e o que cada um exige do host. */
 const TIPOS_DE_SUPERFICIE = Object.freeze({
   pagina: { host: "palco-de-paginas", foco: false, camada: false },
@@ -584,6 +610,10 @@ class SuperficieDeMod {
     const prefixo = this.tipo === "pagina" ? "pagina-de-mod"
       : this.tipo === "painel" || this.tipo === "folha" ? `${this.tipo}-de-mod` : "dialogo-de-mod";
     const cabeca = elemento("header", `${prefixo}-cabecalho`);
+    // **A marca do produto na linha de cima do modal** (0.19), como nos
+    // modais do próprio app (o aceite dos MODs, o da máquina): a moldura é do
+    // SEELE, e a marca diz isso antes da origem. Desenhada aqui, e não pelo MOD.
+    if (eDialogo) cabeca.append(marcaDoSeele());
     // **Duas classes, e a primeira é a que dá a tipografia.** O título de uma
     // superfície é cartela — Saira Condensed em caixa alta, como o da
     // moderação e o da configuração —, e o que muda entre página, painel e

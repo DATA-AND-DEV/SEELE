@@ -386,6 +386,73 @@
   color: var(--seele-rotulo-painel);
 }
 
+/* ----------------------------- o modal de um MOD, como os modais do app
+   O diálogo modal comum (não a tela, não o celular) tem a gramática dos modais
+   do próprio produto (o aceite dos MODs e o da máquina, `camada-maquina.css`):
+   uma superfície só, opaca, 32px de raio e 36/44 de respiro, sem faixa de
+   cabeçalho nem de rodapé; em cima, a linha miúda (a marca, a origem e o
+   FECHAR à direita, onde o produto põe o chip), e o título em Inter Tight
+   abaixo dela; as ações à direita, no pé. O que muda do produto para o MOD é
+   o furo do véu (o operador fica de fora), e não a caixa. */
+:root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) {
+  gap: 18px;
+  padding: 36px 44px 32px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: 32px;
+  background: var(--seele-negro-painel);
+  box-sizing: border-box;
+}
+:root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) > .dialogo-de-mod-cabecalho {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "marca origem sair" "titulo titulo titulo";
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+:root:not([data-casca="celular"]) .dialogo-de-mod .superficie-de-mod-marca { grid-area: marca; width: 24px; height: 24px; }
+.superficie-de-mod-marca-cheio { fill: var(--seele-laranja-nerv); }
+.superficie-de-mod-marca-vazio { fill: none; stroke: var(--seele-laranja-nerv); stroke-width: 6; }
+.superficie-de-mod-marca-traco { fill: none; stroke: var(--seele-osso); stroke-width: 6; }
+:root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) .dialogo-de-mod-origem {
+  grid-area: origem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) .dialogo-de-mod-titulo {
+  grid-area: titulo;
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 32px;
+  line-height: 1.12;
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: none;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+:root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) .superficie-de-mod-sair {
+  grid-area: sair;
+  min-height: 36px;
+}
+:root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) > .dialogo-de-mod-corpo {
+  margin: 0 -8px;
+  padding: 0 8px;
+  background: none;
+}
+:root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) > .dialogo-de-mod-rodape {
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 4px 0 0;
+  border: 0;
+  background: none;
+}
+
 /* -------------------------- os formulários que um MOD declara, em 0.19
    Os controles são do produto; o MOD só os nomeia. Por isso a gramática é a
    do produto inteiro: rótulo em Inter e caixa de frase, campo de 48px com
