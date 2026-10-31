@@ -493,23 +493,34 @@
 :root:not([data-casca="celular"]) .superficie-de-mod .regiao-de-mod-parte[data-forma="separador"] { border-color: var(--seele-vidro-borda); }
 
 /* ------------------------------------------------ a Configuração: VOLTAR
-   O VOLTAR fica no pé da coluna, sempre à vista: preso à caixa da grade
-   (`.server`, posicionada), e não à janela — um `fixed` dentro de quem tem
-   contenção ou filtro deixa de ser da janela e some com a rolagem. A coluna
-   reserva o espaço dele e esmaece o que rola por baixo. */
+   **No cabeçalho, ao lado do título, no fluxo** (0.19, depois do teste do
+   dono). O canvas o põe no pé da coluna, e as duas tentativas de levá-lo
+   para lá — `fixed`, depois `absolute` preso à grade — tiravam o botão da
+   faixa onde ele mora no DOM; no app do Mac ele sumiu nas duas (0.19.0-1 e
+   0.19.0-8), e nenhum navegador de bancada reproduziu. Sem posicionamento
+   nenhum, ele está onde o U33 já o tinha posto: grudado no alto, junto do
+   título, sempre à vista. A grade da faixa: contexto e título à esquerda, o
+   VOLTAR à direita, alinhado ao topo. */
 @media (min-width: 701px) {
-  .camada-server > .server { position: relative; }
-  .server-voltar:not(.server-so-celular) {
-    position: absolute;
-    left: 14px;
-    bottom: 14px;
-    width: 220px;
+  .server-faixa {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "contexto voltar"
+      "texto voltar";
+    column-gap: 16px;
+    align-items: start;
   }
-  .server-coluna {
-    padding-bottom: 84px;
-    scroll-padding-bottom: 84px;
-    -webkit-mask-image: linear-gradient(to bottom, var(--seele-negro-absoluto) calc(100% - 80px), transparent calc(100% - 62px));
-    mask-image: linear-gradient(to bottom, var(--seele-negro-absoluto) calc(100% - 80px), transparent calc(100% - 62px));
+  .server-faixa > .server-contexto { grid-area: contexto; }
+  .server-faixa > .server-faixa-texto { grid-area: texto; }
+  .server-voltar:not(.server-so-celular) {
+    position: static;
+    grid-area: voltar;
+    width: auto;
+    left: auto;
+    bottom: auto;
+    align-self: start;
+    padding: 0 18px;
   }
 }
 
