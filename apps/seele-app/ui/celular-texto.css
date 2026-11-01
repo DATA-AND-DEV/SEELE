@@ -290,7 +290,6 @@
 }
 :where(:root[data-casca="celular"]) .canais-servidor-nome { font-size: calc(24px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .canais-servidor-chip { font-size: calc(11px * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .canais-servidor-endereco { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voice_room-aqui { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .linha-sub { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .telemetria-estado { font-size: calc(12px * var(--cel-escala)); }

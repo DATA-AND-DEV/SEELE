@@ -1347,9 +1347,9 @@
       -->
       <!--
         O servidor em que se está, no alto da coluna (canvas 0.19, `Main`): o
-        nome, o chip do estado da conexão e o endereço com que se entrou.
+        nome e, quando a conexão não está segura, o chip que diz isso.
         `desenharCabecaDoServidor`, em `tela-sessao.js`, escreve os nós com o
-        que `#barra-servidor-*` já escreve.
+        que `#barra-servidor-*` já escreve. O endereço saiu na 0.19.1.
       -->
       <div class="canais-servidor">
         <div class="canais-servidor-linha">
@@ -1359,7 +1359,6 @@
             <span id="canais-servidor-chip-texto"></span>
           </span>
         </div>
-        <p id="canais-servidor-endereco" class="canais-servidor-endereco" hidden></p>
       </div>
       <div class="canais-rolagem">
         <!--

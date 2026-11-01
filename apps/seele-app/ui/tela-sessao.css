@@ -3488,14 +3488,6 @@ button.linha-nome:hover { text-decoration: underline; }
   color: var(--seele-vermelho-claro);
 }
 .canais-servidor-escudo { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.canais-servidor-endereco {
-  margin: 2px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--seele-rotulo-painel);
-}
 
 /* ---------- salas de voz e canais ---------- */
 :root:not([data-casca="celular"]) .canais-cabeca .painel-titulo { font-size: 11px; }

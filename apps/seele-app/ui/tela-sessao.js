@@ -645,15 +645,17 @@ function desenharTopo(snapshot) {
   // As três frases são as três do `Trust` de `client.rs`. O `data-padrao`
   // continua sendo o nome do enum, que é por onde a folha escolhe a cor: uma
   // conexão não verificada não pode ser pintada como se fosse a boa.
+  //
+  // **A conexão segura não é dita** (0.19.1): é o estado normal, e o selo ao
+  // lado de todo nome era ruído. SEM CONEXÃO e NÃO VERIFICADA continuam, que
+  // são o aviso.
   const sub = $("barra-servidor-sub");
   sub.dataset.padrao = snapshot.link_state;
-  sub.textContent = `SERVIDOR · ${
-    {
-      Offline: "SEM CONEXÃO",
-      Unverified: "CONEXÃO NÃO VERIFICADA",
-      Verified: "CONEXÃO SEGURA",
-    }[snapshot.link_state]
-  }`;
+  const aviso = {
+    Offline: "SEM CONEXÃO",
+    Unverified: "CONEXÃO NÃO VERIFICADA",
+  }[snapshot.link_state];
+  sub.textContent = aviso ? `SERVIDOR · ${aviso}` : "SERVIDOR";
 
   const nome = snapshot.server;
   const rotulo = $("barra-servidor-nome");
@@ -673,10 +675,13 @@ function desenharTopo(snapshot) {
 
 /**
  * O nome do servidor no alto da coluna de salas, com o chip do estado da
- * conexão e o endereço — a mesma informação do `#barra-servidor-*`, vestida
- * como o canvas 0.19 a desenha. Só escreve o que a barra já escreve: o nome é
- * o que o servidor anunciou, o chip é uma das três frases do `Trust` e o
- * endereço é o alvo com que se entrou (`alvoDoServer`).
+ * conexão — a mesma informação do `#barra-servidor-*`, vestida como o canvas
+ * 0.19 a desenha. O nome é o que o servidor anunciou, e o chip é uma das
+ * frases do `Trust`.
+ *
+ * **O chip só aparece quando a conexão não está segura** (0.19.1): o SEGURA
+ * ao lado de todo nome era ruído, e o endereço (`seele://<ip>`) também saiu
+ * daqui. SEM CONEXÃO e NÃO VERIFICADA continuam, porque são o aviso.
  */
 function desenharCabecaDoServidor(snapshot) {
   const nome = $("canais-servidor-nome");
@@ -686,14 +691,12 @@ function desenharCabecaDoServidor(snapshot) {
   nome.title = snapshot.server || "";
   const chip = $("canais-servidor-chip");
   chip.dataset.padrao = snapshot.link_state;
+  chip.hidden = !snapshot.link_state || snapshot.link_state === "Verified";
   escrever($("canais-servidor-chip-texto"), {
     Offline: "SEM CONEXÃO",
     Unverified: "NÃO VERIFICADA",
     Verified: "SEGURA",
   }[snapshot.link_state] ?? "");
-  const endereco = $("canais-servidor-endereco");
-  escrever(endereco, alvoDoServer ? `seele://${alvoDoServer}` : "");
-  endereco.hidden = !alvoDoServer;
 }
 
 /**
