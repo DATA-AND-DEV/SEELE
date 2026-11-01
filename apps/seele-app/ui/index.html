@@ -51,6 +51,7 @@
 <link rel="stylesheet" href="camada-bateria.css">
 <link rel="stylesheet" href="camada-tuneis.css">
 <link rel="stylesheet" href="camada-maquina.css">
+<link rel="stylesheet" href="faixa-de-jogos.css">
 <link rel="stylesheet" href="camada-portaria.css">
 <link rel="stylesheet" href="camada-toque.css">
 <link rel="stylesheet" href="camada-sala.css">
@@ -2320,6 +2321,14 @@
       ela existe. Sem saber, esta métrica fica no travessão.
     -->
     <span class="metrica"><b class="rotulo">CAMINHO</b> <span id="tel-caminho">·</span></span>
+    <!--
+      **Os jogos, na fileira da rede** (0.19.2, `faixa-de-jogos.js`): um selo por
+      servidor de jogo desta máquina e por porta aberta para um jogo, com o
+      estado e o endereço. Eram faixas no alto da sessão, que tomavam espaço
+      útil. O detalhe e as ações abrem num painel acima desta barra; fora da
+      sessão (sem esta barra), a faixa de cima continua dizendo tudo.
+    -->
+    <span id="tel-jogos" class="telemetria-jogos" hidden></span>
     <span class="espaco"></span>
     <!--
       A região `status.barra` da API 6 (rascunho §3, tarefa 5): o que um MOD
@@ -5111,6 +5120,14 @@
   desenhada por `camada-maquina.js`; escondida sem máquina nenhuma.
 -->
 <div id="maquinas" class="camada-maquina" role="status" aria-live="polite" hidden></div>
+<!--
+  O painel dos jogos (0.19.2): aberto pelo selo na barra de baixo da sessão.
+  As faixas `#maquinas` e `#tuneis` mudam para dentro dele enquanto ele está
+  aberto, com os mesmos botões, e voltam ao lugar ao fechar.
+-->
+<div id="painel-jogos" class="painel-jogos" role="region" aria-labelledby="painel-jogos-titulo" hidden>
+  <p id="painel-jogos-titulo" class="painel-jogos-titulo">Servidores de jogo</p>
+</div>
 
 <!--
   **O aceite da máquina de jogo** (API 8, parte 3; `camada-maquina.js`).
@@ -5584,6 +5601,7 @@
 <script src="camada-versoes.js"></script>
 <script src="camada-tuneis.js"></script>
 <script src="camada-maquina.js"></script>
+<script src="faixa-de-jogos.js"></script>
 <script src="tela-antes-de-hospedar.js"></script>
 <script src="camada-servidores.js"></script>
 <!--

@@ -154,6 +154,7 @@ async function caso(motor, numero, prova) {
           table.maquina_revogar = () => null;
         });
         const zerar = () => pagina.evaluate(() => {
+          fecharOPainelDeJogos();
           chamadas.length = 0;
           // Fecha o que a prova anterior deixou, pelo caminho do produto.
           filaDeMaquinas.length = 0;
@@ -254,6 +255,8 @@ async function caso(motor, numero, prova) {
           const faixa = await pagina.evaluate(() => faixaDeMaquinas());
           assert.match(faixa, /este computador está pronto para servir Minecraft \(x\/jogo\)/, `${motor}: 4 · ${faixa}`);
           assert.match(faixa, /DESLIGAR/, `${motor}: 4 · ${faixa}`);
+          // Na sessão, a faixa mora no painel do selo, na barra de baixo (0.19.2).
+          await pagina.click(".selo-de-jogo");
           await pagina.click(".maquina-desligar");
           assert.deepEqual(await pagina.evaluate(() => chamadasDe("maquina_desligar")), [
             { alvo: "127.0.0.1:7000", modId: "x/jogo", servidor: "srv-1" },
@@ -794,8 +797,69 @@ async function caso(motor, numero, prova) {
           }
         });
 
+        // 24. (0.19.2) O jogo na barra de baixo, e não no alto da sessão: o selo
+        //     com o nome, o estado e o endereço; o painel com o detalhe e as
+        //     ações acima da barra; e, fora da sessão, a faixa de cima de volta.
+        await caso(motor, "24", async () => {
+          await zerar();
+          await emitirPedido({}, {});
+          await esperarTela("Fulano");
+          await pagina.click("#maquina-aceitar");
+          await esperarFechada();
+          await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: true }));
+          const selo = await pagina.evaluate(() => {
+            const s = document.querySelector("#tel-jogos .selo-de-jogo");
+            const faixa = $("maquinas").getBoundingClientRect();
+            return {
+              texto: s?.innerText ?? null, tom: s?.dataset.tom ?? null,
+              naBarra: Boolean(s?.closest("footer.telemetria")), visivel: Boolean(s && s.getBoundingClientRect().width > 0),
+              faixaOcupa: Math.round(faixa.width * faixa.height),
+            };
+          });
+          assert.equal(selo.texto, "SRV-1 · PRONTO · localhost:25565", `${motor}: 24 · o selo: ${JSON.stringify(selo)}`);
+          assert.ok(selo.naBarra && selo.visivel && selo.tom === "pronto", `${motor}: 24 · o selo não está na barra de baixo: ${JSON.stringify(selo)}`);
+          assert.ok(selo.faixaOcupa <= 1, `${motor}: 24 · a faixa de cima ainda ocupa a tela na sessão: ${JSON.stringify(selo)}`);
+          if (process.env.SEELE_RETRATO_DA_FAIXA) await pagina.screenshot({ path: `${process.env.SEELE_RETRATO_DA_FAIXA}-${motor}-selo.png` });
+          // O painel: acima da barra, com a faixa dentro, o endereço e o DESLIGAR.
+          await pagina.click(".selo-de-jogo");
+          if (process.env.SEELE_RETRATO_DA_FAIXA) await pagina.screenshot({ path: `${process.env.SEELE_RETRATO_DA_FAIXA}-${motor}-painel.png` });
+          const painel = await pagina.evaluate(() => {
+            const p = $("painel-jogos");
+            return {
+              aberto: !p.hidden, temAFaixa: $("maquinas").parentNode === p,
+              endereco: p.querySelector(".maquina-endereco")?.value ?? null,
+              acimaDaBarra: p.getBoundingClientRect().bottom <= document.querySelector("footer.telemetria").getBoundingClientRect().top,
+              expandido: document.querySelector(".selo-de-jogo").getAttribute("aria-expanded"),
+            };
+          });
+          assert.deepEqual(painel, { aberto: true, temAFaixa: true, endereco: "localhost:25565", acimaDaBarra: true, expandido: "true" },
+            `${motor}: 24 · o painel: ${JSON.stringify(painel)}`);
+          await pagina.click("#painel-jogos .maquina-copiar");
+          assert.ok(await pagina.isVisible("#painel-jogos .maquina-desligar"), `${motor}: 24 · o DESLIGAR não está no painel`);
+          // O jogo que começa muda o selo.
+          await pagina.evaluate(() => emitir("maquina-jogo", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", rodando: true }));
+          assert.equal(await pagina.evaluate(() => document.querySelector(".selo-de-jogo").innerText), "SRV-1 · RODANDO · localhost:25565", `${motor}: 24 · rodando`);
+          // Esc fecha, e a faixa volta para a casa dela.
+          await pagina.keyboard.press("Escape");
+          assert.deepEqual(await pagina.evaluate(() => ({ aberto: !$("painel-jogos").hidden, naCasa: $("maquinas").parentNode === document.body })),
+            { aberto: false, naCasa: true }, `${motor}: 24 · o Esc não fechou o painel, ou a faixa não voltou`);
+          // Fora da sessão, a faixa de cima diz tudo de novo.
+          const fora = await pagina.evaluate(async () => {
+            $("tela-sessao").hidden = true;
+            await new Promise((ok) => setTimeout(ok, 50));
+            const r = $("maquinas").getBoundingClientRect();
+            const medido = { modo: document.documentElement.dataset.jogosNaBarra, altura: Math.round(r.height), texto: $("maquinas").innerText };
+            $("tela-sessao").hidden = false;
+            await new Promise((ok) => setTimeout(ok, 50));
+            return medido;
+          });
+          assert.ok(fora.modo === "nao" && fora.altura > 20 && /está pronto|rodando/.test(fora.texto),
+            `${motor}: 24 · fora da sessão a faixa de cima não voltou: ${JSON.stringify(fora)}`);
+          await pagina.evaluate(() => emitir("maquina-estado", { alvo: "127.0.0.1:7000", mod_id: "x/jogo", servidor: "srv-1", ligada: false, motivo: "pelo-dono" }));
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 24, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 25, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

@@ -291,6 +291,8 @@ async function caso(motor, numero, prova) {
             conexoes: 0, quedas: [], udp_descartados: 0, encerrado: "fechado",
           } } }));
           assert.match((await pagina.evaluate(() => faixa())).split("\n").join(" "), /minecraft-4a \(x\/jogo\) fechou: a porta foi fechada/, `${motor}: 10 · o fim por quem abriu`);
+          // Na sessão, a faixa mora no painel do selo, na barra de baixo (0.19.2).
+          await pagina.click('.selo-de-jogo');
           await pagina.click('#tuneis [data-nome="minecraft-3a"] .tunel-dispensar');
           const depois = await pagina.evaluate(() => faixa());
           assert.doesNotMatch(depois, /minecraft-3a/, `${motor}: 10 · o DISPENSAR não tirou a linha: ${depois}`);

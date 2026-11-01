@@ -1853,6 +1853,28 @@ const FRASES_DO_TUNEL = Object.freeze({
  * `maquina-pedido.mudou`); a frase é daqui, como em toda fronteira. O que o Rust
  * dirá e a lista não tiver aparece com o próprio nome, e o fato vai ao registro.
  */
+/**
+ * **Os jogos na barra de baixo** (0.19.2, `faixa-de-jogos.js`): o selo de cada
+ * servidor de jogo e de cada porta aberta, na fileira da rede, no lugar das
+ * faixas que tomavam o alto da sessão. O que cada palavra diz é o estado que a
+ * faixa já dizia; o detalhe abre num painel acima da barra.
+ */
+const FRASES_DA_BARRA_DE_JOGOS = Object.freeze({
+  rodando: "RODANDO",
+  pronto: "PRONTO",
+  esperando: "ESPERANDO O ANFITRIÃO",
+  desligado: "DESLIGADO",
+  parou: "PAROU",
+  sobrou: "SOBROU",
+  aberta: "PORTA ABERTA",
+  fechada: "FECHADA",
+  recusada: "RECUSADA",
+  painel: "Servidores de jogo",
+  enderecoAqui: "para entrar deste computador",
+  copiar: "COPIAR",
+  detalhes: (frase) => `${frase} — detalhes e ações`,
+});
+
 const FRASES_DA_MAQUINA = Object.freeze({
   titulo: (quem) => `${quem} pede para rodar um servidor de jogo neste computador`,
   // **A reserva diz que é a reserva** (API 8 parte 7): o pedido traz o papel,

@@ -1,0 +1,150 @@
+/* SEELE — os jogos na barra de baixo da sessão (0.19.2, `faixa-de-jogos.js`).
+ *
+ * Um selo por jogo na fileira da rede, com o ponto na cor do estado — as cores
+ * da faixa da máquina: fósforo de pé, azul pronto sem jogo, laranja esperando
+ * quem hospeda, vermelho a parada que ninguém pediu, cinza a pedida —, e o
+ * painel com o detalhe e as ações, acima da barra. */
+
+.telemetria-jogos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.telemetria-jogos[hidden] { display: none; }
+
+.selo-de-jogo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 3px 12px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.selo-de-jogo:hover,
+.selo-de-jogo[aria-expanded="true"] { border-color: var(--seele-controle-borda); }
+
+.selo-de-jogo-texto { overflow: hidden; text-overflow: ellipsis; }
+
+.selo-de-jogo-ponto {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-osso-apagado);
+}
+
+.selo-de-jogo[data-tom="rodando"] .selo-de-jogo-ponto {
+  background: var(--seele-fosforo);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--seele-fosforo) 18%, transparent);
+}
+.selo-de-jogo[data-tom="pronto"] .selo-de-jogo-ponto { background: var(--seele-azul-claro); }
+.selo-de-jogo[data-tom="espera"] .selo-de-jogo-ponto { background: var(--seele-laranja-nerv); }
+.selo-de-jogo[data-tom="erro"] .selo-de-jogo-ponto { background: var(--seele-vermelho-alerta); }
+.selo-de-jogo[data-tom="erro"] { border-color: color-mix(in srgb, var(--seele-vermelho-alerta) 50%, transparent); }
+
+/* **Na sessão, as faixas saem da vista e ficam ao ouvido.** Fora do painel,
+   elas não ocupam espaço nem pintam nada, mas o `aria-live` continua no
+   documento: o leitor de tela ouve o que mudou, como antes. Fora da sessão
+   (`data-jogos-na-barra="nao"`), nada aqui vale, e a faixa de cima é a de
+   sempre. */
+:root[data-jogos-na-barra="sim"] :is(#maquinas, #tuneis):not(#painel-jogos > *) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* O painel, acima da barra de baixo, à direita, onde os selos moram. */
+.painel-jogos {
+  position: fixed;
+  right: 24px;
+  bottom: 76px;
+  z-index: 85;
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(60dvh, 560px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: 20px;
+  background: var(--seele-negro-painel);
+}
+
+.painel-jogos[hidden] { display: none; }
+
+.painel-jogos-titulo {
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+/* Dentro do painel, as faixas são lista, e não mais camada no alto. */
+#painel-jogos > #maquinas {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  pointer-events: auto;
+}
+
+#painel-jogos > #tuneis {
+  margin: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+/* O endereço para entrar deste computador, com COPIAR. */
+.maquina-linha-endereco {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+.maquina-endereco-rotulo {
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-rotulo-painel);
+}
+
+/* Com duas classes: a regra geral `input:not([type]) { width: 100% }`, de
+   `base.css`, ganhava de uma só, e o campo tomava a linha inteira. */
+.maquina-linha-endereco > .maquina-endereco {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 22ch;
+  padding: 6px 10px;
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: 10px;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: 13px;
+}
+
+.maquina-copiar { min-height: 36px; }

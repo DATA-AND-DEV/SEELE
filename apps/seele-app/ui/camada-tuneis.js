@@ -179,6 +179,7 @@ function desenharOsTuneis() {
   if (!faixa) return;
   faixa.replaceChildren(...[...tuneisNaFaixa.values()].map(desenharUmTunel));
   faixa.hidden = tuneisNaFaixa.size === 0;
+  if (typeof desenharOsJogosNaBarra === "function") desenharOsJogosNaBarra();
 }
 
 function dizerAFalhaDaFaixa(oQue, falha) {

@@ -351,6 +351,12 @@
   :where(:root[data-casca="celular"]) .maquina-mudou { font-size: calc(12px * var(--cel-escala)); }
 }
 
+/* faixa-de-jogos.css */
+:where(:root[data-casca="celular"]) .selo-de-jogo { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .painel-jogos-titulo { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-endereco-rotulo { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .maquina-linha-endereco > .maquina-endereco { font-size: calc(13px * var(--cel-escala)); }
+
 /* camada-portaria.css */
 :where(:root[data-casca="celular"]) .portaria-eyebrow { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .portaria-chip { font-size: calc(11px * var(--cel-escala)); }

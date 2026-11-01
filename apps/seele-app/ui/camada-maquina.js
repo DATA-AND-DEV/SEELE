@@ -57,6 +57,21 @@ const maquinasNaFaixa = new Map();
 const titulosDeMaquinas = new Map();
 
 /**
+ * **As portas do jogo de cada máquina** (0.19.2), da oferta aceita: o selo na
+ * barra de baixo e o painel dizem o endereço para entrar deste computador
+ * (`localhost:<porta>`). Vêm do pedido e, depois de recarregar, de
+ * `maquinas_aceitas` (`tuneis`).
+ */
+const portasDasMaquinas = new Map();
+
+/** O endereço para entrar no jogo deste computador, ou `null`. */
+function enderecoDaMaquina(entrada) {
+  const tuneis = portasDasMaquinas.get(chaveDaMaquina(entrada.alvo, entrada.modId, entrada.servidor)) ?? [];
+  const tunel = tuneis.find((t) => String(t.protocolo).toLowerCase() === "tcp") ?? tuneis[0];
+  return tunel && Number(tunel.porta) > 0 ? `localhost:${Number(tunel.porta)}` : null;
+}
+
+/**
  * Se o jogo de cada máquina ligada roda agora (`maquina-jogo`, e `jogo` de
  * `maquinas_aceitas`): a faixa diz «serve» só com o jogo de pé.
  */
@@ -299,6 +314,7 @@ function passarAoProximoPedido() {
 function chegouUmPedido(pedido) {
   const chave = chaveDoEvento(pedido);
   titulosDeMaquinas.set(chave, pedido.oferta?.titulo ?? pedido.mod_id);
+  portasDasMaquinas.set(chave, pedido.oferta?.tuneis ?? []);
   const atual = maquinaNaTela?.pedido;
   if (atual && chaveDoEvento(atual) === chave) {
     // O mesmo pedido outra vez (o servidor reenvia) não mexe nas caixas marcadas;
@@ -436,6 +452,25 @@ function desenharUmaMaquina(entrada) {
     bloco.append(elemento("p", "maquina-sem-anfitriao", rodando ? F.semAnfitriao : F.semAnfitriaoSemJogo));
   }
   if (entrada.falha) bloco.append(elemento("p", "maquina-nota", entrada.falha));
+  // O endereço para entrar deste computador, com COPIAR (0.19.2). O mesmo
+  // `copiarLink` do convite: no WKWebView do Mac a área de transferência
+  // moderna é negada, e ele sabe o caminho que funciona.
+  const endereco = entrada.ligada ? enderecoDaMaquina(entrada) : null;
+  if (endereco) {
+    const FB = FRASES_DA_BARRA_DE_JOGOS;
+    const campo = elemento("input", "maquina-endereco");
+    campo.readOnly = true;
+    campo.value = endereco;
+    campo.setAttribute("aria-label", FB.enderecoAqui);
+    const copiar = elemento("button", "botao-fantasma maquina-copiar", FB.copiar);
+    copiar.type = "button";
+    copiar.addEventListener("click", () => {
+      copiarLink(campo, copiar).catch((falha) => registrarNoAnfitriao("maquina", `copiar o endereço falhou — ${String(falha?.message ?? falha)}`, "aviso", entrada.modId));
+    });
+    const linha = elemento("p", "maquina-linha-endereco");
+    linha.append(elemento("span", "maquina-endereco-rotulo", FB.enderecoAqui), campo, copiar);
+    bloco.append(linha);
+  }
 
   const botao = elemento("button", entrada.ligada ? "maquina-desligar" : "maquina-dispensar", entrada.ligada ? F.desligar : F.dispensar);
   botao.type = "button";
@@ -471,6 +506,7 @@ function desenharAFaixaDeMaquinas() {
   if (!faixa) return;
   faixa.replaceChildren(...[...maquinasNaFaixa.values()].map(desenharUmaMaquina));
   faixa.hidden = maquinasNaFaixa.size === 0;
+  if (typeof desenharOsJogosNaBarra === "function") desenharOsJogosNaBarra();
 }
 
 function aplicarOEstadoDaMaquina(estado) {
@@ -541,6 +577,7 @@ async function relerAsMaquinasLigadas() {
   for (const aceita of aceitas ?? []) {
     const chave = chaveDaMaquina(aceita.alvo, aceita.mod_id, aceita.servidor);
     titulosDeMaquinas.set(chave, aceita.titulo);
+    portasDasMaquinas.set(chave, aceita.tuneis ?? []);
     if (aceita.ligada && typeof aceita.jogo === "boolean" && !jogosRodando.has(chave)) jogosRodando.set(chave, aceita.jogo);
     if (!aceita.ligada || maquinasNaFaixa.has(chave)) continue;
     maquinasNaFaixa.set(chave, {
