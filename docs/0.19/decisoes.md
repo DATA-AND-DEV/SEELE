@@ -266,12 +266,67 @@ conserto de produto foi provado revertendo-o e vendo a bancada dele reprovar.
 
 **Ainda vermelho (31/10):**
 
-- `sessao-no-navegador.cjs`, caso 14: o TOCAR do MOD de referência volta a
-  TOCAR — o som carrega (`midia_do_mod`, `som_do_mod` uma vez cada, figura
-  `pronta`), mas o MOD recebe um estado de mídia que não é `tocando` e se
-  desfaz. Não reproduzido até a causa; nem bancada velha nem conserto decidido.
+- ~~`sessao-no-navegador.cjs`, caso 14~~ — resolvido: era a bancada. Ver
+  «o caso 14 da sessão no navegador» abaixo.
 - `tools/bancada-do-celular.py`: 329 medidas reprovam (aba de pessoas, chamada,
   faixa de voz, texto maior, entrada…), a bancada medindo a casca do celular de
   antes da 0.19. Pede a mesma triagem, tela por tela.
 - `chamada-web.cjs` não roda nesta máquina: a porta fixa 19885 está presa por
   um `seele-encontro` órfão de outra árvore (das 05:55). Numa porta livre, passa.
+
+## 31/10/2026 — o caso 14 da sessão no navegador: era a bancada (D-tocar)
+
+Decidido na triagem, sem palavra do dono: **bancada velha, e não regressão do
+produto.** O produto faz o que foi desenhado; a bancada media um instante.
+
+**O que se mediu.** Cinco rodadas da `sessao-no-navegador.cjs` na d79ef846 (0.19
++ API 8): quatro verdes, uma vermelha no caso 14 (`parar: false`, sem aviso,
+figura `pronta`, `midia_do_mod` e `som_do_mod` uma vez cada). Uma cópia com um
+`MutationObserver` em volta do clique deu a linha do tempo:
+
+```
+0ms    clicado: o botão da FIGURA (do produto), e não o do MOD
+3ms    figura PAUSAR · MOD TOCAR
+110ms  figura PAUSAR · MOD PARAR      ← o MOD ouviu `tocando`
+203ms  figura TOCAR  · MOD PARAR      ← o toque de 0,2 s acabou
+204ms  figura TOCAR  · MOD TOCAR      ← o MOD ouviu `terminou`
+```
+
+**A causa, em duas partes, as duas da bancada:**
+
+1. O `find(b => b.textContent === "TOCAR")` pega o **primeiro** TOCAR do
+   painel. Com o som já carregado, é o botão que o produto põe na figura da
+   mídia (`montarSom`, o que substitui o `<audio controls>`), que vem antes do
+   botão `tocar` do MOD na árvore. O comentário dizia que o botão «vira PARAR
+   pelo próprio MOD», e o clique não era no do MOD.
+2. O PARAR que aquele clique produz vive do `tocando` ao `terminou`: uns 95 ms,
+   num som de 0,2 s. A bancada amostrava o texto a cada 100 ms. Quando a
+   amostra caía fora da janela, ela via TOCAR até o prazo de 10 s.
+
+**Não é da API 8.** O 15fbd5f3 só trocou `"api": 7` por `8` no `mod.json`. O
+cliente do MOD, o `toque.wav`, o caminho do som em `mods-regiao.js` e a conferência
+da bancada são os mesmos desde a v0.18.1 (`ae0f2715c`, o commit gravado no
+release; o da v0.18.3 não está no corpo dele). Com o `mod.json` de volta na API
+7, a mesma cópia reprovou com a mesma linha do tempo (PARAR de 106 a 202 ms).
+A corrida já estava lá antes. Ela passava quase sempre porque a janela é quase
+do tamanho da amostra.
+
+**O comportamento que fica, e por que é o certo.** O MOD de referência segue a
+mídia pelo que o produto diz (`case "midia"`: `tocando` só com `tocando`). Um
+toque que termina volta a TOCAR, e um botão que ficasse em PARAR depois do fim
+seria um botão mentindo, que é o que aquele comentário do vetor proíbe.
+
+**O que mudou na bancada.** O caso 14 aperta o botão do MOD
+(`button[data-chave-do-mod="tocar"]`) e grava cada rótulo dele por
+`MutationObserver` instalado antes do clique. Ele exige o ciclo inteiro,
+`["TOCAR","PARAR","TOCAR"]`, sem `som: recusada|falhou`, com a figura `pronta`
+(ou `tocando`). A volta a TOCAR é a prova de que o som tocou até o fim: a
+conferência velha passava com um produto que nunca dissesse `terminou`.
+
+**A prova, pelas reversões do produto, com a bancada nova:**
+
+- sem o `avisar("terminou")` do `TocadorDeSomDeMod`: reprova,
+  `rotulos: ["TOCAR","PARAR"]`;
+- sem os bytes do `som_do_mod` (o `carregarSom` lançando): reprova,
+  `som: 0`, figura `falhou`;
+- com o produto intacto: três rodadas verdes seguidas.

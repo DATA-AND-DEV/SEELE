@@ -971,20 +971,41 @@ const invocar = (aba, comando, args) =>
     }, exigido.id, 15_000);
     confere("14", falou.pronto, `o painel do MOD não diz a resposta da metade de servidor: ${JSON.stringify(falou.textos)}`);
     // **A mídia do pacote**: o painel declara o som do MOD, a casca o pede
-    // (`midia_do_mod`) e lê os bytes (`som_do_mod`) para decodificar. O botão
-    // vira PARAR pelo próprio MOD, com som ou sem: quem diz que o som
-    // carregou é a figura da mídia, `pronta` (ou `tocando`), e `falhou` sem os
-    // bytes (medido pela reversão).
+    // (`midia_do_mod`) e lê os bytes (`som_do_mod`) para decodificar. Quem
+    // aperta é o botão **do MOD** (`data-chave-do-mod="tocar"`): ele vira
+    // PARAR pelo próprio MOD, toca pela declaração, e volta a TOCAR quando o
+    // produto diz `terminou` — o toque tem 0,2 s. A volta é a prova de que o
+    // som tocou de verdade: sem os bytes, o MOD diz `som: falhou`, e sem o fim
+    // natural ele fica em PARAR. A figura da mídia diz `pronta` (ou `tocando`).
+    //
+    // **O ciclo inteiro, por observador, e não uma amostra** (0.19, decisão
+    // D-tocar em `docs/0.19/decisoes.md`). A versão anterior pegava o primeiro
+    // «TOCAR» da página — que, com o som já carregado, é o botão do produto na
+    // figura, e não o do MOD — e amostrava o texto a cada 100 ms. O PARAR que
+    // aquele clique produz dura uns 95 ms (do `tocando` ao `terminou`), e a
+    // amostra caía fora dele uma vez em cinco, já na API 7: medido com a linha
+    // do tempo das mutações.
     const tocou = await f.aba.evaluate(async (id) => {
-      const botao = [...document.querySelectorAll(`[data-mod="${id}"] button`)].find((b) => b.textContent.trim() === "TOCAR");
+      const doMod = () => document.querySelector(`[data-mod="${id}"] button[data-chave-do-mod="tocar"]`);
+      const botao = doMod();
       if (!botao) return { semBotao: true };
+      const rotulos = [botao.textContent.trim()];
+      const ler = () => {
+        const agora = doMod()?.textContent.trim() ?? "(sem botão)";
+        if (rotulos[rotulos.length - 1] !== agora) rotulos.push(agora);
+      };
+      const observador = new MutationObserver(ler);
+      observador.observe(document.body, { subtree: true, childList: true, characterData: true });
       botao.click();
       const fim = Date.now() + 10_000;
       for (;;) {
+        ler();
         const texto = [...document.querySelectorAll(`[data-mod="${id}"]`)].map((no) => no.textContent).join(" ");
-        if (/PARAR/.test(texto) || /som: (recusada|falhou)/.test(texto) || Date.now() > fim) {
+        const voltou = rotulos.includes("PARAR") && rotulos[rotulos.length - 1] === "TOCAR";
+        if (voltou || /som: (recusada|falhou)/.test(texto) || Date.now() > fim) {
+          observador.disconnect();
           return {
-            parar: /PARAR/.test(texto),
+            rotulos,
             aviso: (texto.match(/som: \w+/) ?? [null])[0],
             midia: CHAMADAS_DA_PONTE.get("midia_do_mod") ?? 0,
             som: CHAMADAS_DA_PONTE.get("som_do_mod") ?? 0,
@@ -992,14 +1013,15 @@ const invocar = (aba, comando, args) =>
             estados: [...document.querySelectorAll(`[data-mod="${id}"] [data-estado]`)].map((no) => `${no.tagName}:${no.dataset.estado}`),
           };
         }
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 50));
       }
     }, exigido.id);
     confere(
       "14",
-      tocou.parar && tocou.midia >= 1 && tocou.som >= 1 && tocou.aFazer.length === 0 &&
+      JSON.stringify(tocou.rotulos) === '["TOCAR","PARAR","TOCAR"]' && tocou.aviso === null &&
+        tocou.midia >= 1 && tocou.som >= 1 && tocou.aFazer.length === 0 &&
         tocou.estados.length === 1 && /^FIGURE:(pronta|tocando)$/.test(tocou.estados[0]),
-      `o som do pacote não tocou: ${JSON.stringify(tocou)}`,
+      `o som do pacote não tocou o ciclo TOCAR → PARAR → TOCAR: ${JSON.stringify(tocou)}`,
     );
     // **A mídia do servidor**, reduzida ao uso: uma capa maior que o teto
     // volta no teto (960 × 320), e um texto que não é base64 é recusado.
