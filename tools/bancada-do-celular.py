@@ -228,6 +228,13 @@ def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
             pg.goto(f"file://{pagina}")
             entrar(pg)
+            # **A barra da janela ainda assenta depois do `entrar`.** Medido em
+            # 31/10, no Chromium: sem esta espera, duas fotos em cinco diferiam
+            # em 33 pixels de 1 a 4 níveis nas bordas do minimizar e do
+            # maximizar (1308–1399 × 8–15), igual na base `d79ef846` e com as
+            # duas cópias idênticas; com 1,5 s a mais, oito em oito iguais. A
+            # comparação continua pixel a pixel, e sem máscara nova.
+            pg.wait_for_timeout(1500)
             fotos[nome] = saida / f"g3-{nome}-{motor.name}.png"
             pg.screenshot(path=fotos[nome], animations="disabled",
                           mask=[pg.locator("#barra-relogio"), pg.locator("#tel-uptime")])
@@ -252,8 +259,12 @@ def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
 MEDIR = r"""
 ([topo, pe, raiz]) => {
   const W = innerWidth, H = innerHeight;
+  // **Só do leitor de tela** é fora da vista: a caixa de 1 px recortada por
+  // `clip-path: inset(50%)` (o rótulo do compositor da 0.19, `.compor-rotulo`)
+  // não desenha nada, e o filho dela «passava» da tela sem ser visto.
+  const soDoLeitor = (e) => { for (let p = e; p; p = p.parentElement) if (getComputedStyle(p).clipPath === "inset(50%)") return true; return false; };
   const vis = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
-    return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !e.closest("[hidden]"); };
+    return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !e.closest("[hidden]") && !soDoLeitor(e); };
   const nome = (e) => (e.id ? "#" + e.id : e.tagName.toLowerCase() + (typeof e.className === "string" && e.className ? "." + e.className.trim().split(/\s+/)[0] : ""))
     + " «" + (e.getAttribute("aria-label") || e.textContent || e.placeholder || "").trim().replace(/\s+/g, " ").slice(0, 28) + "»";
   // Só um trilho marcado rola de lado: um painel com `overflow-y: auto` tem
@@ -281,8 +292,20 @@ MEDIR = r"""
     .map((e) => nome(e) + " y=" + Math.round(e.getBoundingClientRect().top));
   const naBarra = todos.filter((e) => (controles.includes(e) || temTexto(e)) && e.getBoundingClientRect().bottom > H - pe + 1 && e.getBoundingClientRect().top < H && !rolaY(e))
     .map((e) => nome(e) + " fim=" + Math.round(e.getBoundingClientRect().bottom));
+  // **O que passa é texto, ou um filho**, e não um enfeite: o `scrollWidth`
+  // conta também um `::after` posto para fora de propósito (o selo de quem
+  // fala, 5 px fora do canto do avatar, na 0.19), que nada tem de texto. O
+  // transbordo só conta quando um nó de verdade (texto ou elemento) passa da
+  // caixa de conteúdo; um pseudo-elemento não é nó, e fica de fora.
+  const passaDaCaixa = (e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e);
+    const esq = r.left + e.clientLeft + parseFloat(s.paddingLeft) - 1;
+    const dir = r.left + e.clientLeft + e.clientWidth - parseFloat(s.paddingRight) + 1;
+    return [...e.childNodes].some((n) => { let b;
+      if (n.nodeType === 3) { if (!n.textContent.trim()) return false; const g = document.createRange(); g.selectNodeContents(n); b = g.getBoundingClientRect(); }
+      else if (n.nodeType === 1) b = n.getBoundingClientRect(); else return false;
+      return b.width > 0 && (b.right > dir || b.left < esq); }); };
   const transborda = todos.filter((e) => temTexto(e) && !rolaX(e) && getComputedStyle(e).overflowX === "visible"
-      && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0)
+      && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0 && passaDaCaixa(e))
     .map((e) => nome(e) + ` ${e.scrollWidth}>${e.clientWidth}`);
   // O contraste de todo texto visível contra o fundo opaco de verdade atrás
   // dele: 4,5:1, ou 3:1 para texto grande (WCAG 1.4.3). `color(srgb …)` vem em
@@ -469,7 +492,7 @@ IDENTIDADE_DO_CASO = r"""() => {
     ate: agora + 7 * 86400, hashes: ["sha-256:caso"], convite: "7K4MNPQRSTVWXYZ23456", ...extra } });
   const LINKS = {
     pronto: link(), vencido: link({ ate: agora - 60 }),
-    "servidor-0.15": { erro: "SemHashesDoNavegador" }, incompleto: { erro: "SemImpressao" }, "outra-origem": { erro: "OutraOrigem" },
+    incompleto: { erro: "SemImpressao" }, "outra-origem": { erro: "OutraOrigem" },
   };
   window.__conexoes = [];
   window.__respostas = [];
@@ -511,14 +534,6 @@ ENTRADA_LIDA = r"""() => {
 }"""
 
 
-INICIO_LIDO = """() => ({ titulo: document.querySelector("#cel-entrada-titulo")?.textContent,
-    servidores: [...document.querySelectorAll(".cel-entrada-servidor")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
-    vazio: document.querySelector(".cel-entrada-corpo > .cel-entrada-nota")?.textContent ?? null,
-    baixar: document.querySelector(".cel-entrada-fora a.cel-baixar")?.getAttribute("href"),
-    colar: [...document.querySelectorAll(".cel-entrada-pe button")].map((b) => b.textContent),
-    caixaDoDesktop: getComputedStyle(document.querySelector("#tela-boot > .boot-caixa")).display })"""
-
-
 def usar_a_entrada(pg: Page, **opcoes) -> None:
     """A tela com a identidade do caso. Os servidores deste aparelho são os da
     identidade (`conhecidos()` e `entrarNoConhecido`, da F4), guardados no
@@ -545,25 +560,34 @@ def entrada(pg: Page) -> list[str]:
     falhas = []
     pg.evaluate(IDENTIDADE_DO_CASO)
     usar_a_entrada(pg)
-    inicio = pg.evaluate(INICIO_LIDO)
     f = pg.evaluate("FRASES_DO_CELULAR.entrada")
-    if inicio["titulo"] != f["inicio"]["titulo"]:
-        falhas.append(f"a tela de início diz «{inicio['titulo']}»")
-    if inicio["servidores"] or inicio["vazio"] != f["inicio"]["vazio"]:
-        falhas.append(f"sem servidor guardado, a tela de início mostra {inicio['servidores']} e diz «{inicio['vazio']}»")
-    if inicio["baixar"] != pg.evaluate("PAGINA_DO_APP"):
-        falhas.append(f"o BAIXAR O APP DO SEELE aponta para {inicio['baixar']}")
-    if inicio["colar"] != [f["inicio"]["colar"]]:
-        falhas.append(f"o pé da tela de início tem {inicio['colar']}")
-    if inicio["caixaDoDesktop"] != "none":
-        falhas.append("a caixa de entrada do desktop continua à vista no celular")
+    # **O início do celular é a `.boot-caixa` de `#tela-boot` desde a 0.18**
+    # (`5dfe9c59`; a mesma decisão de `area-util.cjs` e `entrada-simples.cjs`):
+    # o painel «Conectar», com o campo do link e o CONECTAR, e a lista de
+    # servidores do aparelho, que vem do `conhecidos` da ponte. A tela de início
+    # própria do celular (`.cel-entrada` com a lista, COLAR UM LINK) não aparece.
+    inicio = pg.evaluate("""() => {
+        const v = (s) => { const e = document.querySelector(s); return !!e && e.checkVisibility(); };
+        const alto = (s) => Math.round(document.querySelector(s)?.getBoundingClientRect().height ?? 0);
+        const conectar = document.getElementById('botao-conectar');
+        const r = conectar?.getBoundingClientRect();
+        return { caixa: v('#tela-boot > .boot-caixa'), campo: v('#tela-boot .inicio-conectar input'), campoAlto: alto('#tela-boot .inicio-conectar input'),
+                 conectar: !!conectar?.checkVisibility() && r.bottom <= innerHeight && r.right <= innerWidth, conectarAlto: Math.round(r?.height ?? 0),
+                 celular: v('.cel-entrada'), vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    if not inicio["caixa"] or inicio["celular"]:
+        falhas.append(f"o início do celular não é a caixa da entrada (o painel «Conectar»): {inicio}")
+    if not inicio["campo"] or not inicio["conectar"] or min(inicio["campoAlto"], inicio["conectarAlto"]) < 44:
+        falhas.append(f"o início não tem o campo do link e o CONECTAR à vista, com 44: {inicio}")
+    if inicio["vaza"]:
+        falhas.append("o início do celular rola de lado")
 
     e = f["estados"]
     esperado = {
         "pronto": (None, [f["entrarEm"]["entrar"], f["entrarEm"]["agoraNao"]]),
-        "numa-aba": (e["numa-aba"]["titulo"], [e["numa-aba"]["copiar"], f["entrarEm"]["agoraNao"]]),
+        # Numa aba também se entra desde a 0.17.4 (`8284b642`, a identidade
+        # persistente do navegador): ENTRAR, COPIAR O LINK e AGORA NÃO.
+        "numa-aba": (e["numa-aba"]["titulo"], [f["entrarEm"]["entrar"], e["numa-aba"]["copiar"], f["entrarEm"]["agoraNao"]]),
         "vencido": ("ESTE LINK VENCEU EM", [f["entrarEm"]["servidores"]]),
-        "servidor-0.15": (e["servidor-0.15"]["titulo"], [f["entrarEm"]["servidores"]]),
         "incompleto": (e["incompleto"]["titulo"], [f["entrarEm"]["servidores"]]),
         "outra-origem": (e["outra-origem"]["titulo"], [f["entrarEm"]["servidores"]]),
     }
@@ -594,46 +618,35 @@ def entrada(pg: Page) -> list[str]:
 def conhecidos_de_verdade(pg: Page, f: dict) -> list[str]:
     """SERVIDORES DESTE APARELHO pela identidade da F4: uma entrada que dá
     certo guarda o servidor; o nome chega pelo `lembrarONome` (no produto, o
-    primeiro retrato); a lista mostra o nome, o endereço, a versão e o dia, com
-    ENTRAR, que entra pela chave e **sem o convite**; e com o relógio da
-    identidade oito dias adiante os hashes guardados vencem, a lista diz LINK
-    VENCIDO, e o toque recebe o `link-vencido`."""
+    primeiro retrato); e o ENTRAR de um guardado entra pela chave, **sem o
+    convite**.
+
+    **Pela identidade, e não pela lista da `.cel-entrada`**: desde a 0.18 o
+    início do celular é a `.boot-caixa`, e a lista à vista vem do `conhecidos`
+    da ponte web (`ponte-web.js`, que lê esta mesma identidade); a lista
+    própria da `.cel-entrada` não aparece mais. E o «LINK VENCIDO» de um
+    guardado saiu na 0.17 (`fec5e0c4`): o `podeEntrar` diz só se o servidor é
+    desta linha (um Servidor 1 pede a 0.16), e os hashes guardados não vencem."""
     falhas = []
     usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
     pg.fill("#cel-entrada-apelido", "rafa")
     tocar_acao(pg, f["entrarEm"]["entrar"])
     pg.wait_for_timeout(600)
-    # Antes do primeiro retrato o servidor não tem nome: o endereço é o título,
-    # uma vez só.
-    usar_a_entrada(pg)
-    sem_nome = pg.evaluate(INICIO_LIDO)["servidores"]
-    if len(sem_nome) != 1 or sem_nome[0][0].count("198.51.100.7:8383") != 1:
-        falhas.append(f"o servidor guardado, ainda sem nome, sai como {sem_nome}")
+    guardados = pg.evaluate("window.__identidade.conhecidos()")
+    if len(guardados) != 1 or guardados[0]["endereco"] != "198.51.100.7:8383" or guardados[0]["nome"] is not None:
+        falhas.append(f"a entrada que deu certo não guardou o servidor, ainda sem nome: {guardados}")
+        return falhas
     pg.evaluate('window.__identidade.lembrarONome("3cbcfb02".repeat(8), "OFICINA")')
-    usar_a_entrada(pg)
-    inicio = pg.evaluate(INICIO_LIDO)
-    versao = pg.evaluate("FRASES_DO_CELULAR.entrada.inicio.servidor('1.0')")
-    servidores = inicio["servidores"]
-    if (len(servidores) != 1 or not servidores[0][0].startswith("OFICINA") or "198.51.100.7:8383" not in servidores[0][0]
-            or versao not in servidores[0][0] or not servidores[0][0].endswith(f["inicio"]["entrar"]) or servidores[0][1] < 44):
-        falhas.append(f"o servidor guardado sai na tela de início como {servidores}")
+    guardados = pg.evaluate("window.__identidade.conhecidos()")
+    if [g["nome"] for g in guardados] != ["OFICINA"] or guardados[0]["podeEntrar"] is not True:
+        falhas.append(f"o nome do primeiro retrato não chegou ao servidor guardado: {guardados}")
     antes = pg.evaluate("window.__conexoes.length")
-    tocar(pg, ".cel-entrada-servidor")
+    pg.evaluate("window.__respostas.push(undefined)")
+    pg.evaluate('window.__identidade.entrarNoConhecido("3cbcfb02".repeat(8), "rafa")')
     pg.wait_for_timeout(600)
     pelo_conhecido = pg.evaluate("window.__conexoes.slice(%d)" % antes)
     if len(pelo_conhecido) != 1 or pelo_conhecido[0]["credencial"] is not None:
-        falhas.append(f"o ENTRAR da lista não entrou pela chave, sem o convite: {pelo_conhecido}")
-    # Oito dias depois, os hashes guardados (sete dias) venceram.
-    pg.evaluate("window.__agora = Date.now() + 8 * 86400000")
-    usar_a_entrada(pg)
-    vencido = pg.evaluate(INICIO_LIDO)
-    if len(vencido["servidores"]) != 1 or not vencido["servidores"][0][0].endswith(f["inicio"]["linkVencido"]):
-        falhas.append(f"com os hashes guardados vencidos, a lista diz {vencido['servidores']}")
-    tocar(pg, ".cel-entrada-servidor")
-    pg.wait_for_timeout(600)
-    aviso = pg.evaluate("[...document.querySelectorAll('.cel-entrada-aviso-titulo')].map((e) => e.textContent)")
-    if aviso != [f["desfechos"]["link-vencido"][0]]:
-        falhas.append(f"o toque num servidor de link vencido diz {aviso}")
+        falhas.append(f"o ENTRAR de um guardado não entrou pela chave, sem o convite: {pelo_conhecido}")
     return falhas
 
 
@@ -976,11 +989,16 @@ def persistencia_dita(pg: Page) -> list[str]:
         falhas.append(f"a mesma resposta foi dita de novo: {r}")
 
     # A resposta muda: diz a nova. E a que o navegador não dá.
-    for resposta in ("concedida", "sem-suporte"):
-        de_novo()
-        r = entrar_com(resposta)
-        if not r["sessao"] or r["texto"] != f[resposta] or r["dita"] != resposta:
-            falhas.append(f"a resposta mudou para «{resposta}», e o aviso não a disse: {r}")
+    # O «concedida» só informa, e o celular o cala desde a 0.18 (`5dfe9c59`,
+    # `faixaDeAvisos`): não aparece, e por isso não fica dito.
+    de_novo()
+    r = entrar_com("concedida")
+    if not r["sessao"] or r["texto"] is not None or r["dita"] == "concedida":
+        falhas.append(f"a resposta mudou para «concedida», que só informa, e o aviso a mostrou ou a deu por dita: {r}")
+    de_novo()
+    r = entrar_com("sem-suporte")
+    if not r["sessao"] or r["texto"] != f["sem-suporte"] or r["dita"] != "sem-suporte":
+        falhas.append(f"a resposta mudou para «sem-suporte», e o aviso não a disse: {r}")
 
     # Com o armazenamento da origem recusado, a mesma resposta é dita de novo:
     # o navegador não guarda nada, e o aviso diz a verdade.
@@ -1046,33 +1064,34 @@ MUDO_ALCANCAVEL = """() => { const b = document.getElementById('voz-mudo').getBo
 
 
 def queda(pg: Page) -> list[str]:
-    """A queda (spec §2.5; specs/07): uma faixa no alto, em largura cheia, e não
-    uma caixa sobre a conversa. A sessão esmaece e continua legível: uma
-    mensagem à vista embaixo da faixa recebe o toque. A faixa de voz diz «SEM
-    SOM · RECONECTANDO», e o MUDO continua ao alcance. Quando o enlace volta,
-    tudo volta. Termina na queda, para a foto."""
+    """A queda (spec §2.5; specs/07). **Na 0.19 ela é uma página** (o canvas
+    `Cel-reconectando.dc`, `49758837`), e não mais a faixa no alto da 0.16: o
+    enlace, o título, a conta grande e as tentativas, na largura inteira, do
+    alto até a faixa de voz, que fica por cima dela, diz «SEM SOM ·
+    RECONECTANDO», e mantém o MUDO ao alcance. O que a pessoa precisa saber
+    (quanto falta, quantas tentativas) fica à vista, acima da faixa. Quando o
+    enlace volta, tudo volta. Termina na queda, para a foto."""
     falhas = []
     ir_para_aba(pg, "conversa", falhas)
     pg.evaluate("SEELE_QUADRO.link = { InternalBattery: { remaining_seconds: 287, attempts: 2 } }")
     esperar_quadro(pg)
     v = pg.evaluate("""() => {
-        const caixa = document.querySelector('#bateria .bateria-caixa'); const b = caixa?.getBoundingClientRect();
-        const legivel = [...document.querySelectorAll('#lista-mensagens li.mensagem')].some((li) => {
-            const r = li.getBoundingClientRect(); if (!b || r.top < b.bottom || r.height === 0) return false;
-            const c = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 12)); return !!c && li.contains(c); });
-        return { visivel: !!caixa && caixa.checkVisibility(), caixa: b ? [Math.round(b.top), Math.round(b.width), Math.round(b.height)] : null,
-                 legivel, faixa: document.querySelector('.voz-celular .voz-sala-quem')?.textContent ?? '',
+        const camada = document.getElementById('bateria'); const b = camada.getBoundingClientRect();
+        const voz = document.getElementById('voz').getBoundingClientRect();
+        const aVista = (s) => { const e = camada.querySelector(s); if (!e?.checkVisibility()) return false;
+            const r = e.getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= voz.top + 1; };
+        return { visivel: camada.checkVisibility(), caixa: [Math.round(b.top), Math.round(b.width)],
+                 conta: aVista('#bateria-conta'), tentativas: aVista('#bateria-tentativas'), titulo: aVista('.bateria-nome'),
+                 faixa: document.querySelector('.voz-celular .voz-sala-quem')?.textContent ?? '',
                  inteira: ((q, f) => q.scrollWidth <= q.clientWidth + 1 && q.getBoundingClientRect().bottom <= f.getBoundingClientRect().bottom + 1)(
                      document.querySelector('.voz-celular .voz-sala-quem'), document.querySelector('.voz-celular')),
                  vaza: document.documentElement.scrollWidth > innerWidth }; }""")
-    largura, altura = pg.evaluate("[innerWidth, innerHeight]")
-    # A altura conta sem a área segura do alto: aquela faixa é do sistema (a
-    # ilha), e não da conversa.
-    seguro = pg.evaluate("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cel-seguro-topo')) || 0")
-    if not v["visivel"] or v["caixa"][0] > 1 or v["caixa"][1] < largura - 1 or v["caixa"][2] - seguro > altura / 3:
-        falhas.append(f"a queda não é uma faixa no alto, em largura cheia: {v['caixa']} numa tela de {largura}×{altura}, com {seguro} de área segura")
-    if not v["legivel"]:
-        falhas.append("com a queda, nenhuma mensagem fica à vista e ao toque embaixo da faixa")
+    largura = pg.evaluate("innerWidth")
+    if not v["visivel"] or v["caixa"][0] > 1 or v["caixa"][1] < largura - 1:
+        falhas.append(f"a queda não é a página no alto, em largura cheia: {v['caixa']} numa tela de {largura}")
+    for parte in ("titulo", "conta", "tentativas"):
+        if not v[parte]:
+            falhas.append(f"com a queda, {parte} não fica à vista acima da faixa de voz")
     reconectando = pg.evaluate("FRASES_DO_CELULAR.voz.reconectando")
     if v["faixa"] != reconectando:
         falhas.append(f"com a queda, a faixa de voz diz «{v['faixa']}», e não «{reconectando}»")
@@ -1118,10 +1137,10 @@ def alerta(pg: Page) -> list[str]:
 
 
 def confirmacao(pg: Page) -> list[str]:
-    """A confirmação (spec §2.4) é uma folha de baixo, como as do celular: em
-    largura cheia, presa ao pé, com a borda vermelha, o verbo inteiro no botão,
-    o CANCELAR com 44 como saída, e o voltar do aparelho a fecha. Termina com
-    ela aberta, para a foto."""
+    """A confirmação (spec §2.4): desde a 0.18 (`5dfe9c59`) um cartão no meio
+    da tela, a 12 px de cada borda, e não mais a folha presa ao pé. Com a borda
+    vermelha, o verbo inteiro no botão, o CANCELAR com 44 como saída, e o
+    voltar do aparelho a fecha. Termina com ela aberta, para a foto."""
     falhas = []
     abrir = "abrirConfirmacao('APAGAR A MENSAGEM', 'A mensagem sai da conversa para todo mundo, e não volta.', 'APAGAR A MENSAGEM', () => {})"
     pg.evaluate(abrir)
@@ -1129,14 +1148,15 @@ def confirmacao(pg: Page) -> list[str]:
     v = pg.evaluate("""() => {
         const caixa = document.querySelector('#moderar .moderar-caixa'); const b = caixa.getBoundingClientRect();
         const verbo = document.getElementById('moderar-confirmar'), cancelar = document.getElementById('moderar-cancelar');
-        return { caixa: [Math.round(b.left), Math.round(b.bottom), Math.round(b.width)], borda: getComputedStyle(caixa).borderTopColor,
+        return { caixa: [Math.round(b.left), Math.round(b.top), Math.round(b.bottom), Math.round(b.width)], borda: getComputedStyle(caixa).borderTopColor,
                  vermelho: getComputedStyle(document.documentElement).getPropertyValue('--seele-vermelho-alerta').trim(),
                  verbo: [verbo.textContent.trim(), Math.round(verbo.getBoundingClientRect().height)],
                  cancelar: cancelar.checkVisibility() ? Math.round(cancelar.getBoundingClientRect().height) : 0,
                  vaza: document.documentElement.scrollWidth > innerWidth }; }""")
     largura, altura = pg.evaluate("[innerWidth, innerHeight]")
-    if v["caixa"][0] > 0 or v["caixa"][2] < largura - 1 or abs(v["caixa"][1] - altura) > 1:
-        falhas.append(f"a confirmação não é uma folha presa ao pé, em largura cheia: {v['caixa']}")
+    esquerda, topo, fundo, larga = v["caixa"]
+    if abs(esquerda - 12) > 1 or abs(larga - (largura - 24)) > 1 or abs(topo - (altura - fundo)) > 1 or topo < 0:
+        falhas.append(f"a confirmação não é o cartão no meio, a 12 das bordas: {v['caixa']} numa tela de {largura}×{altura}")
     vermelho = pg.evaluate("(cor) => { const e = document.createElement('i'); e.style.color = cor; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; }", v["vermelho"])
     if v["borda"] != vermelho:
         falhas.append(f"a borda da confirmação é {v['borda']}, e não o vermelho do alerta ({vermelho})")
@@ -1603,6 +1623,14 @@ def ajustes_e_avisos(pg: Page) -> list[str]:
     ):
         pg.evaluate(mostrar)
         esperar_quadro(pg)
+        # **O celular não tem mais o aviso de fone** (0.18, `5dfe9c59`: a frase
+        # do celular é vazia, e o eco do navegador vem ligado). O que se confere
+        # dele é que não acende; os outros dois continuam medidos.
+        if aviso == "aviso-fone" and not pg.evaluate("CASCA.avisoDeFone()"):
+            if pg.evaluate("document.getElementById('aviso-fone').checkVisibility()"):
+                falhas.append("o celular não tem frase de fone, e o #aviso-fone acendeu mesmo assim")
+            pg.evaluate(tirar)
+            continue
         r = pg.evaluate(AJUSTES_CONTRA_O_AVISO, aviso)
         if not r["aVista"]:
             falhas.append(f"o #{aviso} não apareceu com AJUSTES aberto: a conferência não vale")
@@ -1727,11 +1755,13 @@ O_DONO_DAS_SECOES = """() => {
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
   const razao = (a, b) => { const [x, y] = [luz(rgb(a)), luz(rgb(b))].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
   return [...(folha?.querySelectorAll('.contribuicao-de-mod') ?? [])].map((raiz) => {
-    const secao = raiz.closest('.cel-folha-detalhe');
-    const origem = secao?.querySelector(':scope > .contribuicao-de-mod-origem');
+    // A ficha da 0.19 (`fichaDaPessoa`): a linha do produto e a caixa do MOD
+    // são irmãs, a linha logo antes da caixa.
+    const caixa = raiz.closest('.contribuicao-de-mod-caixa');
+    const origem = caixa?.previousElementSibling?.matches('.contribuicao-de-mod-origem') ? caixa.previousElementSibling : null;
     if (!origem?.checkVisibility()) return { mod: raiz.dataset.mod, origem: null };
     const r = origem.getBoundingClientRect(), s = getComputedStyle(origem);
-    const conteudo = secao.querySelector(':scope > .contribuicao-de-mod-caixa')?.getBoundingClientRect();
+    const conteudo = caixa.getBoundingClientRect();
     const no = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return { mod: raiz.dataset.mod, origem: origem.textContent, foraDoMod: !raiz.contains(origem),
              acima: !!conteudo && r.bottom <= conteudo.top + 1,
@@ -1806,7 +1836,7 @@ def detalhes_da_pessoa(pg: Page) -> list[str]:
     # o tira da árvore, e o foco de dentro dele cairia.
     pg.evaluate("""() => { window.__trocasNaFolha = 0;
         new MutationObserver((rs) => { for (const r of rs) window.__trocasNaFolha += r.removedNodes.length; })
-          .observe(document.querySelector('#cel-folha-pessoa .cel-folha-detalhes'), { childList: true, subtree: true }); }""")
+          .observe(document.querySelector('#cel-folha-pessoa .cel-folha-corpo'), { childList: true, subtree: true }); }""")
     esperar_quadro(pg)
     esperar_quadro(pg)
     r = pg.evaluate(O_DETALHE_NA_FOLHA, texto)
@@ -1814,13 +1844,22 @@ def detalhes_da_pessoa(pg: Page) -> list[str]:
         falhas.append(f"com a folha aberta por dois quadros, a contribuição saiu dela ou é outro nó: {r}")
     if (trocas := pg.evaluate("window.__trocasNaFolha")):
         falhas.append(f"com a folha aberta e nada mudando, {trocas} nós saíram dela em dois quadros")
-    # Uma contribuição que chega com a folha aberta aparece nela no quadro seguinte.
+    # Uma contribuição que chega com a folha aberta. A ficha da 0.19
+    # (`abrirFichaDaPessoa`, a mesma no computador) é montada ao abrir, e não a
+    # cada quadro: a que chegou aparece na próxima abertura, e nunca em
+    # duplicata nem fora da folha.
     pg.evaluate(MOD_DE_PE.replace("'teste/bancada'", "'teste/tarde'"))
     pg.evaluate("""(alvo) => __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.detalhes', modo: 'adicionar', alvo,
         conteudo: [{ forma: 'texto', chave: 'tarde', dentro: 'CHEGOU COM A FOLHA ABERTA' }] } })""", juli)
     esperar_quadro(pg)
-    if not (r := pg.evaluate(O_DETALHE_NA_FOLHA, "CHEGOU COM A FOLHA ABERTA"))["naFolha"]:
-        falhas.append(f"a contribuição que chegou com a folha aberta não apareceu nela: {r}")
+    if (r := pg.evaluate(O_DETALHE_NA_FOLHA, "CHEGOU COM A FOLHA ABERTA"))["foraDaFolhaAVista"]:
+        falhas.append(f"a contribuição que chegou com a folha aberta apareceu fora dela: {r}")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+    pg.evaluate(abrir)
+    pg.wait_for_timeout(300)
+    if not (r := pg.evaluate(O_DETALHE_NA_FOLHA, "CHEGOU COM A FOLHA ABERTA"))["naFolha"] or r["copias"] != 1:
+        falhas.append(f"a contribuição que chegou com a folha aberta não está nela na abertura seguinte: {r}")
     pg.keyboard.press("Escape")
     pg.wait_for_timeout(300)
     esperar_quadro(pg)
@@ -1859,8 +1898,11 @@ def lados_das_superficies(pg: Page) -> list[str]:
     superfícies, e não pelo teto da coluna (achado da F3, 16/10, no caso
     `superficies-deitado`: com o teto de 480 px revertido para 4000, as quatro
     desenhavam a 25 px da borda). Com o teto a 4000, nada de MOD fica nos 47 px
-    de cada lado. Com o teto a 480, a coluna já os afasta, e a superfície não
-    perde largura por isso: o texto fica onde ficaria sem área nenhuma."""
+    de cada lado.
+
+    O teto da coluna (`--cel-coluna`) saiu na 0.17 (`fec5e0c4`: a sessão usa a
+    superfície inteira); o que se mede é a superfície contra as áreas, sem
+    teto nenhum."""
     falhas = []
     ir_para_aba(pg, "conversa", falhas)
     pg.evaluate(MOD_DE_PE)
@@ -1870,23 +1912,16 @@ def lados_das_superficies(pg: Page) -> list[str]:
                     ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: d.id, arvore: [{ forma: 'texto', chave: 't', dentro: 'um texto de MOD' }, { forma: 'botao', chave: 'b', dentro: 'UM BOTÃO' }] }))",
                     descricao)
         esperar_quadro(pg)
-        medidas = {}
-        for coluna, px in (("480px", "0px"), ("480px", "47px"), ("4000px", "47px")):
-            pg.evaluate(f"document.documentElement.style.setProperty('--cel-coluna', '{coluna}')")
-            pg.evaluate(lados, px)
-            pg.wait_for_timeout(150)
-            medidas[(coluna, px)] = pg.evaluate(FORA_DOS_LADOS, [seletor, 47])
-        if medidas[("4000px", "47px")]["naArea"]:
-            falhas.append(f"com a coluna sem teto, {nome} desenha nos 47 px laterais: {medidas[('4000px', '47px')]['naArea']}")
+        pg.evaluate(lados, "47px")
+        pg.wait_for_timeout(150)
+        medida = pg.evaluate(FORA_DOS_LADOS, [seletor, 47])
+        if medida["naArea"]:
+            falhas.append(f"com as áreas laterais de 47, {nome} desenha nelas: {medida['naArea']}")
         # E o texto começa logo depois da área, à vista: uma margem que crescesse
-        # sem piso (a da coluna, negativa quando o teto passa da tela) o
-        # empurraria para fora, e a conferência de cima passaria por não vê-lo.
-        if not 47 <= (medidas[("4000px", "47px")]["texto"] or -1) < 200:
-            falhas.append(f"com a coluna sem teto, o texto de {nome} não começa logo depois da área lateral: {medidas[('4000px', '47px')]['texto']} px")
-        if medidas[("480px", "47px")]["texto"] != medidas[("480px", "0px")]["texto"]:
-            falhas.append(f"com o teto de 480, a coluna já afasta as áreas, e {nome} perde largura por elas mesmo assim: "
-                          f"o texto vai de {medidas[('480px', '0px')]['texto']} a {medidas[('480px', '47px')]['texto']} px")
-        pg.evaluate("document.documentElement.style.removeProperty('--cel-coluna')")
+        # sem piso o empurraria para fora, e a conferência de cima passaria por
+        # não vê-lo.
+        if not 47 <= (medida["texto"] or -1) < 200:
+            falhas.append(f"o texto de {nome} não começa logo depois da área lateral: {medida['texto']} px")
         pg.evaluate(lados, "0px")
         pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
         esperar_quadro(pg)
@@ -1992,7 +2027,11 @@ def faixa_de_voz(pg: Page) -> list[str]:
             const r = aviso.getBoundingClientRect(), v = document.getElementById('voz').getBoundingClientRect();
             return { quem, rodape: ABERTURA_DO_AUDIO[abertura].rodape, frase: ABERTURA_DO_AUDIO[abertura].frase,
                      aviso: aviso.hidden ? null : document.getElementById('aviso-audio-texto').textContent,
-                     dentro: r.left >= 0 && r.right <= innerWidth + 0.5, colado: Math.abs(r.bottom - v.top) <= 1 };
+                     // Colado pela margem: a pele da 0.19 (`120ea48c`) deixa
+                     // 8 px de respiro entre os avisos e a faixa, que é um
+                     // cartão solto; o aviso ainda é o vizinho de cima dela.
+                     dentro: r.left >= 0 && r.right <= innerWidth + 0.5,
+                     colado: Math.abs(r.bottom + parseFloat(getComputedStyle(aviso).marginBottom) - v.top) <= 1 };
         }""", abertura)
         if visto["rodape"] not in visto["quem"]:
             falhas.append(f"com o áudio em {abertura}, a faixa diz «{visto['quem']}», sem «{visto['rodape']}»")
@@ -2321,7 +2360,6 @@ def aba_pessoas(pg: Page) -> list[str]:
     linhas = pg.evaluate("""(() => [...document.querySelectorAll('#lista-roster li.pessoa')].map((li) => {
         const visivel = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
         return { nome: li.querySelector('.pessoa-nome')?.textContent ?? '', altura: Math.round(li.getBoundingClientRect().height),
-                 numero: visivel(li.querySelector('.pessoa-sync-valor')), barra: visivel(li.querySelector('.barra')),
                  palavra: visivel(li.querySelector('.pastilha')), volume: visivel(li.querySelector('input.volume')) };
     }))()""")
     if len(linhas) < 4:
@@ -2329,8 +2367,10 @@ def aba_pessoas(pg: Page) -> list[str]:
     for l in linhas:
         if l["altura"] < 56:
             falhas.append(f"a linha de {l['nome']} tem {l['altura']} de altura, e não 56")
-        if not (l["numero"] and l["barra"] and l["palavra"]):
-            falhas.append(f"o sinal de {l['nome']} não tem número, barra e palavra: {l}")
+        # Uma linha por pessoa (0.19, `6445d953`/`352bed15`): o sinal por
+        # pessoa (número e barra) saiu de propósito; o estado em palavra fica.
+        if not l["palavra"]:
+            falhas.append(f"a linha de {l['nome']} não diz o estado em palavra: {l}")
         if l["volume"]:
             falhas.append(f"o volume de {l['nome']} aparece na linha (ele mora na folha da pessoa)")
 
@@ -2341,8 +2381,11 @@ def aba_pessoas(pg: Page) -> list[str]:
         if not pg.locator("#cel-folha-pessoa").is_visible():
             return None
         return pg.evaluate("""(() => { const f = document.getElementById('cel-folha-pessoa');
-            return { volume: !!f.querySelector('input[type=range]'), rotulo: f.querySelector('.cel-folha-volume')?.textContent ?? '',
-                     moderar: /MODERAR/.test(f.querySelector('.cel-fora')?.textContent ?? ''),
+            // A folha é a ficha da 0.19 (`fichaDaPessoa`): o número do
+            // volume em `.ficha-volume-valor`, e onde se modera na nota
+            // `.ficha-moderar-fora` (a frase do produto, e não uma cópia).
+            return { volume: !!f.querySelector('input[type=range]'), rotulo: f.querySelector('.ficha-volume-valor')?.textContent ?? '',
+                     moderar: (f.querySelector('.ficha-moderar-fora')?.textContent ?? null) === FRASES_DA_FICHA.moderarFora,
                      moderacaoDoDesktop: !document.getElementById('moderar').hidden,
                      foco: f.contains(document.activeElement) }; })()""")
 
@@ -2364,11 +2407,12 @@ def aba_pessoas(pg: Page) -> list[str]:
         pg.evaluate("""(() => { const v = document.querySelector('#cel-folha-pessoa input[type=range]');
             v.value = '150'; v.dispatchEvent(new Event('input', { bubbles: true })); })()""")
         pg.wait_for_timeout(200)
-        do_desktop = pg.evaluate("document.querySelector(\"#lista-roster input.volume[data-pessoa='juli']\")?.value ?? null")
+        # O deslizante da linha saiu (o volume mora na ficha, 0.19): o que se
+        # confere é o comando que chega ao áudio.
         volumes = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_volume').map(([, a]) => a)")
-        rotulo = pg.evaluate("document.querySelector('#cel-folha-pessoa .cel-folha-volume')?.textContent ?? ''")
-        if do_desktop != "150" or {"nickname": "juli", "percent": 150} not in volumes:
-            falhas.append(f"o volume da folha não chegou ao desktop: input {do_desktop}, set_volume {volumes}")
+        rotulo = pg.evaluate("document.querySelector('#cel-folha-pessoa .ficha-volume-valor')?.textContent ?? ''")
+        if {"nickname": "juli", "percent": 150} not in volumes:
+            falhas.append(f"o volume da folha não chegou ao áudio: set_volume {volumes}")
         if "150%" not in rotulo:
             falhas.append(f"o número do volume não acompanhou: {rotulo!r}")
         pg.keyboard.press("Escape")
@@ -2430,14 +2474,17 @@ def chamada(pg: Page) -> list[str]:
         largura = pg.evaluate("innerWidth")
         if v[2] < largura - 1 or abs(v[1] - (t[1] + t[3])) > 1 or abs(v[1] + v[3] - z[1]) > 1:
             falhas.append(f"a CHAMADA não cobre a sessão entre o topo e a faixa: {v}, topo {t}, faixa {z}")
-    if visto["mudo"] != mudo_antes:
-        falhas.append(f"o MUDO mudou de lugar com a CHAMADA: {mudo_antes} → {visto['mudo']}")
-    if visto["abas"] is not None or visto["telemetria"] is None:
-        falhas.append(f"a telemetria não tomou o lugar das abas: abas {visto['abas']}, telemetria {visto['telemetria']}")
-    elif abas_antes and (abs(visto["telemetria"][1] - abas_antes[1]) > 1 or abs(visto["telemetria"][3] - abas_antes[3]) > 1):
-        falhas.append(f"a telemetria não ocupa o lugar exato das abas: {visto['telemetria']} contra {abas_antes}")
-    if visto["palavras"] != ["ATRASO", "JITTER", "PERDA", "CODEC"]:
-        falhas.append(f"a telemetria da CHAMADA diz {visto['palavras']}")
+    # **A fileira da telemetria saiu na 0.18** (`5dfe9c59`, de propósito: a
+    # sessão do celular não tem mais o rodapé dela). As abas saem, e a faixa
+    # desce ao pé: o MUDO fica na mesma coluna e com o mesmo tamanho, e a faixa
+    # fica acima da barra de gestos (que as medidas do aparelho conferem).
+    if visto["mudo"] is None or mudo_antes is None or visto["mudo"][0] != mudo_antes[0] or visto["mudo"][2:] != mudo_antes[2:]:
+        falhas.append(f"o MUDO mudou de coluna ou de tamanho com a CHAMADA: {mudo_antes} → {visto['mudo']}")
+    if visto["abas"] is not None:
+        falhas.append(f"com a CHAMADA aberta, as abas continuam à vista: {visto['abas']}")
+    z = visto["voz"]
+    if z is None or (abas_antes and z[1] + z[3] > abas_antes[1] + abas_antes[3]):
+        falhas.append(f"a faixa desceu além do pé das abas: faixa {z}, abas {abas_antes}")
     if "RECOLHER" not in visto["sala"]:
         falhas.append(f"na CHAMADA, a faixa diz «{visto['sala']}», e não RECOLHER")
 
@@ -2484,8 +2531,8 @@ def capa_na_chamada(pg: Page) -> list[str]:
     desktop (`pintarCartao` e o `vestirCapa` da F3); a casca só o põe em duas
     colunas. Confere que a capa veste o cartão inteiro e está entre as que
     animam, e que todo texto fica acima de 4,5:1 com o mesmo contraste contra
-    uma capa branca, uma preta e uma da cor da tinta: nenhum texto encosta na
-    capa, todos ficam sobre as placas do desktop.
+    uma capa branca, uma preta e uma da cor da tinta, medido através do véu da
+    capa (o texto da 0.19 fica sobre ele, e não mais sobre uma placa opaca).
 
     O contraste não é o de sem capa, como a F3 exige no desktop: sem capa, o
     cartão do celular é do painel, falando ou calado; com capa, a placa de
@@ -2520,8 +2567,9 @@ def capa_na_chamada(pg: Page) -> list[str]:
         baixos = {k: v for k, v in medida.items() if v < 4.5}
         if baixos:
             falhas.append(f"sobre uma capa {nome}, texto do cartão abaixo de 4,5:1: {baixos}")
-    if len({tuple(sorted(m.items())) for m in medidas.values()}) != 1:
-        falhas.append(f"um texto do cartão encosta na capa: o contraste muda com ela {medidas}")
+    # O cartão simples da 0.19 (`74732140`, `352bed15`) põe o nome sobre o véu
+    # da capa, e não numa placa opaca: o contraste muda com a capa, de
+    # propósito, e o que se exige é o piso sob a branca, a preta e a da tinta.
     return falhas
 
 
@@ -2662,12 +2710,14 @@ def ajustes_medida(pg: Page) -> list[str]:
     return falhas
 
 
-ORDEM_DE_AJUSTES = ["ÁUDIO", "APARÊNCIA", "ESTE SERVIDOR", "MODS DESTE SERVIDOR", "CONEXÃO", "IDENTIDADE",
-                    "O QUE O CELULAR NÃO FAZ", "COMO ESTA PÁGINA ABRE", "SOBRE", "SAIR DO SERVIDOR"]
+# CONEXÃO saiu na 0.18 (`5dfe9c59`, com a telemetria da CHAMADA), e CARGOS E
+# PERMISSÕES entrou (a camada da 0.17, E6, que a 0.18 pôs na lista).
+ORDEM_DE_AJUSTES = ["ÁUDIO", "APARÊNCIA", "ESTE SERVIDOR", "MODS DESTE SERVIDOR", "IDENTIDADE",
+                    "O QUE O CELULAR NÃO FAZ", "COMO ESTA PÁGINA ABRE", "CARGOS E PERMISSÕES", "SOBRE", "SAIR DO SERVIDOR"]
 
 
 def aba_ajustes(pg: Page) -> list[str]:
-    """A aba AJUSTES (Tarefa 9): SEU PERFIL, as seções na ordem do spec, CONEXÃO,
+    """A aba AJUSTES (Tarefa 9): SEU PERFIL, as seções na ordem do spec,
     o que o celular não faz, e as ações que o desktop já tem."""
     falhas = []
     if not ir_para_aba(pg, "ajustes", falhas):
@@ -2695,13 +2745,6 @@ def aba_ajustes(pg: Page) -> list[str]:
     def voltar():
         exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
 
-    if abrir("cel-secao-conexao"):
-        medidas = pg.evaluate("[...document.querySelectorAll('#cel-painel-conexao .cel-medida')].map((m) => [m.querySelector('.rotulo').textContent, m.querySelector('.cel-medida-valor').textContent.trim()])")
-        rotulos = [r for r, _ in medidas]
-        if rotulos != ["ATRASO", "JITTER", "PERDA", "CODEC", "CAMINHO", "UPTIME", "SINAL DA SALA"] or any(not v for _, v in medidas):
-            falhas.append(f"CONEXÃO mostra {medidas}")
-        voltar()
-
     if abrir("cel-secao-fora"):
         fora = pg.evaluate("""(() => [...document.querySelectorAll('#cel-painel-fora .cel-fora-grupo')].map((g) => ({
             grupo: g.querySelector('.rotulo').textContent, itens: g.querySelectorAll('li').length,
@@ -2720,8 +2763,9 @@ def aba_ajustes(pg: Page) -> list[str]:
 
     if abrir("secao-audio"):
         modos = pg.evaluate("[...document.querySelectorAll('#painel-audio .server-modo')].filter((b) => getComputedStyle(b).display !== 'none').map((b) => [b.dataset.modo, b.querySelector('.server-modo-nome').textContent])")
-        if modos != [["PushToTalk", "SEGURAR PARA FALAR"], ["VoiceActivated", "VOZ"]]:
-            falhas.append(f"o modo de voz em ÁUDIO mostra {modos}, e não SEGURAR PARA FALAR e VOZ")
+        # «VOZ» virou «AO FALAR» na pele da 0.19 (`49758837`, o canvas).
+        if modos != [["PushToTalk", "SEGURAR PARA FALAR"], ["VoiceActivated", "AO FALAR"]]:
+            falhas.append(f"o modo de voz em ÁUDIO mostra {modos}, e não SEGURAR PARA FALAR e AO FALAR")
         pg.evaluate("window.__SEELE_HISTORICO.length = 0")
         exigir_toque(pg, "#server-modo-tecla", falhas)
         pg.wait_for_timeout(300)
@@ -2751,7 +2795,6 @@ def aba_ajustes(pg: Page) -> list[str]:
 # `celular-texto.css` repete o tamanho, mais os tetos escritos à mão.
 TEXTO_COM_TETO = {
     ".cel-abas": "as abas têm teto de 13 px, como a barra de abas do iOS (spec, §5)",
-    ".cel-telemetria": "a telemetria da CHAMADA tem a altura das abas e teto como elas: quatro medidas em 390",
     ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar":
         "as iniciais numa caixa de tamanho fixo são marcas, e não texto de ler",
     ".barra, .sync-marca, .chamada-cartao-barra, .chamada-cartao-marca":
@@ -2865,7 +2908,7 @@ def texto_maior(pg: Page) -> list[str]:
         pg.keyboard.press("Escape")
     if ir_para_aba(pg, "ajustes", falhas):
         conferir("a lista de AJUSTES")
-        for secao in ("secao-audio", "secao-aparencia", "secao-servidor", "secao-mods", "cel-secao-conexao",
+        for secao in ("secao-audio", "secao-aparencia", "secao-servidor", "secao-mods",
                       "secao-identidade", "cel-secao-fora", "cel-secao-casca"):
             if not pg.locator(f"#{secao}").is_visible():
                 continue
@@ -3315,9 +3358,18 @@ CONTRASTE_EM = r"""([seletor, capa]) => {
   const luz = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
   const razao = (a, b) => { const [x, y] = [luz(a), luz(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+  // **O véu da capa** (0.19, `352bed15`: «under the same scrim, everywhere a
+  // cover renders»): o `::after` da `.capa-camada`, translúcido, fica entre a
+  // imagem e o texto. O fundo de verdade de um texto que chega à capa é o véu
+  // composto sobre ela, e não a capa nua. `color(srgb …)` vem em 0–1.
+  const veu = (() => { const c = quadro.querySelector(':scope > .capa-camada'); if (!c) return null;
+    const t = getComputedStyle(c, '::after').backgroundColor; const n = (t.match(/[\d.]+/g) || []).map(Number);
+    if (n.length < 3) return null; const cor = t.startsWith('color(srgb') ? n.slice(0, 3).map((v) => v * 255) : n.slice(0, 3);
+    return { cor, alfa: n.length >= 4 ? n[3] : 1 }; })();
+  const sobOVeu = (base) => !veu ? base : base.map((v, i) => veu.cor[i] * veu.alfa + v * (1 - veu.alfa));
   const fundo = (el, tinta) => {
     for (let n = el; n; n = n.parentElement) {
-      if (n === quadro && capa) return capa === "tinta" ? tinta : capa;
+      if (n === quadro && capa) return sobOVeu(capa === "tinta" ? tinta : capa);
       const c = rgb(getComputedStyle(n).backgroundColor);
       if (c.length >= 3 && (c.length < 4 || c[3] >= 0.99)) return c.slice(0, 3);
     }
@@ -3456,8 +3508,11 @@ def teclado(pg: Page) -> list[str]:
     pg.wait_for_timeout(200)
     visto = pg.evaluate("""(() => {
         const r = (s) => { const e = document.querySelector(s); if (!e || getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom)]; };
+        // O compositor da 0.19 é um cartão solto, com 8 px de respiro embaixo
+        // (`120ea48c`): colado ao teclado é colado pela margem dele.
+        const c = r('#form-mensagem'), pe = parseFloat(getComputedStyle(document.getElementById('form-mensagem')).marginBottom) || 0;
         return { marca: document.getElementById('tela-sessao').hasAttribute('data-teclado'),
-                 abas: r('.cel-abas'), mudo: r('#voz-mudo'), compositor: r('#form-mensagem'), topo: r('.cel-topo') };
+                 abas: r('.cel-abas'), mudo: r('#voz-mudo'), compositor: c && [c[0], Math.round(c[1] + pe)], topo: r('.cel-topo') };
     })()""")
     if not visto["marca"]:
         return falhas + ["com o teclado aberto, a sessão não sabe dele (data-teclado)"]
@@ -3482,19 +3537,29 @@ def teclado(pg: Page) -> list[str]:
 
 
 def tela_larga(pg: Page) -> list[str]:
-    """Um tablet, ou a escolha à mão, numa tela grande (Tarefa 12): uma coluna de
-    até 480 px no meio, com as abas e AJUSTES presos a ela."""
+    """Um tablet, ou a escolha à mão, numa tela grande (Tarefa 12).
+
+    **A coluna de 480 px no meio saiu na 0.17** (`fec5e0c4`, `celular-sessao.css`:
+    «a coluna estreita centrada que o dono recusou»): a sessão usa a superfície
+    inteira, e o que fica limitado é o grupo das quatro abas (cada alvo até
+    160 px, no meio) e o parágrafo. AJUSTES abre na largura da sessão."""
     falhas = []
     largura = pg.evaluate("innerWidth")
-    for alvo in ("#tela-sessao", ".cel-abas"):
-        caixa = pg.evaluate("(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; }", alvo)
-        if caixa[1] > 481 or abs(caixa[0] - (largura - caixa[1]) / 2) > 1:
-            falhas.append(f"{alvo} não é a coluna de até 480 no meio: {caixa}")
+    caixa = "(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; }"
+    sessao = pg.evaluate(caixa, "#tela-sessao")
+    if sessao != [0, largura]:
+        falhas.append(f"#tela-sessao não usa a superfície inteira: {sessao} numa tela de {largura}")
+    abas = pg.evaluate("""() => [...document.querySelectorAll('.cel-aba')].map((a) => { const r = a.getBoundingClientRect();
+        return [Math.round(r.left), Math.round(r.width)]; })""")
+    if len(abas) != 4 or any(w > 161 for _, w in abas):
+        falhas.append(f"as abas não são quatro alvos de até 160: {abas}")
+    elif abs(abas[0][0] - (largura - (abas[-1][0] + abas[-1][1]))) > 1:
+        falhas.append(f"o grupo das abas não está no meio: {abas}")
     ir_para_aba(pg, "ajustes", falhas)
     pg.wait_for_timeout(500)
-    camada = pg.evaluate("(() => { const r = document.getElementById('tela-server').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; })()")
-    if camada[1] > 481 or abs(camada[0] - (largura - camada[1]) / 2) > 1:
-        falhas.append(f"AJUSTES não fica na coluna: {camada}")
+    camada = pg.evaluate(caixa, "#tela-server")
+    if camada != [0, largura]:
+        falhas.append(f"AJUSTES não abre na largura da sessão: {camada}")
     return falhas
 
 
@@ -3549,6 +3614,13 @@ def deitado(pg: Page) -> list[str]:
     """O aparelho deitado na CHAMADA (Tarefa 12, vindo da 8): o palco toma o
     espaço acima da faixa, e a faixa continua à mão."""
     falhas = []
+    # Sem transmissão o palco não existe (0.19, pedido do dono): a sala ganha
+    # a tela de juli, assistida, como no caso `chamada`.
+    pg.evaluate("""(() => {
+        SEELE_QUADRO.transmissoes = [{ tela: 1, de: 2, e_minha: false, assistida: true, espectadores: 1 }];
+        SEELE_QUADRO.tela = { tela: 1, de: 2, e_minha: false, espectadores: 1, parada: null, pedido: null };
+    })()""")
+    esperar_quadro(pg)
     exigir_toque(pg, "#voz .voz-sala", falhas)
     esperar_quadro(pg)
     # A imagem de uma tela pede um servidor de verdade: o palco é posto no
@@ -3583,7 +3655,10 @@ def casca_larga(pg: Page) -> list[str]:
         return { barra: v('#barra-janela'), hospedar: v('#botao-hospedar'), nomePublico: v('#boot-nome-publico'),
                  frase: document.querySelector('.larga-hospedar')?.textContent ?? null,
                  link: link?.getAttribute('href') ?? null,
-                 proposito: document.querySelector('#tela-boot .boot-proposito').textContent,
+                 // O parágrafo do propósito (`.boot-proposito`) saiu da
+                 // entrada na 0.18 (`5dfe9c59`): o que se confere é o texto à
+                 // vista da entrada inteira.
+                 proposito: document.getElementById('tela-boot').innerText,
                  topo: Math.round(document.getElementById('tela-boot').getBoundingClientRect().top) };
     }""", visivel)
     if entrada["barra"]:
@@ -3592,7 +3667,7 @@ def casca_larga(pg: Page) -> list[str]:
         falhas.append(f"a entrada ainda oferece o que é de quem hospeda: {entrada}")
     if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://get.seele.sh/#baixar":
         falhas.append(f"no lugar do HOSPEDAR AQUI não há a frase do app e o link: {entrada['frase']!r} {entrada['link']!r}")
-    if "pela" in entrada["proposito"] and "no ar a partir desta máquina" in entrada["proposito"] or "link" not in entrada["proposito"]:
+    if "no ar a partir desta máquina" in entrada["proposito"] or "link" not in entrada["proposito"]:
         falhas.append(f"o propósito ainda fala em pôr um servidor no ar: {entrada['proposito']!r}")
     if entrada["topo"] != 0:
         falhas.append(f"a entrada não começa no alto da página: {entrada['topo']}")
@@ -3725,13 +3800,17 @@ PECAS_DA_SALA_PESSOAL = ("toque", "boot-sala-estado", "sala-estado", "perfil-sal
 
 
 def sala_pessoal(pg: Page) -> list[str]:
-    """O navegador não tem sala pessoal: as duas cascas dele escondem toda peça
-    com `data-sala-pessoal` (o contrato que a F7 escreveu no `index.html`), e o
-    SÓ NO APP DO SEELE diz que receber ligações pelo código é do app.
+    """**O navegador tem o código pessoal e a agenda desde a 0.17.4** (`5dfe9c59`:
+    «Código pessoal e agenda também estão disponíveis no navegador»; a regra
+    das cascas que escondia toda peça com `data-sala-pessoal` saiu). O que a
+    F7 prometia ao contrário — a casca esconde — agora é o inverso: as peças
+    que o script mostra, a casca não esconde por cima. E o SÓ NO APP DO SEELE
+    continua dizendo que receber ligações pelo código, com o app fechado, é do
+    app.
 
-    As peças nascem `hidden`, e no navegador a ponte responde neutro: «nenhuma
-    à vista» passaria sem regra nenhuma. O caso as mostra como o desktop as
-    mostraria (tira o `hidden` e põe texto) e exige que a casca as esconda."""
+    As peças nascem `hidden`, e o caso as mostra como o script as mostraria
+    (tira o `hidden` e põe texto): uma regra da casca que voltasse a escondê-las
+    reprova aqui."""
     falhas = []
     achadas = pg.evaluate("[...document.querySelectorAll('[data-sala-pessoal]')].map((e) => e.id)")
     faltam = [i for i in PECAS_DA_SALA_PESSOAL if i not in achadas]
@@ -3747,8 +3826,9 @@ def sala_pessoal(pg: Page) -> list[str]:
         const b = e.getBoundingClientRect();
         return getComputedStyle(e).display !== 'none' && b.width > 0 && b.height > 0 ? e.id : null;
     }).filter(Boolean)""")
-    if vistas:
-        falhas.append(f"a casca do navegador deixa a sala pessoal à vista: {vistas}")
+    escondidas = [i for i in ("boot-codigo", "boot-amigos") if i not in vistas]
+    if escondidas:
+        falhas.append(f"a casca do navegador esconde o código pessoal ou a agenda, que ele tem desde a 0.17.4: {escondidas}")
     diz = pg.evaluate("[...document.querySelectorAll('.cel-fora-grupo, .larga-fora-grupo')].some((g) => g.textContent.includes('RECEBER LIGAÇÕES PELO SEU CÓDIGO'))")
     if not diz:
         falhas.append("o SÓ NO APP DO SEELE não diz que receber ligações pelo código é do app")
