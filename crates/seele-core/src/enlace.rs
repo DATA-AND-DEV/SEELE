@@ -2714,7 +2714,10 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn gravar_perfil(&self, mensagem: seele_proto::control::ClientMessage) -> Result<(), Fechado> {
+    pub async fn gravar_perfil(
+        &self,
+        mensagem: seele_proto::control::ClientMessage,
+    ) -> Result<(), Fechado> {
         self.mandar(Comando::GravarPerfil(mensagem)).await
     }
 

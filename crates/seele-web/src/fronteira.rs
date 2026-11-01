@@ -1535,8 +1535,7 @@ pub unsafe extern "C" fn perfil_imagem_ler(ptr: *const u8, len: usize) -> u32 {
     ) else {
         return erro_do_perfil(&ErroDoPerfil::Mudou);
     };
-    match crate::perfil::pedido_de_ler(numero_do_pedido(&pedido, "pessoa"), lado, hash, negociado)
-    {
+    match crate::perfil::pedido_de_ler(numero_do_pedido(&pedido, "pessoa"), lado, hash, negociado) {
         Ok(pedido) => dizer(pedido, 0),
         Err(erro) => erro_do_perfil(&erro),
     }
@@ -1645,7 +1644,12 @@ pub unsafe extern "C" fn perfil_conferir(ptr: *const u8, len: usize) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `entrada`.
     let bytes = unsafe { entrada(ptr, len) };
     match seele_sessao::perfil::conferir_imagem(bytes) {
-        Ok(tipo) => dizer(seele_sessao::perfil::tipo_de_midia(tipo).as_bytes().to_vec(), 0),
+        Ok(tipo) => dizer(
+            seele_sessao::perfil::tipo_de_midia(tipo)
+                .as_bytes()
+                .to_vec(),
+            0,
+        ),
         Err(erro) => erro_do_perfil(&erro),
     }
 }

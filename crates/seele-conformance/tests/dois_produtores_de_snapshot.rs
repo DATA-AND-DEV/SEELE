@@ -311,7 +311,8 @@ fn os_dois_produtores_dao_o_mesmo_retrato_depois_de_cada_mensagem() {
         .unwrap();
     assert_eq!(do_navegador[primeira_parte].perfis_revision, 0);
     assert_eq!(
-        do_navegador[primeira_parte + 1].perfis_revision, 0,
+        do_navegador[primeira_parte + 1].perfis_revision,
+        0,
         "uma parte sem `ultima` fez a marca andar"
     );
     assert_eq!(do_navegador[primeira_parte + 2].perfis_revision, 1);

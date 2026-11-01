@@ -916,7 +916,10 @@ mod tags_migracao_testes {
         // 0.19); o que o teste prende é que ele passa do 18 do banco gravado.
         assert_eq!(
             antes.esquema_desta_versao,
-            seele_server::persistence::schema::MIGRATIONS.last().unwrap().version
+            seele_server::persistence::schema::MIGRATIONS
+                .last()
+                .unwrap()
+                .version
         );
         assert!(antes.esquema_desta_versao > 18);
         assert_eq!(std::fs::read(&caminho).unwrap(), bytes);
@@ -935,7 +938,10 @@ mod tags_migracao_testes {
         .unwrap();
         assert_eq!(
             db.schema_version().unwrap(),
-            seele_server::persistence::schema::MIGRATIONS.last().unwrap().version
+            seele_server::persistence::schema::MIGRATIONS
+                .last()
+                .unwrap()
+                .version
         );
         drop(db);
         let c = rusqlite::Connection::open(&caminho).unwrap();

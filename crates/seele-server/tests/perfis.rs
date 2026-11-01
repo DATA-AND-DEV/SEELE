@@ -560,7 +560,9 @@ async fn dez_mib_mais_um_e_recusado() -> Result<()> {
         let mut acima = valido.clone();
         acima[pos] = 0x81;
         let (mut envia, mut recebe) = a.conexao.open_bi().await?;
-        envia.write_all(&seele_proto::quadro::enquadrar(&acima)?).await?;
+        envia
+            .write_all(&seele_proto::quadro::enquadrar(&acima)?)
+            .await?;
         let _ = envia.finish();
         tokio::time::timeout(PRAZO, frame::read::<RespostaDeImagem>(&mut recebe)).await?
     };
@@ -868,7 +870,9 @@ async fn a_pendencia_da_migracao_chega_ate_a_pessoa_trocar_a_imagem() -> Result<
     let pessoa = primeira.pessoa;
     drop(primeira);
     {
-        use seele_server::persistence::perfis::{registrar_migracao, MigracaoDaPessoa, ResultadoDaImagem};
+        use seele_server::persistence::perfis::{
+            registrar_migracao, MigracaoDaPessoa, ResultadoDaImagem,
+        };
         let perfil = seele_proto::perfil::validar(&seele_proto::perfil::EntradaDePerfil {
             nome_exibido: "Lia",
             pronomes: "",
@@ -898,10 +902,16 @@ async fn a_pendencia_da_migracao_chega_ate_a_pessoa_trocar_a_imagem() -> Result<
             _ => None,
         })
         .await;
-    assert_eq!(faltou, Some(vec![LadoDoPerfil::Capa]), "a pendência da migração não chegou à pessoa");
+    assert_eq!(
+        faltou,
+        Some(vec![LadoDoPerfil::Capa]),
+        "a pendência da migração não chegou à pessoa"
+    );
 
     // Trocar a imagem é ter visto o aviso: a sessão seguinte não o repete.
-    let resposta = segunda.enviar_imagem(LadoDoPerfil::Capa, png(64, 1).len() as u64, png(64, 1)).await?;
+    let resposta = segunda
+        .enviar_imagem(LadoDoPerfil::Capa, png(64, 1).len() as u64, png(64, 1))
+        .await?;
     assert_eq!(resposta.erro, None);
     drop(segunda);
     let mut terceira = abrir(casa.endereco, 7, 12).await?;
@@ -912,7 +922,10 @@ async fn a_pendencia_da_migracao_chega_ate_a_pessoa_trocar_a_imagem() -> Result<
             _ => None,
         })
         .await;
-    assert_eq!(de_novo, None, "a pendência voltou depois de a pessoa trocar a imagem");
+    assert_eq!(
+        de_novo, None,
+        "a pendência voltou depois de a pessoa trocar a imagem"
+    );
     casa.daemon.shutdown();
     Ok(())
 }

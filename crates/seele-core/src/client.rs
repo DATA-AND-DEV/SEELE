@@ -3554,7 +3554,11 @@ pub struct ServidorAntigo(pub seele_sessao::perfil::ErroDoPerfil);
 
 impl std::fmt::Display for ServidorAntigo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "o servidor negociado não conhece este pedido: {:?}", self.0)
+        write!(
+            f,
+            "o servidor negociado não conhece este pedido: {:?}",
+            self.0
+        )
     }
 }
 

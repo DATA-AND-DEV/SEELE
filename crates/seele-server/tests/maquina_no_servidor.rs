@@ -1268,7 +1268,10 @@ async fn quem_volta_antes_da_conexao_velha_morrer_e_dito() -> Result<()> {
         }
     }
     assert!(parou, "a conexão velha caiu e o Parou não saiu");
-    assert!(voltou, "Alice segue aqui por outra conexão e o Voltou não saiu");
+    assert!(
+        voltou,
+        "Alice segue aqui por outra conexão e o Voltou não saiu"
+    );
     m.daemon.shutdown();
     Ok(())
 }

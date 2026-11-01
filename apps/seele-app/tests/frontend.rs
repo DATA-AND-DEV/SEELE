@@ -3319,7 +3319,12 @@ fn a_person_card_is_simple_and_never_measures_anything_itself() {
         body_of(&script, "function pintarCartao")
     );
 
-    for drawn in ["pessoa.signal", "sync_band", "blocos(", "chamada-cartao-barra"] {
+    for drawn in [
+        "pessoa.signal",
+        "sync_band",
+        "blocos(",
+        "chamada-cartao-barra",
+    ] {
         assert!(
             !body.contains(drawn),
             "the card draws `{drawn}` again: the signal left the card (owner's \
@@ -3399,14 +3404,21 @@ fn the_state_of_a_person_is_a_word_and_never_only_a_colour() {
         );
     }
     assert!(
-        words.split('"').skip(1).step_by(2).filter(|w| !w.trim().is_empty()).count() >= 4,
+        words
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|w| !w.trim().is_empty())
+            .count()
+            >= 4,
         "the state words do not tell the ways out apart: {words}"
     );
 
     // The muted and deafened states keep a drawn form (a cut glyph, not a
     // colour), only when they are true.
     assert!(
-        paint.contains("glifoComEstado(") && paint.contains("pessoa.muted")
+        paint.contains("glifoComEstado(")
+            && paint.contains("pessoa.muted")
             && paint.contains("pessoa.total_isolation"),
         "mute and deafen are no longer drawn as cut icons on the card"
     );
@@ -11475,7 +11487,11 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             for (onde, _) in ouvinte.match_indices("preventDefault") {
                 let dentro = onde > abre && onde < fecha;
                 assert!(
-                    if dentro { espera.is_some_and(|e| abre + e < onde) } else { onde > fecha },
+                    if dentro {
+                        espera.is_some_and(|e| abre + e < onde)
+                    } else {
+                        onde > fecha
+                    },
                     "`{nome}` segura o fechar sem servidor no ar e sem pedido pendente na \
                      portaria: o veto sem servidor só vale depois de \
                      `if (!esperaPendenteNaTela()) return;` (decisão do dono, 31/10), e \
@@ -13918,7 +13934,8 @@ fn compartilhar_a_tela_tem_uma_porta_so_e_ela_e_a_barra_da_chamada() {
         "o palco não some sem transmissão (ou não volta com ela): a caixa preta vazia voltou"
     );
     assert!(
-        without_comments(&read("ui/tela-chamada.css")).contains(".chamada-palco[hidden] { display: none; }"),
+        without_comments(&read("ui/tela-chamada.css"))
+            .contains(".chamada-palco[hidden] { display: none; }"),
         "o `display: flex` do palco vence o `hidden`, e a caixa vazia volta"
     );
 }
@@ -19140,7 +19157,9 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
     let sessao = without_comments(&read("ui/tela-sessao.js"));
     let ficha = body_of(&sessao, "function mandarOVolumeDaFicha(evento) {");
     assert!(
-        ficha.contains("marcarVolume(") && ficha.contains("invoke(\"set_volume\"") && !ficha.contains("volumesLidos.set("),
+        ficha.contains("marcarVolume(")
+            && ficha.contains("invoke(\"set_volume\"")
+            && !ficha.contains("volumesLidos.set("),
         "o deslizante da ficha escreve o volume do gesto sem passar por `marcarVolume`:\n{ficha}"
     );
     // O mesmo ouvinte no modal do computador e na folha do celular, que mora
@@ -25835,7 +25854,11 @@ clearTimeout(vigia);
 /// O mesmo enlace abre quando o segundo anúncio chega; nenhum TURN/novo par.
 #[test]
 fn o_convite_atualiza_candidatos_tardios_sem_loop_nem_post_apos_sair() {
-    rodar_node("candidatos tardios do servidor hospedado", &format!("{ENLACE_NODE}\n{}", r##"
+    rodar_node(
+        "candidatos tardios do servidor hospedado",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
 const v4 = { em: 3400, type: "srflx", address: "203.0.113.7", port: 41000 };
 const v6 = { em: 100, type: "srflx", address: "2001:4860::7", port: 41001 };
 const alvo = "203.0.113.7:41000";
@@ -25859,7 +25882,9 @@ for (const r of [tardio, primeiroTardio, fechado, repetido, terceiro, icePrecoce
   confere("excedeu três candidatos no par", new Set(r.montagens.flat()).size <= 3);
   confere("excedeu três POSTs", r.posts.length <= 3);
 }
-"##));
+"##
+        ),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -25940,7 +25965,9 @@ const CHAVE_ALERTAS = "seele.alertas.v1";
 fn as_preferencias_dos_alertas_tem_padrao_e_sobrevivem_a_um_armazenamento_quebrado() {
     rodar_node(
         "as preferências dos alertas",
-        &format!("{ALERTAS_NODE}\n{}", r##"
+        &format!(
+            "{ALERTAS_NODE}\n{}",
+            r##"
 // Sem nada guardado: ligado, 0,6, todos os grupos.
 const limpo = montarAlertas();
 const p0 = limpo.a.preferencias();
@@ -25969,7 +25996,8 @@ let depois;
 try { confere("o armazenamento quebrado não deu o padrão", doente.a.preferencias().volume === 0.6); depois = doente.a.definir({ ligado: false }); } catch (e) { estourou = e; }
 confere("o armazenamento quebrado estourou: " + estourou, estourou === null);
 confere("a escolha não valeu na página: " + JSON.stringify(depois), depois && depois.ligado === false && doente.a.preferencias().ligado === false);
-"##),
+"##
+        ),
     );
 }
 
@@ -25977,7 +26005,9 @@ confere("a escolha não valeu na página: " + JSON.stringify(depois), depois && 
 fn interruptor_ou_grupo_desligado_nao_toca_e_o_teste_toca_sempre() {
     rodar_node(
         "o interruptor e os grupos dos alertas",
-        &format!("{ALERTAS_NODE}\n{}", r##"
+        &format!(
+            "{ALERTAS_NODE}\n{}",
+            r##"
 const m = montarAlertas();
 confere("ligado, o conectou não tocou", m.a.tocar("conectou") === true && m.iniciados.length === 2);
 
@@ -26017,7 +26047,8 @@ const teste = montarAlertas();
 teste.a.definir({ ligado: false, grupos: { ligacoes: false } });
 confere("o teste mudo", teste.a.tocar("conectou", { teste: true }) === true && teste.iniciados.length === 2);
 confere("um som desconhecido tocou", teste.a.tocar("nao-existe", { teste: true }) === false);
-"##),
+"##
+        ),
     );
 }
 
@@ -26025,7 +26056,9 @@ confere("um som desconhecido tocou", teste.a.tocar("nao-existe", { teste: true }
 fn repetir_duas_vezes_mantem_um_laco_e_parar_o_cala_para_sempre() {
     rodar_node(
         "os laços dos alertas",
-        &format!("{ALERTAS_NODE}\n{}", r##"
+        &format!(
+            "{ALERTAS_NODE}\n{}",
+            r##"
 const m = montarAlertas();
 const um = m.a.repetir("chamando");
 const dois = m.a.repetir("chamando");
@@ -26096,7 +26129,8 @@ confere("uma chamada que não chegou a existir tocou o encerrou", c.iniciados.le
 c.a.notarFase("livre", "chamando");
 c.a.notarFase("chamando", "encerrada");
 confere("chamando → encerrada não tocou o encerrou, ou deixou o laço vivo", c.iniciados.length === antes2 + 1 + 2 && c.timers.size === 0);
-"##),
+"##
+        ),
     );
 }
 
@@ -26104,7 +26138,9 @@ confere("chamando → encerrada não tocou o encerrou, ou deixou o laço vivo", 
 fn o_toque_para_no_teto_de_45_e_60_segundos() {
     rodar_node(
         "o teto dos toques",
-        &format!("{ALERTAS_NODE}\n{}", r##"
+        &format!(
+            "{ALERTAS_NODE}\n{}",
+            r##"
 // Chegando: quatro notas a cada 2 s, ciclos de 0 a 44 s (23), e o teto em 45 s.
 const m = montarAlertas();
 m.a.repetir("ligacao-chegando");
@@ -26123,7 +26159,8 @@ const c = montarAlertas();
 c.a.repetir("chamando");
 c.avancar(300000);
 confere("o «chamando» não parou nos 60 s: " + c.iniciados.length, c.iniciados.length === 15);
-"##),
+"##
+        ),
     );
 }
 
@@ -26131,7 +26168,9 @@ confere("o «chamando» não parou nos 60 s: " + c.iniciados.length, c.iniciados
 fn sem_gesto_o_alerta_deixa_uma_linha_e_o_primeiro_toque_acorda_o_audio() {
     rodar_node(
         "o autoplay dos alertas",
-        &format!("{ALERTAS_NODE}\n{}", r##"
+        &format!(
+            "{ALERTAS_NODE}\n{}",
+            r##"
 const m = montarAlertas({ estado: "suspended" });
 let estourou = null, tocou;
 try { tocou = m.a.tocar("mensagem"); m.a.tocar("conectou"); m.avancar(2000); m.a.tocar("mensagem"); } catch (e) { estourou = e; }
@@ -26171,7 +26210,8 @@ confere("a saída foi reaplicada a cada som: " + JSON.stringify(sai.sinks), sai.
 const padrao = montarAlertas({ saida: null });
 padrao.a.tocar("mensagem");
 confere("sem saída escolhida, o contexto foi mexido: " + JSON.stringify(padrao.sinks), padrao.sinks.length === 0);
-"##),
+"##
+        ),
     );
 }
 
@@ -26179,7 +26219,9 @@ confere("sem saída escolhida, o contexto foi mexido: " + JSON.stringify(padrao.
 fn a_pagina_indo_embora_nao_comeca_som_e_cala_o_que_toca() {
     rodar_node(
         "o pagehide dos alertas",
-        &format!("{ALERTAS_NODE}\n{}", r##"
+        &format!(
+            "{ALERTAS_NODE}\n{}",
+            r##"
 const m = montarAlertas();
 m.a.repetir("ligacao-chegando");
 m.avancar(100);
@@ -26190,7 +26232,8 @@ confere("o laço seguiu depois do pagehide: " + (m.iniciados.length - tocando), 
 confere("tocou com a página indo embora", m.a.tocar("conectou") === false && m.a.tocar("mensagem") === false);
 m.dispara("window", "pageshow");   // voltou do bfcache
 confere("a página de volta não toca", m.a.tocar("conectou") === true);
-"##),
+"##
+        ),
     );
 }
 
@@ -26198,7 +26241,9 @@ confere("a página de volta não toca", m.a.tocar("conectou") === true);
 fn a_sala_so_avisa_de_quem_entra_e_sai_na_mesma_sala_e_nunca_de_mim() {
     rodar_node(
         "a presença na sala de voz",
-        &format!("{ALERTAS_NODE}\n{}", r##"
+        &format!(
+            "{ALERTAS_NODE}\n{}",
+            r##"
 const eu = { id: 1, nickname: "Alex", is_self: true };
 const lia = { id: 2, nickname: "Lia", is_self: false };
 const rafa = { id: 3, nickname: "Rafa", is_self: false };
@@ -26264,7 +26309,8 @@ e.a.notarEnlace(bateria(2), on);
 confere("a volta não tocou o conexao-voltou: " + vozes(e), vozes(e).slice(2).join() === "587.33,880");
 e.a.notarEnlace(on, on);
 confere("depois da volta, nada", e.iniciados.length === 4);
-"##),
+"##
+        ),
     );
 }
 
@@ -26903,7 +26949,10 @@ fn toda_variavel_do_estilo_de_mod_esta_declarada() {
              o estilo do MOD vira `unset` sem aviso"
         );
     }
-    assert!(vistas >= 2, "o guarda não achou as famílias em `PALAVRAS_DO_ESTILO`");
+    assert!(
+        vistas >= 2,
+        "o guarda não achou as famílias em `PALAVRAS_DO_ESTILO`"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -26914,8 +26963,12 @@ fn toda_variavel_do_estilo_de_mod_esta_declarada() {
 /// seguinte (`#nomear`).
 fn bloco_do_perfil() -> String {
     let pagina = without_comments(&read("ui/index.html"));
-    let inicio = pagina.find("<div id=\"perfil\"").expect("o #perfil sumiu da página");
-    let fim = pagina[inicio..].find("<div id=\"nomear\"").expect("o #nomear sumiu da página");
+    let inicio = pagina
+        .find("<div id=\"perfil\"")
+        .expect("o #perfil sumiu da página");
+    let fim = pagina[inicio..]
+        .find("<div id=\"nomear\"")
+        .expect("o #nomear sumiu da página");
     pagina[inicio..inicio + fim].to_owned()
 }
 
@@ -27058,7 +27111,11 @@ fn cancelar_esc_e_clique_fora_saem_do_perfil_pelo_mesmo_caminho() {
         .expect("o Escape do perfil sumiu de camada-nomear.js");
     assert_eq!(
         (cancelar.as_str(), fora.as_str(), esc.as_str()),
-        ("pedirParaSairDoPerfil", "pedirParaSairDoPerfil", "pedirParaSairDoPerfil"),
+        (
+            "pedirParaSairDoPerfil",
+            "pedirParaSairDoPerfil",
+            "pedirParaSairDoPerfil"
+        ),
         "CANCELAR, o clique fora e o Escape não passam pela mesma saída do perfil"
     );
 
@@ -27938,7 +27995,8 @@ fn the_people_list_does_not_write_transmitindo_but_still_says_it() {
         "the chip must leave the view and stay in the document, for the screen reader: {corpo}"
     );
     assert!(
-        !css.contains("[data-estado=\"at\"]) {") && !css.contains("data-estado=\"surdo\"], [data-estado"),
+        !css.contains("[data-estado=\"at\"]) {")
+            && !css.contains("data-estado=\"surdo\"], [data-estado"),
         "MUDO and ISOLAMENTO TOTAL must stay visible in the people list"
     );
     let script = scripts();
@@ -27964,18 +28022,41 @@ fn the_people_list_does_not_write_transmitindo_but_still_says_it() {
 fn hospedar_diz_cada_passo_e_a_falha_de_cada_um_e_um_por_vez() {
     let boot = read("ui/tela-boot.js");
     let corpo = js_function(&boot, "async function hospedar(");
-    let abre = corpo.find("abrirHospedando()").expect("hospedar() não abre a caixa de hospedando");
-    let sobe = corpo.find("invoke(\"hospedar\"").expect("hospedar() não chama o Rust");
-    assert!(abre < sobe, "a caixa abre depois de o servidor subir, e a espera continua calada");
-    let um = corpo.find("if (hospedandoAgora)").expect("hospedar() não se recusa a correr duas vezes");
-    assert!(um < abre, "a recusa do segundo hospedar() vem depois de ele abrir a caixa");
-    let marca = corpo.find("hospedandoAgora = true").expect("hospedar() não marca que está em curso");
+    let abre = corpo
+        .find("abrirHospedando()")
+        .expect("hospedar() não abre a caixa de hospedando");
+    let sobe = corpo
+        .find("invoke(\"hospedar\"")
+        .expect("hospedar() não chama o Rust");
+    assert!(
+        abre < sobe,
+        "a caixa abre depois de o servidor subir, e a espera continua calada"
+    );
+    let um = corpo
+        .find("if (hospedandoAgora)")
+        .expect("hospedar() não se recusa a correr duas vezes");
+    assert!(
+        um < abre,
+        "a recusa do segundo hospedar() vem depois de ele abrir a caixa"
+    );
+    let marca = corpo
+        .find("hospedandoAgora = true")
+        .expect("hospedar() não marca que está em curso");
     assert!(um < marca && marca < sobe);
-    let desmarca = corpo.rfind("hospedandoAgora = false").expect("hospedar() nunca devolve a vez");
-    assert!(corpo[..desmarca].contains("finally"), "a vez só volta no `finally`, ou uma falha a prende");
-    let subiu = corpo.find("servidorDeHospedarSubiu(").expect("o passo 1 nunca fecha");
+    let desmarca = corpo
+        .rfind("hospedandoAgora = false")
+        .expect("hospedar() nunca devolve a vez");
+    assert!(
+        corpo[..desmarca].contains("finally"),
+        "a vez só volta no `finally`, ou uma falha a prende"
+    );
+    let subiu = corpo
+        .find("servidorDeHospedarSubiu(")
+        .expect("o passo 1 nunca fecha");
     assert!(sobe < subiu, "o passo 1 fecha antes de o Rust responder");
-    let falha = corpo.find("catch (falha)").expect("hospedar() perdeu o catch");
+    let falha = corpo
+        .find("catch (falha)")
+        .expect("hospedar() perdeu o catch");
     let dita = &corpo[falha..];
     assert!(
         dita.contains("invoke(\"meu_servidor\")") && dita.contains("hospedagemFalhou("),
@@ -27990,14 +28071,18 @@ fn hospedar_diz_cada_passo_e_a_falha_de_cada_um_e_um_por_vez() {
     // subindo por baixo. E ela tranca o que está atrás.
     let pagina = read("ui/index.html");
     let caixa = tag_with_id(&pagina, "hospedando");
-    assert!(!caixa.contains("role=\"dialog\""), "a caixa de hospedando virou diálogo: {caixa}");
+    assert!(
+        !caixa.contains("role=\"dialog\""),
+        "a caixa de hospedando virou diálogo: {caixa}"
+    );
     let camada = read("ui/camada-hospedando.js");
     assert!(
         js_function(&camada, "function abrirHospedando(").contains("$(\"tela-boot\").inert = true"),
         "a entrada continua clicável por baixo da caixa de hospedando"
     );
     assert!(
-        js_function(&camada, "function fecharHospedando(").contains("$(\"tela-boot\").inert = false"),
+        js_function(&camada, "function fecharHospedando(")
+            .contains("$(\"tela-boot\").inert = false"),
         "fechar a caixa deixa a entrada inerte"
     );
 }
@@ -28020,7 +28105,8 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
     );
     let sair = js_function(&auth, "function sairDaEspera(");
     assert!(
-        sair.contains("esperaPendenteNaTela()") && sair.contains("perguntarAntesDeSairDaEspera(\"sair\", voltarParaAEntrada)"),
+        sair.contains("esperaPendenteNaTela()")
+            && sair.contains("perguntarAntesDeSairDaEspera(\"sair\", voltarParaAEntrada)"),
         "sair da espera não pergunta antes: {sair}"
     );
     let pendente = js_function(&auth, "function esperaPendenteNaTela(");
@@ -28037,7 +28123,8 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
     let caixa = read("ui/camada-sair-da-espera.js");
     let perguntar = js_function(&caixa, "function perguntarAntesDeSairDaEspera(");
     assert!(
-        perguntar.contains("$(\"sair-da-espera-ficar\").focus()") && perguntar.contains("f.nadaErrado"),
+        perguntar.contains("$(\"sair-da-espera-ficar\").focus()")
+            && perguntar.contains("f.nadaErrado"),
         "a pergunta não nasce em CONTINUAR ESPERANDO, ou não diz que nada deu errado"
     );
     let scripts = scripts();
@@ -28057,18 +28144,33 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
         1,
         "um caminho novo da «ENTRAR EM» sai da espera sem perguntar"
     );
-    assert!(entrar_em.contains("onclick: sair"), "o ‹ VOLTAR do celular sai da espera sem perguntar");
+    assert!(
+        entrar_em.contains("onclick: sair"),
+        "o ‹ VOLTAR do celular sai da espera sem perguntar"
+    );
 
     let frases = read("ui/frases.js");
     let espera = js_const(&frases, "FRASES_DA_ESPERA");
     for chave in [
-        "titulo:", "naoEErro:", "naoEErroCelular:", "tituloSair:", "nadaErrado:", "sair:", "fechar:",
-        "voltar:", "sairCelular:", "voltarCelular:", "ficar:", "sairMesmo:", "fecharMesmo:",
+        "titulo:",
+        "naoEErro:",
+        "naoEErroCelular:",
+        "tituloSair:",
+        "nadaErrado:",
+        "sair:",
+        "fechar:",
+        "voltar:",
+        "sairCelular:",
+        "voltarCelular:",
+        "ficar:",
+        "sairMesmo:",
+        "fecharMesmo:",
     ] {
         assert!(espera.contains(chave), "FRASES_DA_ESPERA perdeu `{chave}`");
     }
     assert!(
-        espera.to_lowercase().contains("nada deu errado") && espera.contains("não cancela o pedido"),
+        espera.to_lowercase().contains("nada deu errado")
+            && espera.contains("não cancela o pedido"),
         "a pergunta deixou de dizer que nada deu errado e que sair não cancela o pedido"
     );
     assert!(
@@ -28081,10 +28183,18 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
     // `#tela-auth`, antes do «Entrar no servidor», que some na espera pendente;
     // e na «ENTRAR EM» do celular, antes do título dela.
     let pagina = read("ui/index.html");
-    let entrada = pagina.split("<div class=\"auth-entrada\">").nth(1).expect("a coluna da entrada");
-    let cabeca = entrada.find("id=\"auth-espera-cabeca\"").expect("a sala de espera perdeu a cabeça");
+    let entrada = pagina
+        .split("<div class=\"auth-entrada\">")
+        .nth(1)
+        .expect("a coluna da entrada");
+    let cabeca = entrada
+        .find("id=\"auth-espera-cabeca\"")
+        .expect("a sala de espera perdeu a cabeça");
     assert!(
-        cabeca < entrada.find("class=\"auth-cabeca\"").expect("o título da entrada"),
+        cabeca
+            < entrada
+                .find("class=\"auth-cabeca\"")
+                .expect("o título da entrada"),
         "a cabeça da espera não está acima de tudo na tela de entrada"
     );
     assert!(auth.contains("$(\"auth-espera-titulo\").textContent = FRASES_DA_ESPERA.titulo;"));
@@ -28094,9 +28204,14 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
             && css.contains("#tela-auth[data-modo=\"espera\"][data-espera=\"pendente\"] .auth-cabeca { display: none; }"),
         "a cabeça da espera não aparece na espera pendente, ou o «Entrar no servidor» continua por cima dela"
     );
-    let cabeca_cel = entrar_em.find("cabecaDaEspera,").expect("a «ENTRAR EM» não mostra a cabeça da espera");
+    let cabeca_cel = entrar_em
+        .find("cabecaDaEspera,")
+        .expect("a «ENTRAR EM» não mostra a cabeça da espera");
     assert!(
-        cabeca_cel < entrar_em.find("titulo(f.titulo").expect("o título da «ENTRAR EM»")
+        cabeca_cel
+            < entrar_em
+                .find("titulo(f.titulo")
+                .expect("o título da «ENTRAR EM»")
             && entrar_em.contains("text: FRASES_DA_ESPERA.titulo"),
         "no celular, a cabeça da espera não vem acima do título"
     );

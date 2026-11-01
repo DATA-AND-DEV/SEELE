@@ -229,7 +229,11 @@ fn dizer_que_subiu(
         let _ = barramento.send(crate::server::Event::Maquina(
             crate::maquinas::MudancaDeMaquina::MetadeSubiu {
                 mod_id,
-                motivo: if primeira { "servidor-subiu" } else { "codigo-novo" },
+                motivo: if primeira {
+                    "servidor-subiu"
+                } else {
+                    "codigo-novo"
+                },
                 maquinas,
             },
         ));

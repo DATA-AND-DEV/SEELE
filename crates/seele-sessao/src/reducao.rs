@@ -167,9 +167,7 @@ pub fn icone_do_perfil(escolhida: &[u8]) -> Option<Vec<u8>> {
         let mut quadro = if imagem.width() > lado || imagem.height() > lado {
             // `Lanczos3` e não `Nearest`: reduzir foto sem filtro é o que
             // produz aquele serrilhado que parece defeito da tela.
-            imagem
-                .resize(lado, lado, FilterType::Lanczos3)
-                .to_rgba8()
+            imagem.resize(lado, lado, FilterType::Lanczos3).to_rgba8()
         } else {
             imagem.to_rgba8()
         };
@@ -494,7 +492,11 @@ mod testes {
     #[test]
     fn o_icone_do_perfil_cabe_no_que_o_protocolo_aceita() {
         let pronto = icone_do_perfil(&ruido(1024)).expect("o ruído tinha de caber");
-        assert!(pronto.len() <= TETO_DO_ICONE, "saiu com {} bytes", pronto.len());
+        assert!(
+            pronto.len() <= TETO_DO_ICONE,
+            "saiu com {} bytes",
+            pronto.len()
+        );
         let (largura, altura) = dimensoes(&pronto);
         assert!(largura <= LADO_DO_ICONE && altura <= LADO_DO_ICONE);
         assert_eq!(

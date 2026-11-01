@@ -90,13 +90,18 @@ fn sql(banco: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open(banco).expect("abrir o arquivo")
 }
 
-fn mensagem(sql: &rusqlite::Connection, canal: ChannelId, autor: PersonId, corpo: &str) -> MessageId {
+fn mensagem(
+    sql: &rusqlite::Connection,
+    canal: ChannelId,
+    autor: PersonId,
+    corpo: &str,
+) -> MessageId {
     sql.execute(
-            "INSERT INTO messages (channel_id, author_id, body, created_at)
+        "INSERT INTO messages (channel_id, author_id, body, created_at)
              VALUES (?1, ?2, ?3, 1700000000)",
-            rusqlite::params![i64::from(canal.get()), autor.get() as i64, corpo],
-        )
-        .expect("semear a mensagem");
+        rusqlite::params![i64::from(canal.get()), autor.get() as i64, corpo],
+    )
+    .expect("semear a mensagem");
     MessageId(u64::try_from(sql.last_insert_rowid()).expect("id"))
 }
 
@@ -285,7 +290,10 @@ async fn anexar(
     };
     let quadro = seele_proto::control::encode(&header).expect("codificar");
     let mut fluxo = par.conexao.open_uni().await.expect("abrir o fluxo");
-    fluxo.write_all(&[StreamType::Attachment.byte()]).await.ok()?;
+    fluxo
+        .write_all(&[StreamType::Attachment.byte()])
+        .await
+        .ok()?;
     fluxo
         .write_all(&u32::try_from(quadro.len()).unwrap().to_be_bytes())
         .await
@@ -353,7 +361,11 @@ async fn anexo_num_canal_onde_a_pessoa_nao_escreve_e_recusado() -> Result<()> {
         Some(AttachmentRefusal::NotAllowed),
         "o anexo entrou num canal onde a pessoa não escreve"
     );
-    assert_eq!(gravadas(&casa.banco, 2), 0, "a mensagem foi gravada mesmo assim");
+    assert_eq!(
+        gravadas(&casa.banco, 2),
+        0,
+        "a mensagem foi gravada mesmo assim"
+    );
 
     casa.daemon.shutdown();
     Ok(())
@@ -386,13 +398,28 @@ async fn anexo_que_responde_a_mensagem_de_outro_canal_e_recusado() -> Result<()>
 
     // O controle: responder a uma mensagem do próprio canal entra.
     assert_eq!(
-        anexar(&mut pessoa, ABERTO, 4, Some(casa.semente.do_comandante_no_aberto)).await,
+        anexar(
+            &mut pessoa,
+            ABERTO,
+            4,
+            Some(casa.semente.do_comandante_no_aberto)
+        )
+        .await,
         None
     );
-    assert!(espera_gravar(&casa.banco, 4).await, "a resposta legítima não entrou");
+    assert!(
+        espera_gravar(&casa.banco, 4).await,
+        "a resposta legítima não entrou"
+    );
 
     assert_eq!(
-        anexar(&mut pessoa, ABERTO, 5, Some(casa.semente.do_comandante_no_outro)).await,
+        anexar(
+            &mut pessoa,
+            ABERTO,
+            5,
+            Some(casa.semente.do_comandante_no_outro)
+        )
+        .await,
         Some(AttachmentRefusal::NotAllowed),
         "o anexo respondeu a uma mensagem de outro canal"
     );
@@ -426,24 +453,48 @@ async fn mensagem_que_responde_a_mensagem_de_outro_canal_e_recusada() -> Result<
     };
     let recusa_de = |chave: u64| {
         move |quadro: &ServerMessage| match quadro {
-            ServerMessage::MessageRejected { client_message_id, reason, .. }
-                if *client_message_id == ClientMessageId(chave) =>
-            {
-                Some(*reason)
-            }
+            ServerMessage::MessageRejected {
+                client_message_id,
+                reason,
+                ..
+            } if *client_message_id == ClientMessageId(chave) => Some(*reason),
             _ => None,
         }
     };
 
     // O controle: responder a uma mensagem do próprio canal entra.
-    frame::write(&mut pessoa.envio, &responder(casa.semente.do_comandante_no_aberto, 14)).await?;
-    assert!(espera_gravar(&casa.banco, 14).await, "a resposta legítima não entrou");
+    frame::write(
+        &mut pessoa.envio,
+        &responder(casa.semente.do_comandante_no_aberto, 14),
+    )
+    .await?;
+    assert!(
+        espera_gravar(&casa.banco, 14).await,
+        "a resposta legítima não entrou"
+    );
 
-    let outro = pedir(&mut pessoa, responder(casa.semente.do_comandante_no_outro, 15), recusa_de(15)).await;
-    assert!(outro.is_some(), "a resposta a uma mensagem de outro canal não foi recusada");
-    assert_eq!(gravadas(&casa.banco, 15), 0, "a resposta a outro canal foi gravada");
+    let outro = pedir(
+        &mut pessoa,
+        responder(casa.semente.do_comandante_no_outro, 15),
+        recusa_de(15),
+    )
+    .await;
+    assert!(
+        outro.is_some(),
+        "a resposta a uma mensagem de outro canal não foi recusada"
+    );
+    assert_eq!(
+        gravadas(&casa.banco, 15),
+        0,
+        "a resposta a outro canal foi gravada"
+    );
 
-    let fantasma = pedir(&mut pessoa, responder(MessageId(987_654), 16), recusa_de(16)).await;
+    let fantasma = pedir(
+        &mut pessoa,
+        responder(MessageId(987_654), 16),
+        recusa_de(16),
+    )
+    .await;
     assert_eq!(
         fantasma, outro,
         "responder a uma mensagem que não existe recusa diferente de responder a outro canal"
@@ -478,7 +529,10 @@ async fn pesar_um_canal_que_nao_se_le_responde_como_um_que_nao_existe() -> Resul
     )
     .await;
     assert!(
-        matches!(aberto, Some(ServerMessage::ChannelWeighed { messages: 2, .. })),
+        matches!(
+            aberto,
+            Some(ServerMessage::ChannelWeighed { messages: 2, .. })
+        ),
         "o canal aberto não foi pesado: {aberto:?}"
     );
 
@@ -526,9 +580,12 @@ async fn pesar_um_canal_que_nao_se_le_responde_como_um_que_nao_existe() -> Resul
 /// Pelo banco, e não por `MessageRemoved`: o anúncio só chega a quem abriu o
 /// canal, e o que se quer saber aqui é se a linha foi carimbada.
 async fn apagar_e_esperar(par: &mut Par, banco: &Path, alvo: MessageId) {
-    frame::write(&mut par.envio, &ClientMessage::RemoveMessage { message: alvo })
-        .await
-        .expect("mandar o pedido");
+    frame::write(
+        &mut par.envio,
+        &ClientMessage::RemoveMessage { message: alvo },
+    )
+    .await
+    .expect("mandar o pedido");
     for _ in 0..50 {
         if apagada(banco, alvo) {
             return;
@@ -667,7 +724,10 @@ async fn senha_errada_em_laco_fecha_a_sala_ate_para_a_senha_certa() -> Result<()
 
     // O controle: a senha certa abre a sala, e uma errada é recusada. Sem ele,
     // a recusa final poderia ser uma sala que nunca abre.
-    assert!(!recusada(&mut operador, Some(SENHA)).await, "a senha certa não abriu");
+    assert!(
+        !recusada(&mut operador, Some(SENHA)).await,
+        "a senha certa não abriu"
+    );
 
     for tentativa in 0..5 {
         assert!(
@@ -708,7 +768,10 @@ async fn conferir_a_senha_nao_segura_o_banco() -> Result<()> {
         seele_server::admissao::fechadura_da_sala(&persistence, seele_proto::ids::VoiceRoomId(1))
     };
     let inicio = std::time::Instant::now();
-    assert!(!seele_server::admissao::senha_abre(&fechadura, Some("errada")));
+    assert!(!seele_server::admissao::senha_abre(
+        &fechadura,
+        Some("errada")
+    ));
     let conta = inicio.elapsed();
     assert!(
         conta > Duration::from_millis(100),

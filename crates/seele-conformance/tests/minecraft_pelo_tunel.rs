@@ -518,8 +518,10 @@ async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
         o_jogo_baixado(&plano, jogo_a, pasta_a.path(), Some(copia_a)).await?;
     let mut jogo = rodar_ate_o_done(&principal, &plano, &mut relatorio).await?;
     eprintln!("principal:\n{}", relatorio.join("\n"));
-    jogo.escrever("scoreboard objectives add reserva dummy\n").await?;
-    jogo.escrever("scoreboard players set prova reserva 42\n").await?;
+    jogo.escrever("scoreboard objectives add reserva dummy\n")
+        .await?;
+    jogo.escrever("scoreboard players set prova reserva 42\n")
+        .await?;
     let marcou = esperar_linha(&mut jogo, "prova to 42", Duration::from_secs(20)).await?;
     eprintln!("na principal: {marcou}");
 
@@ -530,11 +532,31 @@ async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
     let joga = enlace(endereco, &conjunto, 3, "joga").await?;
     use maquina_de_jogo::aceitar_no_papel;
     use seele_server::maquinas::Papel;
-    aceitar_no_papel(&daemon, &mut ea, SERVIDOR_DE_JOGO, Papel::Principal,
-        &[(TUNEL, ProtocoloDeTunel::Tcp, jogo_a), (COPIA, ProtocoloDeTunel::Tcp, copia_a)]).await?;
-    aceitar_no_papel(&daemon, &mut eb, SERVIDOR_DE_JOGO, Papel::Reserva,
-        &[(TUNEL, ProtocoloDeTunel::Tcp, jogo_b), (COPIA, ProtocoloDeTunel::Tcp, copia_b)]).await?;
-    ea.servir_tunel(MOD, TUNEL, ProtocoloDeTunel::Tcp, jogo_a).await.map_err(|r| anyhow::anyhow!("{r:?}"))?;
+    aceitar_no_papel(
+        &daemon,
+        &mut ea,
+        SERVIDOR_DE_JOGO,
+        Papel::Principal,
+        &[
+            (TUNEL, ProtocoloDeTunel::Tcp, jogo_a),
+            (COPIA, ProtocoloDeTunel::Tcp, copia_a),
+        ],
+    )
+    .await?;
+    aceitar_no_papel(
+        &daemon,
+        &mut eb,
+        SERVIDOR_DE_JOGO,
+        Papel::Reserva,
+        &[
+            (TUNEL, ProtocoloDeTunel::Tcp, jogo_b),
+            (COPIA, ProtocoloDeTunel::Tcp, copia_b),
+        ],
+    )
+    .await?;
+    ea.servir_tunel(MOD, TUNEL, ProtocoloDeTunel::Tcp, jogo_a)
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?;
 
     // **O salvamento seguro da receita, com o pacote no meio.**
     let relogio = Instant::now();
@@ -544,7 +566,8 @@ async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
     let salvou_em = relogio.elapsed();
     let principal = Arc::new(principal);
     let p = Arc::clone(&principal);
-    let pacote = tokio::task::spawn_blocking(move || p.empacotar("world", "copias/mundo.tar.gz")).await??;
+    let pacote =
+        tokio::task::spawn_blocking(move || p.empacotar("world", "copias/mundo.tar.gz")).await??;
     let empacotou_em = relogio.elapsed() - salvou_em;
     jogo.escrever("save-on\n").await?;
     eprintln!("salvo em {salvou_em:?} («{salvo}»); pacote: {} arquivos, {} bytes → {} bytes, {} links pulados, {} travados {:?}, em {empacotou_em:?}",
@@ -556,18 +579,27 @@ async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
     } else {
         assert_eq!(pacote.travados_pulados, 0);
     }
-    let oferta = principal.oferecer_copia("copias/mundo.tar.gz", copia_a).await?;
-    ea.servir_tunel(MOD, COPIA, ProtocoloDeTunel::Tcp, copia_a).await.map_err(|r| anyhow::anyhow!("{r:?}"))?;
+    let oferta = principal
+        .oferecer_copia("copias/mundo.tar.gz", copia_a)
+        .await?;
+    ea.servir_tunel(MOD, COPIA, ProtocoloDeTunel::Tcp, copia_a)
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?;
 
     // A reserva: outra pasta, o mesmo jogo baixado, e a cópia pelo túnel.
     let (reserva, mut relatorio_b) =
         o_jogo_baixado(&plano, jogo_b, pasta_b.path(), Some(copia_b)).await?;
     eprintln!("reserva (baixada):\n{}", relatorio_b.join("\n"));
-    let local = eb.entrar_no_tunel(MOD, COPIA).await.map_err(|r| anyhow::anyhow!("{r:?}"))?;
+    let local = eb
+        .entrar_no_tunel(MOD, COPIA)
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?;
     let mut caminho = None;
     let ate = Instant::now() + Duration::from_secs(10);
     while Instant::now() < ate && !format!("{caminho:?}").contains("Direto") {
-        if let Ok(Aviso::Tunel(r)) = tokio::time::timeout(Duration::from_millis(200), eb.proximo()).await {
+        if let Ok(Aviso::Tunel(r)) =
+            tokio::time::timeout(Duration::from_millis(200), eb.proximo()).await
+        {
             if r.nome == COPIA {
                 caminho = Some(r.caminho);
             }
@@ -586,7 +618,12 @@ async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
             |_, _| {},
         )
         .await?;
-    eprintln!("cópia: {} bytes por {caminho:?} em {:?}, {} retomadas", chegou.tamanho, relogio.elapsed(), chegou.retomadas);
+    eprintln!(
+        "cópia: {} bytes por {caminho:?} em {:?}, {} retomadas",
+        chegou.tamanho,
+        relogio.elapsed(),
+        chegou.retomadas
+    );
     let _ = eb.sair_do_tunel(MOD, COPIA).await;
     reserva.desempacotar(&PedidoDeDesempacotar {
         mesclar: false,
@@ -610,12 +647,23 @@ async fn a_reserva_liga_com_o_mundo_da_principal() -> Result<()> {
     let relogio = Instant::now();
     let mut jogo_b_proc = rodar_ate_o_done(&reserva, &plano, &mut relatorio_b).await?;
     eprintln!("a reserva ligou com o mundo em {:?}", relogio.elapsed());
-    jogo_b_proc.escrever("scoreboard players get prova reserva\n").await?;
+    jogo_b_proc
+        .escrever("scoreboard players get prova reserva\n")
+        .await?;
     let placar = esperar_linha(&mut jogo_b_proc, "prova has", Duration::from_secs(20)).await?;
     eprintln!("o placar na reserva: {placar}");
-    anyhow::ensure!(placar.contains("prova has 42"), "o mundo da reserva não é o da principal: {placar}");
-    eb.servir_tunel(MOD, TUNEL, ProtocoloDeTunel::Tcp, jogo_b).await.map_err(|r| anyhow::anyhow!("a reserva, dona, não serviu: {r:?}"))?;
-    let porta = joga.entrar_no_tunel(MOD, TUNEL).await.map_err(|r| anyhow::anyhow!("{r:?}"))?.porta;
+    anyhow::ensure!(
+        placar.contains("prova has 42"),
+        "o mundo da reserva não é o da principal: {placar}"
+    );
+    eb.servir_tunel(MOD, TUNEL, ProtocoloDeTunel::Tcp, jogo_b)
+        .await
+        .map_err(|r| anyhow::anyhow!("a reserva, dona, não serviu: {r:?}"))?;
+    let porta = joga
+        .entrar_no_tunel(MOD, TUNEL)
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?
+        .porta;
     let (json, levou) = status(porta).await?;
     eprintln!("status pela reserva em {levou:?}: {json}");
     anyhow::ensure!(json.contains("pelo t"), "{json}");

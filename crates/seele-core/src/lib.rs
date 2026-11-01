@@ -35,6 +35,9 @@ pub mod aparelho_de_mentira {
 }
 pub mod agenda;
 pub mod anexo_no_disco;
+/// Os tipos do perfil público no fio (`PerfilPublico`, `Efeito`,
+/// `LadoDoPerfil`…): o ffi não vê o `seele-proto` (ADR 0002).
+pub use seele_proto::perfil as perfil_do_fio;
 pub use seele_sessao::assento;
 /// O base64 de ida e de volta, de onde o desktop e o navegador o leem.
 pub use seele_sessao::base64;
@@ -57,9 +60,6 @@ pub use seele_sessao::midia_de_mod;
 /// validação por campo, a conferência da imagem e o portão de versão, de onde
 /// o desktop e o navegador os leem. Os tipos do fio vêm de `perfil_do_fio`.
 pub use seele_sessao::perfil;
-/// Os tipos do perfil público no fio (`PerfilPublico`, `Efeito`,
-/// `LadoDoPerfil`…): o ffi não vê o `seele-proto` (ADR 0002).
-pub use seele_proto::perfil as perfil_do_fio;
 /// A redução de uma imagem de MOD ao uso, com a feature `reducao`.
 #[cfg(feature = "reducao")]
 pub use seele_sessao::reducao;
@@ -256,6 +256,9 @@ pub use seele_proto::transport::key_fingerprint;
 /// `seele-proto`, pelo mesmo ADR 0002 que já traz os enumerados de anexo daqui.
 pub use seele_proto::volume::VolumeRefusal;
 
+/// O verbo do cliente, para o `Command::GravarPerfil` da FFI carregar a
+/// mensagem já montada por `perfil::montar_gravar`.
+pub use seele_proto::control::ClientMessage;
 /// A régua do fio, para a FFI conferir uma oferta que a casca devolve antes de
 /// a guardar como aceite.
 pub use seele_proto::control::Validate;
@@ -266,9 +269,6 @@ pub use seele_proto::control::MAX_BODY_LEN;
 /// revisão do lote P61): uma senha acima dele não cabe no fio, e o núcleo a
 /// recusaria sem que o `Room` da casca soubesse qual entrada desfazer.
 pub use seele_proto::control::MAX_NICKNAME_LEN;
-/// O verbo do cliente, para o `Command::GravarPerfil` da FFI carregar a
-/// mensagem já montada por `perfil::montar_gravar`.
-pub use seele_proto::control::ClientMessage;
 /// Os outros tetos dos campos que a casca escreve: o nome de um canal ou de
 /// uma sala, quantas pessoas uma sala nova pode ter, o nome do servidor e o
 /// motivo de um banimento (os textos em **bytes**).

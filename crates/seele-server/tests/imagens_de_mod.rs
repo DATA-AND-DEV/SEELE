@@ -577,9 +577,13 @@ async fn o_mrpack_vai_ao_volume_e_volta_com_o_teto_do_tipo() -> Result<()> {
     )
     .await?;
     let teto = seele_proto::pack::TETO_DO_PACK;
-    let recusa = transferir_ou_recusa(&par._conexao, enviar("p4", teto + 1), &[0x50, 0x4b, 0x03, 0x04])
-        .await?
-        .expect_err("um pack acima de 64 MiB passou");
+    let recusa = transferir_ou_recusa(
+        &par._conexao,
+        enviar("p4", teto + 1),
+        &[0x50, 0x4b, 0x03, 0x04],
+    )
+    .await?
+    .expect_err("um pack acima de 64 MiB passou");
     assert_eq!(recusa, format!("arquivo-grande-demais:{}:{teto}", teto + 1));
 
     // Um zip sem o índice na raiz não é pack.

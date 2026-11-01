@@ -2682,10 +2682,12 @@ async fn run_session(
     // não recebe nenhuma (`entende_a_mensagem`) e segue vendo apelido e ícone.
     // Um banco que não responde não manda parte nenhuma, e diz no registro:
     // uma parte vazia com `ultima` afirmaria que ninguém tem perfil.
-    if session.protocol_version >= seele_proto::vocabulario::desde(&ServerMessage::Perfis {
-        parte: Vec::new(),
-        ultima: true,
-    }) {
+    if session.protocol_version
+        >= seele_proto::vocabulario::desde(&ServerMessage::Perfis {
+            parte: Vec::new(),
+            ultima: true,
+        })
+    {
         let perfis = {
             let guard = server.persistence.lock().await;
             crate::persistence::perfis::todos(&guard)

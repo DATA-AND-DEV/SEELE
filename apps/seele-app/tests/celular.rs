@@ -223,7 +223,11 @@ const FORA_DO_CELULAR: &str = ":root:not([data-casca=\"celular\"])";
 // `redesenho-019-mods.css` (a terceira passada do 0.19: os MODs e a chamada) é
 // só do desktop e se escreve inteira na forma negativa, como as duas de cima; a
 // leitura positiva da marca continua reprovada nela.
-const COM_O_DESKTOP_FORA_DO_CELULAR: &[&str] = &["tela-sessao.css", "tela-chamada.css", "redesenho-019-mods.css"];
+const COM_O_DESKTOP_FORA_DO_CELULAR: &[&str] = &[
+    "tela-sessao.css",
+    "tela-chamada.css",
+    "redesenho-019-mods.css",
+];
 
 const LEITURAS_DA_MARCA: &[&str] = &[
     "data-casca",

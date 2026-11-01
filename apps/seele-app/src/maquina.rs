@@ -4691,7 +4691,11 @@ mod testes {
             let nomes = |chave: &str| -> Vec<String> {
                 lido["pack_esperado"][chave]
                     .as_array()
-                    .map(|v| v.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+                    .map(|v| {
+                        v.iter()
+                            .filter_map(|x| x.as_str().map(str::to_owned))
+                            .collect()
+                    })
                     .unwrap_or_default()
             };
             for m in nomes("presentes") {

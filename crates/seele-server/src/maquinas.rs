@@ -415,7 +415,15 @@ impl Maquinas {
         pedido_por: PersonId,
         oferta: &OfertaDeMaquina,
     ) -> Pedido {
-        self.pedir_como(mod_id, hash, servidor, Papel::Principal, quem, pedido_por, oferta)
+        self.pedir_como(
+            mod_id,
+            hash,
+            servidor,
+            Papel::Principal,
+            quem,
+            pedido_por,
+            oferta,
+        )
     }
 
     /// O servidor pede a `quem` que rode a máquina `papel` de `servidor`,
@@ -466,7 +474,11 @@ impl Maquinas {
             return Pedido::JaAceito;
         }
         if !self.pendentes.contains_key(&k)
-            && self.pendentes.keys().filter(|(m, _, _)| m == mod_id).count()
+            && self
+                .pendentes
+                .keys()
+                .filter(|(m, _, _)| m == mod_id)
+                .count()
                 >= MAX_PEDIDOS_PENDENTES_POR_MOD
         {
             return Pedido::Recusado(Excesso::PendentesDemais);
@@ -1283,7 +1295,16 @@ pub fn pedir(
     pedido_por: PersonId,
     oferta: &OfertaDeMaquina,
 ) -> Pedido {
-    pedir_como(server, mod_id, hash, servidor, Papel::Principal, quem, pedido_por, oferta)
+    pedir_como(
+        server,
+        mod_id,
+        hash,
+        servidor,
+        Papel::Principal,
+        quem,
+        pedido_por,
+        oferta,
+    )
 }
 
 /// O servidor pede uma máquina: guarda o pendente, manda o `PedidoDeMaquina` a
@@ -1865,8 +1886,11 @@ mod tests {
         assert!(m.saiu(A, 11).is_empty());
         assert!(m.maquina_de(A, 10, MOD, "mc-1"));
 
-        let mut saiu: Vec<(String, String)> =
-            m.saiu(A, 10).into_iter().map(|(m, s, _, _)| (m, s)).collect();
+        let mut saiu: Vec<(String, String)> = m
+            .saiu(A, 10)
+            .into_iter()
+            .map(|(m, s, _, _)| (m, s))
+            .collect();
         saiu.sort();
         assert_eq!(
             saiu,
@@ -1951,8 +1975,14 @@ mod tests {
         let _ = m.pedir(MOD, HASH, "mc-1", B, GESTORA, &oferta(25566));
         let mut desligado = m.mod_desligado(MOD, None);
         desligado.pendentes.sort();
-        assert_eq!(desligado.pendentes, vec![(A, "mc-2".to_owned(), Papel::Principal)]);
-        assert_eq!(desligado.maquinas, vec![(B, "mc-1".to_owned(), Papel::Principal)]);
+        assert_eq!(
+            desligado.pendentes,
+            vec![(A, "mc-2".to_owned(), Papel::Principal)]
+        );
+        assert_eq!(
+            desligado.maquinas,
+            vec![(B, "mc-1".to_owned(), Papel::Principal)]
+        );
     }
 
     /// **A troca de pacote leva só o que foi feito contra o pacote velho.** A
@@ -1986,8 +2016,14 @@ mod tests {
         let _ = m.pedir(MOD, HASH, "mc-4", B, GESTORA, &velha);
 
         let desligado = m.mod_desligado(MOD, Some(NOVO));
-        assert_eq!(desligado.maquinas, vec![(A, "mc-1".to_owned(), Papel::Principal)]);
-        assert_eq!(desligado.pendentes, vec![(B, "mc-4".to_owned(), Papel::Principal)]);
+        assert_eq!(
+            desligado.maquinas,
+            vec![(A, "mc-1".to_owned(), Papel::Principal)]
+        );
+        assert_eq!(
+            desligado.pendentes,
+            vec![(B, "mc-4".to_owned(), Papel::Principal)]
+        );
         assert!(desligado.restam_aceitas);
         assert_eq!(desligado.a_parar, vec![(A, vec!["mc".to_owned()])]);
         assert_eq!(
@@ -2003,8 +2039,14 @@ mod tests {
 
         // Desligado de vez, tudo sai.
         let desligado = m.mod_desligado(MOD, None);
-        assert_eq!(desligado.maquinas, vec![(B, "mc-2".to_owned(), Papel::Principal)]);
-        assert_eq!(desligado.pendentes, vec![(A, "mc-3".to_owned(), Papel::Principal)]);
+        assert_eq!(
+            desligado.maquinas,
+            vec![(B, "mc-2".to_owned(), Papel::Principal)]
+        );
+        assert_eq!(
+            desligado.pendentes,
+            vec![(A, "mc-3".to_owned(), Papel::Principal)]
+        );
         assert!(!desligado.restam_aceitas);
         assert!(m.hashes().is_empty());
     }
@@ -2111,7 +2153,12 @@ mod tests {
         let _ = m.saiu(A, 12);
         assert_eq!(
             m.sem_quem_veja(A),
-            vec![(MOD.to_owned(), "mc-1".to_owned(), Papel::Principal, M::SemTela)]
+            vec![(
+                MOD.to_owned(),
+                "mc-1".to_owned(),
+                Papel::Principal,
+                M::SemTela
+            )]
         );
         // E depois de cair, outra recusa da mesma conexão não acha o que recusar
         // (o servidor não publica duas vezes).
@@ -2136,7 +2183,13 @@ mod tests {
         let o = oferta(25565);
         let pedido = m.pedir_como(MOD, HASH, "mc-1", papel, quem, GESTORA, &o);
         assert!(
-            matches!(pedido, Pedido::Guardado { dispensada: None, .. }),
+            matches!(
+                pedido,
+                Pedido::Guardado {
+                    dispensada: None,
+                    ..
+                }
+            ),
             "{pedido:?}"
         );
         let aceita = m
@@ -2208,7 +2261,15 @@ mod tests {
         let mut m = Maquinas::default();
         aceita_como(&mut m, Papel::Principal, A, 10);
         assert_eq!(
-            m.pedir_como(MOD, HASH, "mc-1", Papel::Reserva, A, GESTORA, &oferta(25565)),
+            m.pedir_como(
+                MOD,
+                HASH,
+                "mc-1",
+                Papel::Reserva,
+                A,
+                GESTORA,
+                &oferta(25565)
+            ),
             Pedido::Recusado(Excesso::MesmaPessoaNasDuas)
         );
     }
@@ -2226,8 +2287,14 @@ mod tests {
         assert_eq!(*papel, Papel::Principal);
         assert!(m.sumiu_de_vez(MOD, "mc-1", Papel::Principal, *vez));
         aceita_como(&mut m, Papel::Principal, A, 11);
-        assert!(!m.sumiu_de_vez(MOD, "mc-1", Papel::Principal, *vez), "voltou, e o prazo valeu");
+        assert!(
+            !m.sumiu_de_vez(MOD, "mc-1", Papel::Principal, *vez),
+            "voltou, e o prazo valeu"
+        );
         let _ = m.saiu(A, 11);
-        assert!(!m.sumiu_de_vez(MOD, "mc-1", Papel::Principal, *vez), "outra saída, a vez velha valeu");
+        assert!(
+            !m.sumiu_de_vez(MOD, "mc-1", Papel::Principal, *vez),
+            "outra saída, a vez velha valeu"
+        );
     }
 }

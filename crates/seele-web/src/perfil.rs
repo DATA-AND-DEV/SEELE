@@ -130,8 +130,8 @@ mod tests {
 
     use super::*;
     use seele_proto::control::decode;
-    use seele_proto::quadro::{comprimento, PREFIXO_LEN};
     use seele_proto::perfil::TETO_DA_IMAGEM;
+    use seele_proto::quadro::{comprimento, PREFIXO_LEN};
 
     const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
 
@@ -242,7 +242,10 @@ mod tests {
     #[test]
     fn o_icone_nativo_cabe_no_que_o_0_18_aceita() {
         let icone = icone_nativo(PNG_4X4).unwrap();
-        assert_eq!(seele_proto::control::check_server_icon(Some(&icone)), Ok(()));
+        assert_eq!(
+            seele_proto::control::check_server_icon(Some(&icone)),
+            Ok(())
+        );
         assert!(icone_nativo(b"isto nao e imagem").is_none());
     }
 }

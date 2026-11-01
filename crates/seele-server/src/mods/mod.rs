@@ -969,12 +969,9 @@ impl Anfitriao {
                           -> rquickjs::Result<()> {
                         let juntado =
                             maquina::dona_da_chamada(&ctx, valor)?.and_then(|(servidor, papel)| {
-                                declarado
-                                    .lock()
-                                    .map_err(|_| "falhou".to_owned())
-                                    .and_then(|mut d| {
-                                        d.juntar_dona(servidor, papel).map_err(str::to_owned)
-                                    })
+                                declarado.lock().map_err(|_| "falhou".to_owned()).and_then(
+                                    |mut d| d.juntar_dona(servidor, papel).map_err(str::to_owned),
+                                )
                             });
                         juntado.map_err(|nome| rquickjs::Exception::throw_message(&ctx, &nome))
                     },

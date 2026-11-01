@@ -524,7 +524,9 @@ fn atender_na_sessao(
                 .campo("lado")
                 .and_then(|valor| serde_json::from_value(valor.clone()).ok())
                 .ok_or_else(|| a.invalido("lado", "Foto ou Capa"))?;
-            saida.mensagens.push(seele_sessao::perfil::mensagem_de_tirar(lado));
+            saida
+                .mensagens
+                .push(seele_sessao::perfil::mensagem_de_tirar(lado));
             Ok(Value::Null)
         }
         "imagem_da_pessoa" => {
@@ -1155,9 +1157,8 @@ mod tests {
     /// A mesma, com um servidor que carimba os quadros com `numero`: é o que
     /// a ligação grava como o protocolo negociado.
     fn dentro_em(numero: u8) -> Ligacao {
-        let do_servidor = |mensagem: &ServerMessage| {
-            enquadrar(&encode_em(numero, mensagem).unwrap()).unwrap()
-        };
+        let do_servidor =
+            |mensagem: &ServerMessage| enquadrar(&encode_em(numero, mensagem).unwrap()).unwrap();
         let mut ligacao = Ligacao::abrir(Pedido {
             sala_pessoal: false,
             apelido: "marcela".into(),

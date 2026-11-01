@@ -492,7 +492,15 @@ mod testes {
             mod_id: "a/b".to_owned(),
             token: "t1".to_owned(),
         };
-        let r = gravar_fluxo(&esperas, Some(&raizes), pessoa(7), fonte, cabecalho, tamanho).await;
+        let r = gravar_fluxo(
+            &esperas,
+            Some(&raizes),
+            pessoa(7),
+            fonte,
+            cabecalho,
+            tamanho,
+        )
+        .await;
         (r, temp)
     }
 
@@ -506,7 +514,10 @@ mod testes {
         };
         let (r, temp) = gravar(&mut fonte, &["png"], None).await;
         let (_, recusa) = r.expect_err("passou do teto e foi aceito");
-        assert_eq!(recusa.motivo, seele_proto::volume::VolumeRefusal::Incompleto);
+        assert_eq!(
+            recusa.motivo,
+            seele_proto::volume::VolumeRefusal::Incompleto
+        );
         // Parou no bloco que cruzou o teto, e não leu o resto.
         assert!(
             fonte.lidos <= TETO_FIXO + BLOCO as u64,
@@ -525,7 +536,10 @@ mod testes {
         };
         let (r, temp) = gravar(&mut fonte, &["png"], None).await;
         let (_, recusa) = r.expect_err("um executável foi aceito como imagem");
-        assert_eq!(recusa.motivo, seele_proto::volume::VolumeRefusal::TipoRecusado);
+        assert_eq!(
+            recusa.motivo,
+            seele_proto::volume::VolumeRefusal::TipoRecusado
+        );
         assert_eq!(recusa.detectado, Detectado::FormatoNenhum);
         assert!(
             fonte.lidos <= BLOCO as u64,
@@ -1150,7 +1164,10 @@ pub async fn atender_imagem(
             tracing::warn!(%pessoa, %erro, "pedido de imagem recusado na leitura");
             let _ = crate::frame::write(
                 envio,
-                &RespostaDeImagem { erro: Some("pedido-invalido-ou-grande-demais".into()), bytes: 0 },
+                &RespostaDeImagem {
+                    erro: Some("pedido-invalido-ou-grande-demais".into()),
+                    bytes: 0,
+                },
             )
             .await;
             let _ = envio.finish();

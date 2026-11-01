@@ -3862,10 +3862,17 @@ mod perfis_testes {
             campos: Vec::new(),
         });
         assert!(a.recusa_de_perfil && a.any());
-        assert_eq!(room.recusas_de_perfil.len(), 2, "a segunda apagou a primeira");
+        assert_eq!(
+            room.recusas_de_perfil.len(),
+            2,
+            "a segunda apagou a primeira"
+        );
         assert_eq!(room.recusas_de_perfil[0].motivo, RecusaDePerfil::Campos);
         assert_eq!(room.recusas_de_perfil[0].campos.len(), 1);
-        assert_eq!(room.perfis_marca, 0, "uma recusa não é uma mudança de perfil");
+        assert_eq!(
+            room.perfis_marca, 0,
+            "uma recusa não é uma mudança de perfil"
+        );
     }
 
     /// A reconexão não herda perfil nenhum: o servidor reapresenta os que

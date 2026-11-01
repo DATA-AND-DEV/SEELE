@@ -1231,10 +1231,20 @@ async fn o_servidor_que_reinicia_chama_as_maquinas_sozinho() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("o servidor subiu e não chamou a dona de volta: {e}"))?;
     aceitar_de_novo(&mut principal).await?;
     let livro = || daemon.server().maquinas();
-    assert_eq!(livro().dona(MOD, SERVIDOR), Papel::Reserva, "a dona mudou na volta");
+    assert_eq!(
+        livro().dona(MOD, SERVIDOR),
+        Papel::Reserva,
+        "a dona mudou na volta"
+    );
     let fim = Instant::now() + PACIENCIA;
-    while livro().quem_opera_como(MOD, SERVIDOR, Papel::Reserva).is_none() {
-        anyhow::ensure!(Instant::now() < fim, "o aceite da reserva não entrou no livro");
+    while livro()
+        .quem_opera_como(MOD, SERVIDOR, Papel::Reserva)
+        .is_none()
+    {
+        anyhow::ensure!(
+            Instant::now() < fim,
+            "o aceite da reserva não entrou no livro"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     reserva
@@ -1243,14 +1253,21 @@ async fn o_servidor_que_reinicia_chama_as_maquinas_sozinho() -> Result<()> {
         .await
         .map_err(|r| anyhow::anyhow!("a reserva religada não serviu de novo: {r:?}"))?;
     assert!(reserva.jogo_vivo().await, "o jogo da dona caiu na volta");
-    assert_eq!(partidas(reserva.raiz()), 1, "o jogo da dona foi subido de novo");
+    assert_eq!(
+        partidas(reserva.raiz()),
+        1,
+        "o jogo da dona foi subido de novo"
+    );
     eco_na(&mut fluxo)
         .await
         .map_err(|e| anyhow::anyhow!("a conexão pela malha caiu na volta: {e}"))?;
     let lido: serde_json::Value =
         serde_json::from_str(&pedir_ao_mod(&mut joga, &serde_json::json!({ "ler": true })).await?)?;
     let religou = lido["religar"].as_str().unwrap_or_default();
-    assert!(religou.contains("reserva") && religou.contains("principal"), "{lido}");
+    assert!(
+        religou.contains("reserva") && religou.contains("principal"),
+        "{lido}"
+    );
     daemon.shutdown();
     Ok(())
 }

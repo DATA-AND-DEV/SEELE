@@ -29,7 +29,7 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use seele_proto::ids::PersonId;
 use seele_proto::perfil::{
-    cor_de_texto, cor_em_texto, validar, EntradaDePerfil, Efeito, ImagemDoPerfil, LadoDoPerfil,
+    cor_de_texto, cor_em_texto, validar, Efeito, EntradaDePerfil, ImagemDoPerfil, LadoDoPerfil,
     PerfilPublico, PerfilValidado, TipoDaImagem, COR_PADRAO,
 };
 use serde::{Deserialize, Serialize};
@@ -135,7 +135,8 @@ fn imagem_da_linha(
     }))
 }
 
-const SELECIONAR: &str = "SELECT pessoa, revisao, nome_exibido, pronomes, status, bio, cor, efeito, \
+const SELECIONAR: &str =
+    "SELECT pessoa, revisao, nome_exibido, pronomes, status, bio, cor, efeito, \
      foto_hash, foto_tipo, foto_bytes, capa_hash, capa_tipo, capa_bytes FROM perfis";
 
 fn perfil_da_linha(linha: &rusqlite::Row<'_>) -> Result<PerfilPublico> {
@@ -286,7 +287,11 @@ pub fn gravar(
     Ok(Ok(nova))
 }
 
-fn hash_atual(conexao: &Connection, pessoa: PersonId, lado: LadoDoPerfil) -> Result<Option<[u8; 32]>> {
+fn hash_atual(
+    conexao: &Connection,
+    pessoa: PersonId,
+    lado: LadoDoPerfil,
+) -> Result<Option<[u8; 32]>> {
     let (hash, _, _) = colunas(lado);
     let guardado: Option<Option<Vec<u8>>> = conexao
         .query_row(
@@ -685,13 +690,16 @@ pub fn pendencias(persistence: &Persistence, pessoa: PersonId) -> Result<Vec<Pen
     if registro.avisada {
         return Ok(Vec::new());
     }
-    Ok([(LadoDoPerfil::Foto, registro.foto), (LadoDoPerfil::Capa, registro.capa)]
-        .into_iter()
-        .filter_map(|(lado, estado)| match estado {
-            EstadoDaImagem::Falhou(motivo) => Some(PendenciaDeImagem { lado, motivo }),
-            _ => None,
-        })
-        .collect())
+    Ok([
+        (LadoDoPerfil::Foto, registro.foto),
+        (LadoDoPerfil::Capa, registro.capa),
+    ]
+    .into_iter()
+    .filter_map(|(lado, estado)| match estado {
+        EstadoDaImagem::Falhou(motivo) => Some(PendenciaDeImagem { lado, motivo }),
+        _ => None,
+    })
+    .collect())
 }
 
 /// Marca a pessoa como avisada: `pendencias` passa a voltar vazio.
@@ -915,7 +923,9 @@ mod tests {
     fn revisao_velha_e_recusada() {
         let p = banco();
         let ana = pessoa(&p, 1);
-        gravar(&p, ana, 0, &validado("Ana"), Efeito::Nenhum).unwrap().unwrap();
+        gravar(&p, ana, 0, &validado("Ana"), Efeito::Nenhum)
+            .unwrap()
+            .unwrap();
         // Outra janela salvou antes: a que ainda acha que a revisão é 0 perde.
         let recusa = gravar(&p, ana, 0, &validado("Outra"), Efeito::Nenhum).unwrap();
         assert_eq!(recusa, Err(RevisaoVelha { atual: 1 }));
@@ -931,7 +941,9 @@ mod tests {
     fn a_imagem_sobe_a_revisao_e_derruba_o_editor_velho() {
         let p = banco();
         let ana = pessoa(&p, 1);
-        gravar(&p, ana, 0, &validado("Ana"), Efeito::Nenhum).unwrap().unwrap();
+        gravar(&p, ana, 0, &validado("Ana"), Efeito::Nenhum)
+            .unwrap()
+            .unwrap();
         trocar_imagem(&p, ana, LadoDoPerfil::Foto, &imagem(1)).unwrap();
         assert_eq!(ler(&p, ana).unwrap().unwrap().revisao, 2);
         assert_eq!(
@@ -954,7 +966,9 @@ mod tests {
         assert_eq!(segunda.anterior, Some([1; 32]));
         assert_eq!(segunda.revisao, 2);
         // Texto gravado depois não leva a foto embora.
-        gravar(&p, ana, 2, &validado("Ana"), Efeito::Nenhum).unwrap().unwrap();
+        gravar(&p, ana, 2, &validado("Ana"), Efeito::Nenhum)
+            .unwrap()
+            .unwrap();
         let lido = ler(&p, ana).unwrap().unwrap();
         assert_eq!(lido.foto, Some(imagem(2)));
         assert_eq!(lido.capa, None);
@@ -979,7 +993,10 @@ mod tests {
         trocar_imagem(&p, bia, LadoDoPerfil::Capa, &imagem(7)).unwrap();
         let troca = trocar_imagem(&p, ana, LadoDoPerfil::Foto, &imagem(8)).unwrap();
         assert_eq!(troca.anterior, Some([7; 32]));
-        assert!(hash_em_uso(&p, &[7; 32]).unwrap(), "a capa da Bia ainda o usa");
+        assert!(
+            hash_em_uso(&p, &[7; 32]).unwrap(),
+            "a capa da Bia ainda o usa"
+        );
         assert_eq!(
             hashes_em_uso(&p).unwrap(),
             HashSet::from([[7; 32], [8; 32]])
@@ -1041,7 +1058,10 @@ mod tests {
             ResultadoDaImagem::Trazida(imagem(3)),
             ResultadoDaImagem::Falhou("fragmento-faltando".into()),
         );
-        assert_eq!(registrar_migracao(&p, &m).unwrap(), DesfechoDaMigracao::Registrada);
+        assert_eq!(
+            registrar_migracao(&p, &m).unwrap(),
+            DesfechoDaMigracao::Registrada
+        );
         assert!(ja_migrado(&p, ana).unwrap());
 
         let lido = ler(&p, ana).unwrap().unwrap();
@@ -1052,7 +1072,10 @@ mod tests {
         let registro = registro_da_migracao(&p, ana).unwrap().unwrap();
         assert_eq!(registro.revisao_no_mod, 5);
         assert_eq!(registro.foto, EstadoDaImagem::Trazida);
-        assert_eq!(registro.capa, EstadoDaImagem::Falhou("fragmento-faltando".into()));
+        assert_eq!(
+            registro.capa,
+            EstadoDaImagem::Falhou("fragmento-faltando".into())
+        );
         assert!(!registro.avisada);
 
         assert_eq!(
@@ -1066,7 +1089,10 @@ mod tests {
         assert_eq!(pendencias(&p, ana).unwrap(), vec![]);
 
         // Segunda vez: pulada, nada muda.
-        assert_eq!(registrar_migracao(&p, &m).unwrap(), DesfechoDaMigracao::JaMigrada);
+        assert_eq!(
+            registrar_migracao(&p, &m).unwrap(),
+            DesfechoDaMigracao::JaMigrada
+        );
         assert_eq!(ler(&p, ana).unwrap().unwrap(), lido);
     }
 
@@ -1088,8 +1114,12 @@ mod tests {
         assert!(!ja_migrado(&p, PersonId(4242)).unwrap());
 
         let ana = pessoa(&p, 1);
-        gravar(&p, ana, 0, &validado("Nova"), Efeito::Nenhum).unwrap().unwrap();
-        gravar(&p, ana, 1, &validado("Nova"), Efeito::Nenhum).unwrap().unwrap();
+        gravar(&p, ana, 0, &validado("Nova"), Efeito::Nenhum)
+            .unwrap()
+            .unwrap();
+        gravar(&p, ana, 1, &validado("Nova"), Efeito::Nenhum)
+            .unwrap()
+            .unwrap();
         let m = migracao(
             ana,
             1,
@@ -1097,9 +1127,16 @@ mod tests {
             ResultadoDaImagem::Falhou("nao-encontrada".into()),
             ResultadoDaImagem::Nenhuma,
         );
-        assert_eq!(registrar_migracao(&p, &m).unwrap(), DesfechoDaMigracao::PerfilMaisNovo);
+        assert_eq!(
+            registrar_migracao(&p, &m).unwrap(),
+            DesfechoDaMigracao::PerfilMaisNovo
+        );
         assert_eq!(ler(&p, ana).unwrap().unwrap().nome_exibido, "Nova");
-        assert_eq!(pendencias(&p, ana).unwrap(), vec![], "não há o que corrigir");
+        assert_eq!(
+            pendencias(&p, ana).unwrap(),
+            vec![],
+            "não há o que corrigir"
+        );
         assert!(ja_migrado(&p, ana).unwrap());
     }
 

@@ -381,7 +381,10 @@ impl Armazem {
         hash: &str,
     ) -> Result<Vec<u8>, FalhaNoPadrao> {
         let padrao = self.ler();
-        let Some(imagem) = padrao.imagem(lado).filter(|i| i.hash.eq_ignore_ascii_case(hash)) else {
+        let Some(imagem) = padrao
+            .imagem(lado)
+            .filter(|i| i.hash.eq_ignore_ascii_case(hash))
+        else {
             return Err(ErroDoPerfil::Mudou.into());
         };
         let arquivo = self
@@ -406,7 +409,11 @@ impl Armazem {
                 let url = self
                     .bytes_da_imagem(lado, &imagem.hash)
                     .map(|bytes| {
-                        format!("data:{};base64,{}", imagem.tipo, seele_ffi::base64_de(&bytes))
+                        format!(
+                            "data:{};base64,{}",
+                            imagem.tipo,
+                            seele_ffi::base64_de(&bytes)
+                        )
                     })
                     .unwrap_or_default();
                 ImagemDoPadraoNaTela {
@@ -509,7 +516,11 @@ mod testes {
         let pasta = pasta();
         let armazem = Armazem::em(&pasta);
         assert_eq!(armazem.ler(), PerfilPadrao::default());
-        assert_eq!(armazem.na_tela().revisao, 0, "um padrão nunca salvo não é aplicado");
+        assert_eq!(
+            armazem.na_tela().revisao,
+            0,
+            "um padrão nunca salvo não é aplicado"
+        );
 
         let gravado = armazem.gravar_textos(&entrada()).unwrap();
         assert_eq!(gravado.nome_exibido, "Maya");
@@ -524,9 +535,17 @@ mod testes {
         assert_eq!(relido.bio, "um\ndois");
         assert_eq!(relido.efeito, Efeito::Brilho);
         let foto = relido.foto.unwrap();
-        assert_eq!(foto.hash, hex(&hash_da_imagem(PNG)), "o endereço não é o do servidor");
+        assert_eq!(
+            foto.hash,
+            hex(&hash_da_imagem(PNG)),
+            "o endereço não é o do servidor"
+        );
         assert_eq!(foto.tipo, "image/png");
-        assert!(foto.url.starts_with("data:image/png;base64,"), "{}", foto.url);
+        assert!(
+            foto.url.starts_with("data:image/png;base64,"),
+            "{}",
+            foto.url
+        );
         assert_eq!(relido.capa.unwrap().tipo, "image/gif");
         assert!(pasta.join("imagens").join(&foto.hash).exists());
 
@@ -563,9 +582,14 @@ mod testes {
         grande.resize(seele_ffi::perfis::TETO_DA_IMAGEM + 1, 0);
         assert!(matches!(
             armazem.guardar_imagem(LadoDoPerfil::Capa, &grande),
-            Err(FalhaNoPadrao::Perfil(ErroDoPerfil::ImagemGrandeDemais { .. }))
+            Err(FalhaNoPadrao::Perfil(
+                ErroDoPerfil::ImagemGrandeDemais { .. }
+            ))
         ));
-        assert!(!pasta.join("imagens").exists(), "uma imagem recusada foi ao disco");
+        assert!(
+            !pasta.join("imagens").exists(),
+            "uma imagem recusada foi ao disco"
+        );
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
@@ -580,18 +604,31 @@ mod testes {
         // A mesma imagem nos dois lados: tirar de um não a apaga.
         armazem.guardar_imagem(LadoDoPerfil::Capa, PNG).unwrap();
         armazem.tirar_imagem(LadoDoPerfil::Capa).unwrap();
-        assert!(pasta.join("imagens").join(&velha).exists(), "apagou a foto que ainda vale");
-        assert_eq!(armazem.bytes_da_imagem(LadoDoPerfil::Foto, &velha).unwrap(), PNG);
+        assert!(
+            pasta.join("imagens").join(&velha).exists(),
+            "apagou a foto que ainda vale"
+        );
+        assert_eq!(
+            armazem.bytes_da_imagem(LadoDoPerfil::Foto, &velha).unwrap(),
+            PNG
+        );
 
         armazem.guardar_imagem(LadoDoPerfil::Foto, GIF).unwrap();
-        assert!(!pasta.join("imagens").join(&velha).exists(), "a foto velha ficou no disco");
+        assert!(
+            !pasta.join("imagens").join(&velha).exists(),
+            "a foto velha ficou no disco"
+        );
         assert_eq!(
             armazem.bytes_da_imagem(LadoDoPerfil::Foto, &velha),
             Err(FalhaNoPadrao::Perfil(ErroDoPerfil::Mudou))
         );
         let revisao = armazem.ler().revisao;
         armazem.tirar_imagem(LadoDoPerfil::Capa).unwrap();
-        assert_eq!(armazem.ler().revisao, revisao, "tirar o que não há subiu a revisão");
+        assert_eq!(
+            armazem.ler().revisao,
+            revisao,
+            "tirar o que não há subiu a revisão"
+        );
         let _ = std::fs::remove_dir_all(&pasta);
     }
 

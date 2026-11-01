@@ -28,7 +28,7 @@
 
 use seele_proto::control::ClientMessage;
 use seele_proto::perfil::{
-    validar, EntradaDePerfil, ErroDeCampo, Efeito, RecusaDePerfil, TipoDaImagem, TETO_DA_IMAGEM,
+    validar, Efeito, EntradaDePerfil, ErroDeCampo, RecusaDePerfil, TipoDaImagem, TETO_DA_IMAGEM,
 };
 use seele_proto::vocabulario::{desde_do_cliente, desde_o_pedido_de_imagem};
 use seele_proto::volume::PedidoDeImagem;
@@ -668,7 +668,10 @@ mod testes {
 
     #[test]
     fn o_erro_serializa_pelo_nome_da_variante() {
-        assert_eq!(serde_json::to_string(&ErroDoPerfil::Heic).unwrap(), "\"Heic\"");
+        assert_eq!(
+            serde_json::to_string(&ErroDoPerfil::Heic).unwrap(),
+            "\"Heic\""
+        );
         assert_eq!(
             serde_json::to_string(&ErroDoPerfil::ServidorAntigo {
                 negociado: 11,
