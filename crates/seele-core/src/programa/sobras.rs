@@ -162,12 +162,22 @@ pub fn anotar(pasta: &Path, registro: &RegistroDeProcesso) -> std::io::Result<Pa
 /// do sistema agora.
 pub(crate) fn registro_de(pid: u32, etiqueta: &str) -> RegistroDeProcesso {
     let (grupo, inicio) = como_esta(pid).unwrap_or((pid, String::new()));
+    // **Sem o começo, o registro não protege nada** (revisão da 0.19, M2): a
+    // reabertura não tem como saber se o pid ainda é este processo, e o apaga
+    // sem parar nada. Quem lê o log precisa saber que este jogo ficou sem guarda.
+    if inicio.is_empty() {
+        tracing::warn!(pid, "o começo do processo de jogo não foi lido: se o app morrer sem pará-lo, o app reaberto não o reconhece");
+    }
+    let dono_inicio = inicio_deste_app();
+    if dono_inicio.is_empty() {
+        tracing::warn!(pid, "o começo deste app não foi lido: o registro do jogo vale como de um dono vivo enquanto o pid deste app existir");
+    }
     RegistroDeProcesso {
         pid,
         grupo,
         inicio,
         dono: std::process::id(),
-        dono_inicio: inicio_deste_app(),
+        dono_inicio,
         etiqueta: etiqueta.to_owned(),
     }
 }
@@ -180,9 +190,25 @@ fn ainda_e_ele(registro: &RegistroDeProcesso) -> bool {
 }
 
 /// O app dono do registro ainda vive: o registro é de outra janela.
+///
+/// **Sem o começo do dono, o pid vivo basta** (revisão da 0.19, M2): um app que
+/// não leu o próprio começo grava `dono_inicio` vazio, e tratar isso como dono
+/// morto fazia a segunda instância parar o jogo da primeira, viva. Errar para o
+/// lado de deixar rodar custa um órfão que a próxima abertura para; errar para
+/// o outro lado derruba o jogo de quem está jogando.
 fn dono_vive(registro: &RegistroDeProcesso) -> bool {
-    !registro.dono_inicio.is_empty()
-        && como_esta(registro.dono).is_some_and(|(_, inicio)| inicio == registro.dono_inicio)
+    match como_esta(registro.dono) {
+        None => false,
+        Some(_) if registro.dono_inicio.is_empty() => {
+            tracing::warn!(
+                pid = registro.pid,
+                dono = registro.dono,
+                "registro de jogo sem o começo do dono, e o pid do dono existe: tratado como de uma janela viva, e o jogo não é tocado"
+            );
+            true
+        }
+        Some((_, inicio)) => inicio == registro.dono_inicio,
+    }
 }
 
 #[cfg(unix)]
@@ -244,14 +270,24 @@ fn parar_um(_registro: &RegistroDeProcesso, _prazo: Duration) -> DesfechoDaSobra
     }
 }
 
-/// **Acha e para os jogos que sobraram** de um app que morreu sem desligá-los.
+/// Um jogo órfão achado e ainda não parado ([`achar_sobras`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SobraAParar {
+    /// O arquivo do registro, que sai quando ele para.
+    arquivo: PathBuf,
+    /// O registro que ele deixou.
+    pub registro: RegistroDeProcesso,
+}
+
+/// **Acha os jogos que sobraram**, sem parar nenhum: o que [`parar_sobras`]
+/// faz em duas partes, para quem precisa saber **antes** de parar quantos são
+/// (o app não sobe jogo novo enquanto um velho ainda salva; revisão da 0.19,
+/// I1). Rápido: lê a pasta e pergunta ao sistema por cada pid.
 ///
-/// Bloqueia até `prazo` por órfão: chame numa thread. Cada desfecho vai ao
-/// log; a lista volta para a tela. O registro sai em todo desfecho, menos no
-/// [`DesfechoDaSobra::NaoParou`] (para a próxima abertura tentar de novo) e
-/// no de outra janela viva.
+/// Apaga os registros que não valem mais (ilegíveis, `.parcial`, de um
+/// processo que já saiu); deixa os de outra janela viva.
 #[must_use]
-pub fn parar_sobras(pasta: &Path, prazo: Duration) -> Vec<SobraEncontrada> {
+pub fn achar_sobras(pasta: &Path) -> Vec<SobraAParar> {
     let Ok(entradas) = std::fs::read_dir(pasta) else {
         return Vec::new();
     };
@@ -277,35 +313,70 @@ pub fn parar_sobras(pasta: &Path, prazo: Duration) -> Vec<SobraEncontrada> {
             continue;
         }
         if !ainda_e_ele(&registro) {
-            tracing::debug!(
-                pid = registro.pid,
-                "registro de processo de jogo de um processo que já saiu: apagado"
-            );
+            if registro.inicio.is_empty() {
+                tracing::warn!(
+                    pid = registro.pid,
+                    "registro de processo de jogo sem o começo: não há como saber se o pid ainda é o jogo; apagado sem parar nada"
+                );
+            } else {
+                tracing::debug!(
+                    pid = registro.pid,
+                    "registro de processo de jogo de um processo que já saiu: apagado"
+                );
+            }
             let _ = std::fs::remove_file(&caminho);
             continue;
         }
-        tracing::warn!(
-            pid = registro.pid,
-            grupo = registro.grupo,
-            etiqueta = %registro.etiqueta,
-            "um jogo de uma execução anterior do app ainda roda: pedindo que salve e saia"
-        );
-        let desfecho = parar_um(&registro, prazo);
-        match &desfecho {
-            DesfechoDaSobra::SaiuAoPedido { levou } => {
-                tracing::info!(pid = registro.pid, levou = ?levou, "o jogo que sobrou saiu com o SIGTERM");
-            }
-            DesfechoDaSobra::Forcada { esperou } => {
-                tracing::warn!(pid = registro.pid, esperou = ?esperou, "o jogo que sobrou não saiu no prazo: grupo morto com SIGKILL");
-            }
-            DesfechoDaSobra::NaoParou { motivo } => {
-                tracing::error!(pid = registro.pid, motivo, "o jogo que sobrou não parou");
-            }
-        }
-        if !matches!(desfecho, DesfechoDaSobra::NaoParou { .. }) {
-            let _ = std::fs::remove_file(&caminho);
-        }
-        achadas.push(SobraEncontrada { registro, desfecho });
+        achadas.push(SobraAParar {
+            arquivo: caminho,
+            registro,
+        });
     }
     achadas
+}
+
+/// **Para um jogo que sobrou**: `SIGTERM` ao grupo, `prazo` para sair, e
+/// então `SIGKILL`. Bloqueia até `prazo` (mais 2 s): chame numa thread. O
+/// registro sai em todo desfecho menos no [`DesfechoDaSobra::NaoParou`] (para
+/// a próxima abertura tentar de novo).
+#[must_use]
+pub fn parar_sobra(sobra: SobraAParar, prazo: Duration) -> SobraEncontrada {
+    let SobraAParar { arquivo, registro } = sobra;
+    tracing::warn!(
+        pid = registro.pid,
+        grupo = registro.grupo,
+        etiqueta = %registro.etiqueta,
+        "um jogo de uma execução anterior do app ainda roda: pedindo que salve e saia"
+    );
+    let desfecho = parar_um(&registro, prazo);
+    match &desfecho {
+        DesfechoDaSobra::SaiuAoPedido { levou } => {
+            tracing::info!(pid = registro.pid, levou = ?levou, "o jogo que sobrou saiu com o SIGTERM");
+        }
+        DesfechoDaSobra::Forcada { esperou } => {
+            tracing::warn!(pid = registro.pid, esperou = ?esperou, "o jogo que sobrou não saiu no prazo: grupo morto com SIGKILL");
+        }
+        DesfechoDaSobra::NaoParou { motivo } => {
+            tracing::error!(pid = registro.pid, motivo, "o jogo que sobrou não parou");
+        }
+    }
+    if !matches!(desfecho, DesfechoDaSobra::NaoParou { .. }) {
+        let _ = std::fs::remove_file(&arquivo);
+    }
+    SobraEncontrada { registro, desfecho }
+}
+
+/// **Acha e para os jogos que sobraram** de um app que morreu sem desligá-los:
+/// [`achar_sobras`] e então [`parar_sobra`] em cada um.
+///
+/// Bloqueia até `prazo` por órfão: chame numa thread. Cada desfecho vai ao
+/// log; a lista volta para a tela. O registro sai em todo desfecho, menos no
+/// [`DesfechoDaSobra::NaoParou`] (para a próxima abertura tentar de novo) e
+/// no de outra janela viva.
+#[must_use]
+pub fn parar_sobras(pasta: &Path, prazo: Duration) -> Vec<SobraEncontrada> {
+    achar_sobras(pasta)
+        .into_iter()
+        .map(|sobra| parar_sobra(sobra, prazo))
+        .collect()
 }

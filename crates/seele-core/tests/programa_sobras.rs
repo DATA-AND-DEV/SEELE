@@ -180,6 +180,45 @@ fn o_jogo_de_uma_janela_viva_fica() {
     matar(outra_janela);
 }
 
+/// **Sem o começo do dono, um dono vivo segue dono** (revisão da 0.19, M2): um
+/// app que não leu o próprio começo grava `dono_inicio` vazio, e a segunda
+/// instância parava o jogo da primeira, viva. Com `dono_vive` exigindo o
+/// começo não vazio, o jogo é morto e este teste reprova.
+#[test]
+fn sem_o_comeco_do_dono_um_dono_vivo_nao_perde_o_jogo() {
+    /// Mata o grupo mesmo se o teste reprovar: um laço solto segura a saída
+    /// do `cargo test` aberta para sempre.
+    struct Matar(u32);
+    impl Drop for Matar {
+        fn drop(&mut self) {
+            matar(self.0);
+        }
+    }
+    let p = pasta("dono-sem-comeco");
+    let pid = orfao(LACO);
+    let outra_janela = orfao(LACO);
+    let soltos = (Matar(pid), Matar(outra_janela));
+    let arquivo = anotar_processo(&p.0, &registro(pid, (outra_janela, String::new()))).unwrap();
+
+    let achadas = parar_sobras(&p.0, Duration::from_secs(1));
+
+    assert!(achadas.is_empty(), "{achadas:?}");
+    assert!(
+        vivo(pid),
+        "o jogo de uma janela viva foi parado por um registro sem o começo do dono"
+    );
+    assert!(arquivo.exists(), "o registro de uma janela viva sumiu");
+    drop(soltos);
+
+    // O dono que já saiu continua sendo dono morto: o órfão é parado.
+    let pid = orfao(LACO);
+    let _solto = Matar(pid);
+    anotar_processo(&p.0, &registro(pid, (dono_morto().0, String::new()))).unwrap();
+    let achadas = parar_sobras(&p.0, Duration::from_secs(5));
+    assert_eq!(achadas.len(), 1, "{achadas:?}");
+    assert!(esperar_morrer(pid), "o órfão de um dono morto segue vivo");
+}
+
 fn programa(raiz_de: &Path) -> Programa {
     let raiz = raiz_de.join("jogo");
     std::fs::create_dir_all(raiz.join("bin")).unwrap();
@@ -247,6 +286,51 @@ async fn o_programa_anota_cada_processo_enquanto_ele_vive() {
     assert!(parar_sobras(&registros, Duration::from_secs(1)).is_empty());
 
     processo.matar();
+    loop {
+        let evento = tokio::time::timeout(Duration::from_secs(20), processo.proximo())
+            .await
+            .unwrap()
+            .unwrap();
+        if matches!(evento, EventoDoProcesso::Terminou(_)) {
+            break;
+        }
+    }
+    assert!(
+        !arquivo.exists(),
+        "o registro ficou depois de o processo terminar"
+    );
+}
+
+/// **O registro existe quando `rodar` volta** (revisão da 0.19, M3): gravado
+/// numa tarefa à parte, ele aparecia dezenas de ms depois de o processo já
+/// rodar, e um app morto nesse meio deixava um órfão sem registro. Com a
+/// gravação de volta na tarefa, o arquivo ainda não existe na linha seguinte ao
+/// `rodar` e este teste reprova.
+#[tokio::test]
+async fn o_registro_existe_quando_rodar_volta() {
+    let p = pasta("sincrono");
+    let registros = p.0.join("registros");
+    let programa = programa(&p.0);
+    programa.anotar_processos_em(registros.clone(), "etiqueta-do-app".to_owned());
+    let mut processo = programa
+        .rodar(&PedidoDeExecucao {
+            comando: "bin/servidor".to_owned(),
+            argumentos: vec!["eco".to_owned()],
+            pasta: String::new(),
+        })
+        .unwrap();
+    let pid = processo.pid().unwrap();
+    let arquivo = registros.join(format!("{pid}.json"));
+    let lido = std::fs::read(&arquivo)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<RegistroDeProcesso>(&b).ok());
+    processo.matar();
+    let lido = lido.expect("o registro não existia quando `rodar` voltou");
+    assert_eq!(lido.pid, pid);
+    assert!(
+        !lido.inicio.is_empty(),
+        "o registro saiu sem o começo do processo"
+    );
     loop {
         let evento = tokio::time::timeout(Duration::from_secs(20), processo.proximo())
             .await

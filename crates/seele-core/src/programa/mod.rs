@@ -66,8 +66,8 @@ pub use rodar::{
     MAX_LINHAS_NA_FILA,
 };
 pub use sobras::{
-    anotar as anotar_processo, inicio_do_processo, parar_sobras, prazo as prazo_das_sobras,
-    DesfechoDaSobra, RegistroDeProcesso, SobraEncontrada,
+    achar_sobras, anotar as anotar_processo, inicio_do_processo, parar_sobra, parar_sobras,
+    prazo as prazo_das_sobras, DesfechoDaSobra, RegistroDeProcesso, SobraAParar, SobraEncontrada,
 };
 pub use trazer::Trazido;
 

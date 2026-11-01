@@ -18,8 +18,11 @@ pub use seele_core::programa::{
 };
 // O jogo que sobra de um app que morreu sem desligá-lo (e2e de 31/10, passo 14).
 pub use seele_core::programa::{
-    parar_sobras, prazo_das_sobras, DesfechoDaSobra, RegistroDeProcesso, SobraEncontrada,
+    achar_sobras, parar_sobra, parar_sobras, prazo_das_sobras, DesfechoDaSobra, RegistroDeProcesso,
+    SobraAParar, SobraEncontrada,
 };
+// Para as provas da casca: um registro de jogo de mentira, como o `programa` o grava.
+pub use seele_core::programa::{anotar_processo, inicio_do_processo};
 // A cópia do mundo (API 8 parte 7).
 pub use seele_core::programa::{
     CopiaOferecida, CopiaRecebida, Empacotado, PedidoDeCopia, MAX_TENTATIVAS_DA_COPIA,

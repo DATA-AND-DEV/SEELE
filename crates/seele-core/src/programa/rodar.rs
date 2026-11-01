@@ -317,40 +317,51 @@ impl Programa {
             "programa iniciou um processo"
         );
 
-        let mut processos = interior.processos.lock().map_err(|_| Recusa::NaoIniciou {
-            comando: programa.clone(),
-            motivo: "o registro de processos foi envenenado".to_owned(),
-        })?;
+        // **O registro do processo, fora da raiz** (`sobras`; e2e de 31/10,
+        // passo 14): um app que morre sem parar o jogo deixa este arquivo, e o
+        // app reaberto acha o órfão por ele.
+        //
+        // **Gravado antes de `rodar` voltar** (revisão da 0.19, M3): numa tarefa
+        // à parte, ele saía dezenas de ms depois de o processo já rodar, e um
+        // app morto nesse meio deixava um órfão que nenhuma reabertura achava.
+        // O que resta é o tempo de um `ps` entre o `spawn` e o arquivo: o
+        // começo do processo só existe depois de ele existir.
+        let anotado = interior
+            .anotacao
+            .lock()
+            .ok()
+            .and_then(|a| a.clone())
+            .zip(pid)
+            .and_then(|((pasta, etiqueta), pid)| {
+                super::sobras::anotar(&pasta, &super::sobras::registro_de(pid, &etiqueta))
+                    .map_err(|erro| {
+                        tracing::warn!(processo = numero, pid, %erro, "programa: o registro do processo não foi gravado; se o app morrer sem pará-lo, o app reaberto não o acha");
+                    })
+                    .ok()
+            });
+        let soltar_o_registro = |anotado: &Option<std::path::PathBuf>| {
+            if let Some(arquivo) = anotado {
+                let _ = std::fs::remove_file(arquivo);
+            }
+        };
+
+        let Ok(mut processos) = interior.processos.lock() else {
+            soltar_o_registro(&anotado);
+            return Err(Recusa::NaoIniciou {
+                comando: programa.clone(),
+                motivo: "o registro de processos foi envenenado".to_owned(),
+            });
+        };
         // Encerrado entre a primeira conferência e aqui: quem encerrou já
         // esvaziou o registro. O filho é solto, e `kill_on_drop` o mata.
         if interior.encerrado.load(Ordering::SeqCst) {
+            soltar_o_registro(&anotado);
             return Err(Recusa::Encerrado);
         }
         let dono = Arc::clone(interior);
         let entrada_da_vigia = Arc::clone(&entrada);
-        // **O registro do processo, fora da raiz** (`sobras`; e2e de 31/10,
-        // passo 14): um app que morre sem parar o jogo deixa este arquivo, e o
-        // app reaberto acha o órfão por ele.
-        let anotacao = interior.anotacao.lock().ok().and_then(|a| a.clone());
         let tarefa = tokio::spawn(async move {
             let grupo = grupo;
-            let anotado = match (anotacao, pid) {
-                (Some((pasta, etiqueta)), Some(pid)) => {
-                    let feito = tokio::task::spawn_blocking(move || {
-                        super::sobras::anotar(&pasta, &super::sobras::registro_de(pid, &etiqueta))
-                    })
-                    .await;
-                    match feito {
-                        Ok(Ok(arquivo)) => Some(arquivo),
-                        Ok(Err(erro)) => {
-                            tracing::warn!(processo = numero, pid, %erro, "programa: o registro do processo não foi gravado; se o app morrer sem pará-lo, o app reaberto não o acha");
-                            None
-                        }
-                        Err(_) => None,
-                    }
-                }
-                _ => None,
-            };
             let (estado, morto_a_pedido) = tokio::select! {
                 estado = filho.wait() => (estado, false),
                 () = esperar_a_ordem(&mut morte) => {
