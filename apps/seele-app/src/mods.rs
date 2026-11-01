@@ -445,7 +445,20 @@ pub(crate) fn publicar_de(
     // A estufa fica **fora** da raiz dos pacotes, e não é detalhe: a listagem
     // confere o nome da pasta contra o conteúdo, e uma pasta de obras lá dentro
     // apareceria como um pacote recusado enquanto a cópia acontece.
-    let estufa = config_dir.join(".mods-em-obras").join(&id);
+    //
+    // **E é uma por instalação, não uma por MOD** (hotfix da 0.19.1). Era
+    // `.mods-em-obras/<id>`: duas instalações do mesmo MOD ao mesmo tempo
+    // dividiam a pasta, e a segunda começava apagando a cópia da primeira. Na
+    // 0.19.0, instalando o `seele/multiplayer` do catálogo, uma saiu com
+    // `NaoCopiei("No such file or directory")` e a outra publicou um pacote
+    // com o nome de uma cópia pela metade.
+    static INSTALACOES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let estufa = config_dir.join(".mods-em-obras").join(format!(
+        "{}-{}-{}",
+        id.replace('/', "_"),
+        std::process::id(),
+        INSTALACOES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_dir_all(&estufa);
     if let Err(falha) = copiar_arvore(origem, &estufa) {
         let _ = std::fs::remove_dir_all(&estufa);
@@ -483,6 +496,11 @@ pub(crate) fn publicar_de(
     }
     if let Err(erro) = std::fs::rename(&estufa, &destino) {
         let _ = std::fs::remove_dir_all(&estufa);
+        // Outra instalação dos mesmos bytes chegou primeiro: o nome é o hash do
+        // conteúdo, então o que está lá é exatamente o que esta ia pôr.
+        if destino.join("mod.json").is_file() {
+            return Ok(Publicado { id, hash });
+        }
         return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
     }
     Ok(Publicado { id, hash })
@@ -2296,5 +2314,58 @@ mod instalar {
             "o pacote do layout antigo que não se copia foi pulado sem linha WARN com o MOD, o \
              que o disco disse e a pasta: {avisos:#?}"
         );
+    }
+
+    /// **Duas instalações do mesmo MOD ao mesmo tempo não se atropelam.**
+    ///
+    /// A estufa era `.mods-em-obras/<id>`, a mesma para toda instalação do
+    /// MOD: a segunda começava apagando a cópia da primeira no meio. Medido na
+    /// 0.19.0 com o `seele/multiplayer` do catálogo: uma saiu com
+    /// `NaoCopiei("No such file or directory")`, e a outra publicou um pacote
+    /// com o nome tirado de uma cópia pela metade — que a listagem recusa,
+    /// porque o nome não é o hash do conteúdo.
+    #[test]
+    fn duas_instalacoes_do_mesmo_mod_ao_mesmo_tempo_chegam_ao_mesmo_pacote() {
+        let raiz = pasta("corrida");
+        let origem = pacote(&raiz, "autor/corrida", None);
+        // Muitos arquivos, para a janela da cópia ser larga o bastante.
+        for i in 0..400 {
+            let sub = origem.join(format!("dados/{}", i % 20));
+            std::fs::create_dir_all(&sub).unwrap();
+            std::fs::write(sub.join(format!("{i}.txt")), vec![b'x'; 4096]).unwrap();
+        }
+        let config = raiz.join("config");
+
+        let fios: Vec<_> = (0..8)
+            .map(|_| {
+                let (config, origem) = (config.clone(), origem.clone());
+                std::thread::spawn(move || super::publicar_de(&config, &origem))
+            })
+            .collect();
+        let resultados: Vec<_> = fios.into_iter().map(|f| f.join().unwrap()).collect();
+
+        let hashes: Vec<_> = resultados
+            .iter()
+            .map(|r| r.as_ref().map(|p| p.hash.clone()))
+            .collect();
+        assert!(
+            hashes.iter().all(Result::is_ok),
+            "uma instalação simultânea falhou: {hashes:?}"
+        );
+        let pacotes: Vec<_> = std::fs::read_dir(config.join(seele_ffi::mods::PACOTES))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        let hash = hashes[0].as_ref().unwrap();
+        assert!(
+            hashes.iter().all(|h| h.as_ref().unwrap() == hash),
+            "as instalações devolveram hashes diferentes: {hashes:?}"
+        );
+        assert_eq!(
+            pacotes,
+            vec![hash.clone()],
+            "o cache não ficou com um pacote só, com o nome do conteúdo"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 }
