@@ -133,3 +133,89 @@ as de navegador com `.wasm`, `seeled` ou o Playwright do repositório não rodam
 aqui sem os artefatos do CI. Ficam fora deste lote: seguram a publicação do
 mesmo jeito, e cada uma pede a mesma decisão (bancada velha ou produto
 regredido).
+
+## 31/10/2026 — as bancadas que ainda reprovavam, com os artefatos do CI
+
+Rodadas aqui como o CI as roda: o `.wasm` da página e o do motor
+(`cargo xtask web`, o wasi-sdk conferido copiado de outro `target/`), o
+`servidor_da_bancada`, a `portaria-da-bancada`, o `eco`, o `seele-encontro`,
+o `cargo xtask pacote-web`, e o Playwright de Node que o job instala
+(`npm install --no-save playwright`: hoje a 1.64.1, Chromium 156 e WebKit 27.2).
+Cada uma decidida entre «a bancada ficou velha» e «o produto regrediu»; cada
+conserto de produto foi provado revertendo-o e vendo a bancada dele reprovar.
+
+**Bancadas velhas (o produto mudou de propósito; a promessa continua medida):**
+
+- `avatares-do-mod.cjs` — esperava «três avatares quaisquer»; na 0.19 a lista
+  de pessoas também veste o avatar, e o três passava antes de a conversa chegar.
+  Espera as três superfícies por nome.
+- `conversa-com-estado.cjs`, `tags.cjs` — o volume por pessoa saiu da linha do
+  roster para a ficha da pessoa (`6445d953`); o gesto passa pela ficha.
+- `qualidade-da-voz.cjs` — a leitura do teste de microfone é da geração que a
+  pediu desde `fec5e0c4`; a bancada passa a geração.
+- `diagnostico-de-mods.cjs` — `pessoa.acoes` mora na ficha (abre a ficha para o
+  contorno); e o retrato não aparece na conversa do computador na 0.19, então o
+  recorte é medido no corpo que um MOD desenha (`conversa.mensagem`).
+- `um-redesenho-por-quadro.cjs` — a CSP do produto só deixa Worker de `blob:`
+  (`95f670d4`); a rajada sai de um `blob:`.
+- `linhas-pelo-id.cjs` — as linhas planas da 0.19 são mais baixas: cem
+  mensagens, e não sessenta, dão a rolagem que o caso 14 prepara.
+- `aviso-antes-de-atualizar.cjs` — a limpeza de textos (`959e49ae`) tirou o
+  «Servidor 1.0/2.0» e o «WebRTC»; as frases novas são as conferidas.
+- `palco-na-troca-de-vista.cjs` — «SEM COMPARTILHAMENTO» desde a 0.18.
+- `vista-pessoal-0-17.cjs` e `proporcao-tela-cheia.cjs` — sem transmissão, o
+  palco não existe (0.19, pedido do dono): a vista pessoal exige o palco
+  escondido e o COMPARTILHAR na barra; a tela cheia é medida com uma tela na
+  sala. A saída é um ícone (o nome no `aria-label`); «Recebendo ligações.»; as
+  colunas da entrada contam-se pela borda esquerda (o CONECTAR desceu ao pé); o
+  cartão «Ligações diretas» alinha pela borda com o formulário (`display:
+  contents`), e não pelo `padding`.
+- `visual-0174.cjs --extras` — o `<select>` da cor do cargo é `aria-hidden` e
+  fora do Tab (quem escolhe são as amostras): fora do leitor e do Tab ao mesmo
+  tempo não é controle medido.
+- `tema-claro-legivel.cjs` — cada pastilha pelo piso dela (o EM ESCUTA é o
+  apagado secundário, 3:1 pelo contrato), e o `color(srgb …)` do `color-mix` é
+  lido em 0–1 (lido como `rgb()`, um fundo claro virava negro e o contraste
+  mentia).
+- `area-util.cjs` — o início do celular é a `.boot-caixa` de `#tela-boot` desde
+  a 0.18 (a `.cel-entrada[data-inicio]` sai), e a lista de servidores dela vem do
+  `conhecidos` da ponte web; o perfil é um diálogo de 560px no desenho
+  (`Perfil.dc.html`), medido como diálogo.
+- `entrada-simples.cjs` — o início do celular (o painel «Conectar»): o campo e
+  o CONECTAR à vista a 390 e a 320, e o campo aceita o link.
+- `cargos-pela-tela.cjs`, `sessao-no-navegador.cjs` — o apelido do retrato
+  leva a tag da identidade desde a 0.18 («gi#VC8C»); o volume é escolhido pelo
+  apelido inteiro.
+- `pacote_web::tests` — a Saira Condensed saiu com a pele da 0.19; o
+  versionamento é conferido na Inter.
+- `tools/bancada-do-celular.py` — a marcação da 0.19 cita os arquivos das
+  cascas em comentário; o guarda olha só o que carrega.
+
+**O produto regrediu (consertos mínimos, no desenho da 0.19):**
+
+- *O vidro tingia com o texto da região* (`tema-claro-legivel`): o compositor e
+  a tira do operador misturavam `--seele-osso` lido no próprio contêiner, que é
+  onde uma região escreve o texto. A tinta do vidro (`--seele-tinta-do-vidro`)
+  é resolvida em `#tela-sessao`, onde o tema escreve.
+- *O SAIR, o MUDO e o fone sumiam sob um tema claro* (1,09:1): o vidro
+  translúcido deixava o fundo do tema passar sob o creme do núcleo. Ganharam a
+  placa opaca do núcleo (`--nucleo-vidro`), no mesmo tom de antes sem tema.
+- *O MUDO da pastilha a 1,15:1 sob tema claro*: o laranja-claro e o azul-claro
+  da 0.19 não eram derivados. Sob tema, seguem o acento e o azul derivados.
+- *Duas barras na ligação pessoal*: a cópia da barra da chamada (`74732140`)
+  aparecia acima da do operador, que na ligação é a barra («sem cópia»). Sai na
+  vista da ligação.
+- *O modo de desenvolvedor não contornava `pessoa.acoes`*: na ficha, a caixa só
+  existia com ações. No modo, ela existe vazia — é o contorno que mostra onde o
+  MOD entra.
+- *Os avisos do celular a 32% e 26% da altura* (`area-util`): a 320px o
+  `dispensar` descia (o resumo já é de uma linha: não quebra mais), e deitado o
+  alvo de 44 `!important` passava por cima dos 32px de lá (o token vale 32 ali).
+- *«Antes de hospedar» numa coluna de 69%* com parágrafo de 100ch: o painel
+  toma a largura (como no canvas), e o parágrafo volta à medida de leitura.
+- *O foco por baixo do rodapé do perfil*: `scroll-padding-bottom` na altura do
+  rodapé preso.
+- *O teto do `.wasm` da página* (`cargo xtask pacote-web`, D-web-5): medido de
+  novo — v0.18.1 2 215 156, hoje 2 406 940 (gzip -9 664 188 → 703 545), o
+  protocolo 12 da API 8 e dos perfis. Teto a 2 455 000, ~2% sobre a medida.
+  **Pede o aval do dono**: o teto existe para esta conversa.

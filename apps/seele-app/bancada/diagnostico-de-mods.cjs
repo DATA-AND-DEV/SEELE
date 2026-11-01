@@ -942,11 +942,22 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
     ...new Set([...document.querySelectorAll(".contorno-de-ponto")].map((c) => c.dataset.ponto)),
   ]);
   for (const ponto of [
-    "canal.cabecalho", "canal.item", "compositor.ferramentas", "pessoa.acoes", "pessoa.avatar",
+    "canal.cabecalho", "canal.item", "compositor.ferramentas", "pessoa.avatar",
     "pessoa.cartao", "pessoa.identidade", "sala.acoes", "servidor.aparencia",
   ]) {
     assert.ok(vistos.includes(ponto), `o contorno de «${ponto}» não apareceu; apareceram: ${vistos.join(", ")}`);
   }
+  // **As ações sobre a pessoa moram na ficha dela** desde a 0.19 (`6445d953`:
+  // a linha abre a pessoa num modal), e o contorno as acha lá quando a ficha
+  // abre — o mesmo seletor de `CONTEINERES_DOS_PONTOS`.
+  await pagina.evaluate(() => abrirFichaDaPessoa(2));
+  await esperarQue(
+    pagina,
+    () => document.querySelector('.contorno-de-ponto[data-ponto="pessoa.acoes"]') !== null,
+    "com a ficha aberta, o contorno de «pessoa.acoes» não apareceu",
+    () => [...document.querySelectorAll(".contorno-de-ponto")].map((c) => c.dataset.ponto),
+  );
+  await pagina.evaluate(() => fecharFichaDaPessoa({ devolverOFoco: false }));
   assert.equal(
     await pagina.evaluate(() => localStorage.getItem("seele.mods.desenvolvedor")),
     "sim",
@@ -1018,6 +1029,12 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
   // janela — sobre o cabeçalho do canal —, e só o recorte da lista os
   // esconde. Sem o recorte, o contorno de um retrato que ninguém vê fica
   // desenhado por cima do nome do canal.
+  //
+  // **Na 0.19 o computador não mostra o retrato na conversa** (as linhas são
+  // «hora autor ▸ corpo», `.mensagem-avatar { display: none }`): o que fica na
+  // lista com contorno é o corpo que um MOD desenha (`conversa.mensagem`,
+  // `.mensagem-miolo`). Um MOD substitui o corpo de cada mensagem, e a prova
+  // mede esses contornos — e os de retrato, onde a casca ainda os mostra.
   const rolada = await pagina.evaluate(async () => {
     const agora = Math.floor(Date.now() / 1000);
     const longa = Array.from({ length: 80 }, (_, i) => ({
@@ -1034,6 +1051,14 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
     // A mesma conversa para quem a buscar de novo: uma busca em voo não a
     // troca pela curta no meio da medida.
     testTable.messages = longa;
+    for (const m of longa) {
+      contribuicoesDosMods.registrar({ id: "mod/a" }, instancia("mod/a"), {
+        ponto: "conversa.mensagem",
+        modo: "substituir",
+        alvo: String(m.id),
+        conteudo: [{ forma: "texto", dentro: `corpo ${m.id} desenhado pelo MOD` }],
+      });
+    }
     mensagens = longa;
     desenharMensagens();
     const lista = $("lista-mensagens");
@@ -1043,12 +1068,14 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
     }
     const area = lista.getBoundingClientRect();
     const naJanela = (r) => r.width + r.height > 0 && r.bottom > 0 && r.top < innerHeight;
-    const cortados = [...lista.querySelectorAll("[data-pessoa-do-avatar]")]
+    const cortados = [...lista.querySelectorAll("[data-pessoa-do-avatar], .mensagem-miolo")]
       .map((no) => no.getBoundingClientRect())
       .filter((r) => naJanela(r) && (r.top < area.top || r.bottom > area.bottom));
     // Os contornos de retrato na faixa da lista: os da conversa, e não os da
     // lista de pessoas, que mora em outra coluna.
-    const daLista = [...document.querySelectorAll('.contorno-de-ponto[data-ponto="pessoa.avatar"]')]
+    const daLista = [...document.querySelectorAll(
+      '.contorno-de-ponto[data-ponto="pessoa.avatar"], .contorno-de-ponto[data-ponto="conversa.mensagem"]',
+    )]
       .map((c) => {
         const left = parseFloat(c.style.left);
         const top = parseFloat(c.style.top);

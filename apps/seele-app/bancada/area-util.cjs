@@ -40,23 +40,33 @@ const TELAS = [
   { tela: "config-indice", raiz: "#tela-server", barra: null, caixa: "#tela-server .server", so_estreito: true,
     cenaPropria: { nome: "config-indice", casca: "app", passos: `abrirServer("tela-boot")` } },
   // As telas do CELULAR de verdade (a casca `celular` e a `web` com a ponte web), e não o app com a janela estreita: é o que o PWA mostra.
-  { tela: "celular-entrada", raiz: ".cel-entrada", barra: null, caixa: ".cel-entrada", so_celular: true,
+  // **O início é a caixa de `#tela-boot`** desde a 0.18 (`celular-entrada.css`: `.cel-entrada[data-inicio]` sai, e a `.boot-caixa`
+  // entra); a `.cel-entrada` fica para a «ENTRAR EM» e o conectar. Medir a seção escondida dava «a tela não ficou visível».
+  { tela: "celular-entrada", raiz: "#tela-boot", barra: null, caixa: "#tela-boot .boot-caixa", so_celular: true,
     cenaPropria: { nome: "celular-entrada", casca: "web" } },
   // A entrada do celular com servidores JÁ guardados (a lista de «conhecidos» da identidade da página, por um stub dela).
-  { tela: "celular-entrada-servidores", raiz: ".cel-entrada", barra: null, caixa: ".cel-entrada", so_celular: true,
+  { tela: "celular-entrada-servidores", raiz: "#tela-boot", barra: null, caixa: "#tela-boot .boot-caixa", so_celular: true,
     cenaPropria: { nome: "celular-entrada-servidores", casca: "web", espera: 900,
-      passos: `await CELULAR.ajudante("entrada").usar({ ler: () => null, abrir: async () => null },
-        { conhecidos: async () => [
+      // O início do celular é a caixa de `#tela-boot`, e a lista dela vem do `conhecidos` da ponte web, que lê a identidade da página
+      // (`ponte-web.js`): o stub entra pelos dois caminhos, o da `.cel-entrada` e o da ponte, e a lista à vista é a da caixa.
+      passos: `const servidores = [
           { endereco: "lia.exemplo.br:8383", nome: "Oficina da Lia", apelido: "Alex", impressao: "ab".repeat(32), versaoDoServidor: "2.0", visto: Date.now() - 86400000, podeEntrar: true },
           { endereco: "203.0.113.9:8383", nome: "Biblioteca Norte", apelido: "alex", impressao: "cd".repeat(32), versaoDoServidor: "2.0", visto: Date.now() - 600000, podeEntrar: true },
           { endereco: "198.51.100.4:8383", nome: "", apelido: "alex", impressao: "ef".repeat(32), versaoDoServidor: "1.0", visto: Date.now() - 9000000, podeEntrar: false },
-        ], entrarNoConhecido: async () => {} });` } },
+        ];
+        const daPagina = { ler: () => null, abrir: async () => null, conhecidos: async () => servidores, entrarNoConhecido: async () => {} };
+        window.identidadeDaPagina = async () => daPagina;
+        await CELULAR.ajudante("entrada").usar({ ler: () => null, abrir: async () => null },
+          { conhecidos: async () => servidores, entrarNoConhecido: async () => {} });
+        await lerOsServidoresDaEntrada();
+        if (document.querySelectorAll("#boot-servidores-lista > *").length !== servidores.length) throw new Error("a lista de servidores da entrada não chegou à caixa");` } },
   { tela: "celular-sessao", raiz: "#tela-sessao", barra: null, caixa: "#tela-sessao", so_celular: true,
     cenaPropria: { nome: "celular-sessao", casca: "celular", sessao: true } },
   { tela: "celular-ajustes", raiz: "#tela-sessao", barra: null, caixa: "#tela-sessao", so_celular: true,
     cenaPropria: { nome: "celular-ajustes", casca: "celular", sessao: true, passos: `document.getElementById("tela-sessao").dataset.aba = "ajustes";`, espera: 800 } },
   // Os diálogos e camadas que ocupam a janela, ou que têm de continuar legíveis como diálogo (cenas ESCRITAS; a primeira corrida da bancada as confere).
-  { tela: "perfil-com-agenda", raiz: "#perfil", barra: null, caixa: "#perfil .perfil-caixa", largo: true,
+  // **Um diálogo de 560px** no desenho da 0.19 (`Perfil.dc.html`: «Seu perfil» num modal), e não uma tela larga: mede-se como diálogo.
+  { tela: "perfil-com-agenda", raiz: "#perfil", barra: null, caixa: "#perfil .perfil-caixa", dialogo: true,
     cenaPropria: { nome: "perfil-com-agenda", casca: "app", espera: 900,
       resposta: {
         meu_codigo: "ALEX-EXMP-9999-ZZZZ", estado_da_sala: { estado: "NoAr", registro: { registro: "Registrado" }, firewall: null },

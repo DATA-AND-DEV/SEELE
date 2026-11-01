@@ -25,7 +25,12 @@ const engines = require('./playwright.cjs');
           desenhar(r); await abrirChamada();
           const c = $('palco-imagem'); c.hidden = false; c.width = 360; c.height = 640;
           c.getContext('2d').fillRect(0, 0, 360, 640); botaoDeCinema(true);
-        }, retrato());
+          // **Com uma tela na sala** (0.19): sem transmissão o palco não existe
+          // (`desenharPalco`, pedido do dono), e o TELA CHEIA mora nele.
+        }, retrato({
+          tela: { tela: 5, de: 2, e_minha: false, espectadores: 1, parada: null, pedido: null },
+          transmissoes: [{ tela: 5, de: 2, e_minha: false, espectadores: 1, parada: null, assistida: true }],
+        }));
         const bounds = selector => page.locator(selector).evaluate(e => {
           const r = e.getBoundingClientRect(), s = getComputedStyle(e);
           return { x: r.x, y: r.y, w: r.width, h: r.height, vw: innerWidth, vh: innerHeight, fit: s.objectFit };

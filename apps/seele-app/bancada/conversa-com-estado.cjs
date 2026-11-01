@@ -349,14 +349,21 @@ const chromium = require("./playwright.cjs").chromium();
       await new Promise((ok) => setTimeout(ok, 0));
       window.adiarVolumes = true;
       const leitura = lerVolumes();
-      const deslizante = $("lista-roster").querySelector('input.volume[data-pessoa="Lia"]');
+      // Na 0.19 o deslizante mora na ficha da pessoa (o modal que a linha
+      // abre, `6445d953`), e não mais na linha do roster.
+      abrirFichaDaPessoa(2);
+      const deslizante = $("ficha-pessoa").querySelector('input.volume[data-pessoa="Lia"]');
       deslizante.value = "150";
       deslizante.dispatchEvent(new Event("input", { bubbles: true }));
       window.soltarVolumes({});
       await leitura;
       window.adiarVolumes = false;
       window.testTable.volumes_locais = tinha;
-      return volumesLidos.get("Lia") ?? null;
+      // E a tela continua dizendo o gesto, não a leitura velha.
+      pintarVolumesDoRoster();
+      const naTela = deslizante.value;
+      fecharFichaDaPessoa({ devolverOFoco: false });
+      return naTela === "150" ? volumesLidos.get("Lia") ?? null : `na tela: ${naTela}`;
     });
     assert.equal(
       volume,

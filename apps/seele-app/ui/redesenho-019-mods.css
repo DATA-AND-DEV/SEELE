@@ -696,6 +696,12 @@
   bottom: 16px;
   z-index: 2;
 }
+/* **Na ligação pessoal a barra é a do operador** (`camada-sala.css`: «os
+   mesmos controles e handlers, sem cópia»). Esta cópia é da vista da chamada
+   do servidor, onde a coluna do operador sai de cena; na ligação ela punha um
+   segundo microfone, fone e SAIR DA SALA logo acima dos de verdade
+   (`bancada/vista-pessoal-0-17.cjs`, passo 4). */
+#tela-sessao[data-vista="ligacao"] #chamada-controles { display: none; }
 .chamada-controle {
   display: inline-flex;
   align-items: center;

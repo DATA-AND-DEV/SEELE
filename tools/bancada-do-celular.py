@@ -184,7 +184,11 @@ def montar(destino: pathlib.Path, *, celular: bool, marca: str | None) -> pathli
                 arquivo.unlink()
         texto = re.sub(r'<link rel="stylesheet" href="(?:celular|larga)-[^"]+">\n', "", pagina.read_text())
         texto = re.sub(r'<script src="(?:celular|larga)-[^"]+"></script>\n', "", texto)
-        assert "celular-" not in texto and "larga-" not in texto, "sobrou uma casca do navegador na cópia do desktop"
+        # Fora dos comentários: a marcação da 0.19 cita os arquivos das cascas em
+        # comentário («o nome vem do perfil (`larga-casca.js`)»), e o que a
+        # cópia do desktop não pode ter é uma carga — `<script>` ou `<link>`.
+        carregado = re.sub(r"<!--.*?-->", "", texto, flags=re.S)
+        assert "celular-" not in carregado and "larga-" not in carregado, "sobrou uma casca do navegador na cópia do desktop"
         pagina.write_text(texto)
 
     texto = pagina.read_text()

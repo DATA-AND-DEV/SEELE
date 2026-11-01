@@ -454,7 +454,7 @@ const invocar = (aba, comando, args) =>
     confere("3", entradaDaB.entrada?.ok === true, `a segunda entrada: ${JSON.stringify(entradaDaB.entrada)}`);
     const viu = await esperar(a.aba, async () => {
       const r = await window.__TAURI__.core.invoke("snapshot");
-      return { pronto: r.presentes.some((p) => p.nickname === "bia"), presentes: r.presentes.map((p) => p.nickname) };
+      return { pronto: r.presentes.some((p) => p.nickname.split("#")[0] === "bia"), presentes: r.presentes.map((p) => p.nickname) };
     });
     confere("3", viu.pronto, `a primeira página não viu a segunda: ${JSON.stringify(viu.presentes)}`);
     // E a casca foi avisada: o `RosterChanged` da chegada dela, que só a dobra
@@ -490,7 +490,11 @@ const invocar = (aba, comando, args) =>
     // O volume de quem fala: escolhido pelo apelido, aplicado pela alça.
     const desconhecida = await invocar(b.aba, "set_volume", { nickname: "ninguem", percent: 50 });
     confere("4", desconhecida.erro === "UnknownPerson", `o volume de quem não está: ${JSON.stringify(desconhecida)}`);
-    confere("4", (await invocar(b.aba, "set_volume", { nickname: "ANA", percent: 0 })).ok === null, "o set_volume não respondeu null");
+    // **O apelido do retrato leva a tag da identidade** desde a 0.18 («ana#6NUQ»), e é por ele que o volume é escolhido (a casca usa
+    // `pessoa.volume`, o apelido inteiro): duas «ana» na sala são duas pessoas. Em caixa alta, como antes: o casamento ignora a caixa.
+    const apelidoDaAna = (await invocar(b.aba, "snapshot", {})).ok.presentes.map((p) => p.nickname).find((n) => n.split("#")[0] === "ana");
+    confere("4", typeof apelidoDaAna === "string" && apelidoDaAna.includes("#"), `o retrato não traz a ana com a tag: ${apelidoDaAna}`);
+    confere("4", (await invocar(b.aba, "set_volume", { nickname: apelidoDaAna.toUpperCase(), percent: 0 })).ok === null, "o set_volume não respondeu null");
     const calada = await esperar(b.aba, async () => {
       const contas = await vozDaPonte.atual.contas();
       const ganhos = Object.values(contas.controles.ganhos);
@@ -498,7 +502,7 @@ const invocar = (aba, comando, args) =>
     });
     confere("4", calada.pronto, `o ganho da primeira não chegou à mistura da segunda: ${JSON.stringify(calada.ganhos)}`);
     const volumes = (await invocar(b.aba, "volumes_locais", {})).ok;
-    confere("4", JSON.stringify(volumes) === '{"ANA":0}', `os volumes locais: ${JSON.stringify(volumes)}`);
+    confere("4", JSON.stringify(volumes) === JSON.stringify({ [apelidoDaAna.toUpperCase()]: 0 }), `os volumes locais: ${JSON.stringify(volumes)}`);
 
     // ------------------------------------------------------------ 5. o servidor guardado
     const guardado = await esperar(a.aba, async (impressao) => {
@@ -528,7 +532,7 @@ const invocar = (aba, comando, args) =>
     confere("6", depois.erro === "NotConnected", `o snapshot depois do disconnect: ${JSON.stringify(depois)}`);
     const saiu = await esperar(a.aba, async () => {
       const r = await window.__TAURI__.core.invoke("snapshot");
-      return { pronto: !r.presentes.some((p) => p.nickname === "bia"), presentes: r.presentes.map((p) => p.nickname) };
+      return { pronto: !r.presentes.some((p) => p.nickname.split("#")[0] === "bia"), presentes: r.presentes.map((p) => p.nickname) };
     });
     confere("6", saiu.pronto, `a primeira página ainda vê a segunda: ${JSON.stringify(saiu.presentes)}`);
 
@@ -816,7 +820,7 @@ const invocar = (aba, comando, args) =>
     const vozDeNovo = await esperar(e.aba, async (antes) => {
       const r = await window.__TAURI__.core.invoke("snapshot");
       const decodificados = (await vozDaPonte.atual.contas()).pagina.decodificados;
-      return { pronto: r.presentes.some((p) => p.nickname === "ana") && decodificados > antes + 25, decodificados };
+      return { pronto: r.presentes.some((p) => p.nickname.split("#")[0] === "ana") && decodificados > antes + 25, decodificados };
     }, daEAntes, 20_000);
     confere("13", vozDeNovo.pronto, `a voz da primeira não voltou à outra página: ${daEAntes} → ${vozDeNovo.decodificados} decodificados`);
     // **O enlace que responde fica de pé**: três `Ping` de rotina sem `Pong`

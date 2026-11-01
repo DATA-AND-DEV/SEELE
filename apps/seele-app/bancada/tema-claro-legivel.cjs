@@ -89,7 +89,12 @@ const TEMA_CLARO = {
     await page.waitForSelector(".mensagens .corpo");
 
     const porRegiao = await page.evaluate((tema) => {
-      const rgb = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+      // `color(srgb r g b / a)`, que o `color-mix` da 0.19 devolve, vem em 0–1:
+      // lido como `rgb()`, um fundo claro virava quase negro e o contraste mentia.
+      const rgb = (s) => {
+        const n = (s.match(/[\d.]+/g) || []).map(Number);
+        return s.startsWith("color(srgb") ? n.map((v, i) => (i < 3 ? v * 255 : v)) : n;
+      };
       const lum = ([r, g, b]) =>
         [r, g, b]
           .map((c) => {
@@ -201,7 +206,12 @@ const TEMA_CLARO = {
 
     const medido = await page.evaluate((tema) => {
       aplicarOTemaDoMod("seele/estilo", tema);
-      const rgb = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+      // `color(srgb r g b / a)`, que o `color-mix` da 0.19 devolve, vem em 0–1:
+      // lido como `rgb()`, um fundo claro virava quase negro e o contraste mentia.
+      const rgb = (s) => {
+        const n = (s.match(/[\d.]+/g) || []).map(Number);
+        return s.startsWith("color(srgb") ? n.map((v, i) => (i < 3 ? v * 255 : v)) : n;
+      };
       const lum = ([r, g, b]) =>
         [r, g, b]
           .map((c) => {
@@ -220,14 +230,15 @@ const TEMA_CLARO = {
         }
         return rgb(getComputedStyle(document.body).backgroundColor).slice(0, 3);
       };
-      const medir = (seletor) => {
+      const medir = (seletor, piso = 4.5) => {
         const el = document.querySelector(seletor);
-        if (!el) return { seletor, achado: false };
+        if (!el) return { seletor, achado: false, piso };
         const cor = getComputedStyle(el).color;
         const fundo = fundoDe(el);
         return {
           seletor,
           achado: true,
+          piso,
           cor,
           fundo: `rgb(${fundo.join(",")})`,
           razao: Number(razao(rgb(cor).slice(0, 3), fundo).toFixed(2)),
@@ -241,8 +252,13 @@ const TEMA_CLARO = {
           medir(".roster .pessoa-nome"),
           // As cores de estado, derivadas do tema (tarefa 17e): a pastilha de
           // estado da pessoa (o número da sincronia saiu da linha na 0.19), e o
-          // nome de quem usa, no azul.
-          medir(".roster .pastilha"),
+          // nome de quem usa, no azul. **Cada estado pelo piso dele**: o MUDO
+          // (laranja) no de texto; o EM ESCUTA é o apagado secundário, que o
+          // contrato deriva a 3:1 (`tema.derivados-pelo-produto`), e não um
+          // estado colorido — medir só a primeira pastilha media ele, e nunca
+          // uma cor de estado.
+          medir('.roster .pastilha[data-estado="at"]'),
+          medir('.roster .pastilha[data-estado="escuta"]', 3),
           medir("#operador-nome"),
         ],
       };
@@ -252,8 +268,8 @@ const TEMA_CLARO = {
     for (const lugar of medido.lugares) {
       assert.ok(lugar.achado, `«${lugar.seletor}» não está na sessão desenhada`);
       assert.ok(
-        lugar.razao >= 4.5,
-        `«${lugar.seletor}» sai a ${lugar.razao}:1 sob o tema claro (${lugar.cor} sobre ` +
+        lugar.razao >= lugar.piso,
+        `«${lugar.seletor}» sai a ${lugar.razao}:1 (piso ${lugar.piso}) sob o tema claro (${lugar.cor} sobre ` +
           `${lugar.fundo}): a cor foi resolvida acima de #tela-sessao, onde o tema não chega`,
       );
     }

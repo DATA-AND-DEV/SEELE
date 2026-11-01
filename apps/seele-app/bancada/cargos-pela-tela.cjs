@@ -488,7 +488,8 @@ async function encerrarOServidor(s) {
     // ------------------------------------------------------------ 4. atribuir
     caso = "4-atribuir";
     const deGi = await darOuTirar(dona.aba, "gi", "Gestão", true);
-    if (!/gi PASSA A PODER: .*GERIR CARGOS/.test(deGi.previa)) throw new Error(`a prévia não diz o que a Gi ganha: ${deGi.previa}`);
+    // O apelido da prévia é o que o servidor registra, com a tag da identidade desde a 0.18 («gi#VC8C»).
+    if (!/gi(#[0-9A-Z]{4})? PASSA A PODER: .*GERIR CARGOS/.test(deGi.previa)) throw new Error(`a prévia não diz o que a Gi ganha: ${deGi.previa}`);
     await confirmar(dona.aba, deGi.caixa, true);
     const deTeo = await darOuTirar(dona.aba, "teo", "Gestão", true);
     await confirmar(dona.aba, deTeo.caixa, true);
@@ -506,7 +507,7 @@ async function encerrarOServidor(s) {
     const darGuarda = await darOuTirar(dona.aba, "gi", "Guarda", true);
     await confirmar(dona.aba, darGuarda.caixa, true);
     const tirarGuarda = await darOuTirar(dona.aba, "gi", "Guarda", false);
-    if (!/gi DEIXA DE PODER: .*BANIR/.test(tirarGuarda.previa)) throw new Error(`a prévia de tirar não diz o que a Gi perde: ${tirarGuarda.previa}`);
+    if (!/gi(#[0-9A-Z]{4})? DEIXA DE PODER: .*BANIR/.test(tirarGuarda.previa)) throw new Error(`a prévia de tirar não diz o que a Gi perde: ${tirarGuarda.previa}`);
     await confirmar(dona.aba, tirarGuarda.caixa, false);
     const idDaGi = await gi.aba.evaluate(() => desenhado.me);
     const idDaGuarda = doServidor.cargos.find((c) => c.nome === "Guarda").id;

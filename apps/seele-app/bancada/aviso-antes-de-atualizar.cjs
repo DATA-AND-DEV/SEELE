@@ -7,7 +7,7 @@
 //
 // 1. **Da 0.16 para a 0.17** (`pede_aviso: true`): INSTALAR abre o aviso e não
 //    instala nada; o aviso é um `alertdialog` com o foco no CANCELAR e diz a
-//    WebRTC, a 0.16 que não conversa, e a 0.16 guardada ao lado.
+//    a 0.16 que não conversa, e a 0.16 guardada ao lado.
 // 2. **CANCELAR** (e o Escape) diz `cancelar` ao Rust e não instala.
 // 3. **ADIAR** diz `adiar` e não instala; a procura seguinte, com `adiada`,
 //    diz que já foi adiada.
@@ -67,7 +67,11 @@ const MESMA = {
 
     // 1. O aviso abre, e nada é instalado.
     await procurar(CRUZA);
-    assert.match(await page.evaluate(() => $("atualizacao-travessia").textContent), /Servidor 1\.0 para o Servidor 2\.0/,
+    // Sem o número interno da versão do servidor desde a limpeza de textos da
+    // 0.19 (`959e49ae`, `docs/0.19/limpeza-de-textos.md`): a frase diz que a
+    // versão do servidor muda e quem deixa de conversar, pelas versões do app.
+    assert.match(await page.evaluate(() => $("atualizacao-travessia").textContent),
+      /MUDA A VERSÃO DO SERVIDOR\. Quem ficar na 0\.16\.0 não conversa com a 0\.17\.0\./,
       "o painel não diz, antes do botão, que a versão do servidor muda");
     await page.click("#atualizacao-instalar");
     assert.equal(await aberto(), true, "INSTALAR numa versão que cruza a quebra não abriu o aviso");
@@ -79,7 +83,10 @@ const MESMA = {
     }));
     assert.equal(aviso.papel, "alertdialog", "o aviso não é um alertdialog");
     assert.equal(aviso.foco, "travessia-cancelar", `o foco não nasceu no CANCELAR: ${aviso.foco}`);
-    for (const precisa of [/WebRTC/, /não conversa com a 0\.16\.0/, /0\.16\.0 continua disponível/, /CANCELAR/, /ADIAR/, /INSTALAR A 0\.17\.0/]) {
+    // Sem «WebRTC» desde a limpeza de textos da 0.19 (o jargão de rede saiu do
+    // que se lê, item B de `docs/0.19/limpeza-de-textos.md`); a 0.16 guardada
+    // ao lado continua dita, com a palavra nova.
+    for (const precisa of [/não conversa com a 0\.16\.0/, /A 0\.16\.0 continua guardada/, /CANCELAR/, /ADIAR/, /INSTALAR A 0\.17\.0/]) {
       assert.match(aviso.texto, precisa, `o aviso não diz ${precisa}: ${aviso.texto}`);
     }
 

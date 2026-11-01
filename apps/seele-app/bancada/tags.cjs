@@ -43,12 +43,17 @@ const engines=require('./playwright.cjs');
    assert.ok(projetado.pessoas.every(p=>!/#AB0[123]/.test(p.apelido)));
    // Volume mantém o alias interno distinto; o nome acessível não o revela.
    await page.evaluate(()=>{desenharChamada(testTable.snapshot);});
+   // O deslizante mora na ficha da pessoa desde a 0.19 (`6445d953`: a linha abre um modal), e não na linha do roster.
    for(const id of [2,3]) {
-    const volume=page.locator(`#lista-roster [data-pessoa-id="${id}"] input.volume`).first();
+    await page.evaluate(id=>abrirFichaDaPessoa(id),id);
+    const volume=page.locator('#ficha-pessoa input.volume').first();
     await volume.evaluate((e,id)=>{e.value=String(100+id*10);e.dispatchEvent(new Event('input',{bubbles:true}));},id);
     const chamadas=await page.evaluate(()=>testCalls.filter(c=>c.cmd==='set_volume'));
     assert.equal(chamadas.at(-1).args.nickname,'é'.repeat(13)+'#AB0'+id);
     assert.equal(chamadas.at(-1).args.percent,100+id*10);
+    // E o nome acessível do deslizante, na ficha, não revela a tag.
+    assert.ok(!/#AB0/.test(await volume.getAttribute('aria-label')),await volume.getAttribute('aria-label'));
+    await page.evaluate(()=>fecharFichaDaPessoa({devolverOFoco:false}));
    }
    await page.evaluate(()=>desenharModeracao(testTable.snapshot));
    for(const id of [2,3]) assert.ok((await page.locator(`#moderar-quem option[value="${id}"]`).textContent()).startsWith(base));

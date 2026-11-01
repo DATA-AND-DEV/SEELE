@@ -438,9 +438,20 @@ pub(crate) const PERFIL_DA_PAGINA: [&str; 4] = [
 ///   o limite continua bloqueando pacotes maiores. Não é medida de download
 ///   no aparelho nem autorização para crescimento posterior sem nova prova.
 ///
+/// - **31/10/2026 (0.19 + API 8), medido de novo antes de subir:** a v0.18.1
+///   (`ae0f2715`) dá 2 215 156 bytes no mesmo perfil, e esta linha 2 406 940
+///   (+191 784, 8,66%); gzip -9 local, 664 188 → 703 545 (+39 357, 5,9%).
+///   Nenhum crate novo no grafo: o que cresceu é o protocolo 12 que a página
+///   lê e escreve — a plataforma dos MODs, o túnel do jogador, o pedido, o
+///   aceite e o papel da máquina, os perfis oficiais (PERFIS F0/F4) —, com as
+///   variantes multiplicadas pelos quatro caminhos de serde da ponte. Brotli
+///   não medido (sem o binário nesta máquina), nem o download no aparelho. O
+///   teto deixa os mesmos ~2% sobre a medida, e não autoriza o próximo
+///   crescimento sem nova medida.
+///
 /// Passar dele é a hora de medir de novo o que chega ao celular, e não de
 /// subir o número calado.
-pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_250_000;
+pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_455_000;
 
 /// Os nomes das seções próprias (`custom`) de um `.wasm`, lidas do formato:
 /// o cabeçalho, e cada seção com o id e o tamanho em LEB128.
@@ -845,7 +856,9 @@ mod tests {
             ("voz-web.js", "voz-worklet.js"),
             ("mods-no-navegador.js", "seele_motor_web.wasm"),
             ("mods-no-navegador.js", "executor-de-mod.html"),
-            ("fontes.css", "fontes/saira-condensed-500.woff2"),
+            // A Saira Condensed saiu com a pele da 0.19 (`d4854b4e`): a
+            // Inter é a face de corpo agora.
+            ("fontes.css", "fontes/inter-400.woff2"),
         ] {
             assert!(
                 std::fs::read_to_string(pasta.join(arquivo))

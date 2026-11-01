@@ -1587,12 +1587,16 @@ async function abrir(browser, url, r) {
     //     Em todos, o foco no link de uma mensagem e a seleção no corpo de outra
     //     ficam, e cada `li` é o mesmo nó.
     const agora = Math.floor(Date.now() / 1000);
-    const CONVERSA = Array.from({ length: 60 }, (_, i) => ({
+    // **Cem, e não sessenta**: as linhas planas da 0.19 («hora autor ▸ corpo»)
+    // são mais baixas, e sessenta já não davam a rolagem de que a prova precisa
+    // (`preparo.cabe > 1600`: 1148 px com sessenta).
+    const TAMANHO_DA_CONVERSA = 100;
+    const CONVERSA = Array.from({ length: TAMANHO_DA_CONVERSA }, (_, i) => ({
       id: i + 1,
       channel: 1,
       author: (i % 3) + 2,
       author_nickname: apelido((i % 3) + 2),
-      at_seconds: agora - (60 - i) * 1200,
+      at_seconds: agora - (TAMANHO_DA_CONVERSA - i) * 1200,
       body: i === 10
         ? `mensagem ${i}: veja https://exemplo.br/pagina-${i} antes de sair`
         : i === 20
@@ -1733,24 +1737,24 @@ async function abrir(browser, url, r) {
       }];
       lista.scrollTop = 800;
       const rolagemAntes = lista.scrollTop;
-      r = await passo(() => comRevisao(comNova(testTable.messages, 61)));
+      r = await passo(() => comRevisao(comNova(testTable.messages, conversa.length + 1)));
       const nova = {
         redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
         trocadas: trocadas(r.antes),
         tirados: tirados(r.registros).length,
         postos: postos(r.registros).map((no) => no.className),
         dentroDeOutras: r.registros.filter((reg) => reg.target !== lista).length,
-        entrou: Boolean(liDe(61)),
+        entrou: Boolean(liDe(conversa.length + 1)),
         rolagem: [rolagemAntes, lista.scrollTop],
       };
 
       // d) Outra, com a conversa no fim: ela segue o fim.
       lista.scrollTop = lista.scrollHeight;
-      r = await passo(() => comRevisao(comNova(testTable.messages, 62)));
+      r = await passo(() => comRevisao(comNova(testTable.messages, conversa.length + 2)));
       const noFim = {
         redesenhou: r.redesenhou,
         trocadas: trocadas(r.antes),
-        entrou: Boolean(liDe(62)),
+        entrou: Boolean(liDe(conversa.length + 2)),
         distanciaDoFim: lista.scrollHeight - lista.scrollTop - lista.clientHeight,
       };
       lista.scrollTop = 800;
@@ -1804,7 +1808,7 @@ async function abrir(browser, url, r) {
       const nosDeModAntes = deMod();
       const donoDe = (no) => no.closest("li")?.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem;
       const donos = nosDeModAntes.map(donoDe);
-      r = await passo(() => comRevisao(comNova(testTable.messages, 63)));
+      r = await passo(() => comRevisao(comNova(testTable.messages, conversa.length + 3)));
       const removidos = r.registros.flatMap((reg) => [...reg.removedNodes]);
       const comMod = {
         redesenhou: r.redesenhou,

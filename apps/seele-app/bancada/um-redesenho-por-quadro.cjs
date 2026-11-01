@@ -105,8 +105,6 @@ const pessoa = (id) => ({
         window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
       };
     }, respostas({ snapshot: null, microfones: [], saidas: [], pacotes_no_cache: [], aceites_de_mods: [] }));
-    await page.route("**/__rajada.js", (rota) =>
-      rota.fulfill({ contentType: "text/javascript", body: RAJADA }));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
 
     const r = retrato({ presentes: Array.from({ length: PESSOAS }, (_, i) => pessoa(i + 1)) });
@@ -162,9 +160,12 @@ const pessoa = (id) => ({
     );
 
     // 2. A lista grande sob o ritmo do servidor.
-    const sobARajada = await page.evaluate(async ({ porSegundo, janela }) => {
+    const sobARajada = await page.evaluate(async ({ porSegundo, janela, codigo }) => {
       const agora = () => performance.timeOrigin + performance.now();
-      const worker = new Worker("/__rajada.js");
+      // **De um `blob:`, que é o que a CSP do produto deixa** (`worker-src
+      // blob:`, desde o executor de MODs em `95f670d4`): um Worker de
+      // `/__rajada.js` é recusado pela política, e a rajada nunca saía.
+      const worker = new Worker(URL.createObjectURL(new Blob([codigo], { type: "text/javascript" })));
       let atrasoMaximo = 0;
       let atendidos = 0;
       let enviados = 0;
@@ -182,7 +183,7 @@ const pessoa = (id) => ({
       });
       worker.terminate();
       return { falha, enviados, atendidos, atrasoMaximo, decorrido: performance.now() - inicio };
-    }, { porSegundo: PESSOAS, janela: JANELA_MS });
+    }, { porSegundo: PESSOAS, janela: JANELA_MS, codigo: RAJADA });
     assert.equal(sobARajada.falha, null, `a rajada não saiu: ${sobARajada.falha}`);
     assert.ok(
       sobARajada.enviados >= PESSOAS * (JANELA_MS / 1000) * 0.9,

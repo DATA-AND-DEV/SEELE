@@ -552,8 +552,13 @@ section:has(> #perfil-folha:not([hidden])) > :not(#perfil-folha) { display: none
 }
 #perfil .perfil-recarregar { align-self: flex-start; margin: 0; }
 
-/* O rodapé preso: CANCELAR e SALVAR; ou a pergunta de descartar. */
-#perfil .perfil-corpo { padding-bottom: 0; }
+/* O rodapé preso: CANCELAR e SALVAR; ou a pergunta de descartar.
+   **E o que rola não para debaixo dele**: o `scroll-padding-bottom` é a altura
+   do rodapé (14 + 44 + 22, e a borda), e o foco pelo Tab — e todo
+   `scrollIntoView` — deixa o controle acima dele. Sem isto, o ADICIONAR AOS
+   AMIGOS e o BLOQUEAR da agenda ganhavam o foco por baixo do SALVAR
+   (`bancada/area-util.cjs`, perfil-com-agenda). */
+#perfil .perfil-corpo { padding-bottom: 0; scroll-padding-bottom: 96px; }
 #perfil .perfil-fim {
   position: sticky;
   bottom: 0;
