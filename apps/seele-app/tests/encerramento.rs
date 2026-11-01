@@ -417,13 +417,21 @@ fn sair_sem_fechar_a_janela_tambem_se_despede() {
     };
     // A saída comum marca a despedida feita, **dentro** do braço do
     // `ExitRequested`, e o `RunEvent::Exit` que vem depois dela não despede de
-    // novo.
+    // novo. A marca mora em `ao_fechar_a_ultima_janela` (revisão da 0.19, M6),
+    // que também não despede se outra despedida já corre.
     let (Some(janela), Some(marca)) = (
         fecho.find("ExitRequested{code:None,"),
-        fecho.find(".despedida_feita.store(true,"),
+        fecho.find("ao_fechar_a_ultima_janela(&handle.state::<Session>().despedida_feita,"),
     ) else {
         panic!("a saída comum deixou de marcar a despedida feita:\n{fecho}");
     };
+    let marcar: String = corpo(&fonte, "ao_fechar_a_ultima_janela")
+        .split_whitespace()
+        .collect();
+    assert!(
+        marcar.contains("feita.swap(true,"),
+        "`ao_fechar_a_ultima_janela` deixou de marcar a despedida feita:\n{marcar}"
+    );
     assert!(
         janela < marca && marca < no_fim,
         "a marca da despedida feita saiu do braço do `ExitRequested`:\n{fecho}"

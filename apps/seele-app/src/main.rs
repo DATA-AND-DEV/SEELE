@@ -15709,30 +15709,29 @@ fn main() {
                 code: None, api, ..
             } = &evento
             {
-                api.prevent_exit();
                 // O `RunEvent::Exit` que vem depois desta saída não despede de
-                // novo (`despedir_no_fim`).
-                handle
-                    .state::<Session>()
-                    .despedida_feita
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                let saida = handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    use tauri::Manager as _;
-                    despedir_das_hospedagens(
-                        &saida.state::<Session>(),
-                        TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS,
-                    )
-                    .await;
-                    saida.exit(0);
+                // novo (`despedir_no_fim`); e uma despedida que já corre (a de
+                // um sinal) não roda outra vez (revisão da 0.19, M6).
+                api.prevent_exit();
+                ao_fechar_a_ultima_janela(&handle.state::<Session>().despedida_feita, || {
+                    let saida = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        use tauri::Manager as _;
+                        despedir_das_hospedagens(
+                            &saida.state::<Session>(),
+                            TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS,
+                        )
+                        .await;
+                        saida.exit(0);
+                    });
+                    // **As portas de jogo fecham aqui**: `despedir_se` encerra cada
+                    // sessão (`encerrar_e_esperar`), e o enlace derruba os túneis de
+                    // quem joga ao sair — a porta em `127.0.0.1` não sobrevive ao
+                    // app. Provado em `tunel_pela_ffi.rs` (conformidade),
+                    // `encerrar_a_sessao_fecha_a_porta`: a mesma chamada, com a porta
+                    // aberta de verdade.
+                    despedir_se(handle);
                 });
-                // **As portas de jogo fecham aqui**: `despedir_se` encerra cada
-                // sessão (`encerrar_e_esperar`), e o enlace derruba os túneis de
-                // quem joga ao sair — a porta em `127.0.0.1` não sobrevive ao
-                // app. Provado em `tunel_pela_ffi.rs` (conformidade),
-                // `encerrar_a_sessao_fecha_a_porta`: a mesma chamada, com a porta
-                // aberta de verdade.
-                despedir_se(handle);
             }
             // **E quem sai sem fechar a janela** (tarefa 21 da F7): o Sair do
             // Dock, o logout, um `quit` mandado de fora. O `NSApplication` manda
@@ -15794,32 +15793,69 @@ fn sair_despedindo_nos_sinais(handle: tauri::AppHandle) {
             return;
         };
         use tauri::Manager as _;
-        if handle
-            .state::<Session>()
-            .despedida_feita
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            // A despedida já corre (a janela fechou antes): o `exit` dela vem.
-            tracing::info!(sinal = nome, "sinal durante a saída: a despedida já corria");
-        } else {
-            tracing::info!(
-                sinal = nome,
-                "sinal recebido: o app se despede como ao fechar a janela, e sai"
-            );
-            let da_sessao = handle.clone();
-            let sessao = tauri::async_runtime::spawn_blocking(move || despedir_se(&da_sessao));
-            let estado = handle.state::<Session>();
-            let hospedagens = despedir_das_hospedagens(&estado, TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS);
-            // Um segundo sinal no meio sai na hora.
-            tokio::select! {
-                _ = async { let _ = tokio::join!(sessao, hospedagens); } => {}
-                segundo = chegou.recv() => {
-                    tracing::warn!(sinal = ?segundo, "segundo sinal durante a despedida: o app sai sem terminá-la");
-                }
-            }
-        }
-        handle.exit(0);
+        let estado = handle.state::<Session>();
+        let da_sessao = handle.clone();
+        despedir_no_sinal(
+            &estado.despedida_feita,
+            nome,
+            async {
+                let sessao = tauri::async_runtime::spawn_blocking(move || despedir_se(&da_sessao));
+                let hospedagens =
+                    despedir_das_hospedagens(&estado, TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS);
+                let _ = tokio::join!(sessao, hospedagens);
+            },
+            chegou.recv(),
+            || handle.exit(0),
+        )
+        .await;
     });
+}
+
+/// **A última janela fechou** (`ExitRequested { code: None }`, com a saída já
+/// segurada): a despedida só começa se nenhuma outra já corre (revisão da
+/// 0.19, M6). Um sinal que chegou antes já despede e já chama o `exit`;
+/// despedir de novo dobrava a despedida das hospedagens e a espera da saída.
+fn ao_fechar_a_ultima_janela(feita: &std::sync::atomic::AtomicBool, comecar: impl FnOnce()) {
+    if feita.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        tracing::info!("a última janela fechou com a despedida já correndo: o exit dela vem");
+        return;
+    }
+    comecar();
+}
+
+/// **A saída por um sinal**, sem o runtime: se outra despedida já corre (a
+/// janela fechou antes), **não sai** — o `exit` daquela vem quando ela acaba, e
+/// sair aqui cortava a janela de 1 s das hospedagens (revisão da 0.19, M1).
+/// Senão despede, e um segundo sinal no meio sai na hora.
+#[cfg(unix)]
+async fn despedir_no_sinal<D, S>(
+    feita: &std::sync::atomic::AtomicBool,
+    nome: &'static str,
+    despedir: D,
+    segundo_sinal: S,
+    sair: impl FnOnce(),
+) where
+    D: std::future::Future<Output = ()>,
+    S: std::future::Future<Output = Option<&'static str>>,
+{
+    if feita.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        tracing::info!(
+            sinal = nome,
+            "sinal durante a saída: a despedida já corria, e o exit dela vem"
+        );
+        return;
+    }
+    tracing::info!(
+        sinal = nome,
+        "sinal recebido: o app se despede como ao fechar a janela, e sai"
+    );
+    tokio::select! {
+        () = despedir => {}
+        segundo = segundo_sinal => {
+            tracing::warn!(sinal = ?segundo, "segundo sinal durante a despedida: o app sai sem terminá-la");
+        }
+    }
+    sair();
 }
 
 /// Avisa os MODs e o servidor de que esta máquina está saindo, antes de o
@@ -16268,6 +16304,64 @@ fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
                  ociosidade, 20 s"
             );
         }
+    }
+}
+
+/// **Uma despedida por saída** (revisão da 0.19, M1 e M6): o sinal que chega
+/// com a despedida da janela correndo não sai por cima dela, e a janela que
+/// fecha com a despedida de um sinal correndo não despede de novo.
+#[cfg(test)]
+mod uma_despedida_por_saida {
+    use super::ao_fechar_a_ultima_janela;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Sem a conferência no `ExitRequested`, a janela que fecha com a
+    /// despedida de um sinal correndo começava outra, e este teste reprova.
+    #[test]
+    fn a_janela_que_fecha_durante_a_despedida_nao_despede_de_novo() {
+        let feita = AtomicBool::new(false);
+        let mut comecou = 0;
+        ao_fechar_a_ultima_janela(&feita, || comecou += 1);
+        assert_eq!(comecou, 1, "a primeira saída não despediu");
+        assert!(feita.load(Ordering::SeqCst));
+        ao_fechar_a_ultima_janela(&feita, || comecou += 1);
+        assert_eq!(
+            comecou, 1,
+            "a saída com a despedida correndo despediu de novo"
+        );
+    }
+
+    /// Com a despedida da janela correndo, o sinal não chama o `exit` (o dela
+    /// vem). Sem o `return`, o sinal saía na hora, e este teste reprova.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn o_sinal_durante_a_despedida_da_janela_nao_sai_por_cima() {
+        let feita = AtomicBool::new(true);
+        let (mut despediu, mut saiu) = (false, false);
+        super::despedir_no_sinal(
+            &feita,
+            "SIGTERM",
+            async { despediu = true },
+            std::future::pending(),
+            || saiu = true,
+        )
+        .await;
+        assert!(!saiu, "o sinal saiu por cima da despedida que já corria");
+        assert!(!despediu, "o sinal despediu de novo");
+
+        // Sem despedida correndo, ele despede e sai.
+        let feita = AtomicBool::new(false);
+        let (mut despediu, mut saiu) = (false, false);
+        super::despedir_no_sinal(
+            &feita,
+            "SIGTERM",
+            async { despediu = true },
+            std::future::pending(),
+            || saiu = true,
+        )
+        .await;
+        assert!(despediu && saiu, "o sinal não despediu e saiu");
+        assert!(feita.load(Ordering::SeqCst));
     }
 }
 
