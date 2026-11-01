@@ -2118,9 +2118,26 @@ function linhasDasRevisoes(instalados, hospedando) {
     if (!grupos.has(mod.id)) grupos.set(mod.id, []);
     grupos.get(mod.id).push(mod);
   }
-  return [...grupos].flatMap(([id, revisoes]) => {
+  // **A lista é de opções para ESTE servidor** (hotfix da 0.19.1). Ela vem do
+  // cache da máquina, que guarda toda versão que algum servidor já usou: num
+  // servidor novo, a linha principal era a primeira da listagem — o ESTILO
+  // 1.0.1 da API 2, que este SEELE nem roda —, e o PERFIS, que agora é do
+  // produto, aparecia como opção. Medido no Mac de quem hospeda: 15 pacotes de
+  // 4 MODs, lidos como «MODs de outro servidor». O que está em uso aqui vem
+  // primeiro; depois a versão mais nova que este SEELE roda. Versão que ele
+  // não roda não é opção: fica na manutenção local, que diz por quê e apaga.
+  const emUso = (mod) => rascunho.has(chaveDoPacote(mod)) || mod.enabled;
+  // Sem a lista de APIs (a resposta do Rust ainda não chegou), não filtra
+  // por API — como `ultimaQueEsteBuildEntende`.
+  const apis = Array.isArray(apisDeModAceitas) ? apisDeModAceitas : [];
+  const roda = (mod) => !mod.refused && (apis.length === 0 || apis.includes(mod.api));
+  return [...grupos].flatMap(([id, todas]) => {
+    if (MODS_INCORPORADOS_AO_PRODUTO.has(id) && !todas.some(emUso)) return [];
+    const revisoes = todas.filter((mod) => emUso(mod) || roda(mod));
+    if (revisoes.length === 0) return [];
     const prioridade = (mod) => rascunho.has(chaveDoPacote(mod)) ? 2 : mod.enabled ? 1 : 0;
-    revisoes.sort((a, b) => prioridade(b) - prioridade(a));
+    revisoes.sort((a, b) => prioridade(b) - prioridade(a)
+      || String(b.version).localeCompare(String(a.version), undefined, { numeric: true }));
     const principal = linhaDeModInstalado(revisoes[0], hospedando);
     if (revisoes.length === 1) return [principal];
     const item = elemento("li", "mods-revisoes");
@@ -2236,18 +2253,23 @@ async function desenharMods() {
     .map(([id, hash]) => linhaDeModQueFalta(id, hash));
 
   const lista = $("lista-mods");
-  if (instalados.length === 0 && faltando.length === 0) {
+  const revisoes = linhasDasRevisoes(instalados, hospedando);
+  if (faltando.length === 0 && revisoes.length === 0) {
+    // Com pacotes no cache que não são opção (versões que este SEELE não roda,
+    // o PERFIS), a lista sai vazia — e diz onde está o resto.
     repovoar(lista, [
       elemento(
         "li",
         "server-dispositivos-vazio",
-        "NENHUM MOD INSTALADO NESTA MÁQUINA",
+        instalados.length === 0
+          ? "NENHUM MOD INSTALADO NESTA MÁQUINA"
+          : "NENHUM MOD PARA ESTE SERVIDOR AINDA: INSTALE PELO CATÁLOGO. AS VERSÕES ANTIGAS ESTÃO NA MANUTENÇÃO LOCAL.",
       ),
     ]);
   } else {
     repovoar(lista, [
       ...faltando,
-      ...linhasDasRevisoes(instalados, hospedando),
+      ...revisoes,
     ]);
   }
 
