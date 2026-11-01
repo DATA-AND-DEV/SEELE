@@ -26,6 +26,16 @@
   // A camada mora entre o topo e o que estiver embaixo (os avisos, a faixa e as
   // abas): as medidas vêm da moldura, e acompanham quando ela muda.
   function encaixar() {
+    // **Só com a sessão à vista.** Escondida, atrás do início, tudo nela mede
+    // 0: o topo dava 0 e o pé dava 0, e a camada ganhava `bottom` da altura da
+    // tela. O `resize` chega ali sem ninguém pedir (a barra de endereço que
+    // recolhe, o giro), e a engrenagem do início abria CONFIGURAÇÕES com 0 de
+    // altura. Fora da sessão a camada é a tela inteira, como no desktop.
+    if (!sessao.checkVisibility()) {
+      camada.style.removeProperty("--cel-ajustes-topo");
+      camada.style.removeProperty("--cel-ajustes-pe");
+      return;
+    }
     const topo = sessao.querySelector(".cel-topo").getBoundingClientRect().bottom;
     const pe = [...sessao.querySelectorAll(":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, #cel-avisos-faixa, .voz-celular, .cel-abas)")]
       .filter((e) => !e.hidden && getComputedStyle(e).display !== "none")

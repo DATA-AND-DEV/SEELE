@@ -615,6 +615,35 @@ def entrada(pg: Page) -> list[str]:
     return falhas
 
 
+def engrenagem_do_inicio(pg: Page) -> list[str]:
+    """A engrenagem do início abre CONFIGURAÇÕES na tela inteira, mesmo depois
+    de a janela mudar de tamanho.
+
+    Num celular a janela muda de tamanho o tempo todo, sem ninguém pedir: a
+    barra de endereço que recolhe, o giro, o teclado. O `encaixar()` de
+    `celular-ajustes.js` media a sessão a cada `resize`, inclusive escondida,
+    atrás do início: o topo dava 0, o pé dava 0, e a camada ganhava
+    `bottom: <altura da tela>` — aberta pela engrenagem, ela tinha 0 de altura
+    e a engrenagem parecia não fazer nada (0.19.0, seele.sh no celular)."""
+    falhas = []
+    tamanho = pg.viewport_size
+    # A barra de endereço recolhendo e voltando: dois `resize` de verdade.
+    pg.set_viewport_size({"width": tamanho["width"], "height": tamanho["height"] - 56})
+    pg.wait_for_timeout(100)
+    pg.set_viewport_size(tamanho)
+    pg.wait_for_timeout(100)
+    if not exigir_toque(pg, "#botao-server", falhas):
+        return falhas
+    pg.wait_for_timeout(300)
+    camada = pg.evaluate("""() => {
+        const c = document.getElementById('tela-server');
+        const r = c.getBoundingClientRect();
+        return { aberta: !c.hidden, topo: Math.round(r.top), alto: Math.round(r.height), tela: innerHeight }; }""")
+    if not camada["aberta"] or camada["topo"] > 0 or camada["alto"] < camada["tela"]:
+        falhas.append(f"a engrenagem do início não abre CONFIGURAÇÕES na tela inteira: {camada}")
+    return falhas
+
+
 def conhecidos_de_verdade(pg: Page, f: dict) -> list[str]:
     """SERVIDORES DESTE APARELHO pela identidade da F4: uma entrada que dá
     certo guarda o servidor; o nome chega pelo `lembrarONome` (no produto, o
@@ -3975,6 +4004,8 @@ CASOS: dict[str, Caso] = {
     "confirmacao": Caso(levar=confirmacao, raiz="#moderar"),
     # A entrada do celular (Tarefa 10), sobre a identidade da F4.
     "entrada": Caso(levar=entrada, entrar=False, raiz="#tela-boot"),
+    # A engrenagem do início depois de um `resize` (hotfix da 0.19.1).
+    "engrenagem-do-inicio": Caso(levar=engrenagem_do_inicio, entrar=False, medir=False),
     "entrada-desfechos": Caso(levar=entrada_desfechos, entrar=False, medir=False, http=True),
     # D-celular-3: a impressão conferida dispensa o aperto, só no celular.
     "entrada-direta": Caso(levar=entrada_direta, entrar=False, medir=False),
