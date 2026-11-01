@@ -19137,13 +19137,20 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
         cartao.contains("volumesLidos.get(pessoa.volume)"),
         "o deslizante da ficha da pessoa não nasce da leitura do Rust:\n{cartao}"
     );
-    let ficha = body_of(
-        &without_comments(&read("ui/tela-sessao.js")),
-        "$(\"ficha-pessoa\").addEventListener(\"input\", (evento) => {",
-    );
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let ficha = body_of(&sessao, "function mandarOVolumeDaFicha(evento) {");
     assert!(
-        ficha.contains("marcarVolume(") && !ficha.contains("volumesLidos.set("),
+        ficha.contains("marcarVolume(") && ficha.contains("invoke(\"set_volume\"") && !ficha.contains("volumesLidos.set("),
         "o deslizante da ficha escreve o volume do gesto sem passar por `marcarVolume`:\n{ficha}"
+    );
+    // O mesmo ouvinte no modal do computador e na folha do celular, que mora
+    // fora de `#ficha-pessoa`: sem o segundo, o deslizante do celular andava e
+    // nada chegava ao áudio (bancada do celular, `aba-pessoas`).
+    assert!(
+        sessao.contains("$(\"ficha-pessoa\").addEventListener(\"input\", mandarOVolumeDaFicha)")
+            && body_of(&sessao, "function abrirFichaDaPessoa(id) {")
+                .contains("corpo.addEventListener(\"input\", mandarOVolumeDaFicha)"),
+        "a ficha do computador e a folha do celular não mandam o volume pelo mesmo ouvinte"
     );
     // 0.19: o cartão da chamada não tem mais controle de volume; ele abre a
     // ficha da pessoa, que é o deslizante acima, lido do Rust.

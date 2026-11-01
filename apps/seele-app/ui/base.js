@@ -3283,6 +3283,13 @@ function escreverOTemaDaSessao() {
   const claros = {
     "--seele-laranja-claro": tons["--seele-laranja-fraco"] ? emVigor.get("acento") : null,
     "--seele-azul-claro": tons["--seele-padrao-azul"] ?? null,
+    // **A tinta sobre o acento cheio** (o primário, o ENVIAR, a tela escolhida
+    // na CHAMADA). A da pele da 0.19 é um negro fixo, feito para o laranja do
+    // produto: sob um tema claro, com o acento escuro, saía a 3,01:1 (bancada
+    // do celular, `chamada` e `aba-conversa` no claro). Sob tema, a tinta é o
+    // fundo do tema, que o contrato já põe a 4,5:1 do acento (`PARES_DO_TEMA`).
+    "--seele-tinta-no-acento": tons["--seele-laranja-fraco"]
+      ? (emVigor.get("fundo") ?? corDaRaiz(TEMA_DA_API.fundo)) : null,
   };
   for (const [token, valor] of Object.entries(claros)) {
     if (valor) sessao.style.setProperty(token, valor);

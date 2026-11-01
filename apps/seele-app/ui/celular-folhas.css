@@ -386,6 +386,11 @@
 
 :root[data-casca="celular"] #bateria .bateria-frase {
   order: 3;
+  /* A do desktop é `flex: 1 0 100%` (a linha inteira, numa fileira). Aqui a
+     caixa é uma coluna, e os 100% viravam a altura: a frase comia 575 px, o
+     enlace encolhia a zero, e a conta e as tentativas desciam para fora da
+     tela (bancada do celular, `queda`). */
+  flex: 0 0 auto;
   margin: 0;
   font-size: calc(14px * var(--cel-escala));
   color: var(--seele-osso-apagado);
@@ -467,9 +472,10 @@
   min-height: var(--cel-alvo);
 }
 
-/* A confirmação é uma folha de baixo, como as do celular: presa ao pé, em
-   largura cheia, com a borda vermelha de quem pergunta antes de um ato sem
-   volta, e as ações em largura cheia, com o verbo inteiro. */
+/* A confirmação é um cartão no meio da tela desde a 0.18 (e não mais a folha
+   presa ao pé da 0.16), a 12 px das bordas, com a borda vermelha de quem
+   pergunta antes de um ato sem volta, e as ações em largura cheia, com o verbo
+   inteiro. */
 :root[data-casca="celular"] #moderar.camada-moderar {
   align-items: center;
   padding: 12px;
