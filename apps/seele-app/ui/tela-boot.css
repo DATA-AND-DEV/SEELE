@@ -1997,6 +1997,8 @@
 #tela-boot:not(:has(.inicio-introducao)) .amigo-codigo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #tela-boot:not(:has(.inicio-introducao)) .amigo-nome { flex: 0 1 auto; field-sizing: content; min-width: 3ch; }
 #tela-boot .boot-amigos-campo { flex: 1 1 130px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* O campo mora no `<label>` em coluna: a base de 140px da linha (`#boot-amigos-form input`) virava altura aqui. */
+#tela-boot #boot-amigos-form .boot-amigos-campo input { flex: none; width: 100%; }
 #tela-boot .boot-amigos-campo-rotulo { font-family: var(--seele-ui); font-size: 13px; font-weight: 500; color: var(--seele-osso); }
 #tela-boot:not(:has(.inicio-introducao)) #boot-amigos-form input { flex: none; width: 100%; }
 #tela-boot:not(:has(.inicio-introducao)) #boot-amigos-form .botao-fantasma { min-height: 48px; }

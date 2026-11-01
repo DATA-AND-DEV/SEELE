@@ -3829,6 +3829,13 @@ def sala_pessoal(pg: Page) -> list[str]:
     escondidas = [i for i in ("boot-codigo", "boot-amigos") if i not in vistas]
     if escondidas:
         falhas.append(f"a casca do navegador esconde o código pessoal ou a agenda, que ele tem desde a 0.17.4: {escondidas}")
+    # **Os campos da agenda têm a altura de um campo** (0.19): cada `input`
+    # mora num `<label>` em coluna (`.boot-amigos-campo`), e a regra da linha,
+    # `flex: 1 1 140px`, virava altura ali: 140 px por campo.
+    campos = pg.evaluate("""() => ['boot-amigo-codigo', 'boot-amigo-nome'].map((id) =>
+        Math.round(document.getElementById(id)?.getBoundingClientRect().height ?? 0))""")
+    if any(not 44 <= alto <= 64 for alto in campos):
+        falhas.append(f"os campos da agenda não têm a altura de um campo (44 a 64): {campos}")
     diz = pg.evaluate("[...document.querySelectorAll('.cel-fora-grupo, .larga-fora-grupo')].some((g) => g.textContent.includes('RECEBER LIGAÇÕES PELO SEU CÓDIGO'))")
     if not diz:
         falhas.append("o SÓ NO APP DO SEELE não diz que receber ligações pelo código é do app")
