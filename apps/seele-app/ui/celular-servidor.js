@@ -38,7 +38,7 @@
   sessao.append(topo);
 
   function desenharTopo() {
-    selo.textContent = subDoDesktop.textContent;
+    selo.textContent = subDoDesktop.dataset.frase ?? subDoDesktop.textContent;
     selo.dataset.padrao = subDoDesktop.dataset.padrao ?? "";
     // O título é da aba. CONVERSA e PESSOAS ainda trazem o cabeçalho do
     // desktop, e um segundo título ali seria o mesmo dito duas vezes.

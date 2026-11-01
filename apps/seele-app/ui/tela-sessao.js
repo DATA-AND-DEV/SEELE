@@ -632,6 +632,7 @@ function esvaziarBarraDoServidor() {
   const sub = $("barra-servidor-sub");
   sub.textContent = "";
   delete sub.dataset.padrao;
+  delete sub.dataset.frase;
 }
 
 function desenharTopo(snapshot) {
@@ -651,11 +652,18 @@ function desenharTopo(snapshot) {
   // são o aviso.
   const sub = $("barra-servidor-sub");
   sub.dataset.padrao = snapshot.link_state;
-  const aviso = {
+  const frase = {
     Offline: "SEM CONEXÃO",
     Unverified: "CONEXÃO NÃO VERIFICADA",
+    Verified: "CONEXÃO SEGURA",
   }[snapshot.link_state];
-  sub.textContent = aviso ? `SERVIDOR · ${aviso}` : "SERVIDOR";
+  sub.textContent = frase && snapshot.link_state !== "Verified" ? `SERVIDOR · ${frase}` : "SERVIDOR";
+  // **A frase inteira continua escrita, para o celular** (0.19.2): o selo do
+  // topo do celular (`cel-selo-seguro`, um item do núcleo de confiança) a lia
+  // do texto desta barra, e com o «CONEXÃO SEGURA» fora do desktop ele passou a
+  // dizer só «SERVIDOR» — medido pela bancada do celular. O desktop cala o
+  // estado bom; o selo do celular continua dizendo os três.
+  sub.dataset.frase = frase ? `SERVIDOR · ${frase}` : "SERVIDOR";
 
   const nome = snapshot.server;
   const rotulo = $("barra-servidor-nome");
