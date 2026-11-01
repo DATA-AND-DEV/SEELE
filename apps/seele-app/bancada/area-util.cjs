@@ -192,7 +192,10 @@ function medirNaPagina({ raiz, barra, caixa }) {
   }
   // os controles
   const controles = [...tela.querySelectorAll("button, input:not([type=hidden]), select, textarea, summary, a[href], [tabindex='0']")]
-    .filter(visivel).filter((e) => !e.disabled);
+    .filter(visivel).filter((e) => !e.disabled)
+    // Fora do leitor e do Tab ao mesmo tempo não é controle de ninguém: o `<select>` da cor do cargo (0.19) segue como fonte da
+    // verdade, escondido, e quem escolhe são as amostras (rádios nativos), que são medidas (o mesmo critério da `visual-0174.cjs`).
+    .filter((e) => !(e.closest('[aria-hidden="true"]') && e.tabIndex < 0));
   // a rolagem vertical que existe: a maior com sobra
   const roladores = [tela, ...tela.querySelectorAll("*")].filter((e) => {
     const o = getComputedStyle(e).overflowY;

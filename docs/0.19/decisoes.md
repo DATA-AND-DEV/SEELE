@@ -260,3 +260,18 @@ conserto de produto foi provado revertendo-o e vendo a bancada dele reprovar.
   (e a `pessoal-codigo-web.cjs` passa na 1.62.1 e não na 1.64.1). Na 1.62.1 as
   três passam. Subir a versão pede a rodada inteira medida, e uma provocação
   nova para o `messageerror`.
+- **`area-util.cjs` no WebKit** — o `<select>` escondido da cor do cargo
+  (`aria-hidden`, fora do Tab) não é medido como controle, o mesmo critério da
+  `visual-0174.cjs`; as amostras, que são o controle, são.
+
+**Ainda vermelho (31/10):**
+
+- `sessao-no-navegador.cjs`, caso 14: o TOCAR do MOD de referência volta a
+  TOCAR — o som carrega (`midia_do_mod`, `som_do_mod` uma vez cada, figura
+  `pronta`), mas o MOD recebe um estado de mídia que não é `tocando` e se
+  desfaz. Não reproduzido até a causa; nem bancada velha nem conserto decidido.
+- `tools/bancada-do-celular.py`: 329 medidas reprovam (aba de pessoas, chamada,
+  faixa de voz, texto maior, entrada…), a bancada medindo a casca do celular de
+  antes da 0.19. Pede a mesma triagem, tela por tela.
+- `chamada-web.cjs` não roda nesta máquina: a porta fixa 19885 está presa por
+  um `seele-encontro` órfão de outra árvore (das 05:55). Numa porta livre, passa.
