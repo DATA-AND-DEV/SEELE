@@ -3494,7 +3494,13 @@ function abrirFichaDaPessoa(id) {
   if (folha) {
     folha({ id: "cel-folha-pessoa", titulo: exibido, conteudo: nos });
     const corpo = document.querySelector("#cel-folha-pessoa");
-    if (corpo) ligarAcoesDeApresentacao(corpo);
+    if (corpo) {
+      ligarAcoesDeApresentacao(corpo);
+      // A folha do celular mora fora de `#ficha-pessoa`, e o ouvinte do
+      // volume de lá não a ouvia: o deslizante andava e nada chegava ao
+      // áudio (bancada do celular, `aba-pessoas`).
+      corpo.addEventListener("input", mandarOVolumeDaFicha);
+    }
     return;
   }
   const camada = $("ficha-pessoa");
@@ -3698,7 +3704,17 @@ function redesenharAsEntradasDeMod() {
 // ---------------------------------------------------------------- telemetria
 
 function desenharTelemetria(snapshot) {
-  if (!$("tel-rtt")) return;
+  // **Sem o rodapé** (o celular o tira desde a 0.18, `celular-voz.js`), o que
+  // não é medida continua: a faixa da queda (`desenharEnlace`) e o aviso ao
+  // MOD que contribui para o `status.barra`, que a casca não tem. Antes, o
+  // `return` daqui calava os dois no celular: a conexão caía sem a faixa, e o
+  // MOD nunca ouvia `regiao-ausente` (bancada do celular, `queda` e
+  // `regioes-do-celular`).
+  if (!$("tel-rtt")) {
+    regiaoAusente("status.barra");
+    desenharEnlace(snapshot.link);
+    return;
+  }
   aplicarARegiao("status.barra", $("telemetria-mods"));
   const tel = snapshot.telemetry;
 
@@ -5822,6 +5838,17 @@ $("lista-roster").addEventListener("input", (evento) => {
   });
 });
 
+/** O volume da ficha (no modal do computador e na folha do celular). */
+function mandarOVolumeDaFicha(evento) {
+  const alvo = evento.target;
+  if (!alvo.classList.contains("volume")) return;
+  const percent = Number(alvo.value);
+  marcarVolume(alvo.dataset.pessoa, percent);
+  invoke("set_volume", { nickname: alvo.dataset.pessoa, percent }).catch((falha) => {
+    console.warn("set_volume:", falha);
+  });
+}
+
 // **A ficha da pessoa** (0.19): o toque na linha — ou Enter/Espaço no alvo
 // dela — abre o modal. Por delegação, na lista inteira: as linhas são
 // reconciliadas a cada quadro, e o alvo é o botão do produto
@@ -5850,15 +5877,7 @@ if ($("ficha-pessoa")) {
   });
   // O volume, pelo mesmo caminho do deslizante de antes: `marcarVolume` e o
   // comando, e uma leitura de antes do gesto não o desfaz.
-  $("ficha-pessoa").addEventListener("input", (evento) => {
-    const alvo = evento.target;
-    if (!alvo.classList.contains("volume")) return;
-    const percent = Number(alvo.value);
-    marcarVolume(alvo.dataset.pessoa, percent);
-    invoke("set_volume", { nickname: alvo.dataset.pessoa, percent }).catch((falha) => {
-      console.warn("set_volume:", falha);
-    });
-  });
+  $("ficha-pessoa").addEventListener("input", mandarOVolumeDaFicha);
   ligarAcoesDeApresentacao($("ficha-pessoa"));
   // Esc fecha, e o Tab não sai da caixa (`aria-modal`).
   window.addEventListener("keydown", (evento) => {

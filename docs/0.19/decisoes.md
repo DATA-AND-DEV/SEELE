@@ -268,11 +268,11 @@ conserto de produto foi provado revertendo-o e vendo a bancada dele reprovar.
 
 - ~~`sessao-no-navegador.cjs`, caso 14~~ — resolvido: era a bancada. Ver
   «o caso 14 da sessão no navegador» abaixo.
-- `tools/bancada-do-celular.py`: 329 medidas reprovam (aba de pessoas, chamada,
-  faixa de voz, texto maior, entrada…), a bancada medindo a casca do celular de
-  antes da 0.19. Pede a mesma triagem, tela por tela.
-- `chamada-web.cjs` não roda nesta máquina: a porta fixa 19885 está presa por
-  um `seele-encontro` órfão de outra árvore (das 05:55). Numa porta livre, passa.
+- ~~`tools/bancada-do-celular.py`: 329 medidas reprovam~~ — triada abaixo
+  («a bancada do celular, tela por tela»).
+- ~~`chamada-web.cjs` não roda nesta máquina~~ — o órfão era da própria bancada:
+  um erro no servidor estático matava o node sem passar pelo `finally`, e o
+  `seele-encontro` ficava com a 19885. Agora ele morre em qualquer saída (0615e327).
 
 ## 31/10/2026 — o caso 14 da sessão no navegador: era a bancada (D-tocar)
 
@@ -330,3 +330,126 @@ conferência velha passava com um produto que nunca dissesse `terminou`.
 - sem os bytes do `som_do_mod` (o `carregarSom` lançando): reprova,
   `som: 0`, figura `falhou`;
 - com o produto intacto: três rodadas verdes seguidas.
+
+## 31/10/2026 — a bancada do celular, tela por tela
+
+`tools/bancada-do-celular.py` (CI, job `bancadas`, e o `publicar.sh`) reprovava
+249 medidas nesta máquina (Playwright de Python 1.62.0, Chromium). A bancada não
+rodava em lugar nenhum desde a 0.17, então parte do que ela afirmava já era da
+0.17 e da 0.18. Cada grupo decidido entre «a bancada ficou velha» e «o produto
+regrediu»; cada conserto de produto foi provado revertendo-o e vendo a bancada
+reprovar (a medida que volta está entre parênteses). Nenhum teto foi mexido.
+
+**O produto regrediu (consertos mínimos):**
+
+- *A faixa de voz na barra de gestos durante a CHAMADA* (`chamada`, `deitado`).
+  A fileira da telemetria que tomava o lugar das abas saiu na 0.18, e a faixa
+  desceu ao pé, em cima da barra de gestos (fim 835 a 844×34). Com a CHAMADA
+  aberta, a faixa leva a área segura de baixo na margem. (Revertido: «na barra
+  de gestos: … fim=835».)
+- *O aviso do `persist()` vazio comia 8 px* (`chamada`, `ajustes-medida`,
+  `persistencia`): a margem dos avisos da 0.19 valia também para a região
+  vazia. Vazia, sem margem. (Revertido: «a CHAMADA não cobre a sessão entre o
+  topo e a faixa».)
+- *A tinta sobre o acento cheio a 3,01:1 sob tema claro* (`chamada`,
+  `aba-conversa` no claro: o ENVIAR e o «NÃO VER»). A pele da 0.19 usa um
+  negro fixo (`--seele-tinta-no-acento`) sobre o acento; sob tema, a tinta é o
+  fundo do tema, que o contrato (`PARES_DO_TEMA`) já põe a 4,5:1 do acento
+  (`escreverOTemaDaSessao`, junto dos claros). Sem tema nada muda. (Revertido:
+  «#botao-enviar 3.01:1».)
+- *«juli fala · sinal 92» a 2,72:1 sob o claro* (`faixa-de-voz`,
+  `aba-servidor`, `aba-pessoas`, `chamada`): a pele trocou o apagado do tema
+  pelo segundo apagado (3:1 pelo contrato) num texto que se lê. Volta ao
+  `--seele-rotulo-painel`. (Revertido: «voz-sala-quem 2.72:1».)
+- *O «negada» do `persist()` cortado numa linha e dado por dito*
+  (`persistencia`): a faixa «N AVISOS», que abria o texto inteiro, saiu na
+  0.18, e o resumo de uma linha ficou para sempre — o `IntersectionObserver`
+  gravava `seele.persistencia-dita` com a frase cortada. O aviso da
+  persistência não é mais resumido (o do veredito continua, com o «ver
+  inteira»). (Revertido: «'inteiro': False».)
+- *Deitado, o palco com o respiro do cartão* (`deitado`): 4 px 16 px em volta
+  da tela que deveria tomar o espaço acima da faixa. Sem margem ali, como o
+  palco da ligação pessoal abaixo de 400 px. (Revertido: «palco [4, 282, 812]».)
+- *O volume da folha da pessoa não chegava ao áudio* (`aba-pessoas`): a ficha
+  da 0.19 no celular mora em `#cel-folha-pessoa`, fora de `#ficha-pessoa`, onde
+  o ouvinte do volume estava; o deslizante andava e nenhum `set_volume` saía.
+  Um ouvinte só (`mandarOVolumeDaFicha`) nos dois, e o guarda de `frontend.rs`
+  passou a exigir os dois. (Revertido: «set_volume []».)
+- *A queda nunca aparecia no celular, e o `status.barra` nunca avisava*
+  (`queda`, `regioes-do-celular`): o celular tira o rodapé da telemetria desde
+  a 0.18, e `desenharTelemetria` retornava logo sem ele — levando junto o
+  `desenharEnlace` (a página «Conexão perdida») e o `regiaoAusente` do
+  `status.barra`. Sem o rodapé, os dois continuam. (Revertido: «a queda não é a
+  página no alto: [0, 0]» e «não recebeu regiao-ausente».)
+- *A página da queda empurrava a conta para fora da tela* (`queda`): o
+  `flex: 1 0 100%` do desktop, numa coluna, fazia a frase ter 575 px, o enlace
+  zero, e a conta (y 836) e as tentativas (y 967) sob a faixa. (Revertido:
+  «conta não fica à vista acima da faixa».)
+- *Com o texto do sistema a 2, quatro coisas passavam da tela ou da caixa*
+  (`texto-maior`): as iniciais do cartão da CHAMADA (46 > 44; ganham o teto de
+  22 px que o `TEXTO_COM_TETO` já declarava), «SALA DE VOZ · TÓQUIO-3» (quebra),
+  ABRIR COMO COMPUTADOR e INSTALAR MOD DE UMA PASTA (quebram, até a largura de
+  quem os contém). (Cada um revertido reprova a medida dele.)
+
+**Bancadas velhas (o produto mudou de propósito; a promessa continua medida):**
+
+- *A telemetria da CHAMADA e a seção CONEXÃO* saíram na 0.18 (`5dfe9c59`). A
+  CHAMADA confere que as abas saem, o MUDO fica na mesma coluna e tamanho, e a
+  faixa não desce além do pé das abas; AJUSTES sem CONEXÃO, com CARGOS E
+  PERMISSÕES (E6 da 0.17) na lista; «VOZ» virou «AO FALAR» (`49758837`).
+- *O aviso de fone* não existe no celular desde a 0.18 (frase vazia): confere-se
+  que não acende. *O «concedida» do `persist()`* é calado pelo celular desde a
+  0.18 (`faixaDeAvisos`): confere-se que não aparece nem fica dito.
+- *O respiro de 8 px da 0.19* (`120ea48c`) entre os avisos e a faixa, e entre o
+  compositor e o teclado: «colado» é colado pela margem.
+- *A pessoa* (`6445d953`, `352bed15`): uma linha por pessoa, sem o sinal por
+  pessoa; a folha é a ficha da 0.19 (`.ficha-volume-valor`,
+  `.ficha-moderar-fora` com a frase do produto); o volume confere o
+  `set_volume`, e não o deslizante da linha, que saiu. Os detalhes de MOD na
+  folha são irmãos da linha do produto, e a ficha é montada ao abrir (no
+  computador também): o que chega com ela aberta aparece na abertura seguinte,
+  nunca em duplicata nem fora dela.
+- *O palco só existe com alguém transmitindo* (0.19): o `deitado` põe a tela de
+  juli na sala. *A queda é uma página* (`Cel-reconectando.dc`, `49758837`): o
+  título, a conta e as tentativas à vista acima da faixa, e a faixa com o MUDO.
+  *A confirmação é um cartão no meio* a 12 px das bordas desde a 0.18.
+- *A coluna de 480 px* saiu na 0.17 (`fec5e0c4`, «a coluna estreita centrada
+  que o dono recusou»; `--cel-coluna` não existe mais): `tela-larga` exige a
+  superfície inteira e as abas como grupo de até 160 por alvo, no meio;
+  `lados-das-superficies` mede as áreas laterais sem teto.
+- *A entrada:* o início do celular é a `.boot-caixa` desde a 0.18 (o mesmo de
+  `area-util` e `entrada-simples`): o campo do link e o CONECTAR à vista, com
+  44. Numa aba também se entra (`8284b642`). O analisador não tem mais o
+  `SemHashesDoNavegador`, e o estado `servidor-0.15` saiu do caso. Os
+  servidores guardados são conferidos pela identidade (`conhecidos`,
+  `lembrarONome`, `entrarNoConhecido` sem convite); o «LINK VENCIDO» de um
+  guardado saiu na 0.17. A casca larga: o `.boot-proposito` saiu na 0.18.
+- *A sala pessoal no navegador* existe desde a 0.17.4 (`5dfe9c59`: «Código
+  pessoal e agenda também estão disponíveis no navegador»): o caso agora
+  reprova se a casca voltar a esconder o código ou a agenda.
+- *A capa no cartão da CHAMADA*: o cartão simples da 0.19 põe o nome sobre o
+  véu da capa, e não numa placa. O contraste é medido através do véu (o
+  `::after` da `.capa-camada`, composto sobre a capa), com o piso de 4,5:1 sob a
+  branca (6,34), a preta e a da tinta; o «contraste igual com qualquer capa»
+  era da placa, que saiu.
+- *Duas medidas da bancada ficaram mais exatas, e não mais frouxas*: «texto
+  passa da caixa» exige que um nó (texto ou filho) passe da caixa de conteúdo —
+  o selo de quem fala, um `::after` posto 5 px fora do avatar de propósito,
+  não é texto (antes: «RA 49>44»); e uma caixa só do leitor de tela
+  (`clip-path: inset(50%)`, o rótulo do compositor) não é «à vista». As duas
+  continuam pegando o transbordo de verdade: as reversões do `texto-maior`
+  acima reprovam por elas.
+
+**O G3 oscilava, e não por causa da 0.19** (o desktop igual pixel a pixel com
+os arquivos das cascas): no Chromium, duas rodadas em cinco diferiam em 33
+pixels, de 1 a 4 níveis, nas bordas do minimizar e do maximizar da barra da
+janela — igual na base `d79ef846`, com as duas cópias de layout idêntico. A
+barra ainda assentava depois do `entrar`; com 1,5 s a mais antes da foto, oito
+rodadas em oito iguais. Nenhuma máscara nova nem tolerância: continua pixel a
+pixel.
+
+**Fica para o dono:** a ficha da pessoa (computador e celular) é montada ao
+abrir, e um `pessoa.detalhes` que chega com ela aberta só aparece na próxima
+abertura; e o `celular.rs` reprova na base (`d79ef846`) em
+`o_texto_do_sistema_alcanca_todo_tamanho_do_desktop` («regere com
+SEELE_REGERAR_TEXTO=1»), fora desta triagem.

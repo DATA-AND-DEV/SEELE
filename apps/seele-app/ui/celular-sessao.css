@@ -149,8 +149,11 @@
 
 /* O resumo: uma linha do texto do aviso, e o `dispensar` ao lado. A impressão digital inteira não vai ao painel principal: ela está no
    texto que o aviso carrega, e só aparece quando a faixa «N AVISOS» está aberta. */
-:root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) > #veredito > .veredito-texto,
-:root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) > #cel-aviso-persistencia > .veredito-texto {
+/* O da resposta do `persist()` não: a faixa que abria o texto inteiro saiu na
+   0.18 (`5dfe9c59`), e o resumo de uma linha virava o texto inteiro para
+   sempre. O «negada» é dito (`seele.persistencia-dita`) quando aparece, e
+   cortado ele era dito sem ter sido lido (bancada do celular, `persistencia`). */
+:root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) > #veredito > .veredito-texto {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
@@ -171,6 +174,9 @@
 :root[data-casca="celular"] #tela-sessao > #cel-aviso-persistencia:empty {
   padding: 0;
   border: 0;
+  /* E sem a margem dos avisos: vazia, ela deixava 8 px entre o painel e a
+     faixa (bancada do celular, `chamada` e `persistencia`). */
+  margin: 0;
 }
 
 :root[data-casca="celular"] #tela-sessao > .cel-abas {
@@ -332,7 +338,10 @@
 
 :root[data-casca="celular"] .voz-sala-quem {
   font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
-  color: var(--seele-osso-apagado);
+  /* O apagado do tema, e não o segundo apagado (`--seele-osso-apagado`, 3:1
+     pelo contrato): quem fala e o sinal são texto que se lê, e sob o claro o
+     segundo saía a 2,72:1 sobre a faixa (bancada do celular). */
+  color: var(--seele-rotulo-painel);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1427,11 +1436,18 @@
 /* ------------------------------------------------------------- a CHAMADA
  *
  * Por cima da sessão, entre o topo (que segura o selo da conexão) e a faixa de
- * voz, que fica onde estava. A fileira da telemetria entra no lugar das abas,
- * com a mesma altura, e é por isso que o MUDO não se mexe. */
+ * voz. As abas saem, e a faixa desce ao pé (a fileira da telemetria que
+ * entrava no lugar delas saiu na 0.18). */
 
 :root[data-casca="celular"] #tela-sessao[data-chamada] > .cel-abas {
   display: none;
+}
+
+/* Sem as abas embaixo (e sem a fileira da telemetria, que saiu na 0.18), a
+   faixa é a última coisa da coluna: ela fica acima da barra de gestos, e não
+   em cima dela (bancada do celular, `chamada` e `deitado`). */
+:root[data-casca="celular"] #tela-sessao[data-chamada] > .voz-celular {
+  margin-bottom: calc(8px + var(--cel-seguro-pe));
 }
 
 :root[data-casca="celular"] #vista-chamada {
@@ -1452,6 +1468,11 @@
 /* A linha de cima é o rótulo; o nome da sala é o título (Cel-chamada.dc). */
 :root[data-casca="celular"] #vista-chamada .chamada-placa {
   flex: 1 0 100%;
+  min-width: 0;
+  /* Quebra com o texto do sistema grande: a 2, «SALA DE VOZ · TÓQUIO-3» numa
+     linha só passava da tela (bancada do celular, `texto-maior`). */
+  white-space: normal;
+  overflow-wrap: anywhere;
   padding: 0;
   font-family: var(--seele-mono);
   font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
@@ -1580,7 +1601,9 @@
   width: 44px;
   height: 44px;
   border-radius: 14px;
-  font-size: calc(18px * var(--cel-escala));
+  /* As iniciais são marca numa caixa fixa de 44 (`TEXTO_COM_TETO` da bancada
+     do celular): com teto, ou a 2 o «RA» passava da caixa (46 > 44). */
+  font-size: min(calc(18px * var(--cel-escala)), 22px);
 }
 
 /* O cartão simples (0.19): o cartão inteiro é o botão que abre a folha da
@@ -2027,6 +2050,10 @@
   :root[data-casca="celular"] #tela-sessao[data-chamada] #vista-chamada > #palco[data-transmitindo="sim"] {
     flex: 1 1 auto;
     min-height: 0;
+    /* Sem o respiro do cartão da 0.19 (4px 16px): deitado, a tela é o espaço
+       inteiro acima da faixa (bancada do celular, `deitado`), como o palco da
+       ligação pessoal abaixo de 400px de altura. */
+    margin: 0;
   }
 }
 
@@ -2275,3 +2302,16 @@
 :root[data-casca="celular"] #lista-roster .pessoa > .pessoa-abrir::after { content: none; }
 /* A conta de bytes do compositor é da fileira larga do desktop. */
 :root[data-casca="celular"] .compor-bytes { display: none; }
+
+/* ---- com o texto do sistema grande, os botões de largura cheia quebram ----
+ *
+ * O `.botao` do desktop não quebra a linha. Numa coluna de 390 com o texto a 2,
+ * «ABRIR COMO COMPUTADOR» e «INSTALAR MOD DE UMA PASTA» passavam da caixa ou da
+ * tela (bancada do celular, `texto-maior`): no celular, eles quebram e não
+ * passam da largura de quem os contém. */
+:root[data-casca="celular"] .cel-folha-acoes > button,
+:root[data-casca="celular"] #painel-mods #mods-instalar {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
