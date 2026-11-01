@@ -24,11 +24,16 @@ minisign-verify = "0.2.5"
 # A redução de uma imagem de MOD ao uso (`reducao`), só com a feature: o
 # desktop e o navegador a ligam, e o resto do grafo não compila o `image`. A
 # mesma versão e as mesmas features do `seele-app`.
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"], optional = true }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "color_quant"], optional = true }
+# O ícone de 8 KiB em paleta (0.19.1): a paleta pelo `color_quant` (o mesmo que
+# o `image` usa no GIF) e o PNG indexado pelo `png`, que o `image` não escreve.
+# As duas já estavam no grafo, nas mesmas versões, por baixo do `image`.
+color_quant = { version = "1.1.0", optional = true }
+png = { version = "0.17.16", optional = true }
 
 [features]
 # A redução de imagem (`reducao`), com o `image`.
-reducao = ["dep:image"]
+reducao = ["dep:image", "dep:color_quant", "dep:png"]
 
 [lints]
 workspace = true

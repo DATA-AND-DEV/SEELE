@@ -5452,8 +5452,10 @@ dependencies = [
 name = "seele-sessao"
 version = "0.0.0"
 dependencies = [
+ "color_quant",
  "image",
  "minisign-verify",
+ "png 0.17.16",
  "seele-proto",
  "serde",
  "serde_json",

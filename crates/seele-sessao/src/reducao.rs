@@ -160,39 +160,138 @@ const DEGRAUS_DO_ICONE: [(u32, u8); 8] = [
 /// Um GIF ou WebP animado entra pelo primeiro quadro (`load_from_memory`), e a
 /// proporção é mantida: uma foto retangular espremida num quadrado fica com a
 /// cara achatada.
+///
+/// # A paleta vem antes dos degraus (0.19.1)
+///
+/// Cortar bits por canal fazia de uma foto um cartaz: no ícone de quem
+/// hospeda, medido, 128 × 127 em 30 cores, com franjas rosa e verdes num rosto
+/// cinza — cada canal arredondava para um degrau diferente. Um PNG indexado,
+/// com uma paleta tirada da própria imagem e o erro espalhado
+/// (Floyd–Steinberg), guarda a mesma foto em 128 px e 256 cores com 6,9 KiB.
+/// Depois do tamanho cheio com as cores todas (que já cabia atravessa sem
+/// perder nada), a paleta desce de [`LADOS_DA_PALETA`] por [`CORES_DA_PALETA`];
+/// os degraus de [`DEGRAUS_DO_ICONE`] ficam como último recurso, e são os
+/// mesmos que o canvas do navegador ainda usa (`REGRAS_DO_ICONE`).
 #[must_use]
 pub fn icone_do_perfil(escolhida: &[u8]) -> Option<Vec<u8>> {
     let imagem = image::load_from_memory(escolhida).ok()?;
-    for (lado, bits) in DEGRAUS_DO_ICONE {
-        let mut quadro = if imagem.width() > lado || imagem.height() > lado {
-            // `Lanczos3` e não `Nearest`: reduzir foto sem filtro é o que
-            // produz aquele serrilhado que parece defeito da tela.
-            imagem.resize(lado, lado, FilterType::Lanczos3).to_rgba8()
-        } else {
-            imagem.to_rgba8()
-        };
+    let cheio = png_rgba(&reduzido(&imagem, LADO_DO_ICONE))?;
+    if cheio.len() <= TETO_DO_ICONE {
+        return Some(cheio);
+    }
+    // Cor antes de tamanho: um avatar aparece com 30 a 90 px, e 128 px em 256
+    // cores é uma foto, enquanto 160 px em 16 cores é um cartaz. As paletas
+    // ricas passam por todos os lados antes de as pobres serem tentadas.
+    for paletas in [&CORES_DA_PALETA[..3], &CORES_DA_PALETA[3..]] {
+        for lado in LADOS_DA_PALETA {
+            let quadro = reduzido(&imagem, lado);
+            for &cores in paletas {
+                if let Some(saida) = png_em_paleta(&quadro, cores) {
+                    if saida.len() <= TETO_DO_ICONE {
+                        return Some(saida);
+                    }
+                }
+            }
+        }
+    }
+    for (lado, bits) in DEGRAUS_DO_ICONE.into_iter().skip(1) {
+        let mut quadro = reduzido(&imagem, lado);
         if bits < 8 {
             achatar_cores(&mut quadro, bits);
         }
-        let mut saida = Vec::new();
-        let escreveu = image::codecs::png::PngEncoder::new_with_quality(
-            &mut saida,
-            image::codecs::png::CompressionType::Best,
-            image::codecs::png::FilterType::Adaptive,
-        );
-        image::ImageEncoder::write_image(
-            escreveu,
-            quadro.as_raw(),
-            quadro.width(),
-            quadro.height(),
-            image::ExtendedColorType::Rgba8,
-        )
-        .ok()?;
+        let saida = png_rgba(&quadro)?;
         if saida.len() <= TETO_DO_ICONE {
             return Some(saida);
         }
     }
     None
+}
+
+/// Os lados que a paleta tenta, do maior ao menor.
+const LADOS_DA_PALETA: [u32; 6] = [LADO_DO_ICONE, 224, 192, 160, 128, 96];
+
+/// As paletas que cada lado tenta, da mais rica à mais pobre.
+const CORES_DA_PALETA: [usize; 5] = [256, 128, 64, 32, 16];
+
+/// A imagem com o lado maior em `lado`, se passar dele, e a proporção mantida.
+fn reduzido(imagem: &image::DynamicImage, lado: u32) -> image::RgbaImage {
+    if imagem.width() > lado || imagem.height() > lado {
+        // `Lanczos3` e não `Nearest`: reduzir foto sem filtro é o que
+        // produz aquele serrilhado que parece defeito da tela.
+        imagem.resize(lado, lado, FilterType::Lanczos3).to_rgba8()
+    } else {
+        imagem.to_rgba8()
+    }
+}
+
+/// Um PNG RGBA, com a compressão mais forte.
+fn png_rgba(quadro: &image::RgbaImage) -> Option<Vec<u8>> {
+    let mut saida = Vec::new();
+    let escreveu = image::codecs::png::PngEncoder::new_with_quality(
+        &mut saida,
+        image::codecs::png::CompressionType::Best,
+        image::codecs::png::FilterType::Adaptive,
+    );
+    image::ImageEncoder::write_image(
+        escreveu,
+        quadro.as_raw(),
+        quadro.width(),
+        quadro.height(),
+        image::ExtendedColorType::Rgba8,
+    )
+    .ok()?;
+    Some(saida)
+}
+
+/// Um PNG indexado em `cores` cores, com a paleta tirada da própria imagem
+/// (NeuQuant) e o erro espalhado (Floyd–Steinberg). O alfa vai na paleta
+/// (`tRNS`), então uma borda suave continua suave.
+fn png_em_paleta(quadro: &image::RgbaImage, cores: usize) -> Option<Vec<u8>> {
+    let mapa = color_quant::NeuQuant::new(10, cores, quadro.as_raw());
+    let mut espalhado = quadro.clone();
+    // O `dither` do `image` olha o vizinho da direita e o de baixo: numa
+    // imagem de um pixel de largura ou de altura, ele sai do quadro.
+    if espalhado.width() > 1 && espalhado.height() > 1 {
+        image::imageops::dither(&mut espalhado, &mapa);
+    }
+    let indices = image::imageops::index_colors(&espalhado, &mapa);
+    let rgba = mapa.color_map_rgba();
+    let paleta: Vec<u8> = rgba
+        .chunks_exact(4)
+        .flat_map(|cor| cor.iter().take(3).copied())
+        .collect();
+    let alfa: Vec<u8> = rgba
+        .chunks_exact(4)
+        .filter_map(|cor| cor.get(3).copied())
+        .collect();
+    // Uma foto sem transparência não leva a tabela do alfa: a paleta do
+    // NeuQuant arredonda o 255 de algumas cores para 254, e a tabela custava
+    // uns 256 bytes a troco de nada.
+    let opaca = quadro.pixels().all(|pixel| pixel.0[3] == u8::MAX);
+
+    // Sem filtro costuma ser o melhor para um PNG indexado, e nem sempre é:
+    // os dois são tentados, e fica o menor.
+    let mut menor: Option<Vec<u8>> = None;
+    for filtro in [png::FilterType::NoFilter, png::FilterType::Paeth] {
+        let mut saida = Vec::new();
+        {
+            let mut gravador = png::Encoder::new(&mut saida, quadro.width(), quadro.height());
+            gravador.set_color(png::ColorType::Indexed);
+            gravador.set_depth(png::BitDepth::Eight);
+            gravador.set_palette(paleta.clone());
+            if !opaca {
+                gravador.set_trns(alfa.clone());
+            }
+            gravador.set_compression(png::Compression::Best);
+            gravador.set_filter(filtro);
+            let mut escrita = gravador.write_header().ok()?;
+            escrita.write_image_data(indices.as_raw()).ok()?;
+        }
+        if menor.as_ref().is_none_or(|atual| saida.len() < atual.len()) {
+            menor = Some(saida);
+        }
+    }
+    menor
 }
 
 /// Reduz cada canal a `bits` níveis, mantendo preto preto e branco branco: a
@@ -534,5 +633,96 @@ mod testes {
     fn o_que_nao_e_imagem_nao_vira_icone() {
         assert!(icone_do_perfil(b"isto nao e uma imagem").is_none());
         assert!(icone_do_perfil(&[]).is_none());
+    }
+
+    /// Uma «foto» em tons de cinza com o ruído de cor de uma WebP com perda:
+    /// formas suaves, textura fina e cada canal um pouco fora do outro.
+    fn foto_cinza(lado: u32) -> Vec<u8> {
+        let mut quadro = RgbaImage::new(lado, lado);
+        let mut semente = 0x9E37_79B9_7F4A_7C15_u64;
+        for (x, y, pixel) in quadro.enumerate_pixels_mut() {
+            semente ^= semente << 13;
+            semente ^= semente >> 7;
+            semente ^= semente << 17;
+            let b = semente.to_le_bytes();
+            let (fx, fy) = (f64::from(x), f64::from(y));
+            let forma = 128.0 + 70.0 * (fx / 37.0).sin() * (fy / 53.0).cos();
+            let textura = f64::from(b[0] % 40) - 20.0;
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "limitado"
+            )]
+            let cinza = (forma + textura).clamp(0.0, 255.0) as i16;
+            let canal = |desvio: u8| {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "limitado"
+                )]
+                let valor = (cinza + i16::from(desvio % 7) - 3).clamp(0, 255) as u8;
+                valor
+            };
+            pixel.0 = [canal(b[1]), canal(b[2]), canal(b[3]), 255];
+        }
+        let mut saida = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(quadro)
+            .write_to(&mut saida, ImageFormat::Png)
+            .expect("gravar a foto");
+        saida.into_inner()
+    }
+
+    /// **O ícone de uma foto cinza continua cinza, e com tons** (0.19.1).
+    ///
+    /// A escada cortava bits por canal: num cinza com ruído de cor, cada canal
+    /// arredondava para um degrau diferente, e o ícone saía com franjas rosa e
+    /// verdes em 30 cores — medido no ícone de quem hospeda, 128 × 127. Com
+    /// uma paleta, o mesmo teto de 8 KiB guarda o cinza como cinza.
+    #[test]
+    fn o_icone_de_uma_foto_cinza_nao_ganha_cor_e_guarda_os_tons() {
+        let pronto = icone_do_perfil(&foto_cinza(873)).expect("a foto tinha de caber");
+        assert!(
+            pronto.len() <= TETO_DO_ICONE,
+            "saiu com {} bytes",
+            pronto.len()
+        );
+        assert_eq!(
+            seele_proto::control::check_server_icon(Some(&pronto)),
+            Ok(())
+        );
+        let imagem = image::load_from_memory(&pronto).expect("é PNG").to_rgba8();
+        let mut tons = std::collections::BTreeSet::new();
+        let mut pior_cor = 0_u8;
+        for pixel in imagem.pixels() {
+            let [r, g, b, _] = pixel.0;
+            pior_cor = pior_cor.max(r.max(g).max(b) - r.min(g).min(b));
+            tons.insert(g);
+        }
+        assert!(
+            pior_cor <= 16,
+            "o cinza ganhou cor: canais até {pior_cor} apart"
+        );
+        assert!(tons.len() >= 24, "só {} tons de cinza", tons.len());
+        assert!(
+            imagem.width() >= 96,
+            "o ícone encolheu demais: {}px",
+            imagem.width()
+        );
+    }
+
+    /// Uma imagem de um pixel de largura não derruba a redução (o `dither`
+    /// do `image` olha o vizinho da direita).
+    #[test]
+    fn uma_imagem_de_um_pixel_de_largura_vira_icone() {
+        let mut saida = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+            1,
+            300,
+            image::Rgba([10, 20, 30, 255]),
+        ))
+        .write_to(&mut saida, ImageFormat::Png)
+        .expect("gravar");
+        let pronto = icone_do_perfil(saida.get_ref()).expect("é imagem");
+        assert!(pronto.len() <= TETO_DO_ICONE);
     }
 }
