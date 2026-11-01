@@ -672,6 +672,19 @@ async function caso(motor, numero, prova) {
           assert.equal((faixa.match(/processo 4242/g) ?? []).length, 1, `${motor}: 20 · linha repetida: ${faixa}`);
           assert.match(faixa, /processo 4343.*não saiu em 20,0 s e foi encerrado à força/s, `${motor}: 20 · forçada: ${faixa}`);
           assert.equal(await pagina.evaluate(() => document.querySelector('.maquina-bloco[data-motivo="sobra-forcada"]') !== null), true, `${motor}: 20 · a forçada não está em alerta`);
+          // Ainda salvando (revisão da 0.19, I1): a faixa diz que nenhum jogo
+          // sobe até ele sair, e o desfecho toma o lugar dessa linha.
+          await pagina.evaluate((s) => emitir("maquina-sobra", { ...s, pid: 4545, desfecho: "parando", segundos: 0 }), sobra);
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /processo 4545.*espera ele sair; até lá, nenhum jogo sobe neste computador/s, `${motor}: 20 · parando: ${faixa}`);
+          await pagina.evaluate((s) => emitir("maquina-sobra", { ...s, pid: 4545, desfecho: "saiu", segundos: 3 }), sobra);
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.equal((faixa.match(/processo 4545/g) ?? []).length, 1, `${motor}: 20 · o parando ficou ao lado do desfecho: ${faixa}`);
+          assert.doesNotMatch(faixa, /nenhum jogo sobe/, `${motor}: 20 · o parando não saiu: ${faixa}`);
+          // Que não parou: o caminho vale fora do Mac também (revisão da 0.19, M4).
+          await pagina.evaluate((s) => emitir("maquina-sobra", { ...s, pid: 4646, desfecho: "nao-parou", motivo: "EPERM" }), sobra);
+          faixa = await pagina.evaluate(() => faixaDeMaquinas());
+          assert.match(faixa, /processo 4646.*pelo gerenciador de processos do sistema/s, `${motor}: 20 · nao-parou: ${faixa}`);
           await pagina.evaluate(() => { table.maquinas_sobras = () => []; });
         });
 

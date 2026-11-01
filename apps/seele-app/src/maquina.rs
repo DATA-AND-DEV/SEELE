@@ -1232,6 +1232,9 @@ pub(crate) struct Maquinas {
     /// ao abrir ([`procurar_sobras`]), para a faixa de uma janela que
     /// recarrega.
     sobras: Mutex<Vec<SobraNaTela>>,
+    /// **Nenhuma metade sobe enquanto um jogo que sobrou ainda salva**
+    /// (revisão da 0.19, I1): [`PortaDasSobras`].
+    porta_das_sobras: PortaDasSobras,
 }
 
 impl Maquinas {
@@ -1882,6 +1885,12 @@ fn processar_pedido<R: tauri::Runtime>(app: &AppHandle<R>, chegado: ChegadoCedo)
     let Some(estado) = sessoes(app) else {
         return;
     };
+    // **Antes da vez**: a espera pelo jogo que sobrou é de segundos, e um
+    // pedido de outra chave não fica preso atrás dela no cadeado.
+    esperar_as_sobras(
+        &estado.maquinas,
+        &Chave::de(&chegado.alvo, &chegado.mod_id, &chegado.servidor),
+    );
     let _vez = estado
         .maquinas
         .vez
@@ -2290,6 +2299,8 @@ pub(crate) fn aceitar<R: tauri::Runtime>(
 ) -> Result<AceiteDeMaquinaGuardado, String> {
     let chave = Chave::de(alvo, mod_id, servidor);
     let estado = sessoes(app).ok_or("sem-sessao")?;
+    // O aceite pela tela também espera o jogo que sobrou (revisão da 0.19, I1).
+    esperar_as_sobras(&estado.maquinas, &chave);
     let _vez = estado
         .maquinas
         .vez
@@ -2492,6 +2503,7 @@ pub(crate) struct SobraNaTela {
     pub(crate) servidor: String,
     pub(crate) titulo: String,
     pub(crate) pid: u32,
+    /// `parando` (o pedido de salvar e sair acabou de sair, e ele ainda roda),
     /// `saiu` (com o pedido de salvar e sair), `forcada` (não saiu no prazo
     /// e foi morto) ou `nao-parou`.
     pub(crate) desfecho: &'static str,
@@ -2508,8 +2520,30 @@ pub(crate) const EVENTO_DA_SOBRA: &str = "maquina-sobra";
 /// O que a tela recebe de uma sobra encontrada.
 pub(crate) fn sobra_na_tela(achada: &seele_ffi::programa::SobraEncontrada) -> SobraNaTela {
     use seele_ffi::programa::DesfechoDaSobra;
-    let etiqueta: serde_json::Value =
-        serde_json::from_str(&achada.registro.etiqueta).unwrap_or_default();
+    let (desfecho, segundos, motivo) = match &achada.desfecho {
+        DesfechoDaSobra::SaiuAoPedido { levou } => ("saiu", levou.as_secs_f64(), None),
+        DesfechoDaSobra::Forcada { esperou } => ("forcada", esperou.as_secs_f64(), None),
+        DesfechoDaSobra::NaoParou { motivo } => ("nao-parou", 0.0, Some(motivo.clone())),
+    };
+    sobra_com(&achada.registro, desfecho, segundos, motivo)
+}
+
+/// O que a tela recebe de uma sobra que acabou de receber o pedido de salvar
+/// e sair (`parando`): a faixa diz que ela ainda roda, e que um jogo novo
+/// espera ela sair (revisão da 0.19, I1).
+pub(crate) fn sobra_parando_na_tela(
+    registro: &seele_ffi::programa::RegistroDeProcesso,
+) -> SobraNaTela {
+    sobra_com(registro, "parando", 0.0, None)
+}
+
+fn sobra_com(
+    registro: &seele_ffi::programa::RegistroDeProcesso,
+    desfecho: &'static str,
+    segundos: f64,
+    motivo: Option<String>,
+) -> SobraNaTela {
+    let etiqueta: serde_json::Value = serde_json::from_str(&registro.etiqueta).unwrap_or_default();
     let campo = |nome: &str| {
         etiqueta
             .get(nome)
@@ -2517,53 +2551,205 @@ pub(crate) fn sobra_na_tela(achada: &seele_ffi::programa::SobraEncontrada) -> So
             .unwrap_or_default()
             .to_owned()
     };
-    let (desfecho, segundos, motivo) = match &achada.desfecho {
-        DesfechoDaSobra::SaiuAoPedido { levou } => ("saiu", levou.as_secs_f64(), None),
-        DesfechoDaSobra::Forcada { esperou } => ("forcada", esperou.as_secs_f64(), None),
-        DesfechoDaSobra::NaoParou { motivo } => ("nao-parou", 0.0, Some(motivo.clone())),
-    };
     SobraNaTela {
         alvo: campo("alvo"),
         mod_id: campo("mod_id"),
         servidor: campo("servidor"),
         titulo: campo("titulo"),
-        pid: achada.registro.pid,
+        pid: registro.pid,
         desfecho,
         segundos,
         motivo,
     }
 }
 
+/// **A porta que segura as metades enquanto um jogo que sobrou para**
+/// (revisão da 0.19, I1).
+///
+/// O app reaberto manda `SIGTERM` ao `java` órfão, e ele leva até
+/// [`seele_ffi::programa::prazo_das_sobras`] salvando o mundo. Nesse meio, o
+/// `MetadeSubiu` de quem acabou de hospedar fazia o MOD chamar esta máquina de
+/// volta, o aceite guardado ligava a metade sozinho, e um segundo `java`
+/// subia na mesma raiz — com o `session.lock` e a porta ainda do primeiro.
+///
+/// **Toda metade espera, e não só a da mesma chave**: a porta do jogo é da
+/// máquina inteira, e o mesmo servidor alcançado por outro endereço é outra
+/// chave com a mesma porta. A espera só existe na abertura, e acaba quando a
+/// última sobra sai.
+///
+/// A procura é marcada **antes** de a thread começar ([`Self::abrir`]): um
+/// pedido que chega antes de a pasta ser lida espera também. Depois que ela
+/// fecha, nada a reabre — passar por ela uma vez vale para sempre.
+#[derive(Default)]
+pub(crate) struct PortaDasSobras {
+    estado: Mutex<SobrasEmCurso>,
+    mudou: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct SobrasEmCurso {
+    /// A pasta ainda está sendo lida.
+    procurando: bool,
+    /// Sobras achadas e ainda não paradas.
+    parando: usize,
+}
+
+impl SobrasEmCurso {
+    fn livre(&self) -> bool {
+        !self.procurando && self.parando == 0
+    }
+}
+
+/// O que a procura diz pelo caminho, para a tela.
+#[derive(Debug)]
+pub(crate) enum AvisoDaSobra<'a> {
+    /// Achada, e o pedido de salvar e sair vai sair agora.
+    Parando(&'a seele_ffi::programa::RegistroDeProcesso),
+    /// Parou (ou não), com o desfecho.
+    Parou(&'a seele_ffi::programa::SobraEncontrada),
+}
+
+impl PortaDasSobras {
+    fn estado(&self) -> std::sync::MutexGuard<'_, SobrasEmCurso> {
+        self.estado.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A procura vai começar: quem pedir uma metade daqui em diante espera.
+    pub(crate) fn abrir(&self) {
+        self.estado().procurando = true;
+    }
+
+    /// A procura não vai acontecer (sem thread): a porta abre.
+    fn desistir(&self) {
+        *self.estado() = SobrasEmCurso::default();
+        self.mudou.notify_all();
+    }
+
+    /// **Acha e para as sobras de `pasta`**, abrindo a porta quando a última
+    /// sai. Bloqueia: numa thread. Uma queda no meio abre a porta também — uma
+    /// porta presa seria nenhuma máquina subir até o app fechar.
+    pub(crate) fn procurar(
+        &self,
+        pasta: &std::path::Path,
+        prazo: std::time::Duration,
+        mut avisar: impl FnMut(AvisoDaSobra<'_>),
+    ) {
+        struct AbreNoFim<'a>(&'a PortaDasSobras);
+        impl Drop for AbreNoFim<'_> {
+            fn drop(&mut self) {
+                self.0.desistir();
+            }
+        }
+        let _abre = AbreNoFim(self);
+        let achadas = seele_ffi::programa::achar_sobras(pasta);
+        {
+            let mut estado = self.estado();
+            estado.procurando = false;
+            estado.parando = achadas.len();
+        }
+        self.mudou.notify_all();
+        for sobra in achadas {
+            avisar(AvisoDaSobra::Parando(&sobra.registro));
+            let parada = seele_ffi::programa::parar_sobra(sobra, prazo);
+            {
+                let mut estado = self.estado();
+                estado.parando = estado.parando.saturating_sub(1);
+            }
+            self.mudou.notify_all();
+            avisar(AvisoDaSobra::Parou(&parada));
+        }
+    }
+
+    /// Espera a porta abrir. Devolve quanto esperou, se esperou.
+    pub(crate) fn esperar(&self) -> Option<std::time::Duration> {
+        let mut estado = self.estado();
+        if estado.livre() {
+            return None;
+        }
+        let comeco = std::time::Instant::now();
+        while !estado.livre() {
+            estado = self
+                .mudou
+                .wait(estado)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        Some(comeco.elapsed())
+    }
+
+    /// A porta está fechada agora?
+    fn fechada(&self) -> bool {
+        !self.estado().livre()
+    }
+}
+
+/// **Antes de uma metade subir, o jogo que sobrou sai** (revisão da 0.19,
+/// I1): espera a [`PortaDasSobras`], e o log diz quanto e por quê. Chamada sem
+/// a `vez` na mão: a espera é de até ~22 s por sobra.
+fn esperar_as_sobras(maquinas: &Maquinas, chave: &Chave) {
+    if maquinas.porta_das_sobras.fechada() {
+        tracing::warn!(mod_id = %chave.mod_id, servidor = %chave.servidor, "pedido de máquina enquanto um jogo de uma execução anterior ainda salva e sai: a metade espera ele sair para não subir um segundo jogo por cima do mundo e da porta dele");
+    }
+    if let Some(esperou) = maquinas.porta_das_sobras.esperar() {
+        tracing::info!(mod_id = %chave.mod_id, servidor = %chave.servidor, esperou = ?esperou, "o jogo que sobrou saiu: o pedido de máquina segue");
+    }
+}
+
 /// **Acha e para o jogo que um app anterior deixou rodando** (e2e de 31/10,
 /// passo 14), numa thread: o pedido de salvar e sair, o prazo, e então à
-/// força ([`seele_ffi::programa::parar_sobras`]). Cada um vai à faixa
-/// (`maquina-sobra`) e fica guardado para a janela que relê
-/// ([`sobras`]).
+/// força ([`seele_ffi::programa::parar_sobra`]). Cada um vai à faixa
+/// (`maquina-sobra`) duas vezes — `parando`, e então o desfecho — e fica
+/// guardado para a janela que relê ([`sobras`]). Enquanto houver sobra
+/// parando, nenhuma metade sobe ([`PortaDasSobras`]).
 pub(crate) fn procurar_sobras<R: tauri::Runtime>(app: AppHandle<R>) {
     let pasta = pasta_dos_processos(&crate::config_dir(&app));
+    // Fechada aqui, na thread do `setup`, e não na da procura: um pedido que
+    // chegue antes de a thread ler a pasta já espera.
+    if let Some(estado) = sessoes(&app) {
+        estado.maquinas.porta_das_sobras.abrir();
+    }
+    let da_thread = app.clone();
     let feito = std::thread::Builder::new()
         .name("jogos que sobraram".into())
         .spawn(move || {
-            let achadas =
-                seele_ffi::programa::parar_sobras(&pasta, seele_ffi::programa::prazo_das_sobras());
-            for achada in &achadas {
-                let na_tela = sobra_na_tela(achada);
-                tracing::warn!(pid = na_tela.pid, mod_id = %na_tela.mod_id, servidor = %na_tela.servidor, desfecho = na_tela.desfecho, segundos = na_tela.segundos, "um jogo de uma execução anterior do app rodava sem ninguém; a faixa diz à pessoa");
-                if let Some(estado) = sessoes(&app) {
-                    estado
+            let app = da_thread;
+            let Some(estado) = sessoes(&app) else {
+                return;
+            };
+            let dizer = |na_tela: SobraNaTela| {
+                {
+                    let mut guardadas = estado
                         .maquinas
                         .sobras
                         .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(na_tela.clone());
+                        .unwrap_or_else(PoisonError::into_inner);
+                    // O desfecho toma o lugar do «parando» do mesmo processo.
+                    guardadas.retain(|s| s.pid != na_tela.pid);
+                    guardadas.push(na_tela.clone());
                 }
                 if let Err(erro) = app.emit(EVENTO_DA_SOBRA, na_tela) {
                     tracing::warn!(%erro, "maquina-sobra não chegou à janela");
                 }
-            }
+            };
+            estado.maquinas.porta_das_sobras.procurar(
+                &pasta,
+                seele_ffi::programa::prazo_das_sobras(),
+                |aviso| match aviso {
+                    AvisoDaSobra::Parando(registro) => {
+                        dizer(sobra_parando_na_tela(registro));
+                    }
+                    AvisoDaSobra::Parou(achada) => {
+                        let na_tela = sobra_na_tela(achada);
+                        tracing::warn!(pid = na_tela.pid, mod_id = %na_tela.mod_id, servidor = %na_tela.servidor, desfecho = na_tela.desfecho, segundos = na_tela.segundos, "um jogo de uma execução anterior do app rodava sem ninguém; a faixa diz à pessoa");
+                        dizer(na_tela);
+                    }
+                },
+            );
         });
     if let Err(erro) = feito {
         tracing::error!(%erro, "a procura de jogos que sobraram não conseguiu thread: um jogo órfão segue rodando");
+        if let Some(estado) = sessoes(&app) {
+            estado.maquinas.porta_das_sobras.desistir();
+        }
     }
 }
 
@@ -3304,6 +3490,11 @@ mod testes {
             "maquina.aoReconectar((v) => maquina.pedir('voltei ' + v.fora));             maquina.programa.rodar({ comando: 'bin/servidor', argumentos: ARGUMENTOS, pasta: '' })               .then(() => maquina.pedir('rodou'), (e) => maquina.pedir('recusou ' + e.erro));",
         );
         assert_eq!(viva.processos_vivos(), 1);
+        // O `fora` que o `aoReconectar` lê é o tempo de órfã, em segundos
+        // inteiros: sob carga, as esperas pelo batimento abaixo passam de 1 s,
+        // e a frase certa é «voltei 1» (a suíte inteira, 31/10). A prova lê o
+        // número e o confere contra o relógio, em vez de supor que é 0.
+        let orfanou = Instant::now();
         let orfas = maquinas.orfanar_de_geracao_velha(1, 2);
         assert_eq!(orfas.len(), 1);
         let antes = batimento(&raiz).unwrap_or(0);
@@ -3328,7 +3519,26 @@ mod testes {
         assert!(maquinas.estado().ligadas[&viva.chave].orfa.is_none());
         assert_eq!(maquinas.estado().ligadas[&viva.chave].geracao, 2);
         religada.reconectar(fora);
-        novo.esperar(r#"pedir "voltei 0""#);
+        let teto = orfanou.elapsed().as_secs();
+        let voltas: Vec<String> = novo
+            .esperar(r#"pedir "voltei "#)
+            .into_iter()
+            .filter(|l| l.starts_with(r#"pedir "voltei "#))
+            .collect();
+        assert_eq!(
+            voltas.len(),
+            1,
+            "o aoReconectar não falou uma vez só: {voltas:?}"
+        );
+        let segundos: u64 = voltas[0]
+            .trim_start_matches(r#"pedir "voltei "#)
+            .trim_end_matches('"')
+            .parse()
+            .unwrap_or_else(|_| panic!("o fora não é um número: {voltas:?}"));
+        assert!(
+            segundos <= teto,
+            "o aoReconectar leu {segundos} s fora, e a órfã ficou no máximo {teto} s"
+        );
         assert_eq!(
             fio.anotado()
                 .iter()
@@ -4540,5 +4750,113 @@ mod testes {
             fio.quando("servir "),
         );
         assert!(porta_fechada, "o jogo seguiu escutando depois da parada");
+    }
+
+    // ------------------------------------------- o jogo que sobrou, e a porta
+
+    /// **Nenhuma metade sobe enquanto o jogo que sobrou ainda salva** (revisão
+    /// da 0.19, I1). O pior caso, de propósito: o pedido chega antes de a
+    /// procura sequer ler a pasta, e o órfão leva 1 s para sair depois do
+    /// `SIGTERM` (o mundo salvando). Quem pede espera exatamente o que
+    /// `processar_pedido` e `aceitar` esperam ([`esperar_as_sobras`]) e então
+    /// olha o órfão — no lugar em que a metade subiria. Sem a espera, o órfão
+    /// ainda roda nesse instante (ele nem recebeu o sinal) e este teste reprova.
+    #[cfg(unix)]
+    #[test]
+    fn nenhuma_metade_sobe_enquanto_o_jogo_que_sobrou_salva() {
+        use seele_ffi::programa::{anotar_processo, inicio_do_processo, RegistroDeProcesso};
+        use std::os::unix::process::CommandExt as _;
+
+        struct Matar(u32);
+        impl Drop for Matar {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("kill")
+                    .args(["-KILL", &format!("-{}", self.0)])
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+        }
+        let vivo = |pid: u32| inicio_do_processo(pid).is_some();
+
+        let casa = pasta_do_teste("sobra-porta");
+        let mut filho = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "trap 'sleep 1; exit 0' TERM; while :; do sleep 0.05; done",
+            ])
+            .process_group(0)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = filho.id();
+        let _solto = Matar(pid);
+        std::thread::spawn(move || {
+            let _ = filho.wait();
+        });
+        let fim = Instant::now() + Duration::from_secs(2);
+        while !vivo(pid) && Instant::now() < fim {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let mut morto = std::process::Command::new("true").spawn().unwrap();
+        let dono = morto.id();
+        morto.wait().unwrap();
+        let chave = Chave::de("127.0.0.1:7000", "x/jogo", "srv-1");
+        anotar_processo(
+            &casa.0,
+            &RegistroDeProcesso {
+                pid,
+                grupo: pid,
+                inicio: inicio_do_processo(pid).expect("o órfão de teste não subiu"),
+                dono,
+                dono_inicio: "Thu Jan  1 00:00:00 1970".to_owned(),
+                etiqueta: etiqueta_da_sobra(&chave, "Minecraft"),
+            },
+        )
+        .unwrap();
+
+        let maquinas = Maquinas::default();
+        // Como `procurar_sobras` faz no `setup`, antes de a thread existir.
+        maquinas.porta_das_sobras.abrir();
+        let avisos: Mutex<Vec<String>> = Mutex::default();
+        let vivo_ao_subir = std::thread::scope(|escopo| {
+            let pedido = escopo.spawn(|| {
+                esperar_as_sobras(&maquinas, &chave);
+                vivo(pid)
+            });
+            // O pedido já está na porta antes de a procura começar.
+            std::thread::sleep(Duration::from_millis(50));
+            escopo.spawn(|| {
+                maquinas
+                    .porta_das_sobras
+                    .procurar(&casa.0, Duration::from_secs(5), |aviso| {
+                        let dito = match aviso {
+                            AvisoDaSobra::Parando(r) => sobra_parando_na_tela(r),
+                            AvisoDaSobra::Parou(a) => sobra_na_tela(a),
+                        };
+                        avisos
+                            .lock()
+                            .unwrap()
+                            .push(format!("{} {} {}", dito.desfecho, dito.servidor, dito.pid));
+                    });
+            });
+            pedido.join().unwrap()
+        });
+        assert!(
+            !vivo_ao_subir,
+            "a metade subiria com o jogo que sobrou ainda salvando na mesma raiz"
+        );
+        assert_eq!(
+            *avisos.lock().unwrap(),
+            vec![format!("parando srv-1 {pid}"), format!("saiu srv-1 {pid}")],
+            "a faixa não ouviu o «parando» e então o desfecho"
+        );
+        assert!(
+            !maquinas.porta_das_sobras.fechada(),
+            "a porta ficou fechada"
+        );
+        // Sem sobra nenhuma, a porta não segura ninguém.
+        assert_eq!(maquinas.porta_das_sobras.esperar(), None);
     }
 }

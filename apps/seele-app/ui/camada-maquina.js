@@ -650,7 +650,9 @@ listen("maquina-jogo", ({ payload }) => {
 function aplicarASobra(sobra) {
   if (!sobra || typeof sobra !== "object") return;
   const chave = `sobra\u0000${sobra.pid}`;
-  if (maquinasNaFaixa.has(chave)) return;
+  // O desfecho toma o lugar do «parando» do mesmo processo (revisão da 0.19,
+  // I1); qualquer outra repetição (a lista relida) não repete a linha.
+  if (maquinasNaFaixa.has(chave) && maquinasNaFaixa.get(chave).sobra?.desfecho !== "parando") return;
   maquinasNaFaixa.set(chave, {
     alvo: sobra.alvo, modId: sobra.mod_id || "MOD", servidor: sobra.servidor,
     titulo: sobra.titulo || sobra.servidor || "um servidor de jogo",

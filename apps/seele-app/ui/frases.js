@@ -1907,9 +1907,12 @@ const FRASES_DA_MAQUINA = Object.freeze({
   // nessa hora: quem pede para salvar é o SEELE, pelo sinal de término.
   sobra: (titulo, mod, pid) => `${titulo} (${mod}) seguia rodando neste computador (processo ${pid}) desde que o SEELE fechou sem desligá-lo`,
   sobras: Object.freeze({
+    // Ainda salvando (revisão da 0.19, I1): um jogo deste computador só sobe
+    // depois que ele sai, para não dividir o mundo e a porta com ele.
+    parando: () => "o SEELE pediu ao jogo para salvar e sair e espera ele sair; até lá, nenhum jogo sobe neste computador",
     saiu: (segundos) => `o SEELE pediu ao jogo para salvar e sair, e ele saiu em ${segundos} s`,
     forcada: (segundos) => `o SEELE pediu ao jogo para salvar e sair; ele não saiu em ${segundos} s e foi encerrado à força, e o que não estava salvo se perdeu`,
-    "nao-parou": (motivo) => `o SEELE não conseguiu pará-lo (${motivo}): ele segue rodando, com o mundo e a porta; encerre-o pelo Monitor de Atividade`,
+    "nao-parou": (motivo) => `o SEELE não conseguiu pará-lo (${motivo}): ele segue rodando, com o mundo e a porta; encerre-o pelo gerenciador de processos do sistema (no Mac, o Monitor de Atividade)`,
   }),
   desligar: "DESLIGAR",
   revogar: "REVOGAR",
