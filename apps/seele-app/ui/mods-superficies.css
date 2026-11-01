@@ -301,6 +301,9 @@
      quem liga, em cima (tarefa 9, Step 5). Sem recorte, as três variáveis são
      zero. */
   padding-left: calc(16px + var(--recorte-esquerda, 0px));
+  /* E o mesmo do outro lado, para a caixa ficar no meio da janela mesmo com
+     uma coluna à esquerda (0.19.2). */
+  padding-right: calc(16px + var(--recorte-esquerda, 0px));
   padding-top: calc(max(24px, env(safe-area-inset-top)) + var(--recorte-cima, 0px));
   padding-bottom: calc(max(24px, env(safe-area-inset-top)) + var(--recorte-baixo, 0px));
   background: color-mix(in srgb, var(--seele-negro-absoluto) 78%, transparent);

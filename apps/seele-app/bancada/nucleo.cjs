@@ -514,6 +514,9 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
         cruzaPorta: Boolean(caixa && porta?.getClientRects().length && cruza(caixa.getBoundingClientRect(), porta.getBoundingClientRect())),
         rola: Boolean(corpo && corpo.scrollHeight > corpo.clientHeight),
         dentroDaJanela: Boolean(caixa && caixa.getBoundingClientRect().bottom <= innerHeight && caixa.getBoundingClientRect().right <= innerWidth),
+        // **No meio da janela, como os modais do produto** (0.19.2): o centro
+        // da caixa contra o da janela, em px.
+        desvioDoCentro: caixa ? Math.round(Math.abs((caixa.getBoundingClientRect().left + caixa.getBoundingClientRect().right) / 2 - innerWidth / 2)) : null,
       };
     });
 
@@ -550,6 +553,11 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     assert.ok(largo.restoCoberto.length >= 2 && largo.restoCoberto.every(Boolean), `a 1400, o resto da sessão não ficou sob o modal: ${JSON.stringify(largo)}`);
     assert.deepEqual({ cruzaBarra: largo.cruzaBarra, rola: largo.rola, dentroDaJanela: largo.dentroDaJanela }, { cruzaBarra: false, rola: true, dentroDaJanela: true },
       `a 1400, o diálogo alto cruza a barra, não rola por dentro, ou sai da janela: ${JSON.stringify(largo)}`);
+    // **No meio da janela** (0.19.2): a barra do operador mora no pé da coluna
+    // da esquerda, e o diálogo a evita pela altura, e não empurrando-se para a
+    // direita — que era o que o deixava torto, no Multiplayer.
+    assert.ok(largo.desvioDoCentro !== null && largo.desvioDoCentro <= 2,
+      `a 1400, o diálogo modal não está no meio da janela: ${JSON.stringify(largo)}`);
     // O Tab fica no diálogo, e o Esc o fecha.
     const dentroDoAlto = () => page.evaluate(() => Boolean(document.activeElement?.closest('[data-superficie="alto"]')));
     const tabs = [];
@@ -562,6 +570,35 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     assert.equal(await page.evaluate(() => Boolean(document.querySelector('[data-superficie="alto"]')?.isConnected)), false, 'o Esc não fechou o diálogo modal');
     assert.equal(await page.evaluate(() => document.activeElement?.id ?? document.activeElement?.tagName), 'botao-buscar',
       'fechado o diálogo modal, o foco não voltou a quem o tinha antes');
+
+    // **O modal curto tem cara de janela** (0.19.2, «o modal é muito pequeno»):
+    // o seletor do Multiplayer — 760 px, um cartão só — abria como uma tira.
+    // Com pouco conteúdo, a caixa tem ao menos min(640, a altura que cabe), no
+    // meio da janela, e sem cruzar a barra do operador.
+    const curto = await page.evaluate(async () => {
+      const mod = { id: 'teste/nucleo', hash: 'h', api: 6 };
+      const inst = modsCarregados.get(mod.id);
+      superficiesDoMod(mod, inst).soltarTudo();
+      await atenderOMod(mod, inst, { tipo: 'superficie-criar', n: 40, descricao: { id: 'curto', tipo: 'dialogo', titulo: 'Curto', tamanho: { largura: 760 } } });
+      await atenderOMod(mod, inst, { tipo: 'superficie-montar', n: 41, superficie: 'curto', arvore: [
+        { forma: 'texto', chave: 'a', dentro: 'uma linha' }, { forma: 'texto', chave: 'b', dentro: 'outra linha' },
+      ] });
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const caixa = document.querySelector('.dialogo-de-mod[data-superficie="curto"]').getBoundingClientRect();
+      const camada = document.querySelector('.dialogo-de-mod[data-superficie="curto"]').closest('.camada-de-mod');
+      const estilo = getComputedStyle(camada);
+      const cabe = camada.clientHeight - parseFloat(estilo.paddingTop) - parseFloat(estilo.paddingBottom);
+      const barra = document.querySelector('#tela-sessao .operador').getBoundingClientRect();
+      const medido = {
+        altura: Math.round(caixa.height), esperada: Math.round(Math.min(640, cabe)), largura: Math.round(caixa.width),
+        desvio: Math.round(Math.abs((caixa.left + caixa.right) / 2 - innerWidth / 2)),
+        cruzaBarra: caixa.left < barra.right && barra.left < caixa.right && caixa.top < barra.bottom && barra.top < caixa.bottom,
+      };
+      superficiesDoMod(mod, inst).soltarTudo();
+      return medido;
+    });
+    assert.ok(curto.altura >= curto.esperada - 1 && curto.largura === 760 && curto.desvio <= 2 && !curto.cruzaBarra,
+      `a 1400, o modal curto não tem cara de janela no meio, ou cruza a barra: ${JSON.stringify(curto)}`);
 
     // A 900, a coluna é gaveta: fechada, a porta dela fica alcançável; aberta,
     // o MUDO.

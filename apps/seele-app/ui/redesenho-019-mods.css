@@ -395,6 +395,10 @@
    abaixo dela; as ações à direita, no pé. O que muda do produto para o MOD é
    o furo do véu (o operador fica de fora), e não a caixa. */
 :root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) {
+  /* **Cara de janela, e não de tira** (0.19.2, «o modal é muito pequeno»): o
+     seletor do Multiplayer, com um cartão só, abria com a altura do conteúdo.
+     Ao menos 640, ou o que couber entre os furos do véu. */
+  min-height: min(640px, 100%);
   gap: 18px;
   padding: 36px 44px 32px;
   border: var(--seele-b) solid var(--seele-controle-borda);

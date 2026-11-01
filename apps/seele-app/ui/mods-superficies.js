@@ -799,14 +799,25 @@ class SuperficieDeMod {
     }
     // Só o modal tem véu para furar; o não modal só ganha a área do diálogo.
     if (this.modal) camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
-    // A área do diálogo: à direita dos furos da metade esquerda, abaixo dos da
-    // metade de cima que não estão à esquerda, e acima dos da metade de baixo
-    // que não estão à esquerda.
+    // A área do diálogo: à direita dos furos que ocupam a altura da metade
+    // esquerda (cruzam o meio), abaixo dos que estão na metade de cima e acima
+    // dos que estão na metade de baixo.
+    //
+    // **Um furo no pé da coluna é evitado pela altura** (0.19.2). A barra do
+    // operador mora embaixo, à esquerda, e antes todo furo da metade esquerda
+    // empurrava o diálogo para a direita dela: o modal do Multiplayer abria
+    // centrado no que sobrava, torto, longe do meio da janela onde ficam os
+    // modais do produto. Só uma coluna que cruza o meio (a porta da gaveta, a
+    // 900) ainda o empurra de lado. **Só no modal**: o não modal mora no canto
+    // de baixo, à direita, e a barra do operador no canto oposto não tem por
+    // que subi-lo — subido, ele cobria o COPIAR do PERFIL (`nucleo.cjs`, 2b).
     const meioX = caixa.left + caixa.width / 2;
     const meioY = caixa.top + caixa.height / 2;
-    const aEsquerda = furos.filter((r) => r.right <= meioX);
-    const emCima = furos.filter((r) => r.right > meioX && r.bottom <= meioY);
-    const embaixo = furos.filter((r) => r.right > meioX && r.top >= meioY);
+    const aEsquerda = this.modal
+      ? furos.filter((r) => r.right <= meioX && r.top < meioY && r.bottom > meioY)
+      : furos.filter((r) => r.right <= meioX);
+    const emCima = furos.filter((r) => !aEsquerda.includes(r) && r.bottom <= meioY);
+    const embaixo = furos.filter((r) => !aEsquerda.includes(r) && r.top >= meioY);
     camada.style.setProperty("--recorte-esquerda", px(Math.max(0, ...aEsquerda.map((r) => r.right - caixa.left))));
     camada.style.setProperty("--recorte-cima", px(Math.max(0, ...emCima.map((r) => r.bottom - caixa.top))));
     camada.style.setProperty("--recorte-baixo", px(Math.max(0, ...embaixo.map((r) => caixa.bottom - r.top))));
