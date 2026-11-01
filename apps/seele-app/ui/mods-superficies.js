@@ -255,11 +255,17 @@ function desempilharCamada(no) {
  * O readormecer confere a pilha de novo em vez de confiar no que era verdade
  * quando a pergunta abriu: entre abrir e responder, outra camada pode ter
  * entrado ou saído.
+ *
+ * **O pedido vale também para a camada que entrar depois** (0.19.1). A tela de
+ * aceite de máquina pode abrir antes do modal do MOD que a pediu, e antes
+ * disto o pedido só valia para quem já dormia: o modal que abria em seguida
+ * adormecia a tela, e o aceite ficava sem clique. O nó entra no conjunto de
+ * qualquer jeito, e o `recalcularAInercia` o mantém acordado.
  */
 function acordarDaPilha(no) {
-  if (!no || !adormecidosPelaPilha.includes(no)) return () => {};
+  if (!no) return () => {};
   acordadosPorPedido.add(no);
-  no.inert = false;
+  if (adormecidosPelaPilha.includes(no)) no.inert = false;
   return () => {
     acordadosPorPedido.delete(no);
     if (adormecidosPelaPilha.includes(no)) no.inert = true;

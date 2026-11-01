@@ -747,8 +747,55 @@ async function caso(motor, numero, prova) {
           await esperarFechada();
         });
 
+        // 23. (0.19.1) O pedido chega com um modal de MOD aberto — o caso real:
+        //     o CRIAR do Multiplayer mora num diálogo do MOD. A pilha de camadas
+        //     adormece (`inert`) tudo o que não é o modal, e a tela de aceite
+        //     adormecia junto: aparecia, e a caixa do EULA e o ACEITAR não
+        //     respondiam ao clique — só o Esc, que escuta o documento, recusava.
+        await caso(motor, "23", async () => {
+          await zerar();
+          await pagina.evaluate(() => {
+            const modal = document.createElement("div");
+            modal.id = "modal-de-mod-de-bancada";
+            modal.textContent = "diálogo do MOD";
+            document.body.append(modal);
+            empilharCamada(modal);
+          });
+          try {
+            await emitirPedido({}, { termos: [{ titulo: "EULA do Minecraft (Mojang)", url: "https://aka.ms/MinecraftEULA" }] });
+            await esperarTela("Fulano");
+            assert.equal(await pagina.evaluate(() => $("maquina-aceite").closest("[inert]") === null), true,
+              `${motor}: 23 · a tela de aceite ficou inerte sob o modal do MOD`);
+            await pagina.locator(".maquina-termo-caixa").first().check({ timeout: 3000 });
+            await pagina.click("#maquina-aceitar", { timeout: 3000 });
+            await esperarFechada();
+            assert.equal(await pagina.evaluate(() => chamadasDe("maquina_aceitar").length), 1, `${motor}: 23 · o aceite não chegou`);
+            // Fechada a tela, o modal do MOD continua sendo o único acordado.
+            assert.equal(await pagina.evaluate(() => $("maquina-aceite").closest("[inert]") !== null), true,
+              `${motor}: 23 · a tela fechada não voltou a dormir sob o modal`);
+            // E na ordem inversa: a tela já aberta, e um modal de MOD que entra depois.
+            await pagina.evaluate(() => {
+              const modal = document.getElementById("modal-de-mod-de-bancada");
+              desempilharCamada(modal);
+            });
+            await emitirPedido({ resumo: "resumo-depois" }, { termos: [{ titulo: "EULA do Minecraft (Mojang)", url: "https://aka.ms/MinecraftEULA" }] });
+            await esperarTela("Fulano");
+            await pagina.evaluate(() => empilharCamada(document.getElementById("modal-de-mod-de-bancada")));
+            await pagina.locator(".maquina-termo-caixa").first().check({ timeout: 3000 });
+            await pagina.click("#maquina-aceitar", { timeout: 3000 });
+            await esperarFechada();
+            assert.equal(await pagina.evaluate(() => chamadasDe("maquina_aceitar").length), 2, `${motor}: 23 · o aceite com o modal aberto depois não chegou`);
+          } finally {
+            await pagina.evaluate(() => {
+              const modal = document.getElementById("modal-de-mod-de-bancada");
+              desempilharCamada(modal);
+              modal.remove();
+            });
+          }
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 23, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 24, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

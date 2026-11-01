@@ -42,6 +42,13 @@ let maquinaNaTela = null;
 
 /** Onde estava o foco antes da tela, para devolvê-lo a quem abriu a conversa. */
 let focoAntesDaMaquina = null;
+// **A tela de aceite é do produto e fica acordada sob um modal de MOD**
+// (0.19.1). O CRIAR do Multiplayer mora num diálogo do MOD, e a pilha de
+// camadas (`mods-superficies.js`) adormece (`inert`) tudo fora dele: a tela
+// aparecia, e a caixa do EULA e o ACEITAR não respondiam ao clique — só o
+// Esc, que escuta o documento, recusava. Enquanto ela está aberta, pede para
+// ficar acordada (`acordarDaPilha`), e devolve o pedido ao fechar.
+let readormecerAMaquina = null;
 
 /** As linhas da faixa, por chave: ligadas e a última parada de cada uma. */
 const maquinasNaFaixa = new Map();
@@ -261,6 +268,8 @@ function abrirOPedido(pedido) {
   if ($("maquina-aceite").hidden) {
     focoAntesDaMaquina = document.activeElement;
     desenharOPedido(pedido);
+    readormecerAMaquina?.();
+    readormecerAMaquina = typeof acordarDaPilha === "function" ? acordarDaPilha($("maquina-aceite")) : null;
     $("maquina-aceite").hidden = false;
   } else {
     desenharOPedido(pedido);
@@ -271,6 +280,8 @@ function abrirOPedido(pedido) {
 
 function fecharATela() {
   $("maquina-aceite").hidden = true;
+  readormecerAMaquina?.();
+  readormecerAMaquina = null;
   maquinaNaTela = null;
   const volta = focoAntesDaMaquina;
   focoAntesDaMaquina = null;
