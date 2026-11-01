@@ -987,7 +987,9 @@ fn as_regras_da_voz_da_ponte_sao_as_do_desktop() {
 /// **A escada do ícone é a do desktop.** O navegador encolhe a imagem
 /// escolhida pelo canvas, com a escada do `icone::encolher` (Tarefa 2.6 da
 /// F4): os degraus e o teto do arquivo de origem são cópias, e este guarda as
-/// prende ao `icone.rs`.
+/// prende a quem as tem. Desde a 0.19 a escada mora em
+/// `seele_sessao::reducao` (`DEGRAUS_DO_ICONE`), que o `icone::encolher`
+/// chama; o teto do arquivo de origem continua no `icone.rs`.
 #[test]
 fn a_escada_do_icone_da_ponte_e_a_do_desktop() {
     let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
@@ -1022,12 +1024,31 @@ fn a_escada_do_icone_da_ponte_e_a_do_desktop() {
             })
             .product()
     };
-    let lado = numero_de("LADO");
-    let degraus: Vec<[u64; 2]> = icone
-        .split_once("const DEGRAUS")
+    // O lado do degrau cheio é o do protocolo: `LADO_DO_ICONE` é
+    // `MAX_SERVER_ICON_SIDE`, e é dele que o número se lê.
+    let controle = sem_comentarios(&ler("../../crates/seele-proto/src/control.rs"));
+    let lado: u64 = controle
+        .split_once("pub const MAX_SERVER_ICON_SIDE: u32 = ")
+        .and_then(|(_, depois)| depois.split_once(';'))
+        .expect("o `control.rs` declara `MAX_SERVER_ICON_SIDE`")
+        .0
+        .trim()
+        .parse()
+        .expect("um lado");
+    let reducao = sem_comentarios(&ler("../../crates/seele-sessao/src/reducao.rs"));
+    assert!(
+        reducao.contains("const LADO_DO_ICONE: u32 = seele_proto::control::MAX_SERVER_ICON_SIDE;"),
+        "o `reducao.rs` deixou de tirar o lado do ícone do protocolo"
+    );
+    assert!(
+        icone.contains("seele_ffi::reducao::icone_do_perfil("),
+        "o `icone::encolher` deixou de chamar a escada do `seele-sessao`"
+    );
+    let degraus: Vec<[u64; 2]> = reducao
+        .split_once("const DEGRAUS_DO_ICONE")
         .and_then(|(_, depois)| depois.split_once("= ["))
         .and_then(|(_, depois)| depois.split_once("];"))
-        .expect("o `icone.rs` declara `DEGRAUS`")
+        .expect("o `reducao.rs` declara `DEGRAUS_DO_ICONE`")
         .0
         .split('(')
         .skip(1)
@@ -1037,7 +1058,7 @@ fn a_escada_do_icone_da_ponte_e_a_do_desktop() {
                 .and_then(|(dentro, _)| dentro.split_once(','))
                 .expect("um par (lado, bits)");
             let maior = match maior.trim() {
-                "LADO" => lado,
+                "LADO_DO_ICONE" => lado,
                 outro => outro.parse().expect("um lado"),
             };
             [maior, bits.trim().parse().expect("os bits")]
@@ -1045,7 +1066,7 @@ fn a_escada_do_icone_da_ponte_e_a_do_desktop() {
         .collect();
     assert!(
         degraus.len() >= 4,
-        "li só {degraus:?} da escada do `icone.rs`"
+        "li só {degraus:?} da escada do `reducao.rs`"
     );
     let do_desktop = serde_json::json!({
         "degraus": degraus,
@@ -1054,7 +1075,7 @@ fn a_escada_do_icone_da_ponte_e_a_do_desktop() {
     assert_eq!(
         numeros_como_f64(da_ponte),
         numeros_como_f64(do_desktop.clone()),
-        "a escada do ícone da ponte discorda do `icone.rs`. A de hoje é:\n{}",
+        "a escada do ícone da ponte discorda do `reducao.rs` e do `icone.rs`. A de hoje é:\n{}",
         serde_json::to_string_pretty(&do_desktop).expect("JSON")
     );
 }
@@ -1167,6 +1188,29 @@ const ENDERECOS_DA_PAGINA: &[(&str, &str, &str)] = &[
         "a `PAGINA_DO_APP`, BAIXAR O APP DO SEELE (o site de downloads, get.seele.sh)",
     ),
     ("ui/glifos.js", "http://www.w3.org", "o namespace do SVG"),
+    // O mesmo namespace, nos outros arquivos que desenham SVG pelo
+    // `createElementNS`. É um nome do XML, e o navegador não o busca: não é
+    // origem de ninguém, mas o `createElementNS` só aceita ele escrito inteiro.
+    (
+        "ui/camada-mods.js",
+        "http://www.w3.org",
+        "o namespace do SVG (os ícones da camada de MODs)",
+    ),
+    (
+        "ui/celular-folhas.js",
+        "http://www.w3.org",
+        "o namespace do SVG (as folhas do celular)",
+    ),
+    (
+        "ui/celular-voz.js",
+        "http://www.w3.org",
+        "o namespace do SVG (a voz do celular)",
+    ),
+    (
+        "ui/mods-superficies.js",
+        "http://www.w3.org",
+        "o namespace do SVG (as superfícies de MOD)",
+    ),
 ];
 
 /// **A página não escreve outra origem** (D-web-2): o código que o navegador

@@ -48,6 +48,7 @@ use seele_proto::transport::IDLE_TIMEOUT;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod apelido;
 mod vaga;
 
 /// O que se promete a quem ficou: quem saiu some dos presentes dentro disto.
@@ -158,14 +159,15 @@ async fn conectar_pela_ffi(config: ConnectConfig) -> Arc<Connection> {
     }
 }
 
-/// Quem tem este apelido entre os presentes, se tem.
-fn presente(sala: &Room, apelido: &str) -> Option<PersonId> {
+/// Quem tem este apelido entre os presentes, se tem: pela base, porque o
+/// apelido chega com a marca da chave desde a 0.18 (ver `apelido`).
+fn presente(sala: &Room, procurado: &str) -> Option<PersonId> {
     sala.presentes
         .iter()
         .find(|id| {
             sala.people
                 .get(id)
-                .is_some_and(|pessoa| pessoa.nickname == apelido)
+                .is_some_and(|pessoa| apelido::base(&pessoa.nickname) == procurado)
         })
         .copied()
 }

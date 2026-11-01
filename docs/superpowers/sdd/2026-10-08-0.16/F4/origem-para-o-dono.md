@@ -70,6 +70,12 @@ Pages e o Netlify leem:
 # em 24/10/2026, na primeira publicação da 0.16).
 /executor-de-mod
   Content-Security-Policy: frame-ancestors 'self'
+
+/diagnostico-rede.html
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self' https://rendzvous.seele.sh; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+/diagnostico-rede
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self' https://rendzvous.seele.sh; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 ```
 
 **Por que cada um:**
@@ -85,6 +91,10 @@ Pages e o Netlify leem:
   política de verdade dele está no `<meta>` do próprio arquivo, com o hash do
   script. Ele não pode receber a CSP da página: o `frame-ancestors 'none'` dela
   o impediria de ser emoldurado pela página;
+- **a CSP do `diagnostico-rede.html`** (e a gêmea sem o `.html`, 0.18.2): a
+  página que só prova o transporte até o servidor. O resto fica no
+  `default-src 'self'`, e o `connect-src` só abre a origem e o ponto de
+  encontro (`https://rendzvous.seele.sh`), o único que ela precisa alcançar;
 - **`Strict-Transport-Security`**, por um ano, sem `preload` e sem
   `includeSubDomains`: a origem é um subdomínio, e o `preload` pede o domínio
   inteiro;

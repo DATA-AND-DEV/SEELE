@@ -22,6 +22,7 @@ use seele_ffi::{
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod apelido;
 mod vaga;
 
 const VOICE_ROOM: u32 = 1;
@@ -192,7 +193,13 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
     let snapshot = connection.snapshot();
     assert_eq!(snapshot.link_state, LinkTrust::Verified);
     assert_eq!(snapshot.server, "Casa");
-    assert_eq!(snapshot.nickname, "marcela");
+    // O apelido volta com a marca da chave desde a 0.18 (`marcela#XXXX`).
+    assert_eq!(apelido::base(&snapshot.nickname), "marcela");
+    assert!(
+        apelido::marca(&snapshot.nickname).is_some(),
+        "o apelido não trouxe a marca da chave: {:?}",
+        snapshot.nickname
+    );
     assert!(snapshot.me.is_some());
     assert!(
         !snapshot.voice_rooms.is_empty(),
@@ -337,7 +344,10 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
         .iter()
         .find(|m| m.body == "sync caiu aqui")
         .expect("message");
-    assert_eq!(message.author_nickname, "rafael");
+    // Quem falou, com a marca da chave dele: o mesmo apelido que a sessão
+    // dele conhece.
+    assert_eq!(message.author_nickname, speaker.snapshot().nickname);
+    assert_eq!(apelido::base(&message.author_nickname), "rafael");
     assert!(!message.own);
     assert!(message.at_seconds > 0, "no timestamp: {message:?}");
 
@@ -367,7 +377,7 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
                 voice_room
                     .people
                     .iter()
-                    .any(|person| person.nickname == "helena")
+                    .any(|person| apelido::base(&person.nickname) == "helena")
             })
         }),
         "the other person never appeared"
@@ -382,7 +392,7 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
                 voice_room
                     .people
                     .iter()
-                    .any(|person| person.nickname == "helena" && person.muted)
+                    .any(|person| apelido::base(&person.nickname) == "helena" && person.muted)
             })
         }),
         "a mute was applied locally and never announced"
@@ -442,7 +452,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
         .iter()
         .find(|m| m.body == "primeira coisa dita")
         .expect("message");
-    assert_eq!(message.author_nickname, "maya");
+    assert_eq!(apelido::base(&message.author_nickname), "maya");
     assert!(
         message.at_seconds > 1_600_000_000,
         "history with no time on it — or with the wrong unit, which reads as \
@@ -542,7 +552,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
         .expect("mensagem");
 
     // Sem perda: quem escreveu, e quando — não só o corpo.
-    assert_eq!(mensagem.author_nickname, "marcela");
+    assert_eq!(apelido::base(&mensagem.author_nickname), "marcela");
     assert!(!mensagem.own, "atribuída à pessoa errada");
     assert!(
         mensagem.at_seconds > 1_600_000_000,

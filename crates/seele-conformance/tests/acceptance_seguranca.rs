@@ -474,16 +474,15 @@ async fn um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> R
         "uma chave nova entrou por se dizer pelo nome de alguém já admitido"
     );
 
-    // 8. E se quem hospeda aprovar **essa** chave nova, a recusa que sobra tem
-    //    de dizer qual é.
+    // 8. E se quem hospeda aprovar **essa** chave nova, ela entra — com o
+    //    apelido que pediu, e como outra pessoa.
     //
-    // O relato de campo: «dou permissão e continua dando credencial recusada,
-    // mesmo fechando o app». Quatro falhas diferentes vestiam essa frase, e uma
-    // delas é esta — o apelido pertence a outra chave, e não passa com o tempo:
-    // tentar de novo, ser aprovado de novo e reinstalar o app dão o mesmo
-    // resultado. Enquanto ela se chamava «credencial recusada», o conselho que
-    // vinha junto mandava conferir o convite, que é a única coisa que não era o
-    // problema.
+    // Até a 0.18 a recusa que sobrava aqui era `NicknameTaken`: o apelido era
+    // de outra chave. Desde `8284b642` bases iguais de chaves diferentes são
+    // admitidas, cada chave com a própria marca (`estranho#XXXX`), e o que este
+    // passo guarda é o que a marca promete: a chave nova não ganha a
+    // identidade da que já foi admitida com o mesmo nome. O passo 7 continua
+    // sendo o da portaria — sem a aprovação, o mesmo nome não abre a porta.
     {
         let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
         portaria::decidir(&mut persistence, &impressao_de(3), true)?;
@@ -495,15 +494,24 @@ async fn um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> R
         Arc::new(MemoryPinStore::new()),
         Some("terceiro impacto"),
     )
-    .await;
-    assert_eq!(
-        razao(homonimo_aprovado.err()),
-        DisconnectReason::NicknameTaken,
-        "a portaria aprovou e a recusa que sobrou não disse que era o apelido;          quem lê «credencial recusada» vai mexer no convite para sempre"
+    .await
+    .expect("a chave aprovada não entrou com um apelido que outra chave também usa");
+    let o_primeiro = conectar(
+        endereco,
+        "estranho",
+        9,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await
+    .expect("o primeiro admitido não voltou");
+    assert_ne!(
+        homonimo_aprovado.session().person,
+        o_primeiro.session().person,
+        "a chave nova entrou como a pessoa que já tinha o mesmo apelido"
     );
 
-    // E com outro apelido a mesma chave entra, que é a prova de que a frase
-    // acima aponta para a coisa certa de mexer.
+    // E com outro apelido a mesma chave entra como ela mesma.
     let com_outro_nome = conectar(
         endereco,
         "outro-nome",
@@ -512,9 +520,10 @@ async fn um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> R
         Some("terceiro impacto"),
     )
     .await;
-    assert!(
-        com_outro_nome.is_ok(),
-        "trocar de apelido não resolveu: {:?}",
+    assert_eq!(
+        com_outro_nome.as_ref().map(|c| c.session().person).ok(),
+        Some(homonimo_aprovado.session().person),
+        "trocar de apelido mudou quem a chave é: {:?}",
         com_outro_nome.err()
     );
 

@@ -144,11 +144,33 @@ async fn partes_dos_membros(par: &mut Par) -> Vec<(Vec<Membro>, bool)> {
     partes
 }
 
+/// A base de um apelido, sem a marca da chave (`pessoa091#XXXX`) que ele traz
+/// desde a 0.18 (`8284b642`). Sem marca bem formada, o apelido inteiro — e
+/// então a comparação com a base reprova, como deve.
+fn base(apelido: &str) -> &str {
+    match apelido.rsplit_once('#') {
+        Some((base, marca))
+            if marca.len() == 4
+                && marca
+                    .bytes()
+                    .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase()) =>
+        {
+            base
+        }
+        _ => apelido,
+    }
+}
+
 fn apelidos(membros: &[Membro]) -> Vec<&str> {
     membros
         .iter()
-        .map(|membro| membro.nickname.as_str())
+        .map(|membro| base(&membro.nickname))
         .collect()
+}
+
+/// Um `Membro` como (id, base do apelido).
+fn quem(membro: Option<Membro>) -> Option<(PersonId, String)> {
+    membro.map(|m| (m.id, base(&m.nickname).to_owned()))
 }
 
 /// **O caso da P5:** A e B entram, e B sai. C entra e recebe a lista com os
@@ -223,7 +245,10 @@ async fn quem_entra_recebe_os_membros_e_fica_sabendo_do_banimento() -> Result<()
         _ => None,
     })
     .await;
-    assert_eq!(renomeado, Some((a.person, "anfitria".to_owned())));
+    assert_eq!(
+        renomeado.map(|(pessoa, apelido)| (pessoa, base(&apelido).to_owned())),
+        Some((a.person, "anfitria".to_owned()))
+    );
 
     // E quem entra depois já não vê o banido, e vê o nome novo.
     let mut d = entrar(endereco, 94).await?;
@@ -258,19 +283,16 @@ async fn a_conta_nova_vira_membro_para_quem_ja_esta_e_a_volta_nao() -> Result<()
 
     let d = entrar(endereco, 104).await?;
     let pessoa_d = d.person;
-    for (quem, par) in [("A", &mut a), ("C", &mut c)] {
+    for (nome, par) in [("A", &mut a), ("C", &mut c)] {
         let novo = esperar(par, |mensagem| match mensagem {
             ServerMessage::MembroNovo { membro } => Some(membro),
             _ => None,
         })
         .await;
         assert_eq!(
-            novo,
-            Some(Membro {
-                id: pessoa_d,
-                nickname: "pessoa104".into(),
-            }),
-            "{quem} não soube da conta nova"
+            quem(novo),
+            Some((pessoa_d, "pessoa104".to_owned())),
+            "{nome} não soube da conta nova"
         );
     }
 
@@ -284,11 +306,8 @@ async fn a_conta_nova_vira_membro_para_quem_ja_esta_e_a_volta_nao() -> Result<()
     })
     .await;
     assert_eq!(
-        proximo,
-        Some(Membro {
-            id: e.person,
-            nickname: "pessoa105".into(),
-        }),
+        quem(proximo),
+        Some((e.person, "pessoa105".to_owned())),
         "a volta de uma conta que já existia saiu como membro novo"
     );
 

@@ -96,10 +96,10 @@ async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
 
 /// O destino, com o que o convite prometeu.
 ///
-/// O apelido entra por fora porque o ADR 0017 o prende à identidade: uma chave
-/// nova com o apelido de outra pessoa é recusada com `CredentialRejected`. Aqui
-/// a identidade nunca muda dentro de um teste, justamente para que a única
-/// coisa que varia seja a impressão esperada.
+/// O apelido entra por fora porque o ADR 0017 o prende à identidade (desde a
+/// 0.18, pela marca da chave: `base#XXXX`). Aqui a identidade nunca muda dentro
+/// de um teste, justamente para que a única coisa que varia seja a impressão
+/// esperada.
 fn destino(endereco: SocketAddr, apelido: &str, impressao_esperada: Option<&str>) -> Destino {
     Destino {
         servidor: endereco,
@@ -537,10 +537,13 @@ async fn a_impressao_que_nao_confere_nao_deixa_pedido_na_portaria() -> Result<()
 /// `NicknameTaken`, trocava o nome, e o mesmo convite já não entrava
 /// (`CredentialRejected`). Um link morto por causa de um nome.
 ///
-/// A conferência do apelido agora vem antes do `gastar`, e o convite fica
-/// intacto para a segunda tentativa.
+/// Desde a 0.18 (`8284b642`) o nome não é mais recusado: bases iguais de
+/// chaves diferentes entram, cada uma com a própria marca (`maya#XXXX`). O
+/// link não morre por causa de um nome porque o nome entra. O que este teste
+/// guarda agora é isso, e que o convite continua de uso único: entra uma vez,
+/// como outra pessoa que não a dona do nome, e não entra uma segunda.
 #[tokio::test(flavor = "multi_thread")]
-async fn o_apelido_de_outra_chave_nao_gasta_o_convite() -> Result<()> {
+async fn o_apelido_de_outra_chave_entra_pelo_convite_como_outra_pessoa() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     let real = servidor.fingerprint().to_owned();
@@ -557,19 +560,24 @@ async fn o_apelido_de_outra_chave_nao_gasta_o_convite() -> Result<()> {
         admissao::criar_convite(&mut persistence, "para o shinji")?
     };
 
-    let erro = conectar_com_convite(endereco, 52, "maya", &convite, &real, &loja)
+    let shinji = conectar_com_convite(endereco, 52, "maya", &convite, &real, &loja)
         .await
-        .expect_err("«maya» é de outra chave; não havia o que aceitar");
-    assert_eq!(
-        erro,
-        ConnectError::Refused {
-            reason: DisconnectReason::NicknameTaken
-        }
+        .expect("o convite não entrou com um nome que outra chave também usa");
+    assert_ne!(
+        shinji.sessao().person,
+        maya.sessao().person,
+        "a chave nova entrou como a dona do nome"
     );
 
-    let shinji = conectar_com_convite(endereco, 52, "shinji", &convite, &real, &loja)
+    let de_novo = conectar_com_convite(endereco, 53, "rei", &convite, &real, &loja)
         .await
-        .expect("o convite foi gasto pela tentativa com o apelido de outra chave");
+        .expect_err("o convite de uso único entrou duas vezes");
+    assert_eq!(
+        de_novo,
+        ConnectError::Refused {
+            reason: DisconnectReason::CredentialRejected
+        }
+    );
 
     drop(shinji);
     drop(maya);

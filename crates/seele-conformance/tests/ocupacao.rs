@@ -45,6 +45,7 @@ use seele_proto::ids::{ChannelId, VoiceRoomId};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod apelido;
 mod vaga;
 
 /// Sobe um servidor numa porta que o sistema escolhe, com duas salas de voz.
@@ -140,11 +141,12 @@ where
     pronto(room)
 }
 
-/// Os apelidos sentados numa sala de voz, como a tela os desenharia.
+/// As bases dos apelidos sentados numa sala de voz (sem a marca da chave, que
+/// vem desde a 0.18: ver `apelido`).
 fn sentados(room: &Room, voice_room: VoiceRoomId) -> Vec<String> {
     let mut nomes: Vec<String> = room
         .roster(voice_room)
-        .map(|person| person.nickname.clone())
+        .map(|person| apelido::base(&person.nickname).to_owned())
         .collect();
     nomes.sort();
     nomes

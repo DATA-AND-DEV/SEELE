@@ -11,10 +11,13 @@
 //! - **M1**: sentada em A, pede B com a senha errada;
 //! - **M3**: cai e volta numa sala com senha. O servidor resgata o assento (o
 //!   mesmo `ssrc`), e o motor refaz a entrada sem a senha, que é recusada;
-//! - **M5**: sentada em A, escolhe um apelido que já é de outra pessoa. O
-//!   servidor recusava com o mesmo motivo (`nao_deu`, em `seele-server`). Desde
-//!   a F1 ele recusa com `PedidoRecusado { pedido, causa }`, e o M5 continua:
-//!   ele mede que uma recusa que não é de entrada não tira ninguém da sala.
+//! - **M5**: sentada em A, faz um pedido que o servidor recusa e que não é de
+//!   entrada. Era escolher um apelido que já é de outra pessoa, que o servidor
+//!   recusava com o mesmo motivo (`nao_deu`, em `seele-server`); desde a F1 ele
+//!   recusa com `PedidoRecusado { pedido, causa }`. Desde a 0.18 (`8284b642`)
+//!   o apelido de outra chave é admitido com outra marca (`lia#XXXX`), e o M5
+//!   pede a remoção de uma mensagem que não existe (`NaoExiste`): continua
+//!   medindo que uma recusa que não é de entrada não tira ninguém da sala.
 //!
 //! Antes da pendência 52 isso só fazia a tela mentir. Com ela, o áudio segue o
 //! assento, e a pessoa ficava surda e muda numa sala em que todos a viam — o
@@ -193,12 +196,12 @@ fn recusada(conexao: &Connection) -> bool {
 
 /// A recusa do apelido tomado, como ela chega desde a F1: o pedido pelo nome
 /// da variante, e a causa.
-fn apelido_recusado(conexao: &Connection) -> bool {
+fn remocao_recusada(conexao: &Connection) -> bool {
     conexao.snapshot().notice.is_some_and(|aviso| {
         aviso.reason
             == NoticeReason::PedidoRecusado {
-                pedido: "SetNickname",
-                causa: CausaDaRecusa::NomeTomado,
+                pedido: "RemoveMessage",
+                causa: CausaDaRecusa::NaoExiste,
             }
     })
 }
@@ -293,25 +296,21 @@ async fn quem_e_recusado_noutra_sala_continua_na_sua_e_com_o_audio() -> Result<(
     Ok(())
 }
 
-/// **M5**: sentada em A, pede um apelido que já é de outra pessoa, e continua
-/// em A, com voz. A recusa é do apelido, e chega com o motivo de entrada.
+/// **M5**: sentada em A, faz um pedido que o servidor recusa e que não é de
+/// entrada — a remoção de uma mensagem que não existe —, e continua em A, com
+/// voz. Era um apelido tomado, até a 0.18 admitir o apelido de outra chave com
+/// outra marca (ver o cabeçalho).
 #[tokio::test(flavor = "multi_thread")]
-async fn um_apelido_tomado_nao_tira_ninguem_da_sala() -> Result<()> {
+async fn uma_recusa_que_nao_e_de_entrada_nao_tira_ninguem_da_sala() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
-    let _lia = Enlace::conectar(
-        destino(endereco, "lia"),
-        ed25519_dalek::SigningKey::from_bytes(&[72; 32]),
-        Arc::new(MemoryPinStore::new()) as Arc<dyn PinStore>,
-    )
-    .await?;
     let casa = tempfile::tempdir()?;
     let p = entrar_pela_ffi(config(casa.path(), endereco, "p")).await;
     let a = VoiceRoomId(p.snapshot().voice_rooms[0].id);
 
     sentar_pela_ffi(&p, &daemon, a, None).await;
-    p.set_nickname("lia".into()).expect("a sessão acabou");
-    continua_em(&p, &daemon, a, "M5", apelido_recusado).await;
+    p.remove_message(9_999).expect("a sessão acabou");
+    continua_em(&p, &daemon, a, "M5", remocao_recusada).await;
 
     p.disconnect();
     daemon.shutdown();

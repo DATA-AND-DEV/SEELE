@@ -48,6 +48,7 @@ use seele_proto::MediaHeader;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod apelido;
 mod vaga;
 
 /// Quanto se espera além do tempo ocioso antes de conferir o estrago.
@@ -278,11 +279,12 @@ where
     }
 }
 
-/// Os apelidos sentados numa sala, como a tela os desenharia.
+/// As bases dos apelidos sentados numa sala (sem a marca da chave, que vem
+/// desde a 0.18: ver `apelido`).
 fn sentados(room: &Room, sala: VoiceRoomId) -> Vec<String> {
     let mut nomes: Vec<String> = room
         .roster(sala)
-        .map(|pessoa| pessoa.nickname.clone())
+        .map(|pessoa| apelido::base(&pessoa.nickname).to_owned())
         .collect();
     nomes.sort();
     nomes

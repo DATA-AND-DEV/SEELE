@@ -48,6 +48,7 @@ use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod apelido;
 mod vaga;
 
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -119,10 +120,12 @@ async fn absorver(enlace: &mut Enlace, room: &mut Room, por: Duration) {
     }
 }
 
+/// As bases dos apelidos sentados (sem a marca da chave, que vem desde a
+/// 0.18: ver `apelido`).
 fn sentados(room: &Room, voice_room: VoiceRoomId) -> Vec<String> {
     let mut nomes: Vec<String> = room
         .roster(voice_room)
-        .map(|person| person.nickname.clone())
+        .map(|person| apelido::base(&person.nickname).to_owned())
         .collect();
     nomes.sort();
     nomes

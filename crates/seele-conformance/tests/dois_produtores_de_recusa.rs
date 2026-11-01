@@ -14,7 +14,7 @@ use seele_core::ConnectError;
 use seele_proto::control::{encode_em, DisconnectReason, ServerMessage, MAX_NICKNAME_LEN};
 use seele_proto::mods::ModAnunciado;
 use seele_proto::quadro::enquadrar;
-use seele_proto::version::PROTOCOL_VERSION;
+use seele_proto::version::{PROTOCOL_VERSION, VERSAO_MINIMA};
 use seele_web::ligacao::{Ligacao, Passo, Pedido};
 
 fn pedido(apelido: &str) -> Pedido {
@@ -109,8 +109,11 @@ fn a_recusa_do_servidor_e_a_mesma_antes_e_depois_da_prova() {
 #[test]
 fn outra_linha_diz_a_mesma_versao_e_o_mesmo_mais_nova() {
     // Os números de antes da 1.0, o da linha 1 (9), que desde a 0.17 não é
-    // este, e os depois da linha 2 (10, o de agora, fica de fora: ele entra).
-    for numero in (0..=9).chain([11, 200, 255]) {
+    // este, e os depois da faixa que esta build lê (`VERSAO_MINIMA` a
+    // `PROTOCOL_VERSION`, que ficam de fora: eles entram). O 11 era um dos de
+    // fora até o protocolo subir para 12 (`6e33ce3d`), e agora é a 0.18, que
+    // entra; os de fora são os acima do de agora.
+    for numero in (0..VERSAO_MINIMA).chain([PROTOCOL_VERSION + 1, 200, 255]) {
         let mut ligacao = Ligacao::abrir(pedido("marcela")).unwrap();
         let navegador = recusada(ligacao.chegou(&enquadrar(&[numero, 0, 0]).unwrap()));
         assert_eq!(

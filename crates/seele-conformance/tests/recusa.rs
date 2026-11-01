@@ -8,6 +8,12 @@
 //! pertencia a outra identidade, o servidor recusou dizendo exatamente isso no
 //! log, e o cliente mostrou "NÃO FOI POSSÍVEL ALCANÇAR O servidor". Passei um bom
 //! tempo procurando problema de rede que não existia.
+//!
+//! Desde a 0.18 (`8284b642`) aquele apelido não é mais recusado: bases iguais
+//! de chaves diferentes entram, cada uma com a própria marca (`marcela#XXXX`).
+//! A recusa que estes testes encenam passou a ser a do segredo do servidor
+//! (`CredentialRejected`, ADR 0021), que vem no mesmo lugar — depois do TLS,
+//! no aperto de mão — e é o que eles medem.
 
 #![allow(clippy::expect_used)]
 
@@ -18,7 +24,7 @@ use anyhow::Result;
 use seele_core::enlace::{Destino, Enlace};
 use seele_core::{Client, ConnectError, MemoryPinStore, PinStore};
 use seele_server::persistence::Location;
-use seele_server::{Daemon, ServerConfig};
+use seele_server::{admissao, Daemon, ServerConfig};
 
 mod vaga;
 
@@ -38,6 +44,12 @@ async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     Ok((endereco, servidor))
 }
 
+/// Passa a pedir uma senha, que quem entra a seguir não traz.
+async fn fechar_com_senha(servidor: &Daemon) -> Result<()> {
+    let mut persistence = servidor.server().persistence.lock().await;
+    admissao::definir_senha(&mut persistence, Some("terceiro impacto"))
+}
+
 async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client, ConnectError> {
     Client::connect(
         endereco,
@@ -53,18 +65,18 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client, ConnectErro
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn um_apelido_de_outro_dono_e_recusa_e_nao_rede() -> Result<()> {
+async fn uma_recusa_do_servidor_e_recusa_e_nao_rede() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
-    // O primeiro reivindica o apelido. ADR 0017: PERSISTENCE prende o apelido à
-    // identidade que o pegou primeiro.
+    // O primeiro entra com o servidor aberto: o servidor está de pé e alcançável.
     let primeiro = entrar(endereco, 1).await.expect("o primeiro deve entrar");
     drop(primeiro);
 
-    // O segundo tem outra chave e quer o mesmo nome.
+    // O servidor passa a pedir senha, e o segundo não a traz.
+    fechar_com_senha(&servidor).await?;
     let Err(erro) = entrar(endereco, 2).await else {
-        panic!("o segundo entrou com um apelido que não é dele");
+        panic!("o segundo entrou sem a senha que o servidor pede");
     };
 
     assert!(
@@ -91,6 +103,7 @@ async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
 
     let primeiro = entrar(endereco, 1).await.expect("o primeiro deve entrar");
     drop(primeiro);
+    fechar_com_senha(&servidor).await?;
 
     let loja = Arc::new(MemoryPinStore::new());
     let chave_do_pin = endereco.to_string();
@@ -105,15 +118,15 @@ async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
         aceito: None,
     };
 
-    // Mesma situação do teste acima: outra identidade pedindo um apelido que já
-    // tem dono. O TLS passa, o aperto de mão não.
+    // Mesma situação do teste acima: outra identidade, sem a senha que o
+    // servidor pede. O TLS passa, o aperto de mão não.
     let erro = Enlace::conectar(
         destino,
         ed25519_dalek::SigningKey::from_bytes(&[2; 32]),
         Arc::clone(&loja) as Arc<dyn PinStore>,
     )
     .await
-    .expect_err("o segundo entrou com um apelido que não é dele");
+    .expect_err("o segundo entrou sem a senha que o servidor pede");
     assert!(matches!(erro, ConnectError::Refused { .. }), "«{erro:?}»");
 
     assert_eq!(

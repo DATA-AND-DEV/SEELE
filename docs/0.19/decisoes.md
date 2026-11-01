@@ -453,3 +453,74 @@ abrir, e um `pessoa.detalhes` que chega com ela aberta só aparece na próxima
 abertura; e o `celular.rs` reprova na base (`d79ef846`) em
 `o_texto_do_sistema_alcanca_todo_tamanho_do_desktop` («regere com
 SEELE_REGERAR_TEXTO=1»), fora desta triagem.
+
+## 01/11/2026 — a bateria do release
+
+A bateria do `empacotar/publicar.sh` (o `cargo fmt --check`, o clippy, o
+`cargo test --workspace -- --test-threads=1`, os `cargo xtask check-*` e o
+`cargo deny`) reprovava em `desenho/api-8-sobre-0.19` (`ba0fd50e`). A lista
+inteira veio de um `cargo test --workspace --no-fail-fast -- --test-threads=1`:
+25 testes em 13 alvos, e todos reprovam igual na ponta da `entrega/0.19`
+(`74732140`, medido numa árvore à parte), exceto o `mods-superficies.js` do
+item 3, que só existe na linha da API 8. Uma decisão por linha:
+
+- **`cargo fmt --check`** (134 trechos em 28 arquivos): formatação do rustfmt
+  1.9.0 do 1.97.1 fixado, num commit só dela; conferido que a diferença é só
+  espaço, ordem de `use` e chaves de braço de `match`.
+- **`a_escada_do_icone_da_ponte_e_a_do_desktop`** — guarda velho. A escada saiu
+  do `icone.rs` para o `seele_sessao::reducao` (`DEGRAUS_DO_ICONE`) na 0.19
+  (`01ac840f`). O guarda lê a escada de lá, o lado cheio do
+  `MAX_SERVER_ICON_SIDE`, e confere que o `icone::encolher` ainda a chama; o
+  teto da origem continua no `icone.rs`. Trocar um degrau no `reducao.rs` o
+  reprova (medido).
+- **`a_origem_do_web_app_e_escrita_num_lugar_so`** — defeito. `seele.sh`
+  escrito à mão no `index.html` (a faixa da casca larga), no
+  `composicao-0174.js` (a dica do campo), no `diagnostico-rede.js` (o convite
+  remontado do fragmento), num comentário do `alertas-sonoros.js`, na bancada
+  `rtc-diagnostico.cjs` e no `convite_ipv6_compartilhado.rs`. A página agora
+  diz a origem que a serviu (`location.host`), a bancada lê a do `uri.rs`
+  (`origem-do-produto.cjs`) e o teste do proto usa a `ORIGEM_DO_NAVEGADOR`.
+  Com os seis arquivos de volta, o guarda reprova nomeando os seis (medido).
+- **`a_pagina_nao_escreve_outra_origem`** — guarda velho. O namespace do SVG
+  (`http://www.w3.org/2000/svg`) é nome do XML, e não origem: o
+  `createElementNS` o pede inteiro. Entraram em `ENDERECOS_DA_PAGINA`, com o
+  porquê, os quatro arquivos que desenham SVG além do `glifos.js`
+  (`camada-mods.js`, `celular-folhas.js`, `celular-voz.js` e, só na API 8,
+  `mods-superficies.js`). Um quinto arquivo que o escreva reprova (medido).
+- **`os_cabecalhos_da_origem_sao_um_so`** — documento velho. A 0.18.2
+  (`13918258`) pôs no `web/_headers` a CSP do `diagnostico-rede`, e os passos
+  do dono (`F4/origem-para-o-dono.md`) não a copiaram. O bloco é de novo o
+  arquivo inteiro, com o porquê da regra nova. Uma regra a mais no
+  `_headers` reprova (medido).
+- **`as_cores_daqui_sao_as_do_produto`** (`seele-instalador`) — defeito. A pele
+  do instalador ficou nas cores da 0.18 com os tokens da 0.19 no `tokens.css`
+  (`d4854b4e`): painel, linha, linha forte, rótulo e o laranja. As constantes
+  agora são as da 0.19, e o guarda passou a ler o valor esperado **das
+  próprias constantes**: ele tinha uma lista à parte, e por isso nem esta
+  divergência nem a volta de uma constante ele veria. Com o `PAINEL` de antes,
+  reprova (medido).
+- **`outra_linha_diz_a_mesma_versao_e_o_mesmo_mais_nova`** — guarda velho. O
+  11 era um carimbo de fora até o protocolo subir para 12 (`6e33ce3d`); hoje
+  ele é a 0.18, que entra. Os de fora passam a ser os abaixo da
+  `VERSAO_MINIMA` e os acima da `PROTOCOL_VERSION`, lidos das constantes.
+- **Os apelidos com marca** (`acceptance_m5` ×5, `ocupacao` ×2, `desassentar`
+  ×4, `reconexao_fantasma`, `saida_com_despedida` ×3, `fora_do_ar` ×2 do
+  `seele-server`) — guardas velhos. Desde a 0.18 (`8284b642`) o servidor
+  devolve `base#XXXX`, e estes testes comparavam a base com o apelido inteiro.
+  Comparam a base (o módulo `tests/apelido` da conformidade), como o
+  `d01f502a` já fez com o `senha_da_sala`; a sessão do terminal confere também
+  que a marca veio bem formada, e a conversa confere o autor contra o apelido
+  inteiro que a sessão de quem falou conhece.
+- **As recusas do apelido tomado** (`a_recusa_nao_tira_da_sala` M5, `recusa`
+  ×2, `convite`, o passo 8 do `acceptance_seguranca`) — guardas velhos, pela
+  mesma regra: `SetNickname` e o aperto de mão não recusam mais o apelido de
+  outra chave. Cada um mantém a promessa com uma recusa que ainda existe ou
+  com o que a marca promete: o M5 pede a remoção de uma mensagem que não
+  existe (`NaoExiste`), e sem o pedido reprova; o `recusa` fecha o servidor
+  com senha (`CredentialRejected`, depois do TLS), e sem a senha o segundo
+  entra e ele reprova; o `convite` prova que o nome de outra chave entra pelo
+  convite como **outra pessoa** e que o convite segue de uso único, e sem o
+  convite a entrada é recusada; o passo 8 prova que o homônimo aprovado entra
+  como outra pessoa, e o 7 continua barrando o homônimo sem aprovação.
+- **Instáveis:** nenhum. Os 25 reprovaram nas duas árvores, e passaram de novo
+  depois do conserto.
