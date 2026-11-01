@@ -195,3 +195,86 @@ Cada decisão no formato `Ruling: <o quê> — <por quê> — <custo se errada>`
   e o contrato que o MOD copia (`test/contrato/api-v8.json`) precisa ser
   copiado de novo: a v8 ganhou `reservado-ao-aceite`, `pasta-fora-do-aceite`
   e os campos `caminho`, `reservado` e `pasta`, e o `rodar` só roda na raiz.
+
+## Revisão do release 0.19 + API 8 (31/10)
+
+Relatório: I1 e M1–M7. As provas por reversão abaixo foram rodadas: cada
+teste reprova com o conserto desfeito e passa com ele.
+
+- **Ruling R19 (I1): nenhuma metade sobe enquanto um jogo que sobrou ainda
+  salva — e a espera vale para toda metade, não só para a da mesma chave.**
+  `PortaDasSobras` (`maquina.rs`) é fechada no `setup`, antes de a thread da
+  procura existir; a thread acha as sobras (`achar_sobras`, núcleo), para
+  cada uma (`parar_sobra`) e abre a porta quando a última sai (e também se
+  cair no meio). `processar_pedido` e `aceitar` esperam a porta **antes** da
+  `vez`, para um pedido não prender os outros no cadeado. Esperar, e não
+  recusar: os motivos de recusa são uma lista fechada do protocolo, e o
+  servidor não tem prazo para o pendente. A espera vale para todas as chaves
+  porque a porta do jogo é da máquina inteira, e o mesmo servidor alcançado
+  por outro endereço é outra chave. A faixa diz `parando` («o SEELE pediu ao
+  jogo para salvar e sair e espera ele sair; até lá, nenhum jogo sobe neste
+  computador»), e o desfecho toma o lugar dessa linha. **O MOD não ouve nada
+  além da espera**: o aceite dele chega quando o órfão sai. Dizer mais pede
+  um momento novo na v8. — Prova: `nenhuma_metade_sobe_enquanto_o_jogo_que_sobrou_salva`
+  (o pedido já está na porta antes de a procura ler a pasta, e o órfão leva
+  1 s para sair depois do `SIGTERM`). Sem a espera ele reprova sempre, porque
+  o órfão ainda nem recebeu o sinal. A bancada `aceite-da-maquina.cjs`, caso
+  20, prova a linha `parando` e a troca dela pelo desfecho. — Custo: na
+  abertura, uma metade de outro jogo também espera até ~22 s por sobra. A
+  ligação entre a porta e as duas chamadas tem uma linha em cada lugar, e
+  nenhum teste a liga ao `processar_pedido`.
+- **Ruling R20 (M1): o sinal que chega durante a despedida da janela não sai
+  por cima dela.** `despedir_no_sinal` volta sem chamar o `exit`: o `exit`
+  vem da despedida que já corre. — Prova:
+  `o_sinal_durante_a_despedida_da_janela_nao_sai_por_cima`.
+- **Ruling R21 (M2): sem o começo do dono, um pid do dono que existe vale
+  como dono vivo.** O registro fica, e o log diz (`warn`). O registro sem o
+  começo do próprio jogo também passa a ser dito em `warn`, ao gravar e ao
+  apagar. Errar para este lado custa um órfão, que a próxima abertura para;
+  errar para o outro derruba o jogo de quem está jogando. — Prova:
+  `sem_o_comeco_do_dono_um_dono_vivo_nao_perde_o_jogo`.
+- **Ruling R22 (M3): o registro é gravado antes de `rodar` voltar**, e é
+  apagado nos dois retornos de erro que vêm depois. Ainda há uma janela: o
+  tempo de um `ps` entre o `spawn` e o arquivo, porque o começo do processo
+  só existe depois que ele existe. — Prova: `o_registro_existe_quando_rodar_volta`.
+- **Ruling R23 (M4): «que não parou» diz «pelo gerenciador de processos do
+  sistema (no Mac, o Monitor de Atividade)».** — Prova: bancada
+  `aceite-da-maquina.cjs`, caso 20.
+- **Ruling R24 (M5): a volta sozinha só acontece se a sessão que acabou era
+  a do servidor desta janela.** O alvo dessa sessão tem de ser igual a
+  `meu_servidor().alvo`. — Prova: bancada `volta-depois-de-salvar-o-conjunto.cjs`,
+  caso 4.
+- **Ruling R25 (M6): a janela que fecha com a despedida de um sinal correndo
+  não despede de novo.** O `prevent_exit` continua na linha de sempre, e
+  `ao_fechar_a_ultima_janela` faz o `swap`. — Prova:
+  `a_janela_que_fecha_durante_a_despedida_nao_despede_de_novo`.
+- **Ruling R26 (M7): o logoff do Windows fica como custo aceito da W3,
+  documentado.** Ele não é medido.
+  - **O que o relatório supunha**: que o logoff mata o app sem caminho
+    nenhum. Lendo o `tao` 0.35.3 (`platform_impl/windows/event_loop.rs`,
+    `WM_ENDSESSION`), esse caminho existe: o `loop_destroyed` gera o
+    `RunEvent::Exit`, e daí `despedir_no_fim_do_app` chama
+    `parar_todas_na_saida`, que dá o `aoParar("app-fechou")` com o `stop`.
+  - **Por que não basta**: tudo isso corre dentro do teto inegociável de 1 s
+    (`TETO_DA_DESPEDIDA_NO_FIM`). Quando a mensagem volta, o Windows encerra
+    o processo, e o Job mata o `java`. Um mundo que leva mais de 1 s para
+    salvar perde o que mudou desde o último autosave.
+  - **Por que não foi além**: estender esse tempo pede
+    `ShutdownBlockReasonCreate` e responder ao `WM_QUERYENDSESSION`, que o
+    `tao` não trata. Seria código Windows `unsafe` novo numa janela que não é
+    nossa, e não é simples.
+  - **Por que não foi medido**: medir pede fazer logoff da sessão do dono no
+    `winpc`, e isso é mexer no sistema.
+  - **Os registros no Windows**: só são gravados e apagados, sem parar nada
+    (`como_esta` devolve `None`). Ficam como estão, porque a W3 cobre a queda.
+- **Ruling R27 (teste instável): `a_volta_religa_a_orfa_sem_subir_de_novo`
+  tinha um defeito de tempo no teste, e o produto estava certo.** O `fora`
+  do `aoReconectar` é o tempo de órfã em segundos inteiros. Sob carga, as
+  esperas pelo batimento passam de 1 s, e «voltei 1» é a resposta certa.
+  Nenhum pedido se perdeu: o quadro chegou uma vez, e pela conexão nova.
+  - **Prova do diagnóstico**: com 1,1 s a mais entre orfanar e religar, o
+    teste antigo reprova com a mesma mensagem da suíte (`«pedir "voltei 0"»
+    não chegou ao fio; chegou ["pedir \"voltei 1\""]`), e o novo passa.
+  - **O conserto**: o teste espera qualquer `voltei N`, exige que seja um
+    quadro só, e confere `N` contra o relógio do teste.
+  - **Medida**: 30 de 30 rodadas passaram com 30 `yes` ocupando 15 núcleos.
