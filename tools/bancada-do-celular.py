@@ -641,6 +641,24 @@ def engrenagem_do_inicio(pg: Page) -> list[str]:
         return { aberta: !c.hidden, topo: Math.round(r.top), alto: Math.round(r.height), tela: innerHeight }; }""")
     if not camada["aberta"] or camada["topo"] > 0 or camada["alto"] < camada["tela"]:
         falhas.append(f"a engrenagem do início não abre CONFIGURAÇÕES na tela inteira: {camada}")
+        return falhas
+    # E ela tem saída: no início não há a aba que a fecha. O «‹ INÍCIO» está à
+    # vista, com 44, e o que pede um servidor (SAIR, CARGOS) não aparece.
+    lista = pg.evaluate("""() => {
+        const v = (s) => !!document.querySelector(s)?.checkVisibility();
+        const r = document.querySelector('#tela-server .cel-ajustes-ao-inicio')?.getBoundingClientRect();
+        return { inicio: v('#tela-server .cel-ajustes-ao-inicio') && r.bottom <= innerHeight, inicioAlto: Math.round(r?.height ?? 0),
+                 sair: v('#tela-server .cel-sair-do-servidor'), cargos: v('#tela-server .cel-cargos') }; }""")
+    if not lista["inicio"] or lista["inicioAlto"] < 44:
+        falhas.append(f"aberta pelo início, a camada não tem o «‹ INÍCIO» à vista, com 44: {lista}")
+    if lista["sair"] or lista["cargos"]:
+        falhas.append(f"aberta pelo início, a camada oferece o que pede um servidor: {lista}")
+    if exigir_toque(pg, "#tela-server .cel-ajustes-ao-inicio", falhas):
+        pg.wait_for_timeout(300)
+        depois = pg.evaluate("""() => ({ camada: !document.getElementById('tela-server').hidden,
+            inicio: !!document.getElementById('tela-boot')?.checkVisibility() })""")
+        if depois["camada"] or not depois["inicio"]:
+            falhas.append(f"o «‹ INÍCIO» não fecha CONFIGURAÇÕES de volta ao início: {depois}")
     return falhas
 
 

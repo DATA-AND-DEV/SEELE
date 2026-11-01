@@ -76,6 +76,18 @@
     if (camada.hidden && sessao.dataset.aba === "ajustes") CELULAR.ajudante("abrirAba")("conversa");
   }).observe(camada, { attributes: true, attributeFilter: ["hidden"] });
 
+  // **Aberta pela engrenagem do início**, a camada não tem a aba que a fecha:
+  // as abas são da sessão, e o VOLTAR do desktop sai no celular. Sem isto ela
+  // abria sem saída, e com SAIR DO SERVIDOR e CARGOS, que pedem um servidor.
+  // A marca diz de onde ela veio; o «‹ INÍCIO» no alto da lista a fecha.
+  document.getElementById("botao-server").addEventListener("click", () => {
+    camada.dataset.celOrigem = "inicio";
+    camada.setAttribute("data-cel-pagina", "lista");
+  });
+  new MutationObserver(() => {
+    if (camada.hidden) delete camada.dataset.celOrigem;
+  }).observe(camada, { attributes: true, attributeFilter: ["hidden"] });
+
   // As páginas: tocar uma seção a mostra sozinha; «‹ AJUSTES» volta à lista.
   camada.querySelector(".server-faixa").prepend(h("button", {
     class: "cel-ajustes-voltar",
@@ -127,6 +139,13 @@
     h("button", { class: "botao-fantasma cel-perfil-editar", type: "button", onclick: () => abrirPerfil() },
       PALAVRAS.editarPerfil));
   coluna.prepend(perfil);
+  // Só à vista com a camada aberta pela engrenagem do início (a marca acima).
+  coluna.prepend(h("button", {
+    class: "cel-ajustes-ao-inicio",
+    type: "button",
+    "aria-label": PALAVRAS.voltarAoInicio,
+    onclick: () => fecharServer(),
+  }, glifo("recuar"), PALAVRAS.inicio));
 
   // A região `operador.barra` (F3, passo 8b): a tira do operador não existe no
   // celular, e a região vem para logo abaixo de SEU PERFIL. O mesmo nó, e não

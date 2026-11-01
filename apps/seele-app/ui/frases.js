@@ -2951,6 +2951,8 @@ const FRASES_DO_CELULAR = Object.freeze({
   ajustes: Object.freeze({
     ajustes: "AJUSTES",
     voltarAosAjustes: "Voltar à lista de AJUSTES",
+    inicio: "INÍCIO",
+    voltarAoInicio: "Fechar AJUSTES e voltar ao início",
     seuPerfil: "SEU PERFIL",
     editarPerfil: "EDITAR PERFIL",
     audio: "ÁUDIO",

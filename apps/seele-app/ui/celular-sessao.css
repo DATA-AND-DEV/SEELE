@@ -1699,7 +1699,20 @@
   display: none;
 }
 
-:root[data-casca="celular"] .cel-ajustes-voltar {
+/* Aberta pela engrenagem do início, não há aba que a feche: o «‹ INÍCIO» no
+   alto da lista fecha, e o que pede um servidor (SAIR, CARGOS) não aparece. */
+:root[data-casca="celular"] #tela-server:not([data-cel-origem="inicio"]) .cel-ajustes-ao-inicio,
+:root[data-casca="celular"] #tela-server[data-cel-origem="inicio"] :is(.cel-ajustes-saida, li:has(> .cel-cargos)) {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-server .cel-ajustes-ao-inicio {
+  align-self: flex-start;
+  min-height: 44px;
+  margin-top: var(--cel-seguro-topo, 0px);
+}
+
+:root[data-casca="celular"] :is(.cel-ajustes-voltar, .cel-ajustes-ao-inicio) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
