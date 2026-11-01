@@ -132,8 +132,9 @@ const FRASE_DA_VOLTA_DO_CONJUNTO =
  * propósito: a sessão volta para carregar os MODs novos. O que estava errado
  * era pedir a quem já disse sim que voltasse à mão.
  *
- * Volta sozinha quando o sim guardado para este endereço é o conjunto que o
- * servidor desta janela exige agora: é o sim que o SALVAR gravou
+ * Volta sozinha quando a sessão que acabou era a do servidor desta janela
+ * (`meu_servidor`) e o sim guardado para esse endereço é o conjunto que ele
+ * exige agora: é o sim que o SALVAR gravou
  * (`aplicar_conjunto_de_mods`, antes de soltar o banco). Qualquer outro caso —
  * um membro, um conjunto que mudou de novo, uma janela que não hospeda —
  * fica na tela de sempre, com RECONECTAR.
@@ -143,14 +144,20 @@ const FRASE_DA_VOLTA_DO_CONJUNTO =
 async function voltarSozinhoSeOConjuntoEMeu(alvo) {
   let aceito;
   let exigido;
+  let meu;
   try {
-    [aceito, exigido] = await Promise.all([
+    [aceito, exigido, meu] = await Promise.all([
       invoke("aceite_de_mods", { alvo }),
       invoke("conjunto_exigido_agora"),
+      invoke("meu_servidor"),
     ]);
   } catch {
     return false;
   }
+  // **O conjunto exigido é o do servidor desta janela**, e só vale comparar com
+  // o sim de quem saiu dele (revisão da 0.19, M5): a sessão que acabou podia
+  // ser de outro servidor, cujo sim guardado só por acaso é a mesma lista.
+  if (!meu || meu.alvo !== alvo) return false;
   if (typeof aceito !== "string" || !aceito || aceito !== exigido) return false;
   // A pessoa pode ter saído por conta própria enquanto se perguntava.
   if ($("tela-fim").hidden || alvoDoFim !== alvo) return false;

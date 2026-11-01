@@ -10,7 +10,9 @@
 //  2. o sim guardado é de outro conjunto (um membro, ou o conjunto mudou de
 //     novo): a tela de sempre fica, com «OS MODS DESTE SERVIDOR MUDARAM» e
 //     RECONECTAR, e nada se conecta sozinho;
-//  3. a janela não hospeda (`conjunto_exigido_agora` vazio): idem.
+//  3. a janela não hospeda (`conjunto_exigido_agora` vazio): idem;
+//  4. a sessão que acabou é de outro servidor (`meu_servidor` é outro alvo),
+//     e o sim dele é por acaso o conjunto do meu: idem.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/volta-depois-de-salvar-o-conjunto.cjs
 
@@ -58,17 +60,18 @@ async function caso(motor, numero, prova) {
         await pagina.waitForFunction(() => typeof mostrarFim === "function" && typeof conectar === "function");
 
         /** A sessão de `alvo` acaba com `ModsMudaram`; a ponte responde o sim guardado e o exigido. */
-        const acabar = (aceito, exigido) => pagina.evaluate(([a, e]) => {
+        const acabar = (aceito, exigido, meu = "127.0.0.1:8383") => pagina.evaluate(([a, e, m]) => {
           chamadas.length = 0;
           table.aceite_de_mods = () => a;
           table.conjunto_exigido_agora = () => e;
+          table.meu_servidor = () => (m ? { alvo: m, nome: null } : null);
           // A volta para no `connect`: o que importa é que ela sai, e para onde.
           table.connect = () => new Promise(() => {});
           alvoDoServer = "127.0.0.1:8383";
           $("tela-sessao").hidden = false;
           $("tela-fim").hidden = true;
           mostrarFim("ModsMudaram");
-        }, [aceito, exigido]);
+        }, [aceito, exigido, meu]);
         const chamou = (cmd) => pagina.evaluate((c) => chamadas.filter((x) => x.cmd === c).map((x) => x.args), cmd);
 
         // 1. O sim guardado é o conjunto exigido agora: volta sozinha.
@@ -100,6 +103,18 @@ async function caso(motor, numero, prova) {
           await pagina.waitForFunction(() => chamadas.some((c) => c.cmd === "conjunto_exigido_agora"), null, { timeout: 5000 });
           await pagina.waitForTimeout(300);
           assert.equal((await chamou("connect")).length, 0, `${motor}: 3 · conectou sozinho sem hospedar`);
+        });
+
+        // 4. A sessão que acabou é de outro servidor, e o sim guardado dele é
+        //    por acaso o conjunto que o desta janela exige (revisão da 0.19, M5):
+        //    nada se conecta sozinho.
+        await caso(motor, "4", async () => {
+          await acabar("conj-novo", "conj-novo", "127.0.0.1:9999");
+          await pagina.waitForFunction(() => chamadas.some((c) => c.cmd === "conjunto_exigido_agora"), null, { timeout: 5000 });
+          await pagina.waitForTimeout(300);
+          assert.equal((await chamou("connect")).length, 0, `${motor}: 4 · voltou sozinho a outro servidor pelo conjunto do meu`);
+          const texto = await pagina.evaluate(() => $("fim-motivo").textContent);
+          assert.doesNotMatch(texto, /PASSOU A VALER/, `${motor}: 4 · ${texto}`);
         });
 
         if (erros.length) falhas.push(`${motor}: erros na página: ${erros.join(" | ")}`);
