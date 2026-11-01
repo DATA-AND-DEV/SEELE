@@ -56,7 +56,8 @@ function sinalDaFamilia(sinal, familia) {
   if (familia) testar.textContent = `Testar IPv${familia}`;
   const fragmento = location.hash;
   if (fragmento) {
-    campo.value = `https://seele.sh/${fragmento}`;
+    // A página veio do link: a origem dela é a do convite.
+    campo.value = `https://${location.host}/${fragmento}`;
     history.replaceState(null, "", location.pathname + location.search);
   }
   function lerConvite(texto) {

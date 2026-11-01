@@ -6,7 +6,7 @@
 // dente de serra): o som de um aviso tem de ser notado sem assustar quem está
 // no meio de uma frase. Sem arquivo, não há o que carregar, cachear, licenciar
 // nem o que a CSP (`default-src 'self'`) precise liberar — e a mesma ui/ serve
-// o desktop (webview do Tauri) e o navegador (seele.sh) sem uma linha a mais.
+// o desktop (webview do Tauri) e o navegador (o web app) sem uma linha a mais.
 //
 // **Um contexto só dele**, criado na primeira vez que alguém precisa de som e
 // separado do da voz (`voz-web.js`): a voz abre e fecha o dela com a conversa,

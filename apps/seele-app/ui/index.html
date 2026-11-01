@@ -309,10 +309,12 @@
          data-foco="botao-conectar"
          data-anuncio="Entrada. Conecte a um servidor, ou hospede um aqui.">
   <div class="boot-caixa">
-    <!-- Só no navegador (casca larga): de onde vem a página, e a troca para a casca do celular. -->
+    <!-- Só no navegador (casca larga): de onde vem a página, e a troca para a casca do celular.
+         O nome é o da origem que serviu a página (`location.host`, posto pelo
+         `composicao-0174.js`), e não uma cópia escrita aqui (D-web-2). -->
     <div class="boot-faixa-web" role="note">
-      <span class="boot-faixa-origem">seele.sh</span>
-      <span class="boot-faixa-texto">a página vem de seele.sh · a tecla de falar só vale com esta aba em foco</span>
+      <span class="boot-faixa-origem" data-origem-da-pagina></span>
+      <span class="boot-faixa-texto">a página vem de <span data-origem-da-pagina></span> · a tecla de falar só vale com esta aba em foco</span>
       <button id="boot-abrir-como-celular" class="botao-fantasma" type="button">ABRIR COMO CELULAR</button>
     </div>
     <header class="boot-topo">

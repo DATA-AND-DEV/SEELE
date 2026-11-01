@@ -22,7 +22,7 @@ fn convite() -> Convite {
 fn ipv6_cru_e_codificado_preservam_o_convite_inteiro() {
     let original = convite();
     let cru = format!(
-        "https://seele.sh/#{}",
+        "https://{ORIGEM_DO_NAVEGADOR}/#{}",
         original.to_string().trim_start_matches("seele://")
     );
     for texto in [
@@ -57,7 +57,8 @@ fn link_gerado_nao_tem_colchetes_crus_e_volta_sem_perdas() {
                 .convite,
             original
         );
-        assert_eq!(link.split('#').next(), Some("https://seele.sh/"));
+        let raiz = format!("https://{ORIGEM_DO_NAVEGADOR}/");
+        assert_eq!(link.split('#').next(), Some(raiz.as_str()));
     }
 }
 
@@ -74,7 +75,10 @@ fn codificacao_nao_recupera_pin_ausente_nem_injeta_campos() {
         assert!(analisar_no_navegador(&adulterado, ORIGEM_DO_NAVEGADOR).is_err());
     }
     assert!(analisar_no_navegador(
-        &link.replace("https://seele.sh/", "https://seele.sh.evil.invalid/"),
+        &link.replace(
+            &format!("https://{ORIGEM_DO_NAVEGADOR}/"),
+            &format!("https://{ORIGEM_DO_NAVEGADOR}.evil.invalid/")
+        ),
         ORIGEM_DO_NAVEGADOR
     )
     .is_err());

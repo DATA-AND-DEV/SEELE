@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { origemDoProduto } = require('./origem-do-produto.cjs');
 const source = fs.readFileSync(path.join(__dirname, '../ui/rtc-web.js'), 'utf8');
 function contexto(PC) {
   const ctx = vm.createContext({ RTCPeerConnection: PC, console, setTimeout, clearTimeout, setInterval, clearInterval,
@@ -64,7 +65,7 @@ function pagina() {
   prepararCertificadoDtls:async()=>({}),fronteiraDoSinal:()=>({}),window:{addEventListener(){}},navigator:{clipboard:{writeText:async()=>{}}},
   criarEnlaceRtc:()=>({...enlace,ready:new Promise((resolve,reject)=>pendentes.push({resolve,reject}))})});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../ui/diagnostico-rede.js'),'utf8'),ctx);
- el('convite').value='https://seele.sh/#192.0.2.1:8383?enc=rendzvous.seele.sh:8384/203.0.113.1:8383&fp='+'ab'.repeat(32);
+ el('convite').value=origemDoProduto+'/#192.0.2.1:8383?enc=rendzvous.seele.sh:8384/203.0.113.1:8383&fp='+'ab'.repeat(32);
  return {el,pendentes,medicoes:()=>medicoes};
 }
 test('página exporta medição antes da falha e interrompe coleta ao terminar',async()=>{

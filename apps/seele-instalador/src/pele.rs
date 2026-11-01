@@ -30,17 +30,17 @@ pub(crate) const fn cor(rgb: u32) -> u32 {
 /// `--seele-negro-absoluto`: o fundo, e nunca um cinza-carvão neutro.
 pub(crate) const NEGRO: u32 = cor(0x05_04_03);
 /// `--seele-negro-painel`: a lombada, a barra de título e o rodapé.
-pub(crate) const PAINEL: u32 = cor(0x0A_08_06);
+pub(crate) const PAINEL: u32 = cor(0x0D_0C_0A);
 /// `--seele-linha`: a borda de 1px que separa as faixas.
-pub(crate) const LINHA: u32 = cor(0x24_1F_19);
+pub(crate) const LINHA: u32 = cor(0x20_1E_1B);
 /// `--seele-linha-forte`: a borda de um campo, e a moldura da janela.
-pub(crate) const LINHA_FORTE: u32 = cor(0x3A_32_2A);
+pub(crate) const LINHA_FORTE: u32 = cor(0x3D_39_34);
 /// `--seele-osso`: texto corrido.
 pub(crate) const OSSO: u32 = cor(0xEA_E3_CF);
 /// `--seele-rotulo-painel`: rótulo miúdo, 9–10px, em caixa alta.
-pub(crate) const ROTULO: u32 = cor(0x90_85_74);
+pub(crate) const ROTULO: u32 = cor(0x8A_84_7A);
 /// `--seele-laranja-nerv`: o acento, e o passo em que se está.
-pub(crate) const LARANJA: u32 = cor(0xF2_52_1F);
+pub(crate) const LARANJA: u32 = cor(0xF47732);
 // `--seele-fosforo` entra junto com o log do passo 03, e não antes: a bateria
 // roda o clippy com `-D warnings`, e uma constante sem uso reprova o release.
 
@@ -71,16 +71,17 @@ pub(crate) const MARCA: &[u8] = include_bytes!("../../seele-app/marca-instalador
 
 #[cfg(test)]
 mod testes {
-    use super::{cor, LARANJA, NEGRO, OSSO};
+    use super::{cor, LARANJA, LINHA, LINHA_FORTE, NEGRO, OSSO, PAINEL, ROTULO};
 
     #[test]
     fn a_ordem_dos_canais_e_a_do_gdi_e_nao_a_do_css() {
-        // O laranja do produto é `#F2521F`: muito vermelho, médio verde, pouco
-        // azul. No formato do GDI ele tem de sair com o vermelho no byte baixo.
+        // O laranja do produto é `#F47732` (0.19): muito vermelho, médio verde,
+        // pouco azul. No formato do GDI ele tem de sair com o vermelho no byte
+        // baixo.
         //
         // Sem este teste, trocar a ordem é um defeito que compila, roda, e só
         // aparece para quem olha a tela — num azul onde devia haver laranja.
-        assert_eq!(LARANJA, 0x00_1F_52_F2);
+        assert_eq!(LARANJA, 0x00_32_77_F4);
         assert_eq!(cor(0xFF_00_00), 0x00_00_00_FF, "vermelho puro");
         assert_eq!(cor(0x00_00_FF), 0x00_FF_00_00, "azul puro");
         assert_eq!(NEGRO, 0x00_03_04_05);
@@ -99,15 +100,29 @@ mod testes {
             panic!("não li {}", caminho.display());
         };
 
-        for (nome, valor) in [
-            ("--seele-negro-absoluto", "#050403"),
-            ("--seele-negro-painel", "#0A0806"),
-            ("--seele-linha", "#241F19"),
-            ("--seele-linha-forte", "#3A322A"),
-            ("--seele-osso", "#EAE3CF"),
-            ("--seele-rotulo-painel", "#908574"),
-            ("--seele-laranja-nerv", "#F2521F"),
+        // O valor esperado sai das próprias constantes, de volta do `0x00BBGGRR`
+        // do GDI para o `#RRGGBB` do CSS: uma lista à parte no teste seria uma
+        // terceira cópia, e foi assim que a pele ficou na cor da 0.18 com a 0.19
+        // já no `tokens.css` sem que este guarda dissesse nada da constante.
+        let css_de = |gdi: u32| {
+            format!(
+                "#{:02X}{:02X}{:02X}",
+                gdi & 0xFF,
+                (gdi >> 8) & 0xFF,
+                (gdi >> 16) & 0xFF
+            )
+        };
+        for (nome, constante) in [
+            ("--seele-negro-absoluto", NEGRO),
+            ("--seele-negro-painel", PAINEL),
+            ("--seele-linha", LINHA),
+            ("--seele-linha-forte", LINHA_FORTE),
+            ("--seele-osso", OSSO),
+            ("--seele-rotulo-painel", ROTULO),
+            ("--seele-laranja-nerv", LARANJA),
         ] {
+            let valor = css_de(constante);
+            let valor = valor.as_str();
             // A linha do token, e não uma busca por `nome: valor` grudados: o
             // `tokens.css` alinha os valores em coluna com vários espaços, e um
             // guarda preso ao espaçamento reprova quando alguém alinha a tabela.

@@ -20,7 +20,11 @@
     proposito?.remove();
     boot.prepend(topo);
     const faixa = boot.querySelector(".boot-faixa-web");
-    if (faixa) boot.prepend(faixa);
+    if (faixa) {
+      // De onde a página veio: a origem que a serviu, e não um nome escrito à mão (D-web-2).
+      faixa.querySelectorAll("[data-origem-da-pagina]").forEach(nome => { nome.textContent = location.host; });
+      boot.prepend(faixa);
+    }
   }
   const esquerda = boot?.querySelector(".boot-esq");
   const direita = boot?.querySelector(".boot-dir");
@@ -53,7 +57,7 @@
       const entrada = document.createElement("input");
       entrada.type = "text";
       entrada.placeholder = celular ? "Cole aqui para conectar"
-        : larga ? "https://seele.sh/#…" : "seele://… ou 10.0.0.4:8383";
+        : larga ? `https://${location.host}/#…` : "seele://… ou 10.0.0.4:8383";
       entrada.autocomplete = "off"; entrada.spellcheck = false;
       rotulo.append(entrada);
       const grupo = document.createElement("div"); grupo.className = "inicio-conectar-linha";
