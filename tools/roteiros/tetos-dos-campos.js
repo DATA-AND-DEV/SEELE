@@ -60,12 +60,14 @@ await caso("apelido gravado", async () => {
     exigir(await ate(() => visivel("perfil") === "VISIVEL", 900), "o perfil não abriu na entrada");
     const grande = passa(TETOS.apelido);
     document.getElementById("perfil-apelido").value = grande;
+    // A recusa do nome é dita no campo do nome desde a 0.19 (`dizerNoNome`, em
+    // `perfis.js`: `#perfil-apelido-erro`), e não no aviso geral do perfil.
     document.getElementById("perfil-salvar").click();
-    await ate(() => visivel("perfil-erro") === "VISIVEL", 600);
+    await ate(() => visivel("perfil-apelido-erro") === "VISIVEL", 600);
     exigir(window.__SEELE_APELIDO === antes && !mandou("escolher_apelido_local").some((a) => a?.apelido === grande),
       `um apelido de ${grande.length} letras e ${bytesDe(grande)} bytes foi gravado nesta máquina, e vai no Hello`);
-    exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(`${TETOS.apelido} BYTES`),
-      `a recusa não diz o teto no perfil: «${texto("perfil-erro")}»`);
+    exigir(visivel("perfil-apelido-erro") === "VISIVEL" && texto("perfil-apelido-erro").includes(`${TETOS.apelido} BYTES`),
+      `a recusa não diz o teto no perfil: «${texto("perfil-apelido-erro")}»`);
     exigir(visivel("perfil") === "VISIVEL", "o perfil fechou com o apelido recusado");
     const certo = cabe(TETOS.apelido);
     document.getElementById("perfil-apelido").value = certo;
@@ -118,11 +120,11 @@ await caso("apelido na sessão", async () => {
   const grande = passa(TETOS.apelido);
   document.getElementById("perfil-apelido").value = grande;
   document.getElementById("perfil-salvar").click();
-  await ate(() => visivel("perfil-erro") === "VISIVEL", 600);
+  await ate(() => visivel("perfil-apelido-erro") === "VISIVEL", 600);
   exigir(!mandou("escolher_apelido").some((a) => a?.apelido === grande),
     `um apelido de ${bytesDe(grande)} bytes saiu para o servidor, e o núcleo o recusa calado`);
-  exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(`${TETOS.apelido} BYTES`),
-    `a recusa não diz o teto no perfil: «${texto("perfil-erro")}»`);
+  exigir(visivel("perfil-apelido-erro") === "VISIVEL" && texto("perfil-apelido-erro").includes(`${TETOS.apelido} BYTES`),
+    `a recusa não diz o teto no perfil: «${texto("perfil-apelido-erro")}»`);
   const certo = cabe(TETOS.apelido);
   document.getElementById("perfil-apelido").value = certo;
   document.getElementById("perfil-salvar").click();

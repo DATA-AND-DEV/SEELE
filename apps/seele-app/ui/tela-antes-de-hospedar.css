@@ -482,7 +482,7 @@
   color: var(--seele-osso-apagado);
   white-space: pre-line;
   overflow-wrap: anywhere;
-  max-width: none;
+  max-width: var(--seele-leitura);
   font-size: 14px;
   line-height: 1.6;
   margin-top: 6px;
@@ -607,7 +607,10 @@
   background: var(--seele-laranja-nerv);
   border-color: var(--seele-laranja-nerv);
 }
-/* O motivo do HOSPEDAR apagado, ao lado dele. */
+/* O motivo do HOSPEDAR apagado, ao lado dele — encostado ao botão que ele
+   explica: com o painel na largura toda, alinhado à esquerda da medida de
+   leitura ele ficava solto no meio do pé. */
+@media (min-width: 701px) { .antes-motivo { text-align: end; } }
 .antes-motivo {
   margin: 0;
   font-size: var(--seele-t-dado);
@@ -633,8 +636,13 @@
    e a palavra de estado usam a face de dados, em caixa alta e espaçada. A lista
    de versões e o campo de nome do desenho moram em «Preparar este servidor», que
    é outra tela e outro pacote. */
+/* A largura toda, como no desenho (o painel de «Antes de hospedar» do canvas
+   toma o resto da linha, com o respiro de 16px da tela): o teto de 1000px
+   deixava uma coluna de 69% no centro de uma janela de 1440, contra a regra
+   do dono da 0.17 («nada aglomerado numa coluna estreita no centro»,
+   `bancada/area-util.cjs`). O parágrafo segue na medida de leitura, abaixo. */
 #tela-antes-de-hospedar .boot-caixa.area {
-  width: min(100%, 1000px);
+  width: 100%;
   flex: 1 0 auto;
   display: flex;
   flex-direction: column;

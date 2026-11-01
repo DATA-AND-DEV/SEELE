@@ -63,6 +63,10 @@ async function extras() {
       if (raiz.scrollWidth>raiz.clientWidth+2) throw new Error('Transbordamento horizontal no fluxo');
       for (const el of raiz.querySelectorAll('button,input,select,textarea,a[href]')) {
         if(el.disabled || !el.getClientRects().length)continue;
+        // Fora do leitor e do Tab ao mesmo tempo não é controle de ninguém: o
+        // <select> da cor do cargo (0.19) segue como fonte da verdade, escondido,
+        // e quem escolhe são as amostras (rádios nativos), que são medidas.
+        if(el.closest('[aria-hidden="true"]') && el.tabIndex<0)continue;
         el.scrollIntoView({block:'center',inline:'nearest'});el.focus({preventScroll:true});
         const r=el.getBoundingClientRect(),no=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
         if(r.left<0 || r.right>innerWidth+1 || r.top<0 || r.bottom>innerHeight+1 || !(no===el || el.contains(no))) throw new Error('Controle encoberto: '+(el.id||el.textContent));

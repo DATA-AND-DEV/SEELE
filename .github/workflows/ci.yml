@@ -271,7 +271,15 @@ jobs:
       # ganhar um por causa disto: a dependência é de teste, de um job, e
       # declarar um manifesto npm na raiz de um workspace Rust convida a uma
       # segunda árvore de dependências que ninguém pediu.
-      - run: npm install --no-save playwright
+      #
+      # **A versão é fixa** (31/10/2026): com a mais nova a cada rodada, o
+      # navegador muda debaixo das bancadas. A 1.64 (Chromium 156, WebKit 27.2)
+      # aceita o `WebAssembly.Module` na porta do worklet, que a
+      # `voz-no-navegador.cjs` usa para provocar o `messageerror`, e o WebKit
+      # 27.2 desenha diferente a captura redimensionada da
+      # `compartilhar-pessoal-web.cjs`; as duas passam na 1.62.1. Subir a
+      # versão é uma decisão com a rodada inteira medida, e não um efeito do dia.
+      - run: npm install --no-save playwright@1.62.1
       - run: npx playwright install --with-deps chromium
       # Cada bancada por nome, e não um laço sobre a pasta. Uma bancada nova tem
       # de ser acrescentada aqui de propósito: um laço que rodasse tudo passaria
@@ -712,7 +720,8 @@ jobs:
       # bancada de navegador mora aqui, e não no `bancadas`. O teste
       # `a_bancada_do_executor_no_navegador_roda_depois_do_motor_compilado`, em
       # `xtask/src/check_runtime.rs`, segura a ordem e o caminho.
-      - run: npm install --no-save playwright
+      # A mesma versão fixa do job `bancadas` (ver o motivo lá).
+      - run: npm install --no-save playwright@1.62.1
         if: ${{ !cancelled() }}
       - run: npx playwright install --with-deps chromium webkit
         if: ${{ !cancelled() }}
@@ -822,7 +831,9 @@ jobs:
       - run: node apps/seele-app/bancada/chamada-web.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
-      - run: node apps/seele-app/bancada/compartilhar-pessoal-web.cjs
+      # O `.wasm` da página é argumento obrigatório dela (sem ele a bancada
+      # morria com «uso:» antes de abrir o navegador).
+      - run: node apps/seele-app/bancada/compartilhar-pessoal-web.cjs target/pacote-web/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/entrada-dos-mods.cjs
@@ -859,6 +870,11 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/sessao-campainha.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A saída de som da conversa pessoal com os dispositivos simulados, que
+      # nenhum lugar chamava (`toda_bancada_da_pasta_roda_em_algum_lugar`).
+      - run: node apps/seele-app/bancada/saida-pessoal-web.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright

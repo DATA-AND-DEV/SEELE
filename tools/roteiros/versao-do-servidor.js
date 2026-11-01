@@ -47,7 +47,10 @@ await mandar();
 // Antes do ABRIR: a pergunta, e nada aberto nem conectado.
 const pergunta = document.getElementById("versoes-confirmar-frase")?.textContent ?? "";
 relatar(`a pergunta: ${visivel("versoes-confirmar")} «${pergunta}»`);
-exigir(visivel("versoes-confirmar") === "VISIVEL" && pergunta.includes("Servidor 0.15"),
+// Sem a versão interna desde a limpeza de textos da 0.19 (`959e49ae`, regra 1
+// de `docs/0.19/limpeza-de-textos.md`): a pergunta diz «outra versão» e a
+// janela que abre; a linha certa é conferida no pedido, abaixo.
+exigir(visivel("versoes-confirmar") === "VISIVEL" && pergunta.includes("outra versão") && pergunta.includes("noutra janela"),
   `o link de outra linha não perguntou antes de abrir: versoes-confirmar ${visivel("versoes-confirmar")}, «${pergunta}»`);
 relatar(`antes do ABRIR: abriu outra versão ${chamou("abrir_versao")}, conectou ${chamou("connect")}`);
 exigir(!chamou("abrir_versao") && !chamou("connect"),

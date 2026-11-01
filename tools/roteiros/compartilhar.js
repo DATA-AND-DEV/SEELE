@@ -23,8 +23,11 @@ exigir(visivel("compartilhar") === "VISIVEL",
 // O que a caixa pergunta: os controles de escolha dentro dela. A lista de
 // fontes são botões, um por monitor ou janela, e não entra aqui.
 const caixa = document.getElementById("compartilhar");
-const perguntas = [...caixa.querySelectorAll("select, input, textarea")]
-  .map((el) => el.id || el.tagName.toLowerCase()).sort();
+// As pílulas da 0.19 (rádios `name="<select>-pilula"`) são a mesma pergunta do
+// `<select>` que elas espelham (`ligarPilulas`, em `camada-compartilhar.js`):
+// cada pergunta conta uma vez, pelo nome do `<select>`.
+const perguntas = [...new Set([...caixa.querySelectorAll("select, input, textarea")]
+  .map((el) => (el.type === "radio" && el.name.endsWith("-pilula") ? el.name.slice(0, -"-pilula".length) : el.id || el.tagName.toLowerCase())))].sort();
 relatar("o que ela pergunta: " + perguntas.join(" "));
 exigir(perguntas.join(" ") === "compartilhar-quadros compartilhar-resolucao compartilhar-som",
   "a caixa pergunta outra coisa além da resolução, dos quadros e do som: " + perguntas.join(" "));

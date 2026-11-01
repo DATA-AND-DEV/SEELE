@@ -79,6 +79,13 @@
   --seele-sync-nominal: var(--seele-fosforo);
   --seele-sync-degradado: var(--seele-laranja-nerv);
   --seele-sync-critico: var(--seele-vermelho-alerta);
+  /* **A tinta do vidro** (0.19): as bandejas de vidro — o compositor, a tira do
+     operador — tingem com o texto do tema, resolvido **aqui**, onde o tema
+     escreve. Uma região que só troca o `texto` escreve `--seele-osso` no
+     próprio contêiner, e com a mistura lida ali o fundo dele mudava junto
+     (`tema-claro-legivel.cjs`): a validação mede o texto da região contra o
+     fundo da sessão, e esse fundo tem de continuar o mesmo. */
+  --seele-tinta-do-vidro: var(--seele-osso);
 }
 
 /* **O fundo do tema chega à sessão** (0.19). Até a 0.18 as colunas pintavam o
@@ -918,7 +925,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
   flex-direction: column;
   gap: 10px;
   flex: 0 0 auto;
-  background: color-mix(in srgb, var(--seele-osso) 5%, transparent);
+  background: color-mix(in srgb, var(--seele-tinta-do-vidro, var(--seele-osso)) 5%, transparent);
   border: 1px solid var(--seele-controle-borda);
   border-radius: 20px;
 }
@@ -1009,6 +1016,13 @@ button.voice_room-nome:hover { text-decoration: underline; }
      escreve os `--seele-*` em `#tela-sessao`, e não os alcança. */
   --nucleo-tinta-no-acento: var(--seele-tinta-no-acento);
   --nucleo-acento-claro: var(--seele-laranja-claro);
+  /* **O vidro do núcleo, opaco**: o tom que o vidro dos ícones tem sobre o
+     fundo do produto (o 4% do controle sobre o 5% da tira do operador, sobre o
+     negro), fixado numa placa. O vidro translúcido deixava o fundo do tema
+     passar: sob um tema claro, o creme do SAIR, do MUDO e do fone ficava a
+     1,09:1 sobre o creme do tema (`bancada/tema-claro-legivel.cjs`). */
+  --nucleo-vidro: color-mix(in srgb, var(--seele-osso) 9%, var(--seele-negro-absoluto));
+  --nucleo-vidro-aceso: color-mix(in srgb, var(--seele-osso) 13%, var(--seele-negro-absoluto));
 }
 
 #voz-estado {
@@ -2832,7 +2846,7 @@ button.linha-nome:hover { text-decoration: underline; }
   margin: 0 12px 12px;
   border: 1px solid var(--seele-controle-borda);
   border-radius: 22px;
-  background: color-mix(in srgb, var(--seele-osso) 6%, transparent);
+  background: color-mix(in srgb, var(--seele-tinta-do-vidro, var(--seele-osso)) 6%, transparent);
 }
 .compor-enviar {
   flex: 0 0 auto;
@@ -3085,10 +3099,10 @@ button.linha-nome:hover { text-decoration: underline; }
   height: 44px;
   border: 1px solid var(--seele-controle-borda);
   border-radius: var(--seele-raio-pilula);
-  background: var(--seele-controle);
+  background: var(--nucleo-vidro);
   color: var(--nucleo-texto);
 }
-.operador-glifo:hover, .operador-config:hover { background: var(--seele-controle-hover); color: var(--nucleo-texto); border-color: var(--seele-controle-borda); }
+.operador-glifo:hover, .operador-config:hover { background: var(--nucleo-vidro-aceso); color: var(--nucleo-texto); border-color: var(--seele-controle-borda); }
 .operador-glifo[data-ativo="sim"] {
   background: var(--nucleo-acento);
   border-color: var(--nucleo-acento);
@@ -3097,7 +3111,7 @@ button.linha-nome:hover { text-decoration: underline; }
 /* O «no ar» mantém a placa opaca do núcleo (`--nucleo-painel`, acima): fora da
    vista no computador desde a 0.19, ele continua sendo o que o leitor de tela
    anuncia, e um fundo transparente o punha sobre o fundo do tema. */
-#operador-sair { background-color: var(--seele-controle); }
+#operador-sair { background-color: var(--nucleo-vidro); }
 .operador-fileira > button { min-height: 44px; font-size: 13px; padding: 0 14px; }
 /* ---------- a conversa ---------- */
 .linha-barra-cerquilha + .linha-nome { margin-left: -12px; }
@@ -3531,7 +3545,7 @@ button.linha-nome:hover { text-decoration: underline; }
   padding: 12px;
   border: 1px solid var(--seele-controle-borda);
   border-radius: 20px;
-  background: color-mix(in srgb, var(--seele-osso) 5%, transparent);
+  background: color-mix(in srgb, var(--seele-tinta-do-vidro, var(--seele-osso)) 5%, transparent);
 }
 :root:not([data-casca="celular"]) .operador-topo,
 :root:not([data-casca="celular"]) .operador-fileira { display: contents; }

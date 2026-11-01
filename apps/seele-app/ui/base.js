@@ -3275,6 +3275,19 @@ function escreverOTemaDaSessao() {
     if (tons[token]) sessao.style.setProperty(token, tons[token]);
     else sessao.style.removeProperty(token);
   }
+  // **Os claros da pele da 0.19** (a letra das pastilhas MUDO e SURDO, sobre o
+  // preenchimento do estado) seguem o tom derivado: o laranja-claro e o
+  // azul-claro do produto são tons para o fundo negro, e sob um tema claro o
+  // MUDO saía a 1,15:1 (`bancada/tema-claro-legivel.cjs`). Sob tema, o acento e
+  // o azul derivado, que já alcançam os pisos; sem tema, os do produto.
+  const claros = {
+    "--seele-laranja-claro": tons["--seele-laranja-fraco"] ? emVigor.get("acento") : null,
+    "--seele-azul-claro": tons["--seele-padrao-azul"] ?? null,
+  };
+  for (const [token, valor] of Object.entries(claros)) {
+    if (valor) sessao.style.setProperty(token, valor);
+    else sessao.style.removeProperty(token);
+  }
   escreverAsRegioesDoTema(Object.fromEntries(emVigor));
   // Os números viram medida com unidade **aqui**, e não no MOD: o que
   // atravessa a API é 8, e o que vai para a folha é `8px`. Um MOD que

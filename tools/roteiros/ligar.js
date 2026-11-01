@@ -14,6 +14,14 @@
 const CODIGO = "CSM7-NBFR-CAYQ-EV4Y";
 const ALVO = "@" + CODIGO;
 
+// **A ligação direta vem antes da sala da 0.17.3** desde a 0.18
+// (`irParaOServidor`, `camada-servidores.js`): o código colado chama primeiro o
+// serviço de ligações do navegador (`seelePessoalWeb.chamarCodigo`), e só a
+// ausência explícita dele — um código sem a capacidade direta — devolve ao
+// `connect` da sala de voz pessoal, que é o que este roteiro mede. O duble não
+// tem o serviço (nem o `.wasm`): ele responde a ausência.
+window.seelePessoalWeb = { chamarCodigo: async () => ({ ausente: true }) };
+
 const chamou = (cmd) => window.__SEELE_CHAMADAS.includes(cmd);
 const erroDoDialogo = () =>
   visivel("servidores-erro") === "VISIVEL"

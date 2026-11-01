@@ -563,14 +563,14 @@ contra a da casca, tema a tema, e o build reprova se elas divergirem.
 // lista, esta cópia e a da casca dão o mesmo resultado, e as cores abaixo são
 // as de `apps/seele-app/ui/tokens.css`.
 
-/** As cores do produto que a derivação lê, de `tokens.css`. */
+/** As cores do produto que a derivação lê, de `tokens.css` (a pele da 0.19). */
 const CORES_DO_PRODUTO = Object.freeze({
-  "--seele-negro-absoluto": "#000000",
-  "--seele-osso": "#eaeaea",
+  "--seele-negro-absoluto": "#050403",
+  "--seele-osso": "#eae3cf",
   "--seele-laranja-nerv": "#f47732",
-  "--seele-linha": "#252525",
-  "--seele-negro-painel": "#000000",
-  "--seele-rotulo-painel": "#8a8a8a",
+  "--seele-linha": "#201e1b",
+  "--seele-negro-painel": "#0d0c0a",
+  "--seele-rotulo-painel": "#8a847a",
   "--seele-laranja-fraco": "#331704",
   "--seele-fosforo": "#6bffb6",
   "--seele-fosforo-fraco": "#06220f",
@@ -578,7 +578,7 @@ const CORES_DO_PRODUTO = Object.freeze({
   "--seele-azul-fraco": "#04182b",
   "--seele-vermelho-alerta": "#ff6262",
   "--seele-vermelho-fraco": "#2f1413",
-  "--seele-osso-apagado": "#b0b0b0",
+  "--seele-osso-apagado": "#a39d92",
 });
 
 /** A cor de um token do produto, para o segundo argumento de `tonsDoTema`. */

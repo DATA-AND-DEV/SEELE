@@ -39,24 +39,26 @@ const pw = require('./playwright.cjs');
   const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   await mobile.addInitScript(()=>localStorage.setItem('seele.casca','celular'));
   await mobile.goto(`http://127.0.0.1:${server.address().port}`);
-  await mobile.locator('.cel-entrada').waitFor({state:'visible'});
-  await mobile.getByRole('button',{name:'COLAR UM LINK',exact:true}).waitFor({state:'visible'});
+  // **O início do celular é a caixa de `#tela-boot`** desde a 0.18 (`celular-entrada.css`: `.cel-entrada[data-inicio]` sai e a
+  // `.boot-caixa` entra; na 0.19, o painel «Conectar»). A `.cel-entrada` fica para a «ENTRAR EM» e o colar de um link. A promessa é a
+  // mesma: o caminho para entrar está à vista, o campo aceita o link e o CONECTAR cabe na janela, a 390 e a 320.
+  await mobile.locator('#tela-boot .inicio-conectar').waitFor({state:'visible'});
+  assert.equal(await mobile.locator('.cel-entrada').isVisible(),false,'o início mostra a seção da ENTRAR EM');
+  const campo=mobile.locator('#tela-boot .inicio-conectar input');
+  const conectar=mobile.getByRole('button',{name:'CONECTAR',exact:true});
+  await conectar.waitFor({state:'visible'});
   await mobile.waitForTimeout(200);
-  const detalhes=mobile.locator('.cel-entrada-identidade');
-  assert.equal(await detalhes.getAttribute('open'),null);
-  assert.equal(await mobile.locator('.cel-entrada-origem-nova').count(),0);
+  assert.equal(await mobile.evaluate(()=>document.querySelector('#tela-boot').scrollWidth<=innerWidth+1),true,'o início rola de lado a 390');
   if(pasta) await mobile.screenshot({path:path.join(pasta,`${engine}-web-mobile.png`)});
-  await detalhes.locator('summary').click();
-  assert.ok(await detalhes.locator('button').isVisible());
-  await detalhes.locator('button').click();
-  await mobile.waitForFunction(()=>!document.querySelector('.cel-entrada-identidade'));
-  assert.equal(await mobile.evaluate(()=>localStorage.getItem('seele.origem-nova-dita')),'1');
   await mobile.setViewportSize({width:320,height:568});
-  const colar=mobile.getByRole('button',{name:'COLAR UM LINK',exact:true});
-  assert.ok(await colar.isVisible());
-  const r=await colar.boundingBox();assert.ok(r.y>=0&&r.y+r.height<=568,JSON.stringify(r));
-  await colar.click();
-  assert.ok(await mobile.locator('textarea:visible,input:visible').count()>0);
+  await mobile.waitForTimeout(200);
+  assert.equal(await mobile.evaluate(()=>document.querySelector('#tela-boot').scrollWidth<=innerWidth+1),true,'o início rola de lado a 320');
+  for(const alvo of [campo,conectar]){
+   await alvo.scrollIntoViewIfNeeded();
+   const r=await alvo.boundingBox();assert.ok(r && r.y>=0&&r.y+r.height<=568&&r.x>=0&&r.x+r.width<=321,JSON.stringify(r));
+  }
+  await campo.fill('seele://exemplo.br:8383');
+  assert.equal(await campo.inputValue(),'seele://exemplo.br:8383','o campo do início não aceita o link');
   if(pasta) await mobile.screenshot({path:path.join(pasta,`${engine}-web-colar-320.png`)});
   await mobile.close();
   console.log(`${engine}: entrada/preparar 1280/390/320, ações acessíveis, sem campos removidos ou erros PASS`);

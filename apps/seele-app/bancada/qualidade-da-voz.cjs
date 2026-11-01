@@ -369,7 +369,9 @@ function controles(extra = {}) {
     const medidor = await page.evaluate(async () => {
       window.testCalls.length = 0;
       await $("server-testar-microfone").click();
-      await lerOTesteDeMicrofone();
+      // A leitura é da geração do teste que a pediu (`fec5e0c4`): sem ela, uma
+      // leitura velha não desenha — e esta, sem geração, era tratada como velha.
+      await lerOTesteDeMicrofone(geracaoDoTeste);
       return {
         aberto: $("server-nivel-da-voz").hidden === false,
         largura: $("server-nivel-preenchido").style.width,

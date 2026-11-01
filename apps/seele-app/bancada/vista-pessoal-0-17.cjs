@@ -145,7 +145,10 @@ const MEDIDOR = `
 
     const DA_CHAMADA = {
       "a grade de participantes": "#chamada-grade",
-      "o palco da tela": "#palco",
+      // O palco só existe com uma tela na sala desde a 0.19 (pedido do dono,
+      // `desenharPalco`): sem ninguém compartilhando, quem mostra a tela é o
+      // COMPARTILHAR da barra de baixo. O palco vazio é medido abaixo.
+      "COMPARTILHAR (na barra)": "#operador-vista",
       "o microfone": "#botao-mudo",
       "AJUSTES (dispositivos)": "#botao-server-sessao",
       "SAIR DA SALA": "#operador-sair",
@@ -164,6 +167,11 @@ const MEDIDOR = `
     for (const [quem, seletor] of Object.entries(FORA)) {
       assert.ok(!(await visivel(seletor)), `na vista pessoal ${quem} (${seletor}) ainda aparece`);
     }
+    // Sem transmissão na ligação, sem a moldura do palco (0.19): uma caixa
+    // preta numa ligação em que ninguém compartilha parecia tela travada.
+    assert.equal(await page.evaluate(() => $("palco-quem").textContent.trim()), "SEM COMPARTILHAMENTO",
+      "a bancada mede o palco vazio, e a ligação tem transmissão");
+    assert.ok(!(await visivel("#palco")), "na vista pessoal sem transmissão o palco vazio aparece");
     for (const [quem, seletor] of Object.entries({
       "o roster do servidor": "#lista-roster", "o painel de pessoas": ".painel-pessoas",
       "a lista de salas de voz": "#lista-voice_rooms", "a coluna de salas": ".canais-rolagem",
@@ -308,12 +316,16 @@ const MEDIDOR = `
       return [...vistos].filter(([, n]) => n > 1).map(([id]) => id);
     });
     assert.deepEqual(ids, [], `ids duplicados na página renderizada: ${ids}`);
-    for (const seletor of ["#botao-mudo", "#operador-sair", "#botao-server-sessao", "#chamada-grade", "#palco", "#trilha-adicionar"]) {
+    // O palco, sem transmissão, não aparece nenhuma vez (0.19; medido acima).
+    for (const [seletor, vezes] of [["#botao-mudo", 1], ["#operador-sair", 1], ["#botao-server-sessao", 1],
+      ["#chamada-grade", 1], ["#palco", 0], ["#trilha-adicionar", 1]]) {
       const n = (await medir(seletor)).filter(Boolean).length;
-      assert.equal(n, 1, `${seletor} aparece ${n} vezes na tela`);
+      assert.equal(n, vezes, `${seletor} aparece ${n} vezes na tela`);
     }
     const sairVisiveis = await page.evaluate(() =>
-      [...document.querySelectorAll("button")].filter((b) => /^SAIR DA SALA$/.test(b.textContent.trim()) && window.__medir && b.getClientRects().length > 0).length);
+      // Pelo nome acessível: desde a 0.19 a saída é um ícone, e a palavra mora
+      // no `aria-label` (`desenharOperador`, pedido do dono).
+      [...document.querySelectorAll("button")].filter((b) => /^SAIR DA SALA$/.test((b.getAttribute("aria-label") ?? b.textContent).trim()) && window.__medir && b.getClientRects().length > 0).length);
     assert.equal(sairVisiveis, 1, `SAIR DA SALA aparece ${sairVisiveis} vezes`);
 
     // 5. A corrida: abrir a vista pessoal e trocar logo para o servidor, com a
@@ -554,13 +566,15 @@ const MEDIDOR = `
     await page.waitForTimeout(800);
     for (const [quem, seletor] of Object.entries({
       "o cabeçalho": "#ligacao-cabeca", "o nome": "#sessao-ligacao", "o estado": "#ligacao-cabeca-estado",
-      "a grade": "#chamada-grade", "o palco": "#palco", "o microfone": "#botao-mudo", "a surdez": "#botao-surdo",
+      "a grade": "#chamada-grade", "o microfone": "#botao-mudo", "a surdez": "#botao-surdo",
       "AJUSTES": "#botao-server-sessao", "COMPARTILHAR": "#operador-vista", "CHAT": "#ligacao-chat",
       "DESLIGAR": "#ligacao-desligar", "a trilha": "#trilha-sessoes",
     })) assert.ok(await visivel(seletor), `(10) na ligação ${quem} (${seletor}) não está visível`);
     for (const [quem, seletor] of Object.entries({
       "criar sala de voz": "#nova-voice_room", "o perfil do operador": "#operador-quem", "a lista de salas": "#lista-voice_rooms",
       "o roster": "#lista-roster", "a conversa": "#vista-conversa",
+      // Sem ninguém compartilhando, sem palco (0.19; ver o passo 2).
+      "o palco vazio": "#palco", "a cópia da barra da chamada": "#chamada-controles",
     })) assert.ok(!(await visivel(seletor)), `(10) na ligação ${quem} (${seletor}) ainda aparece`);
     assert.match(await page.textContent("#ligacao-cabeca-estado"), /NA SALA DE VOZ/, "(10) o estado da ligação não diz que está na sala");
     // A barra fica embaixo do centro, e o cabeçalho em cima dele.
@@ -715,7 +729,9 @@ const MEDIDOR = `
     const ligares = await entrada.evaluate(() => [...document.querySelectorAll("#boot-amigos-lista button")].map((b) => [b.textContent, b.disabled]));
     assert.ok(ligares.some(([t, d]) => t === "LIGAR" && d === true), `o amigo bloqueado pode ser ligado: ${JSON.stringify(ligares)}`);
     assert.ok(ligares.some(([t, d]) => t === "LIGAR" && d === false), `o amigo livre não pode ser ligado: ${JSON.stringify(ligares)}`);
-    assert.match(await entrada.evaluate(() => document.getElementById("boot-codigo-estado").textContent), /(?:pode|consegue) ligar/, "a sala registrada não diz que recebe");
+    // «Recebendo ligações.» (`FRASES_DA_LIGACAO.codigo.recebendo`, desde a
+    // 0.18): a frase curta da sala registrada.
+    assert.match(await entrada.evaluate(() => document.getElementById("boot-codigo-estado").textContent), /^Recebendo ligações\.$/, "a sala registrada não diz que recebe");
     const medidas = await entrada.evaluate(() => {
       const caixa = document.querySelector(".boot-caixa").getBoundingClientRect();
       const cartoes = [...document.querySelectorAll(".amigo-cartao")].map((c) => {
@@ -762,7 +778,15 @@ const MEDIDOR = `
       for (let i = 0; i < cs.length; i += 1) for (let j = i + 1; j < cs.length; j += 1) {
         assert.ok(!sobrepoe(cs[i], cs[j]), `(v2 ${rotulo}) as colunas ${cs[i].c} e ${cs[j].c} se sobrepõem: ${JSON.stringify(cs)}`);
       }
-      const lateral = cs.filter((c) => Math.abs(c.topo - cs[0].topo) < 4).length;
+      // **Colunas pela borda esquerda, e não pelo topo da primeira** (0.19): o
+      // CONECTAR desceu para o pé da coluna (`49758837`, «o campo de conectar
+      // no pé»), e o topo dele já não é o de coluna nenhuma. Conta-se quantas
+      // bordas esquerdas diferentes os blocos à vista têm.
+      const bordas = [];
+      for (const c of cs.filter((x) => x.dir - x.esq > 0)) {
+        if (!bordas.some((e) => Math.abs(e - c.esq) < 4)) bordas.push(c.esq);
+      }
+      const lateral = bordas.length;
       assert.equal(lateral, lado, `(v2 ${rotulo}) esperava ${lado} coluna(s) lado a lado e achou ${lateral}: ${JSON.stringify(cs)}`);
       assert.ok(!(await entrada.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)), `(v2 ${rotulo}) a entrada rola na horizontal`);
       for (const [quem, seletor] of Object.entries({
@@ -796,11 +820,24 @@ const MEDIDOR = `
           caixaDentro: dentro(caixa.getBoundingClientRect()), fecharDentro: antes, fecharDepoisDeRolar: dentro($("perfil-cancelar").getBoundingClientRect()),
           paddingDoForm: getComputedStyle($("perfil-forma")).paddingLeft, paddingDaSala: getComputedStyle(document.querySelector(".perfil-cartao-codigo")).paddingLeft,
           paddingDaCabeca: getComputedStyle(document.querySelector("#perfil .nomear-cabeca")).paddingLeft,
+          // As bordas: o cartão de «Ligações diretas» e o formulário.
+          bordaDaSala: Math.round(document.querySelector(".perfil-cartao-codigo").getBoundingClientRect().left),
+          // O formulário é `display: contents` na 0.19: a borda dele é a do
+          // conteúdo do corpo que o arruma.
+          bordaDoForm: Math.round(corpo.getBoundingClientRect().left + parseFloat(getComputedStyle(corpo).paddingLeft)),
+          direitaDaSala: Math.round(document.querySelector(".perfil-cartao-codigo").getBoundingClientRect().right),
+          direitaDoForm: Math.round(corpo.getBoundingClientRect().right - parseFloat(getComputedStyle(corpo).paddingRight)
+            - (corpo.offsetWidth - corpo.clientWidth - parseFloat(getComputedStyle(corpo).borderLeftWidth) - parseFloat(getComputedStyle(corpo).borderRightWidth))),
         };
       });
       assert.ok(modal.caixaDentro, `(v2 perfil ${rotulo}) a caixa do perfil passa da janela: ${JSON.stringify(modal)}`);
       assert.ok(modal.fecharDentro && modal.fecharDepoisDeRolar, `(v2 perfil ${rotulo}) a saída (CANCELAR) some ao rolar: ${JSON.stringify(modal)}`);
-      assert.equal(modal.paddingDaSala, modal.paddingDoForm, `(v2 perfil ${rotulo}) a seção SEU CÓDIGO tem outro respiro que o formulário: ${JSON.stringify(modal)}`);
+      // **O respiro é a borda, e não o `padding`** (0.19): «Ligações diretas»
+      // virou o cartão de vidro de 18px do desenho (`camada-nomear.css`), que
+      // precisa do recuo dele por dentro da borda. O que se mede é o que se vê:
+      // o cartão alinhado ao formulário dos dois lados.
+      assert.ok(Math.abs(modal.bordaDaSala - modal.bordaDoForm) <= 1 && Math.abs(modal.direitaDaSala - modal.direitaDoForm) <= 1,
+        `(v2 perfil ${rotulo}) a seção SEU CÓDIGO tem outro respiro que o formulário: ${JSON.stringify(modal)}`);
       assert.ok(parseFloat(modal.paddingDaCabeca) >= 16, `(v2 perfil ${rotulo}) a cabeça do modal tem outro respiro: ${JSON.stringify(modal)}`);
       await entrada.screenshot({ path: path.join(capturas, `v2-perfil-${navegador}-${rotulo}.png`) });
       await entrada.keyboard.press("Escape");

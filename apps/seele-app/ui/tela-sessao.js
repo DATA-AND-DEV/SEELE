@@ -3439,7 +3439,12 @@ function fichaDaPessoa(id) {
   // As ações e as seções dos MODs, com o dono escrito pelo produto.
   if (pessoa.id !== undefined && pessoa.id !== null) {
     const acoes = acoesDasContribuicoes("pessoa.acoes", String(pessoa.id), { pessoa: pessoa.id });
-    if (acoes.length) {
+    // **Vazia, só no modo de desenvolvedor**: é onde o contorno mostra a quem
+    // escreve um MOD que as ações entram aqui. Na linha de antes da 0.19 o
+    // rodapé existia sempre; na ficha, sem o modo, uma caixa vazia só somaria
+    // um vão ao corpo.
+    const desenvolvedor = typeof modoDeDesenvolvedorLigado === "function" && modoDeDesenvolvedorLigado();
+    if (acoes.length || desenvolvedor) {
       const caixa = elemento("div", "faixa-de-acoes-de-mod ficha-acoes-de-mod");
       caixa.append(...acoes);
       nos.push(caixa);

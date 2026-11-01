@@ -57,9 +57,15 @@ const { chromium } = require('./playwright.cjs');
       window.handleAvatar = registrarAvatar();
     }, retrato());
     const todos = '[data-pessoa-do-avatar="1"]';
+    // **As três superfícies por nome, e não «três avatares quaisquer».** Na
+    // 0.19 a lista de pessoas também veste o avatar (`.pessoa-avatar`), e a
+    // conversa chega depois, pelo `messages`: contar três passava com o
+    // operador, a chamada e a lista, antes de a mensagem existir.
     await page.waitForFunction(() => {
       const avatares = [...document.querySelectorAll('[data-pessoa-do-avatar="1"]')];
-      return avatares.length >= 3 && avatares.every(e => e.style.backgroundImage.includes(doMod));
+      return ['#operador-inicial', '.chamada-avatar', '.mensagem-avatar']
+        .every(s => document.querySelector(`${s}[data-pessoa-do-avatar="1"]`))
+        && avatares.every(e => e.style.backgroundImage.includes(doMod));
     });
     for (const seletor of ['#operador-inicial', '.chamada-avatar', '.mensagem-avatar']) {
       assert.ok(await page.locator(`${seletor}[data-pessoa-do-avatar="1"]`).count(), seletor);

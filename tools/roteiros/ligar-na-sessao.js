@@ -10,6 +10,10 @@
 const CODIGO = "CSM7-NBFR-CAYQ-EV4Y";
 const ALVO = "@" + CODIGO;
 
+// A ligação direta vem antes da sala da 0.17.3 desde a 0.18 (ver `ligar.js`):
+// o duble responde a ausência do serviço, e o caminho medido é o da sala.
+window.seelePessoalWeb = { chamarCodigo: async () => ({ ausente: true }) };
+
 const chamou = (cmd) => window.__SEELE_CHAMADAS.includes(cmd);
 const colar = async (texto, pronto) => {
   await abrirServidores();

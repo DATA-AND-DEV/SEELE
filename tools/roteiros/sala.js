@@ -35,26 +35,33 @@ exigir(
   (window.__SEELE_OUVINTES["seele://sala"] ?? []).length > 0,
   "ninguém ouve `seele://sala`: o estado da sala nunca chega à casca",
 );
+// **Só onde a pessoa cuida das ligações** (decisão do dono de 31/10,
+// `desenharEstadoDaSala`): a linha da entrada e a do operador não falam mais —
+// ali o aviso parecia erro do servidor em que se está —, e a frase de cada
+// estado vai ao PERFIL (`#perfil-sala-estado`). A promessa é a mesma: no ar e
+// achável, nada; a porta ocupada e o código não achável, com a frase de cada um.
+const naEntrada = () => visivel("boot-sala-estado") !== "escondida" || visivel("sala-estado") !== "escondida";
 sala({ estado: "NoAr", registro: { registro: "Registrado" }, firewall: null });
 await espera(100);
 exigir(
-  visivel("boot-sala-estado") === "escondida",
-  "a sala no ar e achável escreveu na entrada: «" + texto("boot-sala-estado") + "»",
+  !naEntrada() && texto("perfil-sala-estado") === "",
+  "a sala no ar e achável escreveu algo: «" + texto("boot-sala-estado") + texto("perfil-sala-estado") + "»",
 );
 sala({ estado: "Falhou", motivo: "PortaOcupada" });
-await ate(() => visivel("boot-sala-estado") === "VISIVEL", 1000);
-relatar("porta ocupada: " + texto("boot-sala-estado"));
+await ate(() => texto("perfil-sala-estado") !== "", 1000);
+relatar("porta ocupada: " + texto("perfil-sala-estado"));
 exigir(
-  texto("boot-sala-estado").startsWith("NINGUÉM CONSEGUE TE LIGAR AGORA") &&
-    texto("boot-sala-estado").includes("8385"),
-  "a porta ocupada não foi dita na entrada: «" + texto("boot-sala-estado") + "»",
+  // A frase curta da limpeza de textos da 0.19 (`SALA_PESSOAL.falhou.PortaOcupada`).
+  texto("perfil-sala-estado").startsWith("Ligações pelo código paradas") &&
+    texto("perfil-sala-estado").includes("8385") && texto("perfil-sala-estado").includes("em uso") && !naEntrada(),
+  "a porta ocupada não foi dita no perfil (ou a entrada falou): «" + texto("perfil-sala-estado") + "»",
 );
 sala({ estado: "NoAr", registro: { registro: "SemResposta" }, firewall: null });
-await ate(() => texto("boot-sala-estado").startsWith("SEU CÓDIGO NÃO ESTÁ ACHÁVEL AGORA"), 1000);
-relatar("sem resposta: " + texto("boot-sala-estado"));
+await ate(() => texto("perfil-sala-estado").startsWith("SEU CÓDIGO NÃO ESTÁ ACHÁVEL AGORA"), 1000);
+relatar("sem resposta: " + texto("perfil-sala-estado"));
 exigir(
-  texto("boot-sala-estado").startsWith("SEU CÓDIGO NÃO ESTÁ ACHÁVEL AGORA"),
-  "o código não achável não foi dito: «" + texto("boot-sala-estado") + "»",
+  texto("perfil-sala-estado").startsWith("SEU CÓDIGO NÃO ESTÁ ACHÁVEL AGORA") && !naEntrada(),
+  "o código não achável não foi dito no perfil: «" + texto("perfil-sala-estado") + "»",
 );
 
 // 2. O PERFIL, com o SEU CÓDIGO.
@@ -87,7 +94,10 @@ exigir(
   linha.textContent.includes("«rafa»") && linha.textContent.includes("AAAA-BBBB-CCCC-DDD0"),
   "a linha da agenda não mostra o apelido entre aspas e o código",
 );
-linha.querySelector("button").click();
+// Pelo rótulo: desde a 0.18 a linha tem ADICIONAR AOS AMIGOS antes do BLOQUEAR.
+const bloquear = [...linha.querySelectorAll("button")].find((b) => b.textContent.trim() === "BLOQUEAR");
+exigir(bloquear !== undefined, "a linha da agenda não tem BLOQUEAR");
+bloquear.click();
 await ate(() => window.__SEELE_ARGS.bloquear !== undefined, 1000);
 exigir(
   window.__SEELE_ARGS.bloquear?.codigo === "AAAA-BBBB-CCCC-DDD0" &&

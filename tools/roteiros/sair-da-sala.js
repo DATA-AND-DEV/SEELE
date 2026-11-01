@@ -17,10 +17,13 @@ await entrarNaSessao();
 await espera(700);
 
 const sair = document.getElementById("operador-sair");
-relatar("recém-chegado, dentro da PONTE: " + sair.textContent.trim());
+// O rótulo é o nome acessível desde a 0.19: a saída é um ícone (o × da sala, a
+// porta do servidor), e a palavra mora no `aria-label` (`desenharOperador`).
+const rotulo = (sair.getAttribute("aria-label") || sair.textContent).trim();
+relatar("recém-chegado, dentro da PONTE: " + rotulo);
 exigir(
-  sair.textContent.trim() === "SAIR DA SALA",
-  "quem chega já dentro de uma sala vê «" + sair.textContent.trim() +
+  rotulo === "SAIR DA SALA" && sair.dataset.alvo === "sala",
+  "quem chega já dentro de uma sala vê «" + rotulo +
     "» no rodapé, e não SAIR DA SALA: o rótulo só é desenhado com a chamada na frente",
 );
 

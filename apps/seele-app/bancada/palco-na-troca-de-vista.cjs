@@ -293,7 +293,8 @@ const retratoDeC = () => retrato({
       assert.equal(volta.canvas, false, `um canvas apareceu para uma tela encerrada: ${JSON.stringify(volta)}`);
       assert.equal(volta.telaEmCurso, null, `a tela encerrada voltou ao palco: ${JSON.stringify(volta)}`);
       assert.equal(dita.transmitindo, "nao", `a legenda continua ativa sem transmissão: ${JSON.stringify(dita)}`);
-      assert.equal(dita.quem, "NINGUÉM ESTÁ COMPARTILHANDO A TELA", `o palco não diz que ninguém compartilha: ${JSON.stringify(dita)}`);
+      // «SEM COMPARTILHAMENTO» desde a 0.18 (`5dfe9c59`), a frase do palco vazio.
+      assert.equal(dita.quem, "SEM COMPARTILHAMENTO", `o palco não diz que ninguém compartilha: ${JSON.stringify(dita)}`);
       // A Lia volta a compartilhar, na vista: o caminho normal.
       await page.evaluate(() => { retratosDaPonte[1] = structuredClone(tabela.__a); });
       await abrirEmA();

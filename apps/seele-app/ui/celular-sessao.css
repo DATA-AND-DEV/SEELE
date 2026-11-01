@@ -980,7 +980,7 @@
   gap: 8px;
   margin: 0 calc(10px + var(--cel-seguro-dir)) 8px calc(10px + var(--cel-seguro-esq));
   padding: 6px;
-  background: color-mix(in srgb, var(--seele-osso) 6%, transparent);
+  background: color-mix(in srgb, var(--seele-tinta-do-vidro, var(--seele-osso)) 6%, transparent);
   border: 1px solid var(--seele-controle-borda);
   border-radius: 24px;
 }
@@ -2167,6 +2167,9 @@
     padding-block: 2px;
     flex-wrap: nowrap;
     align-items: center;
+    /* O alvo de 44 de `celular-base.css` é `!important` (contra o estilo de MOD), e passava por cima dos 32px daqui: cada aviso
+       ficava com 50px, e dois tomavam 26% da altura deitada (`bancada/area-util.cjs`). O alvo é o token: aqui ele vale 32. */
+    --cel-alvo: 32px;
   }
 
   :root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) > button {
@@ -2174,6 +2177,11 @@
     padding-block: 2px;
   }
 }
+
+/* **O resumo de uma linha não desce o botão** (0.19): fechada a faixa, o texto do veredito e o da identidade já é cortado em uma linha,
+   e o recuo maior do cartão de vidro da 0.19 deixava os 12em do texto sem lugar ao lado do `dispensar` a 320px — o botão descia, e cada
+   aviso ia a duas linhas (os dois juntos, 32% da altura; `bancada/area-util.cjs`, celular-avisos). O texto (`min-width: 0`) encolhe, o botão fica inteiro. */
+:root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) > :is(#veredito, #cel-aviso-persistencia) { flex-wrap: nowrap; align-items: center; }
 
 /* O «ver inteira» da impressão digital só aparece com a faixa de avisos aberta: fechada, o aviso é uma linha e a impressão nem aparece. */
 :root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) #veredito-ver-inteira {
