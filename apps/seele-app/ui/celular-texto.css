@@ -771,6 +771,9 @@
 @media (max-width: 700px) {
   :where(:root[data-casca="celular"]) .pessoal-web-secao-rotulo { font-size: calc(11px * var(--cel-escala)); }
 }
+@media (max-height: 400px) and (max-width: 1000px) {
+  :where(:root[data-casca="celular"]) .pessoal-web-entrada-titulo { font-size: calc(22px * var(--cel-escala)); }
+}
 
 /* camada-compartilhar.css */
 :where(:root[data-casca="celular"]) .compartilhar-titulo { font-size: calc(32px * var(--cel-escala)); }
