@@ -18,6 +18,9 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const origem=`http://127.0.0.1:${server.address().port}`;
  const encontro=spawn(process.env.SEELE_ENCONTRO_BIN || path.join(raiz,'target/debug/seele-encontro'),['--porta','0','--rede-local','--sinal','127.0.0.1:19885','--origem',origem],{stdio:['ignore','pipe','pipe']});
+ // Um erro fora da promessa (o servidor estático sem o .wasm) mata o node sem passar pelo finally, e o encontro ficava
+ // segurando a 19885: a próxima rodada reprovava por «Address already in use».
+ process.on('exit',()=>encontro.kill());
  let logs='';encontro.stderr.on('data',b=>logs+=b);encontro.stdout.on('data',b=>logs+=b);
  try {
   for(let i=0;i<50;i++){try{await fetch('http://127.0.0.1:19885/chamada/1');break;}catch{await new Promise(r=>setTimeout(r,100));}}
