@@ -15,7 +15,10 @@ const caixa = document.getElementById("moderar");
 exigir(await ate(() => !caixa.hidden, 1500), "a caixa do APAGAR não abriu depois da recusa da pesagem");
 const dita = document.getElementById("moderar-consequencia").textContent;
 relatar("caixa: " + dita.split("\n")[0]);
-exigir(dita.startsWith("Não consegui contar o que há dentro de #"), "a caixa não diz que não deu para contar: " + dita);
+// A frase da limpeza de textos da 0.19 (`959e49ae`): o mesmo fato — não deu
+// para contar, e nada foi apagado — sem a primeira pessoa do produto.
+exigir(dita.startsWith("Não foi possível contar as mensagens de #") && dita.includes("não foi apagado"),
+  "a caixa não diz que não deu para contar: " + dita);
 exigir(dita.includes("O SERVIDOR NÃO CONSEGUIU."), "a caixa não diz por quê: " + dita);
 exigir(dita.includes("quem hospeda acha o motivo no registro do servidor"), "a caixa não diz o que fazer: " + dita);
 exigir(!dita.includes("ALGO FALHOU"), "a recusa caiu no ALGO FALHOU: " + dita);

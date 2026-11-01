@@ -1331,13 +1331,13 @@ prazo_dos_roteiros() {
 # diz quais reprovaram. Cada uma é dita antes de rodar (`bancada: rodando …`),
 # para o prazo dizer qual travou (`prazo_das_bancadas`).
 #
-# Precisa do Playwright de Node (o `npm install --no-save playwright` do job, ou
+# Precisa do Playwright de Node (o `npm install --no-save playwright@1.62.1` do job, ou
 # `PLAYWRIGHT` apontando um), com o Chromium, e do Playwright de Python com o
 # Chromium, o WebKit e o Pillow para a do celular.
 bancadas_de_navegador() {
     etapa_da_bateria --prazo prazo_das_bancadas \
         "uma bancada de navegador reprovou, ou falta nesta máquina o Playwright, o Chromium, o WebKit ou o Pillow." \
-        "Leia o fim da saída: ele diz quais reprovaram. Sem o Playwright de Node: «npm install --no-save playwright && npx playwright install chromium webkit», ou PLAYWRIGHT=<pasta do pacote>. Para a do celular: «python3 -m pip install playwright pillow && python3 -m playwright install chromium webkit»." \
+        "Leia o fim da saída: ele diz quais reprovaram. Sem o Playwright de Node: «npm install --no-save playwright@1.62.1 && npx playwright install chromium webkit» (a versão do ci.yml), ou PLAYWRIGHT=<pasta do pacote>. Para a do celular: «python3 -m pip install playwright pillow && python3 -m playwright install chromium webkit»." \
         todas_as_bancadas_de_navegador
 }
 
@@ -1409,7 +1409,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/pacote-web-cache.cjs
     uma_bancada node apps/seele-app/bancada/pacote-web-carregamento.cjs
     uma_bancada node apps/seele-app/bancada/chamada-web.cjs
-    uma_bancada node apps/seele-app/bancada/compartilhar-pessoal-web.cjs
+    uma_bancada node apps/seele-app/bancada/compartilhar-pessoal-web.cjs target/pacote-web/seele_web.wasm
     uma_bancada node apps/seele-app/bancada/entrada-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/icone-das-sessoes.cjs
     uma_bancada node apps/seele-app/bancada/pessoal-web.cjs
@@ -1422,6 +1422,7 @@ todas_as_bancadas_de_navegador() {
     unset SEELE_CHAMADA_WASM
     uma_bancada node apps/seele-app/bancada/rtc-chamada-web.cjs
     uma_bancada node apps/seele-app/bancada/sessao-campainha.cjs
+    uma_bancada node apps/seele-app/bancada/saida-pessoal-web.cjs
     # As bancadas da 0.17 (portaria, cargos, hospedar versus atualizar MOD...).
     uma_bancada node apps/seele-app/bancada/atualizar-mod-sem-servidor.cjs
     uma_bancada node apps/seele-app/bancada/aviso-antes-de-atualizar.cjs

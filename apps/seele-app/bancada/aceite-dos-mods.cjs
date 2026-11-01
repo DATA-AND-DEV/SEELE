@@ -37,8 +37,18 @@ const comClasse = (raiz, classe) => [
   ...raiz.filhos.flatMap((f) => comClasse(f, classe)),
 ];
 
-const contexto = vm.createContext({ console, elemento: no });
-vm.runInContext(recorte(ui("camada-mods.js"), "function linhaDeMod(mod, indice) {"), contexto);
+// **A marca do cartão é o desenho do MOD** desde a 0.19 (`49758837`): a linha
+// chama `iconeDoMod`, que desenha um `<svg>` com as `FORMAS_DO_ICONE`. Os dois
+// entram no contexto com um `document` de mentira que só sabe criar nós.
+const documentoDeMentira = {
+  createElementNS: (_ns, tag) => Object.assign(no(tag), { setAttribute() {} }),
+};
+const contexto = vm.createContext({ console, elemento: no, document: documentoDeMentira });
+const camadaMods = ui("camada-mods.js");
+const formas = camadaMods.slice(camadaMods.indexOf("const FORMAS_DO_ICONE = {"), camadaMods.indexOf("\n};\n", camadaMods.indexOf("const FORMAS_DO_ICONE = {")) + 4);
+vm.runInContext(formas, contexto);
+vm.runInContext(recorte(camadaMods, "function iconeDoMod(mod) {"), contexto);
+vm.runInContext(recorte(camadaMods, "function linhaDeMod(mod, indice) {"), contexto);
 const daFrase = vm.createContext({ console });
 vm.runInContext(ui("frases.js"), daFrase);
 

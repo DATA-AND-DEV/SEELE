@@ -83,8 +83,11 @@ exigir(pedida?.linha === "0.15",
   `a recusa do Servidor 0.15 não perguntou ao launcher pela versão dele: ${JSON.stringify(pedida)}`);
 const pergunta = texto("versoes-confirmar-frase");
 relatar(`a pergunta: ${visivel("versoes-confirmar")} «${pergunta}»`);
+// Sem a versão interna desde a limpeza de textos da 0.19 (`959e49ae`, regra 1
+// de `docs/0.19/limpeza-de-textos.md`): a pergunta diz «outra versão» e a
+// janela que abre; a linha certa é conferida no pedido, abaixo.
 exigir(visivel("servidores") === "VISIVEL" && visivel("versoes-confirmar") === "VISIVEL"
-    && pergunta.includes("Servidor 0.15"),
+    && pergunta.includes("outra versão") && pergunta.includes("noutra janela"),
   `a recusa caiu só na frase: servidores ${visivel("servidores")}, ` +
     `versoes-confirmar ${visivel("versoes-confirmar")}, «${pergunta}»`);
 relatar(`o foco: ${document.activeElement?.id}`);

@@ -141,12 +141,15 @@ exigir(
   "ATENDER chamou o `parar_de_hospedar`, e o servidor que esta janela hospeda caiu com todo mundo dentro",
 );
 const posicao = (cmd) => ordem.indexOf(cmd);
+// **Atender soma uma sessão, e não troca** (E3 da 0.17, `entrarNaSalaAoAtender`):
+// o servidor aberto não é desmontado — nem o cliente dele —, e a ligação abre a
+// sessão dela ao lado. Antes do E3, a ordem tinha um `disconnect` no meio.
 exigir(
   posicao("atender") >= 0 &&
-    posicao("atender") < posicao("disconnect") &&
-    posicao("disconnect") < posicao("connect") &&
+    !ordem.includes("disconnect") &&
+    posicao("atender") < posicao("connect") &&
     posicao("connect") < posicao("enter_voice_room"),
-  "ATENDER não seguiu «decidir, desmontar só o cliente, entrar na sala, sentar»: " + ordem.join(", "),
+  "ATENDER não seguiu «decidir, abrir a sessão da ligação ao lado, sentar»: " + ordem.join(", "),
 );
 exigir(
   window.__SEELE_ARGS.connect?.server === "127.0.0.1:8385",

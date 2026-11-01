@@ -236,7 +236,9 @@ function instrumentarPagina() {
         for (const p of [a,b]) await p.locator('.pessoal-web-estado').filter({hasText:'Conversa conectada'}).waitFor();
         for (const [p,nomes] of [[a,['Anfitrião','Convidado']],[b,['Convidado','Anfitrião']]]) {
           await p.waitForFunction(esperados=>JSON.stringify([...document.querySelectorAll('.pessoal-web-participante-nome')].map(el=>el.textContent))===JSON.stringify(esperados),nomes);
-          assert.equal(await p.evaluate(()=>fontesDaProva.length),0,'aceitar a conversa abre saída, sem pedir captura');
+          // **Entrar na chamada pede o microfone** (0.19, `1df8ed98`): no gesto de chamar ou atender nascem a saída e a captura, e o par
+          // que chega a liga (`ligarMicrofoneDoGesto`). Antes, a captura esperava o toque no microfone, e no celular a pessoa entrava sem falar.
+          assert.ok(await p.evaluate(()=>fontesDaProva.length>=1&&fontesDaProva.some(t=>t.readyState==='live')),'chamar ou atender não abriu a captura no gesto');
         }
         if (soPreparoDoConvite) {
           await b.getByRole('button',{name:'SAIR DA CONVERSA',exact:true}).click();
@@ -252,7 +254,7 @@ function instrumentarPagina() {
         for (const p of [a,b]) await p.waitForFunction(()=>document.querySelectorAll('.pessoal-web-mensagem').length===2);
         for (const p of [a,b]) {
           assert.equal(await p.evaluate(()=>navigator.mediaDevices.getUserMedia.name),'fonteSinteticaDaProva','a prova não pode pedir microfone real');
-          await p.getByRole('button',{name:'LIGAR MICROFONE',exact:true}).click();
+          // O microfone já veio ligado do gesto (acima): o botão diz DESLIGAR, sem um toque a mais.
           await p.getByRole('button',{name:'DESLIGAR MICROFONE',exact:true}).waitFor({timeout:15000}).catch(async e => { console.error(engine, await p.evaluate(()=>({falhas:falhasDaProva,etapas:etapasDoAudio})), await p.locator('.pessoal-web').innerText(), erros); throw e; });
           assert.ok(await p.evaluate(()=>fontesDaProva.some(t=>t.readyState==='live')));
         }

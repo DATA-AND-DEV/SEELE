@@ -100,7 +100,7 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 18] = [
+const BANCADAS: [&str; 20] = [
     "chamada-web-configuracao.cjs",
     "ciclo-do-executor.cjs",
     "ponte-web.cjs",
@@ -119,6 +119,10 @@ const BANCADAS: [&str; 18] = [
     "envelope-do-invoke.cjs",
     "fila-do-volume.cjs",
     "registro-de-sessoes.cjs",
+    // As duas de `node:test` sobre o `rtc-web.js` e o `diagnostico-rede.js`
+    // num `vm`, que nenhum lugar chamava (`toda_bancada_da_pasta_roda_em_algum_lugar`).
+    "rtc-chamada-resiliencia.cjs",
+    "rtc-diagnostico.cjs",
 ];
 
 fn raiz() -> PathBuf {

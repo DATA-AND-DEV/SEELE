@@ -219,3 +219,44 @@ conserto de produto foi provado revertendo-o e vendo a bancada dele reprovar.
   novo — v0.18.1 2 215 156, hoje 2 406 940 (gzip -9 664 188 → 703 545), o
   protocolo 12 da API 8 e dos perfis. Teto a 2 455 000, ~2% sobre a medida.
   **Pede o aval do dono**: o teto existe para esta conversa.
+
+## 31/10/2026 — as bancadas de navegador, segunda leva: roteiros, CI e a versão do Playwright
+
+- **Os roteiros da casca (`tools/carga-da-casca.py`) — treze ficaram velhos**, e
+  os 53 passam: a saída da sala é ícone (o nome no `aria-label`); a recusa do
+  nome vai ao campo do nome (`#perfil-apelido-erro`); um código colado chama
+  primeiro a ligação direta (0.18) — o duble responde a ausência dela, e o
+  caminho medido é o da sala da 0.17.3; atender soma uma sessão (E3 da 0.17), sem
+  `disconnect`; a pergunta de outra versão e a caixa de apagar canal saíram
+  da limpeza de textos; as pílulas da caixa de compartilhar são a mesma
+  pergunta do `<select>`; o estado da sala pessoal só fala no perfil (decisão de
+  31/10); o banco de uma versão mais nova abre ANTES DE HOSPEDAR (E2 da 0.17); o
+  BLOQUEAR da agenda acha-se pelo rótulo.
+- **`pessoal-web-integrada.cjs`** — entrar na chamada pede o microfone desde
+  `1df8ed98` (0.19): a bancada exige a captura no gesto, e o DESLIGAR à vista.
+- **`pessoal-web-layout-0181.cjs` — o produto regrediu**: o respiro de vidro da
+  0.19 cortava o CRIAR CONVERSA (320×360), o COPIAR LINK (568×320) e o
+  «MICROFONE» transbordava o botão deitado (844×390). Abaixo de 400px de altura o
+  palco perde o respiro, e deitado cada botão tem a largura do rótulo. A bancada
+  passou a medir dois quadros depois da troca de fase (o rodapé medido no mesmo
+  instante estava a 249px, e a 747px um quadro depois).
+- **`aceite-dos-mods.cjs`, `tons-do-tema.cjs`** (Node puro, que o `release.yml`
+  também roda) — a linha do MOD desenha o ícone da 0.19 (o contexto leva
+  `iconeDoMod`); e o guia (`docs/como-se-faz-um-mod.md`) ensinava as cores da
+  0.18 na função de referência: agora as de `tokens.css`.
+- **`rtc-chamada-resiliencia.cjs`, `rtc-diagnostico.cjs`, `saida-pessoal-web.cjs`
+  não rodavam em lugar nenhum** (`toda_bancada_da_pasta_roda_em_algum_lugar`
+  reprovava). As duas de `node:test` entraram em `BANCADAS`; a de navegador, no
+  `bancadas-de-mod` e no `publicar.sh`. A `rtc-diagnostico` ganhou o
+  `createElement`/`replaceChildren` que a lista de etapas da 0.19 usa.
+- **`compartilhar-pessoal-web.cjs` morria com «uso:»** no CI e no `publicar.sh`:
+  o `.wasm` da página é argumento obrigatório dela, e agora vai.
+- **O Playwright de Node fica fixo na 1.62.1** (`ci.yml`, e a frase do
+  `publicar.sh`). O `npm install --no-save playwright` pegava a mais nova (hoje a
+  1.64.1: Chromium 156, WebKit 27.2), e duas bancadas reprovavam só por isso: o
+  Chromium 156 aceita o `WebAssembly.Module` pela porta do worklet, que a
+  `voz-no-navegador.cjs` usa para provocar o `messageerror`, e o WebKit 27.2
+  desenha diferente a captura redimensionada da `compartilhar-pessoal-web.cjs`
+  (e a `pessoal-codigo-web.cjs` passa na 1.62.1 e não na 1.64.1). Na 1.62.1 as
+  três passam. Subir a versão pede a rodada inteira medida, e uma provocação
+  nova para o `messageerror`.

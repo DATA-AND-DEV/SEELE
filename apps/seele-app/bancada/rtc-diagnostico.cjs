@@ -54,11 +54,12 @@ test('falha guarda estado anterior ao close sem alterar prazo ou transporte', as
 });
 function pagina() {
  const els = new Map();
- const el = id => {if(!els.has(id)) els.set(id,{value:'',textContent:'',hidden:false,disabled:false,handlers:{},addEventListener(t,f){this.handlers[t]=f;}});return els.get(id);};
+ const el = id => {if(!els.has(id)) els.set(id,{value:'',textContent:'',hidden:false,disabled:false,handlers:{},filhos:[],addEventListener(t,f){this.handlers[t]=f;},replaceChildren(...n){this.filhos=n;}});return els.get(id);};
+ // `replaceChildren` e `createElement`: a lista de etapas que a página da 0.19 desenha (`49758837`).
  const pendentes=[];let medicoes=0;
  const enlace = {visto:{refletido:true,sinal:{aqui:{}},candidatos:[1],antesDeFechar:{ice:'failed',conexao:'failed'}},contas:{candidatosRecusados:0},close(){},medirCaminho:async()=>{medicoes++;return {pares:[{pedidosEnviados:3,respostasRecebidas:0}],estado:{ice:'checking'}};}};
  const ctx=vm.createContext({console,URL,URLSearchParams,setTimeout,clearTimeout,performance,
-  document:{getElementById:el},location:{hash:'',pathname:'/diagnostico-rede',search:''},history:{replaceState(){}},
+  document:{getElementById:el,createElement:(tag)=>({tag,dataset:{},textContent:'',filhos:[],setAttribute(){},append(...n){this.filhos.push(...n);}})},location:{hash:'',pathname:'/diagnostico-rede',search:''},history:{replaceState(){}},
   fetch:async()=>({arrayBuffer:async()=>new ArrayBuffer(0)}),WebAssembly:{instantiate:async()=>({instance:{exports:{}}})},
   prepararCertificadoDtls:async()=>({}),fronteiraDoSinal:()=>({}),window:{addEventListener(){}},navigator:{clipboard:{writeText:async()=>{}}},
   criarEnlaceRtc:()=>({...enlace,ready:new Promise((resolve,reject)=>pendentes.push({resolve,reject}))})});

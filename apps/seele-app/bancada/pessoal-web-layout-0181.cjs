@@ -42,6 +42,9 @@ const motores = require('./playwright.cjs');
               fs.mkdirSync(process.env.SEELE_PREVIEW_DIR, { recursive:true });
               await page.screenshot({ path:path.join(process.env.SEELE_PREVIEW_DIR, `${motor}-pessoal-${width}x${height}.png`) });
             }
+            // Dois quadros antes de medir: o que a pessoa vê é o quadro assentado. Medido no mesmo instante da troca de fase, o rodapé
+            // às vezes ainda estava no meio da coluna (249 px, e 747 px um quadro depois) — o «chat sobre controles» intermitente.
+            await page.evaluate(() => new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto))));
             const medidas = await page.evaluate(() => {
               const root = vista.elemento;
               const inside = r => r.left >= -1 && r.top >= -1 && r.right <= innerWidth+1 && r.bottom <= innerHeight+1;

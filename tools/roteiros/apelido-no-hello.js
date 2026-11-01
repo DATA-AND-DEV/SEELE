@@ -39,11 +39,13 @@ await caso("a recusa de gravar o apelido", async () => {
     document.getElementById("boot-perfil").click();
     exigir(await ate(() => visivel("perfil") === "VISIVEL", 900), "o perfil não abriu na entrada");
     document.getElementById("perfil-apelido").value = "novo";
+    // A recusa do nome é dita no campo do nome desde a 0.19 (`dizerNoNome`, em
+    // `perfis.js`: `#perfil-apelido-erro`), e não no aviso geral do perfil.
     document.getElementById("perfil-salvar").click();
     await ate(() => mandou("escolher_apelido_local").length > 0, 600);
     await espera(200);
-    exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(FRASES.NaoGravei.split("\n")[0]),
-      `a recusa de gravar o apelido sumiu do perfil: #perfil-erro está ${visivel("perfil-erro")}, «${texto("perfil-erro")}»`);
+    exigir(visivel("perfil-apelido-erro") === "VISIVEL" && texto("perfil-apelido-erro").includes(FRASES.NaoGravei.split("\n")[0]),
+      `a recusa de gravar o apelido sumiu do perfil: #perfil-apelido-erro está ${visivel("perfil-apelido-erro")}, «${texto("perfil-apelido-erro")}»`);
     exigir(document.getElementById("perfil-apelido").value === "novo",
       `o apelido que se escreveu sumiu do campo com a recusa: ele diz «${document.getElementById("perfil-apelido").value}»`);
   } finally {
