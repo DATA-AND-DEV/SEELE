@@ -230,8 +230,12 @@ const PERMISSAO_DE_TELA = {
     // Sem `**` nem nenhuma outra marcação: isto é escrito com `textContent`
     // (ver `mostrarPermissao`), então marcação aparece literal na tela. Foi o
     // que aconteceu aqui.
-    nota:
-      "O sistema pergunta uma vez. Se você recusar, marque o SEELE nos ajustes dele e reabra o app.",
+    get nota() {
+      return ambienteDasInstrucoes() === "macos"
+        ? "Permita a gravação de tela do SEELE nos Ajustes do Sistema e reabra o app após conceder."
+        : ambienteDasInstrucoes() === "web" ? "Escolha a tela no seletor do navegador e permita o compartilhamento."
+        : "Permita a captura de tela do SEELE quando o sistema perguntar.";
+    },
     pedir: true,
   },
   // Esta compilação não tem como perguntar ao sistema. A chamada nem desenha o
@@ -246,9 +250,13 @@ const PERMISSAO_DE_TELA = {
   },
   Negada: {
     diz: "O SISTEMA NEGOU A GRAVAÇÃO DE TELA",
-    nota:
-      "No macOS, abra Ajustes do Sistema · Privacidade e Segurança · Gravação de Tela, " +
-      "marque o SEELE e reabra o app. No Linux, ele pergunta de novo na próxima tentativa.",
+    get nota() {
+      const ambiente = ambienteDasInstrucoes();
+      if (ambiente === "macos") return "Abra Ajustes do Sistema · Privacidade e Segurança · Gravação de Tela, marque o SEELE e reabra o app.";
+      if (ambiente === "windows") return "Confira as permissões de captura de tela do SEELE nas Configurações do Windows e tente novamente.";
+      if (ambiente === "web") return "Confira a permissão de captura deste navegador e selecione a tela novamente.";
+      return "Confira as permissões de captura do sistema e tente novamente.";
+    },
     pedir: false,
   },
 };
@@ -517,7 +525,7 @@ function desenharBotoesDeTela(snapshot) {
   comecar.dataset.modo = minha ? "trocar" : "comecar";
   comecar.hidden = false;
   comecar.textContent = minha ? "TROCAR" : "COMPARTILHAR";
-  comecar.disabled = !snapshot || fonteArmada === null || mesmaFonte || relistasPendentes > 0;
+  comecar.disabled = !snapshot || fonteArmada === null || mesmaFonte || relistasPendentes > 0 || comecando;
   comecar.title = mesmaFonte
     ? "é esta que já está no ar; escolha outra para trocar"
     : fonteArmada === null
@@ -590,6 +598,7 @@ async function desenharSomDaCaptura() {
   } catch (falha) {
     console.warn("exclusão do som da captura:", falha);
   }
+  aviso.hidden = false;
   if (dito === "Excluido") {
     aviso.dataset.exclusao = "sim";
     aviso.textContent =
@@ -676,6 +685,7 @@ async function abrirCompartilhar() {
       // 60 junto, sem ninguém ter pedido.
       $("compartilhar-resolucao").value = String(pedido.altura_maxima);
       $("compartilhar-quadros").value = String(pedido.quadros_maximos);
+      $("compartilhar-som").checked = pedido.com_som !== false;
       sincronizarPilulas("compartilhar-resolucao");
       sincronizarPilulas("compartilhar-quadros");
     }
@@ -855,7 +865,7 @@ $("compartilhar-comecar").addEventListener("click", async () => {
 $("compartilhar-parar").addEventListener("click", async () => {
   erroDeTela = null;
   try {
-    await invoke("parar_de_compartilhar");
+    await naFilaDeTela(() => invoke("parar_de_compartilhar"));
     fonteEmCurso = null;
     // Sem registro de eventos aqui também — ver a nota em `compartilhar-comecar`.
   } catch (falha) {

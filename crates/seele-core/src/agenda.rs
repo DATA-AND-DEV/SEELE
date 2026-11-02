@@ -105,13 +105,13 @@ impl Agenda {
     ///
     /// # Errors
     ///
-    /// Falha só se o diretório não puder ser criado.
+    /// Falha se o diretório não puder ser criado ou não houver cópia válida dos dados existentes.
     pub fn abrir(caminho: PathBuf) -> Result<Self> {
         if let Some(pai) = caminho.parent() {
             std::fs::create_dir_all(pai)
                 .with_context(|| format!("não consegui criar {}", pai.display()))?;
         }
-        let contatos = ler(&caminho).unwrap_or_default();
+        let contatos = ler(&caminho)?;
         Ok(Self { caminho, contatos })
     }
 
@@ -247,15 +247,20 @@ impl Agenda {
 /// Os contatos do arquivo. Um arquivo que ainda não existe é uma agenda vazia,
 /// e uma linha ilegível é pulada — inclusive a que não é UTF-8, sem levar as
 /// outras junto.
-fn ler(caminho: &Path) -> std::io::Result<Vec<Contato>> {
-    match std::fs::read(caminho) {
-        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes)
+fn arquivo_valido(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|texto| {
+        texto
             .lines()
-            .filter_map(ler_linha)
-            .collect()),
-        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(erro) => Err(erro),
-    }
+            .all(|linha| linha.is_empty() || ler_linha(linha).is_some())
+    })
+}
+
+fn ler(caminho: &Path) -> std::io::Result<Vec<Contato>> {
+    let bytes = crate::arquivo_local::ler(caminho, arquivo_valido)?.unwrap_or_default();
+    Ok(String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(ler_linha)
+        .collect())
 }
 
 /// Grava a agenda **inteira de uma vez**: num arquivo ao lado, trocado pelo
@@ -279,7 +284,7 @@ fn gravar(caminho: &Path, contatos: &[Contato]) -> Result<()> {
             )
         })
         .collect();
-    crate::conhecidos::trocar_privado(caminho, texto.as_bytes())
+    crate::arquivo_local::gravar(caminho, texto.as_bytes(), arquivo_valido).map_err(Into::into)
 }
 
 /// Uma linha do arquivo, ou nada se ela não se lê.
@@ -401,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn uma_linha_ilegivel_ou_de_codigo_errado_e_pulada_e_as_outras_ficam() {
+    fn agenda_corrompida_sem_copia_nao_vira_agenda_nova() {
         let caminho = nova("ilegivel");
         std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
         let valido = codigo(2).to_string();
@@ -417,12 +422,9 @@ mod tests {
         )
         .unwrap();
 
-        let agenda = Agenda::abrir(caminho).unwrap();
-        assert_eq!(
-            agenda.listar().iter().map(|c| c.codigo).collect::<Vec<_>>(),
-            vec![codigo(2)],
-            "a agenda não pulou o lixo, ou perdeu a linha boa"
-        );
+        let antes = std::fs::read(&caminho).unwrap();
+        assert!(Agenda::abrir(caminho.clone()).is_err());
+        assert_eq!(std::fs::read(&caminho).unwrap(), antes);
     }
 
     #[test]

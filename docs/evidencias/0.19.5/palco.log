@@ -1,0 +1,8 @@
+ok — 1. a volta com a mesma leitura religa o palco, e o seletor diz VER
+ok — 2. a mesma tela com uma leitura nova aberta enquanto fora: a volta mostra a nova
+ok — 3. a transmissão encerrada enquanto fora: a volta diz que ninguém compartilha, sem canvas
+ok — 4. com NÃO VER explícito, a volta não abre nada e não manda nada
+ok — 5. geração nova: a abertura da velha não é rearmada, e a da nova sim
+ok — 6. há tela no retrato e nenhuma abertura: larga e pede de novo com o id do retrato, e a abertura chega
+ok — 7. com o palco vazio e o retrato com tela (o estado do CUA), NÃO VER larga a tela do retrato, e a volta não reabre
+palco na troca de vista: a tela assistida volta com a sessão (a mesma leitura e a nova; canvas e palco visíveis, seletor em VER, um quadro-chave pedido com o carimbo dela); a encerrada diz que ninguém compartilha; NÃO VER e a geração velha não abrem nada; sem abertura, larga e pede de novo com o id do retrato; NÃO VER com o palco vazio larga a tela do retrato.

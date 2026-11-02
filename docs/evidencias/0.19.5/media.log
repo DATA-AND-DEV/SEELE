@@ -1,0 +1,2 @@
+{"engine":"chromium","version":"151.0.7922.34","captura":"canvas real","leitor":"TrackProcessor","quadrosDecodificados":27,"quadrosServidor":4,"erros":[]}
+{"engine":"webkit","version":"26.5","captura":"canvas real","leitor":"requestVideoFrameCallback","quadrosDecodificados":32,"quadrosServidor":4,"erros":[]}

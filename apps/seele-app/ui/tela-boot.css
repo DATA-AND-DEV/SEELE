@@ -2013,3 +2013,6 @@
 #tela-boot:has(.larga-hospedar) .larga-hospedar a { align-self: flex-start; }
 #tela-boot:has(.larga-hospedar) .boot-fora { order: 1; }
 #tela-boot .boot-fora-lista li:last-child { border-bottom: 0; }
+
+/* Caminho local completo no aviso de recuperação, sem sair da janela. */
+#boot-dados-locais { overflow-wrap: anywhere; }

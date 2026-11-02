@@ -191,7 +191,10 @@
         if (original.title) botao.title = original.title;
         if (icone) {
           // O desenho do original (o glifo com ou sem o corte) e o nome dele.
-          botao.replaceChildren(...[...original.childNodes].map((no) => no.cloneNode(true)));
+          // Snapshots chegam durante pointerdown/up: preservar o alvo mantém o clique no WebKit.
+          if (botao.innerHTML !== original.innerHTML) {
+            botao.replaceChildren(...[...original.childNodes].map((no) => no.cloneNode(true)));
+          }
           botao.setAttribute("aria-label", original.getAttribute("aria-label") || original.title || "");
         } else if (rotulo) {
           const texto = rotulo();
@@ -227,6 +230,10 @@
       const bVista = comGlifo(null); bVista.className = "chamada-controle";
       bVista.addEventListener("click", () => vista.click());
       espelhar(bVista, vista, { icone: true });
+      const troca = document.getElementById("operador-trocar-tela");
+      const bTroca = comGlifo(null); bTroca.className = "chamada-controle";
+      bTroca.addEventListener("click", () => troca.click());
+      espelhar(bTroca, troca, { icone: true, mostrar: () => !troca.hidden });
       // SAIR DO SERVIDOR: a mesma função do SAIR do operador fora de sala.
       const bServidor = comGlifo("porta"); bServidor.className = "chamada-controle";
       bServidor.setAttribute("aria-label", "SAIR DO SERVIDOR");
@@ -238,7 +245,7 @@
       const bSala = comGlifo(null); bSala.className = "chamada-controle chamada-controle-sair";
       bSala.addEventListener("click", () => sair.click());
       espelhar(bSala, sair, { icone: true, mostrar: () => sair.dataset.alvo === "sala" });
-      controles.append(bMudo, bSurdo, bVista, bServidor, bSala);
+      controles.append(bMudo, bSurdo, bVista, bTroca, bServidor, bSala);
       chamada.append(controles);
     }
 

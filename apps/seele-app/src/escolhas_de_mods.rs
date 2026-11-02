@@ -95,17 +95,20 @@ pub(crate) fn pendentes(config: &Path, servidor: Option<&str>) -> Vec<Escolha> {
             return Vec::new();
         }
     };
-    match std::fs::read(&caminho) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|erro| {
-            tracing::warn!(%erro, "as escolhas de MOD pendentes não se leem; nenhuma vale");
-            Vec::new()
-        }),
-        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(erro) => {
-            tracing::warn!(%erro, "as escolhas de MOD pendentes não se leem; nenhuma vale");
-            Vec::new()
-        }
-    }
+    ler_pendentes(&caminho).unwrap_or_else(|erro| {
+        tracing::warn!(%erro, "escolhas ilegíveis preservadas; alterações bloqueadas");
+        Vec::new()
+    })
+}
+
+fn ler_pendentes(caminho: &Path) -> Result<Vec<Escolha>, String> {
+    seele_ffi::arquivo_local::ler(caminho, |b| {
+        serde_json::from_slice::<Vec<Escolha>>(b).is_ok()
+    })
+    .map_err(|e| e.to_string())?
+    .map(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()))
+    .transpose()
+    .map(Option::unwrap_or_default)
 }
 
 /// Guarda (ou troca) a escolha para este MOD deste servidor. Escrita num
@@ -120,7 +123,7 @@ pub(crate) fn estagiar(
     escolha: Escolha,
 ) -> Result<(), String> {
     let caminho = arquivo(config, servidor)?;
-    let mut todas = pendentes(config, servidor);
+    let mut todas = ler_pendentes(&caminho)?;
     todas.retain(|outra| outra.id != escolha.id);
     todas.push(escolha);
     gravar(&caminho, &todas)
@@ -130,10 +133,11 @@ fn gravar(caminho: &Path, todas: &[Escolha]) -> Result<(), String> {
     if let Some(pasta) = caminho.parent() {
         std::fs::create_dir_all(pasta).map_err(|erro| erro.to_string())?;
     }
-    let provisorio = caminho.with_extension("json.provisorio");
     let texto = serde_json::to_vec_pretty(todas).map_err(|erro| erro.to_string())?;
-    std::fs::write(&provisorio, texto).map_err(|erro| erro.to_string())?;
-    std::fs::rename(&provisorio, caminho).map_err(|erro| erro.to_string())
+    seele_ffi::arquivo_local::gravar(caminho, &texto, |b| {
+        serde_json::from_slice::<Vec<Escolha>>(b).is_ok()
+    })
+    .map_err(|erro| erro.to_string())
 }
 
 /// **Desfaz a escolha de um MOD** deste servidor (o DESFAZER do ANTES DE
@@ -147,7 +151,7 @@ fn gravar(caminho: &Path, todas: &[Escolha]) -> Result<(), String> {
 /// que reaparece na próxima leitura.
 pub(crate) fn retirar(config: &Path, servidor: Option<&str>, id: &str) -> Result<(), String> {
     let caminho = arquivo(config, servidor)?;
-    let mut todas = pendentes(config, servidor);
+    let mut todas = ler_pendentes(&caminho)?;
     let antes = todas.len();
     todas.retain(|escolha| escolha.id != id);
     if todas.len() == antes {
@@ -160,11 +164,8 @@ pub(crate) fn retirar(config: &Path, servidor: Option<&str>, id: &str) -> Result
 }
 
 fn remover(caminho: &Path) -> Result<(), String> {
-    match std::fs::remove_file(caminho) {
-        Ok(()) => Ok(()),
-        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(erro) => Err(erro.to_string()),
-    }
+    // Gravar o vazio também na cópia impede que a recuperação ressuscite uma escolha retirada.
+    gravar(caminho, &[])
 }
 
 /// Esquece as escolhas pendentes deste servidor (depois de aplicadas).
@@ -482,8 +483,12 @@ mod testes {
             },
         )
         .expect("a segunda escolha");
-        std::fs::create_dir_all(caminho.with_extension("json.provisorio").join("dentro"))
-            .expect("bloquear o provisório");
+        let copia = caminho.with_file_name(format!(
+            "{}.recuperacao",
+            caminho.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::remove_file(&copia).unwrap();
+        std::fs::create_dir_all(copia.join("dentro")).expect("bloquear a troca da cópia");
         assert!(
             super::retirar(config, Some("a"), "x/y").is_err(),
             "retirar com a regravação impossível foi dito como feito"

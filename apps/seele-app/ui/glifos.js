@@ -376,6 +376,9 @@ const GLIFOS = {
 
   // ⧉ — compartilhar a tela: o monitor com a seta saindo dele. É o que o
   // botão faz — mostrar esta tela para a sala —, e não o ◧ da aparência.
+  trocar: [
+    ["path", { d: "M2 5h12M11 2l3 3-3 3M14 11H2M5 8l-3 3 3 3", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }],
+  ],
   tela: [
     ["rect", { x: "1.8", y: "2.8", width: "12.4", height: "8.4", rx: "1.2", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
     ["path", { d: "M5.5 13.6h5M8 11.2v2.4", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round" }],

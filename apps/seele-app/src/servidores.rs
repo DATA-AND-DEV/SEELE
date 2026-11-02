@@ -80,9 +80,19 @@ fn agora() -> i64 {
 /// esquecer de chamar: a primeira listagem numa máquina que já hospedou
 /// encontra `seele.db` e o põe na lista, com `caminho: None`.
 pub(crate) fn listar(config: &str) -> Vec<Servidor> {
-    let mut lista: Vec<Servidor> = std::fs::read_to_string(registro(config))
-        .ok()
-        .and_then(|texto| serde_json::from_str(&texto).ok())
+    listar_conferido(config).unwrap_or_else(|erro| {
+        tracing::warn!(%erro, "registro de servidores preservado");
+        Vec::new()
+    })
+}
+
+pub(crate) fn listar_conferido(config: &str) -> Result<Vec<Servidor>, String> {
+    let bytes = seele_ffi::arquivo_local::ler(&registro(config), registro_valido)
+        .map_err(|e| e.to_string())?;
+    let mut lista: Vec<Servidor> = bytes
+        .map(|b| serde_json::from_slice(&b))
+        .transpose()
+        .map_err(|e| e.to_string())?
         .unwrap_or_default();
 
     let tem_antigo = Path::new(config).join("seele.db").exists();
@@ -102,7 +112,11 @@ pub(crate) fn listar(config: &str) -> Vec<Servidor> {
     }
 
     lista.sort_by_key(|s| std::cmp::Reverse(s.ultimo_uso));
-    lista
+    Ok(lista)
+}
+
+fn registro_valido(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<Vec<Servidor>>(bytes).is_ok()
 }
 
 /// Grava o registro. Uma falha aqui não derruba o que está no ar.
@@ -111,7 +125,9 @@ fn gravar(config: &str, lista: &[Servidor]) {
         return;
     };
     let _ = std::fs::create_dir_all(config);
-    if let Err(erro) = std::fs::write(registro(config), texto) {
+    if let Err(erro) =
+        seele_ffi::arquivo_local::gravar(&registro(config), texto.as_bytes(), registro_valido)
+    {
         tracing::warn!(%erro, "não deu para gravar o registro de servidores");
     }
 }
@@ -156,8 +172,13 @@ fn identificador(nome: &str, usados: &[Servidor]) -> String {
 }
 
 /// Põe um servidor novo no registro e devolve o que foi guardado.
+#[cfg(test)]
 pub(crate) fn criar(config: &str, nome: &str, versao: &str) -> Servidor {
-    let mut lista = listar(config);
+    criar_conferido(config, nome, versao).expect("criar servidor de teste")
+}
+
+pub(crate) fn criar_conferido(config: &str, nome: &str, versao: &str) -> Result<Servidor, String> {
+    let mut lista = listar_conferido(config)?;
     let id = identificador(nome, &lista);
     let novo = Servidor {
         caminho: Some(format!("servidores/{id}/seele.db")),
@@ -167,14 +188,16 @@ pub(crate) fn criar(config: &str, nome: &str, versao: &str) -> Servidor {
         ultimo_uso: agora(),
     };
     lista.push(novo.clone());
-    gravar(config, &lista);
-    novo
+    let bytes = serde_json::to_vec_pretty(&lista).map_err(|e| e.to_string())?;
+    seele_ffi::arquivo_local::gravar(&registro(config), &bytes, registro_valido)
+        .map_err(|e| e.to_string())?;
+    Ok(novo)
 }
 
 /// Apaga uma instância parada e seus dados, preservando a identidade da máquina.
 pub(crate) fn apagar(config: &str, id: &str) -> Result<(), String> {
     use seele_server::persistence::{Location, Persistence};
-    let mut lista = listar(config);
+    let mut lista = listar_conferido(config)?;
     let servidor = lista
         .iter()
         .find(|s| s.id == id)
@@ -201,8 +224,11 @@ pub(crate) fn apagar(config: &str, id: &str) -> Result<(), String> {
         // A fonte lida só para leitura (P1 da 0.17): abrir com
         // `Persistence::open` migraria o legado sem cópia.
         if let Some((cert, key)) = chave_lida_sem_migrar(&antigo) {
-            let para = Persistence::open(&Location::File(base.join("identidade-servidor.db")))
-                .map_err(|e| e.to_string())?;
+            let para = Persistence::abrir_com(
+                &Location::File(base.join("identidade-servidor.db")),
+                seele_server::persistence::Durabilidade::Completa,
+            )
+            .map_err(|e| e.to_string())?;
             seele_server::tls::guardar_identidade(&para, &cert, &key).map_err(|e| e.to_string())?;
         }
         for nome in ["seele.db", "seele.db-wal", "seele.db-shm"] {
@@ -221,7 +247,8 @@ pub(crate) fn apagar(config: &str, id: &str) -> Result<(), String> {
     }
     lista.retain(|s| s.id != id);
     let texto = serde_json::to_string_pretty(&lista).map_err(|e| e.to_string())?;
-    std::fs::write(registro(config), texto).map_err(|e| e.to_string())
+    seele_ffi::arquivo_local::gravar(&registro(config), texto.as_bytes(), registro_valido)
+        .map_err(|e| e.to_string())
 }
 
 /// **O banco que HOSPEDAR abre**: o do servidor guardado, ou, sem escolha, o
@@ -381,7 +408,10 @@ fn herdar_a_chave(config: &str, banco: &Path) {
     if chave_lida_sem_migrar(banco).as_ref() == Some(&(cert.clone(), key.clone())) {
         return;
     }
-    let Ok(para) = Persistence::open(&Location::File(banco.to_path_buf())) else {
+    let Ok(para) = Persistence::abrir_com(
+        &Location::File(banco.to_path_buf()),
+        seele_server::persistence::Durabilidade::Completa,
+    ) else {
         return;
     };
     match seele_server::tls::guardar_identidade(&para, &cert, &key) {
@@ -583,6 +613,29 @@ mod os_servidores_guardados {
 
     fn texto(dir: &tempfile::TempDir) -> String {
         dir.path().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn registro_interrompido_recupera_e_registro_sem_copia_bloqueia_criacao() {
+        let dir = pasta();
+        let config = texto(&dir);
+        let salvo = criar(&config, "Casa", "0.19.5");
+        std::fs::write(super::registro(&config), b"{interrompido").unwrap();
+        let lista = super::listar_conferido(&config).unwrap();
+        assert_eq!(lista.first().unwrap().id, salvo.id);
+        assert_eq!(
+            std::fs::read(super::registro(&config)).unwrap(),
+            b"{interrompido"
+        );
+        let sem_copia = pasta();
+        let outra = texto(&sem_copia);
+        std::fs::write(super::registro(&outra), b"[incompleto").unwrap();
+        assert!(super::listar_conferido(&outra).is_err());
+        assert!(super::criar_conferido(&outra, "Novo", "0.19.5").is_err());
+        assert_eq!(
+            std::fs::read(super::registro(&outra)).unwrap(),
+            b"[incompleto"
+        );
     }
 
     #[test]

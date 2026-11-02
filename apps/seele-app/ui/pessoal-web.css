@@ -23,7 +23,7 @@
 
 .pessoal-web input, .pessoal-web textarea { font: inherit; color: inherit; background: var(--seele-campo); border: var(--seele-b) solid var(--seele-campo-borda); border-radius: var(--seele-raio); padding: 0 16px; min-width: 0; box-sizing: border-box; }
 .pessoal-web textarea { padding: 12px 16px; }
-.pessoal-web input:focus, .pessoal-web textarea:focus { border-color: var(--seele-laranja-nerv); }
+.pessoal-web input:focus { border-color: var(--seele-laranja-nerv); }
 .pessoal-web input:focus:not(:focus-visible), .pessoal-web textarea:focus:not(:focus-visible) { outline: none; }
 .pessoal-web-convite { width: 100%; }
 .pessoal-web-link { flex: 1 1 260px; }
@@ -509,3 +509,8 @@
 @media (min-width: 701px) and (max-height: 500px) and (max-width: 1000px) {
   .pessoal-web .pessoal-web-rodape > button { flex: 1 0 auto; }
 }
+
+/* O chat não ganha contorno ao clicar; o teclado destaca o título. */
+.pessoal-web .pessoal-web-texto { border: 0; }
+.pessoal-web .pessoal-web-texto:focus { outline: none; box-shadow: none; }
+.pessoal-web-chat:has(textarea:focus-visible) .pessoal-web-chat-titulo { text-decoration: underline; }

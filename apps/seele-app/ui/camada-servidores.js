@@ -106,6 +106,10 @@ async function desenharServidores() {
     conhecidos = await invoke("conhecidos");
   } catch (falha) {
     console.warn("conhecidos:", falha);
+    $("servidores-vazio").textContent = "Não consegui ler a lista de servidores. Os arquivos foram preservados para recuperação.";
+    $("servidores-vazio").hidden = false;
+    await avisarDadosLocais();
+    return;
   }
 
   const lista = $("servidores-lista");
@@ -136,11 +140,29 @@ async function lerOsServidoresDaEntrada() {
   let conhecidos = null;
   try {
     conhecidos = await invoke("conhecidos");
-  } catch {
+  } catch (falha) {
     conhecidos = null;
+    if (!PONTE_NO_LUGAR_DO_TAURI) {
+      $("boot-dados-locais").textContent = "Não consegui ler os servidores salvos. Os arquivos foram preservados para recuperação.";
+      $("boot-dados-locais").hidden = false;
+    }
   }
   desenharServidoresNaEntrada(conhecidos);
+  await avisarDadosLocais();
 }
+
+async function avisarDadosLocais() {
+  if (PONTE_NO_LUGAR_DO_TAURI) return;
+  try {
+    const avisos = await invoke("avisos_dos_dados_locais");
+    if (avisos?.length) {
+      $("boot-dados-locais").textContent = avisos.join(" ");
+      $("boot-dados-locais").hidden = false;
+    }
+  } catch (falha) { console.warn("dados locais:", falha); }
+}
+// Preferências e perfis podem terminar de abrir depois da lista de servidores.
+setInterval(() => { if (!$("tela-boot").hidden) void avisarDadosLocais(); }, 5000);
 
 /**
  * Abre a camada.

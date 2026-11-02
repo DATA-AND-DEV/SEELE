@@ -164,8 +164,8 @@ impl Preferences {
     ///
     /// # Errors
     ///
-    /// Only if the directory cannot be created. An unreadable or malformed file
-    /// is treated as an unwritten one — see the module note.
+    /// Directory access or corruption without a valid recovery copy. Existing
+    /// unreadable data is preserved, never treated as an unwritten file.
     pub fn open(path: PathBuf) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -187,7 +187,8 @@ impl Preferences {
             abertura_da_voz_dbfs_milesimos: None,
             receber_ligacoes: None,
         };
-        if let Ok(text) = std::fs::read_to_string(&settings.path) {
+        if let Some(bytes) = crate::arquivo_local::ler(&settings.path, arquivo_valido)? {
+            let text = String::from_utf8(bytes)?;
             for line in text.lines() {
                 let Some((name, value)) = line.split_once('\t') else {
                     continue;
@@ -696,8 +697,17 @@ fn sanitise(value: &str) -> String {
 /// O estrago aqui é menor que o dos pins e não é nulo: este arquivo é reescrito
 /// **inteiro** a cada mudança — ver [`Preferences::write`] —, então uma escrita
 /// interrompida não perde uma preferência, perde todas.
+fn arquivo_valido(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|texto| {
+        !texto.contains('\0')
+            && texto
+                .lines()
+                .all(|linha| linha.is_empty() || linha.contains('\t'))
+    })
+}
+
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    crate::identity::gravar_privado(path, bytes)
+    crate::arquivo_local::gravar(path, bytes, arquivo_valido)
 }
 
 #[cfg(test)]
@@ -911,7 +921,18 @@ mod tests {
     }
 
     #[test]
-    fn a_file_full_of_nonsense_reads_as_the_defaults() {
+    fn preferences_recover_after_truncation() {
+        let path = scratch("recover");
+        let mut settings = Preferences::open(path.clone()).unwrap();
+        settings.set_capture(Some("Microfone escolhido")).unwrap();
+        std::fs::write(&path, b"\0").unwrap();
+        let restored = Preferences::open(path.clone()).unwrap();
+        assert_eq!(restored.capture(), Some("Microfone escolhido"));
+        assert_eq!(std::fs::read(path).unwrap(), b"\0");
+    }
+
+    #[test]
+    fn corrupted_preferences_are_not_silently_reset() {
         // A settings file that got truncated must not stop a client from
         // starting. Every default still works.
         let path = scratch("nonsense");
@@ -920,17 +941,9 @@ mod tests {
         }
         std::fs::write(&path, "\0\u{feff}not a setting\nfuturo\tvalor\n").expect("write");
 
-        let settings = Preferences::open(path).expect("open");
-        assert_eq!(
-            settings.capture(),
-            None,
-            "an unreadable file must not become a microphone nobody chose"
-        );
-        assert_eq!(
-            settings.playback(),
-            None,
-            "an unreadable file must not become an output nobody chose"
-        );
+        let antes = std::fs::read(&path).unwrap();
+        assert!(Preferences::open(path.clone()).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), antes);
     }
 
     /// **O consentimento da malha sobrevive ao fechamento da janela.**

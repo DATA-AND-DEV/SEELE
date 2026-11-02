@@ -593,6 +593,7 @@ async function sairDaSessaoDaPonte(sessao = sessaoDaPonte.atual) {
     }
     return null;
   }
+  sessao.pedidoDeCaptura = (sessao.pedidoDeCaptura ?? 0) + 1;
   const id = sessao.idDaPonte;
   sessoesDaPonte.delete(id);
   if (vistaDaPonte === id) vistaDaPonte = [...sessoesDaPonte.keys()].pop() ?? 0;
@@ -2486,6 +2487,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // tela ENTRAR EM (3.4). E nunca `hospedar`.
   abertura: () => ({ hospedar: false, nome_publico: null, entrar: null, pelo_lancador: false }),
   plataforma: () => "web",
+  avisos_dos_dados_locais: () => [],
   // Quem recusa uma versão revogada é a origem, que não serve a página.
   conferir_esta_versao: () => null,
   atualizacao_que_nao_pegou: () => null,
@@ -3117,7 +3119,8 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // navegador, quando ele o tem.
   exclusao_do_som_da_captura: () => {
     if (!navigator.mediaDevices?.getDisplayMedia) return "SemCaptura";
-    return navigator.mediaDevices.getSupportedConstraints?.().suppressLocalAudioPlayback ? "Excluido" : "NaoExcluido";
+    // Silenciar a reprodução local não prova exclusão do áudio do SEELE.
+    return "NaoExcluido";
   },
   compartilhar_tela: ({ limites } = {}) =>
     comASessao((sessao) => {
@@ -3126,6 +3129,8 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
         return Promise.reject({ RecusaDaPonte: { comando: "compartilhar_tela", frase: FRASES_DA_TELA_NO_NAVEGADOR.recusa } });
       }
       if (!sessao.transmissao) return Promise.reject("ScreenShareUnavailable");
+      const tentativa = (sessao.pedidoDeCaptura ?? 0) + 1;
+      sessao.pedidoDeCaptura = tentativa;
       const comSom = limites?.com_som !== false && temSomDaTelaParaCodificar();
       // Dentro do gesto: nada espera antes do seletor.
       return navigator.mediaDevices
@@ -3137,6 +3142,11 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
         })
         .then(
           (midia) => {
+            // Um seletor pode responder depois de PARAR, desconectar ou trocar de sessão.
+            if (sessao.pedidoDeCaptura !== tentativa || sessaoDaPonte.atual !== sessao) {
+              for (const trilha of midia.getTracks()) trilha.stop();
+              throw "NotConnected";
+            }
             sessao.transmissao.comecar(midia, { ...limites, com_som: comSom });
             return null;
           },
@@ -3150,6 +3160,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     }),
   parar_de_compartilhar: () =>
     comASessao(async (sessao) => {
+      sessao.pedidoDeCaptura = (sessao.pedidoDeCaptura ?? 0) + 1;
       if (sessao.transmissao?.noAr) sessao.transmissao.parar();
       else await pelaSessao("parar_de_compartilhar")({});
       return null;

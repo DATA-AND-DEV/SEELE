@@ -159,7 +159,7 @@ impl Conhecidos {
     ///
     /// # Errors
     ///
-    /// Falha só se o diretório não puder ser criado.
+    /// Falha se o diretório não puder ser criado ou não houver cópia válida dos dados existentes.
     pub fn abrir(caminho: PathBuf) -> Result<Self> {
         Self::abrir_em(caminho, crate::caminho::ambiente_desta_maquina())
     }
@@ -169,14 +169,14 @@ impl Conhecidos {
     ///
     /// # Errors
     ///
-    /// Falha só se o diretório não puder ser criado.
+    /// Falha se o diretório não puder ser criado ou não houver cópia válida dos dados existentes.
     pub fn abrir_em(caminho: PathBuf, ambiente: String) -> Result<Self> {
         if let Some(pai) = caminho.parent() {
             std::fs::create_dir_all(pai)
                 .with_context(|| format!("não consegui criar {}", pai.display()))?;
         }
 
-        let entradas = ler(&caminho, &ambiente).unwrap_or_default();
+        let entradas = ler(&caminho, &ambiente)?;
         Ok(Self {
             caminho,
             entradas,
@@ -411,16 +411,24 @@ impl Conhecidos {
 /// As entradas do arquivo, com as imagens. Um arquivo que ainda não existe é
 /// uma lista vazia, e uma linha ilegível é pulada — inclusive a que não é
 /// UTF-8, sem levar as outras junto.
+fn arquivo_valido(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|texto| {
+        texto.lines().all(|linha| {
+            linha.is_empty()
+                || (linha.split('\t').count() >= 4
+                    && !linha.contains('\0')
+                    && analisar_linha(linha).is_some())
+        })
+    })
+}
+
 fn ler(caminho: &Path, ambiente: &str) -> std::io::Result<Vec<Conhecido>> {
     let agora = agora_em_segundos();
-    let mut entradas: Vec<Conhecido> = match std::fs::read(caminho) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes)
-            .lines()
-            .filter_map(analisar_linha)
-            .collect(),
-        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(erro) => return Err(erro),
-    };
+    let bytes = crate::arquivo_local::ler(caminho, arquivo_valido)?.unwrap_or_default();
+    let mut entradas: Vec<Conhecido> = String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(analisar_linha)
+        .collect();
     // As imagens vêm do disco aqui, e não a cada `listar`: a lista é
     // desenhada na tela de entrada, que a lê mais de uma vez, e reler
     // alguns arquivos por desenho seria pagar disco por uma decoração.
@@ -483,7 +491,7 @@ fn gravar(caminho: &Path, entradas: &[Conhecido]) -> Result<()> {
             )
         })
         .collect();
-    trocar_privado(caminho, texto.as_bytes())?;
+    crate::arquivo_local::gravar(caminho, texto.as_bytes(), arquivo_valido)?;
 
     // As imagens, uma por arquivo. Falhar aqui **não** derruba a gravação da
     // lista: um distintivo que não coube em disco é uma tela sem enfeite, e
@@ -704,11 +712,7 @@ pub(crate) fn travar(caminho: &Path) -> Result<Option<std::fs::File>> {
 ///
 /// Falha se o arquivo ao lado não puder ser gravado, ou a troca não acontecer.
 pub(crate) fn trocar_privado(caminho: &Path, bytes: &[u8]) -> Result<()> {
-    let nova = ao_lado(caminho, "nova");
-    escrever_privado(&nova, bytes)
-        .with_context(|| format!("não consegui gravar {}", nova.display()))?;
-    std::fs::rename(&nova, caminho)
-        .with_context(|| format!("não consegui trocar {} pela nova", caminho.display()))
+    crate::arquivo_local::gravar(caminho, bytes, |_| true).map_err(Into::into)
 }
 
 pub(crate) fn agora_em_segundos() -> i64 {
@@ -892,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn uma_linha_corrompida_e_pulada_e_nao_derruba_o_cliente() {
+    fn uma_linha_corrompida_sem_copia_e_preservada_para_recuperacao() {
         // Isto é conveniência. Recusar abrir por causa de uma lista de atalhos
         // ilegível seria a troca errada.
         let caminho = rascunho("corrompida");
@@ -903,10 +907,29 @@ mod tests {
         )
         .expect("escrever");
 
-        let lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
-        assert!(lista.buscar("host:8383").is_some());
+        let antes = std::fs::read(&caminho).unwrap();
+        assert!(Conhecidos::abrir(caminho.clone()).is_err());
+        assert_eq!(std::fs::read(&caminho).unwrap(), antes);
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
+    }
+
+    #[test]
+    fn perda_de_energia_recupera_servidores_e_preserva_limpeza_intencional() {
+        let caminho = rascunho("recuperacao-energia");
+        let mut lista = Conhecidos::abrir(caminho.clone()).unwrap();
+        lista.registrar("casa:8383", "Ana", Some(1)).unwrap();
+        lista.registrar("amigos:8383", "Ana", None).unwrap();
+        std::fs::write(&caminho, b"casa:83").unwrap();
+        let mut restaurada = Conhecidos::abrir(caminho.clone()).unwrap();
+        assert_eq!(restaurada.listar().len(), 2);
+        restaurada.esquecer("casa:8383").unwrap();
+        restaurada.esquecer("amigos:8383").unwrap();
+        assert!(Conhecidos::abrir(caminho.clone())
+            .unwrap()
+            .listar()
+            .is_empty());
+        std::fs::remove_dir_all(caminho.parent().unwrap()).unwrap();
     }
 
     #[test]

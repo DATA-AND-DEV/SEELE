@@ -86,7 +86,7 @@ const EVENTOS_LEMBRADOS = 40;
 function desenharChamada(snapshot) {
   const voice_room = snapshot ? snapshot.voice_rooms.find((c) => c.occupied_by_us) : null;
 
-  desenharORodapeDoOperador(voice_room);
+  desenharORodapeDoOperador(voice_room, snapshot?.minha_transmissao);
   desenharBarraDaChamada(snapshot, voice_room);
   desenharPalco(snapshot, voice_room);
   desenharCartoes(snapshot, voice_room);
@@ -785,7 +785,7 @@ async function atualizarChamada() {
  * módulo fica velho sempre que alguma outra coisa muda a sala, e há caminhos que
  * mudam — entrar por um clique na lista, ser expulso, o servidor cair.
  */
-function desenharORodapeDoOperador(voice_room) {
+function desenharORodapeDoOperador(voice_room, transmissao = null) {
   const dentro = voice_room != null;
 
   const sair = $("operador-sair");
@@ -804,7 +804,11 @@ function desenharORodapeDoOperador(voice_room) {
     ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
     : "sair deste servidor e voltar à tela de entrada";
 
+  const trocar = $("operador-trocar-tela");
+  trocar.hidden = !dentro || !transmissao;
   const outro = $("operador-vista");
+  outro.dataset.modo = transmissao ? "parar" : "compartilhar";
+  outro.setAttribute("aria-pressed", transmissao ? "true" : "false");
   // `hidden`, e não um estilo: fora de sala este botão não tem ofício nenhum, e
   // um botão desabilitado prometeria que existe um jeito de habilitá-lo aqui.
   outro.hidden = !dentro;
@@ -812,17 +816,18 @@ function desenharORodapeDoOperador(voice_room) {
     // **Ícone também** (0.19, pedido do dono): a fileira do operador é uma
     // linha só de ícones iguais, e «COMPARTILHAR» por extenso a quebrava. A
     // palavra fica no nome acessível, como a das saídas.
-    if (outro.getAttribute("aria-label") !== "COMPARTILHAR" || !outro.firstElementChild) {
-      outro.setAttribute("aria-label", "COMPARTILHAR");
+    const rotulo = transmissao ? "PARAR DE COMPARTILHAR" : "COMPARTILHAR";
+    if (outro.getAttribute("aria-label") !== rotulo || !outro.firstElementChild) {
+      outro.setAttribute("aria-label", rotulo);
       outro.replaceChildren(glifo("tela"));
     }
     // **Indisponível, e dito** (caso 12): sem a captura (o navegador que não
     // a tem), o botão fica à vista, apagado, com o porquê; o clique abre a
     // caixa, que diz o mesmo — nada começa e quebra no meio.
-    const semTela = porQueNaoHaTela();
+    const semTela = transmissao ? null : porQueNaoHaTela();
     outro.setAttribute("aria-disabled", semTela ? "true" : "false");
     outro.dataset.indisponivel = semTela ? "sim" : "nao";
-    outro.title = semTela ?? `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`;
+    outro.title = transmissao ? "parar de compartilhar a tela" : semTela ?? `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`;
   }
 }
 
@@ -834,8 +839,17 @@ function desenharORodapeDoOperador(voice_room) {
 // operador), e o palco vazio nem aparece. O que a U28 protegia continua: o
 // compartilhar se alcança de dentro da chamada, e o «indisponível, e dito»
 // (`desenharORodapeDoOperador`) chega à barra com o `aria-disabled` e o `title`.
-$("operador-vista").addEventListener("click", () => {
-  abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
+$("operador-vista").addEventListener("click", async () => {
+  if ($("operador-vista").dataset.modo !== "parar") {
+    abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
+    return;
+  }
+  try { await naFilaDeTela(() => invoke("parar_de_compartilhar")); }
+  catch (falha) { anunciar(fraseDeErro(falha)); }
+  await atualizarChamada();
+});
+$("operador-trocar-tela").addEventListener("click", () => {
+  abrirCompartilhar().catch(falha => anunciar(fraseDeErro(falha)));
 });
 
 /**

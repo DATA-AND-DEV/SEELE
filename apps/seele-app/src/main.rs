@@ -3972,8 +3972,8 @@ impl From<versoes::RecusaDestaVersao> for FalhaAoHospedar {
 /// desta versão tem um `seele.db` e nenhum registro, e a primeira listagem o
 /// põe na lista apontando para onde ele já está. Ver `servidores.rs`.
 #[tauri::command]
-fn servidores_guardados(app: AppHandle) -> Vec<servidores::Servidor> {
-    servidores::listar(&config_dir(&app))
+fn servidores_guardados(app: AppHandle) -> Result<Vec<servidores::Servidor>, String> {
+    servidores::listar_conferido(&config_dir(&app))
 }
 
 /// Apaga somente com a hospedagem parada nesta janela.
@@ -4096,8 +4096,8 @@ mod o_desfazer_confere_o_servidor {
 /// própria seria a segunda cópia de um número que já tem dono. Um build feito à
 /// mão não a carimba, e aí a entrada fica sem versão — que é a verdade.
 #[tauri::command]
-fn criar_servidor(app: AppHandle, nome: String) -> servidores::Servidor {
-    servidores::criar(
+fn criar_servidor(app: AppHandle, nome: String) -> Result<servidores::Servidor, String> {
+    servidores::criar_conferido(
         &config_dir(&app),
         &nome,
         versoes::em_uso().unwrap_or_default(),
@@ -4430,6 +4430,12 @@ async fn hospedar_em(
     // mesmo caminho quando ninguém escolheu nada — e é o que faz hospedar
     // continuar funcionando numa máquina sem registro nenhum.
     let config = config.to_owned();
+    servidores::listar_conferido(&config).map_err(|motivo| {
+        FalhaAoHospedar::DadosNaoVerificados {
+            motivo,
+            acoes: vec!["tentar-de-novo", "abrir-a-pasta"],
+        }
+    })?;
     let id_do_servidor = servidor.as_deref();
     if let Some(id) = id_do_servidor {
         servidores::marcar_uso(&config, id);
@@ -13773,28 +13779,30 @@ fn caminho_dos_conhecidos<R: tauri::Runtime>(app: &AppHandle<R>) -> std::path::P
 
 /// Os servidores onde esta pessoa já esteve.
 ///
-/// Uma lista de atalhos corrompida não pode fechar a porta: `specs/05` diz que
-/// este arquivo é conveniência e pode ser apagado sem consequência. Por isso
-/// falha vira lista vazia, e nunca erro — a tela esconde a seção e o formulário
-/// de sempre continua ali.
+/// Corrupção tenta a cópia validada e, sem ela, retorna erro. A casca mantém
+/// a entrada disponível, mas informa que a lista foi preservada para recuperação.
 #[tauri::command]
-fn conhecidos(app: AppHandle) -> Vec<seele_ffi::conhecidos::Conhecido> {
+fn conhecidos(app: AppHandle) -> Result<Vec<seele_ffi::conhecidos::Conhecido>, String> {
     seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
         .map(|lista| lista.listar())
-        .unwrap_or_default()
+        .map_err(|erro| erro.to_string())
+}
+
+/// Corrupção ou recuperação encontrada nesta execução, sem conteúdo privado.
+#[tauri::command]
+fn avisos_dos_dados_locais() -> Vec<String> {
+    seele_ffi::arquivo_local::avisos()
 }
 
 /// Tira um servidor da lista.
 ///
-/// Um `Ok` quando a lista nem abriu é a resposta certa e não uma mentira: o que
-/// se pediu foi que aquele endereço não estivesse mais lá, e ele não está.
+/// Uma lista ilegível devolve erro: não se confirma a remoção de dados que
+/// não puderam ser lidos, nem se sobrescreve o arquivo com uma lista vazia.
 #[tauri::command]
-fn esquecer(app: AppHandle, alvo: String) -> Result<(), ()> {
-    let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
-    else {
-        return Ok(());
-    };
-    lista.esquecer(&alvo).map_err(|_| ())
+fn esquecer(app: AppHandle, alvo: String) -> Result<(), String> {
+    let mut lista = seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
+        .map_err(|e| e.to_string())?;
+    lista.esquecer(&alvo).map_err(|e| e.to_string())
 }
 
 /// O que um `seele://` colado diz à tela de entrada.
@@ -15617,6 +15625,7 @@ fn main() {
             set_voice_mode,
             set_volume,
             volumes_locais,
+            avisos_dos_dados_locais,
             fontes_de_tela,
             permissao_de_tela,
             pedir_permissao_de_tela,

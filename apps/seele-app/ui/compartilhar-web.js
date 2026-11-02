@@ -126,8 +126,8 @@ function sondarATela(codec) {
       // A sonda usa a mesma condição do transmissor, incluindo o leitor de
       // vídeo do WebKit quando ele não oferece TrackProcessor.
       if (!temCapturaParaCodificar()) return false;
+      let codificador, timer;
       const saiu = new Promise((resolver) => {
-        let codificador;
         try {
           codificador = new VideoEncoder({ output: () => resolver(true), error: () => resolver(false) });
           codificador.configure({ codec, width: 64, height: 64, bitrate: 100_000, framerate: 8, avc: { format: "annexb" } });
@@ -141,8 +141,12 @@ function sondarATela(codec) {
           resolver(false);
         }
       });
-      const prazo = new Promise((resolver) => setTimeout(() => resolver(false), PRAZO_DA_SONDA_MS));
-      return Promise.race([saiu, prazo]);
+      const prazo = new Promise((resolver) => { timer = setTimeout(() => resolver(false), PRAZO_DA_SONDA_MS); });
+      try { return await Promise.race([saiu, prazo]); }
+      finally {
+        clearTimeout(timer);
+        if (codificador && codificador.state !== "closed") codificador.close();
+      }
     })();
   }
   return sondaDaTela;
@@ -185,11 +189,18 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
   function comecar(midia, limites) {
     if (viva) fechar({ avisar: false });
     viva = { midia, limites, tela: null, fluxo: null };
-    for (const trilha of midia.getTracks()) {
-      // O PARAR do próprio navegador: a trilha acaba, e a transmissão também.
-      trilha.addEventListener("ended", () => parar());
+    const estaVez = viva;
+    for (const trilha of midia.getVideoTracks()) {
+      // Só o vídeo encerra a transmissão; áudio pode acabar separadamente.
+      trilha.addEventListener("ended", () => { if (viva === estaVez) parar(); });
     }
-    pedir("compartilhar_tela", { limites });
+    try {
+      if (!midia.getVideoTracks().some(trilha => trilha.readyState === "live")) throw "ScreenShareUnavailable";
+      pedir("compartilhar_tela", { limites });
+    } catch (falha) {
+      fechar();
+      throw falha;
+    }
   }
 
   /** As mensagens da sessão que mexem na transmissão desta página. */
@@ -198,9 +209,10 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     const comecou = mensagem.ScreenShareStarted;
     if (comecou && comecou.person === eu() && viva.tela === null) {
       viva.tela = comecou.screen;
+      const estaVez = viva;
       abrir().catch((falha) => {
         console.warn("tela: o fluxo da transmissão não abriu:", falha);
-        parar();
+        if (viva === estaVez) parar("Não foi possível abrir a transmissão. Compartilhe a tela novamente.");
       });
     }
     const chave = mensagem.KeyFrameRequested;
@@ -247,7 +259,10 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     };
     fluxo.recuperacoesVideo = 0;
     criarCodificadorDaImagem(estaVez, fluxo);
-    lerAImagem(estaVez, trilha);
+    lerAImagem(estaVez, trilha).catch(falha => {
+      console.warn("tela: falha ao ler a imagem:", falha);
+      if (viva === estaVez && estaVez.fluxo === fluxo) parar("Não foi possível ler a captura. Compartilhe a tela novamente.");
+    });
 
     // O som, no mesmo fluxo.
     const som = estaVez.midia.getAudioTracks()[0];
@@ -290,6 +305,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       .catch((falha) => {
         if (!fluxo.caiu) console.warn("tela: a escrita do fluxo falhou:", falha);
         fluxo.caiu = true;
+        if (viva?.fluxo === fluxo) parar("A conexão da transmissão parou. Compartilhe a tela novamente.");
       })
       .finally(() => {
         fluxo.naFila -= 1;
@@ -386,7 +402,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
         } catch {
           break;
         }
-        if (lido.done || viva !== estaVez) {
+        if (lido.done || viva !== estaVez || estaVez.fluxo !== fluxo) {
           lido.value?.close();
           break;
         }
@@ -462,7 +478,10 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       for (const codificador of fluxo.codificadores) if (codificador.state !== "closed") codificador.close();
       fluxo.escrita.finally(() => fluxo.escritor.close().catch(() => {}));
       estaVez.fluxo = null;
-      abrir().catch((falha) => console.warn("tela: o fluxo não reabriu com os limites novos:", falha));
+      abrir().catch((falha) => {
+        console.warn("tela: o fluxo não reabriu com os limites novos:", falha);
+        if (viva === estaVez) parar("Não foi possível mudar a qualidade. Compartilhe a tela novamente.");
+      });
       return;
     }
     const imagem = fluxo.codificadores.find((codificador) => codificador instanceof VideoEncoder);

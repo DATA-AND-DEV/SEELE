@@ -1,0 +1,32 @@
+{
+  "version": "0.19.5",
+  "base": "f8ef60567a8601f8f40f5859dcd19d74fe35ebbe",
+  "validation": "targeted checks; full release battery not run",
+  "logs": [
+    "frontend",
+    "storage-full",
+    "app-storage",
+    "sqlite",
+    "video",
+    "core",
+    "ui",
+    "media",
+    "permission",
+    "personal",
+    "nucleo",
+    "palco",
+    "ciclo",
+    "clippy-producao",
+    "regressao-ciclo",
+    "regressao-clique"
+  ],
+  "limits": [
+    "UI Chromium/WebKit on macOS with mock IPC; no Windows physical UI test",
+    "media used production WASM from 0.19.4; final 0.19.5 WASM is checked during packaging",
+    "real macOS capture tested, not a final-installer two-machine call",
+    "simulated corruption/interruption, no physical power cut",
+    "mutation fails prove cleanup and DOM node retention; dropped physical clicks were not reproduced",
+    "all-target clippy found pre-existing indexing warning in mods.rs:2359; production clippy passes"
+  ],
+  "user_data": "No user files modified. Metadata only inspected on Windows; no recovery of prior lost data claimed."
+}

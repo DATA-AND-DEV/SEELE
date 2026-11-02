@@ -44,6 +44,8 @@ fn config_guardada(
         mods_dir: pasta_dos_mods,
         listen: SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
         database: banco,
+        // O servidor guardado do app também precisa sobreviver à queda de energia.
+        durabilidade: crate::persistence::Durabilidade::Completa,
         ..ServerConfig::default()
     }
 }
@@ -910,6 +912,18 @@ mod o_alcance_do_navegador {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn servidor_guardado_sincroniza_transacoes_para_queda_de_energia() {
+        let config = super::config_guardada(0, crate::persistence::Location::Memory, "Casa", None);
+        let db = crate::persistence::Persistence::abrir_com(&config.database, config.durabilidade)
+            .unwrap();
+        let synchronous: i64 = db
+            .connection()
+            .pragma_query_value(None, "synchronous", |r| r.get(0))
+            .unwrap();
+        assert_eq!(synchronous, 2, "o banco hospedado precisa usar FULL");
+    }
+
     use super::*;
 
     /// **O modo local (E9): só loopback, e a escada não sobe.** Com o ponto

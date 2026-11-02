@@ -40,9 +40,9 @@ pub fn load_or_create(path: &Path) -> Result<SigningKey> {
             .with_context(|| format!("could not create {}", parent.display()))?;
     }
 
-    if path.exists() {
-        let bytes = std::fs::read(path)
-            .with_context(|| format!("could not read the identity at {}", path.display()))?;
+    if let Some(bytes) = crate::arquivo_local::ler(path, |b| b.len() == 32)
+        .with_context(|| format!("could not read the identity at {}", path.display()))?
+    {
         let bytes: [u8; 32] = bytes.as_slice().try_into().with_context(|| {
             format!(
                 "{} is {} bytes; an Ed25519 identity is 32",
@@ -83,53 +83,8 @@ pub fn load_or_create(path: &Path) -> Result<SigningKey> {
 /// O `sync_all` antes do `rename` é a outra metade, e ela é a que resiste a
 /// queda de energia: sem ele o `rename` pode chegar ao disco antes dos bytes, e
 /// o nome novo apontaria para um conteúdo que não existe.
-#[cfg(unix)]
 pub(crate) fn gravar_privado(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let ao_lado = temporario(path);
-    // Um temporário que sobrou de uma tentativa interrompida não pode impedir a
-    // próxima: `create(true).truncate(true)` o reaproveita.
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&ao_lado)?;
-    // Cada passo desfaz o temporário ao falhar. Sem isto, um disco cheio deixaria
-    // um arquivo pela metade ao lado do bom, para sempre.
-    if let Err(erro) = file.write_all(bytes).and_then(|()| file.sync_all()) {
-        drop(file);
-        let _ = std::fs::remove_file(&ao_lado);
-        return Err(erro);
-    }
-    drop(file);
-    if let Err(erro) = std::fs::rename(&ao_lado, path) {
-        let _ = std::fs::remove_file(&ao_lado);
-        return Err(erro);
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-pub(crate) fn gravar_privado(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    // Windows inherits the directory's ACL, and the directory is under the
-    // user's own profile. Weaker than the Unix mode, and worth knowing.
-    //
-    // Atômica pela mesma razão do caminho de cima, e com uma diferença do
-    // sistema: `rename` no Windows falha quando o destino existe, então o
-    // destino é removido antes. A janela que isso abre é de um `rename` e não de
-    // uma escrita inteira, e é o melhor que a API oferece sem `MoveFileEx`, que
-    // pediria uma dependência nova.
-    let ao_lado = temporario(path);
-    std::fs::write(&ao_lado, bytes)?;
-    let _ = std::fs::remove_file(path);
-    if let Err(erro) = std::fs::rename(&ao_lado, path) {
-        let _ = std::fs::remove_file(&ao_lado);
-        return Err(erro);
-    }
-    Ok(())
+    crate::arquivo_local::gravar(path, bytes, |_| true)
 }
 
 /// O nome antigo, para este arquivo e para os testes dele.
@@ -139,17 +94,6 @@ pub(crate) fn gravar_privado(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// tinha. Uma função e dois nomes não tem como divergir.
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     gravar_privado(path, bytes)
-}
-
-/// O caminho do arquivo temporário ao lado do definitivo.
-///
-/// **No mesmo diretório**, e é o que faz o `rename` ser atômico: entre sistemas
-/// de arquivos diferentes ele deixa de ser uma troca de nome e passa a ser uma
-/// cópia, que tem a mesma janela que este conserto está fechando.
-fn temporario(path: &Path) -> PathBuf {
-    let mut nome = path.as_os_str().to_owned();
-    nome.push(".novo");
-    PathBuf::from(nome)
 }
 
 /// A pin store backed by a file, so ADR 0003 survives a restart.
@@ -186,6 +130,17 @@ pub struct FilePinStore {
     falha: Mutex<Option<String>>,
 }
 
+fn pins_validos(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|texto| {
+        texto.lines().all(|linha| {
+            linha.trim().is_empty()
+                || linha
+                    .split_once(char::is_whitespace)
+                    .is_some_and(|(host, pin)| !host.is_empty() && !pin.trim().is_empty())
+        })
+    })
+}
+
 impl FilePinStore {
     /// Opens the store at `path`, reading whatever is already there.
     ///
@@ -211,7 +166,12 @@ impl FilePinStore {
         // - **linha torta** é corrupção parcial. As linhas boas ficam — jogar a
         //   lista inteira fora por causa de uma linha seria transformar um
         //   arquivo com um defeito num arquivo sem nada.
-        let (pins, falha) = match std::fs::read_to_string(&path) {
+        let (pins, falha) = match crate::arquivo_local::ler(&path, pins_validos)
+            .or_else(|_| std::fs::read(&path).map(Some))
+            .and_then(|bytes| {
+                String::from_utf8(bytes.unwrap_or_default())
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            }) {
             Ok(texto) => {
                 let mut boas = Vec::new();
                 let mut tortas = 0_usize;
@@ -274,7 +234,7 @@ impl FilePinStore {
             .iter()
             .map(|(host, fingerprint)| format!("{host} {fingerprint}\n"))
             .collect();
-        match write_private(&self.path, text.as_bytes()) {
+        match crate::arquivo_local::gravar(&self.path, text.as_bytes(), pins_validos) {
             Ok(()) => {
                 if let Ok(mut falha) = self.falha.lock() {
                     // A gravação deu certo: a falha anterior deixou de ser

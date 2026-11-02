@@ -131,7 +131,7 @@ pub use seele_core::aparelho_de_mentira;
 /// O [`Codigo`] atravessa como o [`uri::Bilhete`] atravessa: tipado, e lido uma
 /// vez só, na borda. Um código em `String` seria lido de novo em cada lugar que
 /// o usa, e cada leitura é um lugar para errar o verificador.
-pub use seele_core::{agenda, entrada, Codigo};
+pub use seele_core::{agenda, arquivo_local, entrada, Codigo};
 
 /// O número do fio, a versão de servidor e a linha de cada número, para quem
 /// confere o manifesto do launcher contra esta build. Pelo `seele-core`, e não

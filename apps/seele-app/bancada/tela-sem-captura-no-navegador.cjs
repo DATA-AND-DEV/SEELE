@@ -104,6 +104,21 @@ const { chromium } = require("./playwright.cjs");
     });
     assert.equal(comTela.aria, "false", "com a captura, o COMPARTILHAR ficou indisponível");
     assert.equal(comTela.palco, null);
+    const tardia = await page.evaluate(async () => {
+      const antes = sessaoDoPedido;
+      let resolver, começos = 0;
+      const trilha = { readyState: "live", stop() { this.readyState = "ended"; } };
+      navigator.mediaDevices.getDisplayMedia = () => new Promise(ok => { resolver = ok; });
+      sessaoDoPedido = { transmissao: { noAr: true, parar() {}, comecar() { começos++; } } };
+      try {
+        const pedido = ATENDIMENTOS_DA_PONTE.compartilhar_tela({ limites: {} }).catch(e => e);
+        await ATENDIMENTOS_DA_PONTE.parar_de_compartilhar();
+        resolver({ getTracks: () => [trilha] });
+        const erro = await pedido;
+        return { começos, estado: trilha.readyState, erro };
+      } finally { sessaoDoPedido = antes; }
+    });
+    assert.deepEqual(tardia, { começos: 0, estado: "ended", erro: "NotConnected" }, "parar invalida o seletor pendente e libera a captura tardia");
     await page.close();
   } finally {
     await browser.close();

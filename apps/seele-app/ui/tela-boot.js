@@ -1225,8 +1225,11 @@ async function abrirHospedagem() {
   try {
     guardados = await invoke("servidores_guardados");
   } catch (falha) {
-    // Sem registro legível, criar é o caminho que sempre funcionou.
     console.warn("servidores:", falha);
+    $("boot-dados-locais").textContent = "Não consegui ler o registro dos servidores. Os arquivos foram preservados; recupere uma cópia válida antes de hospedar.";
+    $("boot-dados-locais").hidden = false;
+    await avisarDadosLocais();
+    return;
   }
   if (guardados.length === 0) {
     prepararVeioDaLista = false;

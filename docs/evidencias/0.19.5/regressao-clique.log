@@ -1,0 +1,12 @@
+AssertionError [ERR_ASSERTION]: snapshot preserva o alvo do gesto
+
+false !== true
+
+    at /private/tmp/seele-0195-regressao/apps/seele-app/bancada/hotfix-0195.cjs:53:11 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

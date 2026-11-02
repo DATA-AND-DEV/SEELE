@@ -308,7 +308,6 @@
   flex: 0 0 auto;
   border: 1px solid var(--seele-controle-borda);
   border-bottom: 1px solid var(--seele-linha);
-  border-left: 3px solid transparent;
   background: var(--seele-controle);
   font-family: var(--seele-ui);
   font-weight: 600;
@@ -418,8 +417,6 @@
   height: 44px;
   flex: 0 0 auto;
   border: 1px dashed var(--seele-controle-borda);
-  border-bottom: 1px solid var(--seele-linha);
-  border-left: 3px solid transparent;
   background: none;
   font: inherit;
   font-size: 18px;
@@ -1480,7 +1477,7 @@ button.linha-nome:hover { text-decoration: underline; }
   border-radius: var(--seele-raio);
 }
 
-.compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
+.compor-caixa:focus-within { border-color: transparent; }
 
 /* O campo cresce; a moldura acompanha. Com o `<textarea>` de várias linhas, o
    `align-items: center` de `.compor-caixa` empurraria o `>` para o meio da
@@ -3153,7 +3150,7 @@ button.linha-nome:hover { text-decoration: underline; }
 .mensagens .envio[data-envio="falhou"] .envio-frase, .mensagens .envio[data-envio="sem-resposta"] .envio-frase { color: var(--seele-vermelho-claro); }
 
 /* O compositor: uma bandeja de vidro e, dentro dela, o campo escuro. */
-.compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
+.compor-caixa:focus-within { border-color: transparent; }
 .compor-anexar:hover { background: var(--seele-controle-hover); color: var(--seele-osso); border-color: var(--seele-controle-borda); }
 .compor-enviar:hover { background: var(--seele-laranja-hover); border-color: var(--seele-laranja-hover); color: var(--seele-tinta-no-acento); }
 
@@ -3664,7 +3661,10 @@ button.linha-nome:hover { text-decoration: underline; }
    canvas punha a linha de escrever e as ações numa caixa negra a 85% dentro da
    bandeja, e ela pesava. Fica uma bandeja de vidro só, e o foco acende a
    bandeja inteira. */
-:root:not([data-casca="celular"]) .compor:focus-within { border-color: var(--seele-laranja-nerv); }
+:root:not([data-casca="celular"]) .compor { border: 0; }
+:root:not([data-casca="celular"]) .compor textarea:focus { outline: none; box-shadow: none; }
+/* Foco de teclado indicado pelo rótulo, sem contornar o chat. */
+:root:not([data-casca="celular"]) .compor:has(textarea:focus-visible) > label { color: var(--seele-osso); text-decoration: underline; }
 :root:not([data-casca="celular"]) #form-mensagem > label { grid-area: rotulo; padding: 0 14px; font-family: var(--seele-ui); font-weight: 500; font-size: 13px; color: var(--seele-osso-apagado); }
 :root:not([data-casca="celular"]) #form-mensagem > label > span { color: var(--seele-osso); }
 :root:not([data-casca="celular"]) .compor > .compor-caixa { grid-area: caixa; position: relative; margin: 2px 0 0 12px; padding: 0; border: 0; border-radius: 0; background: none; min-height: 44px; }

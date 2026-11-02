@@ -1,0 +1,3 @@
+tela: o fluxo da transmissão não abriu: Error: abertura antiga falhou
+    at /Users/dev-alexandre/.codex/worktrees/e595/SEELE/apps/seele-app/bancada/ciclo-captura-web.cjs:16:13
+ciclo captura: recusa libera faixas, fim do áudio, fim atrasado, abertura atrasada, fim do vídeo e parada repetida OK

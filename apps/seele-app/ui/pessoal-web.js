@@ -76,7 +76,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     el.textContent = texto;
     return el;
   };
-  const desenhos = { "SAÍDA DE ÁUDIO": "fone", VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "aparencia", "PARAR COMPARTILHAMENTO": "aparencia", "SAIR DA CONVERSA": "sair", CANCELAR: "sair", "ENCERRAR CONVITE": "sair" };
+  const desenhos = { "SAÍDA DE ÁUDIO": "fone", VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "tela", "PARAR COMPARTILHAMENTO": "tela", "TROCAR TELA": "trocar", "SAIR DA CONVERSA": "xis", CANCELAR: "sair", "ENCERRAR CONVITE": "sair" };
   const rotular = (el, texto) => {
     if (el.getAttribute("aria-label") === texto && el.querySelector(".glifo")) return;
     el.setAttribute("aria-label", texto);
@@ -194,7 +194,9 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   const rodape = no("footer", "pessoal-web-rodape");
   const mic = botao("LIGAR MICROFONE", () => acoes.microfone());
   mic.setAttribute("aria-pressed", "false");
+  let telaNoAr = false;
   const compartilhar = botao("COMPARTILHAR TELA", () => acoes.compartilhar());
+  const trocarTela = botao("TROCAR TELA", () => acoes.trocarTela());
   const saida = botao("SAÍDA DE ÁUDIO", () => {
     painelDaSaida.hidden = !painelDaSaida.hidden;
     saida.setAttribute("aria-expanded", String(!painelDaSaida.hidden));
@@ -223,7 +225,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   const erro = no("p", "pessoal-web-erro");
   erro.setAttribute("role", "alert");
   erro.hidden = true;
-  rodape.append(mic, compartilhar, saida, desligar);
+  rodape.append(mic, compartilhar, trocarTela, saida, desligar);
   raiz.append(topo, corpo, erro, rodape, painelDaSaida);
   // Em janela larga a barra de ações mora no painel do palco, no pé dele (o
   // canvas); na estreita ela segue sob os painéis, como a mão alcança.
@@ -290,8 +292,10 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     saida.hidden = !dentro || !estadoDaSaida.disponivel;
     saida.disabled = listaDaSaida.disabled = escolherSaida.disabled = ocupado;
     if (saida.hidden) { painelDaSaida.hidden = true; saida.setAttribute("aria-expanded", "false"); }
-    compartilhar.disabled = ocupado || !acoes.podeCompartilhar();
-    compartilhar.title = acoes.podeCompartilhar() ? "Compartilhar tela sem som do sistema" : "Captura de tela indisponível";
+    trocarTela.hidden = !dentro || !telaNoAr;
+    trocarTela.disabled = ocupado;
+    compartilhar.disabled = ocupado || (!telaNoAr && !acoes.podeCompartilhar());
+    compartilhar.title = telaNoAr ? "Parar de compartilhar a tela" : acoes.podeCompartilhar() ? "Compartilhar tela sem som do sistema" : "Captura de tela indisponível";
     desligar.hidden = ["livre", "encerrada"].includes(fase);
     rotular(desligar, fase === "recebendo" ? "ENCERRAR CONVITE"
       : dentro ? "SAIR DA CONVERSA" : "CANCELAR");
@@ -368,12 +372,13 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       rotular(mic, ligado ? "DESLIGAR MICROFONE" : "LIGAR MICROFONE");
       mic.setAttribute("aria-pressed", String(ligado));
     },
-    compartilhando(ligado) { rotular(compartilhar, ligado ? "PARAR COMPARTILHAMENTO" : "COMPARTILHAR TELA"); compartilhar.setAttribute("aria-pressed", String(ligado)); },
+    compartilhando(ligado) { telaNoAr = ligado; desenhar(); rotular(compartilhar, ligado ? "PARAR COMPARTILHAMENTO" : "COMPARTILHAR TELA"); compartilhar.setAttribute("aria-pressed", String(ligado)); },
     falha,
     limpar({ preservarOperacao = false } = {}) {
       // Criar/entrar limpam a conversa dentro da ação já em andamento.
       // Preservar seu dono mantém o botão bloqueado e a falha visível.
       if (!preservarOperacao) { ++operacao; ocupado = false; }
+      telaNoAr = false;
       retrato = { estado: "livre" };
       limparHistorico(); link.value = "";
       tela.replaceChildren(); tela.hidden = true; erro.hidden = true;

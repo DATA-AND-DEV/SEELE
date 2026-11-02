@@ -72,6 +72,7 @@ pub use seele_sessao::som;
 /// Os compassos da volta (a página do buraco, a rajada e o passo da
 /// repetição), de onde o desktop e o navegador os leem.
 pub use seele_sessao::volta;
+pub mod arquivo_local;
 pub mod bomba;
 pub mod caminho;
 pub mod chamada_pessoal;

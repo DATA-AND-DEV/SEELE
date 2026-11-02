@@ -94,6 +94,10 @@ function instalarConversasPessoaisWeb() {
       if (!tela || fase !== "dentro") throw new Error("Tela ainda está abrindo");
       return tela.noAr ? tela.parar() : tela.compartilhar();
     },
+    trocarTela: () => {
+      if (!tela || fase !== "dentro") throw new Error("Conversa encerrada");
+      return tela.compartilhar();
+    },
     saida: id => selecaoDaSaida.selecionar(id),
     podeCompartilhar: () => typeof temCapturaParaCodificar === "function" && temCapturaParaCodificar(),
   } });

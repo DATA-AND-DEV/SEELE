@@ -51,9 +51,15 @@ const ui = path.resolve(__dirname, '../ui');
           desligar: async () => { geracao++; prova.trilhasVivas = 0; prova.fechouVoz++; }, modo() {},
           entrar: () => { prova.entrouVoz++; }, contas: async () => ({ pagina: { falhas: [] } }),
         }; };
-        window.criarCompartilhamentoPessoalWeb = () => ({
-          fechar: () => { prova.fechouTela++; }, receberControle() {},
-        });
+        window.criarCompartilhamentoPessoalWeb = ({aoEstado}) => {
+          let noAr = false;
+          return {
+            get noAr() { return noAr; },
+            compartilhar() { prova.compartilhou = (prova.compartilhou || 0) + 1; noAr = true; aoEstado("transmitindo"); },
+            parar() { prova.parouTela = (prova.parouTela || 0) + 1; noAr = false; aoEstado("parada"); },
+            fechar: () => { prova.fechouTela++; }, receberControle() {},
+          };
+        };
         window.criarServicoDeChamadasWeb = async callbacks => {
           window.callbacksDaChamada = callbacks;
           return {
@@ -127,6 +133,15 @@ const ui = path.resolve(__dirname, '../ui');
       assert.equal(await page.evaluate(() => prova.capturas), capturasAntes + 1, 'o par que chegou pediu outra captura');
       assert.equal(await page.evaluate(() => prova.trilhasVivas), 1, 'a permissão do gesto não ligou o microfone');
       assert.equal(await page.evaluate(() => prova.entrouVoz), 2, 'o microfone do gesto não entrou na voz');
+      // Compartilhar, trocar sem confundir com parar, e parar por controle próprio.
+      await page.evaluate(() => { window.temCapturaParaCodificar = () => true; callbacksDaChamada.aoEstado({ estado: 'dentro', papel: 'quem-recebe' }); });
+      await page.getByRole('button', {name:'COMPARTILHAR TELA',exact:true}).click();
+      await page.getByRole('button', {name:'TROCAR TELA',exact:true}).click();
+      assert.equal(await page.evaluate(()=>prova.compartilhou),2);
+      assert.equal(await page.evaluate(()=>prova.parouTela||0),0);
+      await page.getByRole('button', {name:'PARAR COMPARTILHAMENTO',exact:true}).click();
+      assert.equal(await page.evaluate(()=>prova.parouTela),1);
+      assert.equal(await page.getByRole('button', {name:'TROCAR TELA',exact:true}).count(),0);
       // Desligar pelo botão volta ao caminho de sempre: o resto da bancada parte do microfone fechado.
       await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).click();
       await page.waitForFunction(() => prova.calou === 1);

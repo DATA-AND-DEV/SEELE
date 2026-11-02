@@ -226,29 +226,30 @@ impl Armazem {
 
     /// Grava `bytes` em `destino` por um `.em-obras-*` e um `rename`.
     fn gravar_inteiro(destino: &Path, bytes: &[u8]) -> Result<(), FalhaNoPadrao> {
-        let Some(pasta) = destino.parent() else {
-            return Err(NAO_GRAVEI);
-        };
-        let nome = destino
-            .file_name()
-            .map(|nome| nome.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let obras = pasta.join(format!(".em-obras-{nome}"));
-        let feito = std::fs::create_dir_all(pasta)
-            .and_then(|()| std::fs::write(&obras, bytes))
-            .and_then(|()| std::fs::rename(&obras, destino));
-        feito.map_err(|erro| {
-            tracing::warn!(%erro, arquivo = %destino.display(), "não gravei o perfil padrão nesta máquina");
-            let _ = std::fs::remove_file(&obras);
+        seele_ffi::arquivo_local::gravar(destino, bytes, |b| {
+            match destino.file_name().and_then(|n| n.to_str()) {
+                Some("padrao.json") => serde_json::from_slice::<PerfilPadrao>(b).is_ok(),
+                Some("servidores.json") => {
+                    serde_json::from_slice::<BTreeMap<String, Seguimento>>(b).is_ok()
+                }
+                _ => true,
+            }
+        })
+        .map_err(|erro| {
+            tracing::warn!(%erro, "não gravei o perfil padrão");
             NAO_GRAVEI
         })
     }
 
     /// **O padrão guardado**, ou o vazio (revisão zero) quando não há. Um
-    /// arquivo ilegível é dito no registro e lido como vazio: a tela inicial
-    /// abre, e salvar de novo o conserta.
+    /// arquivo ilegível tenta a cópia validada. Sem cópia, a tela ainda abre,
+    /// mas o aviso identifica o arquivo e a gravação recusa sobrescrevê-lo.
     pub(crate) fn ler(&self) -> PerfilPadrao {
-        match std::fs::read(self.arquivo_do_padrao()) {
+        match seele_ffi::arquivo_local::ler(&self.arquivo_do_padrao(), |b| {
+            serde_json::from_slice::<PerfilPadrao>(b).is_ok()
+        })
+        .map(|b| b.unwrap_or_else(|| b"{}".to_vec()))
+        {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|erro| {
                 tracing::warn!(%erro, "o perfil padrão desta máquina não se lê; abro vazio");
                 PerfilPadrao::default()
@@ -438,16 +439,19 @@ impl Armazem {
     }
 
     fn servidores(&self) -> BTreeMap<String, Seguimento> {
-        std::fs::read(self.arquivo_dos_servidores())
-            .ok()
-            .and_then(|bytes| {
-                serde_json::from_slice(&bytes)
-                    .map_err(|erro| {
-                        tracing::warn!(%erro, "a lista de servidores do perfil padrão não se lê");
-                    })
-                    .ok()
-            })
-            .unwrap_or_default()
+        seele_ffi::arquivo_local::ler(&self.arquivo_dos_servidores(), |b| {
+            serde_json::from_slice::<BTreeMap<String, Seguimento>>(b).is_ok()
+        })
+        .ok()
+        .flatten()
+        .and_then(|bytes| {
+            serde_json::from_slice(&bytes)
+                .map_err(|erro| {
+                    tracing::warn!(%erro, "a lista de servidores do perfil padrão não se lê");
+                })
+                .ok()
+        })
+        .unwrap_or_default()
     }
 
     /// O que esta máquina sabe de `servidor` (a impressão dele). Sem registro,
@@ -495,6 +499,33 @@ mod testes {
         ));
         std::fs::create_dir_all(&pasta).unwrap();
         pasta
+    }
+
+    #[test]
+    fn perfil_recupera_sem_apagar_original_e_nao_sobrescreve_unica_copia() {
+        let dir = pasta();
+        let armazem = Armazem::em(&dir);
+        let perfil = PerfilPadrao {
+            nome_exibido: "Maya".into(),
+            ..PerfilPadrao::default()
+        };
+        armazem.guardar(&perfil).unwrap();
+        std::fs::write(armazem.arquivo_do_padrao(), b"{truncado").unwrap();
+        assert_eq!(armazem.ler().nome_exibido, "Maya");
+        assert_eq!(
+            std::fs::read(armazem.arquivo_do_padrao()).unwrap(),
+            b"{truncado"
+        );
+        let dir2 = pasta();
+        let sem_copia = Armazem::em(&dir2);
+        std::fs::write(sem_copia.arquivo_do_padrao(), b"[invalido").unwrap();
+        assert!(sem_copia.guardar(&perfil).is_err());
+        assert_eq!(
+            std::fs::read(sem_copia.arquivo_do_padrao()).unwrap(),
+            b"[invalido"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(dir2).unwrap();
     }
 
     fn entrada() -> EntradaDoPerfil {

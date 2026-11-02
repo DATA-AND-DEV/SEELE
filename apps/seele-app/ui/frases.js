@@ -858,10 +858,28 @@ function fraseDaLigacao(erro, nome, trilha) {
  */
 const MODS_INCORPORADOS_AO_PRODUTO = new Map([["seele/perfis", "0.19"]]);
 
+/** Ambiente da aplicação, informado pela ponte; navegador tem precedência ao SO. */
+function ambienteDasInstrucoes() {
+  if (typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined" && PONTE_NO_LUGAR_DO_TAURI) return "web";
+  return typeof document !== "undefined" ? document.getElementById("barra-janela")?.dataset.plataforma ?? "outro" : "outro";
+}
+
 function fraseDeErro(erro, apelido, deOnde) {
   // A unidade do nativo para a conexão segura não verificada (0.17): a mesma
   // frase da página, que não acusa ninguém. Ver o ramo de objeto, abaixo.
   if (erro === "ConexaoSeguraNaoVerificada") return FRASES_DO_TRANSPORTE.falha.ImpressaoDiferente;
+  if (erro === "SemResposta") {
+    const ambiente = ambienteDasInstrucoes();
+    const orientacao = {
+      web: "Confira o endereço de quem hospeda e as permissões de rede deste navegador.",
+      macos: "Confira o endereço e a porta UDP de quem hospeda, e a permissão de rede local do SEELE em Ajustes do Sistema.",
+      windows: "Confira o endereço e a porta UDP de quem hospeda, e se o Firewall do Windows permite a conexão do SEELE.",
+    };
+    return orientacao[ambiente] ? "OS PACOTES SAÍRAM E NADA VOLTOU\n" + orientacao[ambiente] : FRASES.SemResposta;
+  }
+  if (erro === "ScreenShareUnavailable" && ambienteDasInstrucoes() === "web") {
+    return "NÃO FOI POSSÍVEL COMPARTILHAR A TELA.\nTente selecionar a tela novamente e confira a permissão de captura deste navegador.";
+  }
   if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
     // **A resposta de outra sessão** (E3 da 0.17; `invoke`, em `base.js`): o
@@ -1393,10 +1411,8 @@ const FRASES = {
     // consertar a máquina certa metade das vezes — no macOS o silêncio no
     // caminho da LAN é desta máquina, que recusa calada o que sai daqui para a
     // própria casa até alguém dizer que sim nos Ajustes.
-    SemResposta:
-        "OS PACOTES SAÍRAM E NADA VOLTOU\n" +
-        "Confira o endereço e a porta UDP de quem hospeda. No Mac, confira também " +
-        "a permissão de rede local em Ajustes.",
+    SemResposta: "OS PACOTES SAÍRAM E NADA VOLTOU\nConfira o endereço, a porta UDP de quem hospeda e as permissões de rede.",
+
     // **O impostor que repete o certificado do servidor**, e que chegava aqui
     // como versão incompatível: a frase mandava atualizar o SEELE nas duas
     // máquinas. O certificado é público; a chave que o assina, não, e o TLS a
@@ -1429,9 +1445,7 @@ const FRASES = {
     // para mudar a resposta. Dizer que não é a conexão nem permissão é o que
     // impede a caça ao defeito que não existe — foi o que a frase de
     // `NadaPublicado` aprendeu, dois recursos atrás.
-    ScreenShareUnavailable:
-      "ESTA VERSÃO NÃO SABE COMPARTILHAR TELA.\n" +
-      "Não é a sua conexão nem permissão: a parte que captura a tela ainda não está neste app.",
+    ScreenShareUnavailable: "NÃO FOI POSSÍVEL COMPARTILHAR A TELA.\nConfira a permissão de captura do SEELE e escolha novamente uma tela ou janela disponível.",
 
     // O arquivo veio e não ficou. É a única das três em que tentar de novo
     // resolve às vezes, e por isso é a única que manda tentar — e, quando não
@@ -1934,7 +1948,7 @@ const FRASES_DA_MAQUINA = Object.freeze({
     parando: () => "o SEELE pediu ao jogo para salvar e sair e espera ele sair; até lá, nenhum jogo sobe neste computador",
     saiu: (segundos) => `o SEELE pediu ao jogo para salvar e sair, e ele saiu em ${segundos} s`,
     forcada: (segundos) => `o SEELE pediu ao jogo para salvar e sair; ele não saiu em ${segundos} s e foi encerrado à força, e o que não estava salvo se perdeu`,
-    "nao-parou": (motivo) => `o SEELE não conseguiu pará-lo (${motivo}): ele segue rodando, com o mundo e a porta; encerre-o pelo gerenciador de processos do sistema (no Mac, o Monitor de Atividade)`,
+    "nao-parou": (motivo) => `o SEELE não conseguiu pará-lo (${motivo}): ele segue rodando, com o mundo e a porta; encerre-o pelo ${ambienteDasInstrucoes() === "macos" ? "Monitor de Atividade" : ambienteDasInstrucoes() === "windows" ? "Gerenciador de Tarefas" : ambienteDasInstrucoes() === "web" ? "gerenciador de tarefas do navegador" : "gerenciador de processos do sistema"}`,
   }),
   desligar: "DESLIGAR",
   revogar: "REVOGAR",

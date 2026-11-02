@@ -1402,7 +1402,7 @@ function desenharOperador(snapshot) {
   // SALA, e quem entrava pela lista via SAIR DO SERVIDOR até abrir a grade. O
   // simulador do iOS achou o primeiro em 05/10/2026. A função é de
   // `tela-chamada.js`, que carrega antes do primeiro quadro.
-  desenharORodapeDoOperador(snapshot.voice_rooms.find((c) => c.occupied_by_us) ?? null);
+  desenharORodapeDoOperador(snapshot.voice_rooms.find((c) => c.occupied_by_us) ?? null, snapshot.minha_transmissao);
 
   // O botão diz em que estado o microfone está, e não o que apertá-lo vai
   // fazer. Um botão escrito com o verbo é um botão que ninguém sabe ler quando
