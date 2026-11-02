@@ -911,6 +911,7 @@ $("chamada-grade").addEventListener("click", (evento) => {
 // Escape fecha, que é o que uma tela alcançada de dentro de outra faz. Só com
 // ela na frente, ou engoliria a tecla de quem está fechando uma busca.
 window.addEventListener("keydown", (evento) => {
+  if (evento.defaultPrevented) return;
   // E só com nada por cima. Toda caixa desta janela fecha no Escape, e as duas
   // que se abrem daqui — a ajuda e o compartilhamento — registram o ouvinte
   // delas no mesmo `window`: sem esta conferência, um Escape fecharia a caixa

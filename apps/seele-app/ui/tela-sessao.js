@@ -5405,15 +5405,20 @@ async function refazerBusca() {
  *
  * Escrito aqui e não na marcação porque ele só existe por causa do que a folha
  * faz com a largura, e as duas metades têm de morrer juntas no dia em que a
- * gaveta sair. Ele mora na barra do canal aberto — que é a única barra que
- * continua na tela em toda largura — e a folha o esconde acima do ponto de
- * quebra: um botão que abre uma coluna já visível é um botão que não faz nada.
+ * gaveta sair. Ele mora na navegação da sessão, que continua acessível no chat
+ * e na chamada. A folha o esconde quando a coluna já está visível.
  */
 const botaoDeCanais = elemento("button", "linha-canais", "CANAIS");
 botaoDeCanais.type = "button";
 botaoDeCanais.setAttribute("aria-expanded", "false");
 botaoDeCanais.title = "as salas de voz e os canais de texto";
-document.querySelector(".linha-barra")?.prepend(botaoDeCanais);
+const navegacaoCompacta = elemento("nav", "sessao-navegacao");
+navegacaoCompacta.setAttribute("aria-label", "Painéis do servidor");
+$("tela-sessao").querySelector(".paineis")?.before(navegacaoCompacta);
+navegacaoCompacta.append(botaoDeCanais);
+botaoDeCanais.textContent = "SALAS E CANAIS";
+document.querySelector(".painel-canais").id = "painel-canais";
+botaoDeCanais.setAttribute("aria-controls", "painel-canais");
 
 /**
  * Abre ou fecha a gaveta.
@@ -5432,6 +5437,7 @@ function alternarCanais(abrir) {
   const querAbrir = abrir ?? !aberta;
   if (querAbrir === aberta) return;
   if (querAbrir) {
+    alternarPessoas(false);
     tela.dataset.canais = "abertos";
     botaoDeCanais.setAttribute("aria-expanded", "true");
     $("lista-voice_rooms").querySelector("button")?.focus();
@@ -5468,7 +5474,9 @@ const botaoDePessoas = elemento("button", "linha-pessoas", "PESSOAS");
 botaoDePessoas.type = "button";
 botaoDePessoas.setAttribute("aria-expanded", "false");
 botaoDePessoas.title = "quem está aqui, e o sinal de cada um";
-document.querySelector(".linha-barra")?.append(botaoDePessoas);
+navegacaoCompacta.append(botaoDePessoas);
+document.querySelector(".painel-pessoas").id = "painel-pessoas";
+botaoDePessoas.setAttribute("aria-controls", "painel-pessoas");
 
 /** Abre ou fecha a gaveta de pessoas. Espelho de `alternarCanais`. */
 function alternarPessoas(abrir) {
@@ -5477,6 +5485,7 @@ function alternarPessoas(abrir) {
   const querAbrir = abrir ?? !aberta;
   if (querAbrir === aberta) return;
   if (querAbrir) {
+    alternarCanais(false);
     tela.dataset.pessoas = "abertas";
     botaoDePessoas.setAttribute("aria-expanded", "true");
     $("lista-roster").querySelector("button")?.focus();
@@ -5498,7 +5507,7 @@ botaoDePessoas.addEventListener("click", () => alternarPessoas());
 // chegava ao campo.
 document
   .querySelector(".painel-linha")
-  ?.addEventListener("pointerdown", () => alternarCanais(false));
+  ?.addEventListener("pointerdown", () => { alternarCanais(false); alternarPessoas(false); });
 
 // ------------------------------------------------------------------- ligação
 
@@ -5990,6 +5999,11 @@ window.addEventListener("keydown", (evento) => {
   if (evento.key === "Escape" && $("tela-sessao").dataset.canais === "abertos") {
     evento.preventDefault();
     alternarCanais(false);
+    return;
+  }
+  if (evento.key === "Escape" && $("tela-sessao").dataset.pessoas === "abertas") {
+    evento.preventDefault();
+    alternarPessoas(false);
     return;
   }
   if (evento.code === teclaDeFalar && !digitando() && !evento.repeat) {

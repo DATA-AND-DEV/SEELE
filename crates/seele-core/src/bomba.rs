@@ -36,13 +36,14 @@
 //!    quadro só vale no fluxo da geração dele. O gatilho é o
 //!    [`Ajuste::ResolucaoPedida`] que a onda 2 deixou pronto.
 //!
-//! 4. **Descarta, nunca enfileira — inclusive na entrega.** A regra é do §1 e
+//! 4. **Descarta antes de codificar, nunca enfileira imagem velha.** A regra é do §1 e
 //!    `spikes/tela-no-codec` a mediu: enfileirando, a idade do quadro que sai
 //!    cresce sem limite (958 ms de mediana em oito segundos, e nada nesse
 //!    caminho para de crescer); descartando, ela fica em 3 ms. A captura já
-//!    obedece por dentro, e aqui a mesma regra vale na fronteira com quem
-//!    escreve: quadro que não cabe no canal é **largado e contado**
-//!    ([`Bomba::largados`]), nunca acumulado. Os eventos de controle é que
+//!    obedece por dentro. Com confirmação local do escoadouro, só se codifica
+//!    o próximo quadro quando o anterior terminou de sair, incluindo as fatias
+//!    da chave. Não se espera ACK de rede. Recusas excepcionais pedem chave;
+//!    os deltas dependentes não chegam ao espelho nem ao fio. Os eventos de controle é que
 //!    esperam — ver `pendentes`, e o comentário lá diz por que a ordem entre
 //!    eles e os quadros não pode se perder.
 //!
@@ -135,6 +136,15 @@ pub enum Ordem {
     /// Sob demanda e nunca periódico: um quadro-chave de 1080p custa 65 KiB,
     /// quatro vezes um quadro comum, que são 446 ms do orçamento de 1200 kbps.
     Chave,
+    /// Ativa confirmação local para descartar antes, nunca depois do encoder.
+    ConfirmarQuadros,
+    /// O envio terminou para este quadro (ou ele foi recusado). Não é ACK de rede.
+    QuadroConcluido {
+        /// Geração do fluxo.
+        geracao: u64,
+        /// Sequência local do quadro.
+        sequencia: u64,
+    },
     /// A pessoa mexeu nos próprios tetos (§5).
     ///
     /// Separada de [`Self::Teto`] porque as duas mexem em coisas diferentes e
@@ -160,6 +170,8 @@ pub enum Ordem {
 /// Um quadro codificado, endereçado a um fluxo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuadroParaOFio {
+    /// Sequência local, usada apenas para liberar o próximo tique de codificação.
+    pub sequencia: u64,
     /// De que fluxo este quadro é.
     ///
     /// **Sem isto o degrau novo entrega lixo.** Entre o instante em que a bomba
@@ -341,7 +353,7 @@ impl Bomba {
         self.ordens.send(Ordem::Chave).is_ok()
     }
 
-    /// Uma alça que só sabe pedir quadro-chave, para quem escoa. Ver
+    /// Devolve a alça do escoadouro para confirmação local e pedido de chave. Ver
     /// [`PedidoDeChave`].
     #[must_use]
     pub fn pedido_de_chave(&self) -> PedidoDeChave {
@@ -430,6 +442,9 @@ where
         arranjo,
         compartilhamento: None,
         geracao: 0,
+        sequencia: 0,
+        confirmar_quadros: false,
+        aguardando_quadro: None,
         pendentes: VecDeque::new(),
         fechado: false,
         ordens: recebe_ordem,
@@ -473,6 +488,9 @@ struct Laco<C: Captura> {
     arranjo: Arranjo,
     compartilhamento: Option<Compartilhamento>,
     geracao: u64,
+    sequencia: u64,
+    confirmar_quadros: bool,
+    aguardando_quadro: Option<(u64, u64)>,
     /// Eventos de controle que não couberam no canal ainda.
     ///
     /// **Eles esperam e os quadros não**, e a assimetria é o ponto: perder um
@@ -584,7 +602,17 @@ impl<C: Captura> Laco<C> {
             }
 
             self.escoar_pendentes();
-            match self.tique(pedido_de_chave) {
+            // A captura já guarda só o quadro mais recente. Esperar aqui mantém
+            // as referências H.264 intactas e continua escoando áudio e chave.
+            let passo = if (self.confirmar_quadros && self.aguardando_quadro.is_some())
+                || !self.pendentes.is_empty()
+                || self.para.capacity() == 0
+            {
+                Ok(Passo::SemQuadro)
+            } else {
+                self.tique(pedido_de_chave)
+            };
+            match passo {
                 Ok(Passo::SemQuadro | Passo::PuladoPeloTeto) => self.pedir_escoamento(),
                 Ok(Passo::Quadro(codificado)) => {
                     // O pedido só é atendido quando o quadro-chave de fato saiu:
@@ -595,7 +623,9 @@ impl<C: Captura> Laco<C> {
                     if codificado.chave {
                         pedido_de_chave = false;
                     }
-                    self.entregar(codificado);
+                    if !self.entregar(codificado) {
+                        pedido_de_chave = true;
+                    }
                 }
                 Err(erro) => return Some(erro.to_string()),
             }
@@ -705,6 +735,16 @@ impl<C: Captura> Laco<C> {
 
     fn aplicar(&mut self, ordem: Ordem, pedido_de_chave: &mut bool) -> Result<Andamento, String> {
         match ordem {
+            Ordem::ConfirmarQuadros => {
+                self.confirmar_quadros = true;
+                Ok(Andamento::Segue)
+            }
+            Ordem::QuadroConcluido { geracao, sequencia } => {
+                if self.aguardando_quadro == Some((geracao, sequencia)) {
+                    self.aguardando_quadro = None;
+                }
+                Ok(Andamento::Segue)
+            }
             Ordem::Parar => Ok(Andamento::Para),
             Ordem::Chave => {
                 *pedido_de_chave = true;
@@ -805,6 +845,7 @@ impl<C: Captura> Laco<C> {
             .map_err(|erro: CapturaRecusou| erro.to_string())?;
         self.fonte = Some(fonte);
         self.geracao += 1;
+        self.aguardando_quadro = None;
         self.emitir(EventoDaBomba::Fluxo {
             geracao: self.geracao,
             resolucao: para,
@@ -852,6 +893,7 @@ impl<C: Captura> Laco<C> {
         self.compartilhamento = Some(compartilhamento);
         self.fonte = Some(fonte);
         self.geracao += 1;
+        self.aguardando_quadro = None;
         self.emitir(EventoDaBomba::Fluxo {
             geracao: self.geracao,
             resolucao,
@@ -924,27 +966,36 @@ impl<C: Captura> Laco<C> {
         }
     }
 
-    fn entregar(&mut self, codificado: QuadroCodificado) {
+    fn entregar(&mut self, codificado: QuadroCodificado) -> bool {
         // Ordem antes de tudo: um quadro que passasse na frente de um `Fluxo`
         // pendente seria escrito no cabeçalho errado do outro lado.
         if !self.pendentes.is_empty() {
             self.largados.fetch_add(1, Ordering::Relaxed);
-            return;
+            return false;
         }
+        self.sequencia += 1;
         let quadro = QuadroParaOFio {
+            sequencia: self.sequencia,
             geracao: self.geracao,
             chave: codificado.chave,
             bytes: codificado.bytes,
         };
         match self.para.try_send(EventoDaBomba::Quadro(quadro)) {
-            Ok(()) => {}
+            Ok(()) => {
+                self.aguardando_quadro = Some((self.geracao, self.sequencia));
+                true
+            }
             // Descarta, nunca enfileira. §1, e medido: enfileirar leva a idade
             // do quadro que sai de 3 ms a 958 ms de mediana, crescendo sem
             // limite.
             Err(canal::error::TrySendError::Full(_)) => {
                 self.largados.fetch_add(1, Ordering::Relaxed);
+                false
             }
-            Err(canal::error::TrySendError::Closed(_)) => self.fechado = true,
+            Err(canal::error::TrySendError::Closed(_)) => {
+                self.fechado = true;
+                false
+            }
         }
     }
 }
@@ -953,16 +1004,24 @@ impl<C: Captura> Laco<C> {
 // O outro lado: quem escreve no fio
 // ---------------------------------------------------------------------------
 
-/// Uma alça da [`Bomba`] que só sabe pedir quadro-chave.
+/// Uma alça da [`Bomba`] para pedir chave e confirmar o término local do envio.
 ///
 /// Existe para o laço que escoa ([`escoar_com_espelho`]) pedir a chave quando
 /// descarta um quadro que outros usariam de referência — um quadro acima do
-/// teto do fio. O laço não é dono da bomba (ela mora no enlace), e não precisa
-/// de mais nada dela.
+/// teto do fio ou do orçamento. A confirmação libera a próxima codificação
+/// somente depois de terminarem as fatias; geração e sequência recusam ACKs antigos.
 #[derive(Debug, Clone)]
 pub struct PedidoDeChave(mpsc::Sender<Ordem>);
 
 impl PedidoDeChave {
+    fn ativar_confirmacao(&self) {
+        let _ = self.0.send(Ordem::ConfirmarQuadros);
+    }
+
+    fn concluir(&self, geracao: u64, sequencia: u64) {
+        let _ = self.0.send(Ordem::QuadroConcluido { geracao, sequencia });
+    }
+
     /// Pede um quadro-chave. `false` quando a thread da bomba já acabou.
     pub fn pedir(&self) -> bool {
         self.0.send(Ordem::Chave).is_ok()
@@ -1125,8 +1184,13 @@ pub async fn escoar_com_espelho(
     mut espelho: impl FnMut(EspelhoDaTela<'_>),
     pedido_de_chave: Option<&PedidoDeChave>,
 ) -> Result<Contagem, ErroDeTela> {
+    if let Some(pedido) = pedido_de_chave {
+        pedido.ativar_confirmacao();
+    }
     let mut transmissao: Option<Transmissao> = None;
     let mut geracao = 0_u64;
+    let mut chave_pendente = None;
+    let mut precisa_chave = false;
     let mut contagem = Contagem::default();
 
     while let Some(evento) = eventos.recv().await {
@@ -1156,6 +1220,8 @@ pub async fn escoar_com_espelho(
                 transmissao =
                     Some(Transmissao::abrir(conexao, cabecalho, teto_bps, Instant::now()).await?);
                 geracao = nova;
+                chave_pendente = None;
+                precisa_chave = false;
                 contagem.fluxos += 1;
                 espelho(EspelhoDaTela::Abriu {
                     largura: cabecalho.width,
@@ -1177,12 +1243,26 @@ pub async fn escoar_com_espelho(
             EventoDaBomba::Escoar => {
                 if let Some(viva) = transmissao.as_mut() {
                     viva.escoar_chave().await?;
+                    if !viva.chave_em_voo() {
+                        if let Some((g, n)) = chave_pendente.take() {
+                            if let Some(pedido) = pedido_de_chave {
+                                pedido.concluir(g, n);
+                            }
+                        }
+                    }
                 }
             }
             EventoDaBomba::Quadro(quadro) => {
                 // De um fluxo que já fechou. Escrevê-lo no fluxo de agora seria
                 // entregar 1080p sob um cabeçalho que anuncia 720p.
                 if quadro.geracao != geracao {
+                    continue;
+                }
+                if precisa_chave && !quadro.chave {
+                    contagem.descartados += 1;
+                    if let Some(pedido) = pedido_de_chave {
+                        pedido.concluir(quadro.geracao, quadro.sequencia);
+                    }
                     continue;
                 }
                 if let Some(viva) = transmissao.as_mut() {
@@ -1210,6 +1290,30 @@ pub async fn escoar_com_espelho(
                             "um quadro de tela passou do teto do fio e foi descartado; o próximo \
                              sai como quadro-chave"
                         );
+                    }
+                    if matches!(envio, crate::tela::Envio::Descartado(_)) {
+                        if (!precisa_chave || quadro.chave)
+                            && quadro.bytes.len() <= crate::tela::MAX_QUADRO_LEN
+                        {
+                            if let Some(pedido) = pedido_de_chave {
+                                pedido.pedir();
+                            }
+                        }
+                        precisa_chave = true;
+                    } else if quadro.chave {
+                        precisa_chave = false;
+                    }
+                    if !viva.chave_em_voo() {
+                        if let Some((g, n)) = chave_pendente.take() {
+                            if let Some(pedido) = pedido_de_chave {
+                                pedido.concluir(g, n);
+                            }
+                        }
+                    }
+                    if envio == crate::tela::Envio::Espalhando {
+                        chave_pendente = Some((quadro.geracao, quadro.sequencia));
+                    } else if let Some(pedido) = pedido_de_chave {
+                        pedido.concluir(quadro.geracao, quadro.sequencia);
                     }
                     // Só o que de fato saiu. Um quadro descartado pelo teto não
                     // chega a ninguém, e ver no próprio espelho um quadro que a
@@ -2024,6 +2128,7 @@ pub(crate) mod tests {
                     teto_bps: 8_000_000,
                 },
                 EventoDaBomba::Quadro(QuadroParaOFio {
+                    sequencia: 1,
                     geracao: 1,
                     chave: false,
                     bytes: vec![0; crate::tela::MAX_QUADRO_LEN + 1],
@@ -2036,7 +2141,10 @@ pub(crate) mod tests {
                 .await
                 .expect("a tarefa de escoar")
                 .expect("o laço acabou bem");
-            (contagem, recebe_ordem.try_recv().ok())
+            (
+                contagem,
+                recebe_ordem.try_iter().find(|ordem| *ordem == Ordem::Chave),
+            )
         });
 
         assert_eq!(contagem.grandes_demais, 1, "{contagem:?}");
@@ -2061,6 +2169,132 @@ pub(crate) mod tests {
     /// é a tradução do [`EventoDaBomba::Fluxo`] em cabeçalho de abertura: a
     /// resolução que quem recebe lê é a que o **codificador** está usando, e não
     /// a que a pessoa pediu (§5, *a tela não promete a escolha*).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn descarte_por_orcamento_nao_entrega_predicoes_quebradas_ao_espelho() {
+        let (saida, _entrada) = par_paciente().await;
+        let (manda, mut eventos) = canal::channel(16);
+        let (manda_ordem, recebe_ordem) = mpsc::channel();
+        let pedido = PedidoDeChave(manda_ordem);
+        manda
+            .send(EventoDaBomba::Fluxo {
+                geracao: 1,
+                resolucao: Resolucao::P540,
+                medidas: (960, 540),
+                teto_bps: 8_000,
+            })
+            .await
+            .unwrap();
+        for (sequencia, chave, tamanho) in [(1, false, 1200), (2, false, 40), (3, true, 40)] {
+            manda
+                .send(EventoDaBomba::Quadro(QuadroParaOFio {
+                    geracao: 1,
+                    sequencia,
+                    chave,
+                    bytes: vec![sequencia as u8; tamanho],
+                }))
+                .await
+                .unwrap();
+        }
+        for _ in 0..4 {
+            manda.send(EventoDaBomba::Escoar).await.unwrap();
+        }
+        manda
+            .send(EventoDaBomba::Quadro(QuadroParaOFio {
+                geracao: 1,
+                sequencia: 4,
+                chave: false,
+                bytes: vec![4; 40],
+            }))
+            .await
+            .unwrap();
+        manda.send(EventoDaBomba::Fim(None)).await.unwrap();
+        let mut vistos = Vec::new();
+        let contagem = escoar_com_espelho(
+            &saida,
+            ScreenId(43),
+            ScreenSource::Monitor,
+            &mut eventos,
+            |evento| {
+                if let EspelhoDaTela::Quadro { bytes, .. } = evento {
+                    vistos.push(bytes.first().copied().unwrap());
+                }
+            },
+            Some(&pedido),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            vistos,
+            vec![3, 4],
+            "o delta depois do quadro perdido não pode aparecer"
+        );
+        assert_eq!(contagem.descartados, 2);
+        assert_eq!(
+            recebe_ordem
+                .try_iter()
+                .filter(|o| *o == Ordem::Chave)
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn confirmacao_local_preserva_referencias_durante_chave_em_fatias() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let mut decoder = seele_video::codec::Decodificador::novo(&biblioteca).unwrap();
+        let (saida, entrada) = par_paciente().await;
+        let barreira = Arc::new(std::sync::Barrier::new(2));
+        let outra = Arc::clone(&barreira);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            CapturaDeMentira::default(),
+            arranjo(
+                TetoDeVideo::com_caminho(20_000_000).com_caminho_de_quem_hospeda(20_000_000),
+                SignalBand::Nominal,
+                Resolucao::P720,
+            ),
+            move || {
+                outra.wait();
+            },
+        )
+        .unwrap();
+        let pedido = bomba.pedido_de_chave();
+        pedido.ativar_confirmacao();
+        barreira.wait();
+        let escoando = tokio::spawn(async move {
+            escoar_com_espelho(
+                &saida,
+                ScreenId(42),
+                ScreenSource::Monitor,
+                &mut eventos,
+                |_| {},
+                Some(&pedido),
+            )
+            .await
+        });
+        let mut recepcao = aceitar_com_paciencia(&entrada, || escoando.is_finished()).await;
+        let mut decodificados = 0;
+        for _ in 0..12 {
+            let quadro = tokio::time::timeout(Duration::from_secs(5), recepcao.proximo_quadro())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            if decoder.decodificar(&quadro.bytes).unwrap().is_some() {
+                decodificados += 1;
+            }
+        }
+        bomba.parar();
+        let contagem = escoando.await.unwrap().unwrap();
+        assert_eq!(
+            contagem.descartados, 0,
+            "não descarte referências H.264: {contagem:?}"
+        );
+        assert!(decodificados >= 10, "{decodificados} quadros decodificados");
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_captura_vertical_atravessa_o_fluxo_com_dimensoes_reais() {
         let Some(biblioteca) = biblioteca() else {

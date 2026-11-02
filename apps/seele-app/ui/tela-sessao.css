@@ -3235,7 +3235,7 @@ button.linha-nome:hover { text-decoration: underline; }
 
 @media (max-width: 1240px) {
   /* `relative` porque a gaveta de pessoas se posiciona contra esta caixa. */
-  .paineis {
+  #tela-sessao .paineis {
     position: relative;
     grid-template-columns: 72px 264px minmax(0, 1fr) auto;
     grid-template-areas: "trilha canais linha painelmod";
@@ -3298,7 +3298,7 @@ button.linha-nome:hover { text-decoration: underline; }
 
 @media (max-width: 900px) {
   /* `relative` porque a gaveta se posiciona contra esta caixa. */
-  .paineis {
+  #tela-sessao .paineis {
     position: relative;
     grid-template-columns: 72px minmax(0, 1fr);
     /* A gaveta de canais sai do fluxo (`position: absolute` logo abaixo), e o
@@ -3821,4 +3821,22 @@ button.linha-nome:hover { text-decoration: underline; }
 }
 :root:not([data-casca="celular"]) #lista-roster li.pessoa:not(.pessoa-apresentada):not(.pessoa-com-detalhes) .pessoa-rodape:not(:has(.pastilha:is([data-estado="at"], [data-estado="surdo"]))) {
   padding-bottom: 0;
+}
+
+/* Navegação do desktop independente da vista de chat/chamada. */
+.sessao-navegacao { display: none; flex: 0 0 auto; gap: 8px; padding: 4px 16px 8px; }
+:root:not([data-casca="celular"]) #tela-sessao .paineis { position: relative; min-width: 0; }
+:root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .sessao-navegacao { display: flex; }
+:root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .linha-canais { display: inline-flex; }
+.sessao-navegacao button { min-height: 40px; border-radius: var(--seele-raio-pilula); padding: 0 14px; }
+@media (max-width: 1240px) {
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .sessao-navegacao { display: flex; }
+}
+@media (max-width: 700px) {
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .paineis {
+    grid-template-columns: 60px minmax(0, 1fr); grid-template-areas: "trilha linha";
+    padding: 4px 8px 8px; gap: 8px;
+  }
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .paineis > .trilha { display: flex; }
+  :root:not([data-casca="celular"]) .sessao-navegacao { padding: 4px 8px; flex-wrap: wrap; }
 }

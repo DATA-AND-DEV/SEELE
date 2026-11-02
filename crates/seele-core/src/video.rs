@@ -849,11 +849,25 @@ impl LimitesDeTela {
     ///
     /// A conta é o inverso de `fracao_do`: se o vídeo leva
     /// [`crate::tela::FRACAO_DO_CAMINHO`] por cento do caminho, o caminho que
-    /// compra um limiar é o limiar dividido por essa fração.
+    /// compra um limiar é o limiar dividido por essa fração. A partida considera
+    /// também a cadência e a prioridade: 60 fps não pode nascer com o orçamento
+    /// de 30 fps. É uma hipótese inicial; medições e o limite escolhido continuam mandando.
     #[must_use]
     pub const fn caminho_inicial_bps(&self) -> u32 {
-        let limiar =
-            crate::tela::bits_por_quadro(self.resolucao) * crate::tela::CADENCIA_DE_REFERENCIA;
+        let por_quadro = crate::tela::bits_por_quadro(self.resolucao);
+        let movimento = matches!(self.prioridade, Prioridade::Movimento);
+        let resolucao =
+            por_quadro * crate::tela::CADENCIA_DE_REFERENCIA * if movimento { 2 } else { 1 };
+        let cadencia = (if movimento {
+            por_quadro / 4 * 3
+        } else {
+            por_quadro
+        }) * self.cadencia.hz();
+        let limiar = if cadencia > resolucao {
+            cadencia
+        } else {
+            resolucao
+        };
         ((limiar as u64 * 100) / crate::tela::FRACAO_DO_CAMINHO as u64) as u32
     }
 }
@@ -1492,6 +1506,40 @@ mod tests {
                  compram outro degrau: quem escolher {resolucao:?} continua no \
                  degrau de baixo, que é o pedido inteiro não atendido"
             );
+        }
+    }
+
+    #[test]
+    fn partida_considera_cadencia_e_prioridade_sem_ignorar_limite_de_banda() {
+        for resolucao in [Resolucao::P540, Resolucao::P720, Resolucao::P1080] {
+            for prioridade in [Prioridade::Nitidez, Prioridade::Movimento] {
+                for cadencia in Cadencia::TODAS {
+                    let limites = LimitesDeTela {
+                        resolucao,
+                        prioridade,
+                        cadencia,
+                        ..Default::default()
+                    };
+                    let caminho = limites.caminho_inicial_bps();
+                    let teto =
+                        TetoDeVideo::com_caminho(caminho).com_caminho_de_quem_hospeda(caminho);
+                    let config = config_para(
+                        teto.teto(SignalBand::Nominal),
+                        resolucao,
+                        cadencia,
+                        prioridade,
+                    )
+                    .unwrap();
+                    assert_eq!(config.resolucao, resolucao);
+                    assert_eq!(config.cadencia, cadencia);
+                    assert!(
+                        teto.com_escolha(Some(1_200_000))
+                            .teto(SignalBand::Nominal)
+                            .bps()
+                            <= 1_200_000
+                    );
+                }
+            }
         }
     }
 

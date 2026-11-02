@@ -1,0 +1,42 @@
+{
+  "base_publicada": "c5c89426b05079807f675de6d1f06b15203cffc9",
+  "core_mac": 88,
+  "core_windows": 88,
+  "frontend": 393,
+  "layout": {
+    "engines": [
+      "Chromium",
+      "WebKit"
+    ],
+    "larguras": [
+      1600,
+      1240,
+      1100,
+      900,
+      800,
+      700,
+      640,
+      480
+    ],
+    "vistas": [
+      "chat",
+      "chamada"
+    ],
+    "ipc": "simulado"
+  },
+  "clippy": "passou",
+  "mutacoes": {
+    "sem_confirmacao_local": "teste falhou com 36 descartes",
+    "sem_especificidade_css": "teste falhou com 344 pixels de coluna vazia"
+  },
+  "sha256_core_validado_windows": {
+    "bomba.rs": "07C47B50CD7FC68FCA2DFBAFB2E1650E460065CBA520BCC0374101B419BA9249",
+    "tela.rs": "B5D2A14302B83AECA36A3024FA4B0929392CFDBAC97F617DD0DB997166CB93F8",
+    "video.rs": "10DD893CC408B571F7FCAB6CF24B0587CAC100E55EF83960F60B8D2A990931AB"
+  },
+  "limites": [
+    "Sem validação visual no aplicativo Windows instalado.",
+    "Teste nativo usa captura sintética e codec real; não mede captura física de todos os jogos e monitores.",
+    "Nenhum instalador novo publicado nesta alteração."
+  ]
+}

@@ -818,3 +818,15 @@
 :root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > #lista-perfis-navegacao { margin-top: 4px; }
 :root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .relatorio-perfis:not([hidden]) { margin-bottom: 16px; }
 :root:not([data-casca="celular"]) #tela-sessao .canais-rolagem > .canais { gap: 2px; }
+
+/* A chamada também oferece a gaveta; o seletor da vista não pode escondê-la. */
+:root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"]:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .paineis > .painel-canais {
+  display: flex; position: absolute; z-index: 4; top: 0; bottom: 0; left: 76px;
+  width: min(268px, calc(100% - 84px)); max-width: calc(100% - 84px); min-width: 0;
+}
+:root:not([data-casca="celular"]) #tela-sessao[data-pessoas="abertas"] .painel-pessoas {
+  background: var(--seele-negro-painel);
+}
+:root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"] .painel-canais {
+  background: var(--seele-negro-painel);
+}

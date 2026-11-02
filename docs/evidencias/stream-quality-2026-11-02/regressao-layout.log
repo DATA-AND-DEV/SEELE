@@ -1,0 +1,9 @@
+AssertionError [ERR_ASSERTION]: chat 1240: coluna vazia rouba espaço {"width":520,"height":606.8125,"left":376,"right":896,"bottom":694.8125,"visible":true,"viewport":1240}
+    at /Users/dev-alexandre/.codex/worktrees/e595/SEELE/apps/seele-app/bancada/desktop-estreito.cjs:37:28 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}

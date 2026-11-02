@@ -1199,6 +1199,10 @@ impl Transmissao {
         self.escoar_som().await
     }
 
+    pub(crate) fn chave_em_voo(&self) -> bool {
+        self.em_voo.is_some()
+    }
+
     /// Anda com o quadro-chave em voo sem que um quadro novo precise chegar.
     ///
     /// [`Self::enviar_quadro`] escreve uma fatia por chamada, e quem a chama só

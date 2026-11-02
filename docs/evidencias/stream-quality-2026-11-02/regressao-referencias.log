@@ -1,0 +1,30 @@
+   Compiling seele-core v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-core)
+warning: missing documentation for a method
+    --> crates/seele-core/src/tela.rs:1218:5
+     |
+1218 |     pub async fn escoar_chave(&mut self) -> Result<(), ErroDeTela> {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: requested on the command line with `-W missing-docs`
+
+warning: `seele-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.67s
+     Running unittests src/lib.rs (/private/tmp/seele-0195-target/debug/deps/seele_core-ca78876bcadccf15)
+
+running 1 test
+
+thread 'bomba::tests::confirmacao_local_preserva_referencias_durante_chave_em_fatias' (8482348) panicked at crates/seele-core/src/bomba.rs:2212:9:
+assertion `left == right` failed: não descarte referências H.264: Contagem { fluxos: 1, enviados: 12, descartados: 36, grandes_demais: 0, bytes: 287477 }
+  left: 36
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test bomba::tests::confirmacao_local_preserva_referencias_durante_chave_em_fatias ... FAILED
+
+failures:
+
+failures:
+    bomba::tests::confirmacao_local_preserva_referencias_durante_chave_em_fatias
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 568 filtered out; finished in 1.79s
+
+error: test failed, to rerun pass `-p seele-core --lib`
