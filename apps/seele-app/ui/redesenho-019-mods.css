@@ -397,8 +397,10 @@
 :root:not([data-casca="celular"]) .camada-de-mod[data-modal="sim"] > .dialogo-de-mod:not([data-apresentacao="tela"]) {
   /* **Cara de janela, e não de tira** (0.19.2, «o modal é muito pequeno»): o
      seletor do Multiplayer, com um cartão só, abria com a altura do conteúdo.
-     Ao menos 640, ou o que couber entre os furos do véu. */
-  min-height: min(640px, 100%);
+     **E alto** (0.19.4, «ficou muito curto verticalmente»): a caixa ocupa a
+     altura da janela menos o respiro da camada, até 880 — ela cobre a barra
+     do operador (`foraDoModal`), e não acaba mais acima dela. */
+  min-height: min(880px, 100%);
   gap: 18px;
   padding: 36px 44px 32px;
   border: var(--seele-b) solid var(--seele-controle-borda);

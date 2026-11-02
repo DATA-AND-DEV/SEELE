@@ -133,11 +133,20 @@ function inertarMenos(no, acordados, mudados) {
  *   de 60, ela cobriria as camadas do produto entre 20 e 40, a da própria
  *   portaria entre elas.
  *
+ * **O diálogo modal do desktop cobre a barra** (0.19.4; o dono, 01/11: «não
+ * tem problema tapar. Se o cara quiser mutar, ele pode mutar saindo da tela»).
+ * Para não cruzar a barra do operador, o modal do Multiplayer acabava acima
+ * dela, curto. Agora, como os modais do produto, ele vai até o pé da janela e
+ * cobre a barra, a da chamada e a porta da gaveta; o Esc os devolve. A faixa
+ * de quem liga e a portaria continuam de fora: são a outra pessoa esperando,
+ * e não um comando de quem está aqui. O diálogo não modal (no canto, sem véu),
+ * a página imersiva e o celular seguem com a lista inteira.
+ *
  * `acordados` são os nós que a pilha de inércia deixa acordados; `recortes`,
  * os retângulos que o véu não cobre. Perguntado a cada recálculo, porque a
  * sessão monta e desmonta a faixa e a gaveta. Só elementos de verdade.
  */
-function foraDoModal() {
+function foraDoModal({ cobreABarra = false } = {}) {
   const deVerdade = (no) => typeof Element !== "undefined" && no instanceof Element;
   const daCasca = globalThis.CELULAR?.acordadosNoModal?.();
   if (Array.isArray(daCasca)) {
@@ -153,14 +162,23 @@ function foraDoModal() {
   // mesmos comandos (microfone, som, sair), e por isso fica acordada e fora do
   // véu como a do operador — o que um MOD nunca cobre continua alcançável.
   const daChamada = achar("#chamada-controles");
+  if (cobreABarra) {
+    const avisos = [toque, portaria].filter(deVerdade);
+    return { acordados: avisos, recortes: avisos };
+  }
   return {
     acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), daChamada, porta, toque, portaria].filter(deVerdade),
     recortes: [achar("#tela-sessao .operador"), daChamada, porta, toque, portaria].filter(deVerdade),
   };
 }
 
-function acordadosNoModal() {
-  return foraDoModal().acordados;
+function acordadosNoModal(topo) {
+  return foraDoModal({ cobreABarra: cobreABarraDoOperador(topo) }).acordados;
+}
+
+/** A camada de um diálogo modal: a que cobre a barra (só no desktop). */
+function cobreABarraDoOperador(camada) {
+  return Boolean(camada?.classList?.contains("camada-de-mod") && camada.dataset?.modal === "sim");
 }
 
 /**
@@ -215,7 +233,7 @@ function recalcularAInercia() {
   adormecidosPelaPilha = [];
   const topo = pilhaDeCamadas[pilhaDeCamadas.length - 1];
   if (!topo) return;
-  adormecidosPelaPilha = inertarFora(topo, acordadosNoModal());
+  adormecidosPelaPilha = inertarFora(topo, acordadosNoModal(topo));
   // Anotados como nossos — para serem devolvidos no fim — e mantidos
   // acordados enquanto alguém tiver pedido isso.
   for (const no of adormecidosPelaPilha) {
@@ -761,7 +779,7 @@ class SuperficieDeMod {
   vigiarORecorte() {
     if (this.tipo !== "dialogo" || !this.camada || this.pararORecorte) return;
     const refazer = () => this.recortarOVeu();
-    const recortados = foraDoModal().recortes;
+    const recortados = foraDoModal({ cobreABarra: cobreABarraDoOperador(this.camada) }).recortes;
     const observador = typeof ResizeObserver === "function" ? new ResizeObserver(refazer) : null;
     for (const no of recortados) observador?.observe(no);
     window.addEventListener("resize", refazer);
@@ -777,7 +795,7 @@ class SuperficieDeMod {
     const camada = this.camada;
     if (!camada || this.solta) return;
     const caixa = camada.getBoundingClientRect();
-    const furos = foraDoModal().recortes
+    const furos = foraDoModal({ cobreABarra: cobreABarraDoOperador(camada) }).recortes
       .filter((no) => no.getClientRects().length)
       .map((no) => no.getBoundingClientRect())
       .filter((r) => r.width > 0 && r.height > 0 && r.right > caixa.left && r.left < caixa.right

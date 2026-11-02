@@ -29,13 +29,13 @@
 //    os que estão à vista: no centro de cada um, quem recebe o clique é ele.
 //    Numa bancada, e não em texto no `frontend.rs`: os contêineres são
 //    seletores sobre o DOM, e alguns só existem desenhados.
-// 3. **O modal de MOD não cobre a barra do operador** (Step 4b; decisão da
-//    orquestradora, 09/10: o recorte). A 1400 e a 900 de largura, com um
-//    diálogo modal alto e largo aberto: o MUDO, o fone e o SAIR ficam
-//    acordados e no furo do véu — a 900, com a gaveta fechada, a porta dela, e
-//    aberta, o MUDO —; o resto da sessão continua inerte e coberto; o Tab fica
-//    no diálogo, e o Esc o fecha; e o diálogo nunca cruza a barra, rolando por
-//    dentro. **E a faixa de quem liga** (Step 5): o ATENDER e o RECUSAR
+// 3. **O modal de MOD cobre a barra do operador, e vai até o pé da janela**
+//    (0.19.4; o dono, 01/11 — antes, Step 4b e a decisão de 09/10 a deixavam
+//    de fora, e o modal acabava acima dela, curto). A 1400 e a 900 de
+//    largura, com um diálogo modal alto e largo aberto: o MUDO, o fone, o SAIR
+//    e a porta da gaveta ficam inertes e sob o modal, como o resto da sessão;
+//    o Tab fica no diálogo, e o Esc o fecha; o diálogo rola por dentro e fica
+//    na janela. **E a faixa de quem liga** (Step 5): o ATENDER e o RECUSAR
 //    acordados e alcançáveis, com a ligação chegando depois do modal (a 1400)
 //    e com ela já tocando quando ele abre (a 900), e o diálogo sem cruzá-la.
 //
@@ -547,15 +547,13 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     assert.deepEqual({ atender: largo.atender, recusar: largo.recusar, cruzaToque: largo.cruzaToque },
       { atender: 'sim', recusar: 'sim', cruzaToque: false },
       `a 1400, uma ligação que chega com o modal aberto não é atendida nem recusada, ou o diálogo a cruza: ${JSON.stringify(largo)}`);
-    assert.deepEqual({ mudo: largo.mudo, fone: largo.fone, sair: largo.sair }, { mudo: 'sim', fone: 'sim', sair: 'sim' },
-      `a 1400, com o modal aberto, a barra do operador não está alcançável: ${JSON.stringify(largo)}`);
+    assert.deepEqual({ mudo: largo.mudo, fone: largo.fone, sair: largo.sair }, { mudo: 'inerte', fone: 'inerte', sair: 'inerte' },
+      `a 1400, com o modal aberto, a barra do operador escapou dele: ${JSON.stringify(largo)}`);
     assert.equal(largo.resto, 'inerte', `a 1400, o resto da sessão escapou do modal: ${JSON.stringify(largo)}`);
     assert.ok(largo.restoCoberto.length >= 2 && largo.restoCoberto.every(Boolean), `a 1400, o resto da sessão não ficou sob o modal: ${JSON.stringify(largo)}`);
-    assert.deepEqual({ cruzaBarra: largo.cruzaBarra, rola: largo.rola, dentroDaJanela: largo.dentroDaJanela }, { cruzaBarra: false, rola: true, dentroDaJanela: true },
-      `a 1400, o diálogo alto cruza a barra, não rola por dentro, ou sai da janela: ${JSON.stringify(largo)}`);
-    // **No meio da janela** (0.19.2): a barra do operador mora no pé da coluna
-    // da esquerda, e o diálogo a evita pela altura, e não empurrando-se para a
-    // direita — que era o que o deixava torto, no Multiplayer.
+    assert.deepEqual({ rola: largo.rola, dentroDaJanela: largo.dentroDaJanela }, { rola: true, dentroDaJanela: true },
+      `a 1400, o diálogo alto não rola por dentro, ou sai da janela: ${JSON.stringify(largo)}`);
+    // **No meio da janela** (0.19.2), como os modais do produto.
     assert.ok(largo.desvioDoCentro !== null && largo.desvioDoCentro <= 2,
       `a 1400, o diálogo modal não está no meio da janela: ${JSON.stringify(largo)}`);
     // O Tab fica no diálogo, e o Esc o fecha.
@@ -573,8 +571,12 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
 
     // **O modal curto tem cara de janela** (0.19.2, «o modal é muito pequeno»):
     // o seletor do Multiplayer — 760 px, um cartão só — abria como uma tira.
-    // Com pouco conteúdo, a caixa tem ao menos min(640, a altura que cabe), no
-    // meio da janela, e sem cruzar a barra do operador.
+    // **E alto** (0.19.4, «ficou muito curto verticalmente»): com pouco
+    // conteúdo, a caixa tem ao menos min(880, a altura da janela menos o
+    // respiro), no meio, e passa por cima da barra do operador até o pé. Sem a
+    // ligação e sem a portaria acesas: com elas, a caixa as evita, como acima.
+    await tocar({ evento: 'Parou', quem: 'aa11bb22', desfecho: 'recusada' });
+    await page.evaluate(() => avisarQueBatem(0));
     const curto = await page.evaluate(async () => {
       const mod = { id: 'teste/nucleo', hash: 'h', api: 6 };
       const inst = modsCarregados.get(mod.id);
@@ -590,21 +592,23 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
       const cabe = camada.clientHeight - parseFloat(estilo.paddingTop) - parseFloat(estilo.paddingBottom);
       const barra = document.querySelector('#tela-sessao .operador').getBoundingClientRect();
       const medido = {
-        altura: Math.round(caixa.height), esperada: Math.round(Math.min(640, cabe)), largura: Math.round(caixa.width),
+        altura: Math.round(caixa.height), esperada: Math.round(Math.min(880, innerHeight - 48)), largura: Math.round(caixa.width),
         desvio: Math.round(Math.abs((caixa.left + caixa.right) / 2 - innerWidth / 2)),
-        cruzaBarra: caixa.left < barra.right && barra.left < caixa.right && caixa.top < barra.bottom && barra.top < caixa.bottom,
+        // O pé da caixa abaixo do topo da barra: ela não acaba mais acima dela.
+        passaDaBarra: caixa.bottom > barra.top,
+        cabe: Math.round(cabe), janela: innerHeight,
       };
       superficiesDoMod(mod, inst).soltarTudo();
       return medido;
     });
-    assert.ok(curto.altura >= curto.esperada - 1 && curto.largura === 760 && curto.desvio <= 2 && !curto.cruzaBarra,
-      `a 1400, o modal curto não tem cara de janela no meio, ou cruza a barra: ${JSON.stringify(curto)}`);
+    assert.ok(curto.altura >= curto.esperada - 1 && curto.largura === 760 && curto.desvio <= 2 && curto.passaDaBarra,
+      `a 1400, o modal curto não é alto, não está no meio, ou acaba acima da barra: ${JSON.stringify(curto)}`);
 
-    // A 900, a coluna é gaveta: fechada, a porta dela fica alcançável; aberta,
-    // o MUDO.
+    // A 900, a coluna é gaveta, e a porta dela fica sob o modal como a barra.
     await page.setViewportSize({ width: 900, height: 700 });
     // A 900, a ligação já toca quando o modal abre; a portaria acende depois.
     await page.evaluate(() => avisarQueBatem(0));
+    await tocar({ evento: 'Tocou', quem: 'aa11bb22', codigo: 'K9P2-CSM7-NBFR-AYQ3', apelido: 'rafa', nome_na_agenda: null, com_som: true });
     await abrirModal();
     await page.evaluate(() => avisarQueBatem(2));
     await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
@@ -615,18 +619,11 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     assert.deepEqual({ atender: estreito.atender, recusar: estreito.recusar, cruzaToque: estreito.cruzaToque },
       { atender: 'sim', recusar: 'sim', cruzaToque: false },
       `a 900, com a ligação tocando, o modal adormece ou cobre a faixa: ${JSON.stringify(estreito)}`);
-    assert.equal(estreito.porta, 'sim', `a 900, com o modal aberto, a porta da gaveta não está alcançável: ${JSON.stringify(estreito)}`);
+    assert.equal(estreito.porta, 'inerte', `a 900, com o modal aberto, a porta da gaveta escapou dele: ${JSON.stringify(estreito)}`);
     assert.equal(estreito.resto, 'inerte', `a 900, o resto da sessão escapou do modal: ${JSON.stringify(estreito)}`);
     assert.ok(estreito.restoCoberto.length >= 1 && estreito.restoCoberto.every(Boolean), `a 900, o resto da sessão não ficou sob o modal: ${JSON.stringify(estreito)}`);
-    assert.deepEqual({ cruzaPorta: estreito.cruzaPorta, rola: estreito.rola, dentroDaJanela: estreito.dentroDaJanela }, { cruzaPorta: false, rola: true, dentroDaJanela: true },
-      `a 900, o diálogo cruza a porta da gaveta, não rola, ou sai da janela: ${JSON.stringify(estreito)}`);
-    await page.click('#tela-sessao .linha-canais');
-    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
-    const gavetaAberta = await medirOModal();
-    assert.deepEqual({ mudo: gavetaAberta.mudo, sair: gavetaAberta.sair }, { mudo: 'sim', sair: 'sim' },
-      `a 900, com a gaveta aberta e o modal aberto, o MUDO ou o SAIR não está alcançável: ${JSON.stringify(gavetaAberta)}`);
-    assert.equal(gavetaAberta.cruzaBarra, false, `a 900, o diálogo cruza a barra da gaveta aberta: ${JSON.stringify(gavetaAberta)}`);
-    assert.ok(gavetaAberta.restoCoberto.length >= 2 && gavetaAberta.restoCoberto.every(Boolean), `a 900, a gaveta aberta escapou do modal fora da barra: ${JSON.stringify(gavetaAberta)}`);
+    assert.deepEqual({ rola: estreito.rola, dentroDaJanela: estreito.dentroDaJanela }, { rola: true, dentroDaJanela: true },
+      `a 900, o diálogo não rola, ou sai da janela: ${JSON.stringify(estreito)}`);
     await page.setViewportSize({ width: 1400, height: 900 });
 
     // **O não modal e os avisos não cobrem a portaria** (a mesma decisão): o
