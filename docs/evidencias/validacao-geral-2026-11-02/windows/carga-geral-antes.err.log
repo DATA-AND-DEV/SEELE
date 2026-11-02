@@ -1,0 +1,144 @@
+   Compiling syn v3.0.3
+   Compiling either v1.17.0
+   Compiling bitflags v2.13.1
+   Compiling tracing v0.1.44
+   Compiling time v0.3.55
+   Compiling futures-macro v0.3.33
+   Compiling futures-util v0.3.33
+   Compiling thiserror-impl v2.0.19
+   Compiling thiserror v2.0.19
+   Compiling displaydoc v0.2.7
+   Compiling tokio-macros v2.7.2
+   Compiling tokio v1.54.1
+   Compiling tinystr v0.8.3
+   Compiling serde_derive v1.0.229
+   Compiling serde v1.0.229
+   Compiling icu_locale_core v2.2.0
+   Compiling zerotrie v0.2.4
+   Compiling icu_provider v2.2.0
+   Compiling icu_collections v2.2.0
+   Compiling itertools v0.13.0
+   Compiling icu_properties v2.2.0
+   Compiling bindgen v0.72.1
+   Compiling icu_normalizer v2.2.0
+   Compiling tokio-util v0.7.19
+   Compiling cobs v0.3.0
+   Compiling serde_json v1.0.151
+   Compiling postcard v1.1.3
+   Compiling idna_adapter v1.2.2
+   Compiling h2 v0.4.16
+   Compiling idna v1.1.0
+   Compiling seele-proto v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-proto)
+   Compiling dimpl v0.7.6
+   Compiling darling_core v0.24.0
+   Compiling url v2.5.8
+   Compiling hyper v1.11.0
+   Compiling heck v0.5.0
+   Compiling strum_macros v0.28.0
+   Compiling curve25519-dalek v5.0.0
+   Compiling hyper-util v0.1.20
+   Compiling darling_macro v0.24.0
+   Compiling str0m-proto v0.7.0
+   Compiling castaway v0.2.4
+   Compiling hashbrown v0.16.1
+   Compiling itertools v0.14.0
+   Compiling instability v0.3.13
+   Compiling unicode-width v0.2.2
+   Compiling static_assertions v1.1.0
+   Compiling ryu v1.0.23
+   Compiling winapi v0.3.9
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling toml_edit v0.25.13+spec-1.1.0
+   Compiling compact_str v0.9.1
+   Compiling unicode-truncate v2.0.1
+   Compiling tower v0.5.3
+   Compiling dcv-color-primitives v1.0.0
+   Compiling kasuari v0.4.12
+   Compiling is v0.11.1
+   Compiling darling v0.24.0
+   Compiling shiguredo_opus v2026.2.0
+   Compiling ed25519-dalek v3.0.0
+   Compiling strum v0.28.0
+   Compiling png v0.18.1
+   Compiling tokio-rustls v0.26.4
+   Compiling sctp-proto v0.10.7
+   Compiling shiguredo_openh264 v2026.2.0
+   Compiling convert_case v0.10.0
+   Compiling yasna v0.6.0
+   Compiling lru v0.18.2
+   Compiling critical-section v1.2.0
+   Compiling indoc v2.0.7
+   Compiling image v0.25.10
+   Compiling ratatui-core v0.1.2
+   Compiling str0m v0.24.1
+   Compiling rcgen v0.14.8
+   Compiling derive_more-impl v2.1.1
+   Compiling hyper-rustls v0.27.9
+   Compiling rayon v1.12.0
+   Compiling tower-http v0.6.11
+   Compiling proc-macro-crate v3.5.0
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling regex-syntax v0.8.11
+   Compiling seele-sessao v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-sessao)
+   Compiling regex-automata v0.4.18
+   Compiling seele-enlace v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-enlace)
+   Compiling reqwest v0.13.4
+   Compiling num_enum_derive v0.7.6
+   Compiling crossterm_winapi v0.9.1
+   Compiling windows-capture v2.0.1
+   Compiling derive_more v2.1.1
+   Compiling fast_image_resize v6.1.0
+   Compiling futures-executor v0.3.33
+   Compiling line-clipping v0.3.8
+   Compiling seele-audio v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-audio)
+   Compiling ratatui-widgets v0.3.2
+   Compiling futures v0.3.33
+   Compiling seele-video v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-video)
+   Compiling crossterm v0.29.0
+   Compiling num_enum v0.7.6
+   Compiling matchers v0.2.0
+   Compiling attohttpc v0.30.1
+   Compiling blake2 v0.10.6
+   Compiling nu-ansi-term v0.50.3
+   Compiling rusqlite v0.40.1
+   Compiling netdev v0.46.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling argon2 v0.5.3
+   Compiling igd-next v0.17.1
+   Compiling crab_nat v0.8.1
+   Compiling ratatui-crossterm v0.1.2
+   Compiling seele-core v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-core)
+   Compiling ratatui-macros v0.7.2
+   Compiling seele-conformance v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-conformance)
+   Compiling seele-encontro v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-encontro)
+warning: function `esperar_sumir` is never used
+   --> crates\seele-core\src\programa\sobras.rs:226:4
+    |
+226 | fn esperar_sumir(registro: &RegistroDeProcesso, prazo: Duration) -> bool {
+    |    ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling ratatui v0.30.2
+   Compiling seele-server v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-server)
+warning: `seele-core` (lib) generated 1 warning
+   Compiling seele-ffi v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-ffi)
+   Compiling seele-web v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-web)
+   Compiling tempfile v3.27.0
+warning: linker stdout: Criando biblioteca C:\Users\aleta\seele-0195\t\debug\deps\seele_web.dll.lib e objeto C:\Users\aleta\seele-0195\t\debug\deps\seele_web.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `seele-web` (lib) generated 1 warning
+warning: linker stdout: Criando biblioteca C:\Users\aleta\seele-0195\t\debug\deps\voz_com_muitos_e_entradas-76dea60c710d888e.lib e objeto C:\Users\aleta\seele-0195\t\debug\deps\voz_com_muitos_e_entradas-76dea60c710d888e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `seele-conformance` (test "voz_com_muitos_e_entradas") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 13s
+     Running tests\voz_com_muitos_e_entradas.rs (C:\Users\aleta\seele-0195\t\debug\deps\voz_com_muitos_e_entradas-76dea60c710d888e.exe)
+
+thread 'muitas_vozes_e_novas_entradas_nao_param_o_microfone_nem_a_saida' (11832) panicked at crates\seele-conformance\tests\voz_com_muitos_e_entradas.rs:175:5:
+o microfone não manteve a cadência
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p seele-conformance --test voz_com_muitos_e_entradas`

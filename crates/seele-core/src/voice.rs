@@ -662,6 +662,29 @@ fn open_preferring(chosen: &DeviceChoice) -> Result<AudioIo, device::DeviceError
     }
 }
 
+/// Uma escolha nova é estrita só do lado que a pessoa está trocando.
+/// A preferência antiga do outro lado pode ter sumido desde a abertura: ela
+/// recua ao padrão, como na reconexão, sem impedir a escolha nova.
+fn abrir_para_troca<T>(
+    chosen: &DeviceChoice,
+    trocando: device::Side,
+    mut abrir: impl FnMut(&DeviceChoice) -> Result<T, device::DeviceError>,
+) -> Result<T, device::DeviceError> {
+    match abrir(chosen) {
+        Ok(io) => Ok(io),
+        Err(falha) => {
+            if falha.side() == trocando {
+                return Err(falha);
+            }
+            let Some(alternativa) = chosen.without(falha.side()) else {
+                return Err(falha);
+            };
+            tracing::warn!(%falha, "o aparelho do outro lado sumiu; a troca usa o padrão daquele lado");
+            abrir(&alternativa)
+        }
+    }
+}
+
 /// A running voice path.
 ///
 /// Dropping it stops the audio.
@@ -1136,6 +1159,9 @@ impl Voice {
     /// the session where it was instead of silent. The cost is a moment with two
     /// playback streams open, which every backend this ships on allows.
     ///
+    /// The newly picked microphone is strict. If the old output preference
+    /// disappeared, only that side falls back to the default output.
+    ///
     /// # What has to survive, and why it is decided here
     ///
     /// mudo, Isolamento total, the mode, the held key, every per-talker volume,
@@ -1162,6 +1188,7 @@ impl Voice {
             },
             media,
             ssrc,
+            device::Side::Input,
         )
     }
 
@@ -1175,8 +1202,8 @@ impl Voice {
     /// somebody whose speakers are muted, and a switch that quietly unmutes them
     /// puts a server into a room that had been silent.
     ///
-    /// The microphone stays where it is, asked for exactly as this path asked
-    /// for it.
+    /// The microphone keeps its preference; if it disappeared, only that old
+    /// preference falls back to the default. The newly picked output is strict.
     ///
     /// # Errors
     ///
@@ -1196,6 +1223,7 @@ impl Voice {
             },
             media,
             ssrc,
+            device::Side::Output,
         )
     }
 
@@ -1231,12 +1259,20 @@ impl Voice {
     ///
     /// The one place that list is written. Both switches and the reopening go
     /// through here, so an item added to it is added for all three at once.
-    fn switch_to(&self, chosen: &DeviceChoice, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
+    fn switch_to(
+        &self,
+        chosen: &DeviceChoice,
+        media: MediaChannel,
+        ssrc: Ssrc,
+        trocando: device::Side,
+    ) -> Result<Self> {
         // O aparelho primeiro, porque é a parte que falha e a que demora: se ele
         // não abre, a pessoa continua falando pelo antigo; enquanto ele abre, o
         // antigo continua mandando voz. Só depois o relógio é lido — do ponto em
         // que o antigo de fato está.
-        let io = device::open(chosen.wanted(), RING_MS)?;
+        let io = abrir_para_troca(chosen, trocando, |escolha| {
+            device::open(escolha.wanted(), RING_MS)
+        })?;
         let fresh = Self::around(io, chosen.clone(), media, ssrc, self.relogio_seguinte())?;
         self.carry_over(&fresh);
         Ok(fresh)
@@ -2189,8 +2225,23 @@ async fn pipeline(
         }
 
         // ---- receive ----
-        while let Ok(Ok(bytes)) = tokio::time::timeout(Duration::from_millis(1), media.next()).await
-        {
+        // O prazo é do lote inteiro, não renovado a cada pacote. Com muitas
+        // pessoas falando há sempre outro pacote antes de 1 ms: drenar até
+        // uma pausa da rede deixava captura e reprodução sem vez por segundos.
+        // O teto de quantidade também limita uma fila já pronta; `timeout` pode
+        // devolver um futuro pronto mesmo depois do prazo. Nada é descartado:
+        // o restante fica para a próxima volta, depois de capturar e tocar.
+        let fim_da_recepcao = Instant::now() + Duration::from_millis(2);
+        for _ in 0..64 {
+            let restante = fim_da_recepcao.saturating_duration_since(Instant::now());
+            if restante.is_zero() {
+                break;
+            }
+            let Ok(Ok(bytes)) =
+                tokio::time::timeout(restante.min(Duration::from_millis(1)), media.next()).await
+            else {
+                break;
+            };
             let arrival_ms = started.elapsed().as_secs_f64() * 1000.0;
             // Um cabeçalho recusado é contado, e dito no log na primeira vez:
             // ver `ler_o_datagrama`.
@@ -3378,6 +3429,66 @@ mod tests {
             capture: Some("o microfone".to_owned()),
             playback: Some("a caixa".to_owned()),
         }
+    }
+
+    #[test]
+    fn a_saida_antiga_ausente_nao_impede_trocar_o_microfone() {
+        let escolha = both_chosen();
+        let mut tentativas = Vec::new();
+        let aberto = abrir_para_troca(&escolha, device::Side::Input, |pedido| {
+            tentativas.push(pedido.clone());
+            if pedido.playback.is_some() {
+                Err(device::DeviceError::PlaybackDeviceGone {
+                    id: "a caixa".into(),
+                })
+            } else {
+                Ok(pedido.capture.clone())
+            }
+        })
+        .expect("troca do microfone");
+        assert_eq!(aberto, escolha.capture);
+        assert_eq!(tentativas.len(), 2);
+        assert_eq!(tentativas[1].playback, None);
+        assert_eq!(
+            escolha.playback.as_deref(),
+            Some("a caixa"),
+            "preserva a preferência para reconectar"
+        );
+    }
+
+    #[test]
+    fn o_microfone_antigo_ausente_nao_impede_trocar_a_saida() {
+        let escolha = both_chosen();
+        let aberto = abrir_para_troca(&escolha, device::Side::Output, |pedido| {
+            if pedido.capture.is_some() {
+                Err(device::DeviceError::CaptureDeviceGone {
+                    id: "o microfone".into(),
+                })
+            } else {
+                Ok(pedido.playback.clone())
+            }
+        })
+        .expect("troca da saída");
+        assert_eq!(aberto, escolha.playback);
+    }
+
+    #[test]
+    fn a_escolha_nova_que_falha_nao_e_substituida_em_silencio() {
+        let escolha = both_chosen();
+        let mut tentativas = 0;
+        let aberto: Result<(), _> = abrir_para_troca(&escolha, device::Side::Input, |_| {
+            tentativas += 1;
+            Err(device::DeviceError::CaptureDeviceGone {
+                id: "o microfone".into(),
+            })
+        });
+        assert!(aberto.is_err());
+        assert_eq!(tentativas, 1);
+        let aberto: Result<(), _> =
+            abrir_para_troca(&DeviceChoice::default(), device::Side::Input, |_| {
+                Err(device::DeviceError::NoOutputDevice)
+            });
+        assert!(aberto.is_err());
     }
 
     #[test]

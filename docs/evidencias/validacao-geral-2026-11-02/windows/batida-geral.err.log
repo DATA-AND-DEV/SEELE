@@ -1,0 +1,9 @@
+   Compiling seele-enlace v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-enlace)
+   Compiling seele-server v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-server)
+warning: linker stdout: Criando biblioteca C:\Users\aleta\seele-0195\t\debug\deps\seele_server-9731a1b6782e979e.lib e objeto C:\Users\aleta\seele-0195\t\debug\deps\seele_server-9731a1b6782e979e.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `seele-server` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.41s
+     Running unittests src\lib.rs (C:\Users\aleta\seele-0195\t\debug\deps\seele_server-9731a1b6782e979e.exe)

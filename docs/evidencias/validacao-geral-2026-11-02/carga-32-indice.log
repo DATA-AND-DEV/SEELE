@@ -1,0 +1,24 @@
+   Compiling seele-enlace v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-enlace)
+   Compiling seele-core v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-core)
+   Compiling seele-server v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-server)
+   Compiling seele-ffi v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-ffi)
+   Compiling seele-conformance v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-conformance)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.94s
+     Running tests/voz_com_muitos_e_entradas.rs (/private/tmp/seele-0195-target/debug/deps/voz_com_muitos_e_entradas-dcf3df60b0579a7c)
+
+running 1 test
+{"atraso_laco_ms":6.686292,"blocos":1100,"blocos_com_som":1100,"duracao_s":10.999005375,"entradas":8,"envios_recusados":0,"falantes":32,"fontes":32,"maior_intervalo_microfone_ms":369.304083,"pacotes_microfone":130,"pior_perda":0.5967503692762186,"quadros_ocultados":4323,"reacertos":0,"reposicoes":0,"underruns":480}
+
+thread 'muitas_vozes_e_novas_entradas_nao_param_o_microfone_nem_a_saida' (8609781) panicked at crates/seele-conformance/tests/voz_com_muitos_e_entradas.rs:175:5:
+o microfone não manteve a cadência
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test muitas_vozes_e_novas_entradas_nao_param_o_microfone_nem_a_saida ... FAILED
+
+failures:
+
+failures:
+    muitas_vozes_e_novas_entradas_nao_param_o_microfone_nem_a_saida
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.32s
+
+error: test failed, to rerun pass `-p seele-conformance --test voz_com_muitos_e_entradas`

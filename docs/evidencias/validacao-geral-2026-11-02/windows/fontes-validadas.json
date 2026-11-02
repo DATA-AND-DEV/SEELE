@@ -1,0 +1,6 @@
+{
+  "crates/seele-core/src/voice.rs": "3beb07a8451d4c9fc5ad0ffed3b52f28457b008c0c0f5455308e96c68fdf1f95",
+  "crates/seele-enlace/src/ponta.rs": "29a34a763eb36a57e92a68b98e5f4a306287cae6ae70d69a56ace99af8af1415",
+  "crates/seele-server/src/session.rs": "65acf2d9d104db349c4551814251f5d5bb6f25d54f0f827565d99b8d8381ab40",
+  "crates/seele-conformance/tests/voz_com_muitos_e_entradas.rs": "5ae6727643f6d2c81a189b182a3152156bdd3e99c72552f3d4cb8f4391469657"
+}

@@ -608,6 +608,12 @@ jobs:
       - run: node apps/seele-app/bancada/pos-release-ui.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/desktop-estreito.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/hotfix-0195.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/proporcao-tela-cheia.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

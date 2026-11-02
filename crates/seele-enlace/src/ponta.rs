@@ -1011,12 +1011,23 @@ fn configurar_canais(rtc: &mut Rtc) -> (ChannelId, ChannelId) {
 impl Motor {
     async fn rodar(mut self, mut comandos: mpsc::UnboundedReceiver<Comando>) {
         let mut buf = vec![0_u8; 2048];
+        let mut revisar_em = Instant::now();
+        let mut acordar = revisar_em;
         loop {
             let agora = Instant::now();
-            self.tique(agora);
-            let acordar = self.proximo_acordar(agora);
+            // O fan-out gera um comando por destinatário. Varrer todos os pares
+            // para cada cópia tornava o custo dos temporizadores cúbico na sala.
+            // A rede continua sendo processada imediatamente; só a varredura
+            // global é agrupada no piso de 1 ms que proximo_acordar já adotava.
+            if agora >= revisar_em {
+                self.tique(agora);
+                acordar = self.proximo_acordar(agora);
+                revisar_em = agora + Duration::from_millis(1);
+            }
             tokio::select! {
                 lido = self.socket.recv_from(&mut buf) => {
+                    // A entrada pode antecipar um prazo antes distante.
+                    acordar = acordar.min(revisar_em);
                     match lido {
                         Ok((n, origem)) => {
                             if let Some(bytes) = buf.get(..n) {
@@ -1035,6 +1046,7 @@ impl Motor {
                     }
                 }
                 comando = comandos.recv() => {
+                    acordar = acordar.min(revisar_em);
                     match comando {
                         Some(Comando::Desligar) | None => {
                             self.desligar();
@@ -1246,6 +1258,19 @@ impl Motor {
 
     /// A sessão pronta (DTLS fechado, ctl e voz abertos) que veio de `origem`.
     fn ativa_da_origem(&self, origem: SocketAddr) -> Option<usize> {
+        // O caminho já nomeado é o caso de cada pacote de voz. Consultar o
+        // índice primeiro evita tomar o mutex do endereço de todos os outros
+        // pares a cada datagrama. A confirmação preserva a regra de sessão
+        // ativa; índice antigo ou migração de endereço ainda usa a busca.
+        if let Some(&id) = self.donos.get(&origem) {
+            if self.pares.get(&id).is_some_and(|par| {
+                par.pronto
+                    && par.fechando.is_none()
+                    && par.comp.remoto.lock().is_ok_and(|remoto| *remoto == origem)
+            }) {
+                return Some(id);
+            }
+        }
         self.pares
             .iter()
             .find(|(_, par)| {

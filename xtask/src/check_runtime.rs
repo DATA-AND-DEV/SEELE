@@ -100,8 +100,9 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 20] = [
+const BANCADAS: [&str; 21] = [
     "chamada-web-configuracao.cjs",
+    "ciclo-captura-web.cjs",
     "ciclo-do-executor.cjs",
     "ponte-web.cjs",
     "regiao-do-mod.cjs",

@@ -1,0 +1,5 @@
+F02 OK: o marcador e o padrão da sensibilidade seguem o filtro
+F01 OK: a régua vem do Rust e distingue escolha de padrão
+P54 OK: a linha do padrão só diz o aparelho quando o padrão é a escolha
+F01 OK: o medidor mostra o nível, o corte e quantas vezes abriu
+F01 OK: fechar a tela fecha o microfone

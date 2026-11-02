@@ -1,0 +1,126 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running `/private/tmp/seele-0195-target/debug/xtask check-runtime`
+check-runtime: rodando chamada-web-configuracao.cjs
+Configuração: defaults Rust, overrides locais e falha sem fallback PASS
+check-runtime: rodando ciclo-captura-web.cjs
+tela: o fluxo da transmissão não abriu: Error: abertura antiga falhou
+    at /Users/dev-alexandre/.codex/worktrees/e595/SEELE/apps/seele-app/bancada/ciclo-captura-web.cjs:16:13
+ciclo captura: recusa libera faixas, fim do áudio, fim atrasado, abertura atrasada, fim do vídeo e parada repetida OK
+check-runtime: rodando ciclo-do-executor.cjs
+ciclo do executor: as 6 corridas passam
+check-runtime: rodando ponte-web.cjs
+ponte web: as 23 provas passam
+check-runtime: rodando regiao-do-mod.cjs
+região do MOD: as 60 provas e a validação de resumo por linhas passam
+check-runtime: rodando continuacao-de-midia.cjs
+continuação de mídia: as 3 provas passam
+check-runtime: rodando contribuicoes-e-camadas.cjs
+contribuicoes-e-camadas: R1–R6 e a revisão de 26ad0c2 (reabertura, ordem inversa, descarte com desenho, mil superfícies, cartão genérico por destino) medidos no index.html real (#palco-de-camadas dentro de #tela-sessao) e no roteador real; V14 mede a troca de páginas e a volta à navegação nativa.
+check-runtime: rodando envio-de-imagens.cjs
+imagens: dois uploads de 10 MiB e tráfego concorrente cabem no balde; saída cancela pedidos antigos
+check-runtime: rodando imagens-por-volume.cjs
+volume: SDK e ponte reais conferem capacidade, dono, gravação e geração.
+check-runtime: rodando tema-sai-com-a-sessao.cjs
+ok     sair do servidor apaga o tema na hora
+ok     sair do servidor apaga a prévia do tema na hora, e o selo dela
+ok     o arredondamento, o brilho, a densidade e a fonte chegam à sessão como os tokens deles
+ok     e saem com ela
+ok     a aparência apresentada por outro MOD recusa o tema, pelo nome, sem pintar nada
+ok     o desenho do SEELE escolhido recusa o tema
+ok     o tema do MOD que apresenta a aparência vale
+ok     a prévia não disputa a aparência
+
+o tema e a prévia saem com a sessão.
+check-runtime: rodando retrato-projetado.cjs
+retrato-projetado: ok
+check-runtime: rodando eventos-da-tela.cjs
+eventos-da-tela: ok
+check-runtime: rodando tons-do-tema.cjs
+tons-do-tema: ok
+check-runtime: rodando chaves-do-tema.cjs
+chaves-do-tema: ok (65 casos)
+check-runtime: rodando hospedar-com-mod-antigo.cjs
+hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.
+recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru; e a recusa local de um MOD do catálogo diz a de instalar, sem culpar o catálogo nem a rede; e apagar do cache tem frase para os três motivos.
+busca automática: o MOD que não veio diz a frase da recusa, e não «[object Object]».
+check-runtime: rodando aceite-dos-mods.cjs
+aceite-dos-mods: a tela e a frase dizem, numa linha própria, o MOD que pode mudar a aparência do servidor, e só ele.
+check-runtime: rodando envelope-do-invoke.cjs
+ok atual: valor array chega sem envelope, intacto
+ok legado: valor array chega sem envelope, intacto
+ok atual: valor array vazio chega sem envelope, intacto
+ok legado: valor array vazio chega sem envelope, intacto
+ok atual: valor null chega sem envelope, intacto
+ok legado: valor null chega sem envelope, intacto
+ok atual: valor objeto chega sem envelope, intacto
+ok legado: valor objeto chega sem envelope, intacto
+ok atual: valor objeto com carimbo/valor dentro chega sem envelope, intacto
+ok legado: valor objeto com carimbo/valor dentro chega sem envelope, intacto
+ok atual: valor recusa dentro do valor chega sem envelope, intacto
+ok legado: valor recusa dentro do valor chega sem envelope, intacto
+ok atual: valor zero chega sem envelope, intacto
+ok legado: valor zero chega sem envelope, intacto
+ok epoca do backend (1) difere do contador local (10) e a resposta vale
+ok snapshot achatado passa inteiro (carimbo+epoca+campos)
+ok snapshot achatado com campo `valor` próprio não é desembrulhado
+ok resposta sem carimbo passa como veio
+ok atual: outra sessão rejeitada, não desembrulhada
+ok atual: retorno A→B→A é outra-visita
+ok atual: geração velha rejeitada
+ok atual: resposta atrasada depois de sair da sessão (vista nula) é rejeitada
+ok legado: outra sessão rejeitada, não desembrulhada
+ok legado: retorno A→B→A é outra-visita
+ok legado: geração velha rejeitada
+ok legado: resposta atrasada depois de sair da sessão (vista nula) é rejeitada
+ok retry de SessaoNaoConfere: a resposta do refeito é desembrulhada
+ok retry: o refeito que volta com geração menor que a anotada é rejeitado
+ok resposta atrasada de um pedido, depois de uma troca local, é outra-visita
+ok ver_sessao envia `pedido: {instancia, n}` (nativo) e `epoca` (ponte web); n sobe a cada troca
+ok ver_sessao: o pedido velho que o nativo recusa vira VistaSuperada; a vista fica
+ok ver_sessao: resposta bem-sucedida do pedido velho é descartada e não muda a vista
+ok PedidoVelho em outro comando não é reescrito
+ok recarregar: o primeiro pedido da página nova é aceito (o Date.now() + época falhava aqui)
+ok o relógio recuando não muda nada: o pedido não depende de relógio
+ok inverter a ordem: o pedido 1 chegando depois do 2 é recusado, e a vista fica no 2
+ok o pedido em voo da página de antes, chegando depois do reload, é recusado
+ok nova geração de uma sessão não mexe no domínio dos pedidos de vista
+ok sem instância (a ponte web não a tem), o pedido não vai, e a época vai
+
+39 casos ok
+check-runtime: rodando fila-do-volume.cjs
+fila-do-volume 1/2: maior soma 49155 (limiar 65536), 16/16 mandados
+fila-do-volume: ok
+check-runtime: rodando registro-de-sessoes.cjs
+registro-de-sessoes: ok
+check-runtime: rodando rtc-chamada-resiliencia.cjs
+✔ STUN incompleto não segura oferta e candidato; prazos são separados e finitos (3.671541ms)
+✔ queda transitória preserva chamada; voz não acumula e controle espera recuperação (1.415834ms)
+✔ restart só por quem liga, até duas vezes, preservando DTLS e descartando candidato antigo (1.344209ms)
+✔ par antigo recebe trickle mas não recebe oferta de restart incompatível (0.516959ms)
+✔ candidatos anteriores ao SDP têm fila limitada e saem na geração correta (0.94275ms)
+✔ cancelamento durante sinalização pendente impede callbacks e restart tardios (0.474958ms)
+✔ restart não aceita troca de identidade DTLS nem replay de geração antiga (0.931792ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11.749167
+check-runtime: rodando rtc-diagnostico.cjs
+✔ diagnóstico exporta apenas famílias, tipos e contadores; ausência não vira zero (4.140917ms)
+✔ mDNS e campos desconhecidos não são tratados como IPv6 e exportação é limitada (0.371167ms)
+✔ falha guarda estado anterior ao close sem alterar prazo ou transporte (23.815667ms)
+✔ página exporta medição antes da falha e interrompe coleta ao terminar (330.243792ms)
+✔ cancelar e testar novamente não mistura resultados nem cancela a coleta nova (335.380708ms)
+✔ diagnóstico IPv6 não reintroduz IPv4 pela resposta do encontro (1.6935ms)
+✔ diagnóstico por família não inventa candidato nem envia POST sem candidato (0.586709ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 698.36625

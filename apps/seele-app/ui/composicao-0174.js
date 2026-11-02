@@ -192,7 +192,8 @@
         if (icone) {
           // O desenho do original (o glifo com ou sem o corte) e o nome dele.
           // Snapshots chegam durante pointerdown/up: preservar o alvo mantém o clique no WebKit.
-          if (botao.innerHTML !== original.innerHTML) {
+          if (botao.childNodes.length !== original.childNodes.length ||
+              [...botao.childNodes].some((no, i) => !no.isEqualNode(original.childNodes[i]))) {
             botao.replaceChildren(...[...original.childNodes].map((no) => no.cloneNode(true)));
           }
           botao.setAttribute("aria-label", original.getAttribute("aria-label") || original.title || "");

@@ -1,0 +1,50 @@
+[
+  {
+    "teste": "desktop-estreito",
+    "resultado": 0
+  },
+  {
+    "teste": "hotfix-0195",
+    "resultado": 0
+  },
+  {
+    "teste": "qualidade-da-voz",
+    "resultado": 0
+  },
+  {
+    "teste": "proporcao-tela-cheia",
+    "resultado": 0
+  },
+  {
+    "teste": "palco-da-chamada",
+    "resultado": 0
+  },
+  {
+    "teste": "palco-depois-de-reconectar",
+    "resultado": 0
+  },
+  {
+    "teste": "isolamento-das-sessoes",
+    "resultado": 0
+  },
+  {
+    "teste": "estado-por-sessao",
+    "resultado": 0
+  },
+  {
+    "teste": "queda-que-volta-sozinha",
+    "resultado": 0
+  },
+  {
+    "teste": "ciclo-de-reconectar-o-servidor",
+    "resultado": 0
+  },
+  {
+    "teste": "compartilhar-por-identidade",
+    "resultado": 0
+  },
+  {
+    "teste": "tema-claro-legivel",
+    "resultado": 0
+  }
+]

@@ -1449,6 +1449,8 @@ todas_as_bancadas_de_navegador() {
     # A área útil da 0.17: com `--webkit`, uma execução mede os DOIS motores (o mesmo comando do `ci.yml`, ~10 min; cabe no
     # prazo da etapa, `PRAZO_DA_ETAPA_S`, 40 min). Pede o Playwright de Node com o Chromium e o WebKit.
     uma_bancada node apps/seele-app/bancada/pos-release-ui.cjs
+    uma_bancada node apps/seele-app/bancada/desktop-estreito.cjs
+    uma_bancada node apps/seele-app/bancada/hotfix-0195.cjs
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
     uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/tunel-de-jogador.cjs

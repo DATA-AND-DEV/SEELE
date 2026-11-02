@@ -1,0 +1,15 @@
+✔ STUN incompleto não segura oferta e candidato; prazos são separados e finitos (2.8265ms)
+✔ queda transitória preserva chamada; voz não acumula e controle espera recuperação (1.332375ms)
+✔ restart só por quem liga, até duas vezes, preservando DTLS e descartando candidato antigo (1.328375ms)
+✔ par antigo recebe trickle mas não recebe oferta de restart incompatível (0.62075ms)
+✔ candidatos anteriores ao SDP têm fila limitada e saem na geração correta (0.889208ms)
+✔ cancelamento durante sinalização pendente impede callbacks e restart tardios (0.431417ms)
+✔ restart não aceita troca de identidade DTLS nem replay de geração antiga (0.866792ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10.510166

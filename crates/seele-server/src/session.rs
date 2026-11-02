@@ -1081,86 +1081,18 @@ async fn handshake(
     })
 }
 
-/// A fase 3 do aperto: a portaria, a conta, os MODs e o `Session`.
-async fn admitir(
-    provado: Provado,
-    send: &mut crate::transporte::Envio,
-    recv: &mut crate::transporte::Recebe,
-    config: &ServerConfig,
-    registry: &Registry,
+/// A batida pode esperar o disco (SQLite/FULL e disputa com outra conexão).
+/// O mutex é adquirido sem bloquear o executor, antes de despachar a escrita:
+/// só uma tarefa de banco ocupa o pool, e a voz continua durante essa espera.
+async fn consultar_portaria(
     server: &Server,
-) -> std::result::Result<Session, Refusal> {
-    let Provado {
-        version,
-        client,
-        nickname,
-        public_key,
-        apis_de_mod,
-        passe,
-        recusa_adiada,
-        chegada,
-    } = provado;
-
-    // **As APIs de MOD, antes da portaria e do convite** (a P7c do plano F1b).
-    //
-    // O `Hello` diz que APIs de MOD o app roda, e um MOD exigido de uma API
-    // que ele não roda é uma porta que ele não atravessa: aceitar o anúncio
-    // não o faria rodar. Recusado aqui, com a máscara do que falta, a tela diz
-    // «atualize o app» — e antes da portaria e do convite, para quem não vai
-    // entrar não deixar pedido na fila nem gastar um convite de uso único.
-    //
-    // A API 0 é «não preenchida» (uma linha de antes da migração 14), e não
-    // recusa ninguém. Com o portão dos MODs dormente, nada é exigido. Um banco
-    // que não responde não recusa aqui: o portão dos MODs, adiante, decide.
-    if crate::mods::anuncio::o_anuncio_alcanca_alguem(server.versao_do_anuncio) {
-        let ligados = {
-            let guard = server.persistence.lock().await;
-            crate::persistence::mods::enabled(&guard)
-        };
-        match ligados {
-            Ok(ligados) => {
-                let faltam: Vec<u32> = ligados
-                    .iter()
-                    .map(|ligado| ligado.api)
-                    .filter(|api| *api != 0 && !apis_de_mod.contains(api))
-                    .collect();
-                if !faltam.is_empty() {
-                    return Err(recusa_de_mod(
-                        version,
-                        server.versao_do_anuncio,
-                        DisconnectReason::ModsDeOutraApi {
-                            apis: seele_proto::control::mascara_de_apis(&faltam),
-                        },
-                        format!("o app roda as APIs de MOD {apis_de_mod:?}, e faltam {faltam:?}"),
-                    ));
-                }
-            }
-            Err(erro) => {
-                tracing::warn!(%erro, "não deu para ler as APIs dos MODs antes da portaria");
-            }
-        }
-    }
-
-    // A portaria — ADR 0030. A terceira camada, e a única que decide sobre
-    // gente em vez de sobre um segredo.
-    //
-    // **Aqui**, e não junto com `admissao` lá em cima, porque só agora a chave
-    // foi provada. Fixar uma impressão digital que ninguém demonstrou não é
-    // TOFU, é fixar um palpite: qualquer um encheria a fila com chaves alheias,
-    // e quem hospeda aprovaria uma pessoa e admitiria outra. O que impede a fila
-    // de encher com chaves próprias, que são de graça, é o balde por endereço do
-    // ADR 0025, que responde antes de o `Hello` ser lido.
-    //
-    // **Antes de `register_or_find`**, e isto vale um parágrafo: quem não passa
-    // por aqui não vira conta. Se fosse depois, alguém que nunca foi aprovado
-    // ocuparia um apelido para sempre — o ADR 0017 prende o nome à chave, e uma
-    // batida recusada teria reservado o nome de alguém que jamais entrou.
-    //
-    // Nada espera. Um pedido pendente derruba a conexão neste instante e fica
-    // gravado; ver o cabeçalho de `portaria`.
-    {
-        let mut guard = server.persistence.lock().await;
-        let impressao = seele_proto::transport::key_fingerprint(&public_key);
+    impressao: String,
+    nickname: String,
+    recusa_adiada: Option<String>,
+    chegada: (crate::portaria::Segredo, String),
+) -> std::result::Result<(), Refusal> {
+    let mut guard = Arc::clone(&server.persistence).lock_owned().await;
+    tokio::task::spawn_blocking(move || {
         let (segredo, observacao) = chegada;
 
         // Aqui a impressão digital **está provada**: a assinatura sobre o nonce
@@ -1248,7 +1180,100 @@ async fn admitir(
                 });
             }
         }
+        Ok(())
+    })
+    .await
+    .map_err(|error| Refusal {
+        reason: DisconnectReason::AdmissionPending,
+        detail: format!("could not run the doorkeeper: {error}"),
+    })?
+}
+
+/// A fase 3 do aperto: a portaria, a conta, os MODs e o `Session`.
+async fn admitir(
+    provado: Provado,
+    send: &mut crate::transporte::Envio,
+    recv: &mut crate::transporte::Recebe,
+    config: &ServerConfig,
+    registry: &Registry,
+    server: &Server,
+) -> std::result::Result<Session, Refusal> {
+    let Provado {
+        version,
+        client,
+        nickname,
+        public_key,
+        apis_de_mod,
+        passe,
+        recusa_adiada,
+        chegada,
+    } = provado;
+
+    // **As APIs de MOD, antes da portaria e do convite** (a P7c do plano F1b).
+    //
+    // O `Hello` diz que APIs de MOD o app roda, e um MOD exigido de uma API
+    // que ele não roda é uma porta que ele não atravessa: aceitar o anúncio
+    // não o faria rodar. Recusado aqui, com a máscara do que falta, a tela diz
+    // «atualize o app» — e antes da portaria e do convite, para quem não vai
+    // entrar não deixar pedido na fila nem gastar um convite de uso único.
+    //
+    // A API 0 é «não preenchida» (uma linha de antes da migração 14), e não
+    // recusa ninguém. Com o portão dos MODs dormente, nada é exigido. Um banco
+    // que não responde não recusa aqui: o portão dos MODs, adiante, decide.
+    if crate::mods::anuncio::o_anuncio_alcanca_alguem(server.versao_do_anuncio) {
+        let ligados = {
+            let guard = server.persistence.lock().await;
+            crate::persistence::mods::enabled(&guard)
+        };
+        match ligados {
+            Ok(ligados) => {
+                let faltam: Vec<u32> = ligados
+                    .iter()
+                    .map(|ligado| ligado.api)
+                    .filter(|api| *api != 0 && !apis_de_mod.contains(api))
+                    .collect();
+                if !faltam.is_empty() {
+                    return Err(recusa_de_mod(
+                        version,
+                        server.versao_do_anuncio,
+                        DisconnectReason::ModsDeOutraApi {
+                            apis: seele_proto::control::mascara_de_apis(&faltam),
+                        },
+                        format!("o app roda as APIs de MOD {apis_de_mod:?}, e faltam {faltam:?}"),
+                    ));
+                }
+            }
+            Err(erro) => {
+                tracing::warn!(%erro, "não deu para ler as APIs dos MODs antes da portaria");
+            }
+        }
     }
+
+    // A portaria — ADR 0030. A terceira camada, e a única que decide sobre
+    // gente em vez de sobre um segredo.
+    //
+    // **Aqui**, e não junto com `admissao` lá em cima, porque só agora a chave
+    // foi provada. Fixar uma impressão digital que ninguém demonstrou não é
+    // TOFU, é fixar um palpite: qualquer um encheria a fila com chaves alheias,
+    // e quem hospeda aprovaria uma pessoa e admitiria outra. O que impede a fila
+    // de encher com chaves próprias, que são de graça, é o balde por endereço do
+    // ADR 0025, que responde antes de o `Hello` ser lido.
+    //
+    // **Antes de `register_or_find`**, e isto vale um parágrafo: quem não passa
+    // por aqui não vira conta. Se fosse depois, alguém que nunca foi aprovado
+    // ocuparia um apelido para sempre — o ADR 0017 prende o nome à chave, e uma
+    // batida recusada teria reservado o nome de alguém que jamais entrou.
+    //
+    // Nada espera. Um pedido pendente derruba a conexão neste instante e fica
+    // gravado; ver o cabeçalho de `portaria`.
+    consultar_portaria(
+        server,
+        seele_proto::transport::key_fingerprint(&public_key),
+        nickname.clone(),
+        recusa_adiada,
+        chegada,
+    )
+    .await?;
 
     // PERMISSIONS turns the proven key into an account.
     let account = {
@@ -7950,5 +7975,76 @@ mod a_apresentacao {
             translate(&apresentacao(tunel(), 2, Papel::Busca), &[], PersonId(1)),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod batida_com_disco_ocupado {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// SQLite espera o escritor externo; o executor continua disponível para
+    /// receber e encaminhar mídia. Uma thread só torna o bloqueio observável.
+    #[tokio::test]
+    async fn a_gravacao_da_batida_nao_bloqueia_o_executor_da_rede() {
+        let pasta = tempfile::tempdir().expect("pasta");
+        let caminho = pasta.path().join("portaria.db");
+        let daemon = crate::Daemon::bind(crate::ServerConfig {
+            listen: "127.0.0.1:0".parse().expect("endereço"),
+            database: crate::persistence::Location::File(caminho.clone()),
+            durabilidade: crate::persistence::Durabilidade::Completa,
+            ..crate::ServerConfig::default()
+        })
+        .await
+        .expect("servidor");
+        {
+            let mut banco = daemon.server().persistence.lock().await;
+            crate::portaria::ligar(&mut banco, true).expect("portaria");
+        }
+        let externo = rusqlite::Connection::open(caminho).expect("segundo escritor");
+        externo
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("reservar escrita");
+        let desbloquear = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            externo.execute_batch("ROLLBACK").expect("soltar escrita");
+        });
+        let tiques = Arc::new(AtomicUsize::new(0));
+        let contador = tiques.clone();
+        let batimento = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                contador.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        let inicio = Instant::now();
+        let resultado = consultar_portaria(
+            daemon.server(),
+            "ab".repeat(32),
+            "Pessoa".into(),
+            None,
+            (crate::portaria::Segredo::Aberto, String::new()),
+        )
+        .await;
+        let transcorrido = inicio.elapsed();
+        let rodadas = tiques.load(Ordering::Relaxed);
+        batimento.abort();
+        desbloquear.join().expect("escritor");
+        daemon.shutdown();
+        assert!(
+            matches!(
+                resultado,
+                Err(Refusal {
+                    reason: DisconnectReason::AdmissionPending,
+                    ..
+                })
+            ),
+            "a batida deve continuar pendente"
+        );
+        assert!(
+            transcorrido >= Duration::from_millis(400),
+            "não houve disputa real no SQLite"
+        );
+        assert!(rodadas >= 20, "o executor só rodou {rodadas} vezes durante {transcorrido:?} de escrita: a batida parou a rede");
     }
 }

@@ -1,0 +1,73 @@
+   Compiling cc v1.4.1
+   Compiling serde_derive v1.0.229
+   Compiling zerocopy v0.8.56
+   Compiling windows-core v0.62.2
+   Compiling zerocopy-derive v0.8.56
+   Compiling serde v1.0.229
+   Compiling either v1.17.0
+   Compiling itertools v0.13.0
+   Compiling cmake v0.1.58
+   Compiling windows-sys v0.61.2
+   Compiling winapi v0.3.9
+   Compiling bindgen v0.72.1
+   Compiling half v2.7.1
+   Compiling winapi-util v0.1.11
+   Compiling shiguredo_cmake v4.4.0
+   Compiling alloca v0.4.0
+   Compiling anstyle v1.0.14
+   Compiling plotters-backend v0.3.7
+   Compiling clap_lex v1.1.0
+   Compiling ciborium-io v0.2.2
+   Compiling ciborium-ll v0.2.2
+   Compiling clap_builder v4.6.6
+   Compiling shiguredo_opus v2026.2.0
+   Compiling regex-automata v0.4.18
+   Compiling plotters-svg v0.3.7
+   Compiling windows-future v0.3.2
+   Compiling cobs v0.3.0
+   Compiling same-file v1.0.6
+   Compiling windows-numerics v0.3.1
+   Compiling windows-collections v0.3.2
+   Compiling cast v0.3.0
+   Compiling windows v0.62.2
+   Compiling criterion-plot v0.8.2
+   Compiling page_size v0.6.0
+   Compiling walkdir v2.5.0
+   Compiling postcard v1.1.3
+   Compiling plotters v0.3.7
+   Compiling regex v1.13.1
+   Compiling clap v4.6.6
+   Compiling ciborium v0.2.2
+   Compiling tinytemplate v1.2.1
+   Compiling visibility v0.1.1
+   Compiling oorandom v11.1.5
+   Compiling anes v0.1.6
+   Compiling seele-proto v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-proto)
+   Compiling criterion v0.8.2
+   Compiling cpal v0.18.1
+   Compiling rubato v4.0.0
+   Compiling assert_no_alloc v1.1.2
+   Compiling seele-voz v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-voz)
+   Compiling seele-audio v0.0.0 (C:\Users\aleta\seele-0195\quality-src\crates\seele-audio)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 53.48s
+     Running unittests src\lib.rs (C:\Users\aleta\seele-0195\t\debug\deps\seele_audio-b901342857e83dec.exe)
+the capture default check proves nothing here: this machine lists one microphone
+the playback default check proves nothing here: this machine lists one output
+skipped the playback open check: this machine offers only its default output, so asking for one proves nothing
+
+thread '<unnamed>' (9204) panicked at crates\seele-audio\src\laco.rs:470:13:
+envenenando de propósito, para o teste
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+     Running unittests src\lib.rs (C:\Users\aleta\seele-0195\t\debug\deps\seele_voz-7aa8fcbd760d7989.exe)
+NetworkProfile { base_delay_ms: 1.0, jitter_ms: 1.0, spike_chance: 0.0, spike_ms: 0.0, loss: LossModel { good_to_bad: 0.0, bad_to_good: 1.0, loss_in_good: 0.0, loss_in_bad: 0.0 }, duplication: 0.0 }
+  0 ppm: perda 0.0000 emendas 0 alvo 20.0
+  +300: perda 0.0000 emendas 8 alvo 20.0 fila 20->40
+NetworkProfile { base_delay_ms: 8.0, jitter_ms: 12.0, spike_chance: 0.01, spike_ms: 80.0, loss: LossModel { good_to_bad: 0.003367003367003367, bad_to_good: 0.3333333333333333, loss_in_good: 0.0, loss_in_bad: 1.0 }, duplication: 0.0 }
+  0 ppm: perda 0.0229 emendas 0 alvo 42.3
+  +300: perda 0.0219 emendas 6 alvo 41.9 fila 40->60
+NetworkProfile { base_delay_ms: 30.0, jitter_ms: 15.0, spike_chance: 0.005, spike_ms: 60.0, loss: LossModel { good_to_bad: 0.002512562814070352, bad_to_good: 0.5, loss_in_good: 0.0, loss_in_bad: 1.0 }, duplication: 0.001 }
+  0 ppm: perda 0.0102 emendas 0 alvo 34.3
+  +300: perda 0.0075 emendas 6 alvo 34.1 fila 20->60
+NetworkProfile { base_delay_ms: 60.0, jitter_ms: 40.0, spike_chance: 0.03, spike_ms: 250.0, loss: LossModel { good_to_bad: 0.006578947368421053, bad_to_good: 0.125, loss_in_good: 0.0, loss_in_bad: 1.0 }, duplication: 0.002 }
+  0 ppm: perda 0.0705 emendas 0 alvo 176.6
+  +300: perda 0.0709 emendas 0 alvo 185.3 fila 40->180

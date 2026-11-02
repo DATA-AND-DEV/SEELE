@@ -1,0 +1,9 @@
+   Compiling seele-server v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.20s
+     Running unittests src/lib.rs (/private/tmp/seele-0195-target/debug/deps/seele_server-29b9ce00ede51de0)
+
+running 1 test
+test session::batida_com_disco_ocupado::a_gravacao_da_batida_nao_bloqueia_o_executor_da_rede ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 760 filtered out; finished in 0.63s
+

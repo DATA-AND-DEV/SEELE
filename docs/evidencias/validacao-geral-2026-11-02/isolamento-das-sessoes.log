@@ -1,0 +1,1 @@
+isolamento das sessões na casca: o clique leva o carimbo de onde foi dado; o evento de outra sessão e o de geração velha não chegam à tela; a promessa resolvida depois da troca é recusada (ForaDaVista); a reconexão em segundo plano não mexe na vista nem no foco; o refeito é na mesma sessão; o TRAZER A VOZ manda o carimbo da vista.

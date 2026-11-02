@@ -1,0 +1,12 @@
+
+running 1 test
+{"atraso_laco_ms":30.2681,"blocos":1313,"blocos_com_som":1313,"duracao_s":13.1289894,"entradas":8,"falantes":24,"fontes":24,"maior_intervalo_microfone_ms":561.8881,"pacotes_microfone":187,"reacertos":0,"reposicoes":8,"underruns":1442}
+test muitas_vozes_e_novas_entradas_nao_param_o_microfone_nem_a_saida ... FAILED
+
+failures:
+
+failures:
+    muitas_vozes_e_novas_entradas_nao_param_o_microfone_nem_a_saida
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.05s
+

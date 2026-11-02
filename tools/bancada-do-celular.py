@@ -624,7 +624,7 @@ def engrenagem_do_inicio(pg: Page) -> list[str]:
     `celular-ajustes.js` media a sessão a cada `resize`, inclusive escondida,
     atrás do início: o topo dava 0, o pé dava 0, e a camada ganhava
     `bottom: <altura da tela>` — aberta pela engrenagem, ela tinha 0 de altura
-    e a engrenagem parecia não fazer nada (0.19.0, seele.sh no celular)."""
+    e a engrenagem parecia não fazer nada (0.19.0, aplicativo web no celular)."""
     falhas = []
     tamanho = pg.viewport_size
     # A barra de endereço recolhendo e voltando: dois `resize` de verdade.

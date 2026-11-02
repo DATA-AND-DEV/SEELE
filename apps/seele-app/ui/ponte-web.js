@@ -216,6 +216,7 @@ const SO_NA_CASCA_LARGA = new Map([
 
 /** Atendidos nas duas cascas. */
 const COMANDOS_DA_PONTE = new Set([
+  "avisos_dos_dados_locais",
   "meu_codigo", "amigos", "contatos_da_agenda", "adicionar_amigo", "tirar_dos_amigos",
   "dar_nome_na_agenda", "bloquear", "estado_da_sala", "receber_ligacoes", "atender", "recusar", "encerrar_a_ligacao",
   "tela_cheia",
