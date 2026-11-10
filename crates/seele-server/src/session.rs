@@ -843,6 +843,18 @@ where
     }
 }
 
+/// Se a escrita falhou só porque a mensagem não passou pela validação ou não
+/// coube no quadro, isto é, antes de qualquer byte ir ao fluxo.
+///
+/// `frame::write_em` codifica e enquadra antes do `write_all`, e os dois
+/// passos falham com [`seele_proto::control::ControlError`]; a E/S falha com
+/// outro tipo. É essa diferença que deixa descartar uma mensagem sem deslocar
+/// o enquadramento de quem lê.
+fn so_nao_codificou(erro: &anyhow::Error) -> bool {
+    erro.downcast_ref::<seele_proto::control::ControlError>()
+        .is_some()
+}
+
 /// A handshake that did not succeed, with the reason to send back.
 struct Refusal {
     reason: DisconnectReason,
@@ -4960,7 +4972,24 @@ async fn run_session(
                 }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
-                        escrever!(&message).await?;
+                        // **Um evento que não codifica é descartado, e não
+                        // encerra a sessão de quem ia recebê-lo.** O conteúdo
+                        // de um evento vem de outra pessoa; um `?` aqui dava a
+                        // ela o poder de derrubar esta sessão com um campo
+                        // fora do teto. Só o erro de validação/codificação é
+                        // descartado: ele acontece antes de qualquer byte sair,
+                        // então o fluxo continua inteiro. Erro de E/S e o
+                        // «ficou para trás» seguem encerrando.
+                        if let Err(erro) = escrever!(&message).await {
+                            if !so_nao_codificou(&erro) {
+                                return Err(erro);
+                            }
+                            tracing::warn!(
+                                %erro,
+                                person = %session.person,
+                                "uma mensagem nascida de evento não codificou e foi descartada"
+                            );
+                        }
                     }
                 }
                 // **Os cargos mudaram e esta pessoa foi atingida**: as

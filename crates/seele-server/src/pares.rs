@@ -205,10 +205,16 @@ impl Pares {
         for repasse in &encerrar {
             self.nomeacoes.remove(&(repasse.screen, repasse.assiste));
         }
+        // O que se guarda aqui é o que vai a outra pessoa numa apresentação,
+        // e a apresentação tem teto. A validação do fio já limita `locais`
+        // (`MAX_LOCAIS_DE_PAR`); cortar de novo é a defesa de quem guarda, e
+        // o corte é antes do público para ele nunca ficar de fora.
         let mut enderecos = locais;
         if !enderecos.contains(&publico) {
+            enderecos.truncate(seele_proto::tunel::MAX_ENDERECOS_DE_TUNEL - 1);
             enderecos.push(publico);
         }
+        enderecos.truncate(seele_proto::tunel::MAX_ENDERECOS_DE_TUNEL);
         self.quem.insert(
             pessoa,
             QuemDeclarou {
@@ -632,6 +638,28 @@ mod testes {
 
     /// Quem só conectou: identidade declarada, consentimento nenhum.
     const NAO_CONSENTE: ConsentimentoDePar = ConsentimentoDePar::de_ninguem();
+
+    /// A defesa atrás da validação do fio: mesmo que uma lista grande chegasse
+    /// aqui, o que se guarda cabe em `SirvaTunelPara`, e o público, que é o
+    /// único endereço em que o servidor confia, nunca é o que sobra de fora.
+    #[test]
+    fn declarou_guarda_no_maximo_o_teto_da_apresentacao_e_o_publico_fica() {
+        let teto = seele_proto::tunel::MAX_ENDERECOS_DE_TUNEL;
+        let publico = SocketAddr::from(([203, 0, 113, 9], 8383));
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(1),
+            10,
+            CONSENTE_TUDO,
+            "a".repeat(64),
+            (1..=40).map(endereco).collect(),
+            publico,
+        );
+        let guardados = &pares.declaracao_de(PersonId(1)).unwrap().enderecos;
+        assert_eq!(guardados.len(), teto);
+        assert!(guardados.contains(&publico));
+        assert_eq!(guardados[0], endereco(1));
+    }
 
     #[test]
     fn apresentar_devolve_as_duas_declaracoes_e_nada_sem_uma_delas() {

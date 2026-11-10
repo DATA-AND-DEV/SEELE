@@ -1284,3 +1284,44 @@ async fn esperar_curto(recebe: &mut seele_enlace::Recebe) -> Option<RecusaDeTune
     };
     Some(motivo)
 }
+
+/// **Uma mensagem nascida de evento que não codifica é descartada, e a sessão
+/// de quem ia recebê-la continua de pé.** O defeito: o `?` da escrita no laço
+/// de eventos encerrava a sessão do destinatário por um erro de validação que
+/// outra pessoa provocou (dezesseis `locais` em `EmprestarSubida`, que com o
+/// público passavam do teto de `SirvaTunelPara`). O teto de entrada fecha
+/// aquele caminho; este teste prende o outro lado, pondo no barramento um
+/// evento que nenhuma validação de saída aceita.
+#[tokio::test(flavor = "multi_thread")]
+async fn evento_que_nao_codifica_nao_derruba_a_sessao_de_quem_recebe() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let mut vitima = entrar(endereco, MAQUINA, 12).await?;
+    daemon
+        .server()
+        .events
+        .send(seele_server::server::Event::SirvaTelaPara {
+            screen: seele_proto::ids::ScreenId(1),
+            quem_empresta: vitima.pessoa,
+            enderecos: vec!["203.0.113.5:4000".parse()?],
+            // Não é um SHA-256 em hex: `check_impressao` recusa ao codificar.
+            impressao: "x".into(),
+        })
+        .map_err(|_| anyhow::anyhow!("ninguém ouvindo o barramento"))?;
+    frame::write(
+        &mut vitima.ligado.envio,
+        &ClientMessage::Ping { timestamp: 4242 },
+    )
+    .await?;
+    let eco = esperar(&mut vitima.ligado.recebe, |m| match m {
+        ServerMessage::Pong { timestamp } => Some(*timestamp),
+        _ => None,
+    })
+    .await;
+    assert_eq!(
+        eco,
+        Some(4242),
+        "a sessão de quem ia receber a mensagem incodificável caiu"
+    );
+    daemon.shutdown();
+    Ok(())
+}

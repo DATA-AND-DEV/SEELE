@@ -399,6 +399,15 @@ pub const MAX_REACH_ITENS: usize = 16;
 /// sem poder ser anunciado.
 pub const MAX_REACH_LEN: usize = 48;
 
+/// Quantos endereços de rede local uma declaração de par leva
+/// ([`ClientMessage::EmprestarSubida`]).
+///
+/// Um a menos que [`crate::tunel::MAX_ENDERECOS_DE_TUNEL`], e a conta é a
+/// razão: o servidor acrescenta o endereço público de quem declarou e manda a
+/// soma a **outra pessoa** numa apresentação. Uma entrada que aceitasse mais
+/// do que a saída comporta faria a mensagem dessa outra pessoa não codificar.
+pub const MAX_LOCAIS_DE_PAR: usize = crate::tunel::MAX_ENDERECOS_DE_TUNEL - 1;
+
 /// Why a control frame could not be handled.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ControlError {
@@ -3686,6 +3695,7 @@ impl Validate for ClientMessage {
                 locais,
             } => {
                 check_impressao(impressao)?;
+                check("locais", locais.len(), MAX_LOCAIS_DE_PAR)?;
                 // **A regra do opt-in, no fio.** `locais` é a topologia de
                 // rede interna da máquina de quem declara, e só quem empresta
                 // a conexão tem razão para publicá-la: quem assiste é
@@ -6215,6 +6225,45 @@ mod o_vocabulario_e_a_versao {
                  validação"
             );
         }
+    }
+
+    /// **O teto de entrada casa com o de saída.** O servidor acrescenta o
+    /// endereço público aos `locais` e manda a soma em `SirvaTunelPara`, que
+    /// tem teto de [`crate::tunel::MAX_ENDERECOS_DE_TUNEL`]. Sem teto aqui,
+    /// quem declarava dezesseis locais fazia a mensagem de **outra pessoa**
+    /// não codificar — e a sessão dela caía.
+    #[test]
+    fn locais_tem_teto_e_a_soma_com_o_publico_cabe_na_apresentacao() {
+        let local = |n: usize| -> std::net::SocketAddr {
+            format!("10.0.{}.{}:4000", n / 250, n % 250 + 1)
+                .parse()
+                .unwrap()
+        };
+        let declarar = |quantos: usize| ClientMessage::EmprestarSubida {
+            consentimento: ConsentimentoDePar {
+                pares_que_atende: 1,
+                assiste_por_par: true,
+            },
+            impressao: "3c".repeat(32),
+            locais: (0..quantos).map(local).collect(),
+        };
+        assert!(declarar(MAX_LOCAIS_DE_PAR).validate().is_ok());
+        assert!(matches!(
+            declarar(MAX_LOCAIS_DE_PAR + 1).validate(),
+            Err(ControlError::FieldTooLong {
+                field: "locais",
+                ..
+            })
+        ));
+        // O que o servidor monta com uma declaração no teto: locais + público.
+        let apresentacao = ServerMessage::SirvaTunelPara {
+            mod_id: "seele/eco".into(),
+            nome: "eco".into(),
+            quem: PersonId(1),
+            enderecos: (0..=MAX_LOCAIS_DE_PAR).map(local).collect(),
+            impressao: "3c".repeat(32),
+        };
+        assert!(encode(&apresentacao).is_ok());
     }
 
     #[test]

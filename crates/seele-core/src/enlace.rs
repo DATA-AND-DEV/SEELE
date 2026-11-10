@@ -6017,7 +6017,12 @@ fn locais_a_publicar<F: FnOnce() -> Vec<SocketAddr>>(
     todos: F,
 ) -> Vec<SocketAddr> {
     if consentimento.empresta_conexao() {
-        todos()
+        // O servidor recusa mais que isto (`MAX_LOCAIS_DE_PAR`): uma máquina
+        // com muitas interfaces manda as primeiras, e não uma declaração que
+        // o fio rejeita.
+        let mut locais = todos();
+        locais.truncate(seele_proto::control::MAX_LOCAIS_DE_PAR);
+        locais
     } else {
         Vec::new()
     }
@@ -8449,6 +8454,26 @@ mod tests {
             da_maquina(),
             "quem optou por emprestar deixou de publicar por onde ser alcançado"
         );
+    }
+
+    /// Uma máquina com muitas interfaces não pode montar uma declaração que o
+    /// servidor recusa: o teto do fio é cortado aqui, antes de mandar.
+    #[test]
+    fn os_locais_publicados_cabem_no_teto_do_fio() {
+        let muitos = || {
+            (1..=40u8)
+                .map(|n| SocketAddr::from(([192, 168, 1, n], 4444)))
+                .collect::<Vec<_>>()
+        };
+        let publicados = locais_a_publicar(
+            ConsentimentoDePar {
+                pares_que_atende: 1,
+                assiste_por_par: false,
+            },
+            muitos,
+        );
+        assert_eq!(publicados.len(), seele_proto::control::MAX_LOCAIS_DE_PAR);
+        assert_eq!(publicados[0], muitos()[0]);
     }
 
     #[test]
