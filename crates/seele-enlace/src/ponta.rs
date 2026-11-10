@@ -1915,6 +1915,7 @@ impl Motor {
             }
             Comando::Midia {
                 par,
+                faixa,
                 trilha,
                 tempo,
                 bytes,
@@ -1924,9 +1925,9 @@ impl Motor {
                 };
                 p.comp.midia_na_fila.fetch_sub(1, Ordering::Relaxed);
                 let escrito = p.pronto
-                    && p.midia
-                        .as_ref()
-                        .is_some_and(|m| m.escrever(&mut p.rtc, agora, trilha, tempo, bytes));
+                    && p.midia.as_ref().is_some_and(|m| {
+                        m.escrever(&mut p.rtc, agora, faixa, trilha, tempo, bytes)
+                    });
                 if !escrito {
                     p.comp
                         .contadores
@@ -1935,10 +1936,10 @@ impl Motor {
                 }
                 self.drenar(par);
             }
-            Comando::PedirChave { par } => {
+            Comando::PedirChave { par, faixa } => {
                 if let Some(p) = self.pares.get_mut(&par) {
                     if p.midia.is_some() {
-                        crate::midia::MidiaDoPar::pedir_chave(&mut p.rtc);
+                        crate::midia::MidiaDoPar::pedir_chave(&mut p.rtc, faixa);
                     }
                 }
                 self.drenar(par);
@@ -2441,9 +2442,9 @@ impl Motor {
                     midia.chegou(dados);
                 }
             }
-            Event::KeyframeRequest(_) => {
+            Event::KeyframeRequest(pedido) => {
                 if let Some(midia) = self.pares.get(&id).and_then(|p| p.midia.as_ref()) {
-                    midia.pediram_chave();
+                    midia.pediram_chave(pedido.mid);
                 }
             }
             Event::EgressBitrateEstimate(BweKind::Twcc { estimate, .. }) => {

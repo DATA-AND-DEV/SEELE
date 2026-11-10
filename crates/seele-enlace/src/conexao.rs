@@ -223,6 +223,7 @@ pub(crate) enum Comando {
     /// Um quadro de mídia: sai sem esperar.
     Midia {
         par: usize,
+        faixa: u8,
         trilha: crate::Trilha,
         tempo: u64,
         bytes: Arc<[u8]>,
@@ -230,6 +231,7 @@ pub(crate) enum Comando {
     /// Pede um quadro-chave ao par.
     PedirChave {
         par: usize,
+        faixa: u8,
     },
     /// Até onde a estimativa de banda deve procurar.
     TaxaDaMidia {

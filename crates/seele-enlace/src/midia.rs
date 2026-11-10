@@ -29,15 +29,31 @@ use tokio::sync::mpsc;
 use crate::conexao::{Comando, Compartilhado};
 use crate::Recusa;
 
-/// O `mid` da mídia de vídeo.
-pub const MID_DO_VIDEO: &str = "v";
-/// O `mid` da mídia de som (o som da tela).
-pub const MID_DO_SOM: &str = "s";
+/// Quantas **faixas** uma conexão tem em cada sentido. Uma faixa leva uma
+/// transmissão: um vídeo e o som dele. Quem assiste a mais transmissões que
+/// isso de uma vez recebe as demais pelo canal (ADR 0067).
+pub const FAIXAS: u8 = 4;
 
-/// Os SSRC de quem **atende** (o anfitrião): vídeo, a retransmissão do vídeo, som.
-pub const SSRC_DO_ANFITRIAO: [u32; 3] = [0x5EE1_0001, 0x5EE1_0002, 0x5EE1_0003];
-/// Os SSRC de quem **liga**: vídeo, a retransmissão do vídeo, som.
-pub const SSRC_DE_QUEM_LIGA: [u32; 3] = [0x5EE1_0011, 0x5EE1_0012, 0x5EE1_0013];
+/// O `mid` do vídeo de uma faixa: `v0`, `v1`…
+#[must_use]
+pub fn mid_do_video(faixa: u8) -> String {
+    format!("v{faixa}")
+}
+
+/// O `mid` do som de uma faixa: `s0`, `s1`…
+#[must_use]
+pub fn mid_do_som(faixa: u8) -> String {
+    format!("s{faixa}")
+}
+
+/// Os SSRC de uma faixa num sentido: o vídeo, a retransmissão do vídeo e o
+/// som. `do_anfitriao` diz de quem é a saída: de quem atende, ou de quem liga.
+#[must_use]
+pub const fn ssrc_da_faixa(do_anfitriao: bool, faixa: u8) -> [u32; 3] {
+    let lado = if do_anfitriao { 0x100 } else { 0x200 };
+    let base = 0x5EE1_0000 | lado | ((faixa as u32) << 4);
+    [base | 1, base | 2, base | 3]
+}
 
 /// O relógio do vídeo no RTP.
 pub const RELOGIO_DO_VIDEO: u32 = 90_000;
@@ -79,6 +95,8 @@ pub enum Trilha {
 pub enum EventoDeMidia {
     /// Um quadro inteiro.
     Quadro {
+        /// De qual faixa.
+        faixa: u8,
         /// De qual mídia.
         trilha: Trilha,
         /// O instante do quadro, no relógio da mídia (90 kHz o vídeo, 48 kHz o som).
@@ -90,8 +108,11 @@ pub enum EventoDeMidia {
         /// Os bytes do quadro. Compartilhados: repassar a vários não copia.
         bytes: Arc<[u8]>,
     },
-    /// O par pediu um quadro-chave (PLI).
-    PediramChave,
+    /// O par pediu um quadro-chave do vídeo de uma faixa (PLI).
+    PediramChave {
+        /// De qual faixa.
+        faixa: u8,
+    },
 }
 
 /// A mídia de uma conexão. Vem de [`crate::Conexao::ligar_midia`].
@@ -115,9 +136,16 @@ impl Midia {
     ///
     /// # Errors
     ///
-    /// [`Recusa`]: grande demais, fila cheia, ou a conexão acabou.
-    pub fn mandar(&self, trilha: Trilha, tempo: u64, bytes: Arc<[u8]>) -> Result<(), Recusa> {
-        if bytes.len() > MAX_QUADRO {
+    /// [`Recusa`]: grande demais (ou uma faixa que não existe), fila cheia,
+    /// ou a conexão acabou.
+    pub fn mandar(
+        &self,
+        faixa: u8,
+        trilha: Trilha,
+        tempo: u64,
+        bytes: Arc<[u8]>,
+    ) -> Result<(), Recusa> {
+        if bytes.len() > MAX_QUADRO || faixa >= FAIXAS {
             return Err(Recusa::Grande);
         }
         if self.comp.motivo.borrow().is_some() {
@@ -130,6 +158,7 @@ impl Midia {
         self.cmd
             .send(Comando::Midia {
                 par: self.comp.id,
+                faixa,
                 trilha,
                 tempo,
                 bytes,
@@ -137,9 +166,12 @@ impl Midia {
             .map_err(|_| Recusa::Fechada)
     }
 
-    /// Pede um quadro-chave ao par (PLI).
-    pub fn pedir_chave(&self) {
-        let _ = self.cmd.send(Comando::PedirChave { par: self.comp.id });
+    /// Pede ao par um quadro-chave do vídeo de uma faixa (PLI).
+    pub fn pedir_chave(&self, faixa: u8) {
+        let _ = self.cmd.send(Comando::PedirChave {
+            par: self.comp.id,
+            faixa,
+        });
     }
 
     /// Diz à estimativa de banda até onde vale a pena procurar: sem isso
@@ -168,8 +200,9 @@ impl Midia {
 /// O que a tarefa da ponta guarda da mídia de um par.
 pub(crate) struct MidiaDoPar {
     fila: mpsc::Sender<EventoDeMidia>,
-    /// Um quadro foi largado por fila cheia: o próximo não é contíguo.
-    furo: bool,
+    /// Um quadro de vídeo da faixa foi largado por fila cheia: o próximo
+    /// dela não é contíguo.
+    furo: [bool; FAIXAS as usize],
     video: Pt,
     som: Pt,
 }
@@ -186,35 +219,33 @@ pub(crate) fn configurar(config: RtcConfig) -> RtcConfig {
         .set_reordering_size_audio(0)
 }
 
-/// Declara a mídia num `Rtc`. `anfitriao` diz de que lado da tabela ele está.
-/// `None` se a configuração do `Rtc` não tem H.264 ou Opus.
+/// Declara a mídia num `Rtc`: todas as faixas, nos dois sentidos.
+/// `anfitriao` diz de que lado da tabela ele está. `None` se a configuração
+/// do `Rtc` não tem H.264 ou Opus.
 pub(crate) fn declarar(
     rtc: &mut Rtc,
     anfitriao: bool,
     fila: mpsc::Sender<EventoDeMidia>,
 ) -> Option<MidiaDoPar> {
-    let (meus, dele) = if anfitriao {
-        (SSRC_DO_ANFITRIAO, SSRC_DE_QUEM_LIGA)
-    } else {
-        (SSRC_DE_QUEM_LIGA, SSRC_DO_ANFITRIAO)
-    };
     let video = pt_de(rtc, Codec::H264)?;
     let som = pt_de(rtc, Codec::Opus)?;
-    let mid_v = Mid::from(MID_DO_VIDEO);
-    let mid_s = Mid::from(MID_DO_SOM);
     let mut api = rtc.direct_api();
-    api.declare_media(mid_v, MediaKind::Video);
-    api.declare_media(mid_s, MediaKind::Audio);
-    let [v, rtx, s] = meus.map(Ssrc::from);
-    api.declare_stream_tx(v, Some(rtx), mid_v, None);
-    api.declare_stream_tx(s, None, mid_s, None);
-    let [v, rtx, s] = dele.map(Ssrc::from);
-    api.expect_stream_rx(v, Some(rtx), mid_v, None);
-    api.expect_stream_rx(s, None, mid_s, None);
+    for faixa in 0..FAIXAS {
+        let mid_v = Mid::from(mid_do_video(faixa).as_str());
+        let mid_s = Mid::from(mid_do_som(faixa).as_str());
+        api.declare_media(mid_v, MediaKind::Video);
+        api.declare_media(mid_s, MediaKind::Audio);
+        let [v, rtx, s] = ssrc_da_faixa(anfitriao, faixa).map(Ssrc::from);
+        api.declare_stream_tx(v, Some(rtx), mid_v, None);
+        api.declare_stream_tx(s, None, mid_s, None);
+        let [v, rtx, s] = ssrc_da_faixa(!anfitriao, faixa).map(Ssrc::from);
+        api.expect_stream_rx(v, Some(rtx), mid_v, None);
+        api.expect_stream_rx(s, None, mid_s, None);
+    }
     api.enable_twcc_feedback();
     Some(MidiaDoPar {
         fila,
-        furo: false,
+        furo: [false; FAIXAS as usize],
         video,
         som,
     })
@@ -230,11 +261,24 @@ fn pt_de(rtc: &Rtc, codec: Codec) -> Option<Pt> {
         .map(|p| p.pt())
 }
 
+/// De que faixa e de que mídia é um `mid`.
+fn faixa_do_mid(mid: Mid) -> Option<(u8, Trilha)> {
+    (0..FAIXAS).find_map(|faixa| {
+        if mid == Mid::from(mid_do_video(faixa).as_str()) {
+            Some((faixa, Trilha::Video))
+        } else if mid == Mid::from(mid_do_som(faixa).as_str()) {
+            Some((faixa, Trilha::Som))
+        } else {
+            None
+        }
+    })
+}
+
 impl MidiaDoPar {
     /// Um punho novo: os eventos passam a ir para a fila dele.
     pub(crate) fn trocar_a_fila(&mut self, fila: mpsc::Sender<EventoDeMidia>) {
         self.fila = fila;
-        self.furo = true;
+        self.furo = [true; FAIXAS as usize];
     }
 
     /// Escreve um quadro no `Rtc`. `false` se ele não aceitou.
@@ -242,60 +286,55 @@ impl MidiaDoPar {
         &self,
         rtc: &mut Rtc,
         agora: Instant,
+        faixa: u8,
         trilha: Trilha,
         tempo: u64,
         bytes: Arc<[u8]>,
     ) -> bool {
         let (mid, pt, relogio) = match trilha {
-            Trilha::Video => (MID_DO_VIDEO, self.video, Frequency::NINETY_KHZ),
-            Trilha::Som => (MID_DO_SOM, self.som, Frequency::FORTY_EIGHT_KHZ),
+            Trilha::Video => (mid_do_video(faixa), self.video, Frequency::NINETY_KHZ),
+            Trilha::Som => (mid_do_som(faixa), self.som, Frequency::FORTY_EIGHT_KHZ),
         };
-        rtc.writer(Mid::from(mid)).is_some_and(|escritor| {
+        rtc.writer(Mid::from(mid.as_str())).is_some_and(|escritor| {
             escritor
                 .write(pt, agora, MediaTime::new(tempo, relogio), bytes)
                 .is_ok()
         })
     }
 
-    /// Pede um quadro-chave do vídeo ao par.
-    pub(crate) fn pedir_chave(rtc: &mut Rtc) {
-        if let Some(mut escritor) = rtc.writer(Mid::from(MID_DO_VIDEO)) {
+    /// Pede ao par um quadro-chave do vídeo de uma faixa.
+    pub(crate) fn pedir_chave(rtc: &mut Rtc, faixa: u8) {
+        if let Some(mut escritor) = rtc.writer(Mid::from(mid_do_video(faixa).as_str())) {
             let _ = escritor.request_keyframe(None, KeyframeRequestKind::Pli);
         }
     }
 
     /// Um quadro chegou do `Rtc`.
     pub(crate) fn chegou(&mut self, dados: str0m::media::MediaData) {
-        let trilha = if dados.mid == Mid::from(MID_DO_VIDEO) {
-            Trilha::Video
-        } else if dados.mid == Mid::from(MID_DO_SOM) {
-            Trilha::Som
-        } else {
+        let Some((faixa, trilha)) = faixa_do_mid(dados.mid) else {
             return;
         };
-        let contiguo = dados.contiguous && !(self.furo && trilha == Trilha::Video);
+        let Some(furo) = self.furo.get_mut(usize::from(faixa)) else {
+            return;
+        };
+        let video = trilha == Trilha::Video;
         let evento = EventoDeMidia::Quadro {
+            faixa,
             trilha,
             tempo: dados.time.numer(),
-            contiguo,
+            contiguo: dados.contiguous && !(*furo && video),
             bytes: dados.data,
         };
-        match self.fila.try_send(evento) {
-            Ok(()) => {
-                if trilha == Trilha::Video {
-                    self.furo = false;
-                }
-            }
-            Err(_) => {
-                if trilha == Trilha::Video {
-                    self.furo = true;
-                }
-            }
+        let entrou = self.fila.try_send(evento).is_ok();
+        if video {
+            *furo = !entrou;
         }
     }
 
-    /// O par pediu um quadro-chave.
-    pub(crate) fn pediram_chave(&self) {
-        let _ = self.fila.try_send(EventoDeMidia::PediramChave);
+    /// O par pediu um quadro-chave do vídeo de um `mid`.
+    pub(crate) fn pediram_chave(&self, mid: Mid) {
+        if let Some((faixa, Trilha::Video)) = faixa_do_mid(mid) {
+            let _ = self.fila.try_send(EventoDeMidia::PediramChave { faixa });
+        }
     }
 }

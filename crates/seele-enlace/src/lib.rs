@@ -44,9 +44,9 @@ pub use conexao::{
 pub use credencial::{credencial_valida, sortear_credencial, CREDENCIAL_LEN};
 pub use dtls::CertificadoDtls;
 pub use midia::{
-    EventoDeMidia, Midia, Trilha, ESPERA_PELA_RETRANSMISSAO, ESTIMATIVA_INICIAL_BPS, FILA_DE_MIDIA,
-    FILA_DE_RECEPCAO, MAX_QUADRO, MID_DO_SOM, MID_DO_VIDEO, RELOGIO_DO_SOM, RELOGIO_DO_VIDEO,
-    SSRC_DE_QUEM_LIGA, SSRC_DO_ANFITRIAO,
+    mid_do_som, mid_do_video, ssrc_da_faixa, EventoDeMidia, Midia, Trilha,
+    ESPERA_PELA_RETRANSMISSAO, ESTIMATIVA_INICIAL_BPS, FAIXAS, FILA_DE_MIDIA, FILA_DE_RECEPCAO,
+    MAX_QUADRO, RELOGIO_DO_SOM, RELOGIO_DO_VIDEO,
 };
 pub use ponta::{
     ConfigDoAnfitriao, ContadoresDaPonta, Discagem, FalhaAoDiscar, Pino, Ponta, BUFFER_DE_ENVIO,

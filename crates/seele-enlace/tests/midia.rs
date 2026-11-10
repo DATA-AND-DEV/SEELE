@@ -22,6 +22,9 @@ use seele_enlace::{EventoDeMidia, Midia, Trilha, RELOGIO_DO_VIDEO};
 
 const QUADROS_POR_SEGUNDO: u64 = 30;
 
+/// A faixa dos testes: não a primeira, para provar que a faixa viaja.
+const FAIXA: u8 = 2;
+
 /// Um quadro com forma de H.264 em Annex B: o prefixo, o cabeçalho da NAL
 /// (IDR ou fatia comum), o número do quadro em ASCII e enchimento que nunca
 /// forma um prefixo de início.
@@ -79,7 +82,7 @@ async fn o_video_atravessa_tres_por_cento_de_perda_sem_buraco() {
             let tempo = n * u64::from(RELOGIO_DO_VIDEO) / QUADROS_POR_SEGUNDO;
             let tamanho = if chave { CHAVE } else { COMUM };
             emissor
-                .mandar(Trilha::Video, tempo, quadro(n, chave, tamanho))
+                .mandar(FAIXA, Trilha::Video, tempo, quadro(n, chave, tamanho))
                 .unwrap();
         }
         // Segura o punho: a estimativa é lida depois.
@@ -95,6 +98,7 @@ async fn o_video_atravessa_tres_por_cento_de_perda_sem_buraco() {
             break;
         };
         if let EventoDeMidia::Quadro {
+            faixa: FAIXA,
             trilha: Trilha::Video,
             contiguo,
             bytes,
@@ -145,10 +149,12 @@ async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
 
     // O anfitrião manda (o sentido contrário ao do outro teste): vídeo e som.
     de_la
-        .mandar(Trilha::Video, 0, quadro(0, true, 3_000))
+        .mandar(FAIXA, Trilha::Video, 0, quadro(0, true, 3_000))
         .unwrap();
     let som: Arc<[u8]> = vec![0xF8, 1, 2, 3, 4, 5, 6, 7].into();
-    de_la.mandar(Trilha::Som, 960, Arc::clone(&som)).unwrap();
+    de_la
+        .mandar(FAIXA, Trilha::Som, 960, Arc::clone(&som))
+        .unwrap();
 
     let mut video = false;
     let mut ouviu = false;
@@ -158,6 +164,7 @@ async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
             .expect("a mídia do anfitrião")
         {
             EventoDeMidia::Quadro {
+                faixa: FAIXA,
                 trilha: Trilha::Video,
                 bytes,
                 ..
@@ -166,6 +173,7 @@ async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
                 video = true;
             }
             EventoDeMidia::Quadro {
+                faixa: FAIXA,
                 trilha: Trilha::Som,
                 tempo,
                 bytes,
@@ -175,17 +183,17 @@ async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
                 assert_eq!(tempo, 960);
                 ouviu = true;
             }
-            EventoDeMidia::PediramChave => panic!("ninguém pediu chave"),
+            outro => panic!("inesperado: {outro:?}"),
         }
     }
 
     // Quem assiste pede um quadro-chave: quem manda fica sabendo.
-    de_ca.pedir_chave();
+    de_ca.pedir_chave(FAIXA);
     loop {
         if proximo(&mut de_la, Duration::from_secs(5))
             .await
             .expect("o pedido de quadro-chave")
-            == EventoDeMidia::PediramChave
+            == (EventoDeMidia::PediramChave { faixa: FAIXA })
         {
             break;
         }
@@ -200,7 +208,7 @@ async fn quem_nao_ligou_a_midia_larga_o_pacote_e_conta() {
     let emissor = par.cliente.ligar_midia();
     for n in 0..5 {
         emissor
-            .mandar(Trilha::Video, n * 3000, quadro(n, n == 0, 2_000))
+            .mandar(FAIXA, Trilha::Video, n * 3000, quadro(n, n == 0, 2_000))
             .unwrap();
     }
     let fim = Instant::now() + Duration::from_secs(5);

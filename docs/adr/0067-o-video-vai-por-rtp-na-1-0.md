@@ -29,10 +29,10 @@ Não é um repasse de pacotes RTP (SFU puro). O repasse por quadro custa ao serv
 
 O enlace continua sem SDP. Depois do DTLS, as duas pontas de uma sessão em protocolo 14 declaram, pela API direta do `str0m`, **a mesma tabela fixa**:
 
-- uma mídia de vídeo H.264 e uma de áudio Opus (o som da tela) em cada sentido, com `mid`, SSRC, SSRC de RTX e tipos de carga **constantes do protocolo**, escritos em `seele-proto`;
+- **quatro faixas em cada sentido**, cada uma com uma mídia de vídeo H.264 e uma de áudio Opus (o som da tela), com `mid`, SSRC e SSRC de RTX **constantes do protocolo** (`seele-enlace/src/midia.rs`) e os tipos de carga da configuração comum do `str0m`;
 - as extensões de cabeçalho na ordem padrão do `str0m`, com o retorno de TWCC ligado.
 
-A tabela é parte do protocolo 14: mudar um número dela é mudar de versão. Uma pessoa transmite uma coisa por vez (tela **ou** câmera), então uma mídia de vídeo por sentido basta; o `ScreenId`, a fonte e as medidas, que hoje vão no cabeçalho do canal, passam a ir numa mensagem de controle antes do primeiro quadro.
+A tabela é parte do protocolo 14: mudar um número dela é mudar de versão. Uma faixa leva uma transmissão. Quem transmite usa uma (uma pessoa transmite tela **ou** câmera); quem assiste pode ver várias de uma vez, e o servidor diz em que faixa cada uma desce. Quem assiste a mais de quatro recebe as demais pelo canal. O `ScreenId`, a fonte e as medidas, que hoje vão no cabeçalho do canal, passam a ir numa mensagem de controle antes do primeiro quadro.
 
 A triagem do soquete (`ponta.rs`) passa a entregar ao `Rtc` também os bytes de RTP e RTCP (128–191, RFC 7983), que hoje vão para a fila do ponto de encontro.
 
