@@ -1353,6 +1353,21 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
         })
         .unwrap(),
     ));
+
+    // A câmera (protocolo 13): a mesma abertura, com a fonte no código 2. No
+    // fim da lista, porque o arquivo está congelado e só cresce para baixo.
+    let mut camera = [0_u8; seele_proto::screen::SCREEN_HEADER_LEN];
+    ScreenHeader {
+        version: SCREEN_HEADER_VERSION,
+        screen: ScreenId(5),
+        source: ScreenSource::Camera,
+        codec: ScreenCodec::H264Baseline,
+        width: 1280,
+        height: 720,
+    }
+    .encode(&mut camera)
+    .unwrap();
+    todos.push(("fluxo:abertura-de-tela:camera".to_owned(), camera.to_vec()));
     todos
 }
 
@@ -1815,6 +1830,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
 fn os_codigos_de_um_byte_nao_mudam() {
     assert_eq!(ScreenSource::Monitor.code(), 0);
     assert_eq!(ScreenSource::Window.code(), 1);
+    assert_eq!(ScreenSource::Camera.code(), 2);
     assert_eq!(ScreenCodec::H264Baseline.code(), 0);
     assert_eq!(StreamType::Attachment.byte(), 1);
     assert_eq!(StreamType::Screen.byte(), 2);

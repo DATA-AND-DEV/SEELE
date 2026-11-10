@@ -207,6 +207,7 @@
 /* A barra tem UMA ação principal, o DESLIGAR, no fim e à parte; o SAIR DA SALA
    fica secundário (só para a voz) e a frase de baixo diz a diferença. */
 #tela-sessao[data-vista="ligacao"] #operador-vista { order: 1; }
+#tela-sessao[data-vista="ligacao"] #operador-camera { order: 1; }
 #tela-sessao[data-vista="ligacao"] #ligacao-chat { order: 2; }
 #tela-sessao[data-vista="ligacao"] #operador-sair { order: 3; color: var(--nucleo-apagado); }
 #tela-sessao[data-vista="ligacao"] #ligacao-desligar { order: 4; margin-left: var(--seele-e3); }

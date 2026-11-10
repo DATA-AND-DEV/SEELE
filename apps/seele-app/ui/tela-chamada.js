@@ -264,6 +264,12 @@ function desenharPalco(snapshot, voice_room) {
   const palco = $("palco");
   const tela = snapshot ? snapshot.tela : null;
 
+  // **«Câmera» ou «tela», pelo que a abertura do fluxo declarou** — e nenhum
+  // dos dois antes de ela chegar (`palavrasDaTransmissao`, em `camera.js`).
+  const palavras = palavrasDaTransmissao(tela ? tela.tela : null);
+  $("palco-titulo-tipo").textContent = palavras.titulo;
+  palco.dataset.tipo = palavras.tipo ?? "";
+
   if (!tela) {
     palco.dataset.transmitindo = "nao";
     $("palco-razao").textContent = "";
@@ -296,10 +302,10 @@ function desenharPalco(snapshot, voice_room) {
   // alguém está, e não um nome que esta janela inventaria.
   const dono = voice_room ? voice_room.people.find((pessoa) => pessoa.id === tela.de) : null;
   $("palco-quem").textContent = tela.e_minha
-    ? "SUA TELA"
+    ? palavras.sua
     : dono
-      ? `${apelidoApresentado(dono.id, dono.nickname)} · TELA`
-      : "ALGUÉM DESTA SALA · TELA";
+      ? `${apelidoApresentado(dono.id, dono.nickname)} · ${palavras.rotulo}`
+      : `ALGUÉM DESTA SALA · ${palavras.rotulo}`;
 
   // Só a contagem, e ela é a do **servidor**: `ScreenViewers` conta assinaturas
   // de verdade. A resolução saiu daqui junto com as três caixas de métrica — ela
@@ -324,11 +330,18 @@ function desenharPalco(snapshot, voice_room) {
   // não inventa a causa.
   const parada = $("palco-parada");
   parada.hidden = !tela.parada;
-  parada.textContent = tela.parada ? (PARADAS[tela.parada] ?? "A TELA PAROU") : "";
+  parada.textContent = tela.parada
+    ? (palavras.tipo === "camera"
+      ? FRASES_DA_CAMERA.paradas[tela.parada] ?? FRASES_DA_CAMERA.paradaDesconhecida
+      : PARADAS[tela.parada] ?? "A TELA PAROU")
+    : "";
 
   desenharControlesDoPalco(tela);
   desenharSomDoPalco().catch((falha) => console.warn("som do palco:", falha));
-  botaoDeCinema(true);
+  // A TELA CHEIA é da imagem que chega pelo decodificador. A própria câmera
+  // não passa por ele — é a prévia da mídia —, e o botão abriria um quadro
+  // vazio em tela cheia.
+  botaoDeCinema(!ehAMinhaCamera(tela.tela));
 }
 
 /**
@@ -804,6 +817,12 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
     ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
     : "sair deste servidor e voltar à tela de entrada";
 
+  // **A câmera é uma transmissão, e não é a tela.** O que está no ar pela
+  // câmera desta janela não acende o COMPARTILHAR nem o TROCAR TELA: quem a
+  // desliga é o controle dela, ao lado. Com a câmera ligada o COMPARTILHAR
+  // volta a oferecer a tela — que entra no lugar da câmera.
+  desenharACamera(voice_room, transmissao);
+  if (cameraLigada()) transmissao = null;
   const trocar = $("operador-trocar-tela");
   trocar.hidden = !dentro || !transmissao;
   const outro = $("operador-vista");

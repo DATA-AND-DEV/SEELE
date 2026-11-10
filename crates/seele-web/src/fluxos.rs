@@ -272,6 +272,7 @@ fn quadro_da_tela(tela: &mut Option<ScreenId>, lido: LidoDaTela) -> Vec<Passo> {
                 "screen": cabecalho.screen.0,
                 "width": cabecalho.width,
                 "height": cabecalho.height,
+                "source": crate::tela::nome_da_fonte(cabecalho.source),
             } }))]
         }
         LidoDaTela::Quadro { tipo, bytes } => {
@@ -391,7 +392,7 @@ mod tests {
                 passos,
                 vec![
                     Passo::Evento(
-                        json!({ "ScreenOpened": { "screen": 3, "width": 1280, "height": 720 } })
+                        json!({ "ScreenOpened": { "screen": 3, "width": 1280, "height": 720, "source": "monitor" } })
                     ),
                     Passo::Evento(
                         json!({ "ScreenFrame": { "screen": 3, "key": true, "data": base64(b"chave") } })

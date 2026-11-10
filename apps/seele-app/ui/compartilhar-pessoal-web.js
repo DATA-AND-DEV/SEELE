@@ -141,7 +141,7 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
       if (fechado) return { erro: "encerrada" };
       if (comando === "codificacao_da_tela") return servico.operar({ acao: comando, ...args });
       if (comando === "abertura_da_tela") return { resposta: servico.operar({ acao: comando, largura: args.largura, altura: args.altura }).bytes };
-      if (comando === "compartilhar_tela") {
+      if (comando === "compartilhar_tela" || comando === "compartilhar_camera") {
         queueMicrotask(() => { if (!fechado) transmissao.aoDobrar({ ScreenShareStarted: { person: 1, screen: 1 } }); });
       }
       return { resposta: null };
@@ -158,12 +158,19 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
     }
   } });
   function parar() { captura++; cancelarCaptura?.(); transmissao.parar(); }
-  function usarMidia(midia, limites = { altura_maxima: 720, quadros_maximos: 30, banda_bps: 1200000, com_som: false }) {
+  /**
+   * `camera` diz que a mídia é a câmera (o `getUserMedia`): a trilha é tratada
+   * como movimento e quem a ligou se vê pela própria mídia. **A abertura não
+   * muda**: a chamada pessoal não negocia número de protocolo, e um par da
+   * 0.19 recusa a fonte da câmera — do outro lado ela chega como a imagem
+   * compartilhada de sempre.
+   */
+  function usarMidia(midia, limites = { altura_maxima: 720, quadros_maximos: 30, banda_bps: 1200000, com_som: false }, { camera = false } = {}) {
     if (fechado) { midia.getTracks().forEach(t => t.stop()); throw new Error("Conversa encerrada."); }
     if (!midia.getVideoTracks().length) { midia.getTracks().forEach(t => t.stop()); throw new Error("A captura não tem imagem."); }
     // O adaptador não anuncia suporte ao som de sistema sem um reprodutor.
     for (const t of midia.getAudioTracks()) { t.stop(); midia.removeTrack(t); }
-    try { transmissao.comecar(midia, { ...limites, com_som: false }); }
+    try { transmissao.comecar(midia, { ...limites, com_som: false }, { camera }); }
     catch (erro) { midia.getTracks().forEach(t => t.stop()); throw erro; }
   }
   async function compartilhar() {
@@ -242,5 +249,19 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
     if (document.fullscreenElement === palco || document.webkitFullscreenElement === palco) Promise.resolve(document.exitFullscreen?.() ?? document.webkitExitFullscreen?.()).catch(() => {});
     canvas.remove(); expandir.remove();
   }
-  return { compartilhar, usarMidia, parar, receberControle, telaCheia, fechar, get noAr() { return transmissao.noAr; } };
+  /**
+   * Liga a câmera nesta conversa, no lugar da tela: o `getUserMedia`, no
+   * máximo 720p a 30, sem som (a voz tem o canal dela). As falhas saem com
+   * nome — `NotAllowedError`, `NotFoundError` —, e quem chama escreve a frase.
+   */
+  async function ligarCamera() {
+    if (fechado || !temCameraParaCodificar()) throw new Error(FRASES_DA_CAMERA.semCodificador);
+    cancelarCaptura?.();
+    const vez = ++captura;
+    const midia = await navigator.mediaDevices.getUserMedia(PEDIDO_DA_CAMERA);
+    if (fechado || vez !== captura) { midia.getTracks().forEach(t => t.stop()); return null; }
+    usarMidia(midia, undefined, { camera: true });
+    return midia;
+  }
+  return { compartilhar, usarMidia, ligarCamera, parar, receberControle, telaCheia, fechar, get noAr() { return transmissao.noAr; }, get camera() { return transmissao.camera; }, get midia() { return transmissao.midia; } };
 }

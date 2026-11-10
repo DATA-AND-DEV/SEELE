@@ -105,6 +105,9 @@ const COMANDOS_DA_SESSAO = new Set([
   // A mesa de texto da 1.0: a edição, e a lista de banidos com o desbanir. A
   // resposta que chega depois da troca de vista é de outro servidor.
   "editar_mensagem", "desbanir_pessoa", "listar_banidos", "banidos",
+  // A câmera (1.0): o pedido é da sessão em que foi feito; uma resposta que
+  // chega depois da troca de vista é de outro servidor.
+  "compartilhar_camera", "codificacao_da_camera",
 ]);
 
 /**

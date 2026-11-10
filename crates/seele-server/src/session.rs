@@ -5716,6 +5716,7 @@ async fn assentar(
             ),
             outbound: outbound.clone(),
             tela: tela.clone(),
+            versao: session.protocol_version,
         })
         .await?;
 
@@ -6021,7 +6022,11 @@ async fn apontar_um_par(
         let (responder, resposta) = tokio::sync::oneshot::channel();
         let canal = voice_rooms.of(voice_room).await;
         if canal
-            .send(VoiceRoomCommand::QuemRecebe { screen, responder })
+            .send(VoiceRoomCommand::QuemRecebe {
+                screen,
+                para: quem_quer,
+                responder,
+            })
             .await
             .is_err()
         {
@@ -6187,6 +6192,23 @@ async fn receber_tela(
         if server.telas.lock().await.de(person, sessao) != Some((voice_room, screen)) {
             let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
             tracing::info!(%person, %screen, "a transmissão foi encerrada pelo servidor; o fluxo foi cortado");
+            // **E a sala fica sabendo, pelo nome desta transmissão.** O
+            // controle tirou a vaga — a pessoa parou, ou pediu outra no lugar
+            // (a tela trocada pela câmera) —, e este fluxo ainda tinha bytes a
+            // caminho. Voltar daqui calado deixava a transmissão registrada na
+            // sala para sempre: a próxima da mesma pessoa era recusada como
+            // «já tomada», e ficava anunciada sem que nenhum byte dela
+            // chegasse a alguém (medido em `tests/camera.rs`).
+            //
+            // Pelo nome, e não só pela sessão: se a seguinte já está
+            // registrada, este fim não é dela.
+            let _ = sala
+                .send(VoiceRoomCommand::TelaFechou {
+                    from: person,
+                    sessao,
+                    screen,
+                })
+                .await;
             return Ok(());
         }
         match fluxo.read(&mut buffer).await? {
@@ -6212,6 +6234,7 @@ async fn receber_tela(
         .send(VoiceRoomCommand::TelaFechou {
             from: person,
             sessao,
+            screen,
         })
         .await;
     Ok(())

@@ -2796,13 +2796,13 @@ button.linha-nome:hover { text-decoration: underline; }
   border-color: var(--nucleo-rotulo);
 }
 
-.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):not([data-ativo="sim"]):not(.ativo) {
+.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista, #operador-camera):not([data-ativo="sim"]):not(.ativo) {
   background-color: transparent;
   color: var(--nucleo-texto);
   border-color: var(--nucleo-rotulo);
 }
 
-.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):is(:hover, :focus-visible) {
+.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista, #operador-camera):is(:hover, :focus-visible) {
   border-color: var(--nucleo-acento);
 }
 
@@ -3547,6 +3547,23 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) #botao-server-sessao { order: 3; }
 :root:not([data-casca="celular"]) #operador-sair { order: 4; }
 :root:not([data-casca="celular"]) #operador-vista { order: 5; }
+/* A câmera (1.0), ao lado do COMPARTILHAR: o mesmo desenho, a mesma pílula. */
+:root:not([data-casca="celular"]) #operador-camera { order: 6; }
+/* O estado dela por extenso, numa linha própria sob os controles, com a mesma
+   letra do estado da sala. `pre-line`: as frases têm duas linhas, a que diz o
+   que houve e a que diz o que fazer. */
+:root:not([data-casca="celular"]) .operador > #camera-estado {
+  order: 8;
+  flex: 1 0 100%;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-line;
+  color: var(--seele-rotulo-painel);
+}
+:root:not([data-casca="celular"]) .operador > #camera-estado[data-estado="desligada"],
+:root:not([data-casca="celular"]) .operador > #camera-estado[data-estado="parada"] { color: var(--seele-laranja-claro); }
 :root:not([data-casca="celular"]) .operador > #sala-estado { order: 8; flex: 1 0 100%; margin: 0; font-size: 11px; color: var(--seele-rotulo-painel); }
 /* **«microfone aberto · ouvindo» sai da vista** (0.19, pedido do dono): os
    ícones do microfone e do fone já dizem o estado, com a barra quando
@@ -3575,10 +3592,14 @@ button.linha-nome:hover { text-decoration: underline; }
    compartilhar: colunas iguais, cada controle esticado em pílula de 44px. Fora
    da vista da ligação, que tem a barra dela (`camada-sala.css`). */
 #tela-sessao:not([data-vista="ligacao"]) .operador > .operador-topo > :is(#botao-mudo, #botao-surdo, #botao-server-sessao),
-#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-fileira > :is(#operador-sair, #operador-vista) {
+#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-fileira > :is(#operador-sair, #operador-vista, #operador-camera) {
   flex: 1 1 0;
   width: auto;
-  min-width: 44px;
+  /* 40px, e não 44: com a câmera (1.0) são seis comandos numa sala, e a 44 o
+     sexto caía sozinho na linha de baixo, esticado na largura do cartão. A
+     altura continua 44, e a largura real de cada um é a sexta parte do cartão
+     (40,7px no cartão de 290). */
+  min-width: 40px;
   height: 44px;
   min-height: 44px;
   padding: 0;
@@ -3587,7 +3608,7 @@ button.linha-nome:hover { text-decoration: underline; }
   justify-content: center;
   border-radius: var(--seele-raio-pilula);
 }
-#tela-sessao:not([data-vista="ligacao"]) .operador :is(#operador-sair, #operador-vista, #botao-server-sessao) .glifo { width: 1.15em; height: 1.15em; }
+#tela-sessao:not([data-vista="ligacao"]) .operador :is(#operador-sair, #operador-vista, #operador-camera, #botao-server-sessao) .glifo { width: 1.15em; height: 1.15em; }
 
 /* ---------- a conversa: cabeçalho ---------- */
 :root:not([data-casca="celular"]) .linha-barra { flex-wrap: wrap; }

@@ -1298,6 +1298,13 @@ pub enum Event {
         width: u16,
         /// Altura em pixels.
         height: u16,
+        /// O que é: a tela inteira, uma janela, ou a câmera de quem transmite.
+        ///
+        /// **Só o fluxo sabe**, e é por isso que mora aqui e não no
+        /// [`Snapshot`]: o anúncio de uma transmissão no controle não diz o
+        /// que ela mostra, e a casca só pode escrever «câmera» depois de a
+        /// abertura chegar. Antes disso ela não afirma nem um nem outro.
+        source: ScreenKind,
     },
     /// Um quadro comprimido de uma transmissão alheia.
     ///
@@ -1381,6 +1388,57 @@ pub enum Event {
         /// `mod-desligado`, `outro-pedido` ou `sem-aceite`. A frase é da casca.
         motivo: &'static str,
     },
+    /// **A própria câmera tem de mandar um quadro-chave.**
+    ///
+    /// Quem codifica a câmera é a casca (o `VideoEncoder` da janela), e não
+    /// este lado: o pedido de quem acabou de entrar para assistir, ou de um
+    /// quadro que o teto descartou no caminho, só serve de alguma coisa se
+    /// chegar até lá. Sem este evento o pedido morria aqui, e quem entrou
+    /// ficava olhando o palco vazio até a transmissão recomeçar.
+    CameraKeyFrameRequested {
+        /// Qual transmissão.
+        screen: u32,
+    },
+    /// **O teto de banda da própria câmera, agora.**
+    ///
+    /// Em bits por segundo, do fluxo inteiro. A casca mira o codificador
+    /// abaixo dele: o que estourar é descartado antes do fio, e cada descarte
+    /// custa um quadro-chave. Chega quando o fluxo abre e a cada vez que o
+    /// teto anda — o sinal da voz, quem entra para assistir, a subida de quem
+    /// hospeda.
+    CameraBudget {
+        /// Qual transmissão.
+        screen: u32,
+        /// O teto.
+        bps: u32,
+    },
+    /// **A própria câmera parou de ir para a sala**, e volta sozinha.
+    ///
+    /// O §3.2 do desenho da tela: quando o sinal aperta, quem para é o vídeo,
+    /// e a voz fica. O fluxo fechou; a casca para de codificar e diz por quê.
+    /// A volta é um [`Self::ScreenOpened`] novo da mesma transmissão.
+    CameraPaused {
+        /// Qual transmissão.
+        screen: u32,
+        /// O nome estável do motivo, dos de
+        /// [`crate::motivos_de_parada_da_tela`]. A frase é da casca.
+        reason: &'static str,
+    },
+}
+
+/// O que uma transmissão mostra, como a abertura do fluxo declarou.
+///
+/// Atravessa como texto minúsculo — `"monitor"`, `"window"`, `"camera"` —,
+/// pelo mesmo motivo de [`Prioridade`]: a casca escreve e lê este JSON à mão.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenKind {
+    /// A tela inteira.
+    Monitor,
+    /// Uma janela.
+    Window,
+    /// A câmera de quem transmite (protocolo 13).
+    Camera,
 }
 
 /// Where one file is on its way.
@@ -2121,6 +2179,27 @@ pub enum ConnectionError {
     /// Um hash que não bate quase nunca é corrupção: é uma página de erro de
     /// proxy chegando no lugar do arquivo.
     ScreenModuleRefused,
+    /// Um quadro da câmera chegou e não há transmissão de câmera para levá-lo.
+    ///
+    /// A transmissão acabou — a pessoa parou, o servidor a encerrou, a conexão
+    /// caiu — ou nunca chegou a abrir. A casca para de codificar e solta a
+    /// câmera: continuar seria a luz da câmera acesa para ninguém.
+    CameraNotLive,
+    /// A fila de quadros da câmera encheu, e este quadro **não foi**.
+    ///
+    /// A rede não está levando no passo de quem codifica. O quadro recusado
+    /// era referência do seguinte, então a casca faz do próximo um
+    /// quadro-chave; e o número vai junto para ela poder dizer quantos já
+    /// ficaram, em vez de a imagem engasgar sem explicação.
+    CameraQueueFull {
+        /// Quantos quadros esta transmissão já recusou por fila cheia.
+        dropped: u64,
+    },
+    /// As medidas da câmera não são as de uma transmissão que o fio carrega.
+    ///
+    /// Zero, ímpar que virou zero, ou acima de 1080p. Respondido antes de
+    /// qualquer coisa sair, pela mesma régua do cabeçalho de abertura.
+    CameraBadSize,
 }
 
 impl std::fmt::Display for ConnectionError {

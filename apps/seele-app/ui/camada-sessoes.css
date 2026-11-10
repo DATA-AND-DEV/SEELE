@@ -200,3 +200,17 @@
   border-style: dashed;
 }
 
+/* A CÂMERA que este servidor ainda não conhece (o de antes da 1.0), ou que
+   esta janela não codifica: à vista e apagada, como o COMPARTILHAR sem captura,
+   com o porquê no `title`; o clique escreve a frase ao lado dela. */
+#operador-camera[aria-disabled="true"] {
+  opacity: 0.55;
+  border-style: dashed;
+}
+/* No ar: aceso como o microfone aberto, para se ver de relance que a câmera
+   está indo para a sala. */
+#operador-camera:is([data-estado="no-ar"], [data-estado="ligando"], [data-estado="pedindo"]) {
+  color: var(--seele-laranja-claro);
+  border-color: var(--seele-laranja-claro);
+}
+

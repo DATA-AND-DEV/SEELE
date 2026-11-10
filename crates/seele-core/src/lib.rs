@@ -83,6 +83,7 @@ pub mod chegada;
 pub mod client;
 pub mod confere_codigo;
 pub mod conhecidos;
+pub mod de_fora;
 pub use seele_sessao::despedida;
 pub mod encontro;
 pub mod enlace;
@@ -304,7 +305,9 @@ pub use seele_proto::maquina;
 /// **não** está aqui: quadros por segundo. §5, e é decisão e não esquecimento —
 /// a tela não promete a escolha, e um número que a casca pudesse escrever no
 /// cabeçalho seria a casca prometendo.
-pub use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
+pub use seele_proto::screen::{
+    ScreenCodec, ScreenHeader, ScreenSource, PROTOCOLO_DA_CAMERA, SCREEN_HEADER_VERSION,
+};
 pub use seele_proto::signal::{Signal, SignalBand, SyncInputs};
 pub use seele_proto::transport::DEFAULT_PORT;
 pub use seele_proto::uri;

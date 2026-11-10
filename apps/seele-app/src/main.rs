@@ -13424,6 +13424,170 @@ fn compartilhar_tela(
     session.conexao(carimbo)?.compartilhar_tela(fonte, limites)
 }
 
+/// O que o codificador desta janela faz com a câmera: as medidas, a cadência,
+/// o teto de banda e o codec. É conta, e não fala com o servidor.
+///
+/// A janela pergunta antes de pedir a câmera ao servidor, com as medidas que o
+/// sistema entregou: é com a resposta que ela põe o `VideoEncoder` à prova, e
+/// uma janela que não codifica recusa antes de a sala ouvir que há uma câmera.
+#[tauri::command]
+fn codificacao_da_camera(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    largura: u32,
+    altura: u32,
+    limites: seele_ffi::LimitesDeTela,
+) -> Result<seele_ffi::CodificacaoDaCamera, ConnectionError> {
+    Ok(session
+        .conexao(carimbo)?
+        .codificacao_da_camera(largura, altura, limites))
+}
+
+/// Começa a transmitir a câmera, no lugar da tela.
+///
+/// Quem captura e codifica é a janela (`ui/camera.js`): este processo não tem
+/// captura de câmera, porque o workspace proíbe `unsafe`. `largura` e `altura`
+/// são as do codificador dela. `ConnectionError::ServidorAntigo` quando o
+/// servidor é de antes do protocolo da câmera — nada sai.
+#[tauri::command]
+fn compartilhar_camera(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    largura: u32,
+    altura: u32,
+    limites: seele_ffi::LimitesDeTela,
+) -> Result<(), ConnectionError> {
+    session
+        .conexao(carimbo)?
+        .compartilhar_camera(largura, altura, limites)
+}
+
+/// O cabeçalho que diz se o quadro é um quadro-chave: `1` ou `0`.
+const CABECALHO_DA_CHAVE: &str = "seele-chave";
+/// O cabeçalho com o `SessaoId` da sessão a que o quadro pertence.
+const CABECALHO_DA_SESSAO: &str = "seele-sessao";
+/// O cabeçalho com a geração que a janela viu dessa sessão.
+const CABECALHO_DA_GERACAO: &str = "seele-geracao";
+
+/// Um quadro da câmera, codificado pela janela, a caminho da sala.
+///
+/// # O corpo é cru, e o resto vai nos cabeçalhos
+///
+/// Trinta quadros por segundo em base64 dentro de JSON seriam um terço de
+/// bytes a mais e duas cópias por quadro. O corpo do pedido são os bytes do
+/// quadro, em Annex-B, e o que um comando comum levaria em argumentos — a
+/// sessão, a geração e se é quadro-chave — vai nos cabeçalhos.
+///
+/// O WebView que não entrega corpo cru (o `postMessage` que o Tauri usa quando
+/// o protocolo `ipc:` não está disponível) manda os mesmos bytes como uma
+/// lista de números: ela é lida, mais devagar, em vez de recusada.
+///
+/// # Errors
+///
+/// Nenhum quadro some calado: `CameraNotLive`, `CameraQueueFull` e
+/// `CameraBadSize` voltam à janela, que diz o que houve; e os erros de carimbo
+/// de todo comando de sessão.
+#[tauri::command]
+fn quadro_da_camera(
+    session: State<'_, Session>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), ConnectionError> {
+    let (carimbo, chave) = cabecalhos_do_quadro(request.headers())?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
+        tauri::ipc::InvokeBody::Json(valor) => serde_json::from_value::<Vec<u8>>(valor.clone())
+            .map_err(|_| ConnectionError::CameraBadSize)?,
+    };
+    session.conexao(carimbo)?.quadro_da_camera(chave, bytes)
+}
+
+/// O carimbo e a marca de quadro-chave, lidos dos cabeçalhos do pedido.
+///
+/// Sem a sessão ou sem a geração o quadro não tem dono, e a resposta é a de
+/// um comando sem sessão. A marca de chave ausente é «não é chave»: é o lado
+/// seguro, porque quem assiste só começa a decodificar por um quadro-chave.
+fn cabecalhos_do_quadro(
+    cabecalhos: &tauri::http::HeaderMap,
+) -> Result<(sessoes::CarimboDaJanela, bool), ConnectionError> {
+    let numero =
+        |nome: &str| -> Option<u64> { cabecalhos.get(nome)?.to_str().ok()?.trim().parse().ok() };
+    let (Some(sessao), Some(geracao)) = (numero(CABECALHO_DA_SESSAO), numero(CABECALHO_DA_GERACAO))
+    else {
+        return Err(ConnectionError::NotConnected);
+    };
+    let chave = cabecalhos
+        .get(CABECALHO_DA_CHAVE)
+        .is_some_and(|valor| valor.as_bytes() == b"1");
+    Ok((sessoes::CarimboDaJanela { sessao, geracao }, chave))
+}
+
+#[cfg(test)]
+mod quadro_da_camera_testes {
+    use super::*;
+
+    fn cabecalhos(pares: &[(&'static str, &'static str)]) -> tauri::http::HeaderMap {
+        let mut mapa = tauri::http::HeaderMap::new();
+        for (nome, valor) in pares {
+            mapa.insert(*nome, tauri::http::HeaderValue::from_static(valor));
+        }
+        mapa
+    }
+
+    /// **O quadro leva a sessão, a geração e a marca de chave nos cabeçalhos**,
+    /// porque o corpo do pedido é o quadro cru e não tem onde levá-las.
+    #[test]
+    fn o_carimbo_e_a_chave_do_quadro_vem_dos_cabecalhos() {
+        let lido = cabecalhos_do_quadro(&cabecalhos(&[
+            ("seele-sessao", "7"),
+            ("seele-geracao", "3"),
+            ("seele-chave", "1"),
+        ]));
+        assert_eq!(
+            lido,
+            Ok((
+                sessoes::CarimboDaJanela {
+                    sessao: 7,
+                    geracao: 3
+                },
+                true
+            ))
+        );
+        // Sem a marca, e com qualquer coisa que não seja `1`: não é chave. É o
+        // lado seguro — quem assiste só começa a decodificar por uma chave.
+        for marca in [None, Some("0"), Some("true"), Some("")] {
+            let mut pares = vec![("seele-sessao", "7"), ("seele-geracao", "3")];
+            if let Some(marca) = marca {
+                pares.push(("seele-chave", marca));
+            }
+            assert_eq!(
+                cabecalhos_do_quadro(&cabecalhos(&pares)).map(|(_, chave)| chave),
+                Ok(false),
+                "{marca:?}"
+            );
+        }
+    }
+
+    /// **Um quadro sem dono não vai a sessão nenhuma.** Sem a sessão, sem a
+    /// geração, ou com um número que não se lê, a resposta é a de um comando
+    /// sem sessão — e nunca a sessão que estiver na vista.
+    #[test]
+    fn um_quadro_sem_sessao_ou_sem_geracao_nao_tem_dono() {
+        for pares in [
+            vec![],
+            vec![("seele-sessao", "7")],
+            vec![("seele-geracao", "3")],
+            vec![("seele-sessao", "sete"), ("seele-geracao", "3")],
+            vec![("seele-sessao", "7"), ("seele-geracao", "-1")],
+        ] {
+            assert_eq!(
+                cabecalhos_do_quadro(&cabecalhos(&pares)),
+                Err(ConnectionError::NotConnected),
+                "{pares:?}"
+            );
+        }
+    }
+}
+
 /// Para de transmitir. Idempotente do outro lado: parar sem estar
 /// compartilhando não é erro.
 #[tauri::command]
@@ -15844,6 +16008,9 @@ fn main() {
             permissao_de_tela,
             pedir_permissao_de_tela,
             compartilhar_tela,
+            codificacao_da_camera,
+            compartilhar_camera,
+            quadro_da_camera,
             ajustar_limites_da_tela,
             parar_de_compartilhar,
             pedir_quadro_chave,

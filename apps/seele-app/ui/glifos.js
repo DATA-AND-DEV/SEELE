@@ -385,6 +385,13 @@ const GLIFOS = {
     ["path", { d: "M8 8.8V5.2M6.4 6.6 8 5l1.6 1.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }],
   ],
 
+  // A câmera: o corpo e a lente de lado, vazados como a tela. É o que o botão
+  // faz — mostrar a câmera para a sala —, ao lado do monitor do COMPARTILHAR.
+  camera: [
+    ["rect", { x: "1.8", y: "4.2", width: "8.6", height: "7.6", rx: "1.4", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
+    ["path", { d: "M10.4 7.2 14.2 5v6l-3.8-2.2", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }],
+  ],
+
   // A peça de quebra-cabeça do canvas `Main`: o que vem de um MOD na coluna de
   // canais («DOS MODS»). Um quadrado com dois encaixes, vazado como o anexo.
   peca: [

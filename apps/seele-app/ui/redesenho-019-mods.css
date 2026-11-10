@@ -702,6 +702,35 @@
   bottom: 16px;
   z-index: 2;
 }
+/* O estado da câmera, numa linha própria da bandeja, sob os comandos: pedindo
+   ao sistema, negada, parada pelo sinal. `width: 0` com `min-width: 100%` para
+   a frase caber na largura dos comandos em vez de alargar a bandeja; duas
+   linhas de sentido (`pre-line`), a que diz o que houve e a que diz o que
+   fazer. A cor é a do aviso quando a câmera não está indo. */
+.chamada-camera-estado {
+  flex: 0 0 100%;
+  width: 0;
+  min-width: 100%;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  white-space: pre-line;
+  color: var(--seele-rotulo-painel);
+  /* A bandeja é de vidro e fica por cima do que rola — na janela baixa, por
+     cima da própria imagem da câmera. A frase leva o fundo do painel para se
+     ler sobre qualquer coisa. */
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--seele-negro-painel);
+}
+.chamada-camera-estado:is([data-estado="desligada"], [data-estado="parada"]) { color: var(--seele-laranja-claro); }
+/* Com a frase à vista a bandeja alarga até onde a frase precisa, em vez de a
+   frase quebrar em cinco linhas na largura dos seis comandos: na janela mínima
+   (720×480) cada linha a mais é uma linha de bandeja por cima dos cartões. */
+.chamada-controles:has(> .chamada-camera-estado:not([hidden])) { width: min(600px, calc(100% - 44px)); row-gap: 6px; }
 /* **Na ligação pessoal a barra é a do operador** (`camada-sala.css`: «os
    mesmos controles e handlers, sem cópia»). Esta cópia é da vista da chamada
    do servidor, onde a coluna do operador sai de cena; na ligação ela punha um

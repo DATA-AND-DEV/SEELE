@@ -153,3 +153,4 @@ tunel:ping	0c0003
 fluxo:pedido-de-imagem:enviar-ao-perfil	0a02008010
 fluxo:pedido-de-imagem:ler-do-perfil	0a032a01abababababababababababababababababababababababababababababababab
 fluxo:resposta-de-imagem	0a008008
+fluxo:abertura-de-tela:camera	01000000050200050002d0

@@ -1011,6 +1011,15 @@ impl<C: Captura> Laco<C> {
 pub struct PedidoDeChave(mpsc::Sender<Ordem>);
 
 impl PedidoDeChave {
+    /// Uma alça para quem escoa uma transmissão que **não** vem da bomba, e o
+    /// lado que lê os pedidos dela (`crate::de_fora`: a câmera, codificada
+    /// pela casca). As confirmações de quadro chegam por ali também, e quem
+    /// está de fora as ignora: não há codificador deste lado a segurar.
+    pub(crate) fn de_fora() -> (Self, mpsc::Receiver<Ordem>) {
+        let (manda, recebe) = mpsc::channel();
+        (Self(manda), recebe)
+    }
+
     fn ativar_confirmacao(&self) {
         let _ = self.0.send(Ordem::ConfirmarQuadros);
     }

@@ -80,9 +80,9 @@ pub use types::{
     Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason, OfertaDeMaquinaFfi,
     PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, PortaDeTunel, Preview,
     PreviewRefusal, PreviewRules, QuedaDeTunel, RelatorioDeTunel, SaveDestination, SaveRefused,
-    Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao,
-    TermoOferecidoFfi, Transfer, TransmissaoNaSala, Trust, TunelOferecidoFfi, VoiceMode, VoiceRoom,
-    VoiceRoomSync, VolumeRefusal,
+    ScreenKind, Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry,
+    TemaDaSessao, TermoOferecidoFfi, Transfer, TransmissaoNaSala, Trust, TunelOferecidoFfi,
+    VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// Diz que este processo tem tela para pedidos de máquina de jogo: toda
@@ -1547,6 +1547,15 @@ struct Shared {
     /// tamanho, e o `SCWindow` — que é o que a captura precisa — fica deste
     /// lado, esperando a escolha.
     fontes_de_tela: Mutex<Vec<seele_core::FonteDeTela>>,
+    /// Por onde os quadros da câmera entram, enquanto há uma câmera pedida ou
+    /// no ar.
+    ///
+    /// `None` é «esta sessão não está mandando câmera», e é o que
+    /// [`Connection::quadro_da_camera`] responde com
+    /// [`ConnectionError::CameraNotLive`]. Trocada a cada
+    /// [`Connection::compartilhar_camera`] e esvaziada por
+    /// [`Connection::parar_de_compartilhar`].
+    camera: Mutex<Option<seele_core::de_fora::EntradaDeFora>>,
 }
 
 impl Shared {
@@ -1580,6 +1589,13 @@ impl Shared {
             .store(restante.map_or(0, |q| q.as_secs()), Ordering::Relaxed);
         if let seele_core::Link::InternalBattery { attempts } = estado {
             self.link_attempts.store(attempts, Ordering::Relaxed);
+        }
+    }
+
+    /// Fecha a porta por onde os quadros da câmera entravam.
+    fn largar_a_camera(&self) {
+        if let Ok(mut camera) = self.camera.lock() {
+            *camera = None;
         }
     }
 
@@ -2258,6 +2274,7 @@ impl Connection {
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
+            camera: Mutex::new(None),
         });
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -4235,14 +4252,158 @@ impl Connection {
     ) -> Result<(), ConnectionError> {
         let escolhida = self.fonte_escolhida(fonte)?;
         let biblioteca = modulo_de_video()?;
-        let pedido = seele_core::PedidoDeTela {
+        let pedido = seele_core::PedidoDeTela::DoSistema {
             biblioteca,
             origem: escolhida.origem(),
             captura: seele_core::CapturaEmCaixa::nova(escolhida.captura()),
         };
+        // A tela entra no lugar da câmera, se havia uma: a porta dos quadros
+        // dela fecha aqui, e a casca que ainda empurrar ouve
+        // [`ConnectionError::CameraNotLive`].
+        self.shared.largar_a_camera();
         self.command(Command::ShareScreen {
             pedido: Box::new(pedido),
             limites: limites_do_nucleo(limites),
+        })
+    }
+
+    /// Começa a transmitir a **câmera**, no lugar da tela.
+    ///
+    /// # Quem captura e quem codifica
+    ///
+    /// A casca. Este workspace proíbe `unsafe`, e não há captura de câmera
+    /// nativa sem ele; a janela tem o `getUserMedia` e o `VideoEncoder` do
+    /// sistema. `largura` e `altura` são as medidas com que **ela** codifica —
+    /// vão no cabeçalho de abertura, e quem assiste arma o decodificador por
+    /// elas. Os quadros chegam depois, por [`Self::quadro_da_camera`].
+    ///
+    /// # Uma imagem por pessoa
+    ///
+    /// A câmera vai pelo mesmo caminho da tela — o mesmo `StartScreenShare`, a
+    /// mesma permissão, o mesmo fluxo —, e **no lugar dela**: quem estava
+    /// compartilhando a tela para de compartilhá-la quando liga a câmera. Quem
+    /// avisa a pessoa disso é a casca, antes de chamar.
+    ///
+    /// **`Ok` quer dizer «foi pedido»**, como em [`Self::compartilhar_tela`]:
+    /// o fluxo abre quando o servidor dá nome à transmissão, e a casca fica
+    /// sabendo por um [`Event::ScreenOpened`] da própria transmissão, com
+    /// `source: "camera"`. Só então há para onde mandar quadro.
+    ///
+    /// # Errors
+    ///
+    /// - [`ConnectionError::NotConnected`] sem sessão;
+    /// - [`ConnectionError::ServidorAntigo`] quando o servidor negociou menos
+    ///   que o protocolo da câmera (13). **Nada saiu**: um servidor do 12
+    ///   anunciaria a transmissão e recusaria o fluxo dela, e a sala ficaria
+    ///   olhando uma tela que não existe;
+    /// - [`ConnectionError::CameraBadSize`] para medidas que o cabeçalho de
+    ///   abertura recusaria.
+    pub fn compartilhar_camera(
+        &self,
+        largura: u32,
+        altura: u32,
+        limites: LimitesDeTela,
+    ) -> Result<(), ConnectionError> {
+        let comecou = self.comecar_a_camera(largura, altura, limites);
+        self.shared
+            .gravar_pedido_da_tela(comecou.is_ok().then_some(limites));
+        comecou
+    }
+
+    /// A metade de [`Self::compartilhar_camera`] que recusa antes do fio.
+    fn comecar_a_camera(
+        &self,
+        largura: u32,
+        altura: u32,
+        limites: LimitesDeTela,
+    ) -> Result<(), ConnectionError> {
+        let negociado = self.protocolo_negociado();
+        if negociado == 0 {
+            return Err(ConnectionError::NotConnected);
+        }
+        let exige = seele_core::PROTOCOLO_DA_CAMERA;
+        if negociado < exige {
+            return Err(ConnectionError::ServidorAntigo { negociado, exige });
+        }
+        let (largura, altura) = medidas_da_camera(largura, altura)?;
+        let (entrada, quadros) = seele_core::de_fora::canal_de_fora(largura, altura);
+        // A porta é trocada **antes** de o pedido sair: a resposta do servidor
+        // chega por outra thread, e um quadro que encontrasse a porta da
+        // câmera anterior iria para uma transmissão que acabou.
+        if let Ok(mut camera) = self.shared.camera.lock() {
+            *camera = Some(entrada);
+        }
+        let pedido = seele_core::PedidoDeTela::DeFora(quadros);
+        let pedido = self.command(Command::ShareScreen {
+            pedido: Box::new(pedido),
+            limites: limites_da_camera(limites),
+        });
+        if pedido.is_err() {
+            self.shared.largar_a_camera();
+        }
+        pedido
+    }
+
+    /// **O que a casca manda o codificador dela fazer com esta câmera**: as
+    /// medidas, a cadência, o teto de banda e o codec.
+    ///
+    /// `largura` e `altura` são as que a câmera entrega. As medidas que voltam
+    /// são as do degrau que os limites pedem, na proporção dela, e nunca
+    /// maiores que ela — o mesmo que o codificador de tela faz. Não fala com
+    /// o servidor: é conta.
+    #[must_use]
+    pub fn codificacao_da_camera(
+        &self,
+        largura: u32,
+        altura: u32,
+        limites: LimitesDeTela,
+    ) -> CodificacaoDaCamera {
+        codificacao_da_camera(largura, altura, limites)
+    }
+
+    /// Entrega um quadro da câmera, já codificado em H.264 Annex-B.
+    ///
+    /// `chave` diz se dá para começar a decodificar por ele. O primeiro de um
+    /// fluxo tem de ser, e a casca manda outro a cada
+    /// [`Event::CameraKeyFrameRequested`].
+    ///
+    /// # Errors
+    ///
+    /// Nenhum quadro some calado:
+    /// - [`ConnectionError::CameraNotLive`] quando não há câmera a transmitir;
+    /// - [`ConnectionError::CameraQueueFull`] quando a fila encheu — o quadro
+    ///   não foi, e o próximo tem de ser chave;
+    /// - [`ConnectionError::CameraBadSize`] para um quadro vazio ou maior que
+    ///   o fio carrega.
+    pub fn quadro_da_camera(&self, chave: bool, bytes: Vec<u8>) -> Result<(), ConnectionError> {
+        let entrada = self
+            .shared
+            .camera
+            .lock()
+            .ok()
+            .and_then(|camera| camera.clone())
+            .ok_or(ConnectionError::CameraNotLive)?;
+        entrada.quadro(chave, bytes).map_err(|recusa| match recusa {
+            seele_core::de_fora::RecusaDeFora::FilaCheia { recusados } => {
+                // Dito uma vez por potência de dois: a 30 quadros por segundo,
+                // uma linha por recusa seria o próprio registro a engasgar.
+                if recusados.is_power_of_two() {
+                    tracing::warn!(
+                        recusados,
+                        "a fila de quadros da câmera encheu: a rede não leva no passo de quem \
+                         codifica"
+                    );
+                }
+                ConnectionError::CameraQueueFull { dropped: recusados }
+            }
+            seele_core::de_fora::RecusaDeFora::Fechada => {
+                self.shared.largar_a_camera();
+                ConnectionError::CameraNotLive
+            }
+            seele_core::de_fora::RecusaDeFora::Vazio
+            | seele_core::de_fora::RecusaDeFora::GrandeDemais { .. } => {
+                ConnectionError::CameraBadSize
+            }
         })
     }
 
@@ -4288,6 +4449,9 @@ impl Connection {
         // dobra. As duas limpam, porque só uma delas acontece de cada vez:
         // quando esta pessoa aperta PARAR, o quadro do servidor pode nunca chegar.
         self.shared.gravar_pedido_da_tela(None);
+        // E a porta da câmera, se era uma câmera: um quadro que a casca ainda
+        // empurrar depois de parar ouve [`ConnectionError::CameraNotLive`].
+        self.shared.largar_a_camera();
         self.command(Command::StopScreenShare)
     }
 
@@ -4875,6 +5039,105 @@ fn limites_do_nucleo(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
     }
 }
 
+/// **O H.264 que a casca codifica**, na forma que o `VideoEncoder` pede:
+/// Baseline, nível 4.0 — o `ScreenCodec::H264Baseline` que a abertura anuncia.
+///
+/// Mora aqui, e não na casca: quem decide o perfil é quem escreve a abertura,
+/// e a casca não escreve perfil nenhum à mão. É o mesmo texto do
+/// `seele_web::tela::CODEC_DO_NAVEGADOR`, e a conformidade
+/// (`camera.rs`) prende um ao outro.
+pub const CODEC_DA_CAMERA: &str = "avc1.42E028";
+
+/// O teto de banda de uma câmera quando ninguém escolheu um: o da prova, o
+/// mesmo da tela (`seele_core::TETO_DA_PROVA_BPS`).
+pub const TETO_PADRAO_DA_CAMERA_BPS: u32 = seele_core::TETO_DA_PROVA_BPS;
+
+/// O que o codificador da casca recebe para a câmera.
+///
+/// A mesma forma do que o `.wasm` dá à página do navegador
+/// (`seele_web::tela::codificacao`), porque a casca é a mesma nos dois.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CodificacaoDaCamera {
+    /// O codec, como o `VideoEncoder` o pede. Ver [`CODEC_DA_CAMERA`].
+    pub codec: &'static str,
+    /// Largura a codificar, em pixels, par.
+    pub largura: u32,
+    /// Altura a codificar, em pixels, par.
+    pub altura: u32,
+    /// Quadros por segundo.
+    pub quadros: u32,
+    /// O teto de banda de partida, em bits por segundo. O que vale depois é o
+    /// que chega por [`Event::CameraBudget`].
+    pub banda_bps: u32,
+}
+
+/// A conta de [`Connection::codificacao_da_camera`], fora da conexão para ser
+/// conferida sem uma.
+#[must_use]
+pub fn codificacao_da_camera(
+    largura: u32,
+    altura: u32,
+    limites: LimitesDeTela,
+) -> CodificacaoDaCamera {
+    let do_nucleo = limites_da_camera(limites);
+    let fonte = (
+        usize::try_from(largura).unwrap_or(0),
+        usize::try_from(altura).unwrap_or(0),
+    );
+    let (mut l, mut a) = seele_core::medidas_para(do_nucleo.resolucao, fonte.0, fonte.1);
+    // Nunca ampliar: uma câmera de 480 linhas vai do tamanho dela, com os dois
+    // lados pares.
+    if fonte.0 > 0 && fonte.1 > 0 && fonte.1 < a {
+        (l, a) = ((fonte.0 / 2 * 2).max(2), (fonte.1 / 2 * 2).max(2));
+    }
+    CodificacaoDaCamera {
+        codec: CODEC_DA_CAMERA,
+        largura: u32::try_from(l).unwrap_or(u32::MAX),
+        altura: u32::try_from(a).unwrap_or(u32::MAX),
+        quadros: do_nucleo.cadencia.hz(),
+        banda_bps: limites.banda_bps.unwrap_or(TETO_PADRAO_DA_CAMERA_BPS),
+    }
+}
+
+/// As medidas de uma câmera, como o cabeçalho de abertura as aceita.
+///
+/// A régua é a do fio (`ScreenHeader::check`), perguntada aqui para que a
+/// recusa seja uma resposta na mão de quem chamou, e não um fluxo que não abre
+/// depois de a sala já ter ouvido que há uma transmissão.
+fn medidas_da_camera(largura: u32, altura: u32) -> Result<(u16, u16), ConnectionError> {
+    let (Ok(largura), Ok(altura)) = (u16::try_from(largura), u16::try_from(altura)) else {
+        return Err(ConnectionError::CameraBadSize);
+    };
+    seele_core::ScreenHeader {
+        version: seele_core::SCREEN_HEADER_VERSION,
+        screen: seele_core::ScreenId(0),
+        source: seele_core::ScreenSource::Camera,
+        codec: seele_core::ScreenCodec::H264Baseline,
+        width: largura,
+        height: altura,
+    }
+    .check()
+    .map_err(|_| ConnectionError::CameraBadSize)?;
+    Ok((largura, altura))
+}
+
+/// Os limites de uma câmera, como o núcleo os lê.
+///
+/// **Movimento, e sem som**, qualquer que seja o que a casca mandou nesses
+/// dois campos: uma câmera é um rosto que se mexe, e o som de quem fala já vai
+/// pela voz. A resolução e a cadência são tetos como os da tela, e nunca acima
+/// de 720p a 30 — é o que a casca codifica.
+fn limites_da_camera(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
+    let mut do_nucleo = limites_do_nucleo(LimitesDeTela {
+        altura_maxima: limites.altura_maxima.min(720),
+        quadros_maximos: limites.quadros_maximos.min(30),
+        ..limites
+    });
+    do_nucleo.prioridade = seele_core::tela::Prioridade::Movimento;
+    do_nucleo.com_som = false;
+    do_nucleo
+}
+
 /// O base64 de ida e de volta mora no `seele-sessao` (`base64`) desde a
 /// Tarefa 2.6 da F4: o navegador desfaz a mídia de um MOD pelo mesmo código.
 pub use seele_core::base64::{base64_de, de_base64};
@@ -4991,6 +5254,37 @@ fn modulo_de_video() -> Result<seele_core::BibliotecaDeVideo, ConnectionError> {
         // tentar — aconteceu duas vezes em campo, no macOS e no Windows.
         ConnectionError::ScreenModuleMissing
     })
+}
+
+/// O que a abertura de um fluxo declarou, na forma que atravessa para a casca.
+///
+/// Exaustivo de propósito: uma fonte nova no fio reprova aqui, em vez de
+/// chegar à casca com o rótulo de outra.
+const fn tipo_da_tela(origem: seele_core::ScreenSource) -> ScreenKind {
+    match origem {
+        seele_core::ScreenSource::Monitor => ScreenKind::Monitor,
+        seele_core::ScreenSource::Window => ScreenKind::Window,
+        seele_core::ScreenSource::Camera => ScreenKind::Camera,
+    }
+}
+
+/// O evento que leva à casca um pedido da transmissão da própria câmera.
+fn evento_da_camera(
+    tela: seele_core::ScreenId,
+    sinal: seele_core::de_fora::SinalParaFora,
+) -> Event {
+    use seele_core::de_fora::SinalParaFora;
+    match sinal {
+        SinalParaFora::Chave => Event::CameraKeyFrameRequested { screen: tela.0 },
+        SinalParaFora::Banda { bps } => Event::CameraBudget {
+            screen: tela.0,
+            bps,
+        },
+        SinalParaFora::Parou(motivo) => Event::CameraPaused {
+            screen: tela.0,
+            reason: nome_da_parada(motivo),
+        },
+    }
 }
 
 /// O nome estável de um motivo de parada, para a casca escrever a frase.
@@ -5554,6 +5848,7 @@ async fn drive(
                         tela,
                         largura,
                         altura,
+                        origem,
                         leitura,
                     } => {
                         // **Gravada antes do evento**: a casca que reage ao
@@ -5563,7 +5858,13 @@ async fn drive(
                             screen: tela.0,
                             width: largura,
                             height: altura,
+                            source: tipo_da_tela(origem),
                         });
+                    }
+                    // O que a transmissão da própria câmera pede a quem a
+                    // codifica — a casca. Um evento por pedido, com nome.
+                    seele_core::enlace::Aviso::Camera { tela, sinal } => {
+                        shared.notify(&evento_da_camera(tela, sinal));
                     }
                     seele_core::enlace::Aviso::TelaIlegivel { motivo } => {
                         shared.notify(&Event::ScreenUnreadable { reason: motivo });
@@ -11524,6 +11825,7 @@ mod tests {
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
+            camera: Mutex::new(None),
         });
         let counter = Arc::new(Counter(std::sync::atomic::AtomicUsize::new(0)));
         shared
@@ -11686,6 +11988,7 @@ mod tests {
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
+            camera: Mutex::new(None),
         })
     }
 
@@ -14810,6 +15113,7 @@ mod o_audio_segue_a_sala {
             tela_escolhida: Mutex::new(super::EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
+            camera: Mutex::new(None),
         })
     }
 
@@ -17755,6 +18059,122 @@ mod mesa_de_texto {
                 .map(|b| b.person)
                 .collect::<Vec<_>>(),
             vec![4]
+        );
+    }
+}
+
+#[cfg(test)]
+mod camera_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn pedidos(altura: u32, quadros: u32) -> LimitesDeTela {
+        LimitesDeTela {
+            banda_bps: None,
+            altura_maxima: altura,
+            quadros_maximos: quadros,
+            prioridade: crate::types::Prioridade::Nitidez,
+            com_som: true,
+        }
+    }
+
+    /// **As medidas de uma câmera passam pela régua do fio antes de qualquer
+    /// coisa sair.** Zero, um lado acima de 1920 ou uma área acima de 1080p são
+    /// recusados com o nome, e não viram um fluxo que não abre depois de a
+    /// sala já ter ouvido que há uma câmera.
+    #[test]
+    fn as_medidas_da_camera_passam_pela_regua_do_fio() {
+        assert_eq!(medidas_da_camera(1280, 720), Ok((1280, 720)));
+        assert_eq!(medidas_da_camera(720, 1280), Ok((720, 1280)));
+        for (largura, altura) in [
+            (0, 720),
+            (1280, 0),
+            (1922, 1080),
+            (1920, 1920),
+            (70_000, 720),
+        ] {
+            assert_eq!(
+                medidas_da_camera(largura, altura),
+                Err(ConnectionError::CameraBadSize),
+                "{largura}×{altura}"
+            );
+        }
+    }
+
+    /// **A câmera nunca passa de 720p a 30, vai como movimento e sem som**,
+    /// peça a casca o que pedir.
+    #[test]
+    fn os_limites_da_camera_tem_teto_sao_de_movimento_e_nao_levam_som() {
+        let do_nucleo = limites_da_camera(pedidos(1080, 60));
+        assert_eq!(do_nucleo.resolucao, seele_core::Resolucao::P720);
+        assert_eq!(do_nucleo.cadencia, seele_core::Cadencia::Q30);
+        assert_eq!(
+            do_nucleo.prioridade,
+            seele_core::tela::Prioridade::Movimento
+        );
+        assert!(!do_nucleo.com_som);
+        assert_eq!(
+            limites_da_camera(pedidos(540, 15)).resolucao,
+            seele_core::Resolucao::P540
+        );
+
+        let codificacao = codificacao_da_camera(1920, 1080, pedidos(1080, 60));
+        assert_eq!(
+            (codificacao.largura, codificacao.altura, codificacao.quadros),
+            (1280, 720, 30)
+        );
+        assert_eq!(codificacao.codec, CODEC_DA_CAMERA);
+        // Nunca amplia: a câmera de 480 linhas vai do tamanho dela.
+        let pequena = codificacao_da_camera(640, 480, pedidos(720, 30));
+        assert_eq!((pequena.largura, pequena.altura), (640, 480));
+    }
+
+    /// **Cada pedido da transmissão da câmera vira o evento dele**, com a tela
+    /// de quem é — e o `ScreenOpened` leva o tipo com o nome que a casca lê.
+    #[test]
+    fn os_pedidos_da_camera_e_o_tipo_da_tela_atravessam_pelo_nome() {
+        use seele_core::de_fora::SinalParaFora;
+        let tela = seele_core::ScreenId(7);
+        let json = |evento: &Event| serde_json::to_value(evento).unwrap();
+        assert_eq!(
+            json(&evento_da_camera(tela, SinalParaFora::Chave)),
+            serde_json::json!({ "CameraKeyFrameRequested": { "screen": 7 } })
+        );
+        assert_eq!(
+            json(&evento_da_camera(
+                tela,
+                SinalParaFora::Banda { bps: 900_000 }
+            )),
+            serde_json::json!({ "CameraBudget": { "screen": 7, "bps": 900_000 } })
+        );
+        for motivo in [
+            seele_core::MotivoDeParada::SinalCritico,
+            seele_core::MotivoDeParada::AbaixoDoPiso,
+        ] {
+            assert_eq!(
+                json(&evento_da_camera(tela, SinalParaFora::Parou(motivo))),
+                serde_json::json!({ "CameraPaused": { "screen": 7, "reason": nome_da_parada(motivo) } })
+            );
+        }
+        for (origem, nome) in [
+            (seele_core::ScreenSource::Monitor, "monitor"),
+            (seele_core::ScreenSource::Window, "window"),
+            (seele_core::ScreenSource::Camera, "camera"),
+        ] {
+            assert_eq!(
+                json(&Event::ScreenOpened {
+                    screen: 7,
+                    width: 1280,
+                    height: 720,
+                    source: tipo_da_tela(origem),
+                }),
+                serde_json::json!({ "ScreenOpened": { "screen": 7, "width": 1280, "height": 720, "source": nome } })
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(ConnectionError::CameraQueueFull { dropped: 3 }).unwrap(),
+            serde_json::json!({ "CameraQueueFull": { "dropped": 3 } })
         );
     }
 }

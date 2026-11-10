@@ -180,6 +180,7 @@ const SO_NO_PC_RUIDO = "o celular usa a supressão de ruído do navegador";
 const SO_NO_PC_SAIDA = "o celular toca pela saída de som do sistema";
 const SO_NO_PC_ARRASTAR = "no celular o arquivo vem do seletor, e não do arraste";
 const SO_NO_PC_COMPARTILHAR = "compartilhar a tela é pelo PC";
+const SO_NO_PC_CAMERA = "mostrar a câmera é pelo PC, por enquanto: no celular dá para ver a dos outros";
 const SO_NO_PC_TESTE = "no celular o microfone abre só na sala";
 
 /**
@@ -195,6 +196,8 @@ const SO_NA_CASCA_LARGA = new Map([
   ["aplicar_icone_do_server", SO_NO_PC_MODERAR],
   ["banidos", SO_NO_PC_MODERAR],
   ["banir_pessoa", SO_NO_PC_MODERAR],
+  ["codificacao_da_camera", SO_NO_PC_CAMERA],
+  ["compartilhar_camera", SO_NO_PC_CAMERA],
   ["compartilhar_tela", SO_NO_PC_COMPARTILHAR],
   ["criar_linha", SO_NO_PC_MODERAR],
   ["criar_voice_room", SO_NO_PC_MODERAR],
@@ -3183,6 +3186,42 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
                 : "ScreenShareUnavailable",
             ),
         );
+    }),
+  // **A câmera pelo PC** (1.0, protocolo 13; no celular, recusada com a
+  // frase): quem pede a câmera ao navegador é a casca (`camera.js`, dentro do
+  // gesto), e a mídia é a dela (`midiaDaCameraDaJanela`) — é com ela que a
+  // casca mostra a quem a ligou a própria imagem. Daqui em diante é a transmissão da tela, com a
+  // fonte da câmera. O servidor de antes do 13 recusa no `.wasm`, com o
+  // `ServidorAntigo`, antes de qualquer coisa sair.
+  // As medidas, a cadência e o codec da câmera, pelos degraus do `.wasm` e
+  // com o teto dela (720p a 30): a mesma resposta que o núcleo dá ao aplicativo.
+  codificacao_da_camera: ({ largura, altura, limites } = {}) =>
+    pelaSessao("codificacao_da_tela")({ limites, fonte: "camera", largura, altura }),
+  compartilhar_camera: ({ limites } = {}) =>
+    comASessao(async (sessao) => {
+      const midia = typeof midiaDaCameraDaJanela === "function" ? midiaDaCameraDaJanela() : null;
+      const soltar = () => { for (const trilha of midia?.getTracks?.() ?? []) trilha.stop(); };
+      if (!sessao.transmissao || !midia?.getVideoTracks?.().length) {
+        soltar();
+        return Promise.reject("ScreenShareUnavailable");
+      }
+      sessao.pedidoDeCaptura = (sessao.pedidoDeCaptura ?? 0) + 1;
+      const tentativa = sessao.pedidoDeCaptura;
+      // Um quadro de verdade saindo do codificador, antes de a sala ouvir que
+      // há uma câmera: o `isConfigSupported` do Safari diz que codifica e não
+      // codifica.
+      if (!(await sondarOCodificadorDeVideo(await pelaPagina("codec_da_tela")({})))) {
+        soltar();
+        return Promise.reject({ RecusaDaPonte: { comando: "compartilhar_camera", frase: FRASES_DA_CAMERA.semCodificador } });
+      }
+      if (sessao.pedidoDeCaptura !== tentativa || sessaoDaPonte.atual !== sessao) {
+        soltar();
+        return Promise.reject("NotConnected");
+      }
+      // **No lugar da tela**: o `comecar` fecha a que estava no ar, e o
+      // servidor troca a vaga e anuncia o fim dela à sala.
+      sessao.transmissao.comecar(midia, { ...limites, com_som: false }, { camera: true });
+      return null;
     }),
   parar_de_compartilhar: () =>
     comASessao(async (sessao) => {

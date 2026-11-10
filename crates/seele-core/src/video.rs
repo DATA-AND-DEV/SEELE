@@ -897,19 +897,41 @@ impl Default for LimitesDeTela {
 /// O nome falta porque ele não existe ainda: `StartScreenShare` é um pedido, e
 /// o [`ScreenId`](seele_proto::ids::ScreenId) volta depois, num
 /// `ScreenShareStarted`. Esta estrutura é o que espera nesse intervalo.
+///
+/// **Duas formas, porque a imagem nasce em dois lugares.** A tela é capturada
+/// e codificada aqui; a câmera chega codificada de fora, porque quem a alcança
+/// é a janela. O que vem depois — o fluxo, o teto, o quadro-chave em fatias —
+/// é o mesmo para as duas.
 #[derive(Debug)]
-pub struct PedidoDeTela {
-    /// O módulo do Cisco, já carregado.
-    ///
-    /// Vem pronto de quem chamou pelo mesmo argumento de
-    /// `seele_video::modulo::procurar_em`: onde os arquivos do produto moram é
-    /// decisão da casca, e uma biblioteca que adivinha `~/Library` passa a ter
-    /// opinião sobre uma coisa que não é dela.
-    pub biblioteca: BibliotecaDeVideo,
-    /// Quem sabe começar a captura escolhida.
-    pub captura: CapturaEmCaixa,
-    /// Monitor ou janela, para o cabeçalho de abertura (§3.6).
-    pub origem: seele_proto::screen::ScreenSource,
+pub enum PedidoDeTela {
+    /// A tela ou a janela, capturada e codificada neste processo.
+    DoSistema {
+        /// O módulo do Cisco, já carregado.
+        ///
+        /// Vem pronto de quem chamou pelo mesmo argumento de
+        /// `seele_video::modulo::procurar_em`: onde os arquivos do produto
+        /// moram é decisão da casca, e uma biblioteca que adivinha `~/Library`
+        /// passa a ter opinião sobre uma coisa que não é dela.
+        biblioteca: BibliotecaDeVideo,
+        /// Quem sabe começar a captura escolhida.
+        captura: CapturaEmCaixa,
+        /// Monitor ou janela, para o cabeçalho de abertura (§3.6).
+        origem: seele_proto::screen::ScreenSource,
+    },
+    /// A câmera: quadros H.264 que a casca codifica e empurra por
+    /// [`crate::de_fora::EntradaDeFora`]. Sem módulo e sem captura deste lado.
+    DeFora(crate::de_fora::QuadrosDeFora),
+}
+
+impl PedidoDeTela {
+    /// O que o cabeçalho de abertura declara (§3.6).
+    #[must_use]
+    pub const fn origem(&self) -> seele_proto::screen::ScreenSource {
+        match self {
+            Self::DoSistema { origem, .. } => *origem,
+            Self::DeFora(_) => seele_proto::screen::ScreenSource::Camera,
+        }
+    }
 }
 
 /// Por que o compartilhamento não anda.

@@ -69,6 +69,14 @@ pub enum VoiceRoomCommand {
         /// sem deslocar o enquadramento de quem lê para sempre.
         /// `crate::tela::Pedaco` escreve isso por extenso.
         tela: mpsc::Sender<AberturaDeTela>,
+        /// O protocolo que a conexão desta pessoa negociou.
+        ///
+        /// A sala o guarda por uma razão só: a abertura de uma câmera
+        /// (`ScreenSource::Camera`, protocolo 13) vai reescrita como monitor
+        /// para quem negociou menos, que recusaria o código que não conhece
+        /// (`seele_proto::screen::abertura_para`). Vem da sessão, como o
+        /// `ssrc`, e nunca de quem fala com a sala.
+        versao: u8,
     },
     /// A person left, or their connection dropped.
     Leave {
@@ -135,6 +143,11 @@ pub enum VoiceRoomCommand {
         /// reaberto a transmissão; sem a sessão, o fim da velha apagaria a nova.
         /// É a última porta desta família que ainda era só por pessoa.
         sessao: SessionId,
+        /// **Qual transmissão.** A mesma conexão troca a tela pela câmera sem
+        /// cair: o fluxo da tela acaba depois de a câmera já estar registrada
+        /// aqui, e pela sessão as duas são a mesma. Sem o nome, o fim da tela
+        /// levava a câmera junto.
+        screen: ScreenId,
     },
     /// Alguém pediu para assistir a uma transmissão desta sala.
     ///
@@ -169,6 +182,15 @@ pub enum VoiceRoomCommand {
     QuemRecebe {
         /// Qual transmissão.
         screen: ScreenId,
+        /// Quem quer assistir por um par.
+        ///
+        /// A resposta é **para esta pessoa**: de uma câmera, quem negociou
+        /// menos que o protocolo dela não recebe ninguém (um par repassa a
+        /// abertura como a recebeu, com o código que ela recusaria), e quem
+        /// negociou menos também não é oferecido para repassar (a cópia dele
+        /// foi reescrita como monitor, e passaria adiante o rótulo errado).
+        /// Nos dois casos a imagem vem do servidor, que sabe o que cada um lê.
+        para: PersonId,
         /// Por onde a resposta volta.
         responder: tokio::sync::oneshot::Sender<std::collections::HashSet<PersonId>>,
     },
@@ -286,6 +308,8 @@ struct Member {
     orcamento: crate::taxa::Balde,
     /// Por onde convidar esta pessoa a assistir. Ver [`VoiceRoomCommand::Join`].
     tela: mpsc::Sender<AberturaDeTela>,
+    /// O protocolo que a conexão dela negociou. Ver [`VoiceRoomCommand::Join`].
+    versao: u8,
     /// Quanto da voz desta pessoa não está chegando. Ver o ADR 0036.
     perda: crate::perda_de_subida::PerdaDeSubida,
     /// Quando medir de novo. Ver [`INTERVALO_DE_MEDIDA`].
@@ -323,6 +347,13 @@ struct EmCurso {
 }
 
 impl EmCurso {
+    /// O menor protocolo que lê a abertura desta transmissão como ela foi
+    /// escrita: 13 para uma câmera, e qualquer um para tela e janela.
+    fn desde(&self) -> u8 {
+        seele_proto::screen::ScreenHeader::decode(&self.abertura)
+            .map_or(1, |(cabecalho, _)| cabecalho.source.desde())
+    }
+
     /// Quantas cópias esta transmissão custa ao cano de quem hospeda.
     ///
     /// **Os ligados mais os que esperam.** Quem entrou no meio ainda não tem
@@ -460,6 +491,7 @@ impl VoiceRoom {
                 may_speak,
                 outbound,
                 tela,
+                versao,
             } => {
                 // O `ssrc` de quem está sendo substituído sai junto. Entrar de
                 // novo troca o `Member` desta pessoa, mas `by_ssrc` é outro
@@ -488,6 +520,7 @@ impl VoiceRoom {
                             now,
                         ),
                         tela,
+                        versao,
                         perda: crate::perda_de_subida::PerdaDeSubida::nova(),
                         proxima_medida: now + INTERVALO_DE_MEDIDA,
                     },
@@ -607,34 +640,58 @@ impl VoiceRoom {
             VoiceRoomCommand::TelaParouDeAssistir { person, screen } => {
                 self.parar_de_assistir(person, screen);
             }
-            VoiceRoomCommand::TelaFechou { from, sessao } => {
+            VoiceRoomCommand::TelaFechou {
+                from,
+                sessao,
+                screen,
+            } => {
                 // **Só encerra a transmissão a conexão que a abriu.** O fim
                 // limpo do fluxo velho, chegando depois de a conexão nova ter
                 // reaberto a tela, deixaria quem assiste com o palco apagado
                 // enquanto quem transmite continua mandando bytes.
+                //
+                // **E só a transmissão que acabou.** Ver
+                // [`VoiceRoomCommand::TelaFechou::screen`].
                 if self
                     .telas
                     .get(&from)
-                    .is_some_and(|curso| curso.sessao == sessao)
+                    .is_some_and(|curso| curso.sessao == sessao && curso.screen == screen)
                 {
                     self.encerrar_tela(from, None);
                 }
             }
-            VoiceRoomCommand::QuemRecebe { screen, responder } => {
+            VoiceRoomCommand::QuemRecebe {
+                screen,
+                para,
+                responder,
+            } => {
                 // **Os ligados mais os que esperam**, pela mesma razão que
                 // `EmCurso::recebem` conta os dois: quem entrou no meio ainda
                 // não tem cano, e vai ter em milissegundos. Deixá-lo de fora
                 // faria a escolha do par recusar, por um instante, alguém que
                 // está recebendo.
+                //
+                // **E só quem lê a abertura como ela foi escrita.** Ver
+                // [`VoiceRoomCommand::QuemRecebe::para`].
+                let entende = |quem: &PersonId, desde: u8| {
+                    self.members
+                        .get(quem)
+                        .is_some_and(|member| member.versao >= desde)
+                };
                 let quem = self
                     .telas
                     .values()
                     .find(|curso| curso.screen == screen)
                     .map(|curso| {
+                        let desde = curso.desde();
+                        if !entende(&para, desde) {
+                            return std::collections::HashSet::new();
+                        }
                         curso
                             .canos
                             .keys()
                             .chain(curso.esperando.iter())
+                            .filter(|quem| entende(quem, desde))
                             .copied()
                             .collect()
                     })
@@ -790,12 +847,30 @@ impl VoiceRoom {
         let sessao = member.sessao;
         // Uma por sala (§6 item 3). A corrida já foi decidida no controle; isto
         // é a parede que não depende de o cliente ter respeitado a resposta.
-        if self.telas.contains_key(&from) {
-            // A mesma pessoa abrindo de novo. A corrida já foi decidida no
-            // controle; isto é a parede que não depende de o cliente ter
-            // respeitado a resposta.
-            self.drops.tela_ja_tomada += 1;
-            return;
+        if let Some(anterior) = self.telas.get(&from) {
+            // **A mesma transmissão abrindo de novo**: a parede que não depende
+            // de o cliente ter respeitado a resposta do controle.
+            if anterior.screen == screen {
+                self.drops.tela_ja_tomada += 1;
+                return;
+            }
+            // **Outra transmissão da mesma pessoa: a troca.** Quem decide qual
+            // é a transmissão desta pessoa é o controle — ele já trocou a vaga
+            // e anunciou o fim da anterior, e quem lê o fluxo
+            // (`session::receber_tela`) só chega aqui com o nome que o
+            // controle tem como vigente. O fluxo da anterior ainda não acabou
+            // de morrer, e a sala a encerra aqui em vez de recusar a nova:
+            // recusar deixava a vaga presa à transmissão que o controle já
+            // tinha declarado encerrada, e a nova — a tela trocada pela
+            // câmera, por exemplo — ficava anunciada para a sala e sem fluxo.
+            tracing::info!(
+                sala = %self.id.get(),
+                dono = %from.get(),
+                anterior = %anterior.screen.get(),
+                nova = %screen.get(),
+                "a transmissão desta pessoa foi trocada por outra: a anterior acaba aqui"
+            );
+            self.encerrar_tela(from, None);
         }
         // **O teto é conferido com as cópias que esta transmissão vai somar**, e
         // não com as que já existem: aceitar primeiro e descobrir depois deixaria
@@ -953,7 +1028,12 @@ impl VoiceRoom {
             let (tx, rx) = mpsc::channel(crate::tela::PEDACOS_DEPTH);
             let convite = AberturaDeTela {
                 screen: curso.screen,
-                abertura: curso.abertura.clone(),
+                // **A abertura que este par entende.** Para quem negociou o
+                // protocolo da câmera, os bytes de quem transmite; para quem
+                // negociou menos, a câmera vai escrita como monitor — ele
+                // recusaria o código 2 e ficaria sem imagem nenhuma.
+                abertura: seele_proto::screen::abertura_para(member.versao, &curso.abertura)
+                    .into_owned(),
                 pedacos: rx,
             };
             // `try_send` e não `send`: a sala de voz é uma tarefa só e esperar por um
@@ -1425,6 +1505,7 @@ mod tests {
             may_speak,
             outbound: tx,
             tela,
+            versao: seele_proto::PROTOCOL_VERSION,
         });
         rx
     }
@@ -1440,6 +1521,7 @@ mod tests {
             may_speak: true,
             outbound,
             tela,
+            versao: seele_proto::PROTOCOL_VERSION,
         });
         tela_rx
     }
@@ -1796,6 +1878,7 @@ mod tests {
             may_speak: true,
             outbound: tx,
             tela,
+            versao: seele_proto::PROTOCOL_VERSION,
         });
 
         // E agora a conexão velha morre.
@@ -1854,6 +1937,7 @@ mod tests {
             may_speak: true,
             outbound,
             tela,
+            versao: seele_proto::PROTOCOL_VERSION,
         });
         let _fim_velho = compartilhar(&mut voice_room, 2, 70);
         let _convite_velho = convites
@@ -1870,6 +1954,7 @@ mod tests {
             may_speak: true,
             outbound,
             tela,
+            versao: seele_proto::PROTOCOL_VERSION,
         });
         voice_room.handle(VoiceRoomCommand::Leave {
             person: PersonId(2),
@@ -1891,6 +1976,7 @@ mod tests {
         voice_room.handle(VoiceRoomCommand::TelaFechou {
             from: PersonId(2),
             sessao: SessionId(7),
+            screen: ScreenId(70),
         });
         assert_eq!(
             voice_room.telas.get(&PersonId(2)).map(|curso| curso.screen),
@@ -1910,6 +1996,7 @@ mod tests {
         voice_room.handle(VoiceRoomCommand::TelaFechou {
             from: PersonId(2),
             sessao: SessionId(8),
+            screen: ScreenId(90),
         });
         assert!(
             voice_room.telas.is_empty(),
@@ -1938,6 +2025,7 @@ mod tests {
             may_speak: true,
             outbound: tx,
             tela,
+            versao: seele_proto::PROTOCOL_VERSION,
         });
 
         voice_room.handle(VoiceRoomCommand::Datagram {
@@ -2011,6 +2099,7 @@ mod tests {
                 may_speak: true,
                 outbound,
                 tela,
+                versao: seele_proto::PROTOCOL_VERSION,
             })
             .await
             .unwrap();
@@ -2058,6 +2147,7 @@ mod tests {
                 may_speak: true,
                 outbound: alice_tx,
                 tela: mpsc::channel(4).0,
+                versao: seele_proto::PROTOCOL_VERSION,
             })
             .await
             .unwrap();
@@ -2071,6 +2161,7 @@ mod tests {
                 may_speak: true,
                 outbound: bob_tx,
                 tela: mpsc::channel(4).0,
+                versao: seele_proto::PROTOCOL_VERSION,
             })
             .await
             .unwrap();
@@ -2121,6 +2212,7 @@ mod tests {
             may_speak: true,
             outbound: alice_tx,
             tela: mpsc::channel(4).0,
+            versao: seele_proto::PROTOCOL_VERSION,
         })
         .await
         .unwrap();
@@ -2132,6 +2224,7 @@ mod tests {
             may_speak: true,
             outbound: bob_tx,
             tela: mpsc::channel(4).0,
+            versao: seele_proto::PROTOCOL_VERSION,
         })
         .await
         .unwrap();
@@ -2289,11 +2382,245 @@ mod tests {
         voice_room: &mut VoiceRoom,
         screen: ScreenId,
     ) -> std::collections::HashSet<PersonId> {
+        perguntar_quem_recebe_para(voice_room, screen, PersonId(2))
+    }
+
+    /// A mesma pergunta, feita em nome de quem quer assistir por um par.
+    fn perguntar_quem_recebe_para(
+        voice_room: &mut VoiceRoom,
+        screen: ScreenId,
+        para: PersonId,
+    ) -> std::collections::HashSet<PersonId> {
         let (responder, resposta) = tokio::sync::oneshot::channel();
-        voice_room.handle(VoiceRoomCommand::QuemRecebe { screen, responder });
+        voice_room.handle(VoiceRoomCommand::QuemRecebe {
+            screen,
+            para,
+            responder,
+        });
         resposta
             .blocking_recv()
             .expect("a sala não respondeu quem recebe a transmissão")
+    }
+
+    /// **Trocar a tela pela câmera, sem cair: a sala segue o controle.**
+    ///
+    /// A mesma conexão pede outra transmissão com a primeira ainda no ar. O
+    /// controle troca a vaga e anuncia o fim da anterior; a sala recusava a
+    /// nova como «já tomada» e ficava com a velha, que ninguém mais alimenta —
+    /// a câmera anunciada para a sala e sem um byte chegando a ninguém. Medido
+    /// de ponta a ponta em `tests/camera.rs`.
+    ///
+    /// Três coisas: a nova entra no lugar da velha, quem assistia recebe o fim
+    /// limpo da velha e o convite da nova, e o fim atrasado do fluxo velho —
+    /// que é da mesma sessão — não leva a nova junto.
+    #[test]
+    fn a_transmissao_trocada_pela_mesma_conexao_entra_no_lugar_da_anterior() {
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _dono = espectador(&mut voice_room, 1);
+        let mut convites = espectador(&mut voice_room, 2);
+
+        let _fim_da_tela = compartilhar(&mut voice_room, 1, 7);
+        let mut da_tela = convites
+            .try_recv()
+            .expect("a tela não convidou quem assiste");
+
+        let _fim_da_camera = ligar_a_camera(&mut voice_room, 1, 8);
+        assert_eq!(
+            voice_room.telas.get(&PersonId(1)).map(|curso| curso.screen),
+            Some(ScreenId(8)),
+            "a sala ficou com a transmissão que o controle já tinha encerrado"
+        );
+        assert!(
+            matches!(da_tela.pedacos.try_recv(), Ok(Pedaco::Fim)),
+            "quem assistia a tela não recebeu o fim limpo dela"
+        );
+        let da_camera = convites
+            .try_recv()
+            .expect("a câmera não convidou quem já estava na sala");
+        assert_eq!(da_camera.screen, ScreenId(8));
+        assert_eq!(da_camera.abertura, abertura_de_camera(8));
+
+        // O fluxo da tela acaba de morrer, atrasado, pela mesma sessão.
+        voice_room.handle(VoiceRoomCommand::TelaFechou {
+            from: PersonId(1),
+            sessao: SessionId(1),
+            screen: ScreenId(7),
+        });
+        assert_eq!(
+            voice_room.telas.get(&PersonId(1)).map(|curso| curso.screen),
+            Some(ScreenId(8)),
+            "o fim do fluxo da tela levou a câmera junto"
+        );
+
+        // E o fim da própria câmera a encerra, como sempre.
+        voice_room.handle(VoiceRoomCommand::TelaFechou {
+            from: PersonId(1),
+            sessao: SessionId(1),
+            screen: ScreenId(8),
+        });
+        assert!(voice_room.telas.is_empty());
+    }
+
+    /// Alguém que entra tendo negociado este protocolo, de olho na tela.
+    fn espectador_do_protocolo(
+        voice_room: &mut VoiceRoom,
+        person: u64,
+        versao: u8,
+    ) -> mpsc::Receiver<AberturaDeTela> {
+        let (outbound, _) = mpsc::channel(64);
+        let (tela, tela_rx) = mpsc::channel(crate::tela::ABERTURAS_DEPTH);
+        voice_room.handle(VoiceRoomCommand::Join {
+            person: PersonId(person),
+            sessao: SessionId(person),
+            ssrc: Ssrc(person as u32 * 10),
+            may_speak: true,
+            outbound,
+            tela,
+            versao,
+        });
+        tela_rx
+    }
+
+    /// A abertura de uma câmera, como quem transmite a escreve.
+    fn abertura_de_camera(screen: u32) -> Vec<u8> {
+        let mut bytes = abertura(screen);
+        bytes[5] = seele_proto::screen::ScreenSource::Camera.code();
+        bytes
+    }
+
+    /// Abre a câmera de `person` nesta sala.
+    fn ligar_a_camera(
+        voice_room: &mut VoiceRoom,
+        person: u64,
+        screen: u32,
+    ) -> mpsc::Receiver<crate::tela::FimDaTela> {
+        let (fim, fim_rx) = mpsc::channel(1);
+        voice_room.handle(VoiceRoomCommand::TelaAbriu {
+            from: PersonId(person),
+            screen: ScreenId(screen),
+            abertura: abertura_de_camera(screen),
+            fim,
+        });
+        fim_rx
+    }
+
+    /// **A câmera chega com a fonte 2 a quem negociou o 13, e como monitor a
+    /// quem negociou o 12** — e os quadros são os mesmos bytes para os dois.
+    ///
+    /// Um cliente do 12 recusa o código que não conhece e fica sem imagem; com
+    /// a fonte reescrita ele decodifica o mesmo H.264 e vê a pessoa. Só o byte
+    /// da fonte difere entre as duas cópias.
+    #[test]
+    fn a_camera_vai_inteira_a_quem_negociou_treze_e_como_monitor_a_quem_negociou_doze() {
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _dono = espectador(&mut voice_room, 1);
+        let mut do_treze = espectador_do_protocolo(&mut voice_room, 2, 13);
+        let mut do_doze = espectador_do_protocolo(&mut voice_room, 3, 12);
+
+        let _fim = ligar_a_camera(&mut voice_room, 1, 7);
+        let imagem = quadro(true, 40);
+        voice_room.handle(VoiceRoomCommand::TelaBytes {
+            from: PersonId(1),
+            bytes: imagem.clone(),
+        });
+
+        let mut para_o_treze = do_treze.try_recv().expect("o 13 não foi convidado");
+        let mut para_o_doze = do_doze.try_recv().expect("o 12 não foi convidado");
+        assert_eq!(
+            para_o_treze.abertura,
+            abertura_de_camera(7),
+            "quem negociou o 13 não recebeu a abertura como quem transmite a escreveu"
+        );
+        let (lida, _) = seele_proto::screen::ScreenHeader::decode(&para_o_doze.abertura)
+            .expect("quem negociou o 12 recebeu uma abertura que não se lê");
+        assert_eq!(
+            lida.source,
+            seele_proto::screen::ScreenSource::Monitor,
+            "quem negociou o 12 recebeu a fonte que ele recusa"
+        );
+        assert_eq!(
+            (lida.screen, lida.width, lida.height),
+            (ScreenId(7), 1280, 720),
+            "a reescrita mexeu em mais que a fonte"
+        );
+        assert_eq!(recebido(&mut para_o_treze), imagem);
+        assert_eq!(recebido(&mut para_o_doze), imagem);
+    }
+
+    /// **Uma tela comum não é reescrita para ninguém**: o portão é da câmera,
+    /// e não de toda abertura que passa por um espectador do 12.
+    #[test]
+    fn a_abertura_de_uma_tela_comum_chega_igual_a_quem_negociou_doze() {
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _dono = espectador(&mut voice_room, 1);
+        let mut do_doze = espectador_do_protocolo(&mut voice_room, 3, 12);
+        let _fim = compartilhar(&mut voice_room, 1, 7);
+        assert_eq!(
+            do_doze.try_recv().expect("o 12 não foi convidado").abertura,
+            abertura(7)
+        );
+    }
+
+    /// **Quem chega no meio pelo 12 também recebe a câmera como monitor.** O
+    /// convite de quem entra depois sai pelo mesmo `ligar`, no quadro-chave
+    /// seguinte, e não pode ser a porta por onde o código 2 escapa.
+    #[test]
+    fn quem_chega_no_meio_pelo_doze_recebe_a_camera_como_monitor() {
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _dono = espectador(&mut voice_room, 1);
+        let _fim = ligar_a_camera(&mut voice_room, 1, 7);
+        let mut atrasado = espectador_do_protocolo(&mut voice_room, 3, 12);
+        voice_room.handle(VoiceRoomCommand::TelaBytes {
+            from: PersonId(1),
+            bytes: quadro(true, 16),
+        });
+        let convite = atrasado
+            .try_recv()
+            .expect("quem chegou no meio não foi ligado");
+        assert_eq!(
+            convite.abertura[5],
+            seele_proto::screen::ScreenSource::Monitor.code()
+        );
+    }
+
+    /// **Uma câmera não vai por par a quem negociou o 12, nem por um par do
+    /// 12.** Um par repassa a abertura como a recebeu: o do 13 passaria o
+    /// código 2 a quem o recusa, e o do 12 passaria adiante «monitor» a quem
+    /// saberia ler «câmera». Nos dois casos a sala responde que não há quem
+    /// repasse, e a imagem vem do servidor.
+    #[test]
+    fn uma_camera_nao_e_repassada_por_par_a_quem_negociou_doze_nem_por_ele() {
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _dono = espectador(&mut voice_room, 1);
+        let _do_treze = espectador_do_protocolo(&mut voice_room, 2, 13);
+        let _do_doze = espectador_do_protocolo(&mut voice_room, 3, 12);
+        let _outro_treze = espectador_do_protocolo(&mut voice_room, 4, 13);
+        let _fim = ligar_a_camera(&mut voice_room, 1, 7);
+
+        assert!(
+            perguntar_quem_recebe_para(&mut voice_room, ScreenId(7), PersonId(3)).is_empty(),
+            "a sala ofereceu um par a quem recusaria a abertura dele"
+        );
+        assert_eq!(
+            perguntar_quem_recebe_para(&mut voice_room, ScreenId(7), PersonId(4)),
+            std::collections::HashSet::from([PersonId(2), PersonId(4)]),
+            "o par do 12 foi oferecido para repassar uma câmera, ou o do 13 ficou de fora"
+        );
+    }
+
+    /// E o outro lado, para o teste de cima não passar por recusar sempre: de
+    /// uma tela comum, quem negociou o 12 recebe por par e repassa como antes.
+    #[test]
+    fn uma_tela_comum_continua_indo_por_par_a_quem_negociou_doze() {
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _dono = espectador(&mut voice_room, 1);
+        let _do_treze = espectador_do_protocolo(&mut voice_room, 2, 13);
+        let _do_doze = espectador_do_protocolo(&mut voice_room, 3, 12);
+        let _fim = compartilhar(&mut voice_room, 1, 7);
+        assert_eq!(
+            perguntar_quem_recebe_para(&mut voice_room, ScreenId(7), PersonId(3)),
+            std::collections::HashSet::from([PersonId(2), PersonId(3)])
+        );
     }
 
     #[test]
@@ -2325,14 +2652,22 @@ mod tests {
         // A parede que sobrou, e ela não depende de o cliente ter respeitado a
         // resposta do controle: uma pessoa manda **uma** tela: mandar duas
         // dobraria a subida dela sem que ninguém tivesse pedido a segunda.
+        //
+        // **A mesma transmissão, aberta duas vezes.** Até a 1.0 este teste
+        // abria a segunda com outro nome, e a sala a recusava também — o que
+        // deixava presa a transmissão que o controle já tinha trocado. Outro
+        // nome é a troca, e ela tem o teste dela
+        // (`a_transmissao_trocada_pela_mesma_conexao_entra_no_lugar_da_anterior`);
+        // nos dois casos a pessoa continua com uma só.
         let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
         let _alice = espectador(&mut voice_room, 1);
         let mut bob = espectador(&mut voice_room, 2);
 
         let _fim = compartilhar(&mut voice_room, 1, 7);
-        let _de_novo = compartilhar(&mut voice_room, 1, 8);
+        let _de_novo = compartilhar(&mut voice_room, 1, 7);
 
         assert_eq!(voice_room.drops().tela_ja_tomada, 1);
+        assert_eq!(voice_room.telas.len(), 1);
         assert_eq!(bob.try_recv().map(|c| c.screen), Ok(ScreenId(7)));
         assert!(bob.try_recv().is_err(), "a segunda não chegou a existir");
     }
@@ -2714,6 +3049,7 @@ mod tests {
             may_speak: true,
             outbound: tx,
             tela: mpsc::channel(4).0,
+            versao: seele_proto::PROTOCOL_VERSION,
         });
 
         for seq in 0..10 {

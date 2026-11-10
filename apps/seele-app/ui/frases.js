@@ -896,6 +896,9 @@ function fraseDeErro(erro, apelido, deOnde) {
     // acima do teto. Sem estes dois ramos elas caíam na `desconhecida`.
     if (erro.ServidorAntigo) return FRASES.ServidorAntigo;
     if (erro.MensagemGrandeDemais) return FRASES.MensagemGrandeDemais;
+    // A fila da câmera cheia traz quantos quadros ficaram; a frase diz o que
+    // isso é para quem lê, e o número vai na tela ao lado dela (`camera.js`).
+    if (erro.CameraQueueFull) return FRASES.CameraQueueFull;
     if (erro.Recusado?.motivo) {
       const motivo = erro.Recusado.motivo;
       // Um formato que o produto reconhece e não aceita, pelo nome dele: as
@@ -1492,6 +1495,14 @@ const FRASES = {
     // para mudar a resposta. Dizer que não é a conexão nem permissão é o que
     // impede a caça ao defeito que não existe — foi o que a frase de
     // `NadaPublicado` aprendeu, dois recursos atrás.
+    // As três da câmera (protocolo 13). Quem codifica a câmera é esta janela,
+    // e as três chegam a ela pelo `quadro_da_camera` ou pelo `compartilhar_camera`.
+    CameraNotLive: "A CÂMERA NÃO ESTÁ MAIS INDO PARA A SALA.\nLigue a câmera de novo.",
+    CameraQueueFull:
+      "A CONEXÃO NÃO ESTÁ LEVANDO A CÂMERA NO RITMO DELA.\n" +
+      "Parte da imagem ficou para trás; ela se refaz sozinha no quadro seguinte.",
+    CameraBadSize: "ESTA CÂMERA ENTREGA UMA IMAGEM QUE O SEELE NÃO TRANSMITE.\nEscolha outra câmera no sistema e ligue de novo.",
+
     ScreenShareUnavailable: "NÃO FOI POSSÍVEL COMPARTILHAR A TELA.\nConfira a permissão de captura do SEELE e escolha novamente uma tela ou janela disponível.",
 
     // O arquivo veio e não ficou. É a única das três em que tentar de novo
@@ -2061,6 +2072,89 @@ const FRASES_DA_TELA_NO_NAVEGADOR = Object.freeze({
   palco: "Compartilhamento indisponível neste navegador.",
   recusa: "este navegador não compartilha a tela: use o app do SEELE, ou o Chrome ou o Edge no computador",
 });
+
+/**
+ * **A câmera** (1.0, protocolo 13): no lugar da tela, pelo mesmo caminho dela.
+ *
+ * Cada estado do controle tem a frase dele, e nenhum é mudo: pedindo a
+ * permissão, negada (com o que fazer), sem câmera, sem codificador nesta
+ * janela, no ar, parada pelo sinal, e o servidor que ainda não a conhece. O
+ * rótulo do que se assiste também sai daqui: «câmera» ou «tela» pelo que a
+ * abertura do fluxo declarou, e nenhum dos dois antes de ela chegar.
+ */
+const FRASES_DA_CAMERA = Object.freeze({
+  // O rótulo do controle, em palavras, para quem não vê o ícone.
+  ligar: "LIGAR A CÂMERA",
+  desligar: "DESLIGAR A CÂMERA",
+  // O `title` do controle, por estado.
+  dicaDeLigar: (sala) => `mostrar a sua câmera para quem está em ${sala}`,
+  dicaDeLigarNoLugarDaTela: "ligar a câmera: ela entra no lugar da tela que você está compartilhando",
+  dicaDeDesligar: "parar de mostrar a sua câmera",
+  // O estado, escrito ao lado do controle.
+  pedindo: "PEDINDO A CÂMERA AO SISTEMA…\nSe aparecer uma pergunta, responda que sim.",
+  ligando: "A CÂMERA ESTÁ ABRINDO…",
+  noAr: "SUA CÂMERA ESTÁ INDO PARA A SALA.",
+  noLugarDaTela: "A CÂMERA ENTROU NO LUGAR DA TELA.\nUma pessoa mostra uma imagem por vez: a tela que você compartilhava parou.",
+  negada:
+    "O SISTEMA NÃO DEU A CÂMERA AO SEELE.\n" +
+    "Libere a câmera para o SEELE nos ajustes de privacidade do sistema, ou nas permissões do navegador, e ligue de novo.",
+  semCamera: "NENHUMA CÂMERA FOI ENCONTRADA.\nLigue uma câmera ao computador e tente de novo.",
+  ocupada: "A CÂMERA NÃO ABRIU.\nOutro programa pode estar usando a câmera: feche o programa e ligue de novo.",
+  semCaptura: "ESTA JANELA NÃO TEM ACESSO A CÂMERAS.\nA sua câmera não vai para a sala por aqui; assistir às dos outros funciona.",
+  semCodificador:
+    "ESTA JANELA NÃO CODIFICA VÍDEO DE CÂMERA.\n" +
+    "Falta o codificador H.264 do sistema. A sua câmera não vai para a sala; assistir às dos outros funciona.",
+  servidorAntigo:
+    "ESTE SERVIDOR É DE ANTES DA 1.0 E AINDA NÃO TEM CÂMERA.\n" +
+    "A câmera chega quando quem hospeda atualizar o SEELE. Compartilhar a tela funciona.",
+  dicaDoServidorAntigo: "este servidor é de antes da 1.0 e ainda não tem câmera",
+  semConfirmacao: "O SERVIDOR NÃO CONFIRMOU A CÂMERA.\nEla foi desligada. Confira se você pode compartilhar nesta sala e ligue de novo.",
+  encerrada: "A CÂMERA FOI DESLIGADA.\nA transmissão acabou do lado do servidor, ou a conexão caiu. Ligue de novo quando quiser.",
+  filaCheia: (quantos) =>
+    `A CONEXÃO NÃO ESTÁ LEVANDO A CÂMERA NO RITMO DELA.\n${quantos} ${quantos === 1 ? "quadro ficou" : "quadros ficaram"} para trás; a imagem se refaz sozinha.`,
+  // As duas paradas do teto (`PARADAS`, da tela), ditas da câmera.
+  paradas: Object.freeze({
+    SinalCritico: "A CÂMERA PAROU PARA A VOZ NÃO PICOTAR.\nEla volta sozinha quando o sinal melhorar.",
+    AbaixoDoPiso: "A CÂMERA PAROU: O QUE SOBROU DA CONEXÃO NÃO SUSTENTA NEM A MENOR IMAGEM.\nEla volta sozinha quando o caminho abrir.",
+  }),
+  paradaDesconhecida: "A CÂMERA PAROU.\nEla volta sozinha.",
+  // A transmissão desta página que parou sozinha, pelo passo em que parou
+  // (`fraseDaTransmissaoQueParou`, em `compartilhar-web.js`).
+  parou: Object.freeze({
+    abrir: "Não foi possível abrir a transmissão da câmera. Ligue a câmera de novo.",
+    ler: "Não foi possível ler a imagem da câmera. Ligue a câmera de novo.",
+    codificar: "A imagem da câmera parou de ser codificada. Ligue a câmera de novo.",
+    escrever: "A conexão da transmissão parou. Ligue a câmera de novo.",
+    continuar: "Não foi possível continuar lendo a câmera. Ligue a câmera de novo.",
+    terminar: "A câmera parou de entregar imagem. Ligue a câmera de novo.",
+  }),
+  // O que se assiste: o tipo vem da abertura do fluxo, e antes dela não se sabe.
+  rotulos: Object.freeze({ camera: "CÂMERA", monitor: "TELA", window: "TELA" }),
+  rotuloSemTipo: "AO VIVO",
+  titulos: Object.freeze({ camera: "CÂMERA", monitor: "TELA COMPARTILHADA", window: "TELA COMPARTILHADA" }),
+  tituloSemTipo: "AO VIVO NESTA SALA",
+  sua: Object.freeze({ camera: "SUA CÂMERA", monitor: "SUA TELA", window: "SUA TELA" }),
+  suaSemTipo: "SUA TRANSMISSÃO",
+  verDe: Object.freeze({
+    camera: (quem) => `ver a câmera de ${quem}`,
+    monitor: (quem) => `ver a tela de ${quem}`,
+    window: (quem) => `ver a tela de ${quem}`,
+  }),
+  verSemTipo: (quem) => `ver o que ${quem} está mostrando`,
+  previa: "A sua câmera, como ela sai daqui",
+  // A conversa pessoal do navegador (`pessoal-web.js`).
+  pessoalLigar: "LIGAR CÂMERA",
+  pessoalDesligar: "DESLIGAR CÂMERA",
+  pessoalDica: "Mostrar a sua câmera; ela entra no lugar da tela compartilhada",
+});
+
+/** A frase de uma falha do `getUserMedia` da câmera, pelo nome dela. */
+function fraseDaFalhaDaCamera(falha) {
+  const nome = falha?.name;
+  if (nome === "NotAllowedError" || nome === "SecurityError") return FRASES_DA_CAMERA.negada;
+  if (nome === "NotFoundError" || nome === "OverconstrainedError") return FRASES_DA_CAMERA.semCamera;
+  return FRASES_DA_CAMERA.ocupada;
+}
 
 /**
  * **As várias sessões** (E3 da 0.17): a trilha, a voz e a volta pela entrada.
@@ -3430,7 +3524,7 @@ const FRASES_DOS_CARGOS = Object.freeze({
     ManageVoiceRooms: ["GERIR SALAS E CANAIS", "Criar, renomear e configurar salas de voz e canais."],
     ManageRoles: ["GERIR CARGOS", "Criar, ordenar e editar os cargos abaixo do seu, e dá-los às pessoas."],
     AdministerServer: ["GERIR O SERVIDOR", "O nome e a imagem do servidor, e apagar salas e canais."],
-    ShareScreen: ["TRANSMITIR A TELA", "Mostrar a própria tela para a sala de voz em que está."],
+    ShareScreen: ["TRANSMITIR A TELA", "Mostrar a própria tela, ou a câmera, para a sala de voz em que está."],
     Administrator: [
       "ADMINISTRADOR",
       "Todas as permissões, inclusive as dos MODs. Não passa por uma restrição nem por quem está acima.",

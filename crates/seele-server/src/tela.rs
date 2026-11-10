@@ -879,6 +879,11 @@ pub struct AberturaDeTela {
     /// O cabeçalho de abertura, **byte por byte como quem compartilha o
     /// escreveu**. O servidor não o reescreve: ele já foi conferido, e o
     /// `ScreenId` dentro dele é o que o próprio servidor atribuiu.
+    ///
+    /// **Com uma exceção, de um byte**: a fonte de uma câmera (protocolo 13)
+    /// vai escrita como monitor na cópia de quem negociou menos, que recusaria
+    /// o código que não conhece. Quem reescreve é a sala, ao convidar
+    /// (`VoiceRoom::ligar`, por `seele_proto::screen::abertura_para`).
     pub abertura: Vec<u8>,
     /// Por onde o corpo chega.
     pub pedacos: mpsc::Receiver<Pedaco>,

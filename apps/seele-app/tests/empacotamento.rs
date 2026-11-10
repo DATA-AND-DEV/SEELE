@@ -278,6 +278,57 @@ fn o_app_declara_para_que_quer_a_rede_de_casa() {
     );
 }
 
+/// O valor de uma chave de um plist, quando ele é um `<string>` ou um
+/// `<true/>` logo depois dela — fora dos comentários, que neste projeto
+/// escrevem o nome das chaves por extenso.
+fn valor_no_plist(plist: &str, chave: &str) -> Option<String> {
+    let mut sem_comentarios = String::new();
+    let mut resto = plist;
+    while let Some(abre) = resto.find("<!--") {
+        sem_comentarios.push_str(&resto[..abre]);
+        resto = resto[abre..]
+            .find("-->")
+            .map_or("", |fecha| &resto[abre + fecha + 3..]);
+    }
+    sem_comentarios.push_str(resto);
+    let depois = sem_comentarios
+        .split_once(&format!("<key>{chave}</key>"))?
+        .1
+        .trim_start();
+    if depois.starts_with("<true/>") {
+        return Some("true".to_owned());
+    }
+    let texto = depois.strip_prefix("<string>")?;
+    Some(texto.split_once("</string>")?.0.to_owned())
+}
+
+/// **A câmera, como o microfone**: sem a frase no `Info.plist` o macOS não
+/// pergunta nada e a janela recebe a recusa calada; sem o direito no
+/// `Entitlements.plist` o *hardened runtime* a bloqueia no dia em que o
+/// aplicativo for assinado.
+///
+/// Lê o valor, e não só a presença do nome: os comentários destes dois
+/// arquivos citam as chaves, e um guarda que casasse com o comentário passaria
+/// com a chave apagada.
+#[test]
+fn o_app_declara_para_que_quer_a_camera() {
+    let frase = valor_no_plist(&ler("Info.plist"), "NSCameraUsageDescription")
+        .expect("o Info.plist não diz para que o app quer a câmera; o macOS nega calado");
+    assert!(
+        frase.to_lowercase().contains("câmera") && frase.chars().count() >= 40,
+        "a frase da câmera não diz à pessoa para que ela serve: {frase:?}"
+    );
+    assert_eq!(
+        valor_no_plist(
+            &ler("Entitlements.plist"),
+            "com.apple.security.device.camera"
+        )
+        .as_deref(),
+        Some("true"),
+        "sem este direito a câmera é bloqueada assim que o app for assinado"
+    );
+}
+
 #[test]
 fn o_app_declara_para_que_quer_o_microfone() {
     // Sem esta chave o macOS nega o microfone **sem perguntar nada**: nenhum

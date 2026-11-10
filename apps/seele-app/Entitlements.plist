@@ -14,5 +14,12 @@
 <dict>
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
+	<!--
+	  A câmera (1.0), pela mesma razão do microfone: o *hardened runtime* a
+	  bloqueia sem este direito, e a recusa não tem alerta. Quem a abre é a
+	  janela, e o direito é do aplicativo.
+	-->
+	<key>com.apple.security.device.camera</key>
+	<true/>
 </dict>
 </plist>

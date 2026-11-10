@@ -47,6 +47,7 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
         tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
         fontes_de_tela: Mutex::new(Vec::new()),
+        camera: std::sync::Mutex::new(None),
     })
 }
 

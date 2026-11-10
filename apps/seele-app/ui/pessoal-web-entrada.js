@@ -92,8 +92,22 @@ function instalarConversasPessoaisWeb() {
     },
     compartilhar: () => {
       if (!tela || fase !== "dentro") throw new Error("Tela ainda está abrindo");
-      return tela.noAr ? tela.parar() : tela.compartilhar();
+      // A câmera no ar não é a tela: COMPARTILHAR TELA a troca pela tela.
+      return tela.noAr && !tela.camera ? tela.parar() : tela.compartilhar();
     },
+    // A câmera, no lugar da tela. As recusas do sistema saem com a frase
+    // delas (negada, sem câmera, ocupada), e não com a genérica.
+    camera: async () => {
+      if (!tela || fase !== "dentro") throw new Error("Tela ainda está abrindo");
+      if (tela.noAr && tela.camera) return tela.parar();
+      try { await tela.ligarCamera(); }
+      catch (erro) {
+        const dita = new Error((erro?.name && erro.name !== "Error" ? fraseDaFalhaDaCamera(erro) : erro.message).replace("\n", " "));
+        dita.capacidadeAusente = true;
+        throw dita;
+      }
+    },
+    podeLigarCamera: () => typeof temCameraParaCodificar === "function" && temCameraParaCodificar(),
     trocarTela: () => {
       if (!tela || fase !== "dentro") throw new Error("Conversa encerrada");
       return tela.compartilhar();
@@ -193,7 +207,9 @@ function instalarConversasPessoaisWeb() {
       palco: vista.palco, enviarControle: controle => atual.enviarControle(controle),
       telaCheiaNativa: navegador ? null : ligada => chamarNativo("tela_cheia", { ligada }),
       aoEstado: (estado, detalhe) => {
-        if (estado === "transmitindo" || estado === "parada") vista.compartilhando(estado === "transmitindo");
+        if (estado === "transmitindo" || estado === "parada") {
+          vista.compartilhando(estado === "transmitindo", { camera: Boolean(tela?.camera), midia: tela?.midia ?? null });
+        }
         if (estado === "erro") vista.falha(detalhe || "Não foi possível abrir o compartilhamento.");
       } });
   }

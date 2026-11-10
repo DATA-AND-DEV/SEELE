@@ -536,6 +536,10 @@ pub enum Permission {
     /// Até a 0.16 a tela pegava carona no [`Self::Speak`]. A migração 18
     /// espelha: quem concedia ou negava `Speak` concede ou restringe esta, e
     /// transmitir continua exatamente igual a falar até alguém separar.
+    ///
+    /// **A câmera é desta permissão também** (protocolo 13): ela vai pelo
+    /// caminho da tela e no lugar dela, com o mesmo `StartScreenShare`, e não
+    /// ganhou um bit próprio.
     ShareScreen,
     /// O equivalente do ADMINISTRATOR do Discord: implica todas as permissões,
     /// inclusive as de MOD.

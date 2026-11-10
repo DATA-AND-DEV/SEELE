@@ -1546,6 +1546,14 @@
         -->
         <p id="sala-estado" class="operador-frase sala-estado" role="status" data-sala-pessoal hidden></p>
         <!--
+          O estado da câmera, por extenso: pedindo ao sistema, negada (com o que
+          fazer), sem câmera, no ar, parada pelo sinal, a fila que não acompanha,
+          o servidor de antes da 1.0. Escrito por `camera.js`, e por mais
+          ninguém. Vazio é escondido: uma linha em branco aqui empurraria os
+          controles.
+        -->
+        <p id="camera-estado" class="operador-frase camera-estado" role="status" data-estado="desligada" hidden></p>
+        <!--
           **O seletor de modo saiu daqui.** A comp da 0.9.0 não o desenha no
           operador: ela o põe na configuração, sob `MODO DE VOZ`, e no operador
           deixa só a frase — «microfone aberto · ouvindo · sempre aberto». Os
@@ -1591,6 +1599,18 @@
           <button id="operador-vista" class="operador-glifo" type="button" hidden
                   aria-label="COMPARTILHAR" data-glifo="tela"
                   title="mostrar um monitor ou uma janela sua para quem está na sala"></button>
+          <!--
+            **A câmera** (1.0, protocolo 13), ao lado do COMPARTILHAR e no lugar
+            dele: uma pessoa mostra uma imagem por vez, e ligar a câmera com a
+            tela no ar troca uma pela outra — o `title` e o `camera-estado`
+            dizem isso antes e depois. O estado mora no botão (`data-estado`,
+            `aria-pressed`), e quem o escreve é `desenharACamera`, em
+            `camera.js`. Num servidor de antes da 1.0 ele fica à vista, apagado,
+            com o porquê.
+          -->
+          <button id="operador-camera" class="operador-glifo" type="button" hidden
+                  aria-label="LIGAR A CÂMERA" aria-pressed="false" data-glifo="camera" data-estado="desligada"
+                  title="mostrar a sua câmera para quem está na sala"></button>
           <!--
             Só na vista da ligação pessoal (0.17), onde esta fileira vira a
             barra da chamada: o CHAT abre a conversa num painel sobreposto, e
@@ -1682,7 +1702,7 @@
                  aria-labelledby="palco-titulo">
           <div class="chamada-palco-cabeca">
             <h2 id="palco-titulo" class="chamada-titulo">
-              <span>TELA COMPARTILHADA</span>
+              <span id="palco-titulo-tipo">AO VIVO NESTA SALA</span>
             </h2>
             <!--
               A razão, ao lado da medida, e ela é literal do §5.1 da spec:
@@ -1727,7 +1747,16 @@
               destino dele é um canvas.
             -->
             <canvas id="palco-imagem" class="chamada-palco-imagem" hidden></canvas>
-            <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>
+            <!--
+              A câmera de quem a ligou, como ela sai daqui. `<video>` e não o
+              canvas de cima: a imagem vem da própria mídia desta janela, antes
+              de ser comprimida, e não dos quadros que atravessam a ponte —
+              mandá-la ao núcleo para trazê-la de volta seria decodificar o que
+              esta janela acabou de codificar. Sem som: a câmera não leva som.
+            -->
+            <video id="camera-previa" class="chamada-palco-imagem chamada-palco-previa" muted playsinline hidden
+                   aria-label="A sua câmera, como ela sai daqui"></video>
+            <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ MOSTRANDO NADA</p>
             <!--
               As transmissões da sala, quando há mais de uma.
 
@@ -5708,6 +5737,7 @@
   topo deste arquivo não os toca, então a ordem só importa para quem vier depois
   mexer nele.
 -->
+<script src="camera.js"></script>
 <script src="tela-chamada.js"></script>
 <script src="camada-sessoes.js"></script>
 <!--

@@ -140,7 +140,28 @@ pub enum ScreenSource {
     Monitor,
     /// A single window.
     Window,
+    /// A câmera de quem transmite — protocolo 13.
+    ///
+    /// **No lugar da tela, e não ao lado dela**: uma pessoa manda um fluxo de
+    /// imagem por vez, e é este byte que diz a quem recebe qual dos dois é.
+    /// Nenhum verbo novo: a câmera começa e para pelos mesmos
+    /// `StartScreenShare` e `StopScreenShare`, com a mesma permissão.
+    ///
+    /// **Só vai para quem negociou [`PROTOCOLO_DA_CAMERA`] ou mais.** Um par
+    /// do protocolo 12 recusa o código que não conhece
+    /// ([`ScreenError::UnknownSource`]) — é a regra de cima funcionando —, e por
+    /// isso quem transmite não escreve este byte para um servidor do 12, e o
+    /// servidor do 13 o reescreve como [`Self::Monitor`] na cópia de quem
+    /// assiste pelo 12 ([`abertura_para`]).
+    Camera,
 }
+
+/// O protocolo em que [`ScreenSource::Camera`] nasceu.
+///
+/// As tabelas `desde` de `crate::vocabulario` cobrem mensagens de controle, e
+/// este é um byte de cabeçalho de fluxo: o portão dele é feito à mão, por quem
+/// transmite e por quem encaminha, e os dois leem o número daqui.
+pub const PROTOCOLO_DA_CAMERA: u8 = 13;
 
 impl ScreenSource {
     /// The byte this travels as.
@@ -149,6 +170,7 @@ impl ScreenSource {
         match self {
             Self::Monitor => 0,
             Self::Window => 1,
+            Self::Camera => 2,
         }
     }
 
@@ -158,8 +180,56 @@ impl ScreenSource {
         match code {
             0 => Some(Self::Monitor),
             1 => Some(Self::Window),
+            2 => Some(Self::Camera),
             _ => None,
         }
+    }
+
+    /// O menor protocolo negociado que entende esta fonte.
+    #[must_use]
+    pub const fn desde(self) -> u8 {
+        match self {
+            Self::Monitor | Self::Window => 1,
+            Self::Camera => PROTOCOLO_DA_CAMERA,
+        }
+    }
+}
+
+/// Onde o byte da fonte mora dentro da abertura.
+const POSICAO_DA_FONTE: usize = 5;
+
+/// **A abertura como um par deste protocolo a entende.**
+///
+/// Os onze bytes de quem transmite, intocados, quando o par negociou um
+/// protocolo que conhece a fonte; quando não, a mesma abertura com a fonte
+/// escrita como [`ScreenSource::Monitor`]. Só o byte da fonte muda: o nome da
+/// transmissão, o codec e as medidas são os de quem transmite.
+///
+/// # Por que reescrever, e não deixar recusar
+///
+/// Um cliente do protocolo 12 que recebe o código 2 recusa a abertura e
+/// mostra o aviso de transmissão ilegível — honesto, e sem imagem. A imagem
+/// de uma câmera é H.264 como a de uma tela, e ele a decodifica igual: com a
+/// fonte reescrita ele vê a pessoa, com o rótulo «tela», em vez de não ver
+/// nada. O rótulo errado é o preço menor.
+///
+/// Uma abertura que não se lê (curta, ou de fonte desconhecida) volta como
+/// veio: quem decide o que fazer com ela é quem a lê.
+#[must_use]
+pub fn abertura_para(protocolo_do_par: u8, abertura: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let fonte = abertura
+        .get(POSICAO_DA_FONTE)
+        .copied()
+        .and_then(ScreenSource::from_code);
+    match fonte {
+        Some(fonte) if abertura.len() >= SCREEN_HEADER_LEN && protocolo_do_par < fonte.desde() => {
+            let mut reescrita = abertura.to_vec();
+            if let Some(byte) = reescrita.get_mut(POSICAO_DA_FONTE) {
+                *byte = ScreenSource::Monitor.code();
+            }
+            std::borrow::Cow::Owned(reescrita)
+        }
+        _ => std::borrow::Cow::Borrowed(abertura),
     }
 }
 
@@ -391,7 +461,7 @@ impl ScreenHeader {
         }
 
         let screen = ScreenId(read_u32(header, 1));
-        let source_code = header.get(5).copied().unwrap_or_default();
+        let source_code = header.get(POSICAO_DA_FONTE).copied().unwrap_or_default();
         let Some(source) = ScreenSource::from_code(source_code) else {
             return Err(ScreenError::UnknownSource { code: source_code });
         };
@@ -1080,6 +1150,65 @@ mod tests {
             ScreenHeader::decode(&strange_codec),
             Err(ScreenError::UnknownCodec { code: 4 })
         );
+    }
+
+    /// **A câmera é o código 2, e vai e volta.** O 3 continua recusado: o
+    /// código novo entrou no fim, e não abriu a porta para o que vier depois.
+    #[test]
+    fn a_camera_e_o_codigo_dois_e_o_tres_continua_recusado() {
+        let camera = ScreenHeader {
+            source: ScreenSource::Camera,
+            ..header()
+        };
+        let mut buffer = [0_u8; SCREEN_HEADER_LEN];
+        camera.encode(&mut buffer).unwrap();
+        assert_eq!(buffer[5], 2, "a câmera não saiu como o código 2");
+        assert_eq!(ScreenHeader::decode(&buffer).unwrap().0, camera);
+        assert_eq!(ScreenSource::from_code(2), Some(ScreenSource::Camera));
+
+        let mut desconhecida = buffer;
+        desconhecida[5] = 3;
+        assert_eq!(
+            ScreenHeader::decode(&desconhecida),
+            Err(ScreenError::UnknownSource { code: 3 })
+        );
+    }
+
+    /// **Quem negociou o 12 recebe a câmera escrita como monitor**, e quem
+    /// negociou o 13 a recebe intocada. Só o byte da fonte muda; e a tela e a
+    /// janela, que o 12 conhece, não são tocadas em protocolo nenhum.
+    #[test]
+    fn a_abertura_da_camera_vira_monitor_para_quem_negociou_menos_que_treze() {
+        let camera = ScreenHeader {
+            source: ScreenSource::Camera,
+            ..header()
+        };
+        let mut buffer = [0_u8; SCREEN_HEADER_LEN];
+        camera.encode(&mut buffer).unwrap();
+
+        assert_eq!(&*abertura_para(PROTOCOLO_DA_CAMERA, &buffer), &buffer[..]);
+        assert_eq!(&*abertura_para(PROTOCOL_VERSION, &buffer), &buffer[..]);
+
+        let para_o_doze = abertura_para(PROTOCOLO_DA_CAMERA - 1, &buffer).into_owned();
+        let (lida, _) = ScreenHeader::decode(&para_o_doze).unwrap();
+        assert_eq!(
+            lida,
+            ScreenHeader {
+                source: ScreenSource::Monitor,
+                ..camera
+            },
+            "a reescrita mexeu em mais que a fonte"
+        );
+
+        let mut janela = [0_u8; SCREEN_HEADER_LEN];
+        header().encode(&mut janela).unwrap();
+        assert_eq!(&*abertura_para(10, &janela), &janela[..]);
+
+        // O que não se lê volta como veio: curto, ou de fonte desconhecida.
+        assert_eq!(&*abertura_para(10, &buffer[..7]), &buffer[..7]);
+        let mut estranha = buffer;
+        estranha[5] = 9;
+        assert_eq!(&*abertura_para(10, &estranha), &estranha[..]);
     }
 
     #[test]

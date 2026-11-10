@@ -53,6 +53,7 @@ enxergar o protocolo direto.
 | Confiança | TOFU: o cliente fixa a impressão do certificado no primeiro contato, modelo SSH, e a confere no DTLS antes de mandar qualquer coisa |
 | Voz | Opus 48 kHz mono, quadros de 20 ms, 16 a 48 kbps adaptativo, DTX, sem FEC (ADR 0010), jitter buffer adaptativo |
 | Tela | H.264 num canal confiável e ordenado, encaminhado pelo servidor; o som da tela é Opus a 96 kbps |
+| Câmera | pelo caminho da tela e **no lugar dela**: uma imagem por pessoa. H.264 de até 720p a 30, sem som, codificado pela janela (`getUserMedia` e `VideoEncoder`) |
 | Identidade | par de chaves Ed25519, guardado em disco |
 | Persistência | SQLite com migrações embutidas, no próprio binário |
 | Alcance | rede local, IPv6, porta no roteador por UPnP, e furo de NAT pelo ponto de encontro. Sem TURN e sem relay, por decisão (ADR 0063, emenda de 26/10/2026) |
@@ -382,6 +383,17 @@ nos faria distribuidor sem ela. Há módulo publicado para o macOS em Apple
 Silicon e para o Windows x86-64; o Linux não compartilha tela, por decisão — o
 portal do sistema pediria `pipewire`, e o binário deixaria de ser autocontido.
 Tudo isso mora em `crates/seele-video`.
+
+**A câmera** fica ao lado do COMPARTILHAR, e entra **no lugar** da tela: uma
+pessoa mostra uma imagem por vez, e ligar a câmera com a tela no ar troca uma
+pela outra — o controle diz isso antes, e a frase ao lado dele diz depois. Ela
+sai em até 720p a 30 quadros, sem som (a voz já vai pela voz), e quem a liga se
+vê por uma prévia tirada da própria câmera. A permissão é a mesma de transmitir
+a tela. Quem captura e codifica é a janela, com o codificador H.264 do sistema:
+a câmera não usa o módulo do Cisco. Num servidor de antes da 1.0 o controle
+fica apagado, com o porquê; no celular ainda não dá para enviar a câmera, só
+assistir. O macOS e o navegador perguntam uma vez se o SEELE pode usar a
+câmera, e a recusa tem frase com o caminho de volta.
 
 **Quem leva a imagem até quem assiste é o servidor**, como já faz com a voz. A
 **MALHA**, em CONFIGURAÇÕES, deixa a tela vir de outra pessoa: quem assiste

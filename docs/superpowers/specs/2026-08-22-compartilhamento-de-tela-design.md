@@ -41,6 +41,43 @@ Este spec pede **metade** dessa linha, e diz qual metade:
   existe. Um retângulo com o rosto de alguém não é um subproduto barato de
   compartilhar tela: é a segunda metade do trabalho, feita de novo.
 
+> **Nota de 10/11/2026 (1.0, protocolo 13).** A câmera saiu do não-objetivo. O
+> parágrafo acima fica como foi escrito, porque a razão dele continua
+> verdadeira e foi o que decidiu a forma: a câmera entrou **no lugar da tela, e
+> não ao lado dela**. Uma pessoa manda um fluxo de imagem por vez — tela ou
+> câmera —, o servidor não ganhou um segundo fluxo por pessoa, e ligar a câmera
+> com a tela no ar troca uma pela outra, dito na tela.
+>
+> O que mudou e o que não mudou:
+>
+> - **o fio:** só um código novo na fonte da abertura do fluxo (§3.6),
+>   `ScreenSource::Camera = 2`, em `crates/seele-proto/src/screen.rs`. Nenhum
+>   verbo novo: a câmera começa e para por `StartScreenShare` e
+>   `StopScreenShare`;
+> - **a permissão:** a mesma, `Permission::ShareScreen`. Quem pode mostrar a
+>   tela pode mostrar a câmera, e não há um bit a mais para conceder;
+> - **o portão de versão é feito à mão**, porque as tabelas `desde` cobrem
+>   mensagens de controle e não um byte de cabeçalho: quem transmite só escreve
+>   a fonte 2 para um servidor que negociou o 13 (a recusa é o `ServidorAntigo`
+>   de sempre, antes de qualquer coisa sair), e o servidor reescreve a fonte
+>   como monitor na cópia de quem assiste pelo 12 (`abertura_para`), que
+>   recusaria o código que não conhece;
+> - **quem assiste fica sabendo pelo fluxo**, e não pelo controle: o
+>   `ScreenOpened` da casca leva `source`, e o palco escreve «câmera» ou «tela»
+>   por ele — e nenhum dos dois antes de a abertura chegar;
+> - **o ajuste do codificador:** movimento, 720p a 30 no máximo, sem som (a voz
+>   de quem fala já vai pela voz);
+> - **quem captura no aplicativo é a janela.** O workspace proíbe `unsafe`, e
+>   não há captura de câmera nativa sem ele: o WebView captura e codifica, e os
+>   quadros entram no núcleo já em Annex-B (`crates/seele-core/src/de_fora.rs`),
+>   pelo mesmo escoadouro da tela — o teto, o balde e o quadro-chave em fatias
+>   são os mesmos;
+> - **no celular** a câmera ainda não é oferecida para enviar; assistir funciona;
+> - **na chamada pessoal** a abertura não diz câmera: lá não há número de
+>   protocolo negociado, e um par da 0.19 recusaria a fonte nova.
+>
+> O item 2 do §6 («Câmera») vale até esta data.
+
 Vale escrever a razão de revogar, porque ela não é «agora dá»: é que o ciclo de
 conectividade entregou caminho direto entre casas, e compartilhar tela é o
 primeiro recurso que **só** existe com ele. Sem P2P a decisão era teórica.
@@ -766,6 +803,8 @@ que o recurso.
 1. **Áudio da tela ou do app.** Permissão separada nos três sistemas, mistura
    com o microfone, e eco. No Linux quase não existe. É um segundo recurso.
 2. **Câmera.** §0 explica: é a outra metade do trabalho, não um subproduto.
+   *(Entrou na 1.0, em 10/11/2026, no lugar da tela e não ao lado dela: ver a
+   nota do §0.)*
 3. **Mais de uma tela ao mesmo tempo na mesma sala.** Uma transmissão por sala
    de voz na v1. Duas dobram a subida de quem recebe e triplicam a interface.
 4. **Encoder de hardware** (VideoToolbox, Media Foundation, VAAPI). Três

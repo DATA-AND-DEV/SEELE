@@ -279,6 +279,12 @@ pub enum Aviso {
         largura: u16,
         /// Altura em pixels.
         altura: u16,
+        /// **O que é**: monitor, janela ou câmera, como o cabeçalho declarou.
+        ///
+        /// É por aqui que quem assiste fica sabendo que a imagem é uma câmera
+        /// (protocolo 13): o anúncio da transmissão no controle não diz, e a
+        /// casca escreve «câmera» ou «tela» pelo que chega aqui.
+        origem: seele_proto::screen::ScreenSource,
         /// **Qual leitura abriu**: um número por leitura, crescente no
         /// processo ([`nova_leitura_de_tela`]). O [`Self::TelaFechou`] dela leva
         /// o mesmo número. Sem ele, o fim de uma leitura substituída (o par
@@ -356,6 +362,20 @@ pub enum Aviso {
         tela: ScreenId,
         /// Qual leitura acabou: o número do [`Self::TelaAbriu`] dela.
         leitura: u64,
+    },
+    /// A transmissão da **própria câmera** pede alguma coisa a quem a
+    /// codifica, que está fora deste processo (`crate::de_fora`).
+    ///
+    /// A tela não precisa disto: o codificador dela mora aqui, e o pedido de
+    /// quadro-chave e o teto novo vão direto à bomba. O da câmera mora na
+    /// janela, e sem este aviso um `KeyFrameRequested` do servidor morreria
+    /// deste lado — quem acabou de entrar esperaria uma imagem que ninguém
+    /// mandou refazer.
+    Camera {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// O que ela pede.
+        sinal: crate::de_fora::SinalParaFora,
     },
     /// O que um túnel de jogo mediu: caminho, latência, bytes, quedas.
     ///
@@ -435,12 +455,14 @@ impl std::fmt::Debug for Aviso {
                 tela,
                 largura,
                 altura,
+                origem,
                 leitura,
             } => f
                 .debug_struct("TelaAbriu")
                 .field("tela", tela)
                 .field("largura", largura)
                 .field("altura", altura)
+                .field("origem", origem)
                 .field("leitura", leitura)
                 .finish(),
             Self::TelaIlegivel { motivo } => f
@@ -476,6 +498,11 @@ impl std::fmt::Debug for Aviso {
                 .debug_struct("TelaFechou")
                 .field("tela", tela)
                 .field("leitura", leitura)
+                .finish(),
+            Self::Camera { tela, sinal } => f
+                .debug_struct("Camera")
+                .field("tela", tela)
+                .field("sinal", sinal)
                 .finish(),
             // A oferta fica de fora: o log diz qual pedido, e o resumo a
             // identifica inteira.
@@ -3854,11 +3881,63 @@ struct Queda {
 struct TelaViva {
     /// O nome que o servidor deu a esta transmissão.
     tela: ScreenId,
-    /// A alça da thread do codificador. Largá-la para a bomba.
-    bomba: crate::bomba::Bomba,
+    /// Quem produz os quadros. Largá-lo para a transmissão.
+    produtor: Produtor,
     /// O que a pessoa escolheu, guardado porque o teto é recalculado a cada
     /// `ScreenViewers` e a escolha é uma das pernas dele (§5).
     limites: LimitesDeTela,
+}
+
+/// Quem produz os quadros de uma transmissão desta pessoa.
+///
+/// A tela tem a bomba — a thread que captura e codifica aqui. A câmera tem a
+/// alça de `crate::de_fora`: quem codifica é a janela, e deste lado há só uma
+/// tarefa que entrega os quadros a quem escoa. As ordens são as mesmas, e
+/// cada uma vira o que o produtor sabe fazer com ela.
+#[derive(Debug)]
+enum Produtor {
+    /// A thread do codificador de tela.
+    Bomba(crate::bomba::Bomba),
+    /// A câmera, codificada fora deste processo.
+    DeFora(crate::de_fora::AlcaDeFora),
+}
+
+impl Produtor {
+    /// O teto andou.
+    fn teto(&self, teto: crate::tela::TetoDeVideo, faixa: SignalBand) {
+        match self {
+            Self::Bomba(bomba) => {
+                let _ = bomba.teto(teto, faixa);
+            }
+            // Quem está de fora não lê as pernas do teto: recebe o resultado,
+            // em bits por segundo, ou a parada com o motivo.
+            Self::DeFora(alca) => {
+                let _ = alca.teto(teto.teto(faixa));
+            }
+        }
+    }
+
+    /// A pessoa mexeu na resolução ou na cadência.
+    ///
+    /// Só a bomba troca de degrau sozinha. As medidas da câmera são as do
+    /// codificador da janela, e mudá-las é ela recomeçar a transmissão.
+    fn escolha(&self, resolucao: crate::Resolucao, cadencia: crate::Cadencia) {
+        if let Self::Bomba(bomba) = self {
+            let _ = bomba.escolha(resolucao, cadencia);
+        }
+    }
+
+    /// Alguém que assiste precisa de um quadro-chave.
+    fn chave(&self) {
+        match self {
+            Self::Bomba(bomba) => {
+                let _ = bomba.chave();
+            }
+            Self::DeFora(alca) => {
+                let _ = alca.chave();
+            }
+        }
+    }
 }
 
 /// As tarefas soltas do caminho entre pares, e quem é dono delas.
@@ -4981,6 +5060,27 @@ impl Motor {
             // este comando, e guardar depois abriria uma janela em que o
             // `ScreenShareStarted` chega e não encontra a escolha da pessoa.
             Comando::CompartilharTela { fonte, limites } => {
+                // **A câmera só é pedida a um servidor que a conhece.** A
+                // fonte 2 nasceu no protocolo 13, e um servidor do 12 recusa o
+                // cabeçalho dela *depois* de ter anunciado a transmissão à
+                // sala: ficaria desenhada uma tela que não tem fluxo. Quem
+                // chama já conferiu e respondeu com o nome do erro; isto é a
+                // parede que não depende de quem chama. O pedido é largado
+                // aqui, e a entrada da janela passa a responder «fechada».
+                let negociado = cliente.versao_negociada();
+                if fonte.origem().desde() > negociado {
+                    tracing::warn!(
+                        negociado,
+                        exige = fonte.origem().desde(),
+                        "a câmera foi pedida a um servidor que não a conhece; nada saiu"
+                    );
+                    return;
+                }
+                // **No lugar da tela, e não ao lado dela.** Uma pessoa manda
+                // um fluxo de imagem por vez, e quem troca é o servidor: o
+                // pedido novo toma a vaga, o fim da transmissão anterior é
+                // anunciado à sala (e a esta ponta, que mata a bomba dela em
+                // `a_tela_ouviu`), e só então a nova ganha nome.
                 if self.caminho.estimativa_medida().is_none()
                     && self.caminho.estimativa() == crate::tela::CAMINHO_DA_PROVA_BPS
                 {
@@ -5008,7 +5108,7 @@ impl Motor {
                 };
                 viva.limites = limites;
                 let (resolucao, cadencia) = (limites.resolucao, limites.cadencia);
-                viva.bomba.escolha(resolucao, cadencia);
+                viva.produtor.escolha(resolucao, cadencia);
                 // E o teto de novo, porque a banda escolhida é uma das pernas
                 // dele: sem esta linha, mexer só na banda não mudaria nada.
                 self.reconferir_o_teto();
@@ -5498,7 +5598,7 @@ impl Motor {
             ServerMessage::KeyFrameRequested { screen, .. } => {
                 if let Some(viva) = self.tela_viva.as_ref() {
                     if viva.tela == screen {
-                        let _ = viva.bomba.chave();
+                        viva.produtor.chave();
                     }
                 }
             }
@@ -6453,6 +6553,7 @@ async fn ler_a_tela_alheia(
                     tela,
                     largura: cabecalho.width,
                     altura: cabecalho.height,
+                    origem: cabecalho.source,
                     leitura,
                 })
                 .is_err()
@@ -6634,6 +6735,12 @@ impl Motor {
                 // mesma coisa. Quem compartilha era a única pessoa da sala que
                 // não via o que estava mostrando — o servidor não devolve a
                 // transmissão a quem a produziu, e com razão.
+                //
+                // **Da câmera, só a abertura.** Quem a codifica é a janela, que
+                // tem a imagem na mão antes de ela ser comprimida: devolver-lhe
+                // os quadros seria mandá-la decodificar o que ela mesma acabou
+                // de codificar. A abertura vai, porque é ela que diz à janela
+                // que o fluxo existe e que os quadros já têm para onde ir.
                 let espelho = |visto: crate::bomba::EspelhoDaTela<'_>| {
                     let aviso = match visto {
                         crate::bomba::EspelhoDaTela::Abriu { largura, altura } => {
@@ -6641,8 +6748,14 @@ impl Motor {
                                 tela,
                                 largura,
                                 altura,
+                                origem,
                                 leitura,
                             }
+                        }
+                        crate::bomba::EspelhoDaTela::Quadro { .. }
+                            if origem == seele_proto::screen::ScreenSource::Camera =>
+                        {
+                            return;
                         }
                         crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
                             tela,
@@ -6693,11 +6806,17 @@ impl Motor {
             return;
         };
 
-        let PedidoDeTela {
-            biblioteca,
-            captura,
-            origem,
-        } = *pedido;
+        let (biblioteca, captura, origem) = match *pedido {
+            PedidoDeTela::DoSistema {
+                biblioteca,
+                captura,
+                origem,
+            } => (biblioteca, captura, origem),
+            PedidoDeTela::DeFora(quadros) => {
+                self.nascer_a_camera(tela, quadros, limites, escoar);
+                return;
+            }
+        };
         let arranjo = crate::bomba::Arranjo {
             teto: self.teto_de_video(Some(&limites)),
             faixa: self.faixa,
@@ -6722,7 +6841,58 @@ impl Motor {
         escoar(origem, eventos, bomba.pedido_de_chave());
         self.tela_viva = Some(TelaViva {
             tela,
-            bomba,
+            produtor: Produtor::Bomba(bomba),
+            limites,
+        });
+    }
+
+    /// A câmera pedida vira transmissão: o fluxo abre com o teto de agora, e
+    /// os quadros que a janela empurrar passam a ir a quem escoa.
+    ///
+    /// **O portão de versão, pela segunda vez.** Quem pede a câmera já foi
+    /// conferido antes de o `StartScreenShare` sair (`Comando::CompartilharTela`),
+    /// mas entre o pedido e o nome a conexão pode ter caído e voltado num
+    /// servidor do protocolo 12 — que recusa a fonte 2 e deixaria anunciada
+    /// uma transmissão sem fluxo. Aqui o pedido é largado: a entrada da janela
+    /// passa a responder «fechada», e ela diz por quê.
+    fn nascer_a_camera(
+        &mut self,
+        tela: ScreenId,
+        quadros: crate::de_fora::QuadrosDeFora,
+        limites: LimitesDeTela,
+        escoar: impl FnOnce(
+            seele_proto::screen::ScreenSource,
+            mpsc::Receiver<crate::EventoDaBomba>,
+            crate::bomba::PedidoDeChave,
+        ),
+    ) {
+        let negociado = self.protocolo.load(std::sync::atomic::Ordering::Relaxed);
+        if negociado < seele_proto::screen::PROTOCOLO_DA_CAMERA {
+            tracing::warn!(
+                negociado,
+                exige = seele_proto::screen::PROTOCOLO_DA_CAMERA,
+                "o servidor deu nome a uma câmera numa conexão que não a conhece; nada foi aberto"
+            );
+            return;
+        }
+        let teto = self.teto_de_video(Some(&limites)).teto(self.faixa);
+        let avisos = self.avisos.clone();
+        let (alca, eventos, pedido_de_chave) = crate::de_fora::ligar_de_fora(
+            quadros,
+            teto,
+            crate::tela::intervalo_de_quadro(limites.cadencia.hz()),
+            move |sinal| {
+                let _ = avisos.send(Aviso::Camera { tela, sinal });
+            },
+        );
+        escoar(
+            seele_proto::screen::ScreenSource::Camera,
+            eventos,
+            pedido_de_chave,
+        );
+        self.tela_viva = Some(TelaViva {
+            tela,
+            produtor: Produtor::DeFora(alca),
             limites,
         });
     }
@@ -6827,7 +6997,7 @@ impl Motor {
             return;
         };
         let teto = self.teto_de_video(Some(&viva.limites));
-        let _ = viva.bomba.teto(teto, self.faixa);
+        viva.produtor.teto(teto, self.faixa);
     }
 
     /// Mata a bomba, se houver uma.
@@ -7025,13 +7195,21 @@ fn matar(viva: Option<TelaViva>) {
     // pararia junto a tarefa que escoa — que é justamente quem tem de esvaziar o
     // canal para a thread conseguir entregar o `Fim` dela. Na piscina de bloqueio
     // o mesmo fim não custa nada ao laço.
+    let bomba = match viva.produtor {
+        Produtor::Bomba(bomba) => bomba,
+        // Sem thread a juntar: a tarefa ouve o fim e fecha o fluxo sozinha.
+        Produtor::DeFora(alca) => {
+            alca.parar();
+            return;
+        }
+    };
     match tokio::runtime::Handle::try_current() {
         Ok(runtime) => {
-            runtime.spawn_blocking(move || viva.bomba.parar());
+            runtime.spawn_blocking(move || bomba.parar());
         }
         // Fora de um runtime — um teste que monta o motor à mão. Aqui não há
         // tarefa nenhuma para proteger do bloqueio.
-        Err(_) => viva.bomba.parar(),
+        Err(_) => bomba.parar(),
     }
 }
 
@@ -10590,7 +10768,7 @@ mod tests {
     }
 
     fn pedido_de_teste(biblioteca: seele_video::BibliotecaDeVideo) -> PedidoDeTela {
-        PedidoDeTela {
+        PedidoDeTela::DoSistema {
             biblioteca,
             captura: crate::video::CapturaEmCaixa::nova(CapturaDeMentira),
             origem: seele_proto::screen::ScreenSource::Monitor,

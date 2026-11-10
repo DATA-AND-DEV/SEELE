@@ -135,6 +135,9 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "buscar",
     "codec_da_tela",
     "codificacao_da_tela",
+    // A câmera (protocolo 13): o mesmo `StartScreenShare` da tela, com o
+    // portão de versão feito à mão (`tela::portao_da_fonte`).
+    "compartilhar_camera",
     "compartilhar_tela",
     // Os três dos anexos que a ponte chama por dentro: o cabeçalho do envio,
     // o destino (com as regras do nome) e o pedido de um anexo ao servidor.
@@ -311,6 +314,14 @@ fn estado_vazio() -> Value {
     json!({ "casamentos": [], "atual": null, "ordinal": null, "posicao": 0, "total": 0 })
 }
 
+/// Se este comando pede ou abre uma **câmera**: o `compartilhar_camera`, e a
+/// abertura ou a codificação de um fluxo com a fonte `"camera"`.
+fn pede_a_camera(comando: &str, args: &Value) -> bool {
+    comando == "compartilhar_camera"
+        || (matches!(comando, "abertura_da_tela" | "codificacao_da_tela")
+            && args.get("fonte").and_then(Value::as_str) == Some("camera"))
+}
+
 impl Ligacao {
     /// Atende um comando da sessão desta ligação. `None` quando o comando não
     /// é desta camada.
@@ -323,6 +334,17 @@ impl Ligacao {
     ) -> Option<Atendido> {
         if !COMANDOS_DA_SESSAO.contains(&comando) {
             return None;
+        }
+        // **O portão da câmera, antes de qualquer coisa**: nem o pedido nem a
+        // abertura de uma câmera saem para um servidor que negociou menos que
+        // o protocolo dela. Ver `tela::portao_da_fonte`.
+        if self.carimbo() != 0 && pede_a_camera(comando, args) {
+            if let Err(erro) = crate::tela::portao_da_fonte(
+                seele_proto::screen::ScreenSource::Camera,
+                self.carimbo(),
+            ) {
+                return Some(Err(json!(erro)));
+            }
         }
         let mut saida = Saida::default();
         if self.sessao_mut().is_none() {
@@ -928,6 +950,16 @@ fn atender_na_sessao(
             saida.mensagens.push(ClientMessage::StartScreenShare);
             Ok(Value::Null)
         }
+        // **A câmera, no lugar da tela** (protocolo 13): o mesmo pedido e o
+        // mesmo `StartScreenShare`, com os limites dela. O que a distingue é a
+        // fonte na abertura do fluxo, e o portão de versão já passou
+        // (`Ligacao::atender`).
+        "compartilhar_camera" => {
+            let limites = crate::tela::limites_da_camera(&a.limites("limites")?);
+            sessao.pedir(Some(limites));
+            saida.mensagens.push(ClientMessage::StartScreenShare);
+            Ok(Value::Null)
+        }
         // Idempotente: o pedido sai, e o servidor fica sabendo.
         "parar_de_compartilhar" => {
             sessao.pedir(None);
@@ -942,16 +974,25 @@ fn atender_na_sessao(
             }
             Ok(Value::Null)
         }
-        "codificacao_da_tela" => Ok(crate::tela::codificacao(
-            &a.limites("limites")?,
-            a.u32("largura")?,
-            a.u32("altura")?,
-        )),
+        "codificacao_da_tela" => {
+            let limites = a.limites("limites")?;
+            // Uma câmera tem o teto dela, peça a página o que pedir.
+            let limites = if a.fonte("fonte")? == seele_proto::screen::ScreenSource::Camera {
+                crate::tela::limites_da_camera(&limites)
+            } else {
+                limites
+            };
+            Ok(crate::tela::codificacao(
+                &limites,
+                a.u32("largura")?,
+                a.u32("altura")?,
+            ))
+        }
         "abertura_da_tela" => {
             let lado = |nome: &str| -> Result<u16, Value> { a.u16(nome) };
             crate::tela::abertura(
                 a.u32("tela")?,
-                a.booleano("monitor")?,
+                a.fonte("fonte")?,
                 lado("largura")?,
                 lado("altura")?,
             )
@@ -1151,6 +1192,14 @@ impl Args<'_> {
         self.campo(nome)
             .and_then(Value::as_bool)
             .ok_or_else(|| self.invalido(nome, "um booleano"))
+    }
+
+    /// A fonte de uma transmissão, pelo nome (`tela::nome_da_fonte`).
+    fn fonte(&self, nome: &str) -> Result<seele_proto::screen::ScreenSource, Value> {
+        self.campo(nome)
+            .and_then(Value::as_str)
+            .and_then(crate::tela::fonte_de)
+            .ok_or_else(|| self.invalido(nome, "monitor, window ou camera"))
     }
 
     fn texto(&self, nome: &str) -> Result<String, Value> {
@@ -2567,6 +2616,119 @@ mod tests {
             client_message_id: None,
             attachment: None,
         }
+    }
+
+    /// **A câmera não é pedida nem aberta num servidor 12**, e o erro volta
+    /// tipado, com os dois números — o mesmo `ServidorAntigo` dos verbos do 13.
+    ///
+    /// O `StartScreenShare` da câmera é um verbo que o 12 conhece: o portão de
+    /// toda mensagem (`portao_do_cliente`) o deixaria passar, e o servidor
+    /// anunciaria à sala uma transmissão cujo fluxo ele recusa. O portão da
+    /// câmera é feito à mão, em `Ligacao::atender`; tirá-lo de lá faz o pedido
+    /// chegar ao fio. A tela, que o 12 conhece, continua saindo.
+    #[test]
+    fn um_servidor_doze_nao_recebe_o_pedido_nem_a_abertura_da_camera() {
+        let limites = json!({ "banda_bps": null, "altura_maxima": 720, "quadros_maximos": 30 });
+        let antigo = json!({ "ServidorAntigo": { "negociado": 12, "exige": 13 } });
+        let mut chaves = DaPagina::nova(SEMENTE);
+
+        let mut ligacao = dentro_em(12);
+        for (comando, args) in [
+            ("compartilhar_camera", json!({ "limites": limites })),
+            (
+                "abertura_da_tela",
+                json!({ "tela": 7, "fonte": "camera", "largura": 1280, "altura": 720 }),
+            ),
+            (
+                "codificacao_da_tela",
+                json!({ "limites": limites, "fonte": "camera", "largura": 1280, "altura": 720 }),
+            ),
+        ] {
+            assert_eq!(
+                ligacao.atender(comando, &args, &mut chaves, 0),
+                Some(Err(antigo.clone())),
+                "{comando}"
+            );
+        }
+        assert!(
+            escritos(&mut ligacao).is_empty(),
+            "o pedido da câmera foi ao fio de um servidor do 12"
+        );
+        // A tela é do 9, e sai no 12: o pedido e a abertura.
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "compartilhar_tela",
+            json!({ "limites": limites }),
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![ClientMessage::StartScreenShare]
+        );
+        let abertura = atender(
+            &mut ligacao,
+            &mut chaves,
+            "abertura_da_tela",
+            json!({ "tela": 7, "fonte": "window", "largura": 1280, "altura": 720 }),
+        );
+        assert_eq!(
+            abertura.resposta[1 + 5],
+            1,
+            "a janela não saiu como a fonte 1"
+        );
+
+        // Num servidor 13 a câmera é pedida, abre com a fonte dela, e nunca
+        // passa de 720p a 30 — peça a página o que pedir.
+        let mut ligacao = dentro();
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "compartilhar_camera",
+            json!({ "limites": { "banda_bps": null, "altura_maxima": 1080, "quadros_maximos": 60 } }),
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![ClientMessage::StartScreenShare]
+        );
+        let abertura = atender(
+            &mut ligacao,
+            &mut chaves,
+            "abertura_da_tela",
+            json!({ "tela": 7, "fonte": "camera", "largura": 1280, "altura": 720 }),
+        );
+        assert_eq!(
+            abertura.resposta[1 + 5],
+            2,
+            "a câmera não saiu como a fonte 2"
+        );
+        let codificacao = atender(
+            &mut ligacao,
+            &mut chaves,
+            "codificacao_da_tela",
+            json!({
+                "limites": { "banda_bps": null, "altura_maxima": 1080, "quadros_maximos": 60 },
+                "fonte": "camera", "largura": 1920, "altura": 1080
+            }),
+        );
+        assert_eq!(
+            (
+                &codificacao.resposta["altura"],
+                &codificacao.resposta["quadros"]
+            ),
+            (&json!(720), &json!(30)),
+            "a câmera passou do teto dela: {}",
+            codificacao.resposta
+        );
+        // Uma fonte que não existe não é adivinhada.
+        assert!(matches!(
+            ligacao.atender(
+                "abertura_da_tela",
+                &json!({ "tela": 7, "fonte": "tela", "largura": 1280, "altura": 720 }),
+                &mut chaves,
+                0
+            ),
+            Some(Err(_))
+        ));
     }
 
     /// **Nenhum verbo do protocolo 13 sai para um servidor 12**, e o erro

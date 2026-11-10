@@ -514,3 +514,19 @@
 .pessoal-web .pessoal-web-texto { border: 0; }
 .pessoal-web .pessoal-web-texto:focus { outline: none; box-shadow: none; }
 .pessoal-web-chat:has(textarea:focus-visible) .pessoal-web-chat-titulo { text-decoration: underline; }
+
+/* A câmera de quem a ligou (1.0), como ela sai: um quadro pequeno sobre o
+   canto do palco, espelhado como um espelho. Só enquanto a câmera está no ar. */
+.pessoal-web-previa {
+  position: absolute;
+  right: var(--seele-e3);
+  bottom: calc(var(--seele-e3) + 72px);
+  width: min(28vw, 220px);
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--seele-negro-absoluto);
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio);
+  transform: scaleX(-1);
+  z-index: 2;
+}

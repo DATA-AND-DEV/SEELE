@@ -231,6 +231,14 @@
       const bVista = comGlifo(null); bVista.className = "chamada-controle";
       bVista.addEventListener("click", () => vista.click());
       espelhar(bVista, vista, { icone: true });
+      // A CÂMERA, ao lado do COMPARTILHAR: o mesmo espelho do botão do operador,
+      // com o estado, o indisponível e o porquê dele.
+      const camera = document.getElementById("operador-camera");
+      const bCamera = comGlifo(null); bCamera.className = "chamada-controle";
+      if (camera) {
+        bCamera.addEventListener("click", () => camera.click());
+        espelhar(bCamera, camera, { icone: true, mostrar: () => !camera.hidden });
+      }
       const troca = document.getElementById("operador-trocar-tela");
       const bTroca = comGlifo(null); bTroca.className = "chamada-controle";
       bTroca.addEventListener("click", () => troca.click());
@@ -246,7 +254,18 @@
       const bSala = comGlifo(null); bSala.className = "chamada-controle chamada-controle-sair";
       bSala.addEventListener("click", () => sair.click());
       espelhar(bSala, sair, { icone: true, mostrar: () => sair.dataset.alvo === "sala" });
-      controles.append(bMudo, bSurdo, bVista, bTroca, bServidor, bSala);
+      controles.append(bMudo, bSurdo, bVista, ...(camera ? [bCamera] : []), bTroca, bServidor, bSala);
+      // O estado da câmera, por extenso, na própria bandeja: nesta vista a
+      // coluna do operador sai de cena, e a frase que mora nela
+      // (`camera-estado`) sairia junto — a câmera negada ou parada ficaria só
+      // com um ícone a dizer isso. Quem a escreve é `desenharACamera`.
+      const estadoDaCamera = document.createElement("p");
+      estadoDaCamera.id = "chamada-camera-estado";
+      estadoDaCamera.className = "chamada-camera-estado";
+      estadoDaCamera.setAttribute("role", "status");
+      estadoDaCamera.hidden = true;
+      controles.append(estadoDaCamera);
+      if (typeof desenharACamera === "function") desenharACamera();
       chamada.append(controles);
     }
 

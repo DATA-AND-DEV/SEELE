@@ -29721,3 +29721,452 @@ fn a_tecla_global_nasce_desligada_escondida_e_fora_do_alcance_da_pagina() {
         "a janela vir à frente, sair dela ou fechar não avisa mais a tecla de falar"
     );
 }
+
+// ------------------------------------------------------------- a câmera (1.0)
+
+/// O que `camera.js` espera do resto da casca, para rodar sozinho no `node`:
+/// o `listen` e o `$` do `base.js`, a ponte que não está, e um navegador sem
+/// câmera. O que se mede com isto são as palavras e as contas, e não o DOM.
+const CASCA_MINIMA_DA_CAMERA: &str = r#"
+var ouvintesDaCamera = [];
+var listen = (nome, ouvinte) => { ouvintesDaCamera.push(ouvinte); };
+var $ = () => null;
+var PONTE_NO_LUGAR_DO_TAURI = false;
+var navigator = {};
+var vistaDaJanela = { sessao: null, geracao: 0 };
+"#;
+
+/// **O número da câmera é o do protocolo.** O controle confere o `protocolo`
+/// do retrato contra uma constante escrita em `camera.js`; com 12 no lugar de
+/// 13 a câmera é oferecida a um servidor que anunciaria a transmissão e
+/// recusaria o fluxo dela, e com 14 some de todo servidor da 1.0.
+#[test]
+fn o_numero_da_camera_e_o_do_protocolo() {
+    let camera = without_comments(&read("ui/camera.js"));
+    let escrito: u8 = camera
+        .split("const PROTOCOLO_DA_CAMERA = ")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .and_then(|numero| numero.trim().parse().ok())
+        .expect("`PROTOCOLO_DA_CAMERA` saiu do camera.js, ou deixou de ser um número");
+    assert_eq!(
+        escrito,
+        seele_proto::screen::PROTOCOLO_DA_CAMERA,
+        "o camera.js oferece a câmera a partir do protocolo {escrito}, e a fonte dela nasceu \
+         noutro número"
+    );
+    assert_eq!(
+        seele_proto::screen::ScreenSource::Camera.desde(),
+        seele_proto::screen::PROTOCOLO_DA_CAMERA
+    );
+    let teste = body_of(&camera, "function servidorTemACamera(");
+    assert!(
+        teste.contains("snapshot?.protocolo") && teste.contains(">= PROTOCOLO_DA_CAMERA"),
+        "`servidorTemACamera` não compara o `protocolo` do retrato com a constante: {teste}"
+    );
+    // E quem liga pergunta antes de pedir a câmera ao sistema: num servidor de
+    // antes da 1.0 a pergunta de permissão não chega a aparecer.
+    let ligar = body_of(&camera, "async function ligarACamera(");
+    let (portao, pedido) = (
+        ligar
+            .find("servidorTemACamera(")
+            .expect("`ligarACamera` não confere o servidor"),
+        ligar
+            .find("getUserMedia(PEDIDO_DA_CAMERA)")
+            .expect("`ligarACamera` não pede a câmera"),
+    );
+    assert!(
+        portao < pedido,
+        "`ligarACamera` pede a câmera ao sistema antes de saber se o servidor a conhece"
+    );
+}
+
+/// **Cada estado da câmera tem a frase dele, e todas cabem na régua.**
+///
+/// O `FRASES_DA_CAMERA` não está entre os dicionários planos que
+/// `LIMITE_DE_FRASE` mede, e parte das entradas é função: aqui elas são
+/// rodadas e medidas. Os estados que a decisão do produto pede estão todos
+/// lá — pedindo, negada, sem câmera, sem codificador, no ar, no lugar da tela,
+/// o servidor antigo —, cada parada do teto tem a frase dela, e as três falhas
+/// da câmera no `ConnectionError` não chegam cruas.
+#[test]
+fn cada_estado_da_camera_tem_a_frase_dele_e_todas_cabem() {
+    let Some(saida) = no_node(
+        "as frases da câmera",
+        &read("ui/frases.js"),
+        r#"
+const achatar = (prefixo, valor, fora) => {
+  if (typeof valor === "function") valor = valor(prefixo.endsWith("filaCheia") ? 12345 : "Maria Antonieta das Neves");
+  if (typeof valor === "string") fora.push([prefixo, valor]);
+  else for (const [chave, dentro] of Object.entries(valor)) achatar(`${prefixo}.${chave}`, dentro, fora);
+  return fora;
+};
+console.log(JSON.stringify({
+  frases: achatar("camera", FRASES_DA_CAMERA, []),
+  paradas: Object.keys(FRASES_DA_CAMERA.paradas),
+  falhasDoSistema: {
+    NotAllowedError: fraseDaFalhaDaCamera({ name: "NotAllowedError" }),
+    NotFoundError: fraseDaFalhaDaCamera({ name: "NotFoundError" }),
+    NotReadableError: fraseDaFalhaDaCamera({ name: "NotReadableError" }),
+  },
+  negada: FRASES_DA_CAMERA.negada, semCamera: FRASES_DA_CAMERA.semCamera, ocupada: FRASES_DA_CAMERA.ocupada,
+  falhas: {
+    CameraNotLive: fraseDeErro("CameraNotLive"),
+    CameraBadSize: fraseDeErro("CameraBadSize"),
+    CameraQueueFull: fraseDeErro({ CameraQueueFull: { dropped: 7 } }),
+  },
+  umQuadro: FRASES_DA_CAMERA.filaCheia(1),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das frases");
+    let frases = v["frases"].as_array().expect("as frases");
+    assert!(
+        frases.len() >= 40,
+        "só {} frases da câmera medidas",
+        frases.len()
+    );
+    for par in frases {
+        let (chave, texto) = (
+            par[0].as_str().unwrap_or_default(),
+            par[1].as_str().unwrap_or_default(),
+        );
+        assert!(!texto.trim().is_empty(), "`{chave}` está vazia");
+        let tamanho = texto.chars().count();
+        assert!(
+            tamanho <= LIMITE_DE_FRASE,
+            "`{chave}` tem {tamanho} caracteres, e a régua é {LIMITE_DE_FRASE}:\n{texto}"
+        );
+        assert!(
+            !texto.contains("undefined") && !texto.contains("[object"),
+            "`{chave}` escreve um valor que não chegou: {texto}"
+        );
+        let minuscula = texto.to_lowercase();
+        for (palavra, virou) in APOSENTADOS {
+            assert!(
+                !minuscula
+                    .split(|c: char| !c.is_alphanumeric() && c != '.')
+                    .any(|pedaco| pedaco == *palavra),
+                "`{chave}` traz «{palavra}», que virou «{virou}»: {texto}"
+            );
+        }
+    }
+    let tem = |chave: &str| frases.iter().any(|par| par[0] == format!("camera.{chave}"));
+    for estado in [
+        "pedindo",
+        "ligando",
+        "noAr",
+        "noLugarDaTela",
+        "negada",
+        "semCamera",
+        "ocupada",
+        "semCaptura",
+        "semCodificador",
+        "servidorAntigo",
+        "semConfirmacao",
+        "encerrada",
+        "filaCheia",
+        "ligar",
+        "desligar",
+    ] {
+        assert!(
+            tem(estado),
+            "a câmera não tem frase para o estado `{estado}`"
+        );
+    }
+    // A negada diz o que fazer, e não só que foi negada.
+    let negada = v["negada"].as_str().unwrap_or_default().to_lowercase();
+    assert!(
+        negada.contains("ajustes") || negada.contains("permiss"),
+        "a frase da câmera negada não diz onde liberar: {negada}"
+    );
+    // As três recusas do sistema são três frases diferentes.
+    assert_eq!(v["falhasDoSistema"]["NotAllowedError"], v["negada"]);
+    assert_eq!(v["falhasDoSistema"]["NotFoundError"], v["semCamera"]);
+    assert_eq!(v["falhasDoSistema"]["NotReadableError"], v["ocupada"]);
+    assert!(v["negada"] != v["semCamera"] && v["semCamera"] != v["ocupada"]);
+    // Um quadro, no singular.
+    assert!(
+        v["umQuadro"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("1 quadro ficou"),
+        "{}",
+        v["umQuadro"]
+    );
+
+    // Cada parada que o núcleo pode mandar tem a frase da câmera.
+    let ditas: Vec<&str> = v["paradas"]
+        .as_array()
+        .expect("as paradas")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    for motivo in seele_ffi::motivos_de_parada_da_tela() {
+        assert!(
+            ditas.contains(&motivo),
+            "a parada `{motivo}` chega à câmera sem frase: {ditas:?}"
+        );
+    }
+
+    for (falha, frase) in v["falhas"].as_object().expect("as falhas") {
+        let frase = frase.as_str().unwrap_or_default();
+        assert!(
+            !frase.contains("ALGO FALHOU") && frase != falha && !frase.contains('{'),
+            "a falha `{falha}` da câmera chega à tela sem frase: {frase}"
+        );
+        assert!(
+            frase.chars().count() <= LIMITE_DE_FRASE,
+            "`{falha}`: {frase}"
+        );
+    }
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    for variante in [
+        "    CameraNotLive,",
+        "    CameraQueueFull {",
+        "    CameraBadSize,",
+    ] {
+        assert!(
+            tipos.contains(variante),
+            "`{}` saiu do `ConnectionError`",
+            variante.trim()
+        );
+    }
+}
+
+/// **O que se assiste é rotulado pelo que a abertura do fluxo declarou, e
+/// antes dela nenhuma frase afirma «tela» nem «câmera».**
+///
+/// O anúncio de uma transmissão no controle não diz o que ela mostra. Quem
+/// diz é o `source` do `ScreenOpened`, e `palavrasDaTransmissao` é o único
+/// lugar que o transforma em palavra. Os rótulos fixos que diziam «TELA» a
+/// respeito de qualquer transmissão saíram do `index.html` e da chamada.
+#[test]
+fn o_palco_rotula_pelo_tipo_do_fluxo_e_nao_afirma_tela_antes_dele() {
+    let fontes = format!(
+        "{}\n{CASCA_MINIMA_DA_CAMERA}\n{}",
+        read("ui/frases.js"),
+        read("ui/camera.js")
+    );
+    let Some(saida) = no_node(
+        "os rótulos da transmissão",
+        &fontes,
+        r#"
+const dizer = (tela) => { const p = palavrasDaTransmissao(tela); return { tipo: p.tipo, rotulo: p.rotulo, titulo: p.titulo, sua: p.sua, ver: p.ver("Ana") }; };
+const antes = dizer(7);
+const abrir = (screen, source) => ouvintesDaCamera.forEach((o) => o({ payload: { ScreenOpened: { screen, width: 1280, height: 720, source } } }));
+abrir(7, "camera"); abrir(8, "monitor"); abrir(9, "window");
+const depois = { camera: dizer(7), monitor: dizer(8), janela: dizer(9) };
+ouvintesDaCamera.forEach((o) => o({ payload: { ScreenClosed: { screen: 7 } } }));
+console.log(JSON.stringify({ antes, depois, fechada: dizer(7) }));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON dos rótulos");
+    for (quando, palavras) in [
+        ("antes da abertura", &v["antes"]),
+        ("depois de fechar", &v["fechada"]),
+    ] {
+        assert!(palavras["tipo"].is_null(), "{quando}: {palavras}");
+        for campo in ["rotulo", "titulo", "sua", "ver"] {
+            let texto = palavras[campo].as_str().unwrap_or_default().to_uppercase();
+            assert!(
+                !texto.contains("TELA") && !texto.contains("CÂMERA"),
+                "{quando}, `{campo}` afirma o que a transmissão mostra sem saber: {texto}"
+            );
+        }
+    }
+    assert_eq!(v["depois"]["camera"]["rotulo"], "CÂMERA");
+    assert_eq!(v["depois"]["camera"]["titulo"], "CÂMERA");
+    assert_eq!(v["depois"]["camera"]["sua"], "SUA CÂMERA");
+    assert_eq!(v["depois"]["camera"]["ver"], "ver a câmera de Ana");
+    for tipo in ["monitor", "janela"] {
+        assert_eq!(v["depois"][tipo]["rotulo"], "TELA", "{tipo}");
+        assert_eq!(v["depois"][tipo]["sua"], "SUA TELA", "{tipo}");
+        assert_eq!(v["depois"][tipo]["ver"], "ver a tela de Ana", "{tipo}");
+    }
+
+    // Os rótulos fixos saíram: quem os escreve agora é `palavrasDaTransmissao`.
+    let html = read("ui/index.html");
+    for fixo in [
+        "<span>TELA COMPARTILHADA</span>",
+        "NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>",
+    ] {
+        assert!(
+            !html.contains(fixo),
+            "o index.html voltou a afirmar «tela» sobre qualquer transmissão: {fixo}"
+        );
+    }
+    let chamada = without_comments(&read("ui/tela-chamada.js"));
+    let palco = body_of(&chamada, "function desenharPalco(");
+    assert!(
+        palco.contains("palavrasDaTransmissao(")
+            && !palco.contains("\"SUA TELA\"")
+            && !palco.contains("· TELA`"),
+        "`desenharPalco` voltou a escrever «TELA» sem perguntar o tipo da transmissão"
+    );
+    let imagem = without_comments(&read("ui/palco-imagem.js"));
+    assert!(
+        !imagem.contains("`ver a tela de ${quem}`")
+            && imagem.contains("palavrasDaTransmissao(transmissao.tela).ver(quem)"),
+        "o botão de ver uma transmissão voltou a prometer «a tela» antes de saber o que ela é"
+    );
+    // E os dois produtores do evento mandam o `source`.
+    assert!(
+        read("../../crates/seele-ffi/src/types.rs").contains("        source: ScreenKind,"),
+        "o `ScreenOpened` do desktop deixou de dizer o que a transmissão mostra"
+    );
+    assert!(
+        without_comments(&read("ui/compartilhar-web.js")).contains("source: fonte }"),
+        "o `ScreenOpened` da página deixou de dizer o que a transmissão mostra"
+    );
+}
+
+/// **A câmera está registrada, é chamada, e está ligada à tela.**
+///
+/// - os três comandos existem no `generate_handler!` e a casca chama os três;
+/// - o quadro vai em **corpo cru**, com a sessão, a geração e a marca de chave
+///   nos cabeçalhos — e os nomes dos cabeçalhos são os mesmos dos dois lados;
+/// - os três pedidos do núcleo a quem codifica (`CameraKeyFrameRequested`,
+///   `CameraBudget`, `CameraPaused`) existem no `Event` e têm quem os ouça;
+/// - o controle, o estado e a prévia estão no `index.html`, e `camera.js`
+///   carrega antes de quem o usa;
+/// - a prévia vem da mídia (`srcObject`), e os quadros da própria câmera não
+///   vão ao decodificador do palco.
+#[test]
+fn a_camera_esta_registrada_chamada_e_ligada_a_tela() {
+    let rust = without_comments(&read("src/main.rs"));
+    let registrados = rust
+        .split("tauri::generate_handler![")
+        .nth(1)
+        .and_then(|resto| resto.split(']').next())
+        .expect("o `generate_handler!` saiu do main.rs");
+    let camera = without_comments(&read("ui/camera.js"));
+    for (comando, chamada) in [
+        ("codificacao_da_camera", "invoke(\"codificacao_da_camera\""),
+        ("compartilhar_camera", "invoke(\"compartilhar_camera\""),
+        (
+            "quadro_da_camera",
+            "invocarNaJanela(\"quadro_da_camera\", bytes, { headers: cabecalhos })",
+        ),
+    ] {
+        assert!(
+            registrados.split(',').any(|nome| nome.trim() == comando),
+            "o comando `{comando}` não está registrado: a casca o chamaria e o Tauri responderia \
+             que ele não existe"
+        );
+        assert!(
+            rust.contains(&format!("fn {comando}(")),
+            "`{comando}` está registrado e não existe"
+        );
+        assert!(
+            camera.contains(chamada),
+            "o `camera.js` não chama `{comando}` como o comando o recebe: {chamada}"
+        );
+    }
+
+    // O corpo cru e os cabeçalhos, com os mesmos nomes dos dois lados.
+    let quadro = body_of(&rust, "fn quadro_da_camera(");
+    assert!(
+        quadro.contains("tauri::ipc::Request") || rust.contains("request: tauri::ipc::Request<'_>"),
+        "`quadro_da_camera` deixou de receber o pedido cru"
+    );
+    assert!(
+        quadro.contains("InvokeBody::Raw(bytes)") && quadro.contains("InvokeBody::Json("),
+        "`quadro_da_camera` não lê o corpo cru, ou recusa o WebView que o manda como lista: {quadro}"
+    );
+    for cabecalho in ["seele-chave", "seele-sessao", "seele-geracao"] {
+        assert!(
+            rust.contains(&format!("\"{cabecalho}\"")),
+            "o main.rs não lê o cabeçalho `{cabecalho}`"
+        );
+        assert!(
+            camera.contains(&format!("\"{cabecalho}\"")),
+            "o camera.js não manda o cabeçalho `{cabecalho}`"
+        );
+    }
+
+    // Os três pedidos do núcleo a quem codifica.
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    for evento in ["CameraKeyFrameRequested", "CameraBudget", "CameraPaused"] {
+        assert!(
+            tipos.contains(&format!("    {evento} {{")),
+            "`{evento}` saiu do `Event`"
+        );
+        assert!(
+            camera.contains(&format!("carga.{evento}")),
+            "o `camera.js` não ouve `{evento}`: o pedido do núcleo morreria na casca"
+        );
+    }
+
+    // A tela.
+    let html = read("ui/index.html");
+    for id in [
+        "id=\"operador-camera\"",
+        "id=\"camera-estado\"",
+        "id=\"camera-previa\"",
+    ] {
+        assert!(html.contains(id), "o index.html perdeu `{id}`");
+    }
+    let ordem = |arquivo: &str| {
+        html.find(&format!("<script src=\"{arquivo}\"></script>"))
+            .unwrap_or_else(|| panic!("o index.html não carrega `{arquivo}`"))
+    };
+    for depois in [
+        "tela-chamada.js",
+        "palco-imagem.js",
+        "composicao-0174.js",
+        "pessoal-web.js",
+    ] {
+        assert!(
+            ordem("camera.js") < ordem(depois),
+            "`camera.js` carrega depois de `{depois}`, que o usa"
+        );
+    }
+    for antes in ["frases.js", "glifos.js", "compartilhar-web.js", "base.js"] {
+        assert!(
+            ordem(antes) < ordem("camera.js"),
+            "`camera.js` carrega antes de `{antes}`, de que ele precisa"
+        );
+    }
+    assert!(
+        without_comments(&read("ui/glifos.js")).contains("  camera: ["),
+        "o glifo da câmera saiu do glifos.js"
+    );
+    assert!(
+        without_comments(&read("ui/tela-chamada.js"))
+            .contains("desenharACamera(voice_room, transmissao)"),
+        "o rodapé do operador deixou de desenhar a câmera a cada retrato"
+    );
+
+    // A prévia é da mídia, e a própria câmera não vai ao decodificador.
+    let previa = body_of(&camera, "function desenharAPreviaDaCamera(");
+    assert!(
+        previa.contains("previa.srcObject = midia"),
+        "a prévia da câmera deixou de vir da própria mídia: {previa}"
+    );
+    let palco = without_comments(&read("ui/palco-imagem.js"));
+    assert!(
+        palco.contains("aAberturaEDaMinhaCamera(screen).then((minha) => { if (!minha) abrir(); })"),
+        "o palco voltou a armar o decodificador para a própria câmera, que não manda quadro de volta"
+    );
+    assert!(
+        without_comments(&read("ui/compartilhar-web.js"))
+            .contains("if (tipo !== 2 && !estaVez.camera) emitir({ ScreenFrame"),
+        "a página voltou a mandar à casca os quadros da própria câmera"
+    );
+
+    // No celular a câmera não é oferecida ainda, e a ponte recusa com frase.
+    let ponte = without_comments(&read("ui/ponte-web.js"));
+    assert!(
+        ponte.contains("[\"compartilhar_camera\", SO_NO_PC_CAMERA]"),
+        "a ponte deixou de recusar a câmera no celular com a frase"
+    );
+    assert!(
+        body_of(&camera, "function desenharACamera(").contains("cameraSoNoPc()"),
+        "o controle da câmera voltou a aparecer no celular, onde o pedido é recusado"
+    );
+}

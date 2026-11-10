@@ -233,7 +233,15 @@ pub fn operar(texto: &str) -> Value {
             };
             match (medidas("largura"), medidas("altura")) {
                 (Some(largura), Some(altura)) => {
-                    match crate::tela::abertura(1, false, largura, altura) {
+                    // **Janela, também para a câmera.** A chamada pessoal não
+                    // negocia número de protocolo, e um par da 0.19 recusa a
+                    // fonte 2: a imagem vai com a fonte que todo par lê.
+                    match crate::tela::abertura(
+                        1,
+                        seele_proto::screen::ScreenSource::Window,
+                        largura,
+                        altura,
+                    ) {
                         Ok(bytes) => json!({"bytes":bytes}),
                         Err(_) => json!({"erro":"Invalido"}),
                     }
