@@ -9,7 +9,8 @@
 //! 2. quem transmite pelo canal chega por RTP a quem ligou a mídia;
 //! 3. o pedido de quadro-chave de quem assiste por RTP (PLI) chega a quem
 //!    transmite como o `KeyFrameRequested` de sempre;
-//! 4. um quadro comum que chega sem a cadeia inteira não vai à sala.
+//! 4. um quadro comum que chega sem a cadeia inteira não vai à sala;
+//! 5. o fim da transmissão chega dito a quem assiste por RTP.
 
 #![allow(
     clippy::expect_used,
@@ -361,6 +362,18 @@ async fn a_tela_que_sobe_pelo_canal_desce_por_rtp_e_o_pli_vira_pedido_de_chave()
         })
         .await?;
     assert_eq!(pedida, screen);
+
+    // E o fim da transmissão vem dito a quem assiste pela mídia, como limpo:
+    // no canal seria o `finish` do fluxo, e a mídia não tem fluxo para fechar.
+    mostra.mandar(&ClientMessage::StopScreenShare).await?;
+    let _ = fluxo.finish();
+    let (faixa, limpo) = pela_midia
+        .ate(|mensagem| match mensagem {
+            ServerMessage::FimDaTelaPorMidia { faixa, limpo } => Some((*faixa, *limpo)),
+            _ => None,
+        })
+        .await?;
+    assert_eq!((faixa, limpo), (FAIXA, true));
 
     daemon.shutdown();
     Ok(())

@@ -1187,6 +1187,13 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 abertura: [1, 0, 0, 0, 7, 2, 0, 5, 0, 2, 208],
             },
         ),
+        (
+            "FimDaTelaPorMidia",
+            ServerMessage::FimDaTelaPorMidia {
+                faixa: 0,
+                limpo: false,
+            },
+        ),
     ]
 }
 

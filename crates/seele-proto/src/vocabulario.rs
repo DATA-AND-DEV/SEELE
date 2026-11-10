@@ -171,7 +171,9 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         // conhece.
         ServerMessage::Banidos { .. } => 13,
         // O vídeo por RTP (ADR 0067): um par 12 não tem a mídia declarada.
-        ServerMessage::TelaPorMidia { .. } => crate::screen::PROTOCOLO_DA_MIDIA,
+        ServerMessage::TelaPorMidia { .. } | ServerMessage::FimDaTelaPorMidia { .. } => {
+            crate::screen::PROTOCOLO_DA_MIDIA
+        }
     }
 }
 
@@ -787,6 +789,13 @@ mod tests {
         assert_eq!(crate::screen::PROTOCOLO_DA_MIDIA, 13);
         assert_eq!(
             desde(&ServerMessage::TelaPorMidia { faixa: 0, abertura }),
+            13
+        );
+        assert_eq!(
+            desde(&ServerMessage::FimDaTelaPorMidia {
+                faixa: 0,
+                limpo: true
+            }),
             13
         );
         assert_eq!(desde_do_cliente(&ClientMessage::MidiaLigada), 13);

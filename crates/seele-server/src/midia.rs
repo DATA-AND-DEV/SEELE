@@ -347,15 +347,16 @@ impl SaidaPorMidia {
                 }
             }
         }
-        if !limpo {
-            // No canal, a cópia perdida é um `reset`, e quem assiste lê a
-            // diferença. Na mídia não há fluxo para cortar: fica no registro.
-            tracing::warn!(
-                person = %self.person,
-                %screen,
-                "a cópia de uma transmissão por RTP acabou sem o fim limpo"
-            );
-        }
+        // No canal, o fim é do fluxo: `finish` para a transmissão que acabou,
+        // `reset` para a cópia que se perdeu. Na mídia não há fluxo para
+        // fechar, e o fim vai dito pelo controle, com a mesma diferença.
+        let _ = self
+            .avisos
+            .send(ServerMessage::FimDaTelaPorMidia {
+                faixa: FAIXA,
+                limpo,
+            })
+            .await;
         if let Ok(mut assistindo) = self.assistindo.lock() {
             if *assistindo == Some(screen) {
                 *assistindo = None;

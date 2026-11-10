@@ -3188,6 +3188,21 @@ pub enum ServerMessage {
         /// A abertura, como iria no canal.
         abertura: [u8; crate::screen::SCREEN_HEADER_LEN],
     },
+
+    /// **A cópia que descia por uma faixa acabou** (protocolo 13, ADR 0067).
+    ///
+    /// No canal `u` isto é o fim do fluxo, e quem assiste lê a diferença
+    /// entre o fim limpo (`finish`) e a cópia que se perdeu (`reset`). A mídia
+    /// não tem fluxo para fechar, então o fim vem dito. `limpo` é essa mesma
+    /// diferença: `true` quando a transmissão acabou, `false` quando esta
+    /// sessão deixou de recebê-la (parou de assistir, saiu da sala, ou o
+    /// servidor cortou a cópia).
+    FimDaTelaPorMidia {
+        /// A faixa que ficou livre.
+        faixa: u8,
+        /// A transmissão acabou, e não só a cópia desta sessão.
+        limpo: bool,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -3322,7 +3337,7 @@ impl ListaDeCima for ClientMessage {
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 68;
+    const CONHECIDAS: u32 = 69;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -4259,7 +4274,7 @@ impl Validate for ServerMessage {
                 }
                 Ok(())
             }
-            Self::TelaPorMidia { .. } => Ok(()),
+            Self::TelaPorMidia { .. } | Self::FimDaTelaPorMidia { .. } => Ok(()),
         }
     }
 }
@@ -5991,7 +6006,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            67,
+            68,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -6115,8 +6130,8 @@ mod o_vocabulario_e_a_versao {
         // **E o vídeo por RTP (10/11/2026), ainda no 13**, que **não está
         // publicado** (o último release é a v0.19.6, do 12, conferido em
         // 10/11): `MidiaLigada` e `TelaPorMidia` no fim da lista do cliente,
-        // que foi de 59 para 61, e `TelaPorMidia` no fim da do servidor, que
-        // foi de 67 para 68. ADR 0067.
+        // que foi de 59 para 61, e `TelaPorMidia` e `FimDaTelaPorMidia` no fim
+        // da do servidor, que foi de 67 para 69. ADR 0067.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
             13,
@@ -6759,7 +6774,7 @@ mod mesa_de_texto {
         let do_servidor = crate::vocabulario::variantes::<ServerMessage>().unwrap();
         assert_eq!(
             do_servidor.get(66..),
-            Some(&["Banidos", "TelaPorMidia"][..])
+            Some(&["Banidos", "TelaPorMidia", "FimDaTelaPorMidia"][..])
         );
     }
 
