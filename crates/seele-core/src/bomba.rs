@@ -421,19 +421,16 @@ where
     let largados = Arc::new(AtomicU64::new(0));
 
     let laco = Laco {
-        // Um codificador por transmissão, com o teto de voz. `None` é uma
-        // máquina cujo Opus não abriu: a imagem continua indo, muda.
+        // Um codificador por transmissão, com o perfil de som de tela
+        // (`codificador_do_som`). `None` é uma máquina cujo Opus não abriu: a
+        // imagem continua indo, muda.
         //
         // **E `None` também quando quem envia escolheu não incluir áudio.** Não é
         // só não codificar: `escoar_som` desiste na primeira linha quando não há
         // codificador, então a captura de som nem é lida — que é o que «sem
         // áudio» tem de querer dizer numa máquina onde a captura leva a conversa
         // inteira. Ver `Arranjo::com_som`.
-        som: if arranjo.com_som {
-            seele_audio::codec::VoiceEncoder::with_defaults().ok()
-        } else {
-            None
-        },
+        som: codificador_do_som(arranjo.com_som),
         conta_do_som: (0, 0),
         sobra: VecDeque::new(),
         biblioteca,
@@ -682,7 +679,7 @@ impl<C: Captura> Laco<C> {
         while self.sobra.len() >= seele_audio::FRAME_SAMPLES {
             let quadro: Vec<f32> = self.sobra.drain(..seele_audio::FRAME_SAMPLES).collect();
             // Silêncio exato é o que uma máquina que não toca nada produz, e
-            // mandá-lo é gastar 32 kbps para dizer «nada».
+            // mandá-lo é gastar 96 kbps para dizer «nada».
             if quadro.iter().all(|amostra| *amostra == 0.0) {
                 continue;
             }
@@ -1361,6 +1358,19 @@ fn somar(contagem: &mut Contagem, transmissao: &Transmissao) {
     contagem.enviados += enviados;
     contagem.descartados += descartados;
     contagem.bytes += bytes;
+}
+
+/// O codificador do som de uma transmissão, ou nenhum quando quem envia
+/// escolheu não incluir áudio.
+///
+/// **O de som de tela, e não o de voz.** Até a 0.19 era o de voz: modo `Voip`
+/// e 48 kbps, que é o certo para fala e o errado para o que a máquina toca.
+fn codificador_do_som(com_som: bool) -> Option<seele_audio::codec::VoiceEncoder> {
+    if com_som {
+        seele_audio::codec::VoiceEncoder::para_som_de_tela().ok()
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -2417,5 +2427,18 @@ pub(crate) mod tests {
         assert_eq!(contagem.fluxos, 1);
         assert!(contagem.enviados >= 1, "nenhum quadro chegou ao fio");
         assert!(contagem.bytes > 0);
+    }
+
+    /// A transmissão codifica o som com o perfil de som de tela, e não com o
+    /// de voz; e «sem áudio» é codificador nenhum, não um que não é usado.
+    #[test]
+    fn o_som_da_transmissao_usa_o_perfil_de_som_de_tela() {
+        let com = codificador_do_som(true).expect("o Opus abre nesta máquina");
+        assert_eq!(
+            com.bitrate_bps(),
+            seele_audio::codec::BITRATE_DO_SOM_DE_TELA_BPS,
+            "o som da transmissão voltou para o codificador de voz"
+        );
+        assert!(codificador_do_som(false).is_none());
     }
 }
