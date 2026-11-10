@@ -95,6 +95,7 @@ o ganho é de estética.
 | [0063](0063-a-linha-2-fala-webrtc.md) | A linha 2 fala WebRTC: um transporte só, o Servidor 2.0 e o fio 10 | **aceito** · não medido entre duas casas · emendado em 25/10/2026: o DTLS (`dimpl`) passa ao `aws-lc-rs` pelo RUSTSEC-2026-0387 | `02`, `08` e `10` — transporte e versionamento (emenda `0002`, `0022`, `0057`, `0058` e `0062`) |
 | [0064](0064-cargos-e-permissoes.md) | Cargos e permissões: a soma do Discord, a restrição que já existia e um dono que não nasce da rede | **aceito** · conformidade de ponta a ponta pendente do transporte novo | `04` e `08` — PERMISSIONS (substitui os quatro papéis fixos; usa a API 7 de MODs) |
 | [0065](0065-o-app-testa-os-comandos-com-dev-dependencies.md) | O app testa os comandos de verdade: dev-dependencies nominais, produção intacta | **aceito** | — (decisão do coordenador da 0.17; emenda o `0002`) |
+| [0066](0066-a-tela-fica-no-canal-confiavel-na-1-0.md) | Na 1.0 a tela fica no canal confiável, e o quadro continua indo à janela em base64 | **aceito por default** | — (medida de 10/11/2026; RTP fica como projeto próprio depois da 1.0) |
 
 ## O que ainda não tem ADR
 

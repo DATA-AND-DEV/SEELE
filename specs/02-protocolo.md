@@ -6,7 +6,8 @@
 > - **Mudou:**
 >   - **a serialização está decidida:** `postcard` (ADR 0001, `crates/seele-proto/Cargo.toml`);
 >   - **o anfitrião é ICE completo e controlado.** As duas menções a «ICE-lite» abaixo estão vencidas: emenda de 26/10/2026 ao [ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md), `crates/seele-enlace/src/ponta.rs`;
->   - **a faixa de versões não é `[10, 10]`.** O piso continua 10 e o topo é 12 (`VERSAO_MINIMA` e `PROTOCOL_VERSION` em `crates/seele-proto/src/version.rs`). Depois do `Hello` cada lado carimba com o número negociado (`control::encode_em`);
+>   - **a faixa de versões não é `[10, 10]`.** O piso continua 10 e o topo é 13 (`VERSAO_MINIMA` e `PROTOCOL_VERSION` em `crates/seele-proto/src/version.rs`). Depois do `Hello` cada lado carimba com o número negociado (`control::encode_em`);
+>   - **o 13 é a mesa de texto da 1.0.** Traz `EditMessage`, `UnbanPerson` e `ListBans` do cliente e `Banidos` do servidor, todos no fim dos enums (ADR 0058), e uma mudança que não é do fio: a quem negociou o 13 o servidor manda a conversa de todo canal de texto que a pessoa pode ler, sem `JoinChannel` (`ASSINA_O_QUE_LE_DESDE`, em `crates/seele-server/src/session.rs`). É o que deixa as não lidas e as menções contarem em canal que ainda não foi aberto. A um par 12 continua chegando só o que ele assinou;
 >   - **o byte `ver` da voz é o número do cabeçalho de voz**, e não o do protocolo (`MEDIA_HEADER_VERSION`, `media.rs`);
 >   - **há dois canais a mais:** `t` (túnel, confiável) e `j` (jogo, sem ordem e sem retransmissão), em `crates/seele-proto/src/transport.rs`;
 >   - **os nomes das mensagens nas tabelas são os do desenho** (`Ola`, `InserirPlug`, `DefinirATField`). Os de hoje estão em `crates/seele-proto/src/control.rs` (`Hello` e seguintes), depois do ADR 0035;

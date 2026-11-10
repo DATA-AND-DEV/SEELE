@@ -36,7 +36,7 @@ Divergências conferidas contra o código em 10/11/2026:
 | 01, 02, 08, 09 | O transporte é WebRTC com canais de dados (ICE, DTLS, SCTP) num socket UDP só, e não QUIC. Não há RTP | ADR 0063; `crates/seele-enlace` |
 | 01, 02, 08 | O anfitrião é ICE completo e controlado, e não ICE-lite | ADR 0063, emenda de 26/10/2026; `crates/seele-enlace/src/ponta.rs` |
 | 01, 08 | Não há TURN nem relay | ADR 0063, emenda de 26/10/2026 |
-| 02 | A serialização é `postcard`; a faixa de versões da linha 2 é de 10 a 12; há os canais `t` e `j` | ADR 0001; `crates/seele-proto/src/version.rs` e `transport.rs` |
+| 02 | A serialização é `postcard`; a faixa de versões da linha 2 é de 10 a 13; há os canais `t` e `j` | ADR 0001; `crates/seele-proto/src/version.rs` e `transport.rs` |
 | 02, 10 | O quadro é carimbado com a versão negociada, e não com a global | `crates/seele-proto/src/version.rs` (`control::encode_em`) |
 | 03 | Opus pelo `shiguredo_opus`; ativação por voz sem `webrtc-vad`; ganho e supressão de ruído existem; jitter buffer e mixer em `seele-voz` | ADRs 0008, 0015 e 0055; `crates/seele-audio`, `crates/seele-voz` |
 | 04 | Não há arquivo TOML, endpoint de saúde nem métricas. A operação é por linha de comando e `SEELE_DB`, com `backup`, `restore` e encerramento limpo em `SIGTERM` e `SIGINT` | `crates/seele-server/src/main.rs` e `copia.rs` |
