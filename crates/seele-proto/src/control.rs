@@ -2164,6 +2164,27 @@ pub enum ClientMessage {
     /// Pede a lista de banidos. Só para quem pode banir; a resposta é
     /// [`ServerMessage::Banidos`], em partes.
     ListBans,
+    /// **Esta conexão ligou a mídia RTP** (protocolo 13, ADR 0067): daqui em
+    /// diante as transmissões a que esta sessão assiste descem por ela
+    /// ([`ServerMessage::TelaPorMidia`]) em vez de pelo canal `u`, e a dela
+    /// pode subir por ela ([`Self::TelaPorMidia`]).
+    ///
+    /// Dito, e não deduzido do número do protocolo: a página do navegador
+    /// fala o mesmo número e não tem mídia. Quem recebe isto liga a mídia do
+    /// lado dele. Não há volta: a mídia fica ligada até a conexão acabar.
+    MidiaLigada,
+    /// **A transmissão desta pessoa sobe por RTP** (protocolo 13, ADR 0067),
+    /// na faixa 0 da mídia da conexão, e esta é a abertura dela: os mesmos
+    /// onze bytes que abrem o canal `u` ([`crate::screen::ScreenHeader`]).
+    ///
+    /// Só depois de [`Self::MidiaLigada`]. Vem depois do
+    /// [`ServerMessage::ScreenShareStarted`] e antes do primeiro quadro. Vem
+    /// de novo a cada geração (uma troca de medidas): a geração
+    /// nova começa num quadro-chave. Quem manda isto não abre o canal `u`.
+    TelaPorMidia {
+        /// A abertura, como iria no canal.
+        abertura: [u8; crate::screen::SCREEN_HEADER_LEN],
+    },
 }
 
 /// Server to client.
@@ -3152,6 +3173,21 @@ pub enum ServerMessage {
         /// Esta é a última parte.
         ultima: bool,
     },
+
+    /// **Uma transmissão a que esta sessão assiste desce por RTP** (protocolo
+    /// 13, ADR 0067), na faixa dita, e esta é a abertura dela: os mesmos onze
+    /// bytes que abrem o canal `u`.
+    ///
+    /// Vem antes do primeiro quadro da faixa, que é sempre um quadro-chave, e
+    /// de novo a cada geração de quem transmite. A faixa é desta transmissão
+    /// até ela acabar ([`Self::ScreenShareStopped`]), até esta sessão deixar
+    /// de assistir, ou até outro `TelaPorMidia` dar a faixa a outra.
+    TelaPorMidia {
+        /// A faixa da mídia da conexão.
+        faixa: u8,
+        /// A abertura, como iria no canal.
+        abertura: [u8; crate::screen::SCREEN_HEADER_LEN],
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -3282,11 +3318,11 @@ pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
 }
 
 impl ListaDeCima for ClientMessage {
-    const CONHECIDAS: u32 = 59;
+    const CONHECIDAS: u32 = 61;
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 67;
+    const CONHECIDAS: u32 = 68;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3891,7 +3927,10 @@ impl Validate for ClientMessage {
             // O mesmo teto do `SendMessage`: uma edição não é uma porta para
             // um corpo maior do que o que se pode enviar.
             Self::EditMessage { body, .. } => check("body", body.len(), MAX_BODY_LEN),
-            Self::UnbanPerson { .. } | Self::ListBans => Ok(()),
+            Self::UnbanPerson { .. }
+            | Self::ListBans
+            | Self::MidiaLigada
+            | Self::TelaPorMidia { .. } => Ok(()),
         }
     }
 }
@@ -4220,6 +4259,7 @@ impl Validate for ServerMessage {
                 }
                 Ok(())
             }
+            Self::TelaPorMidia { .. } => Ok(()),
         }
     }
 }
@@ -5944,16 +5984,32 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            58,
+            60,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            66,
+            67,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
+        );
+        // **E o que cada lado diz conhecer acompanha a lista.** `CONHECIDAS`
+        // é o que o laço de controle usa para pular um ordinal de um
+        // vocabulário mais novo: uma variante acrescentada sem subir este
+        // número é lida como desconhecida e **ignorada calada** pela própria
+        // build que a define (medido em 10/11/2026: o `MidiaLigada` chegava ao
+        // servidor e não fazia nada).
+        assert_eq!(
+            <ClientMessage as ListaDeCima>::CONHECIDAS,
+            u32::from(ultima_variante::<ClientMessage>()) + 1,
+            "`CONHECIDAS` do cliente não acompanha a lista"
+        );
+        assert_eq!(
+            <ServerMessage as ListaDeCima>::CONHECIDAS,
+            u32::from(ultima_variante::<ServerMessage>()) + 1,
+            "`CONHECIDAS` do servidor não acompanha a lista"
         );
 
         // E o número da versão, preso ao lado delas. Ele é o que diz a um par se
@@ -6055,6 +6111,12 @@ mod o_vocabulario_e_a_versao {
         // escreve os três verbos a um servidor 12 (`desde_do_cliente`). Editar
         // e responder não precisaram de mensagem nova do servidor: o
         // `MessageEdited` e o `replies_to` são do 9.
+        //
+        // **E o vídeo por RTP (10/11/2026), ainda no 13**, que **não está
+        // publicado** (o último release é a v0.19.6, do 12, conferido em
+        // 10/11): `MidiaLigada` e `TelaPorMidia` no fim da lista do cliente,
+        // que foi de 59 para 61, e `TelaPorMidia` no fim da do servidor, que
+        // foi de 67 para 68. ADR 0067.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
             13,
@@ -6684,10 +6746,21 @@ mod mesa_de_texto {
         let do_cliente = crate::vocabulario::variantes::<ClientMessage>().unwrap();
         assert_eq!(
             do_cliente.get(56..),
-            Some(&["EditMessage", "UnbanPerson", "ListBans"][..])
+            Some(
+                &[
+                    "EditMessage",
+                    "UnbanPerson",
+                    "ListBans",
+                    "MidiaLigada",
+                    "TelaPorMidia"
+                ][..]
+            )
         );
         let do_servidor = crate::vocabulario::variantes::<ServerMessage>().unwrap();
-        assert_eq!(do_servidor.get(66..), Some(&["Banidos"][..]));
+        assert_eq!(
+            do_servidor.get(66..),
+            Some(&["Banidos", "TelaPorMidia"][..])
+        );
     }
 
     /// A edição tem o teto do envio: editar não é porta para um corpo maior.

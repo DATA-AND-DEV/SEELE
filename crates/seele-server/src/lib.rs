@@ -39,6 +39,7 @@ pub mod copia;
 pub mod frame;
 pub mod hospedagem;
 pub mod maquinas;
+pub mod midia;
 pub mod mods;
 pub mod pares;
 pub mod perda_de_subida;

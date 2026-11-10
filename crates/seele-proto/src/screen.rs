@@ -163,6 +163,38 @@ pub enum ScreenSource {
 /// transmite e por quem encaminha, e os dois leem o número daqui.
 pub const PROTOCOLO_DA_CAMERA: u8 = 13;
 
+/// O protocolo em que o vídeo passa a ir por RTP (ADR 0067).
+///
+/// Entre duas pontas que negociaram este número ou mais, a transmissão sobe
+/// e desce pela mídia RTP da conexão, e a abertura vai no controle
+/// (`TelaPorMidia`). Com um par abaixo dele, o canal `u` de sempre. O servidor
+/// traduz entre os dois.
+///
+/// É o 13, que **não está publicado** (o último release é do 12): o RTP entra
+/// nele em vez de gastar um número.
+pub const PROTOCOLO_DA_MIDIA: u8 = 13;
+
+/// Um quadro H.264 em Annex B é um quadro-chave: tem uma fatia IDR (NAL 5).
+///
+/// No canal `u` quem manda diz o tipo no cabeçalho do quadro. No RTP não há
+/// cabeçalho do SEELE: quem recebe olha as NAL. O servidor usa isto para
+/// ligar quem entra no meio num quadro-chave e para traduzir um quadro do
+/// RTP para o canal; quem assiste, para saber de onde pode recomeçar.
+#[must_use]
+pub fn e_quadro_chave_h264(annex_b: &[u8]) -> bool {
+    let mut resto = annex_b;
+    while let Some(inicio) = resto.windows(3).position(|j| j == [0, 0, 1]) {
+        let Some(nal) = resto.get(inicio + 3..) else {
+            return false;
+        };
+        if nal.first().is_some_and(|cabecalho| cabecalho & 0x1F == 5) {
+            return true;
+        }
+        resto = nal;
+    }
+    false
+}
+
 impl ScreenSource {
     /// The byte this travels as.
     #[must_use]
@@ -1794,5 +1826,26 @@ mod os_quadros {
         assert!(
             matches!(tudo.get(1), Some(LidoDaTela::Quadro { bytes, .. }) if bytes.len() == MAX_QUADRO_LEN)
         );
+    }
+
+    /// **A chave se reconhece pela fatia IDR, onde quer que ela esteja no
+    /// quadro**: um quadro-chave de verdade traz SPS e PPS antes dela, com
+    /// prefixos de três ou de quatro bytes.
+    #[test]
+    fn o_quadro_chave_h264_se_reconhece_pela_fatia_idr() {
+        let sps = [0, 0, 0, 1, 0x67, 0x42, 0xE0, 0x28];
+        let pps = [0, 0, 1, 0x68, 0xCE, 0x3C, 0x80];
+        let idr = [0, 0, 1, 0x65, 0x88, 0x84, 0x00];
+        let comum = [0, 0, 0, 1, 0x41, 0x9A, 0x24];
+        let chave: Vec<u8> = [&sps[..], &pps[..], &idr[..]].concat();
+        assert!(e_quadro_chave_h264(&chave));
+        assert!(e_quadro_chave_h264(&idr));
+        assert!(!e_quadro_chave_h264(&comum));
+        // SPS e PPS sozinhos não são imagem nenhuma.
+        assert!(!e_quadro_chave_h264(&[&sps[..], &pps[..]].concat()));
+        // E o que não é Annex B não é chave: nem vazio, nem cortado no prefixo.
+        assert!(!e_quadro_chave_h264(&[]));
+        assert!(!e_quadro_chave_h264(&[0, 0, 1]));
+        assert!(!e_quadro_chave_h264(&[0x65, 0x65, 0x65]));
     }
 }

@@ -927,11 +927,20 @@ pub enum FimDaTela {
 /// O `write_all` é onde a contrapressão mora: um espectador lento faz esta
 /// tarefa parar, a fila dele encher, e o [`crate::voice_room::VoiceRoom`] cortá-lo. Nunca
 /// faz o servidor esperar e nunca faz os outros esperarem.
+///
+/// Com `midia` preenchida, o par ligou o vídeo por RTP (ADR 0067): a
+/// transmissão não abre canal, e os mesmos pedaços saem como quadros na mídia da conexão
+/// (`crate::midia::SaidaPorMidia`).
 pub async fn bombear(
     conexao: crate::transporte::Conexao,
     mut aberturas: mpsc::Receiver<AberturaDeTela>,
+    midia: std::sync::Arc<std::sync::OnceLock<crate::midia::SaidaPorMidia>>,
 ) {
     while let Some(mut convite) = aberturas.recv().await {
+        if let Some(midia) = midia.get() {
+            midia.escrever(convite).await;
+            continue;
+        }
         let Ok(mut fluxo) = conexao.open_uni().await else {
             return;
         };

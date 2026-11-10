@@ -2164,6 +2164,11 @@ impl Room {
             // mensagem que ninguém tratava; esta é dita e decidida.
             ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => {}
 
+            // O mesmo para a faixa de RTP de uma transmissão (ADR 0067): é do
+            // transporte, e quem a lê é o motor do núcleo, que liga a faixa ao
+            // palco. O estado da sala não muda.
+            ServerMessage::TelaPorMidia { .. } => {}
+
             // O anúncio de MODs não chega aqui, e é por construção: ele
             // acontece **dentro do aperto de mão**, antes de existir sessão —
             // ver `client::handshake`. Um `Room` só existe depois do `Session`,

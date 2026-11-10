@@ -779,6 +779,20 @@ impl Telas {
             .collect()
     }
 
+    /// Quem transmite esta tela, em qualquer sala.
+    ///
+    /// Para o pedido de quadro-chave que vem da mídia RTP de um espectador
+    /// (`crate::midia`): ali a tela é a que este servidor pôs na faixa dele,
+    /// e a sala já foi conferida no convite.
+    #[must_use]
+    pub fn dono(&self, screen: ScreenId) -> Option<PersonId> {
+        self.por_voice_room
+            .values()
+            .flatten()
+            .find(|(_, _, corrente)| *corrente == screen)
+            .map(|(person, _, _)| *person)
+    }
+
     /// Quem está transmitindo nesta sala.
     #[must_use]
     pub fn em(&self, voice_room: VoiceRoomId) -> Vec<(PersonId, ScreenId)> {

@@ -497,6 +497,13 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
             },
         ),
         ("ListBans", ClientMessage::ListBans),
+        ("MidiaLigada", ClientMessage::MidiaLigada),
+        (
+            "TelaPorMidia",
+            ClientMessage::TelaPorMidia {
+                abertura: [1, 0, 0, 0, 7, 0, 0, 5, 0, 2, 208],
+            },
+        ),
     ]
 }
 
@@ -1171,6 +1178,13 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                     },
                 ],
                 ultima: true,
+            },
+        ),
+        (
+            "TelaPorMidia",
+            ServerMessage::TelaPorMidia {
+                faixa: 0,
+                abertura: [1, 0, 0, 0, 7, 2, 0, 5, 0, 2, 208],
             },
         ),
     ]

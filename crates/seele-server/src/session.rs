@@ -2121,9 +2121,23 @@ async fn run_session(
     // pode aparecer no laço que lê o controle de todo mundo.
     let (tela_tx, tela_rx) =
         mpsc::channel::<crate::tela::AberturaDeTela>(crate::tela::ABERTURAS_DEPTH);
+    // **O vídeo por RTP (ADR 0067).** A mídia da conexão só é ligada quando o
+    // par diz que ligou a dele (`MidiaLigada`): o número do protocolo não
+    // basta, porque a página do navegador fala o mesmo número e não tem
+    // mídia. Daí em diante a tela desta sessão sobe e desce por RTP em vez de
+    // pelo canal `u`.
+    let mut midia_rtp: Option<crate::midia::MidiaDaSessao> = None;
+    // Guardada até a sessão acabar: largar o guarda abortaria a tarefa.
+    let mut tarefas_da_midia: Vec<AbortaAoSair> = Vec::new();
+    // A entrada por RTP da transmissão desta pessoa, enquanto há uma.
+    let mut tela_por_midia: Option<tokio::task::JoinHandle<()>> = None;
+    // Por onde a tarefa que escreve as transmissões fica sabendo que a saída
+    // passou a ser a mídia. Lido a cada transmissão que começa.
+    let saida_por_midia = Arc::new(std::sync::OnceLock::new());
     let _telas = AbortaAoSair(tokio::spawn(crate::tela::bombear(
         connection.clone(),
         tela_rx,
+        Arc::clone(&saida_por_midia),
     )));
 
     // Uma tarefa que aceita os fluxos unidirecionais que chegam. São dois
@@ -4554,6 +4568,69 @@ async fn run_session(
                         }
                     }
 
+                    ClientMessage::MidiaLigada => {
+                        if midia_rtp.is_none() {
+                            let (sessao, leitura) =
+                                crate::midia::MidiaDaSessao::ligar(&connection);
+                            tarefas_da_midia.push(AbortaAoSair(tokio::spawn(
+                                crate::midia::ler(
+                                    leitura,
+                                    sessao.clone(),
+                                    Arc::clone(server),
+                                    session.person,
+                                ),
+                            )));
+                            let _ = saida_por_midia.set(sessao.saida(
+                                Arc::clone(server),
+                                session.person,
+                                avisos_tx.clone(),
+                            ));
+                            midia_rtp = Some(sessao);
+                            tracing::info!(person = %session.person, "a mídia RTP desta sessão foi ligada");
+                        }
+                    }
+
+                    ClientMessage::TelaPorMidia { abertura } => {
+                        // Só quem ligou a mídia (`MidiaLigada`) chega aqui com
+                        // ela. De um par que não ligou, a transmissão não tem
+                        // por onde subir: fica no registro.
+                        let Some(midia) = midia_rtp.as_ref() else {
+                            tracing::warn!(
+                                person = %session.person,
+                                "um par sem a mídia ligada abriu uma transmissão por RTP; ignorada"
+                            );
+                            continue;
+                        };
+                        // Uma geração nova troca a entrada: a anterior vê o
+                        // fim e diz à sala que fechou, e só então a nova abre —
+                        // a mesma ordem de dois canais `u` seguidos.
+                        let entrada = midia.abrir_entrada();
+                        let anterior = tela_por_midia.take();
+                        let contexto = Arc::clone(server);
+                        let salas = Arc::clone(voice_rooms);
+                        let avisos = avisos_tx.clone();
+                        let pessoa = session.person;
+                        let sessao = session.id;
+                        tela_por_midia = Some(tokio::spawn(async move {
+                            if let Some(anterior) = anterior {
+                                let _ = anterior.await;
+                            }
+                            if let Err(erro) = encaminhar_tela(
+                                &contexto,
+                                &salas,
+                                pessoa,
+                                sessao,
+                                &avisos,
+                                abertura,
+                                FonteDaTela::Midia(entrada),
+                            )
+                            .await
+                            {
+                                tracing::debug!(%pessoa, %erro, "a tela por RTP terminou");
+                            }
+                        }));
+                    }
+
                     ClientMessage::EmprestarSubida {
                         consentimento,
                         impressao,
@@ -6110,21 +6187,80 @@ async fn receber_tela(
     avisos: &mpsc::Sender<ServerMessage>,
     fluxo: &mut crate::transporte::Recebe,
 ) -> Result<()> {
-    let Some((voice_room, screen)) = server.telas.lock().await.de(person, sessao) else {
+    if server.telas.lock().await.de(person, sessao).is_none() {
         // Parar o fluxo e não ignorá-lo: um cliente que abriu sem pedir tem de
         // descobrir agora, e não pela imagem que nunca aparece do outro lado.
+        // Antes de ler a abertura: quem não transmite não custa uma leitura.
         let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
         bail!("um fluxo de tela chegou de quem não está transmitindo");
-    };
+    }
 
     // Inteiro, e não remendado: o byte que a tarefa de aceitação consumiu é o
     // **tipo do fluxo**, e ele vem antes do cabeçalho em vez de ser o primeiro
     // byte dele. Era isto que o `primeiro` carregava de volta para cá.
     let mut abertura = [0_u8; SCREEN_HEADER_LEN];
     fluxo.read_exact(&mut abertura).await?;
+    encaminhar_tela(
+        server,
+        voice_rooms,
+        person,
+        sessao,
+        avisos,
+        abertura,
+        FonteDaTela::Canal(fluxo),
+    )
+    .await
+}
+
+/// De onde vêm os bytes de uma transmissão: do canal `u`, como sempre, ou da
+/// mídia RTP de quem transmite (ADR 0067), já no enquadramento da sala.
+enum FonteDaTela<'a> {
+    Canal(&'a mut crate::transporte::Recebe),
+    Midia(crate::midia::EntradaPorMidia),
+}
+
+impl FonteDaTela<'_> {
+    async fn ler(&mut self, buffer: &mut [u8]) -> Result<crate::midia::Lido> {
+        match self {
+            Self::Canal(fluxo) => Ok(match fluxo.read(buffer).await? {
+                Some(lidos) => {
+                    crate::midia::Lido::Bytes(buffer.get(..lidos).unwrap_or_default().to_vec())
+                }
+                None => crate::midia::Lido::Fim,
+            }),
+            Self::Midia(entrada) => Ok(entrada.ler().await),
+        }
+    }
+
+    /// Diz a quem manda que este fluxo não é mais lido. No canal é o `stop`;
+    /// na mídia não há o que parar, e quem avisa é o controle.
+    fn cortar(&mut self) {
+        if let Self::Canal(fluxo) = self {
+            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+        }
+    }
+}
+
+/// Leva uma transmissão, da abertura ao fim, à sala de voz de quem transmite.
+///
+/// O que [`receber_tela`] sempre fez, agora com a fonte dita: os bytes vêm do
+/// canal ou da mídia, e daqui em diante a sala não distingue.
+async fn encaminhar_tela(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    person: PersonId,
+    sessao: SessionId,
+    avisos: &mpsc::Sender<ServerMessage>,
+    abertura: [u8; SCREEN_HEADER_LEN],
+    mut fonte: FonteDaTela<'_>,
+) -> Result<()> {
+    let Some((voice_room, screen)) = server.telas.lock().await.de(person, sessao) else {
+        fonte.cortar();
+        bail!("uma transmissão de tela chegou de quem não está transmitindo");
+    };
     let (cabecalho, _) = seele_proto::screen::ScreenHeader::decode(&abertura)?;
     if cabecalho.screen != screen {
-        let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+        fonte.cortar();
         bail!(
             "um fluxo de tela declarou {} e não {screen}",
             cabecalho.screen
@@ -6151,7 +6287,7 @@ async fn receber_tela(
         // a tarefa leitora do controle existe para não ter.
         if let Ok(motivo) = fim_rx.try_recv() {
             tracing::info!(%person, %voice_room, %screen, ?motivo, "o servidor encerrou uma transmissão");
-            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+            fonte.cortar();
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
@@ -6190,7 +6326,7 @@ async fn receber_tela(
         // Compartilhar a tela, em `aplicar_os_cargos`): aí o fluxo é cortado, e
         // nenhum byte a mais vai à sala.
         if server.telas.lock().await.de(person, sessao) != Some((voice_room, screen)) {
-            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+            fonte.cortar();
             tracing::info!(%person, %screen, "a transmissão foi encerrada pelo servidor; o fluxo foi cortado");
             // **E a sala fica sabendo, pelo nome desta transmissão.** O
             // controle tirou a vaga — a pessoa parou, ou pediu outra no lugar
@@ -6211,9 +6347,11 @@ async fn receber_tela(
                 .await;
             return Ok(());
         }
-        match fluxo.read(&mut buffer).await? {
-            Some(lidos) => {
-                let bytes = buffer.get(..lidos).unwrap_or_default().to_vec();
+        match fonte.ler(&mut buffer).await? {
+            // Nada desta vez (a mídia não tem «o fluxo fechou»): volta às
+            // duas conferências acima.
+            crate::midia::Lido::Nada => {}
+            crate::midia::Lido::Bytes(bytes) => {
                 // `send` e não `try_send`: encher a fila da sala de voz tem de virar
                 // contrapressão no QUIC de quem compartilha, que é onde ela
                 // conserta alguma coisa. Descartar aqui deslocaria o
@@ -6224,7 +6362,7 @@ async fn receber_tela(
                 })
                 .await?;
             }
-            None => break,
+            crate::midia::Lido::Fim => break,
         }
     }
     // O fim limpo. Quem parou de propósito também manda `StopScreenShare` pelo
@@ -8081,8 +8219,9 @@ mod fim_de_tela_por_sessao {
             "desassentar" => Some("encerrar_telas_desta_conexao("),
             // A troca de sala: leva embora toda transmissão anterior da pessoa.
             "assentar" => Some("encerrar_telas_da_pessoa("),
-            // O fim decidido pelo servidor, de dentro da tarefa da tela.
-            "receber_tela" => Some("encerrar_telas_desta_conexao("),
+            // O fim decidido pelo servidor, de dentro da tarefa da tela — a
+            // mesma para o canal e para a mídia RTP (ADR 0067).
+            "encaminhar_tela" => Some("encerrar_telas_desta_conexao("),
             _ => None,
         };
 

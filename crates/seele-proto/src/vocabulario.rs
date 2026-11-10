@@ -170,6 +170,8 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         // (v0.19.6), e um par 12 que recebesse isto leria uma variante que não
         // conhece.
         ServerMessage::Banidos { .. } => 13,
+        // O vídeo por RTP (ADR 0067): um par 12 não tem a mídia declarada.
+        ServerMessage::TelaPorMidia { .. } => crate::screen::PROTOCOLO_DA_MIDIA,
     }
 }
 
@@ -269,6 +271,10 @@ pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
         ClientMessage::EditMessage { .. }
         | ClientMessage::UnbanPerson { .. }
         | ClientMessage::ListBans => 13,
+        // O vídeo por RTP (ADR 0067): um servidor 12 espera a tela no canal.
+        ClientMessage::MidiaLigada | ClientMessage::TelaPorMidia { .. } => {
+            crate::screen::PROTOCOLO_DA_MIDIA
+        }
     }
 }
 
@@ -770,6 +776,24 @@ mod tests {
         // O que já existia não subiu.
         assert_eq!(desde_do_cliente(&ClientMessage::PedirCargos), 10);
         assert_eq!(desde_do_cliente(&ClientMessage::RecusarMods), 9);
+    }
+
+    /// **O vídeo por RTP é do 13** (ADR 0067): um par 12 não tem a mídia
+    /// declarada, não recebe a faixa de uma transmissão e não ouve de um
+    /// cliente que a mídia foi ligada. Baixar um destes braços reprova aqui.
+    #[test]
+    fn o_video_por_rtp_nao_vai_a_quem_fala_menos_que_o_treze() {
+        let abertura = [0_u8; crate::screen::SCREEN_HEADER_LEN];
+        assert_eq!(crate::screen::PROTOCOLO_DA_MIDIA, 13);
+        assert_eq!(
+            desde(&ServerMessage::TelaPorMidia { faixa: 0, abertura }),
+            13
+        );
+        assert_eq!(desde_do_cliente(&ClientMessage::MidiaLigada), 13);
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::TelaPorMidia { abertura }),
+            13
+        );
     }
 
     /// **Um par 12 não recebe a lista de banidos, e um servidor 12 não recebe

@@ -28,3 +28,4 @@ pub use seele_enlace::{
     CertificadoDtls, Conexao, ConfigDoAnfitriao, Discagem, Envio, FalhaAoDiscar, FalhaDoCanal,
     Leitura, Motivo, Pino, Ponta, Recebe,
 };
+pub use seele_enlace::{EventoDeMidia, Midia, Recusa, RemetenteDeMidia, Trilha};
