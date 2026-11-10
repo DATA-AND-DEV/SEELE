@@ -144,6 +144,39 @@ impl Politica {
         persistence: &Persistence,
         segredo: Option<&str>,
     ) -> Result<Result<Passe, Recusa>> {
+        self.avaliar_com_a_senha_conferida(persistence, segredo, self.senha_confere(segredo))
+    }
+
+    /// Se `segredo` é a senha deste servidor.
+    ///
+    /// **Pesada quando há senha** (Argon2id), e é a única parte de
+    /// [`Self::avaliar`] que é: não toca o banco, para que quem chama de dentro
+    /// de uma tarefa assíncrona a ponha em `spawn_blocking` **sem** o banco na
+    /// mão, e entregue a resposta a [`Self::avaliar_com_a_senha_conferida`].
+    /// Sem senha configurada, ou sem segredo, responde `false` sem calcular.
+    #[must_use]
+    pub fn senha_confere(&self, segredo: Option<&str>) -> bool {
+        match (&self.senha_hash, segredo.filter(|s| !s.is_empty())) {
+            (Some(hash), Some(segredo)) => verificar_senha(segredo, hash),
+            _ => false,
+        }
+    }
+
+    /// [`Self::avaliar`] com a senha já conferida por [`Self::senha_confere`]:
+    /// a metade que precisa do banco, e que não calcula Argon2 nenhum.
+    ///
+    /// `senha_confere` tem de ser a resposta de [`Self::senha_confere`] para
+    /// **este** segredo e **esta** política.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o banco não responder. Recusa é `Ok(Err(_))`, não erro.
+    pub fn avaliar_com_a_senha_conferida(
+        &self,
+        persistence: &Persistence,
+        segredo: Option<&str>,
+        senha_confere: bool,
+    ) -> Result<Result<Passe, Recusa>> {
         if self.aberto() {
             return Ok(Ok(Passe::livre()));
         }
@@ -152,10 +185,8 @@ impl Politica {
             return Ok(Err(Recusa::SegredoAusente));
         };
 
-        if let Some(hash) = &self.senha_hash {
-            if verificar_senha(segredo, hash) {
-                return Ok(Ok(Passe::livre()));
-            }
+        if self.senha_hash.is_some() && senha_confere {
+            return Ok(Ok(Passe::livre()));
         }
 
         if self.aceita_convites {

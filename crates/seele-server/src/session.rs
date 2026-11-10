@@ -956,12 +956,31 @@ async fn handshake(
     // que sim. Ver `admissao::Passe`: quem bate numa porta com portaria é
     // mandado tentar de novo, e queimar o convite dele nesta linha o deixaria
     // de fora para sempre — inclusive depois de aprovado.
-    let (passe, recusa_adiada, chegada) = {
+    //
+    // **O Argon2 da senha roda sem o banco na mão e fora do executor**, como o
+    // da senha de sala de voz. Isto é antes de qualquer autenticação: feito
+    // com o `Mutex` da persistência fechado e numa thread do Tokio, cada
+    // batida com um palpite parava o banco de todo mundo pelo tempo de um
+    // Argon2. Lê-se a política, solta-se o banco, a conta vai para
+    // `spawn_blocking`, e só o que precisa do banco (o convite) volta a ele.
+    let politica = {
         let guard = server.persistence.lock().await;
-        let politica = crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
+        crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: format!("could not read the admission policy: {error}"),
-        })?;
+        })?
+    };
+    let senha_confere = if politica.tem_senha() && join_secret.is_some() {
+        let (politica, segredo) = (politica.clone(), join_secret.clone());
+        // Uma tarefa que morre é uma senha que não conferiu: falha fechada.
+        tokio::task::spawn_blocking(move || politica.senha_confere(segredo.as_deref()))
+            .await
+            .unwrap_or(false)
+    } else {
+        false
+    };
+    let (passe, recusa_adiada, chegada) = {
+        let guard = server.persistence.lock().await;
         // A recusa aqui é **adiada**, e não devolvida na hora.
         //
         // O motivo é um defeito relatado em campo: «aprovei a entrada de
@@ -984,7 +1003,9 @@ async fn handshake(
         // segredo errado, e o balde por endereço do ADR 0025 já limita quantas
         // vezes por minuto. É mais barato que o Argon2 que o caminho da senha
         // pagaria, e o que se compra com ele é quem foi aprovado poder voltar.
-        let (passe, recusa_adiada) = match politica.avaliar(&guard, join_secret.as_deref()) {
+        let avaliado =
+            politica.avaliar_com_a_senha_conferida(&guard, join_secret.as_deref(), senha_confere);
+        let (passe, recusa_adiada) = match avaliado {
             Ok(Ok(passe)) => (Some(passe), None),
             Ok(Err(recusa)) => (None, Some(format!("admissão recusada: {recusa:?}"))),
             Err(error) => {
