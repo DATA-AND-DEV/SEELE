@@ -32,7 +32,7 @@ seele-lancador = { path = "../../crates/seele-lancador" }
 # da 0.16, antes de copiá-los para a linha legada (`versoes::esquema_do_banco`).
 # Não pelo `seele-server`: o caminho dele abre o banco migrando. A mesma versão
 # e a mesma feature do `seele-server`, para não acrescentar crate ao grafo.
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 # Abrir o pacote de uma versão baixada do catálogo — ADR 0046. As mesmas duas
 # que o `seele-instalador` usa, e pelo mesmo motivo: é o formato que o
 # atualizador já publica.
