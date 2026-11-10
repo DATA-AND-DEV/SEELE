@@ -100,6 +100,12 @@ const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e este
 // A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
 const RECUSA_SALA = "este comando controla a sala nativa; no navegador a conversa pessoal usa a conexão direta";
 const RECUSA_ASSINADOR_NATIVO = "a identidade do navegador assina localmente; este comando pertence ao aplicativo";
+// A tecla de falar com outra janela na frente (`tecla_global.rs`): é um atalho
+// do sistema, e a página não registra um. Ligá-la é recusado pelo nome; a
+// pergunta pelo estado (`estado_da_tecla_global`) é atendida com `null`, que a
+// tela lê como «aqui não há», e a opção não aparece. A casca larga diz por quê
+// no alto de ATALHOS (`FRASES_DA_LARGA.tecla`).
+const RECUSA_ATALHO = "o navegador não tem atalho para o computador inteiro: a tecla de falar fora da janela é do app do SEELE";
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
@@ -126,6 +132,7 @@ const RECUSAS_NOMEADAS = new Map([
   ["consentir_no_caminho_entre_pares", RECUSA_REDE],
   ["criar_convite_do_server", RECUSA_PORTARIA],
   ["criar_servidor", RECUSA_HOSPEDAR],
+  ["ligar_tecla_global", RECUSA_ATALHO],
   ["decidir_pedido", RECUSA_PORTARIA],
   // Desfazer a escolha de MOD de um servidor guardado desta máquina (P1).
   ["desfazer_escolha_de_mod", RECUSA_HOSPEDAR],
@@ -250,7 +257,7 @@ const COMANDOS_DA_PONTE = new Set([
   "regras_do_icone_do_server", "remover_mensagem", "salvar_anexo",
   "send_message", "set_muted", "set_talking", "set_total_isolation",
   "set_voice_mode", "set_volume", "snapshot", "soltar_a_entrada", "soltar_escolhido",
-  "som_da_tela", "som_do_mod", "tecla_de_falar", "tirar_minha_imagem",
+  "som_da_tela", "som_do_mod", "tecla_de_falar", "estado_da_tecla_global", "tirar_minha_imagem",
   "versoes_instaladas", "volumes_locais",
   // O túnel de jogo é do aplicativo: aqui a entrada é recusada pelo nome, a
   // saída não tem o que fechar e a lista é vazia.
@@ -2501,6 +2508,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // (a casca) nomeia. No celular não há tecla: falar apertando é o SEGURAR
   // PARA FALAR da faixa de voz.
   tecla_de_falar: () => (CASCA_DA_PONTE === "larga" ? guardadoNaOrigem(CHAVES_DA_ORIGEM.tecla) : null),
+  // Chamado sem gesto (ao carregar, e a cada meio segundo com CONFIGURAÇÕES
+  // aberta): uma recusa seria um aviso no console de toda página. `null` é «o
+  // navegador não tem atalho para o computador inteiro», e a opção não aparece.
+  estado_da_tecla_global: () => null,
   limite_da_mensagem: () => structuredClone(CONSTANTES_DO_DESKTOP.limite_da_mensagem),
   limites_dos_campos: () => structuredClone(CONSTANTES_DO_DESKTOP.limites_dos_campos),
   regras_de_previa: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_de_previa),

@@ -1085,6 +1085,7 @@ async function atualizarServer() {
   desenharNivel(snapshot);
   marcarLinhas(snapshot);
   desenharModos(snapshot, gravado);
+  await atualizarTeclaGlobal();
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
   await desenharEstadoDoServidor();
@@ -2012,6 +2013,9 @@ if ($("server-tecla-falar")) {
       invoke("escolher_tecla_de_falar", { tecla: evento.code })
         .catch((falha) => console.warn("não consegui gravar a tecla:", falha))
         .finally(pararDeOuvirTecla);
+      // A tecla nova pode não servir de atalho do sistema (SHIFT sozinho, por
+      // exemplo): quem lê isso é a linha FORA DA JANELA, no próximo meio segundo
+      // de `atualizarServer`.
     },
     true,
   );
@@ -2022,6 +2026,47 @@ if ($("server-tecla-falar")) {
     if (ouvindoTecla) pararDeOuvirTecla();
   });
 }
+
+// ------------------------------------------ a tecla de falar fora da janela
+//
+// A opção e a frase do estado. O estado é do Rust (`tecla_global.rs`) e a frase
+// é de `fraseDaTeclaGlobal` (`tela-sessao.js`): esta tela não decide nada, e
+// não diz «ligada» antes de o Rust dizer que gravou.
+
+/**
+ * Desenha a opção a partir de um retrato, ou a esconde sem ele.
+ *
+ * `aviso` é uma frase a mais, quando gravar a escolha falhou: o interruptor
+ * volta ao que está valendo e a frase diz por quê.
+ */
+function desenharTeclaGlobal(retrato, aviso = null) {
+  const bloco = $("tecla-global-bloco");
+  if (!bloco) return;
+  bloco.hidden = !retrato;
+  if (!retrato) return;
+  $("server-tecla-global").checked = retrato.ligada;
+  const estado = $("server-tecla-global-estado");
+  estado.dataset.estado = retrato.estado;
+  escreverOTexto(estado, [aviso, fraseDaTeclaGlobal(retrato)].filter(Boolean).join(" "));
+}
+
+/** Relê o estado e redesenha. Chamada por `atualizarServer`, com a tela aberta. */
+async function atualizarTeclaGlobal() {
+  desenharTeclaGlobal(await recarregarTeclaGlobal());
+}
+
+$("server-tecla-global")?.addEventListener("change", async (evento) => {
+  try {
+    const retrato = await invoke("ligar_tecla_global", { ligada: evento.target.checked });
+    anotarTeclaGlobal(retrato);
+    desenharTeclaGlobal(retrato);
+  } catch (falha) {
+    // O disco recusou: nada mudou no sistema, e a tela diz isso em vez de
+    // deixar o interruptor numa posição que não é a que vale.
+    console.warn("tecla de falar fora da janela:", falha);
+    desenharTeclaGlobal(await recarregarTeclaGlobal(), FRASES_DA_TECLA_GLOBAL.naoGravou);
+  }
+});
 
 // ----------------------------------------------- a permissão do microfone
 //

@@ -10221,9 +10221,12 @@ fn a_ajuda_escreve_a_tecla_de_falar_que_esta_gravada() {
     assert_eq!(
         diz.split_whitespace().collect::<Vec<_>>().join(" "),
         "Segure para falar, no modo tecla. Vale com a janela do SEELE na frente \
-         e fora da caixa de mensagem.",
+         e fora da caixa de mensagem. Com outra janela na frente, só ligando em \
+         CONFIGURAÇÕES · ATALHOS.",
         "a ajuda não diz mais onde a tecla de falar vale; quem a segura na caixa \
-         de mensagem ou com outra janela na frente acha que o microfone quebrou"
+         de mensagem ou com outra janela na frente acha que o microfone quebrou \
+         (a segunda frase entrou com a tecla de falar fora da janela, que nasce \
+         desligada: `tecla_global.rs`)"
     );
 }
 
@@ -19342,6 +19345,11 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
             "da preferência desta máquina, lida do disco, e não de um servidor",
         ),
         (
+            "teclaGlobal",
+            "desta máquina: o que o Rust contou por último da tecla de falar fora da \
+             janela (`seele://tecla-global`); é da opção e do sistema, e não de um servidor",
+        ),
+        (
             "foneJaAvisado",
             "da execução: o aviso de fone é uma vez por abertura do app, e o guarda do \
              lote J exige que só a declaração o zere",
@@ -28273,4 +28281,237 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
         "fechar o SEELE com um pedido esperando na portaria não pergunta antes"
     );
     assert!(perguntar.contains("f.fecharMesmo") && perguntar.contains("f.fechar"));
+}
+
+// ---------------------------------------------------------------------------
+// A tecla de falar com outra janela na frente (lista da 1.0).
+//
+// Quem decide quando a tecla é do sistema é o Rust, e a decisão é testada lá
+// (`src/tecla_global.rs`, `mod testes`). Estes guardas seguram a outra metade:
+// que cada estado que o Rust conta tem frase, que a falha chega à tela e ao
+// anúncio, que a opção nasce desligada e escondida, e que a página não alcança
+// o plugin.
+// ---------------------------------------------------------------------------
+
+/// O `node` roda a fonte real: `frases.js` inteiro, o trecho da tecla global de
+/// `tela-sessao.js`, e as funções e o ouvinte de `tela-server.js`.
+const MUNDO_DA_TECLA_GLOBAL: &str = r##"
+const anuncios = [];
+function mundoDaTecla(comandos) {
+  const m = mundo(comandos);
+  m.ctx.anunciar = (frase) => anuncios.push(frase);
+  m.ctx.escreverOTexto = (nodo, texto) => { nodo.textContent = texto; };
+  carregar(m, "frases.js");
+  vm.runInContext(funcao("base.js", "nomeDaTecla"), m.ctx);
+  const sessao = ler("tela-sessao.js");
+  const inicio = sessao.indexOf("let teclaGlobal = null;");
+  const fim = sessao.indexOf('listen("seele://tecla-global"');
+  if (inicio < 0 || fim < inicio) { console.log("o trecho da tecla global sumiu de tela-sessao.js"); process.exit(1); }
+  vm.runInContext(sessao.slice(inicio, sessao.indexOf("\n", fim) + 1), m.ctx);
+  const server = ler("tela-server.js");
+  const ouvinte = server.match(/\$\("server-tecla-global"\)\?\.addEventListener\([\s\S]*?\n\}\);\n/);
+  if (!ouvinte) { console.log("o ouvinte da opção sumiu de tela-server.js"); process.exit(1); }
+  vm.runInContext(funcao("tela-server.js", "desenharTeclaGlobal") + funcao("tela-server.js", "atualizarTeclaGlobal") + ouvinte[0], m.ctx);
+  m.js = (codigo) => vm.runInContext(codigo, m.ctx);
+  return m;
+}
+"##;
+
+#[test]
+fn cada_estado_da_tecla_global_tem_frase_e_a_falha_chega_a_tela_e_ao_anuncio() {
+    let estados = variants_of(&read("src/tecla_global.rs"), "Estado");
+    assert!(
+        estados.len() >= 8,
+        "só {estados:?} lidos de `enum Estado`: o guarda mede quase nada"
+    );
+    let corpo = format!(
+        r##"{MUNDO_DA_TECLA_GLOBAL}
+const ESTADOS = {estados:?};
+const LIMITE = {LIMITE_DE_FRASE};
+
+// 1. Um estado, uma frase: com a tecla pelo nome, e dentro do limite com o
+//    nome mais comprido que `nomeDaTecla` escreve.
+{{
+  const m = mundoDaTecla({{ estado_da_tecla_global: {{ ligada: false, estado: "Desligada", tecla: "Space" }} }});
+  await tick();
+  const frases = new Set();
+  for (const estado of ESTADOS) {{
+    const frase = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "${{estado}}", tecla: "ControlRight" }})`);
+    confere(estado + " não tem frase própria", frase !== m.js("FRASES_DA_TECLA_GLOBAL.desconhecido") && frase.length > 20);
+    confere(estado + " passa do limite de frase: " + frase.length, frase.length <= LIMITE);
+    confere(estado + " repete a frase de outro estado", !frases.has(frase));
+    frases.add(frase);
+  }}
+  for (const sobra of Object.keys(m.js("FRASES_DA_TECLA_GLOBAL.estado"))) {{
+    confere("a frase de " + sobra + " não tem estado no Rust", ESTADOS.includes(sobra));
+  }}
+  for (const comTecla of ["SemAtalho", "Recusada", "Valendo"]) {{
+    const frase = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "${{comTecla}}", tecla: "KeyF" }})`);
+    confere(comTecla + " não diz qual tecla", /(^|\s)F(\s|$)/.test(frase));
+  }}
+  for (const falha of ["Indisponivel", "SemAtalho", "Recusada"]) {{
+    const frase = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "${{falha}}", tecla: "KeyF" }})`);
+    confere(falha + " não diz que fora da janela a tecla não vale", /fora da janela.*não abre|só vale com a janela do SEELE na frente/.test(frase));
+  }}
+  const estranho = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "EstadoDeAmanha", tecla: "KeyF" }})`);
+  confere("um estado que a tela não conhece sai calado", estranho === m.js("FRASES_DA_TECLA_GLOBAL.desconhecido") && estranho.length > 20);
+}}
+
+// 2. No app: a opção aparece, desligada, com a frase do estado.
+{{
+  const m = mundoDaTecla({{ estado_da_tecla_global: {{ ligada: false, estado: "Desligada", tecla: "Space" }} }});
+  m.$("tecla-global-bloco").hidden = true;
+  await m.js("atualizarTeclaGlobal()");
+  confere("no app a opção continua escondida", m.$("tecla-global-bloco").hidden === false);
+  confere("a opção desligada aparece marcada", m.$("server-tecla-global").checked === false);
+  confere("desligada, a tela não diz que está desligada", /Desligada/.test(m.$("server-tecla-global-estado").textContent));
+}}
+
+// 3. No navegador a ponte responde `null` (e, se o comando faltar, recusa): nos
+//    dois a opção não aparece, e nada é dito em voz alta.
+for (const comandos of [{{ estado_da_tecla_global: () => null }}, {{}}]) {{
+  anuncios.length = 0;
+  const m = mundoDaTecla(comandos);
+  m.$("tecla-global-bloco").hidden = true;
+  await m.js("atualizarTeclaGlobal()");
+  confere("no navegador a opção apareceu", m.$("tecla-global-bloco").hidden === true);
+  confere("no navegador a linha do operador ganhou um pedaço", m.js("teclaGlobalNaLinha()") === null);
+  confere("no navegador houve anúncio", anuncios.length === 0);
+}}
+
+// 4. Ligar com uma tecla que não serve de atalho: o Rust responde `SemAtalho`,
+//    e a frase vai à tela e, uma vez, ao anúncio.
+{{
+  anuncios.length = 0;
+  let agora = {{ ligada: false, estado: "Desligada", tecla: "ShiftLeft" }};
+  const m = mundoDaTecla({{
+    estado_da_tecla_global: () => agora,
+    ligar_tecla_global: ({{ ligada }}) => (agora = {{ ligada, estado: ligada ? "SemAtalho" : "Desligada", tecla: "ShiftLeft" }}),
+  }});
+  await m.js("atualizarTeclaGlobal()");
+  m.$("server-tecla-global").checked = true;
+  await m.$("server-tecla-global").emitir("change", {{ target: m.$("server-tecla-global") }});
+  const pedidos = so(m, "ligar_tecla_global");
+  confere("ligar não chamou `ligar_tecla_global` com `ligada: true`", pedidos.length === 1 && pedidos[0].args.ligada === true);
+  const dito = m.$("server-tecla-global-estado").textContent;
+  confere("a tecla que não serve de atalho não é dita na tela: " + dito, /SHIFT ESQ não serve de atalho/.test(dito));
+  confere("a falha não foi ao anúncio uma vez: " + anuncios.length, anuncios.length === 1 && anuncios[0] === dito);
+  confere("a linha do operador não diz que fora da janela não vale", m.js("teclaGlobalNaLinha()") === m.js("FRASES_DA_TECLA_GLOBAL.linhaFalhou"));
+  await m.js("atualizarTeclaGlobal()");
+  await m.js("atualizarTeclaGlobal()");
+  confere("a mesma falha é anunciada a cada meio segundo: " + anuncios.length, anuncios.length === 1);
+}}
+
+// 5. O disco recusa: o interruptor volta ao que vale, e a tela diz por quê.
+{{
+  const m = mundoDaTecla({{
+    estado_da_tecla_global: {{ ligada: false, estado: "Desligada", tecla: "Space" }},
+    ligar_tecla_global: () => {{ throw "NaoGravei"; }},
+  }});
+  await m.js("atualizarTeclaGlobal()");
+  m.$("server-tecla-global").checked = true;
+  await m.$("server-tecla-global").emitir("change", {{ target: m.$("server-tecla-global") }});
+  confere("a gravação falhou e o interruptor ficou ligado", m.$("server-tecla-global").checked === false);
+  confere("a gravação falhou e a tela não disse", m.$("server-tecla-global-estado").textContent.startsWith(m.js("FRASES_DA_TECLA_GLOBAL.naoGravou")));
+}}
+
+// 6. O que o Rust conta pelo evento: a recusa do sistema chega com a janela
+//    atrás de outra, e é dita; valendo, a linha do operador diz que vale.
+{{
+  anuncios.length = 0;
+  const m = mundoDaTecla({{ estado_da_tecla_global: {{ ligada: true, estado: "ForaDeSala", tecla: "KeyF" }} }});
+  await tick();
+  confere("o trecho da tela não ouve `seele://tecla-global`", typeof m.ouvintes["seele://tecla-global"] === "function");
+  confere("esperando sala, a linha do operador ganhou um pedaço", m.js("teclaGlobalNaLinha()") === null);
+  m.ouvintes["seele://tecla-global"]({{ payload: {{ ligada: true, estado: "Valendo", tecla: "KeyF" }} }});
+  confere("valendo, a linha do operador não diz", m.js("teclaGlobalNaLinha()") === m.js("FRASES_DA_TECLA_GLOBAL.linhaValendo"));
+  confere("valer foi anunciado como falha", anuncios.length === 0);
+  m.ouvintes["seele://tecla-global"]({{ payload: {{ ligada: true, estado: "Recusada", tecla: "KeyF" }} }});
+  confere("a recusa do sistema não foi anunciada", anuncios.length === 1 && /O sistema recusou F/.test(anuncios[0]));
+  confere("recusada, a linha do operador não diz", m.js("teclaGlobalNaLinha()") === m.js("FRASES_DA_TECLA_GLOBAL.linhaFalhou"));
+}}
+"##
+    );
+    rodar_node("a tecla de falar fora da janela, na tela", &corpo);
+}
+
+#[test]
+fn a_tecla_global_nasce_desligada_escondida_e_fora_do_alcance_da_pagina() {
+    // **Desligada e escondida na marcação**: é o que se lê se o script não
+    // chegar a escrever, e no navegador ele nunca chega (a ponte recusa o
+    // comando). Uma opção marcada de fábrica seria um atalho do sistema que
+    // ninguém pediu.
+    let pagina = without_comments(&read("ui/index.html"));
+    assert!(
+        pagina.contains("<div class=\"server-bloco-corpo\" id=\"tecla-global-bloco\" hidden>"),
+        "o bloco da tecla de falar fora da janela não nasce escondido: no navegador, \
+         onde não há atalho do sistema, ele apareceria"
+    );
+    assert!(
+        pagina.contains("<input id=\"server-tecla-global\" type=\"checkbox\" role=\"switch\">"),
+        "a opção da tecla de falar fora da janela mudou de forma, ou nasce marcada"
+    );
+    let atalhos = pagina
+        .split("id=\"painel-atalhos\"")
+        .nth(1)
+        .and_then(|resto| resto.split("</section>").next())
+        .expect("o painel de atalhos");
+    assert!(
+        atalhos.contains("id=\"server-tecla-falar\"")
+            && atalhos.contains("id=\"tecla-global-bloco\""),
+        "a opção saiu do lado da tecla de falar: quem troca a tecla precisa ler ali \
+         se a nova serve de atalho"
+    );
+    assert!(
+        atalhos.contains("a tecla não chega ao outro programa"),
+        "a tela não avisa mais que, enquanto vale, a tecla é tirada dos outros programas"
+    );
+
+    // **A linha do operador** diz quando vale e quando está ligada e não vale.
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    assert!(
+        sessao.contains(
+            "!snapshot.muted && snapshot.voice_mode === \"PushToTalk\" ? teclaGlobalNaLinha() : null,"
+        ),
+        "a linha do operador não diz mais a tecla de falar fora da janela"
+    );
+
+    // **A página não alcança o plugin.** Quem registra tecla é o Rust, e só ele:
+    // uma permissão de `global-shortcut` deixaria qualquer script da janela (um
+    // MOD inclusive) tomar teclas do sistema.
+    let capacidade = read("capabilities/janela.json");
+    let permissoes = capacidade
+        .split("\"permissions\"")
+        .nth(1)
+        .expect("a lista de permissões da janela");
+    assert!(
+        !permissoes.contains("global-shortcut"),
+        "a janela ganhou permissão de `global-shortcut`: a página passa a poder \
+         registrar atalhos do sistema"
+    );
+
+    // **O plugin sobe pelo `iniciar`, e não pelo `Builder`**: no `Builder`, o
+    // serviço de atalhos que não sobe derruba a abertura do app.
+    let main = without_comments(&read("src/main.rs"));
+    assert!(
+        !main.contains(".plugin(tauri_plugin_global_shortcut"),
+        "o plugin de atalhos voltou ao `Builder`: se ele não subir, o app não abre"
+    );
+    assert!(
+        main.contains("tecla_global::iniciar("),
+        "ninguém sobe mais a tecla de falar fora da janela"
+    );
+    // **E quem avisa que a situação mudou**: o foco da janela, a troca de modo,
+    // a troca de tecla e os eventos de sala. Sem um deles a tecla ficaria presa
+    // no sistema até a rede de segurança passar.
+    let avisos = main.matches("tecla_global::avisar(").count();
+    assert!(
+        avisos >= 4,
+        "só {avisos} avisos à tecla de falar fora da janela em main.rs: faltou o \
+         foco da janela, o modo, a tecla ou os eventos de sala"
+    );
+    assert!(
+        main.contains("tauri::WindowEvent::Focused(_) | tauri::WindowEvent::Destroyed"),
+        "a janela vir à frente, sair dela ou fechar não avisa mais a tecla de falar"
+    );
 }

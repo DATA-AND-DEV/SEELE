@@ -82,6 +82,8 @@ const SUPRESSAO_DE_RUIDO: &str = "supressao_de_ruido";
 const ABERTURA_DA_VOZ: &str = "abertura_da_voz_dbfs_milesimos";
 /// Se a sala pessoal sobe: «Não receber ligações», no PERFIL. `sim` ou `nao`.
 const RECEBER_LIGACOES: &str = "receber_ligacoes";
+/// Se a tecla de falar vale com outra janela na frente. `sim` ou `nao`.
+const TECLA_DE_FALAR_GLOBAL: &str = "tecla_de_falar_global";
 
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
@@ -157,6 +159,10 @@ pub struct Preferences {
     /// Se a sala pessoal sobe (tarefa 23 da F7). `None` é «não escolhido», e
     /// quem nunca escolheu recebe: ver [`Preferences::receber_ligacoes`].
     receber_ligacoes: Option<bool>,
+    /// Se a tecla de falar vale com outra janela na frente. `None` é «não
+    /// escolhido», e quem nunca escolheu não tem atalho no sistema: ver
+    /// [`Preferences::tecla_de_falar_global`].
+    tecla_de_falar_global: Option<bool>,
 }
 
 impl Preferences {
@@ -186,6 +192,7 @@ impl Preferences {
             supressao_de_ruido: None,
             abertura_da_voz_dbfs_milesimos: None,
             receber_ligacoes: None,
+            tecla_de_falar_global: None,
         };
         if let Some(bytes) = crate::arquivo_local::ler(&settings.path, arquivo_valido)? {
             let text = String::from_utf8(bytes)?;
@@ -248,6 +255,13 @@ impl Preferences {
                     }
                     RECEBER_LIGACOES => {
                         settings.receber_ligacoes = match value.as_deref() {
+                            Some("sim") => Some(true),
+                            Some("nao") => Some(false),
+                            _ => None,
+                        }
+                    }
+                    TECLA_DE_FALAR_GLOBAL => {
+                        settings.tecla_de_falar_global = match value.as_deref() {
                             Some("sim") => Some(true),
                             Some("nao") => Some(false),
                             _ => None,
@@ -629,6 +643,25 @@ impl Preferences {
         self.write()
     }
 
+    /// Se a tecla de falar vale com outra janela na frente.
+    ///
+    /// **Quem nunca escolheu não tem.** Um atalho do sistema tira a tecla dos
+    /// outros programas enquanto vale, e isso só se faz a quem pediu.
+    #[must_use]
+    pub fn tecla_de_falar_global(&self) -> bool {
+        self.tecla_de_falar_global.unwrap_or(false)
+    }
+
+    /// Escreve a escolha da tecla de falar fora da janela.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn set_tecla_de_falar_global(&mut self, ligada: bool) -> Result<()> {
+        self.tecla_de_falar_global = Some(ligada);
+        self.write()
+    }
+
     fn write(&self) -> Result<()> {
         // Every setting, not only the one that just changed: this rewrites the
         // whole file, so a line left out here is a line deleted from disk. That
@@ -650,6 +683,9 @@ impl Preferences {
         let receber = self
             .receber_ligacoes
             .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
+        let tecla_global = self
+            .tecla_de_falar_global
+            .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
         for (name, value) in [
             (CAPTURE, &self.capture),
             (PLAYBACK, &self.playback),
@@ -663,6 +699,7 @@ impl Preferences {
             (SUPRESSAO_DE_RUIDO, &supressao),
             (ABERTURA_DA_VOZ, &abertura),
             (RECEBER_LIGACOES, &receber),
+            (TECLA_DE_FALAR_GLOBAL, &tecla_global),
         ] {
             let Some(value) = value else {
                 continue;
@@ -1109,6 +1146,41 @@ mod tests {
         assert!(Preferences::open(caminho)
             .expect("reabrir")
             .receber_ligacoes());
+    }
+
+    /// A tecla de falar fora da janela: desligada em quem nunca escolheu, a
+    /// escolha atravessa o processo, e escrevê-la não apaga a tecla; nem a
+    /// tecla a apaga.
+    #[test]
+    fn a_tecla_de_falar_global_nasce_desligada_e_atravessa_o_processo() {
+        let caminho = scratch("tecla-global");
+        assert!(
+            !Preferences::open(caminho.clone())
+                .expect("abrir")
+                .tecla_de_falar_global(),
+            "uma instalação nova nasceu com atalho no sistema sem ninguém pedir"
+        );
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("abrir");
+            p.set_push_to_talk_key(Some("KeyF")).expect("tecla");
+            p.set_tecla_de_falar_global(true).expect("ligar");
+        }
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("reabrir");
+            assert!(p.tecla_de_falar_global(), "a escolha não atravessou");
+            assert_eq!(p.push_to_talk_key(), Some("KeyF"), "ligar apagou a tecla");
+            p.set_push_to_talk_key(Some("KeyG"))
+                .expect("trocar a tecla");
+        }
+        let mut p = Preferences::open(caminho.clone()).expect("reabrir");
+        assert!(
+            p.tecla_de_falar_global(),
+            "trocar a tecla desligou o atalho"
+        );
+        p.set_tecla_de_falar_global(false).expect("desligar");
+        assert!(!Preferences::open(caminho)
+            .expect("reabrir")
+            .tecla_de_falar_global());
     }
 
     /// Zero é «ninguém compartilhou tela», e não uma medida de zero.

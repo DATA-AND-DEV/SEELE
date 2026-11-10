@@ -1491,6 +1491,10 @@ function desenharOperador(snapshot) {
   }
   escreverOTexto($("voz-estado"), [
     estadoDoMicrofone,
+    // A tecla fora da janela, quando ela vale ou quando está ligada e não
+    // vale: só no modo tecla e com o microfone vivo, que é quando «segura F»
+    // está escrito logo antes.
+    !snapshot.muted && snapshot.voice_mode === "PushToTalk" ? teclaGlobalNaLinha() : null,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
     // «ninguém está falando comigo», e não «o som da tela também está calado».
     snapshot.total_isolation ? "não está ouvindo nada, nem a tela" : "ouvindo",
@@ -4838,6 +4842,75 @@ async function recarregarTeclaDeFalar() {
 }
 
 recarregarTeclaDeFalar();
+
+// ------------------------------------------ a tecla de falar fora da janela
+//
+// Quem pede a tecla ao sistema, e decide quando, é o Rust (`tecla_global.rs`):
+// só com a opção ligada, numa sala de voz, no modo tecla e com esta janela
+// atrás de outra. Aqui só se lê o que ele conta e se diz por extenso — em
+// CONFIGURAÇÕES · ATALHOS (`tela-server.js`), na linha do operador, e em voz
+// alta quando o sistema recusa a tecla.
+
+/**
+ * O que o Rust disse por último da tecla fora da janela.
+ *
+ * `null` é «não há o que dizer»: no navegador, onde a ponte responde `null`, e
+ * antes da primeira resposta. Com `null` a opção não aparece e a linha do
+ * operador não ganha nada.
+ */
+let teclaGlobal = null;
+
+/** Os estados em que a tecla está ligada e não vale fora da janela. */
+const FALHAS_DA_TECLA_GLOBAL = Object.freeze(["Indisponivel", "SemAtalho", "Recusada"]);
+
+/** A frase de um retrato da tecla fora da janela. Um estado sem frase é dito, e não calado. */
+function fraseDaTeclaGlobal(retrato) {
+  const frase = FRASES_DA_TECLA_GLOBAL.estado[retrato.estado];
+  return frase ? frase(nomeDaTecla(retrato.tecla)) : FRASES_DA_TECLA_GLOBAL.desconhecido;
+}
+
+/**
+ * O pedaço da linha do operador que fala da tecla fora da janela, ou `null`.
+ *
+ * Só as duas coisas que mudam o que a tecla faz **agora**: ela vale com esta
+ * janela atrás (a janela pode estar à vista noutro monitor), ou está ligada e
+ * não vale. Desligada, ou esperando sala, a linha fica como sempre foi.
+ */
+function teclaGlobalNaLinha() {
+  if (!teclaGlobal) return null;
+  if (teclaGlobal.estado === "Valendo") return FRASES_DA_TECLA_GLOBAL.linhaValendo;
+  if (FALHAS_DA_TECLA_GLOBAL.includes(teclaGlobal.estado)) return FRASES_DA_TECLA_GLOBAL.linhaFalhou;
+  return null;
+}
+
+/**
+ * Guarda o retrato novo, e diz a falha quando ela chega.
+ *
+ * A recusa do sistema acontece com esta janela atrás de outra — é só então que
+ * a tecla é pedida —, e quem volta precisa ficar sabendo sem ter de abrir a
+ * configuração: a frase inteira vai ao anúncio, uma vez por falha, e a linha do
+ * operador a mantém à vista.
+ */
+function anotarTeclaGlobal(retrato) {
+  const antes = teclaGlobal?.estado ?? null;
+  teclaGlobal = retrato;
+  if (retrato && retrato.estado !== antes && FALHAS_DA_TECLA_GLOBAL.includes(retrato.estado)) {
+    anunciar(fraseDaTeclaGlobal(retrato));
+  }
+}
+
+/** Pergunta ao Rust como está a tecla fora da janela. No navegador a ponte responde `null`. */
+async function recarregarTeclaGlobal() {
+  try {
+    anotarTeclaGlobal(await invoke("estado_da_tecla_global"));
+  } catch {
+    teclaGlobal = null;
+  }
+  return teclaGlobal;
+}
+
+recarregarTeclaGlobal();
+listen("seele://tecla-global", (evento) => anotarTeclaGlobal(evento.payload));
 
 /**
  * Qual tecla abriu o microfone, ou `null` se ele não está segurado.

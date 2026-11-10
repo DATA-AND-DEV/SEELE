@@ -2152,6 +2152,40 @@ function servidorDaLinha(linha) {
 }
 
 /** A faixa de avisos do pé da sessão no celular: os avisos recolhidos numa linha, e o botão que os abre. */
+/**
+ * A tecla de falar com outra janela na frente (`src/tecla_global.rs`).
+ *
+ * **Um estado do Rust, uma frase.** `estado` tem uma entrada por variante de
+ * `Estado`, com o mesmo nome, e o `tests/frontend.rs` confere as duas listas:
+ * um estado novo sem frase aqui seria o produto sabendo e não contando.
+ *
+ * As três falhas (`Indisponivel`, `SemAtalho`, `Recusada`) dizem o que não
+ * vale e o que fazer. `Recusada` não afirma o motivo: o sistema diz só que
+ * recusou, e outro programa com a mesma tecla é o caso comum, não o único.
+ */
+const FRASES_DA_TECLA_GLOBAL = Object.freeze({
+  estado: Object.freeze({
+    Desligada: () => "Desligada: a tecla de falar só vale com a janela do SEELE na frente.",
+    Indisponivel: () =>
+      "Este sistema não deixou o SEELE registrar atalhos. A tecla de falar só vale com a janela do SEELE na frente.",
+    SemAtalho: (tecla) =>
+      `${tecla} não serve de atalho do sistema sozinha, e fora da janela não abre o microfone. Troque a tecla de falar acima: letra, número ou F1 a F12 servem.`,
+    Recusada: (tecla) =>
+      `O sistema recusou ${tecla} como atalho, e fora da janela ela não abre o microfone. O comum é outro programa já usar a tecla: troque a tecla de falar acima.`,
+    ForaDeSala: (tecla) => `Ligada. ${tecla} passa a valer fora da janela quando você entrar numa sala de voz.`,
+    OutroModo: () =>
+      "Ligada, mas o microfone não abre por tecla. Escolha SEGURAR TECLA em MICROFONE E SOM para ela valer fora da janela.",
+    NaJanela: (tecla) => `Ligada. Quando outra janela estiver na frente, ${tecla} abre o microfone.`,
+    Valendo: (tecla) => `${tecla} está valendo fora da janela.`,
+  }),
+  /** O estado que o Rust mandar e esta lista não conhecer: dito, e não calado. */
+  desconhecido: "Não sei dizer se a tecla de falar vale fora da janela. Com a janela do SEELE na frente ela vale.",
+  naoGravou: "Não consegui gravar a escolha neste computador. A tecla de falar fora da janela continua como estava.",
+  /** A linha do operador, na sessão: curta, ao lado de «microfone abre enquanto segura F». */
+  linhaValendo: "vale fora da janela",
+  linhaFalhou: "fora da janela não vale: veja ATALHOS",
+});
+
 const FRASES_AVISOS_DO_CELULAR = Object.freeze({
   faixa: (n) => `${n} ${n === 1 ? "AVISO" : "AVISOS"}`,
   abrir: "ABRIR",

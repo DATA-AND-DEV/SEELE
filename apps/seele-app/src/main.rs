@@ -64,6 +64,7 @@ mod audio_de_mentira;
 mod escolhas_de_mods;
 // As sessões cliente, todas iguais, e o foco de voz da máquina (E3 da 0.17).
 mod sessoes;
+mod tecla_global;
 mod toque;
 // O cenário da multi-sessão contra servidores de verdade (E3 da 0.17).
 #[cfg(test)]
@@ -1098,6 +1099,40 @@ fn motivo_da_trilha(event: &Event, reconectou: bool) -> Option<&'static str> {
     }
 }
 
+/// Os eventos depois dos quais «estou numa sala de voz» pode ter mudado.
+///
+/// Os que não entram são os de alta frequência que não dizem nada de sala
+/// (telemetria, quadros de tela, mensagens): um aviso por quadro acordaria a
+/// conferida sessenta vezes por segundo. A rede de segurança
+/// (`tecla_global::REDE_DE_SEGURANCA`) cobre o que esta lista esquecer.
+fn muda_a_sala_da_tecla_global(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::RosterChanged
+            | Event::ChannelsChanged
+            | Event::Ended { .. }
+            | Event::CaiuComMotivo { .. }
+            | Event::ConnectStageChanged { .. }
+    )
+}
+
+#[cfg(test)]
+mod os_eventos_que_avisam_a_tecla_global {
+    use super::{muda_a_sala_da_tecla_global, Event};
+
+    #[test]
+    fn os_de_sala_avisam_e_os_de_alta_frequencia_nao() {
+        // Entrar e sair de sala chega como presença ou como canais; o fim da
+        // sessão tira a pessoa da sala sem nenhum dos dois.
+        assert!(muda_a_sala_da_tecla_global(&Event::RosterChanged));
+        assert!(muda_a_sala_da_tecla_global(&Event::ChannelsChanged));
+        // Um aviso por medida de rede ou por mensagem acordaria a conferida o
+        // tempo todo, por nada.
+        assert!(!muda_a_sala_da_tecla_global(&Event::TelemetryChanged));
+        assert!(!muda_a_sala_da_tecla_global(&Event::MessagesChanged));
+    }
+}
+
 #[cfg(test)]
 mod o_motivo_da_trilha {
     use super::{motivo_da_trilha, Event};
@@ -1222,6 +1257,11 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
         // A failed emit means the window is gone, which is not worth a log channel
         // per event during shutdown.
         let _ = self.app.emit(EVENT_CHANNEL, carga);
+        // Entrar e sair de sala, cair, ser movido: a tecla de fora da janela
+        // só vale em sala. Só avisa; quem confere é outra thread.
+        if muda_a_sala_da_tecla_global(&event) {
+            tecla_global::avisar(&self.app);
+        }
         // O sinal da trilha, para o que a placa de uma sessão mostra.
         if matches!(event, Event::MessagesChanged) && !na_vista {
             self.marcas.mudou.store(true, Ordering::Release);
@@ -12812,6 +12852,12 @@ fn em_todas(
 /// pode ficar segura numa sessão que perdeu o foco no meio da pressão.
 #[tauri::command]
 fn set_talking(session: State<'_, Session>, talking: bool) {
+    segurar_a_fala(&session, talking);
+}
+
+/// [`set_talking`] sem o `State`: a tecla de falar da janela e a de fora dela
+/// ([`tecla_global`]) abrem e fecham o mesmo microfone, pela mesma regra.
+fn segurar_a_fala(session: &Session, talking: bool) {
     if talking {
         if let Some(com_o_foco) = session.sessoes.com_o_foco() {
             com_o_foco.conexao.set_talking(true);
@@ -12857,6 +12903,8 @@ fn set_voice_mode(
     for connection in session.sessoes.conexoes() {
         connection.set_voice_mode(mode);
     }
+    // Saindo do modo tecla, a tecla de fora da janela volta ao sistema.
+    tecla_global::avisar(&app);
     Ok(())
 }
 
@@ -13138,7 +13186,67 @@ fn escolher_tecla_de_falar(app: AppHandle, tecla: Option<String>) -> Result<(), 
         .map_err(|erro| {
             tracing::warn!(%erro, "não consegui gravar a tecla de falar");
             FalhaAoEscolher::NaoGravei
-        })
+        })?;
+    // A tecla de fora da janela é a mesma: trocada aqui, ela troca no sistema.
+    if let Some(global) = app.try_state::<tecla_global::TeclaGlobal>() {
+        global.anotar(ajustes.tecla_de_falar_global(), ajustes.push_to_talk_key());
+    }
+    tecla_global::avisar(&app);
+    Ok(())
+}
+
+/// Como está a tecla de falar fora da janela: se a opção está ligada, e o que
+/// a tela diz dela. Ver [`tecla_global`].
+///
+/// O último estado conferido, e não uma conferida nova: este comando roda na
+/// thread principal, e conferir espera por ela.
+#[tauri::command]
+fn estado_da_tecla_global(estado: State<'_, tecla_global::TeclaGlobal>) -> tecla_global::Retrato {
+    estado.retrato()
+}
+
+/// Liga ou desliga a tecla de falar fora da janela, e devolve o que a tela diz
+/// agora — inclusive que a tecla escolhida não serve de atalho, que é o que
+/// quem acabou de ligar precisa ler.
+///
+/// # Errors
+///
+/// [`FalhaAoEscolher::NaoGravei`] se o disco recusar. Nada muda no sistema.
+#[tauri::command]
+async fn ligar_tecla_global(
+    app: AppHandle,
+    ligada: bool,
+) -> Result<tecla_global::Retrato, FalhaAoEscolher> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    ajustes.set_tecla_de_falar_global(ligada).map_err(|erro| {
+        tracing::warn!(%erro, "não consegui gravar a tecla de falar fora da janela");
+        FalhaAoEscolher::NaoGravei
+    })?;
+    if let Some(global) = app.try_state::<tecla_global::TeclaGlobal>() {
+        global.anotar(ligada, ajustes.push_to_talk_key());
+    }
+    Ok(tecla_global::conferir_fora_da_thread(&app).await)
+}
+
+/// O que a tecla de falar fora da janela precisa saber da voz: se a sessão com
+/// a voz desta máquina está numa sala, e se o microfone abre por tecla.
+///
+/// A sessão com o foco de voz, e não a da vista: é a ela que [`segurar_a_fala`]
+/// manda o aperto. Sem ela, ninguém está em sala.
+fn voz_para_a_tecla_global<R: tauri::Runtime>(app: &AppHandle<R>) -> (bool, bool) {
+    let Some(session) = app.try_state::<Session>() else {
+        return (false, false);
+    };
+    let Some(com_o_foco) = session.sessoes.com_o_foco() else {
+        return (false, false);
+    };
+    let retrato = com_o_foco.conexao.snapshot();
+    (
+        retrato.voice_rooms.iter().any(|sala| sala.occupied_by_us),
+        retrato.voice_mode == VoiceMode::PushToTalk,
+    )
 }
 
 #[tauri::command]
@@ -15287,6 +15395,19 @@ fn main() {
         // quem abre um diálogo neste app é um comando desta casca, com o título
         // escrito aqui, e não uma linha de JavaScript.
         .plugin(tauri_plugin_dialog::init())
+        // A tecla de falar fora da janela. O plugin dela **não** sobe aqui: ver
+        // `tecla_global::iniciar`, chamado do `setup`.
+        .manage(tecla_global::TeclaGlobal::default())
+        // A janela vir à frente devolve a tecla ao sistema, e sair da frente a
+        // pede; fechada, devolve. Só avisa: este fecho roda na thread principal.
+        .on_window_event(|janela, evento| {
+            if matches!(
+                evento,
+                tauri::WindowEvent::Focused(_) | tauri::WindowEvent::Destroyed
+            ) {
+                tecla_global::avisar(janela.app_handle());
+            }
+        })
         .manage(Session {
             // Lida aqui e não dentro do `Default`: um `Default` que lê o
             // ambiente é um `Default` que se comporta diferente em teste e em
@@ -15324,6 +15445,18 @@ fn main() {
                 };
                 janela.build()?;
             }
+
+            // A tecla de falar fora da janela: a opção e a tecla que estão no
+            // disco, o serviço de atalhos e a tarefa que confere. Depois da
+            // janela, que é de quem a conferida lê o foco.
+            let ajustes = preferencias(app.handle());
+            tecla_global::iniciar(
+                app.handle(),
+                ajustes
+                    .as_ref()
+                    .is_some_and(seele_ffi::preferences::Preferences::tecla_de_falar_global),
+                ajustes.as_ref().and_then(|p| p.push_to_talk_key()),
+            );
 
             // **Os pacotes do layout antigo, levados uma vez.**
             //
@@ -15651,6 +15784,8 @@ fn main() {
             modo_de_voz_escolhido,
             tecla_de_falar,
             escolher_tecla_de_falar,
+            estado_da_tecla_global,
+            ligar_tecla_global,
             escolher_microfone,
             saidas,
             saida_escolhida,

@@ -59,6 +59,16 @@ seele-motor = { path = "../../crates/seele-motor" }
 # nenhum dos três: o `rfd` fala com a API do sistema em cada um deles, e as três
 # APIs já estavam na árvore por causa do próprio Tauri.
 tauri-plugin-dialog = "2.7"
+# A tecla de falar com outra janela na frente (`src/tecla_global.rs`). O plugin
+# oficial; traz o `global-hotkey`, que fala com a API de atalho de cada sistema
+# (Carbon no macOS, `RegisterHotKey` no Windows, X11 no Linux). Usado só daqui
+# de dentro: não há permissão de `global-shortcut` em `capabilities/janela.json`,
+# e a página não registra tecla nenhuma.
+#
+# **`~2.3`, e não `2`**: a 2.4 pede o `tauri` 2.12, e declará-la trocava o Tauri
+# inteiro do produto (2.11 → 2.12, oitocentas linhas de `Cargo.lock`) por causa
+# de uma tecla. Quando o Tauri subir por decisão própria, este til sai junto.
+tauri-plugin-global-shortcut = "~2.3"
 # Atualização pelo próprio app. ADR 0026.
 #
 # Fixado no minor porque o plugin expõe o `reqwest` dele na API pública

@@ -3571,6 +3571,35 @@
                 <kbd class="server-atalho-tecla" data-tecla="Escape">ESC</kbd>
               </li>
             </ul>
+            <!--
+              **A tecla de falar com outra janela na frente** (lista da 1.0).
+
+              Ao lado da tecla de falar, e não em MICROFONE E SOM: é a mesma
+              tecla, e quem a troca logo acima precisa ler aqui se a nova serve
+              de atalho do sistema.
+
+              Nasce escondido. Quem o mostra é `desenharTeclaGlobal`
+              (`tela-server.js`), quando o comando `estado_da_tecla_global`
+              responde um estado, e só o app responde: no navegador a ponte
+              responde `null`, o bloco fica escondido, e a casca larga já diz
+              por quê, no alto deste painel.
+
+              Sem `checked`: desligada é o padrão, e é o que se lê se o script
+              não chegar a escrever. A frase do estado não está aqui: ela vem de
+              `FRASES_DA_TECLA_GLOBAL`, um estado por frase, e uma escrita na
+              marcação seria uma afirmação que ninguém conferiu.
+            -->
+            <div class="server-bloco-corpo" id="tecla-global-bloco" hidden>
+              <div class="server-campo">
+                <h4 class="rotulo">FORA DA JANELA</h4>
+                <label class="server-marcar" for="server-tecla-global">
+                  <input id="server-tecla-global" type="checkbox" role="switch">
+                  <span>falar com a tecla também com outra janela na frente</span>
+                </label>
+                <p class="nota">Vale numa sala de voz, com o microfone em SEGURAR TECLA. Enquanto vale, a tecla não chega ao outro programa: escolha uma que o jogo não use.</p>
+                <p class="nota" id="server-tecla-global-estado" role="status"></p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -4810,7 +4839,7 @@
         <h3 class="ajuda-secao-nome">AS TECLAS</h3>
         <dl class="ajuda-lista">
           <dt class="ajuda-termo"><span id="ajuda-tecla-falar" class="ajuda-tecla">ESPAÇO</span></dt>
-          <dd class="ajuda-diz">Segure para falar, no modo tecla. Vale com a janela do SEELE na frente e fora da caixa de mensagem.</dd>
+          <dd class="ajuda-diz">Segure para falar, no modo tecla. Vale com a janela do SEELE na frente e fora da caixa de mensagem. Com outra janela na frente, só ligando em CONFIGURAÇÕES · ATALHOS.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">/</span></dt>
           <dd class="ajuda-diz">Procurar no que já foi dito neste canal.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">ENTER</span></dt>
