@@ -5135,7 +5135,28 @@ fn limites_da_camera(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
     });
     do_nucleo.prioridade = seele_core::tela::Prioridade::Movimento;
     do_nucleo.com_som = false;
+    // **A câmera tem teto de banda, peça a casca o que pedir** — inclusive
+    // quando ela não pede nenhum, que é o que a casca faz. Sem escolha, o teto
+    // do fluxo é só o que a sonda mede, e ela sobe enquanto não vê dor: medido
+    // em 10/11/2026 (`docs/medidas/2026-11-10-tela-do-produto-sob-perda.md`),
+    // num caminho sem perda de 60 ms o orçamento chegou a 12,48 Mbps em 5 s, o
+    // codificador o encheu, e quem assistia viu 55% do tempo congelado. O
+    // codificador da tela para de gastar quando a imagem para; o de uma câmera
+    // gasta o que lhe derem.
+    let teto = teto_de_banda_da_camera(do_nucleo.resolucao);
+    do_nucleo.banda_bps = Some(do_nucleo.banda_bps.map_or(teto, |pedida| pedida.min(teto)));
     do_nucleo
+}
+
+/// O máximo que uma câmera nesta resolução gasta, em bits por segundo.
+///
+/// **Derivado, e não escrito à mão**: é o que a tabela do núcleo diz que a
+/// resolução precisa a 30 quadros (`bits_por_quadro` ×
+/// `CADENCIA_DE_REFERENCIA`, 2,76 Mbps em 720p) — o limiar em que a imagem
+/// está paga. Acima dele a câmera só compraria fila.
+#[must_use]
+pub const fn teto_de_banda_da_camera(resolucao: seele_core::Resolucao) -> u32 {
+    seele_core::tela::bits_por_quadro(resolucao) * seele_core::tela::CADENCIA_DE_REFERENCIA
 }
 
 /// O base64 de ida e de volta mora no `seele-sessao` (`base64`) desde a
@@ -18100,6 +18121,29 @@ mod camera_tests {
                 "{largura}×{altura}"
             );
         }
+    }
+
+    /// **A câmera tem teto de banda mesmo quando a casca não escolhe nenhum**
+    /// — e a casca não escolhe. Sem ele o orçamento seguia a sonda até 12 Mbps
+    /// e a câmera congelava num caminho sem perda (medida de 10/11/2026). Uma
+    /// escolha menor continua valendo; uma maior é cortada no teto.
+    #[test]
+    fn a_camera_tem_teto_de_banda_mesmo_sem_escolha() {
+        let teto = teto_de_banda_da_camera(seele_core::Resolucao::P720);
+        assert_eq!(teto, seele_core::tela::TETO_ESTIMADO_PARA_720P_BPS);
+        assert_eq!(limites_da_camera(pedidos(720, 30)).banda_bps, Some(teto));
+        let com = |banda_bps| {
+            limites_da_camera(LimitesDeTela {
+                banda_bps,
+                ..pedidos(720, 30)
+            })
+            .banda_bps
+        };
+        assert_eq!(com(Some(900_000)), Some(900_000));
+        assert_eq!(com(Some(50_000_000)), Some(teto));
+        // O degrau de baixo tem o teto dele, menor.
+        let de_540 = limites_da_camera(pedidos(540, 30)).banda_bps;
+        assert!(de_540 < Some(teto) && de_540.is_some(), "{de_540:?}");
     }
 
     /// **A câmera nunca passa de 720p a 30, vai como movimento e sem som**,
