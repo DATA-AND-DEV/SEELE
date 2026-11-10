@@ -33,7 +33,9 @@ case "$*" in
   *pacote-web)
     [ "${FALHAR_PACOTE:-0}" = 0 ] || exit 42
     mkdir -p target/pacote-web
-    for f in index.html seele_web.wasm seele_motor_web.wasm _headers; do echo teste > "target/pacote-web/$f"; done
+    for f in index.html seele_web.wasm seele_motor_web.wasm _headers 404.html; do
+      [ "${SEM_ARQUIVO:-}" = "$f" ] || echo teste > "target/pacote-web/$f"
+    done
     [ "${MUDAR_LOCK:-0}" = 0 ] || echo alterado >> Cargo.lock
     ;;
 esac''')
@@ -60,6 +62,14 @@ esac''')
         self.env["FALHAR_PACOTE"] = "1"
         self.assertEqual(self.run_build().returncode, 42)
         self.assertFalse((self.root / "target/.cloudflare-web.lock").exists())
+
+    def test_pacote_sem_404_recusa(self):
+        # Sem o 404.html o Pages responde a qualquer caminho com o index e 200,
+        # sem a CSP da página.
+        self.env["SEM_ARQUIVO"] = "404.html"
+        r = self.run_build()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("saída ausente: 404.html", r.stderr)
 
     def test_lockfile_alterado_recusa(self):
         self.env["MUDAR_LOCK"] = "1"
