@@ -35,6 +35,7 @@ pub mod alcance;
 pub mod autorizacao;
 pub mod campainha;
 pub mod cargos;
+pub mod copia;
 pub mod frame;
 pub mod hospedagem;
 pub mod maquinas;
