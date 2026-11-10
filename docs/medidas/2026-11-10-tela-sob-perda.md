@@ -311,3 +311,35 @@ Medido uma vez, com `--perda 0.001` e `--perda 0.003`, antes de a chave do B2 ir
 | 2,0 Mbps, 1% | B | 3 | — | — | — | — | 100,0 | 20000 | 0,0 | 601 | 27 | 61 | 2,88 | 3078 | 0,70 | 488 | 902 | 1,02 | 0,00 |
 | 2,0 Mbps, 1% | B2 | 3 | 1315 | 2095 | 2470 | 2470 | 100,0 | 2054 | 1,1 | 600 | 24 | 63 | 2,92 | 2771 | 0,60 | 56 | 178 | 1,08 | 0,00 |
 | 2,0 Mbps, 1% | teto do j | 3 | 406 | 779 | 858 | 919 | 50,9 | 1197 | 7,6 | 600 | 0 | 0 | 2,83 | 1353 | 1,30 | 516 | 840 | 1,06 | 0,00 |
+
+## Adendo: o tempo mínimo de retransmissão não é o limite
+
+Medido no mesmo dia, depois do relatório acima, para testar a hipótese que ele
+deixa no ar: que o `RTO_MIN` de 1 s do `sctp-proto` explicaria a latência do
+canal confiável sob perda.
+
+O `sctp-proto` aceita o ajuste (`TransportConfig::with_rto_min_ms`), mas o
+`str0m` 0.24.1 monta a configuração com `TransportConfig::default()` e não o
+expõe. A medida usou uma cópia do `str0m` fora do repositório, com
+`rto_min = 200 ms` e `rto_initial = 1000 ms`, aplicada só na linha de comando
+(`--config patch.crates-io.str0m.path=…`). Nada no repositório mudou.
+
+Uma rodada de 20 s, em série, transporte A (o de hoje):
+
+| cenário | RTO mínimo | lat p50 | p95 | p99 | congelado % | quadros/s |
+|---|---|--:|--:|--:|--:|--:|
+| 1% | 1000 ms (padrão, mediana de 3) | 437 | 848 | 1013 | 3,1 | 28,0 |
+| 1% | 200 ms (1 rodada) | 392 | 742 | 942 | 3,2 | 28,6 |
+| 2,0 Mbps, 1% | 1000 ms (padrão, mediana de 3) | 719 | 1438 | 1715 | 8,1 | 24,5 |
+| 2,0 Mbps, 1% | 200 ms (1 rodada) | 627 | 1138 | 1391 | 3,7 | 25,9 |
+
+O ganho fica entre 10% e 20% na latência, com uma rodada só de um lado: é da
+ordem da variação entre rodadas. A hipótese não se sustenta. O que segura o
+vídeo sob perda aleatória é a janela de congestionamento do SCTP, que encolhe a
+cada perda, e não o relógio de retransmissão. Manter uma cópia alterada do
+`str0m` por esse ganho não se paga.
+
+O que isto deixa de pé: sobre SCTP, confiável ou não, o vídeo atrasa sob perda.
+Um transporte de mídia com controle de congestionamento próprio para tempo real
+(RTP com NACK, PLI e estimativa de banda, que o `str0m` tem) não foi medido
+aqui, e é a única alternativa que esta medida não descarta.
