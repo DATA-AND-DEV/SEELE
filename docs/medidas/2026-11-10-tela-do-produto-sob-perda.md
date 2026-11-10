@@ -528,3 +528,64 @@ O controle cru:
 | 2,0 Mbps, 1% | produto | 1 | 277 | 277 | 277 | 1 | 0 | 0,0 | 100 | 100 | 73 | 97 | 0,0 | 63 | 283 | — | 0 |
 | 2,0 Mbps, 1% | produto | 2 | 200 | 200 | 200 | 2 | 0 | 0,0 | 100 | 100 | 87 | 97 | 0,0 | 64 | 156 | — | 0 |
 | 2,0 Mbps, 1% | produto | 3 | 261 | 261 | 261 | 2 | 0 | 0,0 | 100 | 100 | 96 | 97 | 0,0 | 64 | 80 | — | 0 |
+
+## Adendo: a mesma medida depois de três consertos
+
+Medido no mesmo dia, na mesma máquina, com a árvore que tem os três consertos que a medida acima pediu (carga média 2,84 no começo, 1,94 entre a grade e o regime, 1,02 no fim; uma célula por vez). Só a variante «produto», 3 rodadas de 20 s.
+
+```sh
+$B --variante produto
+$B --variante produto --aquecimento 40
+# a casca de antes do conserto 2, para comparar
+$B --variante produto --sem-contrapressao
+```
+
+Os três consertos:
+
+1. **A câmera tem teto de banda** (`seele-ffi`, `teto_de_banda_da_camera`): o que a tabela do núcleo diz que a resolução precisa a 30 quadros, 2,79 Mbps em 720p. Antes o orçamento seguia a sonda até 12,48 Mbps.
+2. **A casca deixa de codificar com a fila do núcleo pela metade** (`camera.js`, `filaDoNucleoCheia`; o `quadro_da_camera` passou a devolver quantos quadros esperam), e um quadro que não foi codificado não pede quadro-chave. Antes ela só sabia da fila pela recusa, que custa uma chave. O codificador de mentira do exemplo espelha isso; `--sem-contrapressao` é a casca de antes.
+3. **O espectador cortado pelo servidor volta no próximo quadro-chave** (`voice_room.rs`, `VOLTA_DO_CORTADO`), uma vez a cada 10 s. Antes o corte era até o fim da transmissão.
+
+A variação «recusa sem chave» da medida acima **não é um conserto**: com H.264 de verdade o quadro codificado que se perde era referência do seguinte. O que ela media era o custo da chave, e o conserto 2 tira a recusa em vez de tirar a chave.
+
+### Primeiros 20 s de uma primeira transmissão (mediana de 3 rodadas)
+
+| cenário | antes: lat p50 / congelado % / quadros/s | depois | depois: p95 | depois: recusados | orçamento mediana kbps (antes → depois) |
+|---|--:|--:|--:|--:|--:|
+| 0% | 415 / 55,3 / 14,8 | 32 / 1,5 / 29,9 | 33 | 0 | 12480 → 2790 |
+| 0,3% | 33 / 22,6 / 20,8 | 34 / 1,5 / 29,3 | 710 | 0 | 1500 → 618–2286 |
+| 1% | 33 / 42,6 / 16,1 | 93 / 9,0 / 25,7 | 1520 | 0 | 746 → 608–940 |
+| 3% | 4466 / 89,1 / 1,5 | 1613 / 34,8 / 19,4 | 3488 | 10 | 1463 → 506–936 |
+| 5% | 6282 / 96,5 / 1,4 | 2888 / 71,7 / 7,2 | 8595 | 218 | 1463 → 936–1170 |
+| 1,0 Mbps, 0% | 283 / 63,3 / 8,9 | 48 / 55,9 / 13,3 | 4534 | 116 | 1170 → 484–1170 |
+| 2,0 Mbps, 1% | 42 / 50,9 / 15,0 | 89 / 11,1 / 24,6 | 1825 | 0 | 725 → 560–689 |
+
+A coluna do orçamento «depois» é a faixa da mediana entre as três rodadas.
+
+### Do segundo 40 ao 60 (mediana de 3 rodadas)
+
+| cenário | antes: lat p50 / congelado % / quadros/s | depois | depois: p95 | orçamento mediana kbps, depois |
+|---|--:|--:|--:|--:|
+| 0% | 3126 / 97,9 / 4,0 | 33 / 0,0 / 30,1 | 34 | 2790 |
+| 0,3% | 32 / 0,0 / 30,1 | 32 / 1,4 / 29,4 | 73 | 248–553 |
+| 1% | 32 / 5,5 / 29,8 | 32 / 1,1 / 29,9 | 90 | 200–279 |
+| 3% | 32 / 13,2 / 30,1 | 32 / 20,7 / 30,1 | 2197 | 200 |
+| 5% | 33 / 29,0 / 29,9 | 118 / 31,2 / 30,1 | 2182 | 200 |
+| 1,0 Mbps, 0% | 49 / 3,4 / 29,2 | 48 / 3,5 / 29,1 | 187 | 480–608 |
+| 2,0 Mbps, 1% | 36 / 0,0 / 29,8 | 35 / 1,0 / 29,8 | 101 | 200–455 |
+
+### O que o adendo mostra
+
+1. **Sem perda a câmera deixou de se estragar sozinha**: de 55% congelado nos primeiros 20 s e 98% em regime para 1,5% e 0%, a 30 quadros/s e 32 ms.
+2. **Até 1% de perda a partida melhorou muito e ainda não é boa**: o tempo congelado caiu de 23–51% para 1,5–11%, sem nenhum quadro recusado. A cauda continua longa (p95 de 0,7 a 1,8 s): é o SCTP retransmitindo em ordem.
+3. **Em regime, até 1% de perda e nas duas bandas estreitas a tela passa** no critério da medida (p50 < 300 ms e < 5% congelado) — ao preço de sempre: o orçamento desce a 200–600 kbps e não volta a subir.
+4. **A 3% e 5% não passa, nem em regime** (21% e 31% congelado, p95 de 2,2 s), e a partida a 1,0 Mbps continua ruim (56% congelado nos primeiros 20 s, enquanto a sonda desce de 5,58 Mbps). Nenhum dos três consertos mexe na sonda nem na partida.
+5. **O corte do espectador aconteceu duas vezes nas 21 rodadas de regime, e nas duas a imagem voltou**: quem assistia teve duas aberturas e uma fechada, e recebeu quadros até o fim da janela. Antes do conserto, as duas rodadas com corte terminaram com zero quadros.
+
+### O que o adendo NÃO mostra
+
+- Tudo o que a medida acima já não mostrava: codificador de verdade, qualidade da imagem, a tela do sistema, perda em rajada, jitter, atraso da voz.
+- **O «antes» e o «depois» não rodaram intercalados**: são duas execuções no mesmo dia, com 3 rodadas cada, e as faixas entre rodadas são largas a partir de 3%.
+- O conserto 2 foi medido com o codificador de mentira, que espelha a casca. O `VideoEncoder` de verdade e o tempo do IPC do Tauri não entraram.
+- Quanto de cada melhora vem de cada conserto: os três foram medidos juntos.
+- O que continua de pé — a faixa de sinal que nunca se mexe, a sonda que lê perda sorteada como congestionamento, e a partida em 5,58 Mbps — não foi tocado.
