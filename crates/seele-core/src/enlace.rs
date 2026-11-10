@@ -5085,7 +5085,7 @@ impl Motor {
                     && self.caminho.estimativa() == crate::tela::CAMINHO_DA_PROVA_BPS
                 {
                     self.caminho =
-                        crate::caminho::Sonda::partindo_de(limites.caminho_inicial_bps());
+                        crate::caminho::Sonda::partindo_de(limites.semente_da_sonda_bps());
                 }
                 self.tela_pedida = Some((fonte, limites));
                 cliente.start_screen_share().await

@@ -870,6 +870,42 @@ impl LimitesDeTela {
         };
         ((limiar as u64 * 100) / crate::tela::FRACAO_DO_CAMINHO as u64) as u32
     }
+
+    /// De que caminho a **sonda** parte: [`Self::caminho_inicial_bps`], e nunca
+    /// acima do caminho que a banda escolhida usa.
+    ///
+    /// Com uma banda escolhida abaixo do que a resolução pede, a sonda partia
+    /// de um caminho que o teto nunca ia usar — e a primeira dor encontrava a
+    /// estimativa longe demais do teto para movê-lo. Medido em 10/11/2026, com
+    /// a câmera (teto de 2,79 Mbps, partida em 9,3 Mbps de caminho): quatro
+    /// janelas seguidas de fila, quatro recuos de 20%, e o orçamento só andou
+    /// na quinta. Num gargalo de 1 Mbps são quatro segundos enchendo a fila
+    /// antes de o primeiro corte chegar ao codificador.
+    ///
+    /// Partindo do caminho da escolha, o teto que vale é o desta perna desde a
+    /// primeira janela, e a primeira dor numa janela cheia já é a medida
+    /// ([`crate::caminho::Sonda::observar`]).
+    ///
+    /// **Só a semente da sonda.** A perna de quem hospeda, quando o servidor
+    /// não declarou a subida, continua saindo de [`Self::caminho_inicial_bps`]:
+    /// ela é dividida pelos espectadores, e amarrá-la à escolha cortaria o
+    /// teto de quem transmite para duas pessoas pela metade.
+    #[must_use]
+    pub const fn semente_da_sonda_bps(&self) -> u32 {
+        let inicial = self.caminho_inicial_bps();
+        match self.banda_bps {
+            Some(banda) => {
+                let da_escolha =
+                    ((banda as u64 * 100) / crate::tela::FRACAO_DO_CAMINHO as u64) as u32;
+                if da_escolha < inicial {
+                    da_escolha
+                } else {
+                    inicial
+                }
+            }
+            None => inicial,
+        }
+    }
 }
 
 impl Default for LimitesDeTela {
@@ -1502,6 +1538,44 @@ mod tests {
 
     use super::*;
     use crate::tela::{CAMINHO_DA_PROVA_BPS, PISO_DE_BANDA_BPS};
+
+    /// **A sonda parte do caminho que a banda escolhida usa**, e não acima
+    /// dele: com 2,79 Mbps escolhidos, o teto da primeira janela é o desta
+    /// perna (60% da semente), e a primeira dor já o move. Medido em
+    /// 10/11/2026: partindo de 9,3 Mbps, o orçamento só andava na quinta
+    /// janela de fila. Sem escolha, ou com uma escolha acima do que a
+    /// resolução pede, a semente é a de sempre.
+    #[test]
+    fn a_sonda_parte_do_caminho_que_a_escolha_usa() {
+        let com = |banda_bps| LimitesDeTela {
+            banda_bps,
+            prioridade: Prioridade::Movimento,
+            ..LimitesDeTela::default()
+        };
+        let inicial = com(None).caminho_inicial_bps();
+        assert_eq!(com(None).semente_da_sonda_bps(), inicial);
+        assert_eq!(com(Some(50_000_000)).semente_da_sonda_bps(), inicial);
+
+        let escolha = crate::tela::TETO_ESTIMADO_PARA_720P_BPS;
+        let semente = com(Some(escolha)).semente_da_sonda_bps();
+        assert!(semente < inicial, "{semente} não ficou abaixo de {inicial}");
+        // O teto que a sonda semeada dá é exatamente a escolha: a perna é a
+        // nossa desde a primeira janela.
+        let teto = crate::tela::TetoDeVideo::com_caminho(semente)
+            .com_caminho_de_quem_hospeda(50_000_000)
+            .com_escolha(Some(escolha))
+            .teto(seele_proto::signal::SignalBand::Nominal);
+        assert_eq!(teto, crate::tela::Teto::Bps(escolha));
+        assert_eq!(
+            crate::tela::TetoDeVideo::com_caminho(semente)
+                .com_caminho_de_quem_hospeda(50_000_000)
+                .teto(seele_proto::signal::SignalBand::Nominal),
+            crate::tela::Teto::Bps(escolha),
+            "sem a escolha, a perna desta máquina já dá o mesmo teto"
+        );
+        // A perna de quem hospeda não segue a escolha.
+        assert_eq!(com(Some(escolha)).caminho_inicial_bps(), inicial);
+    }
 
     /// **Cada piso compra a resolução que promete.**
     ///
