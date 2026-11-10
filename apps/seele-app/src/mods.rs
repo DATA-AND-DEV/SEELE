@@ -2356,7 +2356,7 @@ mod instalar {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        let hash = hashes[0].as_ref().unwrap();
+        let hash = hashes.first().unwrap().as_ref().unwrap();
         assert!(
             hashes.iter().all(|h| h.as_ref().unwrap() == hash),
             "as instalações devolveram hashes diferentes: {hashes:?}"
