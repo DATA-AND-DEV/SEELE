@@ -616,8 +616,10 @@ impl Conexao {
             fila: tx,
         });
         crate::Midia {
-            comp: Arc::clone(&self.comp),
-            cmd: self.cmd.clone(),
+            remetente: crate::RemetenteDeMidia {
+                comp: Arc::clone(&self.comp),
+                cmd: self.cmd.clone(),
+            },
             fila: rx,
         }
     }

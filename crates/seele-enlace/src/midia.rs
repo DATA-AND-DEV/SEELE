@@ -116,19 +116,52 @@ pub enum EventoDeMidia {
 }
 
 /// A mídia de uma conexão. Vem de [`crate::Conexao::ligar_midia`].
+///
+/// Quem manda e quem lê podem ser tarefas diferentes: [`Midia::remetente`]
+/// dá um punho só de saída, que se copia.
 pub struct Midia {
+    pub(crate) remetente: RemetenteDeMidia,
+    pub(crate) fila: mpsc::Receiver<EventoDeMidia>,
+}
+
+/// O lado de saída da mídia de uma conexão: manda quadros, pede quadro-chave
+/// e lê a estimativa de banda.
+#[derive(Clone)]
+pub struct RemetenteDeMidia {
     pub(crate) comp: Arc<Compartilhado>,
     pub(crate) cmd: mpsc::UnboundedSender<Comando>,
-    pub(crate) fila: mpsc::Receiver<EventoDeMidia>,
 }
 
 impl std::fmt::Debug for Midia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Midia").field("par", &self.comp.id).finish()
+        f.debug_struct("Midia")
+            .field("par", &self.remetente.comp.id)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for RemetenteDeMidia {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemetenteDeMidia")
+            .field("par", &self.comp.id)
+            .finish()
     }
 }
 
 impl Midia {
+    /// Um punho só de saída desta mídia.
+    #[must_use]
+    pub fn remetente(&self) -> RemetenteDeMidia {
+        self.remetente.clone()
+    }
+
+    /// O próximo evento. `None` quando a conexão acabou.
+    pub async fn receber(&mut self) -> Option<EventoDeMidia> {
+        self.fila.recv().await
+    }
+}
+
+impl RemetenteDeMidia {
     /// Manda um quadro. Nunca espera.
     ///
     /// `tempo` é o instante do quadro no relógio da mídia
@@ -189,11 +222,6 @@ impl Midia {
     pub fn estimativa_bps(&self) -> Option<u64> {
         let bps = self.comp.estimativa_bps.load(Ordering::Relaxed);
         (bps > 0).then_some(bps)
-    }
-
-    /// O próximo evento. `None` quando a conexão acabou.
-    pub async fn receber(&mut self) -> Option<EventoDeMidia> {
-        self.fila.recv().await
     }
 }
 

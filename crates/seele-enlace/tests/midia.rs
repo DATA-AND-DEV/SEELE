@@ -67,7 +67,7 @@ async fn o_video_atravessa_tres_por_cento_de_perda_sem_buraco() {
     };
     let (par, cano) = par_por_cano(ConfigDoCano::simetrico(sentido, 7)).await;
     let mut enc = par.ponta_do_anfitriao.mensagens_enc().unwrap();
-    let emissor = par.cliente.ligar_midia();
+    let emissor = par.cliente.ligar_midia().remetente();
     let mut receptor = par.anfitriao.ligar_midia();
     emissor.taxa_desejada(2_000_000);
 
@@ -146,13 +146,15 @@ async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
     let par = par_em_loopback().await;
     let mut de_ca = par.cliente.ligar_midia();
     let mut de_la = par.anfitriao.ligar_midia();
+    let para_la = de_ca.remetente();
+    let para_ca = de_la.remetente();
 
     // O anfitrião manda (o sentido contrário ao do outro teste): vídeo e som.
-    de_la
+    para_ca
         .mandar(FAIXA, Trilha::Video, 0, quadro(0, true, 3_000))
         .unwrap();
     let som: Arc<[u8]> = vec![0xF8, 1, 2, 3, 4, 5, 6, 7].into();
-    de_la
+    para_ca
         .mandar(FAIXA, Trilha::Som, 960, Arc::clone(&som))
         .unwrap();
 
@@ -188,7 +190,7 @@ async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
     }
 
     // Quem assiste pede um quadro-chave: quem manda fica sabendo.
-    de_ca.pedir_chave(FAIXA);
+    para_la.pedir_chave(FAIXA);
     loop {
         if proximo(&mut de_la, Duration::from_secs(5))
             .await
@@ -205,7 +207,7 @@ async fn quem_nao_ligou_a_midia_larga_o_pacote_e_conta() {
     let par = par_em_loopback().await;
     let mut enc = par.ponta_do_anfitriao.mensagens_enc().unwrap();
     // Só quem liga declarou a mídia: o anfitrião é um par que não fala RTP.
-    let emissor = par.cliente.ligar_midia();
+    let emissor = par.cliente.ligar_midia().remetente();
     for n in 0..5 {
         emissor
             .mandar(FAIXA, Trilha::Video, n * 3000, quadro(n, n == 0, 2_000))
