@@ -303,6 +303,81 @@ pub fn esquema_gravado_em(caminho: &std::path::Path) -> EsquemaGravado {
     }
 }
 
+/// Deixa o banco, e o que fica ao lado dele, legível só por quem o roda.
+///
+/// O `seele.db` guarda a chave privada do certificado e os convites, e até
+/// aqui nascia com o `umask` de quem rodava o servidor: `0644` no caso comum,
+/// legível por qualquer conta da máquina.
+///
+/// - **A pasta de dados**, quando é este crate que a cria, nasce `0700`. Uma
+///   pasta que já existe não é tocada: pode ser de outra coisa.
+/// - **O banco** é criado `0600` antes de o SQLite o abrir, e o `-wal` e o
+///   `-shm` herdam o modo dele (o SQLite os cria com as permissões do banco).
+/// - **Um banco que já existia mais aberto** é corrigido aqui, com os dois ao
+///   lado. Se a correção falha (o arquivo é de outra conta), o servidor sobe e
+///   **diz**: o banco continua legível por quem não devia.
+#[cfg(unix)]
+fn fechar_para_o_dono(banco: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+
+    if let Some(pasta) = banco.parent().filter(|p| !p.as_os_str().is_empty()) {
+        if !pasta.exists() {
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(pasta)?;
+        }
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(banco)
+    {
+        Ok(_) => {}
+        Err(erro) if erro.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(erro) => return Err(erro),
+    }
+    for sufixo in ["", "-wal", "-shm"] {
+        let mut nome = banco.as_os_str().to_owned();
+        nome.push(sufixo);
+        let arquivo = std::path::PathBuf::from(nome);
+        let Ok(dados) = std::fs::metadata(&arquivo) else {
+            continue;
+        };
+        let modo = dados.permissions().mode() & 0o777;
+        if modo & 0o077 == 0 {
+            continue;
+        }
+        match std::fs::set_permissions(&arquivo, std::fs::Permissions::from_mode(0o600)) {
+            Ok(()) => tracing::info!(
+                arquivo = %arquivo.display(),
+                antes = format_args!("{modo:o}"),
+                "o banco estava legível por outras contas; fechado para 600"
+            ),
+            Err(erro) => tracing::warn!(
+                arquivo = %arquivo.display(),
+                modo = format_args!("{modo:o}"),
+                %erro,
+                "o banco está legível por outras contas e não consegui fechá-lo: ele guarda a \
+                 chave do certificado e os convites"
+            ),
+        }
+    }
+    Ok(())
+}
+
+/// No Windows não há modo de arquivo a restringir: vale a ACL do perfil de
+/// quem roda, que a pasta de dados herda.
+#[cfg(not(unix))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "a mesma assinatura da versão Unix, que falha de verdade"
+)]
+fn fechar_para_o_dono(_banco: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 impl Persistence {
     /// Opens the database and brings the schema up to date.
     ///
@@ -322,8 +397,12 @@ impl Persistence {
     /// migration fails.
     pub fn abrir_com(location: &Location, durabilidade: Durabilidade) -> Result<Self> {
         let connection = match location {
-            Location::File(path) => Connection::open(path)
-                .with_context(|| format!("could not open {}", path.display()))?,
+            Location::File(path) => {
+                fechar_para_o_dono(path)
+                    .with_context(|| format!("could not prepare {}", path.display()))?;
+                Connection::open(path)
+                    .with_context(|| format!("could not open {}", path.display()))?
+            }
             Location::Memory => Connection::open_in_memory()?,
         };
 
@@ -1033,5 +1112,75 @@ mod tests {
             return;
         }
         assert!(matches!(lido, EsquemaGravado::Ilegivel(_)), "{lido:?}");
+    }
+
+    #[cfg(unix)]
+    fn modo(caminho: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(caminho)
+            .unwrap_or_else(|erro| panic!("{}: {erro}", caminho.display()))
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[cfg(unix)]
+    fn ao_lado(banco: &std::path::Path, sufixo: &str) -> std::path::PathBuf {
+        let mut nome = banco.as_os_str().to_owned();
+        nome.push(sufixo);
+        nome.into()
+    }
+
+    /// O `seele.db` guarda a chave privada do certificado e os convites: só o
+    /// dono lê. A pasta de dados que este crate cria nasce fechada, e o banco
+    /// e os dois arquivos do WAL também, seja qual for o `umask` de quem roda.
+    #[cfg(unix)]
+    #[test]
+    fn o_banco_novo_e_a_pasta_dele_nascem_so_do_dono() {
+        let pasta = tempfile::tempdir().expect("tempdir");
+        let dados = pasta.path().join("dados");
+        let banco = dados.join("seele.db");
+        let aberto = Persistence::open(&Location::File(banco.clone())).expect("abrir");
+        assert_eq!(modo(&dados), 0o700, "a pasta de dados");
+        assert_eq!(modo(&banco), 0o600, "o banco");
+        for sufixo in ["-wal", "-shm"] {
+            let arquivo = ao_lado(&banco, sufixo);
+            assert!(
+                arquivo.exists(),
+                "o banco aberto em WAL não tem o `{sufixo}`"
+            );
+            assert_eq!(modo(&arquivo), 0o600, "o `{sufixo}`");
+        }
+        drop(aberto);
+    }
+
+    /// Um banco que já existia mais aberto que isso (criado por uma versão
+    /// anterior, com o `umask` comum) é corrigido na abertura, com o que
+    /// estiver ao lado dele.
+    #[cfg(unix)]
+    #[test]
+    fn um_banco_que_ja_existia_aberto_demais_e_fechado_na_abertura() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let pasta = tempfile::tempdir().expect("tempdir");
+        let banco = pasta.path().join("seele.db");
+        drop(Persistence::open(&Location::File(banco.clone())).expect("criar"));
+        let ao_lado_dele = [ao_lado(&banco, "-wal"), ao_lado(&banco, "-shm")];
+        for arquivo in ao_lado_dele.iter().chain([&banco]) {
+            // O SQLite apaga os dois do WAL ao fechar o último; o que uma
+            // queda deixaria para trás é posto de volta à mão.
+            if !arquivo.exists() {
+                std::fs::write(arquivo, b"").expect("deixar para trás");
+            }
+            std::fs::set_permissions(arquivo, std::fs::Permissions::from_mode(0o644))
+                .expect("abrir demais");
+        }
+        let aberto = Persistence::open(&Location::File(banco.clone())).expect("reabrir");
+        assert_eq!(modo(&banco), 0o600, "o banco");
+        for arquivo in &ao_lado_dele {
+            if arquivo.exists() {
+                assert_eq!(modo(arquivo), 0o600, "{}", arquivo.display());
+            }
+        }
+        drop(aberto);
     }
 }
