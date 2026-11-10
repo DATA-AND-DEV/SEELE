@@ -39,6 +39,7 @@ use std::net::IpAddr;
 use std::time::Instant;
 
 use seele_proto::ids::{PersonId, VoiceRoomId};
+use seele_proto::prefixo::{prefixo, Prefixo};
 
 /// Quantos apertos de mão um mesmo endereço pode fazer em rajada.
 ///
@@ -219,11 +220,16 @@ impl Balde {
 
 /// Os baldes de antes de autenticar, um por endereço de origem.
 ///
+/// **Um por `/64` no IPv6**, e por endereço no IPv4
+/// ([`seele_proto::prefixo::prefixo`], a mesma conta do ponto de encontro):
+/// quem tem um `/64` tem 2^64 endereços, e um balde por endereço inteiro dava
+/// a ele baldes sem fim.
+///
 /// Chave no endereço e não na identidade porque, antes do desafio-resposta, não
 /// existe identidade — é exatamente esse o ponto de quem bate à porta em laço.
 #[derive(Debug, Default)]
 pub struct Portaria {
-    baldes: HashMap<IpAddr, Balde>,
+    baldes: HashMap<Prefixo, Balde>,
     /// Quantas vezes a tabela cheia recusou um endereço novo.
     lotada: u64,
 }
@@ -237,6 +243,7 @@ impl Portaria {
 
     /// Se este endereço pode gastar um aperto de mão agora.
     pub fn permitir(&mut self, origem: IpAddr, agora: Instant) -> bool {
+        let origem = prefixo(origem);
         if let Some(balde) = self.baldes.get_mut(&origem) {
             return balde.tentar(agora);
         }
@@ -272,7 +279,7 @@ impl Portaria {
     /// baldes que não se repuseram: a mesma falha do lado seguro de
     /// [`Self::permitir`].
     pub fn admite(&mut self, origem: IpAddr, agora: Instant) -> bool {
-        if let Some(balde) = self.baldes.get_mut(&origem) {
+        if let Some(balde) = self.baldes.get_mut(&prefixo(origem)) {
             return balde.tem(1.0, agora);
         }
         if self.baldes.len() >= ENDERECOS_LEMBRADOS {
@@ -618,6 +625,35 @@ mod testes {
         assert!(
             portaria.permitir(vizinho, inicio),
             "o vizinho pagou pelo abusador"
+        );
+    }
+
+    /// Quem tem um `/64` tem 2^64 endereços: com o balde por endereço inteiro,
+    /// cada um era um balde novo e o limite não limitava nada. O `/64` é o que
+    /// uma casa recebe, e é a unidade que conta.
+    #[test]
+    fn a_portaria_conta_o_ipv6_pelo_prefixo_de_64() {
+        let inicio = zero();
+        let mut portaria = Portaria::nova();
+        let do_abusador =
+            |n: u16| -> IpAddr { format!("2001:db8:1:2::{n:x}").parse().expect("endereço") };
+        for n in 0..APERTOS_DE_RAJADA {
+            let n = u16::try_from(n).expect("cabe") + 1;
+            assert!(portaria.permitir(do_abusador(n), inicio));
+        }
+        assert!(
+            !portaria.permitir(do_abusador(0xffff), inicio),
+            "um endereço novo do mesmo /64 ganhou um balde novo"
+        );
+        assert!(
+            !portaria.admite(do_abusador(0xfffe), inicio),
+            "o portão do enlace deixou passar um endereço novo do /64 esgotado"
+        );
+        assert_eq!(portaria.lembrados(), 1, "um /64 é um balde só");
+        let vizinho: IpAddr = "2001:db8:1:3::1".parse().expect("endereço");
+        assert!(
+            portaria.permitir(vizinho, inicio),
+            "o /64 vizinho pagou pelo abusador"
         );
     }
 

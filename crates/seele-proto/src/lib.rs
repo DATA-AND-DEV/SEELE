@@ -37,6 +37,7 @@ pub mod midia_de_mod;
 pub mod mods;
 pub mod pack;
 pub mod perfil;
+pub mod prefixo;
 pub mod quadro;
 pub mod screen;
 pub mod signal;
