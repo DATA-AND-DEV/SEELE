@@ -479,9 +479,19 @@ pub(crate) const PERFIL_DA_PAGINA: [&str; 4] = [
 ///   teto deixa os mesmos ~2% sobre a medida, e não autoriza o próximo
 ///   crescimento sem nova medida.
 ///
+/// - **10/11/2026 (1.0, protocolo 13), medido de novo antes de subir:** a
+///   v0.19.6 (`f7ea590e9`) estava sob o teto de 2 455 000, e esta linha dá
+///   2 466 861 bytes no mesmo perfil; gzip -9 local, 720 771. Nenhum crate
+///   novo no grafo. O que cresceu é o protocolo 13 que a página lê e escreve:
+///   a mesa de texto (editar, responder, menções, não lidas, banidos; a quase
+///   totalidade do crescimento, medido em 2 465 442 antes da câmera) e a
+///   câmera como fonte de vídeo (+1 419). Brotli não medido, nem o download
+///   no aparelho. O teto deixa os mesmos ~2% sobre a medida, e não autoriza
+///   o próximo crescimento sem nova medida.
+///
 /// Passar dele é a hora de medir de novo o que chega ao celular, e não de
 /// subir o número calado.
-pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_455_000;
+pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_515_000;
 
 /// Os nomes das seções próprias (`custom`) de um `.wasm`, lidas do formato:
 /// o cabeçalho, e cada seção com o id e o tamanho em LEB128.
