@@ -27537,6 +27537,44 @@ confere("depois da volta, nada", e.iniciados.length === 4);
     );
 }
 
+/// **Os ganchos alcançam o motor.** Sete lugares do produto chamam
+/// `globalThis.alertasSonoros?.…`, e o motor é um `const` do topo de um script
+/// clássico, que **não** vira propriedade do objeto global: o `?.` engolia a
+/// falta e nenhum som de sala, de queda, de porta ou de toque tocava, da 0.19
+/// à 0.19.6. O guarda que havia conferia que o gancho estava escrito, e não
+/// que ele alcançava alguma coisa. Este roda o arquivo como script clássico e
+/// pergunta pelo caminho que os ganchos usam.
+#[test]
+fn os_ganchos_dos_alertas_sonoros_alcancam_o_motor() {
+    let script = r#"
+const vm = require("node:vm"), fs = require("node:fs"), path = require("node:path");
+const fonte = fs.readFileSync(path.join(process.env.SEELE_UI_DIR, "alertas-sonoros.js"), "utf8");
+const ctx = vm.createContext({ console, setTimeout, clearTimeout, localStorage: { getItem: () => null, setItem() {} } });
+vm.runInContext(fonte, ctx, { filename: "alertas-sonoros.js" });
+const tipo = vm.runInContext("typeof globalThis.alertasSonoros?.notarSala", ctx);
+if (tipo !== "function") { console.log("globalThis.alertasSonoros?.notarSala é " + tipo); process.exit(1); }
+"#;
+    let saida = match std::process::Command::new("node")
+        .args(["-e", script])
+        .env("SEELE_UI_DIR", app_dir().join("ui"))
+        .output()
+    {
+        Ok(saida) => saida,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda dos ganchos dos alertas não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    assert!(
+        saida.status.success(),
+        "os ganchos chamam `globalThis.alertasSonoros?.…` e não alcançam o motor: \
+         nenhum alerta sonoro toca.\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
 /// **O motor carrega antes de quem o chama.** Um `alertasSonoros.tocar` numa
 /// camada que carrega antes dele é um `ReferenceError` dentro do desenho da
 /// tela, e o desenho é o que o pagina inteiro espera.
