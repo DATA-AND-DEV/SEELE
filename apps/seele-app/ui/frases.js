@@ -1431,6 +1431,36 @@ const FRASES = {
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
+    UnknownMessage: "NÃO CONHEÇO ESSA MENSAGEM",
+
+    // **As falhas que chegavam à tela com o nome cru** (revisão de 09/11/2026):
+    // variantes unitárias de `ConnectionError` sem entrada aqui. O guarda
+    // `toda_falha_unitaria_da_conexao_tem_frase` lê o enum e cobra cada uma.
+    //
+    // O ponto de encontro levou o chamado e quem hospeda atendeu; o que não
+    // abriu foi o caminho direto entre as duas redes. A frase não manda
+    // insistir, porque insistir não muda um NAT, e diz as duas coisas que
+    // mudam: outra rede deste lado, ou a porta aberta do lado de quem hospeda.
+    NatNaoAbriu:
+        "O CAMINHO DIRETO ATÉ QUEM HOSPEDA NÃO ABRIU\n" +
+        "As duas redes não deixaram a conexão passar. " +
+        "Tente por outra rede, ou peça a quem hospeda que abra a porta UDP no roteador.",
+    LinhaLegada:
+        "ESTE É UM SERVIDOR 1.0\n" +
+        "Esta versão não conversa com ele. Abra o Servidor 1.0 pelo launcher para entrar.",
+    // Diferentes de `NoAudioDevice`: a máquina tem dispositivo, o que sumiu foi
+    // o escolhido, e há uma lista para escolher de novo.
+    CaptureDeviceGone:
+        "O MICROFONE ESCOLHIDO NÃO ESTÁ MAIS NESTA MÁQUINA\n" +
+        "Escolha outro em Configurações.",
+    PlaybackDeviceGone:
+        "A SAÍDA DE ÁUDIO ESCOLHIDA NÃO ESTÁ MAIS NESTA MÁQUINA\n" +
+        "Escolha outra em Configurações.",
+    // A mesma frase de `fraseDeIcone` (tela-server.js), para os caminhos que
+    // não passam por ela.
+    IconNotAPicture:
+        "ESTE ARQUIVO NÃO SERVE COMO IMAGEM.\n" +
+        "PNG, JPEG, WebP e GIF servem; o que o app não conseguir abrir como imagem, não.",
 
     // A recusa de quem apertou COMPARTILHAR com outra pessoa já transmitindo.
     // **Não** é permissão que falta, e a segunda linha é o que separa as duas:

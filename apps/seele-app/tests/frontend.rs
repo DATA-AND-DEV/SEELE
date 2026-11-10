@@ -6166,6 +6166,53 @@ fn opening_the_moderation_carries_the_keyboard_and_closing_gives_it_back() {
     );
 }
 
+/// **Toda falha unitária de `ConnectionError` tem frase em `FRASES`.**
+///
+/// Uma variante sem campos atravessa a ponte como o próprio nome, e
+/// `fraseDeErro` devolve `FRASES[nome] ?? nome`: sem a entrada, quem lê recebe
+/// o identificador cru. Foi assim que `NatNaoAbriu`, a falha de quem tenta
+/// entrar atrás de dois NATs, chegou à tela na 0.19 como «NatNaoAbriu», no
+/// momento em que a pessoa mais precisava saber o que fazer.
+///
+/// A lista é lida do próprio `enum`, e não repetida aqui: uma variante nova
+/// sem frase acende este teste sozinha.
+#[test]
+fn toda_falha_unitaria_da_conexao_tem_frase() {
+    let tipos = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
+        .expect("crates/seele-ffi/src/types.rs");
+    let Some(corpo) = tipos.split("pub enum ConnectionError {").nth(1) else {
+        panic!("`ConnectionError` saiu de seele-ffi/src/types.rs");
+    };
+    let corpo = corpo.split("\n}").next().unwrap_or_default();
+    let unitarias: Vec<&str> = corpo
+        .lines()
+        .filter_map(|linha| linha.strip_prefix("    ")?.strip_suffix(','))
+        .filter(|nome| {
+            nome.starts_with(|c: char| c.is_ascii_uppercase())
+                && nome.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+        .collect();
+    assert!(
+        unitarias.len() >= 20 && unitarias.contains(&"NotConnected"),
+        "só {} variantes unitárias lidas de `ConnectionError`: o enum não está \
+         mais sendo lido direito, e este teste deixou de guardar: {unitarias:?}",
+        unitarias.len()
+    );
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(tabela) = frases.split("\nconst FRASES = {").nth(1) else {
+        panic!("`FRASES` saiu de ui/frases.js");
+    };
+    let sem_frase: Vec<&&str> = unitarias
+        .iter()
+        .filter(|nome| !tabela.contains(&format!("\n    {nome}:")))
+        .collect();
+    assert!(
+        sem_frase.is_empty(),
+        "estas falhas chegam à tela com o nome cru, porque `FRASES` não tem \
+         frase para elas: {sem_frase:?}"
+    );
+}
+
 #[test]
 fn every_failure_the_rust_side_can_name_has_a_sentence_here() {
     // `nome_da_falha` in `src/main.rs` turns each `ErroDeUri` variant into a
