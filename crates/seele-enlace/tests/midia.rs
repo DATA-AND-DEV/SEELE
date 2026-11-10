@@ -1,0 +1,217 @@
+//! A mídia RTP do enlace (ADR 0067): vídeo e som entre duas pontas de verdade,
+//! sem SDP, pelo cano com perda.
+//!
+//! É a prova da etapa 1 do ADR: a API direta do `str0m` leva quadros inteiros
+//! de uma `Ponta` a outra, com retransmissão, pedido de quadro-chave e
+//! estimativa de banda, convivendo com os canais SCTP da mesma conexão.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    missing_docs
+)]
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use seele_enlace::teste::{par_em_loopback, par_por_cano, ConfigDoCano, Sentido};
+use seele_enlace::{EventoDeMidia, Midia, Trilha, RELOGIO_DO_VIDEO};
+
+const QUADROS_POR_SEGUNDO: u64 = 30;
+
+/// Um quadro com forma de H.264 em Annex B: o prefixo, o cabeçalho da NAL
+/// (IDR ou fatia comum), o número do quadro em ASCII e enchimento que nunca
+/// forma um prefixo de início.
+fn quadro(numero: u64, chave: bool, tamanho: usize) -> Arc<[u8]> {
+    let mut bytes = vec![0, 0, 0, 1, if chave { 0x65 } else { 0x41 }];
+    bytes.extend_from_slice(format!("{numero:016}").as_bytes());
+    bytes.resize(tamanho.max(bytes.len()), 0x5A);
+    bytes.into()
+}
+
+/// O número que [`quadro`] escreveu, lido do que chegou. `None` se o quadro
+/// não é um dos nossos, inteiro.
+fn numero_de(bytes: &[u8], tamanho: usize) -> Option<(u64, bool)> {
+    let inicio = bytes.windows(3).position(|j| j == [0, 0, 1])? + 3;
+    let chave = match bytes.get(inicio)? {
+        0x65 => true,
+        0x41 => false,
+        _ => return None,
+    };
+    let texto = bytes.get(inicio + 1..inicio + 17)?;
+    let numero = std::str::from_utf8(texto).ok()?.parse().ok()?;
+    // O quadro tem de chegar do tamanho que saiu (o prefixo pode ter 3 ou 4 bytes).
+    let corpo = bytes.len() - inicio;
+    (corpo == tamanho - 4).then_some((numero, chave))
+}
+
+async fn proximo(midia: &mut Midia, prazo: Duration) -> Option<EventoDeMidia> {
+    tokio::time::timeout(prazo, midia.receber())
+        .await
+        .ok()
+        .flatten()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_video_atravessa_tres_por_cento_de_perda_sem_buraco() {
+    let sentido = Sentido {
+        perda: 0.03,
+        atraso: Duration::from_millis(30),
+        ..Sentido::limpo()
+    };
+    let (par, cano) = par_por_cano(ConfigDoCano::simetrico(sentido, 7)).await;
+    let mut enc = par.ponta_do_anfitriao.mensagens_enc().unwrap();
+    let emissor = par.cliente.ligar_midia();
+    let mut receptor = par.anfitriao.ligar_midia();
+    emissor.taxa_desejada(2_000_000);
+
+    const QUADROS: u64 = 150;
+    const CHAVE: usize = 40_000;
+    const COMUM: usize = 5_000;
+    let mandar = tokio::spawn(async move {
+        let mut relogio = tokio::time::interval(Duration::from_millis(1000 / QUADROS_POR_SEGUNDO));
+        for n in 0..QUADROS {
+            relogio.tick().await;
+            let chave = n == 0;
+            let tempo = n * u64::from(RELOGIO_DO_VIDEO) / QUADROS_POR_SEGUNDO;
+            let tamanho = if chave { CHAVE } else { COMUM };
+            emissor
+                .mandar(Trilha::Video, tempo, quadro(n, chave, tamanho))
+                .unwrap();
+        }
+        // Segura o punho: a estimativa é lida depois.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        emissor
+    });
+
+    let mut vistos = Vec::new();
+    let mut quebras = 0;
+    let fim = Instant::now() + Duration::from_secs(20);
+    while vistos.len() < QUADROS as usize && Instant::now() < fim {
+        let Some(evento) = proximo(&mut receptor, Duration::from_secs(3)).await else {
+            break;
+        };
+        if let EventoDeMidia::Quadro {
+            trilha: Trilha::Video,
+            contiguo,
+            bytes,
+            ..
+        } = evento
+        {
+            let tamanho = if vistos.is_empty() { CHAVE } else { COMUM };
+            let (numero, _) = numero_de(&bytes, tamanho).expect("um quadro inteiro, dos nossos");
+            if !contiguo && !vistos.is_empty() {
+                quebras += 1;
+            }
+            vistos.push(numero);
+        }
+    }
+    let emissor = mandar.await.unwrap();
+
+    // A perda foi de verdade, e a retransmissão a cobriu: todos os quadros, na
+    // ordem, sem um buraco. No canal confiável isto também chega inteiro; o
+    // que muda é o atraso, e esse é da medida, não deste teste.
+    let perdidos = cano.ida().perdidos_no_sorteio;
+    assert!(
+        perdidos > 0,
+        "o cano não perdeu nada: o teste não provou nada"
+    );
+    assert_eq!(
+        vistos,
+        (0..QUADROS).collect::<Vec<_>>(),
+        "com {perdidos} datagramas perdidos"
+    );
+    assert_eq!(quebras, 0);
+
+    // A estimativa de banda existe: o retorno de TWCC chegou a quem manda.
+    assert!(
+        emissor.estimativa_bps().is_some(),
+        "nenhuma estimativa de banda depois de 5 s de vídeo"
+    );
+    // E nenhum pacote de mídia foi parar na fila do ponto de encontro.
+    assert!(enc.try_recv().is_err());
+    assert_eq!(par.ponta_do_anfitriao.contadores().midia_sem_dono, 0);
+    assert_eq!(par.cliente.contadores().midia_nao_saiu, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
+    let par = par_em_loopback().await;
+    let mut de_ca = par.cliente.ligar_midia();
+    let mut de_la = par.anfitriao.ligar_midia();
+
+    // O anfitrião manda (o sentido contrário ao do outro teste): vídeo e som.
+    de_la
+        .mandar(Trilha::Video, 0, quadro(0, true, 3_000))
+        .unwrap();
+    let som: Arc<[u8]> = vec![0xF8, 1, 2, 3, 4, 5, 6, 7].into();
+    de_la.mandar(Trilha::Som, 960, Arc::clone(&som)).unwrap();
+
+    let mut video = false;
+    let mut ouviu = false;
+    while !(video && ouviu) {
+        match proximo(&mut de_ca, Duration::from_secs(5))
+            .await
+            .expect("a mídia do anfitrião")
+        {
+            EventoDeMidia::Quadro {
+                trilha: Trilha::Video,
+                bytes,
+                ..
+            } => {
+                assert_eq!(numero_de(&bytes, 3_000), Some((0, true)));
+                video = true;
+            }
+            EventoDeMidia::Quadro {
+                trilha: Trilha::Som,
+                tempo,
+                bytes,
+                ..
+            } => {
+                assert_eq!(&*bytes, &*som);
+                assert_eq!(tempo, 960);
+                ouviu = true;
+            }
+            EventoDeMidia::PediramChave => panic!("ninguém pediu chave"),
+        }
+    }
+
+    // Quem assiste pede um quadro-chave: quem manda fica sabendo.
+    de_ca.pedir_chave();
+    loop {
+        if proximo(&mut de_la, Duration::from_secs(5))
+            .await
+            .expect("o pedido de quadro-chave")
+            == EventoDeMidia::PediramChave
+        {
+            break;
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quem_nao_ligou_a_midia_larga_o_pacote_e_conta() {
+    let par = par_em_loopback().await;
+    let mut enc = par.ponta_do_anfitriao.mensagens_enc().unwrap();
+    // Só quem liga declarou a mídia: o anfitrião é um par que não fala RTP.
+    let emissor = par.cliente.ligar_midia();
+    for n in 0..5 {
+        emissor
+            .mandar(Trilha::Video, n * 3000, quadro(n, n == 0, 2_000))
+            .unwrap();
+    }
+    let fim = Instant::now() + Duration::from_secs(5);
+    while par.ponta_do_anfitriao.contadores().midia_sem_dono == 0 {
+        assert!(Instant::now() < fim, "o pacote de mídia não foi contado");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Não foi ao ponto de encontro, e a conexão segue de pé.
+    assert!(enc.try_recv().is_err());
+    let (mut envio, _) = par.cliente.controle().unwrap();
+    tokio::io::AsyncWriteExt::write_all(&mut envio, b"ainda aqui")
+        .await
+        .unwrap();
+}

@@ -2,7 +2,8 @@
 //!
 //! # A demultiplexação (RFC 7983)
 //!
-//! Pelo primeiro byte: STUN (0 a 3), DTLS (20 a 63), e o resto vai para
+//! Pelo primeiro byte: STUN (0 a 3), DTLS (20 a 63), RTP e RTCP (128 a 191,
+//! a mídia do ADR 0067, que vai ao `Rtc` da sessão ativa da origem), e o resto vai para
 //! [`Ponta::mensagens_enc`] — os datagramas de texto do ponto de encontro, que
 //! dividem a porta 8383 com o WebRTC. Um STUN ou um DTLS vai ao `Rtc` que o
 //! aceita (`Rtc::accepts`, que é como o str0m separa vários pares num socket).
@@ -64,6 +65,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use str0m::bwe::{Bitrate, BweKind};
 use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::config::Fingerprint;
 use str0m::net::{Protocol, Receive};
@@ -246,6 +248,9 @@ pub struct ContadoresDaPonta {
     pub recusa_de_quem_hospeda: u64,
     /// Bindings com o U de uma conexão que terminou há pouco (a lápide).
     pub bindings_em_lapide: u64,
+    /// Pacotes de RTP ou RTCP de uma origem sem sessão pronta, ou para uma
+    /// sessão que não ligou a mídia: largados.
+    pub midia_sem_dono: u64,
     /// Pares de anfitrião criados desde que a ponta abriu.
     pub pares_criados: u64,
     /// Pendentes aposentados por um aperto novo da mesma origem.
@@ -279,6 +284,7 @@ struct ContadoresDaPontaVivos {
     recusa_pelo_teto_por_ip: std::sync::atomic::AtomicU64,
     recusa_de_quem_hospeda: std::sync::atomic::AtomicU64,
     bindings_em_lapide: std::sync::atomic::AtomicU64,
+    midia_sem_dono: std::sync::atomic::AtomicU64,
     pares_criados: std::sync::atomic::AtomicU64,
     pendentes_superados: std::sync::atomic::AtomicU64,
     bindings_com_sessao_ativa: std::sync::atomic::AtomicU64,
@@ -662,6 +668,7 @@ impl Ponta {
             recusa_pelo_teto_por_ip: c.recusa_pelo_teto_por_ip.load(Ordering::Relaxed),
             recusa_de_quem_hospeda: c.recusa_de_quem_hospeda.load(Ordering::Relaxed),
             bindings_em_lapide: c.bindings_em_lapide.load(Ordering::Relaxed),
+            midia_sem_dono: c.midia_sem_dono.load(Ordering::Relaxed),
             pares_criados: c.pares_criados.load(Ordering::Relaxed),
             pendentes_superados: c.pendentes_superados.load(Ordering::Relaxed),
             bindings_com_sessao_ativa: c.bindings_com_sessao_ativa.load(Ordering::Relaxed),
@@ -957,6 +964,8 @@ struct Par {
     lado: Option<LadoDaTarefa>,
     revezamento: usize,
     apresentacao: Vec<u8>,
+    /// A mídia RTP, depois de `Conexao::ligar_midia`.
+    midia: Option<crate::midia::MidiaDoPar>,
 }
 
 struct Motor {
@@ -1108,6 +1117,13 @@ impl Motor {
         };
         let e_stun = primeiro <= 3;
         let e_dtls = (20..=63).contains(&primeiro);
+        // RTP e RTCP (RFC 7983). Os datagramas do ponto de encontro são texto
+        // (`SEELE-ENC/…`, primeiro byte 83) e nunca caem nesta faixa.
+        let e_midia = (128..=191).contains(&primeiro);
+        if e_midia {
+            self.chegou_midia(agora, origem, bytes);
+            return;
+        }
         if !e_stun && !e_dtls {
             let _ = self.enc.try_send((origem, bytes.to_vec()));
             return;
@@ -1195,6 +1211,33 @@ impl Motor {
             }
             self.entregar(id, agora, entrada, bytes.len(), e_dtls.then_some(origem));
         }
+    }
+
+    /// **A mídia só entra na sessão ativa da origem, e só se ela ligou a
+    /// mídia.** Um pacote RTP de uma origem sem sessão pronta, ou para uma
+    /// sessão que não declarou mídia, é contado e largado: nunca cria par,
+    /// nunca vai à fila do ponto de encontro.
+    fn chegou_midia(&mut self, agora: Instant, origem: SocketAddr, bytes: &[u8]) {
+        let dono = self
+            .ativa_da_origem(origem)
+            .filter(|id| self.pares.get(id).is_some_and(|par| par.midia.is_some()));
+        let Some(id) = dono else {
+            self.contadores
+                .midia_sem_dono
+                .fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        let destino = self.virtual_local(origem.is_ipv4());
+        let Ok(recebido) = Receive::new(Protocol::Udp, origem, destino, bytes) else {
+            return;
+        };
+        self.entregar(
+            id,
+            agora,
+            Input::Receive(agora, recebido),
+            bytes.len(),
+            None,
+        );
     }
 
     /// **Um registro DTLS de outra sessão da mesma 5-tupla nunca entra num par
@@ -1656,7 +1699,7 @@ impl Motor {
         // **ICE completo e controlado** (e não mais ICE-lite): o anfitrião checa
         // os candidatos que conhece, aprende o peer-reflexive de quem liga e
         // responde. Quem liga (o nativo ou a página) segue controlador e nomeia.
-        let mut config = Rtc::builder()
+        let mut config = crate::midia::configurar(Rtc::builder())
             .set_crypto_provider(crate::cripto::provedor())
             .set_local_ice_credentials(IceCreds {
                 ufrag: u.clone(),
@@ -1750,6 +1793,8 @@ impl Motor {
             rtt_us: Default::default(),
             perda_na_saida: Mutex::new(None),
             voz_na_fila: Default::default(),
+            midia_na_fila: Default::default(),
+            estimativa_bps: Default::default(),
             filas_vivas: Default::default(),
             credito_em_aberto: Default::default(),
             pausa_de_teste: Default::default(),
@@ -1793,6 +1838,7 @@ impl Motor {
                 lado: None,
                 revezamento: 0,
                 apresentacao: Vec::new(),
+                midia: None,
             },
         );
         self.vivas.store(self.pares.len(), Ordering::Relaxed);
@@ -1852,6 +1898,56 @@ impl Motor {
                         .contadores
                         .voz_nao_saiu
                         .fetch_add(1, Ordering::Relaxed);
+                }
+                self.drenar(par);
+            }
+            Comando::LigarMidia { par, fila } => {
+                let Some(p) = self.pares.get_mut(&par) else {
+                    return;
+                };
+                if let Some(midia) = p.midia.as_mut() {
+                    midia.trocar_a_fila(fila);
+                } else {
+                    let anfitriao = p.papel == Papel::Anfitriao;
+                    p.midia = crate::midia::declarar(&mut p.rtc, anfitriao, fila);
+                }
+                self.drenar(par);
+            }
+            Comando::Midia {
+                par,
+                trilha,
+                tempo,
+                bytes,
+            } => {
+                let Some(p) = self.pares.get_mut(&par) else {
+                    return;
+                };
+                p.comp.midia_na_fila.fetch_sub(1, Ordering::Relaxed);
+                let escrito = p.pronto
+                    && p.midia
+                        .as_ref()
+                        .is_some_and(|m| m.escrever(&mut p.rtc, agora, trilha, tempo, bytes));
+                if !escrito {
+                    p.comp
+                        .contadores
+                        .midia_nao_saiu
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                self.drenar(par);
+            }
+            Comando::PedirChave { par } => {
+                if let Some(p) = self.pares.get_mut(&par) {
+                    if p.midia.is_some() {
+                        crate::midia::MidiaDoPar::pedir_chave(&mut p.rtc);
+                    }
+                }
+                self.drenar(par);
+            }
+            Comando::TaxaDaMidia { par, desejada_bps } => {
+                if let Some(p) = self.pares.get_mut(&par) {
+                    if p.midia.is_some() {
+                        p.rtc.bwe().set_desired_bitrate(Bitrate::bps(desejada_bps));
+                    }
                 }
                 self.drenar(par);
             }
@@ -2000,7 +2096,7 @@ impl Motor {
             }
         };
         let conferir = matches!(discagem.pino, crate::Pino::Impressao(_));
-        let mut config = Rtc::builder()
+        let mut config = crate::midia::configurar(Rtc::builder())
             .set_crypto_provider(crate::cripto::provedor())
             .set_local_ice_credentials(IceCreds {
                 ufrag: u.clone(),
@@ -2340,6 +2436,23 @@ impl Motor {
             Event::ChannelData(dados) => self.dados(id, dados.id, dados.data),
             Event::ChannelClose(canal) => self.canal_fechou(id, canal),
             Event::ChannelBufferedAmountLow(_) => self.escrever(id),
+            Event::MediaData(dados) => {
+                if let Some(midia) = self.pares.get_mut(&id).and_then(|p| p.midia.as_mut()) {
+                    midia.chegou(dados);
+                }
+            }
+            Event::KeyframeRequest(_) => {
+                if let Some(midia) = self.pares.get(&id).and_then(|p| p.midia.as_ref()) {
+                    midia.pediram_chave();
+                }
+            }
+            Event::EgressBitrateEstimate(BweKind::Twcc { estimate, .. }) => {
+                if let Some(par) = self.pares.get(&id) {
+                    par.comp
+                        .estimativa_bps
+                        .store(estimate.as_u64().max(1), Ordering::Relaxed);
+                }
+            }
             Event::PeerStats(stats) => {
                 if let Some(par) = self.pares.get(&id) {
                     let rtt = stats.rtt.or_else(|| {
