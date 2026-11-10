@@ -570,6 +570,56 @@ pub struct Sonda {
     /// sonda que só recebeu a semente ([`Self::partindo_de`]): ver
     /// [`Self::estimativa_medida`].
     janelas_medidas: u64,
+    /// A menor ida e volta respondida **dentro da janela aberta**, e quantas
+    /// foram. Ver [`Self::fechar`] e [`DorDoPing`].
+    menor_da_janela: Option<Duration>,
+    respostas_da_janela: u64,
+    /// O número de respostas da última leitura, para saber quando chegou outra.
+    respostas_vistas: u64,
+    /// A janela anterior doeu, ou levantou a suspeita. Ver [`DorDoPing`].
+    suspeita: bool,
+}
+
+/// O que o `Ping` de uma janela diz sobre a fila.
+///
+/// # Um `Ping` atrasado sozinho não é fila
+///
+/// O `Ping` vai num canal **confiável**. Num caminho que perde pacotes ao
+/// acaso, de vez em quando o pacote perdido é o dele: ele é retransmitido e
+/// volta 100 ms, 400 ms ou 1 s depois, com a fila do caminho vazia. A sonda
+/// lia isso como dor, e cada leitura dessas baixava a estimativa para o que a
+/// janela tinha carregado e prendia o limite ali.
+///
+/// Medido em 10/11/2026, janela a janela, a 1% de perda sorteada e 60 ms de
+/// ida e volta: a estimativa desceu de 1,71 Mbps para 405 kbps em 46 s por
+/// quatro eventos assim — cada um de **uma** janela, com um `Ping` em voo ou
+/// uma resposta só acima da tolerância, entre janelas de 62–64 ms. A 3% foram
+/// dois em 28 s, e o teto ficou em 588 kbps com a ida e volta parada em 62 ms.
+/// É a medida de `docs/medidas/2026-11-10-tela-do-produto-sob-perda.md`: com
+/// qualquer perda o orçamento só desce.
+///
+/// Fila de verdade não é assim: enquanto ela existe, **todo** `Ping` espera.
+/// Na mesma medida, os segundos de congestionamento do começo trazem cinco a
+/// oito janelas seguidas com todas as respostas acima da tolerância.
+///
+/// # A regra
+///
+/// - **forte** — a janela teve duas respostas ou mais, e **a menor** delas
+///   passou de [`FILA_TOLERADA`]. É fila: a sonda reage na hora.
+/// - **fraca** — uma resposta só acima da tolerância, ou um `Ping` em voo há
+///   mais que ela, com as respostas da janela boas ou ausentes. Pode ser fila
+///   começando, pode ser um pacote perdido. A sonda **não sobe nem desce**
+///   nesta janela, e a seguinte decide: se também doer, é fila; se vier limpa,
+///   foi um pacote.
+///
+/// O preço é um segundo a mais para reagir a uma fila que começa exatamente
+/// numa janela de uma resposta só. Perda e congestionamento contados pelo
+/// transporte, quando ele conta, continuam valendo na hora.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DorDoPing {
+    Nenhuma,
+    Fraca,
+    Forte,
 }
 
 impl Default for Sonda {
@@ -597,6 +647,10 @@ impl Sonda {
             janela: None,
             janelas_sem_medida: 0,
             janelas_medidas: 0,
+            menor_da_janela: None,
+            respostas_da_janela: 0,
+            respostas_vistas: 0,
+            suspeita: false,
         }
     }
 
@@ -701,6 +755,10 @@ impl Sonda {
     /// cai e volta em cinco segundos volta para o mesmo cano.
     pub fn esquecer_a_conexao(&mut self) {
         self.janela = None;
+        self.menor_da_janela = None;
+        self.respostas_da_janela = 0;
+        self.respostas_vistas = 0;
+        self.suspeita = false;
     }
 
     /// De quanto a estimativa sobe nesta janela, conforme o comprimento do
@@ -767,6 +825,16 @@ impl Sonda {
                 Some(menor) => menor.min(medida.valor),
                 None => medida.valor,
             });
+            // E a menor **desta janela**: cada resposta nova entra na conta
+            // uma vez. Um contador que andou para trás é uma conexão nova.
+            if medida.amostras != self.respostas_vistas {
+                self.respostas_vistas = medida.amostras;
+                self.respostas_da_janela = self.respostas_da_janela.saturating_add(1);
+                self.menor_da_janela = Some(match self.menor_da_janela {
+                    Some(menor) => menor.min(medida.valor),
+                    None => medida.valor,
+                });
+            }
         }
 
         let teto_bps = match amostra.teto {
@@ -810,6 +878,8 @@ impl Sonda {
             teto_bps,
             faixa: amostra.faixa,
         });
+        self.menor_da_janela = None;
+        self.respostas_da_janela = 0;
     }
 
     fn fechar(&mut self, agora: Instant, amostra: &Amostra, janela: &Janela, decorrido: Duration) {
@@ -838,17 +908,11 @@ impl Sonda {
         );
         let base = self.menor_ida_e_volta;
         let fila_de = |volta: Duration| base.map(|base| volta.saturating_sub(base) > FILA_TOLERADA);
-        // A ida e volta só conta se é **desta janela**: o número de respostas
-        // andou dentro dela.
-        let enfileirou = match (
-            amostra.transporte.ida_e_volta,
-            janela.transporte.ida_e_volta,
-        ) {
-            (Some(agora), antes) if agora.amostras > antes.map_or(0, |antes| antes.amostras) => {
-                fila_de(agora.valor)
-            }
-            _ => None,
-        };
+        // A ida e volta só conta se é **desta janela** — alguma resposta
+        // chegou dentro dela —, e a que conta é **a menor**: enquanto há fila,
+        // todo `Ping` espera, e uma resposta atrasada entre respostas boas é um
+        // pacote que se perdeu e foi retransmitido. Ver [`DorDoPing`].
+        let enfileirou = self.menor_da_janela.and_then(fila_de);
         // E um `Ping` que ainda não voltou e já passou da fila tolerada é dor
         // medida, mesmo sem resposta: a fila de segundos é a que nunca responde
         // dentro da janela.
@@ -859,7 +923,27 @@ impl Sonda {
             .and_then(fila_de)
             .filter(|atrasou| *atrasou);
 
-        let doeu = [perdeu, congestionou, enfileirou, atrasou].contains(&Some(true));
+        let do_ping = if enfileirou == Some(true) && self.respostas_da_janela >= 2 {
+            DorDoPing::Forte
+        } else if enfileirou == Some(true) || atrasou == Some(true) {
+            DorDoPing::Fraca
+        } else {
+            DorDoPing::Nenhuma
+        };
+        let contada = perdeu == Some(true) || congestionou == Some(true);
+        // A dor fraca só vale em cima de outra: a janela anterior doeu ou
+        // levantou a suspeita.
+        let doeu = contada
+            || do_ping == DorDoPing::Forte
+            || (do_ping == DorDoPing::Fraca && self.suspeita);
+        if do_ping == DorDoPing::Fraca && !doeu {
+            // **Suspeita, e mais nada.** A janela não prova fila e não prova
+            // caminho limpo: a estimativa fica onde está, a sondagem que
+            // estiver no ar espera a próxima janela, e é ela que decide.
+            self.suspeita = true;
+            return;
+        }
+        self.suspeita = doeu;
         // O que prova que **não** doeu: uma ida e volta fresca, ou perda e
         // congestionamento contados. Sem isso a janela não sabe, e não sobe.
         let mediu = enfileirou.is_some() || (perdeu.is_some() && congestionou.is_some());
@@ -1582,8 +1666,23 @@ mod tests {
                 faixa: SignalBand::Nominal,
             };
             assert_eq!(sonda.observar(inicio, &comeco), None);
-            fim.bytes_enviados += cheios;
+            // O sinal aparece no meio da janela e continua até o fim dela, com
+            // uma resposta do `Ping` em cada metade: fila é o que **todo**
+            // `Ping` da janela encontra ([`DorDoPing`]).
+            fim.bytes_enviados += cheios / 2;
             quem(&mut fim);
+            sonda.observar(
+                inicio + Duration::from_millis(500),
+                &Amostra {
+                    transporte: fim,
+                    teto,
+                    faixa: SignalBand::Nominal,
+                },
+            );
+            fim.bytes_enviados += cheios - cheios / 2;
+            if let Some(medida) = fim.ida_e_volta.as_mut() {
+                medida.amostras += 1;
+            }
             sonda.observar(
                 inicio + Duration::from_secs(1),
                 &Amostra {
@@ -1995,7 +2094,10 @@ mod tests {
         assert_eq!(sonda.janelas_sem_medida(), 0);
     }
 
-    /// Um `Ping` que não volta e já passou da fila tolerada é dor medida.
+    /// Um `Ping` que não volta e já passou da fila tolerada é dor medida —
+    /// **quando continua sem voltar**. Na primeira janela ele é só suspeita
+    /// ([`DorDoPing`]): pode ser um pacote perdido. Da segunda em diante é
+    /// fila, e a estimativa desce a cada janela.
     #[test]
     fn um_ping_em_voo_alem_da_fila_e_dor() {
         // A mesma história duas vezes; só muda o `Ping` preso. A janela sem
@@ -2013,7 +2115,7 @@ mod tests {
                 sonda.observar(inicio + TICA * k, &cano.amostra(teto, SignalBand::Nominal));
             }
             // E as seguintes sem resposta nova, cheias, com ou sem um `Ping` no ar.
-            for k in (ticas(2) + 1)..=ticas(4) {
+            for k in (ticas(2) + 1)..=ticas(5) {
                 cano.transporte.bytes_enviados += u64::from(teto.bps() + VOZ_BPS) / 8 / 10;
                 if let Some(medida) = cano.transporte.ida_e_volta.as_mut() {
                     medida.em_voo = preso;
@@ -2027,6 +2129,160 @@ mod tests {
         assert!(
             com_ping_preso < sem_ping_preso,
             "o Ping preso na fila não contou como dor: {com_ping_preso} com, {sem_ping_preso} sem"
+        );
+    }
+
+    /// **Um `Ping` atrasado sozinho não derruba a estimativa** — é um pacote
+    /// que se perdeu e foi retransmitido, e não fila ([`DorDoPing`]). Medido em
+    /// 10/11/2026: a 1% de perda sorteada, quatro eventos destes levaram a
+    /// estimativa de 1,71 Mbps a 405 kbps em 46 s, com a ida e volta em 62 ms.
+    ///
+    /// As três formas em que ele aparece na janela: uma resposta atrasada
+    /// entre respostas boas, uma resposta só e atrasada, e um `Ping` em voo
+    /// além da tolerância. Em nenhuma a estimativa desce, e depois dela a
+    /// sonda continua subindo.
+    #[test]
+    fn um_ping_atrasado_sozinho_nao_e_fila() {
+        let base = Duration::from_millis(60);
+        let tarde = base + FILA_TOLERADA * 5;
+        // Cada forma é o que as leituras da janela do meio trazem: (resposta
+        // nova?, valor, em voo).
+        type Leitura = (bool, Duration, Option<Duration>);
+        let formas: [(&str, [Leitura; 2]); 3] = [
+            (
+                "uma resposta atrasada entre boas",
+                [(true, tarde, None), (true, base, None)],
+            ),
+            (
+                "uma resposta só, atrasada",
+                [(false, base, None), (true, tarde, None)],
+            ),
+            (
+                "um Ping em voo além da tolerância",
+                [(true, base, None), (false, base, Some(tarde))],
+            ),
+        ];
+        for (nome, do_meio) in formas {
+            let mut sonda = Sonda::partindo_de(1_000_000);
+            let inicio = Instant::now();
+            let teto = teto_de(sonda.estimativa(), SignalBand::Nominal);
+            let por_meia = u64::from(teto.bps() + VOZ_BPS) / 8 / 2;
+            let mut transporte = Transporte {
+                bytes_enviados: 0,
+                eventos_de_congestionamento: None,
+                pacotes_perdidos: None,
+                ida_e_volta: Some(IdaEVolta {
+                    valor: base,
+                    amostras: 1,
+                    em_voo: None,
+                }),
+            };
+            let mut ler = |sonda: &mut Sonda, meias: u32, leitura: Leitura| {
+                transporte.bytes_enviados += por_meia;
+                if let Some(medida) = transporte.ida_e_volta.as_mut() {
+                    medida.amostras += u64::from(leitura.0);
+                    medida.valor = leitura.1;
+                    medida.em_voo = leitura.2;
+                }
+                sonda.observar(
+                    inicio + Duration::from_millis(500) * meias,
+                    &Amostra {
+                        transporte,
+                        teto,
+                        faixa: SignalBand::Nominal,
+                    },
+                );
+            };
+            let boa = (true, base, None);
+            ler(&mut sonda, 0, boa);
+            // Uma janela limpa, a do `Ping` atrasado, e outra limpa.
+            ler(&mut sonda, 1, boa);
+            ler(&mut sonda, 2, boa);
+            let antes = sonda.estimativa();
+            ler(&mut sonda, 3, do_meio[0]);
+            ler(&mut sonda, 4, do_meio[1]);
+            assert!(
+                sonda.estimativa() >= antes,
+                "{nome}: a estimativa desceu de {antes} para {}",
+                sonda.estimativa()
+            );
+            assert_eq!(sonda.limite_bps(), None, "{nome}: virou borda encontrada");
+            ler(&mut sonda, 5, boa);
+            ler(&mut sonda, 6, boa);
+            assert!(
+                sonda.estimativa() > antes,
+                "{nome}: depois da janela limpa a sonda não voltou a subir"
+            );
+        }
+    }
+
+    /// **Fila de verdade continua sendo dor na hora**: todas as respostas da
+    /// janela acima da tolerância. E a dor fraca repetida também: duas janelas
+    /// seguidas com uma resposta só, atrasada.
+    #[test]
+    fn todas_as_respostas_atrasadas_e_fila() {
+        let base = Duration::from_millis(60);
+        let tarde = base + FILA_TOLERADA * 5;
+        let correr = |por_janela: &[u64]| {
+            let mut sonda = Sonda::partindo_de(1_000_000);
+            let inicio = Instant::now();
+            let teto = teto_de(sonda.estimativa(), SignalBand::Nominal);
+            let mut transporte = Transporte {
+                bytes_enviados: 0,
+                eventos_de_congestionamento: None,
+                pacotes_perdidos: None,
+                ida_e_volta: Some(IdaEVolta {
+                    valor: base,
+                    amostras: 1,
+                    em_voo: None,
+                }),
+            };
+            sonda.observar(
+                inicio,
+                &Amostra {
+                    transporte,
+                    teto,
+                    faixa: SignalBand::Nominal,
+                },
+            );
+            let mut quedas = Vec::new();
+            for (k, respostas) in por_janela.iter().enumerate() {
+                let antes = sonda.estimativa();
+                transporte.bytes_enviados += u64::from(teto.bps() + VOZ_BPS) / 8;
+                if let Some(medida) = transporte.ida_e_volta.as_mut() {
+                    medida.amostras += respostas;
+                    medida.valor = tarde;
+                }
+                // Uma leitura por resposta, e a última fecha a janela.
+                for r in 1..=*respostas {
+                    let quando = Duration::from_secs(k as u64)
+                        + Duration::from_secs(1) * (r as u32) / (*respostas as u32);
+                    let mut parcial = transporte;
+                    if let Some(medida) = parcial.ida_e_volta.as_mut() {
+                        medida.amostras -= respostas - r;
+                    }
+                    sonda.observar(
+                        inicio + quando,
+                        &Amostra {
+                            transporte: parcial,
+                            teto,
+                            faixa: SignalBand::Nominal,
+                        },
+                    );
+                }
+                quedas.push(sonda.estimativa() < antes);
+            }
+            quedas
+        };
+        assert_eq!(
+            correr(&[2]),
+            vec![true],
+            "duas respostas atrasadas numa janela não foram lidas como fila"
+        );
+        assert_eq!(
+            correr(&[1, 1]),
+            vec![false, true],
+            "uma resposta atrasada por janela, duas janelas seguidas: a segunda é fila"
         );
     }
 
