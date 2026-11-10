@@ -343,8 +343,33 @@ struct EmCurso {
     canos: HashMap<PersonId, mpsc::Sender<Pedaco>>,
     /// Quem entrou na sala depois do começo e ainda espera um quadro-chave.
     esperando: Vec<PersonId>,
+    /// Quando cada espectador foi cortado pela última vez nesta transmissão
+    /// ([`VOLTA_DO_CORTADO`]).
+    cortados: HashMap<PersonId, Instant>,
     fim: mpsc::Sender<FimDaTela>,
 }
+
+/// De quanto em quanto tempo um espectador cortado volta sozinho à fila do
+/// próximo quadro-chave.
+///
+/// **O corte era para sempre, e ninguém ficava sabendo.** Medido em 10/11/2026
+/// (`docs/medidas/2026-11-10-tela-do-produto-sob-perda.md`): quem assistia por
+/// um caminho limpo foi cortado 13 s depois de a câmera ligar e ficou 47 s sem
+/// imagem, até o fim — os bytes de quem transmite chegam em rajada quando o
+/// caminho dele perde um pacote, e a rajada enche a fila de quem assiste
+/// ([`crate::tela::PEDACOS_DEPTH`]) sem que ele tenha ficado para trás.
+///
+/// Cortar continua sendo a sanção certa (pular um pedaço deslocaria o
+/// enquadramento dele para sempre). O que muda é o depois: o cortado entra na
+/// fila de quem espera o quadro-chave, como quem chega no meio, e a sala pede
+/// a chave por ele.
+///
+/// **Uma volta a cada dez segundos, e não toda vez.** Cada volta custa um
+/// quadro-chave a quem transmite e a todos que assistem. Um espectador que
+/// realmente não acompanha seria cortado de novo em seguida, e sem este prazo
+/// a sala inteira pagaria uma chave atrás da outra por causa dele. Cortado de
+/// novo antes do prazo, ele fica de fora, como antes — e isso vai ao registro.
+pub const VOLTA_DO_CORTADO: Duration = Duration::from_secs(10);
 
 impl EmCurso {
     /// O menor protocolo que lê a abertura desta transmissão como ela foi
@@ -635,7 +660,7 @@ impl VoiceRoom {
                 abertura,
                 fim,
             } => self.tela_abriu(from, screen, abertura, fim),
-            VoiceRoomCommand::TelaBytes { from, bytes } => self.tela_bytes(from, &bytes),
+            VoiceRoomCommand::TelaBytes { from, bytes } => self.tela_bytes(from, &bytes, now),
             VoiceRoomCommand::TelaAssistir { person, screen } => self.assistir(person, screen),
             VoiceRoomCommand::TelaParouDeAssistir { person, screen } => {
                 self.parar_de_assistir(person, screen);
@@ -893,6 +918,7 @@ impl VoiceRoom {
                 enquadramento: Enquadramento::novo(),
                 canos: HashMap::new(),
                 esperando: Vec::new(),
+                cortados: HashMap::new(),
                 fim,
             },
         );
@@ -1067,7 +1093,7 @@ impl VoiceRoom {
     /// motivo: é ela que mantém a CPU do servidor plana e que deixa o E2EE de
     /// mídia ser um acréscimo. Os cinco bytes que o [`Enquadramento`] lê dizem
     /// onde um quadro acaba, e nada sobre o que há dentro dele.
-    fn tela_bytes(&mut self, from: PersonId, bytes: &[u8]) {
+    fn tela_bytes(&mut self, from: PersonId, bytes: &[u8], now: Instant) {
         let Some(curso) = self.telas.get_mut(&from) else {
             // **Bytes de tela de quem não está transmitindo.**
             //
@@ -1104,35 +1130,66 @@ impl VoiceRoom {
         // que veio antes vai só para quem já assistia, e do quadro-chave em
         // diante todo mundo recebe o mesmo.
         let Some(corte) = porta else {
-            self.escrever(from, bytes);
+            self.escrever(from, bytes, now);
             return;
         };
         let entrando = std::mem::take(&mut curso.esperando);
         let (antes, depois) = bytes.split_at(corte.min(bytes.len()));
-        self.escrever(from, antes);
+        self.escrever(from, antes, now);
         self.ligar(from, &entrando);
-        self.escrever(from, depois);
+        self.escrever(from, depois, now);
     }
 
     /// Escreve o mesmo pedaço em cada cano ligado.
-    fn escrever(&mut self, dono: PersonId, bytes: &[u8]) {
+    fn escrever(&mut self, dono: PersonId, bytes: &[u8], now: Instant) {
         if bytes.is_empty() {
             return;
         }
         let Some(curso) = self.telas.get_mut(&dono) else {
             return;
         };
+        // Cada cortado, e se o cano dele estava **cheio** (ele existe e não
+        // acompanhou) ou **fechado** (a tarefa que escrevia para ele acabou).
         let mut cortados = Vec::new();
         for (person, cano) in &curso.canos {
-            if cano.try_send(Pedaco::Bytes(bytes.to_vec())).is_err() {
-                cortados.push(*person);
+            match cano.try_send(Pedaco::Bytes(bytes.to_vec())) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => cortados.push((*person, true)),
+                Err(mpsc::error::TrySendError::Closed(_)) => cortados.push((*person, false)),
             }
         }
-        for person in &cortados {
+        let screen = curso.screen;
+        let mut voltam = 0_u64;
+        let mut pedir_por = None;
+        for (person, cheio) in &cortados {
             // Tirar o cano é o corte: `bombear` vê o canal fechar sem um
             // `Fim` e faz `reset` no fluxo daquela pessoa, que é a diferença
             // entre «a transmissão acabou» e «a sua cópia se perdeu».
             curso.canos.remove(person);
+            // **E o cortado volta no próximo quadro-chave** — uma vez a cada
+            // [`VOLTA_DO_CORTADO`]. Ver a constante. Só quem tinha o cano
+            // cheio: um cano fechado é uma sessão que acabou, e não há a quem
+            // devolver a imagem.
+            if !cheio {
+                continue;
+            }
+            let cedo = curso
+                .cortados
+                .insert(*person, now)
+                .is_some_and(|antes| now.saturating_duration_since(antes) < VOLTA_DO_CORTADO);
+            if cedo || !self.members.contains_key(person) {
+                continue;
+            }
+            voltam += 1;
+            if curso.esperando.is_empty() {
+                pedir_por = Some(*person);
+            }
+            if !curso.esperando.contains(person) {
+                curso.esperando.push(*person);
+            }
+        }
+        if let Some(quem) = pedir_por {
+            self.pedir_a_chave(dono, screen, quem);
         }
         if !cortados.is_empty() {
             // O outro ponto onde uma cópia é cortada — este é o do meio do
@@ -1144,6 +1201,7 @@ impl VoiceRoom {
                 sala = %self.id.get(),
                 dono = %dono.get(),
                 cortados = %cortados.len(),
+                voltam_na_proxima_chave = %voltam,
                 total = %self.drops.espectador_cortado,
                 "espectador cortado no meio do fluxo da tela"
             );
@@ -3003,6 +3061,97 @@ mod tests {
             (crate::tela::PEDACOS_DEPTH + 8) * quadro(false, 16).len(),
             "cortar um espectador tirou bytes de quem estava acompanhando"
         );
+    }
+
+    /// **O espectador cortado volta no próximo quadro-chave, e a sala pede a
+    /// chave por ele** (medido em 10/11/2026: o corte era para sempre — 47 s
+    /// sem imagem, até o fim, num caminho limpo). Cortado de novo antes de
+    /// [`VOLTA_DO_CORTADO`], fica de fora; depois do prazo, volta outra vez.
+    #[test]
+    fn o_espectador_cortado_volta_no_proximo_quadro_chave() {
+        let (mut sala, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_SERVER_BPS);
+        let _dono = espectador(&mut sala, 1);
+        let mut lento = espectador(&mut sala, 2);
+        let _fim = compartilhar(&mut sala, 1, 7);
+        let _primeira = lento.try_recv().unwrap();
+        let _ = pedidos_de_chave(&mut ouvinte);
+        let cortes = |sala: &VoiceRoom| sala.drops().espectador_cortado;
+
+        // Ninguém lê o cano do lento: ele enche e é cortado.
+        let agora = Instant::now();
+        let encher = |sala: &mut VoiceRoom, quando: Instant| {
+            for _ in 0..(crate::tela::PEDACOS_DEPTH + 2) {
+                sala.handle_at(
+                    VoiceRoomCommand::TelaBytes {
+                        from: PersonId(1),
+                        bytes: quadro(false, 16),
+                    },
+                    quando,
+                );
+            }
+        };
+        encher(&mut sala, agora);
+        assert_eq!(cortes(&sala), 1, "o espectador lento não foi cortado");
+        assert_eq!(
+            pedidos_de_chave(&mut ouvinte),
+            vec![(7, 2, 1)],
+            "a sala não pediu a chave por quem foi cortado"
+        );
+        assert_eq!(sala.espectadores(), 1, "o cortado saiu da conta de cópias");
+        assert!(
+            lento.try_recv().is_err(),
+            "religado antes de um quadro-chave"
+        );
+
+        // O quadro-chave abre um fluxo novo para ele, e chega inteiro.
+        let chave = quadro(true, 30);
+        sala.handle_at(
+            VoiceRoomCommand::TelaBytes {
+                from: PersonId(1),
+                bytes: chave.clone(),
+            },
+            agora,
+        );
+        let mut segunda = lento.try_recv().expect("o cortado não voltou na chave");
+        assert_eq!(recebido(&mut segunda), chave);
+
+        // Cortado de novo antes do prazo: fica de fora, e ninguém paga chave.
+        encher(&mut sala, agora + Duration::from_secs(1));
+        assert_eq!(cortes(&sala), 2);
+        assert_eq!(pedidos_de_chave(&mut ouvinte), Vec::new());
+        sala.handle_at(
+            VoiceRoomCommand::TelaBytes {
+                from: PersonId(1),
+                bytes: quadro(true, 30),
+            },
+            agora + Duration::from_secs(2),
+        );
+        assert!(
+            lento.try_recv().is_err(),
+            "cortado duas vezes em dez segundos, e voltou assim mesmo"
+        );
+
+        // Quem pede para assistir de novo entra, e depois do prazo o corte
+        // volta a ter volta.
+        sala.handle(VoiceRoomCommand::TelaAssistir {
+            person: PersonId(2),
+            screen: ScreenId(7),
+        });
+        let _ = pedidos_de_chave(&mut ouvinte);
+        let tarde = agora + VOLTA_DO_CORTADO + Duration::from_secs(2);
+        sala.handle_at(
+            VoiceRoomCommand::TelaBytes {
+                from: PersonId(1),
+                bytes: quadro(true, 30),
+            },
+            tarde,
+        );
+        let _terceira = lento
+            .try_recv()
+            .expect("quem pediu para assistir não entrou");
+        encher(&mut sala, tarde);
+        assert_eq!(cortes(&sala), 3);
+        assert_eq!(pedidos_de_chave(&mut ouvinte), vec![(7, 2, 1)]);
     }
 
     #[test]
