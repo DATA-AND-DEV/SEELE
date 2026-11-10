@@ -569,3 +569,28 @@ pub async fn par_por_cano(config: ConfigDoCano) -> (ParDeTeste, Cano) {
     };
     (par, cano)
 }
+
+// --------------------------------------------------------------------------
+// um `Rtc` cru, para bancada de medida
+// --------------------------------------------------------------------------
+
+/// A configuração de um `Rtc` do str0m **fora** do enlace, com o que este
+/// crate daria a ele: o provedor de cripto de `cripto.rs` (por instância,
+/// nunca global) e um certificado DTLS efêmero.
+///
+/// Existe para as bancadas que medem o que o enlace ainda não usa (mídia RTP:
+/// `examples/rtp_sob_perda.rs`). O str0m entra aqui sem backend de cripto
+/// próprio, e o provedor do enlace é privado; sem isto um exemplo não
+/// consegue montar um `Rtc`. Nada no produto chama esta função.
+///
+/// # Panics
+///
+/// Se o certificado efêmero não puder ser gerado: é ajudante de teste.
+#[allow(clippy::expect_used)]
+#[must_use]
+pub fn config_de_rtc_cru() -> str0m::RtcConfig {
+    let certificado = CertificadoDtls::efemero().expect("certificado de teste");
+    str0m::Rtc::builder()
+        .set_crypto_provider(crate::cripto::provedor())
+        .set_dtls_cert(certificado.para_o_str0m())
+}
