@@ -1,5 +1,16 @@
 # 08 — Segurança
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original, com a seção de transporte da 0.17.
+>
+> - **Continua valendo:** a postura, o modelo de ameaça, TOFU, a identidade do servidor pelo certificado P-256, a prova do cliente, autenticação por chave Ed25519 com convite ou senha (ADRs 0004 e 0021), os dois baldes de taxa (ADR 0025), autorização sempre no servidor, sem E2EE na v1, anexos em claro no disco de quem hospeda.
+> - **Mudou:**
+>   - **não há TURN.** O item «TURN» abaixo descreve um relay opcional configurado por quem usa. A emenda de 26/10/2026 ao [ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md) o tirou: não há configuração de TURN, e a página apaga a chave que a guardava (`apps/seele-app/ui/rtc-web.js`);
+>   - **o anfitrião é ICE completo e controlado, e não ICE-lite** (mesma emenda; `crates/seele-enlace/src/ponta.rs`). O título «Riscos novos do anfitrião ICE-lite» ficou com o nome antigo;
+>   - **R2, R3 e R3b têm código hoje,** onde o texto diz «ainda não conferido». Os tetos de Indications e de furos são constantes do enlace (`INDICACOES_POR_CANDIDATO`, `CANDIDATOS_POR_FURO`, `FUROS_POR_MINUTO`) e o anfitrião limita os chamados por minuto (`crates/seele-server/src/alcance/encontro.rs`). O pendente mais velho sai quando o teto enche, e o que não começa o DTLS em 2 s sai: R3 (b) e (c). A mitigação (a) não foi feita, e o cabeçalho de `ponta.rs` diz por quê. Um `U` vivo nunca cria um segundo `Rtc`, e há lápide por `U` (R3b);
+>   - **R4 tem o escalonador** (o `ctl` e a voz saem na hora; `u` e `b` só escrevem abaixo de 64 KiB, `LIMIAR_DE_VOLUME`). Não conferi se a medida que o critério pede foi feita: continua como está escrito abaixo;
+>   - **as exceções ao `unsafe` não são «`seele-ffi` e bindings de áudio»:** o workspace proíbe (`unsafe_code = "forbid"`, que a `seele-ffi` herda), e seis crates trocam por `deny` com exceção nomeada no próprio `Cargo.toml`: `seele-audio`, `seele-core`, `seele-video` (ADR 0041), `seele-web`, `seele-motor-web` e `apps/seele-instalador`.
+> - **Manda agora:** o ADR 0063 com as duas emendas, e `crates/seele-enlace`.
+
 ## Postura
 
 Servidor auto-hospedado, comunidades pequenas, operador confiável mas não necessariamente especialista em segurança. O objetivo é ser **seguro por padrão sem configuração**, e nunca oferecer um caminho não criptografado "para facilitar".

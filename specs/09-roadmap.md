@@ -1,5 +1,14 @@
 # 09 — Roadmap
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este roteiro é o plano original e fica como registro. Quatro milestones não terminaram como escritos:
+>
+> - **M2:** o transporte não é mais QUIC via `quinn`. Desde a 0.17 é WebRTC com canais de dados, em `crates/seele-enlace` ([ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md)).
+> - **M4:** a TUI foi entregue e depois removida. O produto tem uma casca só ([ADR 0039](../docs/adr/0039-o-produto-passa-a-ter-uma-casca-so.md)), e os critérios de aceite deste milestone saíram com ela.
+> - **M5:** não há «paridade com a TUI» nem instalador para os três sistemas. Os releases publicam macOS arm64 e Windows x64; no Linux compila-se do código, sem captura de tela (`crates/seele-video/src/captura/mod.rs`).
+> - **M6:** não há protótipo Flutter nem nativo. O celular entra pelo navegador ([ADR 0057](../docs/adr/0057-o-celular-entra-pelo-navegador.md), `crates/seele-web`), e o aceite do M6 segue aberto e sem medida, como o ADR diz.
+> - **Pós-v1:** compartilhamento de tela entrou antes da 1.0 (`crates/seele-video`). E2EE, federação e gravação continuam fora.
+> - **Manda agora:** `docs/superpowers/` para o que está a caminho da 1.0, e `docs/pendencias.md` para o que está aberto.
+
 Milestones sequenciais. Cada um termina com algo demonstrável e critérios de aceite verificáveis. **Não avançar com critério pendente.**
 
 ---

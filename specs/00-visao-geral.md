@@ -1,5 +1,17 @@
 # 00 — Visão geral
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original.
+>
+> - **Continua valendo:** servidor auto-hospedado e pequeno (um binário, um SQLite), a identidade visual como parte do produto, os alvos de latência e a nota que os corrigiu.
+> - **Mudou:**
+>   - o cliente de terminal saiu. O `seele-tui` foi removido e o produto tem uma casca só, o app Tauri (`apps/seele-app`). Tudo o que este texto diz da TUI como referência, e a métrica de RSS dela, é história: [ADR 0039](../docs/adr/0039-o-produto-passa-a-ter-uma-casca-so.md);
+>   - não há arquivo de configuração: o `seeled` recebe tudo pela linha de comando e por `SEELE_DB` (`crates/seele-server/src/main.rs`);
+>   - compartilhamento de tela deixou de ser não-objetivo: existe, em H.264, em `crates/seele-video` (ADRs 0040 e 0041). Câmera continua fora;
+>   - MODs existem, com API versionada em `api/` (ADR 0045 e seguintes), apesar de «marketplace de plugins» estar entre os não-objetivos;
+>   - o celular não é app: entra pelo navegador, sem hospedar (`crates/seele-web`, [ADR 0057](../docs/adr/0057-o-celular-entra-pelo-navegador.md));
+>   - o cliente publicado é para macOS arm64 e Windows x64. No Linux ele compila do código e não captura tela (`crates/seele-video/src/captura/mod.rs`).
+> - **Manda agora:** o código, o `README.md` da raiz e os ADRs citados.
+
 ## O problema
 
 Ferramentas de voz para grupos pequenos convergiram para um formato só: aplicação Electron pesada, sempre online, com feed social, presença publicada e telemetria. Para quem trabalha em terminal, isso é um contexto estranho e caro em recursos.

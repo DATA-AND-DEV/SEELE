@@ -1,5 +1,17 @@
 # 06 — Clientes gráficos
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original, com seções da 0.17.
+>
+> - **Continua valendo:** Tauri; frontend à mão, sem framework e sem npm (ADR 0019); nenhuma lógica de protocolo em JavaScript; a tela de entrada, o fluxo do convite e da impressão digital; hospedar pelo app; as regras de acessibilidade.
+> - **Mudou:**
+>   - **não há TUI para imitar.** O `seele-tui` e o binário `connection` saíram ([ADR 0039](../docs/adr/0039-o-produto-passa-a-ter-uma-casca-so.md)). «Posição no projeto», «Paridade de interface» e as menções a `connection --hospedar` são história: o app é a única casca;
+>   - **o mobile não é Flutter, nem nativo, nem Tauri Mobile.** A decisão de plataforma foi tomada: o celular entra por uma página, sem hospedar ([ADR 0057](../docs/adr/0057-o-celular-entra-pelo-navegador.md), `crates/seele-web`). O aceite do M6 continua sem medida, como o próprio ADR diz;
+>   - **o `uniffi` não entrou.** A `seele-ffi` não depende dele (`crates/seele-ffi/Cargo.toml`, ADR 0018), e com o ADR 0057 o consumidor de binding que o traria deixou de existir;
+>   - **onde o texto diz «aperto de mão TLS», hoje é o DTLS do WebRTC** (ADR 0063). A conferência da impressão continua antes do `Hello`;
+>   - **a assinatura `ゼーレ` saiu da marca** (ADR 0034). A seção «A marca» descreve a anterior; vale `docs/marca.md`;
+>   - os instaladores publicados são dois, macOS arm64 e Windows x64, e não três.
+> - **Manda agora:** os ADRs 0039 e 0057, `apps/seele-app` e `crates/seele-web`.
+
 ## Posição no projeto
 
 Os clientes gráficos existem para alcançar quem não vive no terminal e para dar mobilidade. Eles **imitam a TUI**, não o contrário. Nenhuma funcionalidade nasce aqui: se algo é útil, é implementado em `seele-core` e aparece nas duas interfaces.

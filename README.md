@@ -26,10 +26,13 @@ hospeda, o vazio é quem chega, a diagonal é o enlace.
                    │  seele-core — sessão, protocolo, áudio, estado
                    │  (nenhuma lógica vive na interface)
                    ▼
-             ── QUIC / TLS 1.3 ──
+    ── WebRTC: ICE + DTLS + SCTP, uma porta UDP ──
                    ▼
                  seeled
 ```
+
+O navegador entra pelo mesmo fio (`crates/seele-web`, em `wasm`), e só entra:
+hospedar é dos nativos.
 
 Um **servidor** é uma instância: o banco dele, as contas dele, os canais dele.
 Dentro dele há **salas de voz** e **canais de texto**. Quem entra é uma
@@ -44,12 +47,24 @@ enxergar o protocolo direto.
 
 | | |
 |---|---|
-| Transporte | QUIC (`quinn`), TLS 1.3 obrigatório, uma porta **UDP** |
-| Confiança | TOFU — o cliente fixa a chave no primeiro contato, modelo SSH |
-| Voz | Opus 48 kHz mono, quadros de 20 ms, DTX, jitter buffer adaptativo |
+| Transporte | WebRTC só com canais de dados (`str0m`, em `crates/seele-enlace`): ICE, DTLS e SCTP num socket **UDP** só, a porta 8383. Sem RTP. Até a 0.16 era QUIC ([ADR 0063](docs/adr/0063-a-linha-2-fala-webrtc.md)) |
+| Canais | `ctl`, confiável e ordenado, para o controle; `voz`, sem ordem e sem retransmissão; `u` e `b`, confiáveis, para anexos, tela e imagens |
+| Serialização | `postcard`, confinado ao `seele-proto` (ADR 0001) |
+| Confiança | TOFU: o cliente fixa a impressão do certificado no primeiro contato, modelo SSH, e a confere no DTLS antes de mandar qualquer coisa |
+| Voz | Opus 48 kHz mono, quadros de 20 ms, 16 a 48 kbps adaptativo, DTX, sem FEC (ADR 0010), jitter buffer adaptativo |
+| Tela | H.264 num canal confiável e ordenado, encaminhado pelo servidor; o som da tela é Opus a 96 kbps |
 | Identidade | par de chaves Ed25519, guardado em disco |
 | Persistência | SQLite com migrações embutidas, no próprio binário |
-| Alcance | rede local, IPv6, porta no roteador por UPnP, e furo de NAT |
+| Alcance | rede local, IPv6, porta no roteador por UPnP, e furo de NAT pelo ponto de encontro. Sem TURN e sem relay, por decisão (ADR 0063, emenda de 26/10/2026) |
+
+### Plataformas da 1.0
+
+| | |
+|---|---|
+| Cliente publicado | macOS (Apple Silicon, arm64) e Windows (x64) |
+| Servidor `seeled` | roda em macOS, Windows e Linux. O pacote pronto sai para macOS arm64 e Windows x64; no Linux, compila-se do código |
+| Cliente no Linux | compila do código e **não captura tela**. A decisão é de 22/08/2026 e está em `crates/seele-video/src/captura/mod.rs`: o portal XDG pediria `ashpd` e `pipewire`, e o binário deixaria de ser autocontido |
+| Navegador | entra em servidores por `seele.sh`, sem hospedar (ADR 0057) |
 
 ---
 
@@ -58,10 +73,11 @@ enxergar o protocolo direto.
 Tauri sobre o mesmo núcleo, e é a única casca do produto — o cliente de terminal
 saiu no [ADR 0039](docs/adr/0039-o-produto-passa-a-ter-uma-casca-so.md).
 
-**No celular, o SEELE ainda não roda.** O caminho decidido é o navegador: uma
-página instalável na Tela de Início, sem app nativo e sem loja, que só entra em
-servidores e nunca hospeda
-([ADR 0057](docs/adr/0057-o-celular-entra-pelo-navegador.md)).
+**No celular, o SEELE é uma página.** Não há app nativo nem loja: o navegador
+carrega a mesma `ui/` do desktop sobre o `crates/seele-web`, entra em servidores
+e nunca hospeda
+([ADR 0057](docs/adr/0057-o-celular-entra-pelo-navegador.md)). O ADR decide uma
+página instalável na Tela de Início; o manifesto que faz isso ainda não existe.
 
 **HOSPEDAR AQUI** sobe um servidor dentro do próprio app e entra nele: quem só
 quer clicar nunca precisa abrir um terminal. Ele vive enquanto a janela estiver
@@ -107,35 +123,47 @@ que encontrar no convite — nunca só o melhor:
 | 4 | **furo de NAT**, com um ponto de encontro apresentando as duas pontas |
 
 O ponto de encontro não vê nada do que é dito: ele apresenta dois endereços um
-ao outro, e guarda em memória, no **quarto**, onde cada anfitrião disse morar —
-o servidor e a escuta de avisos, cada endereço valendo 60 segundos desde o
-último registro dele —, e quem volta pela lista pergunta ao quarto antes de
-tentar. O TLS vai de cada pessoa até o servidor de quem hospeda, e o ponto de
-encontro não está nele. Quem hospeda recebe a voz e o texto em claro, como diz
-a specs/08. Cada endereço da resposta tem a sua barreira:
+ao outro. Desde a 0.17 a conversa com ele é o `SEELE-ENC/3`
+(`crates/seele-proto/src/encontro.rs`), e corre assim:
 
-- o do **servidor** é conferido pela impressão digital, dentro do TLS, antes de
-  qualquer convite ou senha sair;
-- o da **escuta de avisos** vira o destino do `LEVE`, que sai **antes** do TLS:
-  o ponto repassa a esse destino o IP, a porta e o instante de quem tenta
-  chegar. Por isso quem chega só o usa quando ele mora no mesmo IP que o
-  servidor da mesma resposta, e a lista de conhecidos nunca guarda o que o
-  quarto deu.
+1. o anfitrião registra as marcas dele no **quarto**, pelo mesmo socket em que
+   atende (a 8383). As marcas são nomes tirados da impressão digital. O ponto
+   guarda em memória onde cada uma disse morar, e cada registro vale 60
+   segundos desde o último;
+2. quem liga manda um `CHAMA` ao ponto, com a credencial ICE da tentativa e até
+   dois endereços próprios. O app manda por UDP; o navegador, por um
+   `POST /sinal/1`;
+3. o ponto repassa um `CHAMADO` ao anfitrião, que fura o NAT na direção desses
+   endereços e responde `ATENDE`. O ponto devolve a quem ligou o endereço
+   público do anfitrião, e o ICE entra pelo caminho recém-aberto.
 
-**O que sobra num servidor guardado**, que continua no `SEELE-ENC/1` (o
-`SEELE-ENC/2`, o registro assinado do ADR 0062, é da sala pessoal): quem
-toma as duas marcas do anfitrião no quarto — os nomes, tirados da impressão
-digital, sob os quais o servidor e a escuta se registram —, ou só a da escuta
-saindo pelo mesmo IP público que ele, recebe pelo `LEVE` o IP, a porta e o
-instante de quem tenta chegar. O conteúdo, o convite, a senha e o apelido não
-saem: o TLS recusa o servidor errado. `seele-encontro` é o programa, e o
-[`docs/ponto-de-encontro.md`](docs/ponto-de-encontro.md) diz o que ele guarda, o
-que um ponto hostil consegue e quando as marcas ficam livres.
+O DTLS vai de cada pessoa até o servidor de quem hospeda, e o ponto de encontro
+não está nele. Quem hospeda recebe a voz e o texto em claro, como diz a
+specs/08. O endereço que o ponto devolve é só um candidato: quem liga escreve a
+impressão digital do convite, ou a que já fixou, como a esperada, e o DTLS
+recusa outro certificado antes de qualquer convite, senha ou apelido sair. Um
+ponto hostil consegue, no máximo, que a pessoa não entre.
+
+**O que o ponto fica sabendo** é metadado: que endereço chamou que marca, e
+quando. Num servidor guardado o registro é livre (`MORA3`: quem escreveu
+primeiro fica enquanto o prazo vale, e só registra quem devolve o cookie que o
+ponto mandou àquele IP); na sala pessoal ele é assinado pela chave da pessoa
+(`MORO3`, as regras do ADR 0062). Quem ocupar a marca de um servidor guardado
+recebe o `CHAMADO` de quem tenta chegar, com os endereços dele. O conteúdo, o
+convite, a senha e o apelido não saem. `seele-encontro` é o programa, e o
+[`docs/ponto-de-encontro.md`](docs/ponto-de-encontro.md) diz o que ele guarda e
+o que um ponto hostil consegue.
+
+**Não há relay.** O que o caminho direto não atravessa (dois NATs que não
+deixam entrar o que não saiu) fica sem caminho, e o app diz isso em vez de
+contornar.
 
 O degrau 4 foi exercitado entre duas máquinas em redes diferentes — uma em casa
 atrás de CGNAT, outra numa rede móvel — e o convite passa a carregar o bilhete
-que abre o caminho. O ADR 0022 conta a escada inteira, e por que o degrau 5
-(retransmitir pelo servidor) está fora de escopo por decisão.
+que abre o caminho. Essa medida é da linha 1, com QUIC; a travessia entre duas
+casas pelo WebRTC da linha 2 não está medida (ADR 0063, «Não está medido»). O
+ADR 0022 conta a escada inteira, e por que o degrau 5 (retransmitir pelo
+servidor) está fora de escopo por decisão.
 
 ---
 
@@ -161,11 +189,15 @@ de release explicam cada caso.
 
 ### Só o servidor, numa linha
 
-**macOS e Linux:**
+**macOS** (Apple Silicon):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/DATA-AND-DEV/SEELE/main/install.sh | sh
 ```
+
+No Linux o mesmo script roda, lê a lista de somas do release, não acha pacote
+do servidor para o sistema e diz como compilar: os releases só publicam o
+`seeled` para macOS arm64 e Windows x64.
 
 **Windows**, num PowerShell:
 
@@ -284,6 +316,38 @@ seeled --proprietario 3cbcfb0212da738f…   # a impressão inteira, 64 hexadecim
 Sem a declaração, ninguém tem a autoridade de dono, e o `seeled` diz isso ao
 subir. A sala pessoal declara a pessoa dona dela.
 
+### Operar o servidor
+
+O `seeled` não lê arquivo de configuração. O que ele aceita é o que
+`seeled --ajuda` lista:
+
+```text
+seeled [endereço]                  sobe o servidor (padrão [::]:8383)
+seeled --proprietario <impressão>  declara o dono
+seeled senha <senha>               exige esta senha para entrar
+seeled senha --remover             volta a aceitar qualquer um
+seeled convite [para quem]         gera um convite de uso único
+seeled anexos                      mostra o teto de disco dos anexos
+seeled anexos <tamanho>            escolhe o teto (ex.: 2G, 500M)
+seeled backup <pasta>              guarda banco, anexos e perfis numa pasta nova
+seeled restore <pasta>             traz uma cópia de volta
+seeled --versao                    diz qual build é este
+```
+
+- **Onde fica o banco.** Em `$SEELE_DB`; sem a variável, em `seele.db` na pasta
+  de onde o `seeled` foi executado. Os anexos e as imagens de perfil moram em
+  pastas ao lado dele. Todo subcomando lê a mesma variável.
+- **`backup` funciona com o servidor de pé.** O banco sai por `VACUUM INTO`,
+  inteiro e sem `-wal`, com `anexos/` e `perfis/` ao lado. A pasta guarda a
+  chave do certificado e os convites: trate-a como uma senha.
+- **`restore` é com o servidor parado.** Ele confere a cópia antes de tocar em
+  qualquer coisa, põe de lado o que está no lugar com um sufixo datado, e só
+  então traz a cópia. Nada é apagado.
+- **Um sinal encerra, e não mata.** Em `SIGTERM` (o que o systemd e o Docker
+  mandam) e em `SIGINT` (Ctrl+C), o `seeled` avisa cada sessão que o servidor
+  está encerrando, espera até 3 segundos pelas despedidas e fecha. No Windows
+  só o Ctrl+C é ouvido.
+
 ---
 
 ## Compartilhar a tela
@@ -337,8 +401,9 @@ O desenho está em
 `docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`, e a
 prova em `spikes/tela-no-transporte/`. A pergunta que ela respondeu é a que mais
 importa: **quando alguém compartilha a tela e a subida da casa não dá conta, o
-que sobra da voz?** Um par QUIC inteiro num processo, com um cano de 2000 kbps
-no meio, carga com forma de vídeo e sem codec:
+que sobra da voz?** A medida é da linha 1, quando o transporte era QUIC: um par
+QUIC inteiro num processo, com um cano de 2000 kbps no meio, carga com forma de
+vídeo e sem codec:
 
 ```text
 cenário                        perda   p50 ms   p95 ms   vídeo kbps
@@ -361,6 +426,12 @@ Três conclusões, e nenhuma delas era óbvia antes de medir:
 
 A regra de aceite da v1 é uma frase: **a voz nunca cede à tela.** Quem baixa
 resolução e quem para é o vídeo.
+
+No WebRTC da linha 2 a regra é a mesma e o mecanismo mudou de nome: a tela vai
+num canal confiável (`u`), a voz no canal `voz`, e o escalonador do
+`seele-enlace` só deixa os canais de volume escreverem enquanto a associação
+tem menos de 64 KiB esperando (`crates/seele-enlace/src/ponta.rs`). A medida
+dessa regra com o limitador real está aberta como R4 na `specs/08-seguranca.md`.
 
 O que ficava de fora da primeira versão está enumerado com motivo na spec —
 doze itens, entre eles câmera, gravação e controle remoto. Três entraram
@@ -388,7 +459,9 @@ do sistema (ADR 0041) e o som da tela.
 
 Verificado **entre duas máquinas de verdade**, em redes diferentes: o furo de
 NAT abrindo caminho de uma casa atrás de CGNAT para uma rede móvel, com o ponto
-de encontro apresentando as duas pontas.
+de encontro apresentando as duas pontas. A medida é de agosto de 2026, na
+linha 1 (QUIC); a travessia pelo WebRTC da linha 2 não foi medida entre duas
+casas (ADR 0063).
 
 Ainda **não** verificado: voz por microfone real entre duas máquinas, com as
 duas pessoas se ouvindo. É a última validação que falta, e
@@ -402,14 +475,19 @@ O que está frouxo está em `docs/pendencias.md`, com nome e motivo.
 
 | onde | o quê |
 |---|---|
-| `specs/` | a fonte de verdade, escrita antes do código |
+| `specs/` | o desenho original, escrito antes do código. Onde o código divergiu, vale o código e o ADR; `specs/README.md` lista as divergências |
 | `api/` | as versões congeladas da API de MODs, e o que muda em cada uma |
 | `crates/seele-proto` | tipos do protocolo, serialização, versionamento |
-| `crates/seele-audio` | codec, jitter buffer, mixer, deriva de clock, simulador de rede |
+| `crates/seele-enlace` | o transporte: WebRTC (ICE, DTLS, canais de dados) sobre um socket UDP só |
+| `crates/seele-voz` | o caminho da voz sem E/S: portão, jitter buffer, mixer, simulador de rede |
+| `crates/seele-audio` | dispositivos, codec, supressão de ruído, ganho, deriva de clock |
+| `crates/seele-sessao` | a sessão como o servidor a conta, sem E/S, para o desktop e o navegador |
 | `crates/seele-video` | o compartilhamento de tela: captura e codec H.264 |
 | `crates/seele-core` | o núcleo: sessão, estado, voz. Tudo que pensa |
 | `crates/seele-server` | `seeled`, o servidor |
 | `crates/seele-encontro` | o ponto de encontro do furo de NAT |
+| `crates/seele-web` | o cliente do navegador, a parte que roda em `wasm` (ADR 0057) |
+| `crates/seele-motor`, `crates/seele-motor-web` | o motor de MODs do cliente, no desktop e no navegador |
 | `crates/seele-ffi` | a superfície que as cascas gráficas falam |
 | `crates/seele-lancador` | as versões lado a lado: resolver, instalar e iniciar outra versão (ADR 0046) |
 | `crates/seele-conformance` | os testes que sobem cliente e servidor de verdade, os únicos que veem os dois lados |
@@ -434,17 +512,12 @@ explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
 ## Licença
 
-Ainda não definida, mas o que a segurava saiu do caminho.
+AGPL-3.0; o texto fica em LICENSE.
 
-A interface carregava vocabulário e citações vindos de uma obra de terceiro, e
-definir direitos com isso dentro era o tipo de decisão que se toma errado. Uma
-avaliação de usabilidade mostrou que aquele vocabulário também cobrava um preço
-de quem chegava, e as duas razões apontaram para o mesmo lugar: os nomes
-passaram a ser o que as coisas são, e a marca passou a ser dois nós e uma
-ligação. O que saiu, de onde, e por quê está nos ADRs
+O que segurava a decisão era a interface carregar vocabulário e citações de uma
+obra de terceiro. Isso saiu: os nomes passaram a ser o que as coisas são, e a
+marca passou a ser dois nós e uma ligação. O que saiu, de onde, e por quê está
+nos ADRs
 [0033](docs/adr/0033-o-vocabulario-sai-da-interface-a-estetica-fica.md),
 [0034](docs/adr/0034-a-marca-abandona-as-duas-citacoes-do-anime.md) e
 [0035](docs/adr/0035-o-codigo-deixa-de-falar-evangelion.md).
-
-Fica a estética inteira, que nunca foi o problema: mono, laranja sobre
-quase-preto, canto reto, sem sombra.

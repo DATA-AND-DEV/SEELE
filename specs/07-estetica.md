@@ -1,5 +1,14 @@
 # 07 — Estética
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento continua sendo a regra da estética; três pontos dele não batem com o código.
+>
+> - **Continua valendo:** densidade, tokens de cor, tipografia, movimento, a faixa de queda sobre a sessão, a voz da interface e a exceção nomeada do tema de servidor.
+> - **Mudou:**
+>   - **a bateria interna não se apoia em migração de conexão do QUIC.** O transporte é WebRTC, que não migra: uma troca de rede derruba o ICE e o cliente reconecta com um aperto de mão novo ([ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md); `specs/02-protocolo.md`, «Keepalive e queda»). O período de graça de cinco minutos continua;
+>   - **não há TUI.** `crates/seele-tui/src/ui.rs`, citado abaixo como guarda do katakana, não existe mais (ADR 0039). As frases que estendem uma regra «à TUI» valem só para o app;
+>   - **`--seele-raio` não vale `0` hoje.** `apps/seele-app/ui/tokens.css` o define em `16px`, com uma família de raios ao lado; `--seele-sombra` continua `none`. Não achei ADR que registre essa troca: a regra de canto reto abaixo e o código divergem, e a decisão sobre qual dos dois vale está em aberto.
+> - **Manda agora:** este documento, menos os três pontos acima.
+
 > **Nota — 2026-08-31.** Este documento se chamava `07-tema-evangelion.md` e
 > carregava, além da estética, um glossário de vocabulário temático apresentado
 > como «obrigatório em toda a superfície do produto».

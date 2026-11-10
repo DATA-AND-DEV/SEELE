@@ -1,5 +1,18 @@
 # 02 — Protocolo
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original, com emendas parciais da 0.17.
+>
+> - **Continua valendo:** os três papéis (controle, fluxos, voz) na tabela da linha 2; o envelope; o cabeçalho de 11 bytes da voz (`crates/seele-proto/src/media.rs`); o servidor encaminhar a voz sem tocar no payload; os motivos de erro enumerados; os tempos do enlace (20 s ocioso, 5 s de keepalive, 10 s de aperto, em `crates/seele-proto/src/transport.rs`).
+> - **Mudou:**
+>   - **a serialização está decidida:** `postcard` (ADR 0001, `crates/seele-proto/Cargo.toml`);
+>   - **o anfitrião é ICE completo e controlado.** As duas menções a «ICE-lite» abaixo estão vencidas: emenda de 26/10/2026 ao [ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md), `crates/seele-enlace/src/ponta.rs`;
+>   - **a faixa de versões não é `[10, 10]`.** O piso continua 10 e o topo é 12 (`VERSAO_MINIMA` e `PROTOCOL_VERSION` em `crates/seele-proto/src/version.rs`). Depois do `Hello` cada lado carimba com o número negociado (`control::encode_em`);
+>   - **o byte `ver` da voz é o número do cabeçalho de voz**, e não o do protocolo (`MEDIA_HEADER_VERSION`, `media.rs`);
+>   - **há dois canais a mais:** `t` (túnel, confiável) e `j` (jogo, sem ordem e sem retransmissão), em `crates/seele-proto/src/transport.rs`;
+>   - **os nomes das mensagens nas tabelas são os do desenho** (`Ola`, `InserirPlug`, `DefinirATField`). Os de hoje estão em `crates/seele-proto/src/control.rs` (`Hello` e seguintes), depois do ADR 0035;
+>   - a tela viaja em canal confiável `u`, encaminhada pelo servidor (`crates/seele-server/src/tela.rs`). Este documento não a descreve.
+> - **Manda agora:** `crates/seele-proto` (o fio), `crates/seele-enlace` (os canais) e o ADR 0063.
+
 ## Camadas
 
 **Desde a 0.17 (linha 2, ADR 0063), a conexão é WebRTC**, e as três coisas abaixo viajam em canais de dados:

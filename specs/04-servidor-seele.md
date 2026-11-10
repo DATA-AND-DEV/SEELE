@@ -1,5 +1,17 @@
 # 04 — Servidor (seeled)
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original; a seção de cargos já é a da 0.17.
+>
+> - **Continua valendo:** o servidor encaminha a voz sem decodificar; cargos e permissões como descritos abaixo (ADR 0064); SQLite com migrações embutidas; toda ação validada no servidor.
+> - **Mudou:**
+>   - **não existe arquivo TOML.** A seção «Configuração» abaixo nunca foi implementada. O `seeled` recebe o endereço e `--proprietario` pela linha de comando, e o caminho do banco por `SEELE_DB` (padrão `seele.db` na pasta atual). Senha, convite e teto de anexos são subcomandos que escrevem no banco: `seeled senha`, `seeled convite`, `seeled anexos` (`crates/seele-server/src/main.rs`, função `uso`);
+>   - **não há endpoint de saúde nem métricas Prometheus.** Nada em `crates/seele-server` os implementa;
+>   - **o desligamento gracioso existe, com outro motivo:** em `SIGTERM` e `SIGINT` o `seeled` manda `Disconnecting` com `ServerShuttingDown` (e não `ManutencaoProgramada`) a cada sessão, espera até 3 s e fecha (`main.rs`, `Daemon::encerrar_avisando` em `lib.rs`). No Windows só o Ctrl+C é ouvido;
+>   - **há cópia e restauração:** `seeled backup <pasta>` e `seeled restore <pasta>` (`crates/seele-server/src/copia.rs`);
+>   - **o transporte é o do `seele-enlace`:** onde o texto diz «datagram», leia-se mensagem do canal `voz` (ADR 0063). O servidor também encaminha a tela (`crates/seele-server/src/tela.rs`) e guarda anexos com teto (ADR 0027);
+>   - o teto da sala é contado pela subida, e não só declarado (ADR 0038).
+> - **Manda agora:** `crates/seele-server/src/main.rs` para a operação, o ADR 0064 para a autoridade e o `README.md` da raiz, seção «Operar o servidor».
+
 ## Identidade
 
 O daemon se chama `seeled`. Uma instância é um **Server Central**. Internamente, três subsistemas nomeados — não é decoração: são fronteiras reais de módulo, e o estado de cada um aparece nas telas de diagnóstico do cliente.

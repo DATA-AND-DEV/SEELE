@@ -1,5 +1,15 @@
 # 10 — Convenções
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026).
+>
+> - **Continua valendo:** `rustfmt` e `clippy -D warnings`, `thiserror` e `anyhow`, a regra do `unwrap`, Conventional Commits, um ADR por decisão, SemVer, as duas linhas de protocolo, o que nunca se loga.
+> - **Mudou:**
+>   - **a linha de teste da TUI saiu** com o `seele-tui` (ADR 0039);
+>   - **o código não está só em inglês.** Os crates mais novos têm identificadores e comentários em português (`crates/seele-enlace`, `crates/seele-server/src/copia.rs`). O ADR 0023 registrou o começo da deriva no `seele-core` e mandou o código novo voltar ao inglês; não achei ADR que decida o contrário, e a regra abaixo e o código divergem;
+>   - **as exceções ao `unsafe` não são «`seele-ffi` e bindings de áudio»:** o workspace proíbe (`unsafe_code = "forbid"`, que a `seele-ffi` herda), e seis crates trocam por `deny` com exceção nomeada no próprio `Cargo.toml`: `seele-audio`, `seele-core`, `seele-video` (ADR 0041), `seele-web`, `seele-motor-web` e `apps/seele-instalador`;
+>   - **o carimbo de versão é o negociado, e não o global.** O parágrafo «A janela vale só para o lado que ouve» descreve a história de antes: depois do `Hello`, cada lado carimba com o número negociado (`control::encode_em`; `crates/seele-proto/src/version.rs`). A linha 2 fala hoje do 10 ao 12.
+> - **Manda agora:** os ADRs 0058 e 0063 para versões, e o `Cargo.toml` de cada crate para as exceções de `unsafe`.
+
 ## Idioma
 
 - **Código, identificadores, tipos e comentários: inglês.** É o padrão do ecossistema Rust e mantém o projeto aberto a contribuição externa.
