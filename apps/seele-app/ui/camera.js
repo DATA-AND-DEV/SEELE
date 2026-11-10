@@ -78,6 +78,26 @@ const FRACAO_DO_TETO_DA_CAMERA = 0.85;
 /** Quantos quadros a captura pula depois de um quadro-chave, que sai em fatias. */
 const QUADROS_APOS_A_CHAVE = 3;
 
+/**
+ * Com quantos quadros na fila do núcleo a captura deixa de codificar: a metade
+ * da fila (`FILA_DE_FORA` = 8, em `seele-core/src/de_fora.rs`).
+ *
+ * O `quadro_da_camera` devolve quantos quadros estão na fila. Um quadro
+ * **recusado** já foi codificado: o seguinte foi predito dele, e a recusa
+ * custa um quadro-chave. Um quadro que **não foi codificado** não custa nada.
+ * Parar na metade é a contrapressão que a tela do sistema tem (a bomba dela
+ * espera em vez de codificar) — medido em 10/11/2026, a recusa seguida de
+ * chave era 27 pontos dos 43% de tempo congelado a 1% de perda.
+ */
+const LIMIAR_DA_FILA_DA_CAMERA = 4;
+
+/**
+ * De quanto em quanto tempo, com a fila acima do limiar, a captura manda um
+ * quadro mesmo assim. O número da fila só chega na resposta de um quadro: sem
+ * esta sonda, a captura que parou nunca saberia que a fila esvaziou.
+ */
+const SONDA_DA_FILA_DA_CAMERA_MS = 100;
+
 /** O prazo para o servidor dar nome à câmera depois do pedido. */
 const PRAZO_DA_CAMERA_MS = 10_000;
 
@@ -148,6 +168,9 @@ const cameraDaJanela = {
   pular: 0,
   banda: 0,
   enviando: 0,
+  /** Quantos quadros o núcleo tinha na fila na última resposta, e quando. */
+  naFila: 0,
+  naFilaEm: 0,
   prazo: null,
   vez: 0,
   /** Um retrato já mostrou esta câmera como a transmissão desta pessoa. */
@@ -187,6 +210,8 @@ function soltarACamera() {
   cameraDaJanela.codificacao = null;
   cameraDaJanela.recusados = 0;
   cameraDaJanela.enviando = 0;
+  cameraDaJanela.naFila = 0;
+  cameraDaJanela.naFilaEm = 0;
   cameraDaJanela.noRetrato = false;
 }
 
@@ -350,7 +375,11 @@ async function mandarOQuadroDaCamera(chave, bytes, vez) {
   }
   cameraDaJanela.enviando += 1;
   try {
-    await invocarNaJanela("quadro_da_camera", bytes, { headers: cabecalhos });
+    const naFila = await invocarNaJanela("quadro_da_camera", bytes, { headers: cabecalhos });
+    if (vez === cameraDaJanela.vez) {
+      cameraDaJanela.naFila = Number(naFila) || 0;
+      cameraDaJanela.naFilaEm = performance.now();
+    }
   } catch (falha) {
     if (vez !== cameraDaJanela.vez) return;
     // O quadro que não foi era referência do seguinte: o próximo é chave.
@@ -393,6 +422,18 @@ function armarOCodificadorDaCamera(vez) {
   cameraDaJanela.pular = 0;
 }
 
+/**
+ * Se a fila do núcleo passou do limiar e ainda não é hora de sondá-la.
+ *
+ * A última resposta do `quadro_da_camera` diz quantos quadros esperavam. Acima
+ * do limiar a captura não codifica — a não ser um quadro a cada
+ * `SONDA_DA_FILA_DA_CAMERA_MS`, que é como ela fica sabendo que a fila andou.
+ */
+function filaDoNucleoCheia() {
+  return cameraDaJanela.naFila >= LIMIAR_DA_FILA_DA_CAMERA &&
+    performance.now() - cameraDaJanela.naFilaEm < SONDA_DA_FILA_DA_CAMERA_MS;
+}
+
 /** Lê a câmera e codifica, na cadência e nas medidas pedidas. */
 async function codificarACamera(vez) {
   const { largura, altura, quadros } = cameraDaJanela.codificacao;
@@ -425,11 +466,14 @@ async function codificarACamera(vez) {
     const original = lido.value;
     const codificador = cameraDaJanela.codificador;
     const agora = original.timestamp;
-    // Parada pelo sinal, fora da cadência, ou com a fila de envio cheia: o
-    // quadro não entra. O que ficou de fora por fila faz do próximo uma chave.
-    const cheia = cameraDaJanela.enviando > 4 || (codificador?.encodeQueueSize ?? 0) > 2;
+    // Parada pelo sinal, fora da cadência, ou com uma das filas cheia: o
+    // quadro não entra no codificador. **E o próximo não precisa ser chave**:
+    // o que ficou de fora aqui nunca foi codificado, e nenhum quadro foi
+    // predito dele. Chave é para o quadro codificado que se perdeu
+    // (`mandarOQuadroDaCamera`).
+    const cheia = cameraDaJanela.enviando > 4 || (codificador?.encodeQueueSize ?? 0) > 2 ||
+      filaDoNucleoCheia();
     if (!codificador || cameraDaJanela.estado !== "no-ar" || agora - ultimo < intervaloUs || cheia) {
-      if (cheia) cameraDaJanela.chave = true;
       original.close();
       continue;
     }

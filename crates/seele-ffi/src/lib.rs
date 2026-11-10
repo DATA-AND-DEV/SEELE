@@ -4375,7 +4375,12 @@ impl Connection {
     ///   não foi, e o próximo tem de ser chave;
     /// - [`ConnectionError::CameraBadSize`] para um quadro vazio ou maior que
     ///   o fio carrega.
-    pub fn quadro_da_camera(&self, chave: bool, bytes: Vec<u8>) -> Result<(), ConnectionError> {
+    ///
+    /// Quando o quadro entra, volta **quantos estão na fila, contando este**
+    /// (`seele_core::de_fora::EntradaDeFora::quadro`): a casca deixa de
+    /// codificar com a fila pela metade, em vez de esperar a recusa — que
+    /// custa um quadro-chave.
+    pub fn quadro_da_camera(&self, chave: bool, bytes: Vec<u8>) -> Result<u32, ConnectionError> {
         let entrada = self
             .shared
             .camera
@@ -4383,28 +4388,31 @@ impl Connection {
             .ok()
             .and_then(|camera| camera.clone())
             .ok_or(ConnectionError::CameraNotLive)?;
-        entrada.quadro(chave, bytes).map_err(|recusa| match recusa {
-            seele_core::de_fora::RecusaDeFora::FilaCheia { recusados } => {
-                // Dito uma vez por potência de dois: a 30 quadros por segundo,
-                // uma linha por recusa seria o próprio registro a engasgar.
-                if recusados.is_power_of_two() {
-                    tracing::warn!(
-                        recusados,
-                        "a fila de quadros da câmera encheu: a rede não leva no passo de quem \
+        let na_fila = entrada
+            .quadro(chave, bytes)
+            .map_err(|recusa| match recusa {
+                seele_core::de_fora::RecusaDeFora::FilaCheia { recusados } => {
+                    // Dito uma vez por potência de dois: a 30 quadros por segundo,
+                    // uma linha por recusa seria o próprio registro a engasgar.
+                    if recusados.is_power_of_two() {
+                        tracing::warn!(
+                            recusados,
+                            "a fila de quadros da câmera encheu: a rede não leva no passo de quem \
                          codifica"
-                    );
+                        );
+                    }
+                    ConnectionError::CameraQueueFull { dropped: recusados }
                 }
-                ConnectionError::CameraQueueFull { dropped: recusados }
-            }
-            seele_core::de_fora::RecusaDeFora::Fechada => {
-                self.shared.largar_a_camera();
-                ConnectionError::CameraNotLive
-            }
-            seele_core::de_fora::RecusaDeFora::Vazio
-            | seele_core::de_fora::RecusaDeFora::GrandeDemais { .. } => {
-                ConnectionError::CameraBadSize
-            }
-        })
+                seele_core::de_fora::RecusaDeFora::Fechada => {
+                    self.shared.largar_a_camera();
+                    ConnectionError::CameraNotLive
+                }
+                seele_core::de_fora::RecusaDeFora::Vazio
+                | seele_core::de_fora::RecusaDeFora::GrandeDemais { .. } => {
+                    ConnectionError::CameraBadSize
+                }
+            })?;
+        Ok(u32::try_from(na_fila).unwrap_or(u32::MAX))
     }
 
     /// Tira da última listagem a fonte que a casca escolheu.

@@ -151,7 +151,8 @@ function instalarAPonte({ estado, tabela, semCodificador, semCamera }) {
             const falha = typeof banca.falharOQuadro === "function" ? banca.falharOQuadro() : banca.falharOQuadro;
             if (falha) throw falha;
           }
-          return null;
+          // O que o comando devolve: quantos quadros o núcleo tem na fila.
+          return banca.naFila ?? 1;
         }
         banca.chamadas.push({ cmd, args: args ? JSON.parse(JSON.stringify(args)) : null });
         if (Object.hasOwn(comandos, cmd)) return comandos[cmd](args ?? {});
@@ -402,6 +403,30 @@ async function aCameraNoAr(navegador, servidor, medida) {
   await pagina.waitForFunction((n) => banca.quadros.slice(n + 1).some((quadro) => quadro.cabecalhos["seele-chave"] === "1"), antesDaFila);
   await captura(pagina, `camera-fila-cheia-${sufixo}`);
   await pagina.evaluate(() => { banca.falharOQuadro = null; });
+
+  // ---- 4b. a fila do núcleo pela metade: a captura deixa de codificar, e
+  // **não pede quadro-chave por isso** — o quadro que não foi codificado não
+  // era referência de nenhum. Sobra um quadro a cada 100 ms, que é como a
+  // janela fica sabendo que a fila andou.
+  await pagina.waitForTimeout(600);
+  const contarPor = async (ms) => {
+    const de = (await quadros(pagina)).length;
+    await pagina.waitForTimeout(ms);
+    return (await quadros(pagina)).slice(de);
+  };
+  const livres = await contarPor(1000);
+  await pagina.evaluate(() => { banca.naFila = 6; });
+  await pagina.waitForTimeout(300);
+  const contidos = await contarPor(1000);
+  await pagina.evaluate(() => { banca.naFila = 1; });
+  await pagina.waitForTimeout(300);
+  const soltos = await contarPor(1000);
+  assert.ok(livres.length >= 15, `com a fila vazia saíram só ${livres.length} quadros num segundo`);
+  assert.ok(contidos.length >= 5 && contidos.length <= 13,
+    `com a fila do núcleo em 6 saíram ${contidos.length} quadros num segundo: a captura não se conteve (ou parou de sondar)`);
+  assert.ok(soltos.length >= 15, `a fila esvaziou e a captura não voltou: ${soltos.length} quadros num segundo`);
+  assert.equal([...contidos, ...soltos].filter((quadro) => quadro.cabecalhos["seele-chave"] === "1").length, 0,
+    "conter a captura pela fila custou um quadro-chave, e nenhum quadro codificado tinha se perdido");
 
   // ---- 8. desligar
   await clicar(pagina);

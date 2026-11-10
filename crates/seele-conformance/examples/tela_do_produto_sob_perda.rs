@@ -12,6 +12,7 @@
 //!     [--segundos 20] [--rodadas 3] [--semente 20261110] [--so <pedaço do cenário>] \
 //!     [--variante produto|fixo|cru|ambas|todas] [--aquecimento 0] [--atraso-ms 30] \
 //!     [--fracao 0.85] [--fator-da-chave 8] [--sem-chave-na-troca] [--recusa-sem-chave] \
+//!     [--sem-contrapressao] \
 //!     [--escolha-bps 1470000] [--caminho-do-servidor-bps 50000000]
 //! ```
 //!
@@ -113,6 +114,10 @@ const DELTA_FIXO: usize = 6 * 1024;
 const CHAVE_FIXA: usize = 80 * 1024;
 /// `QUADROS_APOS_A_CHAVE` de `apps/seele-app/ui/camera.js`.
 const QUADROS_APOS_A_CHAVE: u32 = 3;
+/// `LIMIAR_DA_FILA_DA_CAMERA` de `camera.js`.
+const LIMIAR_DA_FILA_DA_CAMERA: u32 = 4;
+/// `SONDA_DA_FILA_DA_CAMERA_MS` de `camera.js`.
+const SONDA_DA_FILA_DA_CAMERA: Duration = Duration::from_millis(100);
 /// O piso de `configuracaoDaCamera` em `camera.js`: `Math.max(100_000, …)`.
 const PISO_DO_CODIFICADOR_BPS: f64 = 100_000.0;
 /// Código de início, tipo da NAL, número do quadro (8) e instante (8).
@@ -223,6 +228,9 @@ struct Opcoes {
     aquecimento: u64,
     atraso_ms: u64,
     recusa_sem_chave: bool,
+    /// A contrapressão da casca pela fila do núcleo. `--sem-contrapressao` a
+    /// desliga, e é a casca de antes de 10/11/2026.
+    contrapressao: bool,
 }
 
 fn opcoes() -> Opcoes {
@@ -240,6 +248,7 @@ fn opcoes() -> Opcoes {
         aquecimento: 0,
         atraso_ms: ATRASO.as_millis() as u64,
         recusa_sem_chave: false,
+        contrapressao: true,
     };
     let mut argumentos = std::env::args().skip(1);
     while let Some(nome) = argumentos.next() {
@@ -272,6 +281,7 @@ fn opcoes() -> Opcoes {
             "--aquecimento" => opcoes.aquecimento = valor().parse().expect("--aquecimento"),
             "--atraso-ms" => opcoes.atraso_ms = valor().parse().expect("--atraso-ms"),
             "--recusa-sem-chave" => opcoes.recusa_sem_chave = true,
+            "--sem-contrapressao" => opcoes.contrapressao = false,
             outra => panic!("opção desconhecida: {outra}"),
         }
     }
@@ -925,9 +935,22 @@ async fn celula(
             let mut numero = 0_u64;
             let mut configurado = 0_u32;
             let mut pular = 0_u32;
+            // A contrapressão da casca (`camera.js`, `filaDoNucleoCheia`): com a
+            // fila do núcleo pela metade ela não codifica, a não ser um quadro
+            // a cada 100 ms, que é como fica sabendo que a fila andou.
+            let mut na_fila = 0_u32;
+            let mut na_fila_em = Instant::now();
             while Instant::now() < fim {
                 relogio.tick().await;
                 let na_janela = Instant::now() >= comeco;
+                if variante == Variante::Produto
+                    && opcoes.contrapressao
+                    && na_fila >= LIMIAR_DA_FILA_DA_CAMERA
+                    && na_fila_em.elapsed() < SONDA_DA_FILA_DA_CAMERA
+                {
+                    contado.pulados += u64::from(na_janela);
+                    continue;
+                }
                 if olhos.parada.load(Ordering::SeqCst) {
                     contado.parados += u64::from(na_janela);
                     continue;
@@ -966,7 +989,9 @@ async fn celula(
                 let bytes = quadro(chave, numero, agora_ns(), tamanho);
                 let tamanho = bytes.len() as u64;
                 match transmite.quadro_da_camera(chave, bytes) {
-                    Ok(()) => {
+                    Ok(esperando) => {
+                        na_fila = esperando;
+                        na_fila_em = Instant::now();
                         if na_janela {
                             contado.aceitos.push(numero);
                             contado.bytes += tamanho;

@@ -13491,7 +13491,7 @@ const CABECALHO_DA_GERACAO: &str = "seele-geracao";
 fn quadro_da_camera(
     session: State<'_, Session>,
     request: tauri::ipc::Request<'_>,
-) -> Result<(), ConnectionError> {
+) -> Result<u32, ConnectionError> {
     let (carimbo, chave) = cabecalhos_do_quadro(request.headers())?;
     let bytes = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),

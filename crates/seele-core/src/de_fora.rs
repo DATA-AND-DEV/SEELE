@@ -125,7 +125,17 @@ impl EntradaDeFora {
     ///
     /// [`RecusaDeFora`], e nenhuma delas é silenciosa: a fila cheia é contada
     /// ([`Self::recusados`]) e volta com a contagem.
-    pub fn quadro(&self, chave: bool, bytes: Vec<u8>) -> Result<(), RecusaDeFora> {
+    ///
+    /// # O que volta quando o quadro entra
+    ///
+    /// **Quantos quadros estão na fila, contando este.** É a contrapressão de
+    /// quem codifica: um quadro já codificado que é recusado quebra a predição
+    /// do seguinte e custa um quadro-chave, e um quadro que **não foi
+    /// codificado** não custa nada. Com este número a casca deixa de codificar
+    /// quando a fila passa da metade ([`FILA_DE_FORA`]) em vez de descobrir que
+    /// ela encheu pela recusa. Medido em 10/11/2026: a recusa seguida de chave
+    /// era 27 pontos dos 43% de tempo congelado a 1% de perda.
+    pub fn quadro(&self, chave: bool, bytes: Vec<u8>) -> Result<usize, RecusaDeFora> {
         if bytes.is_empty() {
             return Err(RecusaDeFora::Vazio);
         }
@@ -139,7 +149,8 @@ impl EntradaDeFora {
         }
         // Reservada antes de entrar, e devolvida se não coube: duas chamadas
         // ao mesmo tempo não passam as duas pela última vaga.
-        if self.na_fila.fetch_add(1, Ordering::AcqRel) >= FILA_DE_FORA {
+        let antes = self.na_fila.fetch_add(1, Ordering::AcqRel);
+        if antes >= FILA_DE_FORA {
             self.na_fila.fetch_sub(1, Ordering::AcqRel);
             let recusados = self.recusados.fetch_add(1, Ordering::Relaxed) + 1;
             return Err(RecusaDeFora::FilaCheia { recusados });
@@ -148,7 +159,7 @@ impl EntradaDeFora {
             self.na_fila.fetch_sub(1, Ordering::AcqRel);
             return Err(RecusaDeFora::Fechada);
         }
-        Ok(())
+        Ok(antes + 1)
     }
 
     /// Quantos quadros foram recusados por fila cheia desde o começo.
@@ -583,8 +594,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_fila_cheia_recusa_com_nome_e_conta() {
         let (entrada, _quadros) = canal_de_fora(640, 360);
-        for _ in 0..FILA_DE_FORA {
-            entrada.quadro(false, vec![1]).unwrap();
+        // Cada quadro que entra diz quantos estão na fila com ele: é por este
+        // número que quem codifica para antes da recusa.
+        for esperado in 1..=FILA_DE_FORA {
+            assert_eq!(entrada.quadro(false, vec![1]), Ok(esperado));
         }
         assert_eq!(
             entrada.quadro(false, vec![1]),
