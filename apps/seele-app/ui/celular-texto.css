@@ -252,6 +252,8 @@
 :where(:root[data-casca="celular"]) .busca-contador { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .previa-convite-frase { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .previa-convite-acao { font-size: calc(10px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha-canais,
+:where(:root[data-casca="celular"]) .linha-pessoas { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-frase { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-quem { font-size: inherit; }
 :where(:root[data-casca="celular"]) .operador-inicial { font-size: calc(13px * var(--cel-escala)); }
@@ -276,12 +278,6 @@
 :where(:root[data-casca="celular"]) .pessoa-avatar { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .metrica .rotulo { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .telemetria .rotulo { font-size: calc(12px * var(--cel-escala)); }
-@media (max-width: 1240px) {
-  :where(:root[data-casca="celular"]) .linha-pessoas { font-size: calc(11px * var(--cel-escala)); }
-}
-@media (max-width: 900px) {
-  :where(:root[data-casca="celular"]) .linha-canais { font-size: calc(11px * var(--cel-escala)); }
-}
 @media(max-width: 700px) {
   :where(:root[data-casca="celular"]) #form-mensagem #botao-enviar { font-size: calc(11px * var(--cel-escala)); }
 }
