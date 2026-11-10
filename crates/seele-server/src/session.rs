@@ -972,10 +972,11 @@ async fn handshake(
     };
     let senha_confere = if politica.tem_senha() && join_secret.is_some() {
         let (politica, segredo) = (politica.clone(), join_secret.clone());
-        // Uma tarefa que morre é uma senha que não conferiu: falha fechada.
-        tokio::task::spawn_blocking(move || politica.senha_confere(segredo.as_deref()))
-            .await
-            .unwrap_or(false)
+        // Sob o teto de `ARGON2_SIMULTANEOS`: isto é antes de autenticar.
+        crate::admissao::conferir_fora_do_executor(move || {
+            politica.senha_confere(segredo.as_deref())
+        })
+        .await
     } else {
         false
     };
@@ -3279,11 +3280,15 @@ async fn run_session(
                                     .tentar(session.person, id, Instant::now());
                                 if pode_tentar {
                                     let (fechadura, senha) = (fechadura.clone(), password.clone());
-                                    let certa = tokio::task::spawn_blocking(move || {
-                                        crate::admissao::senha_abre(&fechadura, senha.as_deref())
-                                    })
-                                    .await
-                                    .unwrap_or(false);
+                                    let certa = crate::admissao::conferir_fora_do_executor(
+                                        move || {
+                                            crate::admissao::senha_abre(
+                                                &fechadura,
+                                                senha.as_deref(),
+                                            )
+                                        },
+                                    )
+                                    .await;
                                     if certa {
                                         server
                                             .occupancy
