@@ -598,6 +598,8 @@ enum Comando {
     Dizer {
         linha: ChannelId,
         corpo: String,
+        /// A mensagem a que esta responde, se responde a alguma.
+        responde_a: Option<MessageId>,
         id: ClientMessageId,
     },
     Historico {
@@ -669,6 +671,16 @@ enum Comando {
     RemoverMensagem {
         mensagem: MessageId,
     },
+    /// Os três verbos do protocolo 13. Nenhum volta na reconexão, pelo motivo
+    /// de `Banir` e `RemoverMensagem`: ver `Motor::lembrar`.
+    EditarMensagem {
+        mensagem: MessageId,
+        corpo: String,
+    },
+    Desbanir {
+        pessoa: PersonId,
+    },
+    ListarBanidos,
     MoverPersono {
         pessoa: PersonId,
         voice_room: VoiceRoomId,
@@ -837,6 +849,9 @@ impl Comando {
             Self::Cargo(_) => "Cargo",
             Self::Banir { .. } => "Banir",
             Self::RemoverMensagem { .. } => "RemoverMensagem",
+            Self::EditarMensagem { .. } => "EditarMensagem",
+            Self::Desbanir { .. } => "Desbanir",
+            Self::ListarBanidos => "ListarBanidos",
             Self::MoverPersono { .. } => "MoverPersono",
             Self::ApagarVoiceRoom { .. } => "ApagarVoiceRoom",
             Self::ApagarLinha { .. } => "ApagarLinha",
@@ -940,6 +955,9 @@ pub struct Anexo {
     pub id: ClientMessageId,
     /// O que a pessoa escreveu ao lado do arquivo. Pode ser vazio.
     pub corpo: String,
+    /// A mensagem a que esta responde, se responde a alguma. O servidor
+    /// confere que ela é do mesmo canal, como no envio sem arquivo.
+    pub responde_a: Option<MessageId>,
     /// Onde o arquivo está nesta máquina. Nunca sai daqui.
     pub caminho: std::path::PathBuf,
     /// Que nome dar a ele do outro lado.
@@ -2524,13 +2542,22 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
+    ///
+    /// `responde_a` é a mensagem a que esta responde, ou `None`.
     pub async fn dizer(
         &self,
         linha: ChannelId,
         corpo: String,
+        responde_a: Option<MessageId>,
         id: ClientMessageId,
     ) -> Result<(), Fechado> {
-        self.mandar(Comando::Dizer { linha, corpo, id }).await
+        self.mandar(Comando::Dizer {
+            linha,
+            corpo,
+            responde_a,
+            id,
+        })
+        .await
     }
 
     /// Pede histórico.
@@ -2820,6 +2847,42 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn remover_mensagem(&self, mensagem: MessageId) -> Result<(), Fechado> {
         self.mandar(Comando::RemoverMensagem { mensagem }).await
+    }
+
+    /// Pede ao servidor que reescreva o corpo de uma mensagem própria
+    /// (protocolo 13).
+    ///
+    /// **O portão de versão é de quem chama** ([`seele_sessao::perfil::portao_do_cliente`],
+    /// com o número negociado): a fila não devolve o motivo de um comando que
+    /// não saiu. O motor confere de novo, e um servidor que negociou menos
+    /// não recebe o verbo — só o registro fica sabendo.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn editar_mensagem(&self, mensagem: MessageId, corpo: String) -> Result<(), Fechado> {
+        self.mandar(Comando::EditarMensagem { mensagem, corpo })
+            .await
+    }
+
+    /// Pede ao servidor que tire todo banimento de uma conta (protocolo 13).
+    /// O portão de versão é de quem chama, como em [`Self::editar_mensagem`].
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn desbanir(&self, pessoa: PersonId) -> Result<(), Fechado> {
+        self.mandar(Comando::Desbanir { pessoa }).await
+    }
+
+    /// Pede a lista de banidos (protocolo 13). O portão de versão é de quem
+    /// chama, como em [`Self::editar_mensagem`].
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn listar_banidos(&self) -> Result<(), Fechado> {
+        self.mandar(Comando::ListarBanidos).await
     }
 
     /// Pede ao servidor que mova alguém para uma sala de voz.
@@ -4682,7 +4745,12 @@ impl Motor {
             }
             Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
-            Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
+            Comando::Dizer {
+                linha,
+                corpo,
+                responde_a,
+                id,
+            } => cliente.send_message(linha, &corpo, responde_a, id).await,
             Comando::ImagemDeMod {
                 pedido,
                 bytes,
@@ -4766,6 +4834,11 @@ impl Motor {
                     .await
             }
             Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
+            Comando::EditarMensagem { mensagem, corpo } => {
+                cliente.edit_message(mensagem, &corpo).await
+            }
+            Comando::Desbanir { pessoa } => cliente.unban_person(pessoa).await,
+            Comando::ListarBanidos => cliente.list_bans().await,
             Comando::MoverPersono { pessoa, voice_room } => {
                 cliente.move_person(pessoa, voice_room).await
             }
@@ -4807,7 +4880,7 @@ impl Motor {
                         channel: anexo.linha,
                         client_message_id: anexo.id,
                         body: &anexo.corpo,
-                        replies_to: None,
+                        replies_to: anexo.responde_a,
                         path: &anexo.caminho,
                         file_name: &anexo.nome,
                         declared_type: &anexo.tipo,
@@ -10369,6 +10442,7 @@ mod tests {
         motor.lembrar(&Comando::Dizer {
             linha: ChannelId(1),
             corpo: "oi".into(),
+            responde_a: None,
             id: ClientMessageId(1),
         });
         assert_eq!(motor.linha, None);
@@ -10397,6 +10471,17 @@ mod tests {
         motor.lembrar(&Comando::RemoverMensagem {
             mensagem: MessageId(1),
         });
+        // E os do protocolo 13: uma edição refeita minutos depois reescreveria
+        // por cima de uma edição mais nova, e um desbanimento refeito desfaria
+        // o banimento que alguém pôs de novo no intervalo.
+        motor.lembrar(&Comando::EditarMensagem {
+            mensagem: MessageId(1),
+            corpo: "outra coisa".into(),
+        });
+        motor.lembrar(&Comando::Desbanir {
+            pessoa: PersonId(9),
+        });
+        motor.lembrar(&Comando::ListarBanidos);
 
         assert_eq!(
             motor.voice_room,

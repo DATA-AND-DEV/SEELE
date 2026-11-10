@@ -457,6 +457,18 @@ pub struct Channel {
     pub name: String,
     /// Whether this is the Channel being read.
     pub open: bool,
+    /// Quantas mensagens de outras pessoas chegaram neste canal sem ele estar
+    /// aberto ([`Room::nao_lidas`]). Zero no canal aberto.
+    ///
+    /// **Só desta sessão, e só do que chegou.** A conta não é gravada em
+    /// lugar nenhum — nem no servidor, nem nesta máquina —, então fechar o
+    /// app a zera. E o servidor só manda a conversa de um canal a quem o
+    /// abriu nesta conexão (`JoinChannel`): um canal que ainda não foi aberto
+    /// nesta sessão fica em zero, haja o que houver nele.
+    pub nao_lidas: u32,
+    /// Quantas dessas chamam quem está logado (`@apelido`,
+    /// [`Room::mencoes_nao_lidas`]). Com os mesmos dois limites.
+    pub mencoes: u32,
 }
 
 /// Something worth surfacing.
@@ -720,6 +732,44 @@ pub fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
         .collect()
 }
 
+/// Um banimento que vale agora, como a tela de banidos o lê (protocolo 13).
+///
+/// `nickname` é o apelido **como o servidor o guarda** — o alias, com a marca
+/// (`ana#K7Q2`) —, como o de um membro do FORA DO AR. A base que a tela
+/// mostra sai de `identidades_apresentadas`, no
+/// retrato, pela conta `person`: o servidor manda a identidade apresentada de
+/// cada banido atrás da lista.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Banido {
+    /// A conta banida.
+    pub person: u64,
+    /// O apelido dela, como o servidor o guarda.
+    pub nickname: String,
+    /// O que quem baniu escreveu, se escreveu.
+    pub reason: Option<String>,
+    /// Quando o banimento acaba, em **segundos** desde a época. `None` é
+    /// permanente.
+    pub expires_at: Option<i64>,
+    /// Quem baniu.
+    pub issued_by: Option<u64>,
+}
+
+/// A lista de banidos desta sessão, como chegou da última vez que foi pedida
+/// ([`Room::banidos`]): vazia até alguém pedir.
+#[must_use]
+pub fn banidos_de(room: &Room) -> Vec<Banido> {
+    room.banidos
+        .iter()
+        .map(|banido| Banido {
+            person: banido.person.0,
+            nickname: banido.nickname.clone(),
+            reason: banido.reason.clone(),
+            expires_at: banido.expires_at,
+            issued_by: banido.issued_by.map(|quem| quem.0),
+        })
+        .collect()
+}
+
 /// As linhas de texto, com a que está aberta marcada.
 pub fn lines_of(room: &Room) -> Vec<Channel> {
     room.channels
@@ -728,6 +778,8 @@ pub fn lines_of(room: &Room) -> Vec<Channel> {
             id: channel.id.0,
             name: channel.name.clone(),
             open: room.current_channel == Some(channel.id),
+            nao_lidas: u32::try_from(room.nao_lidas(channel.id)).unwrap_or(u32::MAX),
+            mencoes: u32::try_from(room.mencoes_nao_lidas(channel.id)).unwrap_or(u32::MAX),
         })
         .collect()
 }

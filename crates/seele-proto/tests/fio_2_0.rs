@@ -47,7 +47,7 @@ use seele_proto::cargos::{
 };
 use seele_proto::control::{
     encode_em, recusa_por_versao, AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal,
-    AttachmentState, CausaDaRecusa, ChannelInfo, ClientMessage, ConsentimentoDePar,
+    AttachmentState, Banido, CausaDaRecusa, ChannelInfo, ClientMessage, ConsentimentoDePar,
     DisconnectReason, ListaDeCima, Membro, MessageRefusal, MotivoDeFalhaDePar, Permission,
     PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth,
     Telemetry, VoiceRoomInfo,
@@ -483,6 +483,20 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
                 lado: LadoDoPerfil::Capa,
             },
         ),
+        (
+            "EditMessage",
+            ClientMessage::EditMessage {
+                id: MessageId(3),
+                body: "olá, linha (editada)".into(),
+            },
+        ),
+        (
+            "UnbanPerson",
+            ClientMessage::UnbanPerson {
+                person: PersonId(7),
+            },
+        ),
+        ("ListBans", ClientMessage::ListBans),
     ]
 }
 
@@ -1135,6 +1149,28 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
             "PendenciaDoPerfil",
             ServerMessage::PendenciaDoPerfil {
                 faltou: vec![LadoDoPerfil::Capa],
+            },
+        ),
+        (
+            "Banidos",
+            ServerMessage::Banidos {
+                banidos: vec![
+                    Banido {
+                        person: PersonId(7),
+                        nickname: "kaworu".into(),
+                        reason: Some("spam".into()),
+                        expires_at: Some(1_800_000_000),
+                        issued_by: Some(PersonId(42)),
+                    },
+                    Banido {
+                        person: PersonId(8),
+                        nickname: "gendo".into(),
+                        reason: None,
+                        expires_at: None,
+                        issued_by: None,
+                    },
+                ],
+                ultima: true,
             },
         ),
     ]

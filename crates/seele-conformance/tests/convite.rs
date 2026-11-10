@@ -164,7 +164,7 @@ async fn falar_e_ouvir(enlace: &mut Enlace, o_que: &str) -> Result<()> {
         .await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace
-        .dizer(ChannelId(LINE), o_que.to_owned(), ClientMessageId(1))
+        .dizer(ChannelId(LINE), o_que.to_owned(), None, ClientMessageId(1))
         .await?;
 
     let ouviu = esperar(enlace, Duration::from_secs(15), |aviso| {

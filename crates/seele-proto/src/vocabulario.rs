@@ -166,6 +166,10 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         | ServerMessage::PerfilMudou(..)
         | ServerMessage::PerfilRecusado { .. }
         | ServerMessage::PendenciaDoPerfil { .. } => 12,
+        // A lista de banidos (10/11/2026): o 13. O 12 está publicado
+        // (v0.19.6), e um par 12 que recebesse isto leria uma variante que não
+        // conhece.
+        ServerMessage::Banidos { .. } => 13,
     }
 }
 
@@ -260,6 +264,11 @@ pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
         // O perfil público nativo (0.19), no mesmo 12.
         | ClientMessage::GravarPerfil { .. }
         | ClientMessage::TirarImagemDoPerfil { .. } => 12,
+        // A mesa mínima de texto da 1.0 (10/11/2026): editar a própria
+        // mensagem, desbanir e listar os banidos. Um servidor 12 não os lê.
+        ClientMessage::EditMessage { .. }
+        | ClientMessage::UnbanPerson { .. }
+        | ClientMessage::ListBans => 13,
     }
 }
 
@@ -761,6 +770,66 @@ mod tests {
         // O que já existia não subiu.
         assert_eq!(desde_do_cliente(&ClientMessage::PedirCargos), 10);
         assert_eq!(desde_do_cliente(&ClientMessage::RecusarMods), 9);
+    }
+
+    /// **Um par 12 não recebe a lista de banidos, e um servidor 12 não recebe
+    /// os verbos do 13.** O 12 está publicado (v0.19.6): um `Banidos` escrito
+    /// a ele é uma variante que ele não conhece, e um `EditMessage` escrito a
+    /// um servidor 12 é pulado calado — a pessoa editaria e nada aconteceria.
+    /// Reverter um braço `=> 13` para o 12 reprova aqui.
+    #[test]
+    fn um_par_doze_nao_recebe_o_que_nasceu_no_treze() {
+        use crate::ids::{MessageId, PersonId};
+
+        let banidos = ServerMessage::Banidos {
+            banidos: vec![],
+            ultima: true,
+        };
+        assert_eq!(desde(&banidos), 13);
+        for verbo in [
+            ClientMessage::EditMessage {
+                id: MessageId(1),
+                body: "x".into(),
+            },
+            ClientMessage::UnbanPerson {
+                person: PersonId(1),
+            },
+            ClientMessage::ListBans,
+        ] {
+            assert_eq!(desde_do_cliente(&verbo), 13, "{verbo:?}");
+        }
+        // O que a edição e o desbanimento usam para avisar os outros é do 9:
+        // um par 12 vê a mensagem editada e o membro de volta.
+        assert_eq!(
+            desde(&ServerMessage::MessageEdited {
+                channel: crate::ids::ChannelId(1),
+                id: MessageId(1),
+                body: String::new(),
+            }),
+            9
+        );
+        assert_eq!(
+            desde(&ServerMessage::MembroNovo {
+                membro: crate::control::Membro {
+                    id: PersonId(1),
+                    nickname: String::new(),
+                },
+            }),
+            9
+        );
+        // E o que já existia não subiu.
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::RemoveMessage {
+                message: MessageId(1)
+            }),
+            9
+        );
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::TirarImagemDoPerfil {
+                lado: crate::perfil::LadoDoPerfil::Foto
+            }),
+            12
+        );
     }
 
     #[test]

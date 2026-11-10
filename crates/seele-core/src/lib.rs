@@ -53,6 +53,9 @@ pub use seele_sessao::catalogo;
 /// Os arquivos que uma pessoa escolheu para um MOD: as regras do seletor e o
 /// guarda, de onde o desktop e o navegador os leem.
 pub use seele_sessao::escolhidos;
+/// A regra da menção (`@apelido`), a mesma que a sessão usa para marcar uma
+/// mensagem: reexportada para a casca usá-la no autocompletar.
+pub use seele_sessao::mencao;
 /// A mídia que um MOD recebe do servidor, pronta, com a feature `reducao`.
 #[cfg(feature = "reducao")]
 pub use seele_sessao::midia_de_mod;
@@ -218,6 +221,9 @@ pub use seele_proto::control::{
     AttachmentInfo,
     AttachmentRefusal,
     AttachmentState,
+    // Reexportado com a lista de banidos (`ServerMessage::Banidos`, protocolo
+    // 13), que a ponte dobra e entrega à casca.
+    Banido,
     CausaDaRecusa,
     ChannelInfo,
     // Reexportado porque a casca declara o consentimento do caminho entre pares

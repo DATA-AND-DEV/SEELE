@@ -360,20 +360,78 @@ impl<'a> Permissions<'a> {
         Ok(())
     }
 
-    /// Tira todo banimento de uma pessoa.
+    /// Tira todo banimento de uma pessoa, os expirados também.
+    ///
+    /// Devolve se havia um banimento **valendo**: é o que diz a quem chama se
+    /// a pessoa voltou a ser membro agora, ou se já era.
     ///
     /// # Errors
     ///
-    /// [`Refusal::PermissionDenied`] se quem tira não tem Banir.
-    pub fn unban(&self, person: PersonId, issued_by: PersonId) -> Result<()> {
-        if !self.may(issued_by, Permission::Ban)? {
+    /// [`Refusal::PermissionDenied`] se quem tira não tem Banir **ou** se a
+    /// hierarquia não deixa — a mesma regra de [`Self::ban`], e conferida
+    /// aqui pelo mesmo motivo: quem não pode banir uma pessoa não pode
+    /// desfazer o banimento que alguém acima pôs nela.
+    pub fn unban(&self, person: PersonId, issued_by: PersonId) -> Result<bool> {
+        if !banco::ler_estado(self.connection)?.pode_moderar(issued_by, person, Permission::Ban) {
             return Err(Refusal::PermissionDenied.into());
         }
+        let valia = self.is_banned(person)?;
         self.connection.execute(
             "DELETE FROM bans WHERE person_id = ?1",
             [person.get() as i64],
         )?;
-        Ok(())
+        Ok(valia)
+    }
+
+    /// Os banimentos que valem agora, um por pessoa, em ordem de id.
+    ///
+    /// Um banimento expirado não aparece. Quem foi banido mais de uma vez
+    /// aparece uma vez, com o banimento que dura mais: o permanente, ou o de
+    /// prazo mais distante — é ele que decide quando a pessoa volta.
+    ///
+    /// O motivo sai cortado em [`seele_proto::control::MAX_ALERT_TEXT_LEN`]
+    /// bytes, num limite de caractere: é o teto com que ele entra pelo fio, e
+    /// um motivo gravado por outro caminho não pode derrubar a lista inteira
+    /// na validação do quadro.
+    ///
+    /// # Errors
+    ///
+    /// Se o banco não responder.
+    pub fn banidos(&self) -> Result<Vec<seele_proto::control::Banido>> {
+        let mut statement = self.connection.prepare(
+            "SELECT b.person_id, p.nickname, b.reason, b.expires_at, b.issued_by
+             FROM bans b
+             JOIN people p ON p.id = b.person_id
+             WHERE b.expires_at IS NULL OR b.expires_at > ?1
+             ORDER BY b.person_id, (b.expires_at IS NULL) DESC, b.expires_at DESC, b.id DESC",
+        )?;
+        let linhas = statement
+            .query_map([now_seconds()], |row| {
+                Ok(seele_proto::control::Banido {
+                    person: PersonId(row.get::<_, i64>(0)? as u64),
+                    nickname: row.get(1)?,
+                    reason: row.get(2)?,
+                    expires_at: row.get(3)?,
+                    issued_by: Some(PersonId(row.get::<_, i64>(4)? as u64)),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut banidos: Vec<seele_proto::control::Banido> = Vec::with_capacity(linhas.len());
+        for mut banido in linhas {
+            // A primeira linha de cada pessoa é a que dura mais.
+            if banidos.last().is_some_and(|ja| ja.person == banido.person) {
+                continue;
+            }
+            if let Some(motivo) = banido.reason.as_mut() {
+                let mut corte = motivo.len().min(seele_proto::control::MAX_ALERT_TEXT_LEN);
+                while !motivo.is_char_boundary(corte) {
+                    corte -= 1;
+                }
+                motivo.truncate(corte);
+            }
+            banidos.push(banido);
+        }
+        Ok(banidos)
     }
 
     /// Se a pessoa está banida agora.
@@ -906,6 +964,114 @@ mod tests {
         permissions.ban(target, commander, None, None).unwrap();
         permissions.unban(target, commander).unwrap();
         assert!(permissions.may(target, Permission::Speak).unwrap());
+    }
+
+    /// Desbanir diz se havia um banimento valendo: é o que separa «voltou a
+    /// ser membro agora» de «já era».
+    #[test]
+    fn desbanir_diz_se_havia_um_banimento_valendo() {
+        let persistence = store();
+        let commander = person_with(&persistence, "comandante", 9, COMMANDER);
+        let target = person_with(&persistence, "marcela", 1, PERSON);
+        let permissions = Permissions::new(&persistence);
+        assert!(!permissions.unban(target, commander).unwrap());
+        permissions
+            .ban(target, commander, None, Some(now_seconds() - 1))
+            .unwrap();
+        assert!(
+            !permissions.unban(target, commander).unwrap(),
+            "um banimento expirado contou como valendo"
+        );
+        permissions.ban(target, commander, None, None).unwrap();
+        assert!(permissions.unban(target, commander).unwrap());
+        assert!(!permissions.is_banned(target).unwrap());
+    }
+
+    /// **A hierarquia do banimento vale para o desbanimento.** Um Operador
+    /// tem Banir, e não desfaz o banimento de quem está acima dele.
+    #[test]
+    fn quem_nao_pode_banir_a_pessoa_nao_a_desbane() {
+        let persistence = store();
+        crate::cargos::declarar_proprietario(&persistence, &impressao(9)).unwrap();
+        let dono = Permissions::new(&persistence)
+            .register_or_find(&[9; 32], "dono")
+            .unwrap()
+            .id;
+        let comandante = person_with(&persistence, "comandante", 8, COMMANDER);
+        let operador = person_with(&persistence, "operador", 7, OPERATOR);
+        let pessoa = person_with(&persistence, "marcela", 1, PERSON);
+        let permissions = Permissions::new(&persistence);
+        permissions.ban(comandante, dono, None, None).unwrap();
+        permissions.ban(pessoa, dono, None, None).unwrap();
+
+        assert!(
+            permissions.unban(comandante, operador).is_err(),
+            "o Operador desbaniu quem está acima dele"
+        );
+        assert!(permissions.is_banned(comandante).unwrap());
+        assert!(permissions.unban(pessoa, pessoa).is_err());
+        assert!(permissions.unban(pessoa, operador).unwrap());
+    }
+
+    /// A lista: só o que vale agora, um por pessoa — o que dura mais —, em
+    /// ordem de id, e com o motivo dentro do teto do fio.
+    #[test]
+    fn a_lista_de_banidos_tem_so_o_que_vale_um_por_pessoa() {
+        use seele_proto::control::MAX_ALERT_TEXT_LEN;
+
+        let persistence = store();
+        let commander = person_with(&persistence, "comandante", 9, COMMANDER);
+        let a = person_with(&persistence, "ana", 1, PERSON);
+        let b = person_with(&persistence, "bruno", 2, PERSON);
+        let c = person_with(&persistence, "carla", 3, PERSON);
+        let permissions = Permissions::new(&persistence);
+        assert!(permissions.banidos().unwrap().is_empty());
+
+        let longe = now_seconds() + 7_200;
+        // `a`: três banimentos, e o que decide é o permanente.
+        permissions
+            .ban(a, commander, Some("curto"), Some(now_seconds() + 60))
+            .unwrap();
+        permissions
+            .ban(a, commander, Some("permanente"), None)
+            .unwrap();
+        permissions
+            .ban(a, commander, Some("longo"), Some(longe))
+            .unwrap();
+        // `b`: um expirado e um valendo.
+        permissions
+            .ban(b, commander, Some("velho"), Some(now_seconds() - 5))
+            .unwrap();
+        permissions.ban(b, commander, None, Some(longe)).unwrap();
+        // `c`: só expirado.
+        permissions
+            .ban(c, commander, None, Some(now_seconds() - 5))
+            .unwrap();
+
+        let lista = permissions.banidos().unwrap();
+        assert_eq!(
+            lista
+                .iter()
+                .map(|banido| (
+                    banido.person,
+                    banido.reason.as_deref(),
+                    banido.expires_at,
+                    banido.issued_by
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (a, Some("permanente"), None, Some(commander)),
+                (b, None, Some(longe), Some(commander)),
+            ]
+        );
+
+        // Um motivo gravado por outro caminho, maior que o teto e com um
+        // caractere de dois bytes em cima da linha de corte.
+        permissions.unban(a, commander).unwrap();
+        let enorme = format!("{}é{}", "x".repeat(MAX_ALERT_TEXT_LEN - 1), "y".repeat(40));
+        permissions.ban(a, commander, Some(&enorme), None).unwrap();
+        let motivo = permissions.banidos().unwrap().remove(0).reason.unwrap();
+        assert_eq!(motivo, "x".repeat(MAX_ALERT_TEXT_LEN - 1));
     }
 
     #[test]

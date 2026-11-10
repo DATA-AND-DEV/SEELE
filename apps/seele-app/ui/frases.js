@@ -268,6 +268,9 @@ const PEDIDOS_RECUSADOS = {
   // a pessoa acabou de tentar banir.
   BanPerson: "BANIR ESSA PESSOA",
   RemoveMessage: "REMOVER A MENSAGEM",
+  EditMessage: "EDITAR A MENSAGEM",
+  UnbanPerson: "DESBANIR A PESSOA",
+  ListBans: "LER A LISTA DE BANIDOS",
   DeleteVoiceRoom: "APAGAR A SALA DE VOZ",
   DeleteChannel: "APAGAR O CANAL",
   // O único chamador é o APAGAR (`peso_da_linha`): o verbo é o da caixa dele.
@@ -1432,6 +1435,7 @@ const FRASES = {
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
     UnknownMessage: "NÃO CONHEÇO ESSA MENSAGEM",
+    MensagemVazia: "A MENSAGEM FICOU VAZIA\nEscreva alguma coisa, ou apague a mensagem.",
 
     // **As falhas que chegavam à tela com o nome cru** (revisão de 09/11/2026):
     // variantes unitárias de `ConnectionError` sem entrada aqui. O guarda

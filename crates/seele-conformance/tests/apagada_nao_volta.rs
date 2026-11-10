@@ -116,7 +116,9 @@ async fn repetir_uma_mensagem_apagada_nao_a_anuncia_de_novo_ao_canal() -> Result
     let mut autora = entrar(endereco, 3, "autora").await?;
 
     let chave = ClientMessageId(0xA9A6_0001);
-    autora.send_message(LINHA, "isto vai sair", chave).await?;
+    autora
+        .send_message(LINHA, "isto vai sair", None, chave)
+        .await?;
     let vistas = ler_ate(&mut autora, |m| eco_da_chave(m, chave).is_some()).await;
     let apagada = vistas
         .iter()
@@ -145,10 +147,12 @@ async fn repetir_uma_mensagem_apagada_nao_a_anuncia_de_novo_ao_canal() -> Result
     // mensagem nova: o escritor anuncia na ordem em que grava, então o que a
     // repetição anunciasse chegaria antes desta.
     let mut de_volta = entrar(endereco, 3, "autora").await?;
-    de_volta.send_message(LINHA, "isto vai sair", chave).await?;
+    de_volta
+        .send_message(LINHA, "isto vai sair", None, chave)
+        .await?;
     let depois = ClientMessageId(0xA9A6_0002);
     de_volta
-        .send_message(LINHA, "e esta é nova", depois)
+        .send_message(LINHA, "e esta é nova", None, depois)
         .await?;
 
     let da_testemunha = ler_ate(&mut testemunha, |m| eco_da_chave(m, depois).is_some()).await;
@@ -218,7 +222,9 @@ async fn repetir_muitas_apagadas_nao_para_a_leitura_de_quem_repete() -> Result<(
     // Uma a mais que o teto de mensagens no ar.
     let chaves: Vec<ClientMessageId> = (1..=9).map(|n| ClientMessageId(0xA9A6_0100 + n)).collect();
     for chave in &chaves {
-        autora.send_message(LINHA, "isto vai sair", *chave).await?;
+        autora
+            .send_message(LINHA, "isto vai sair", None, *chave)
+            .await?;
     }
     let mut ids = Vec::new();
     let vistas = ler_ate(&mut autora, |m| {
@@ -258,11 +264,13 @@ async fn repetir_muitas_apagadas_nao_para_a_leitura_de_quem_repete() -> Result<(
     let mut de_volta = entrar(endereco, 3, "autora").await?;
     for chave in &chaves {
         de_volta
-            .send_message(LINHA, "isto vai sair", *chave)
+            .send_message(LINHA, "isto vai sair", None, *chave)
             .await?;
     }
     let nova = ClientMessageId(0xA9A6_0200);
-    de_volta.send_message(LINHA, "e esta é nova", nova).await?;
+    de_volta
+        .send_message(LINHA, "e esta é nova", None, nova)
+        .await?;
 
     let da_autora = ler_ate(&mut de_volta, |m| eco_da_chave(m, nova).is_some()).await;
     assert!(

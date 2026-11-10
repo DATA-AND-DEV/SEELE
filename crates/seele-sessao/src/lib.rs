@@ -36,6 +36,7 @@ pub mod cargos;
 pub mod catalogo;
 pub mod despedida;
 pub mod escolhidos;
+pub mod mencao;
 #[cfg(feature = "reducao")]
 pub mod midia_de_mod;
 pub mod mods;

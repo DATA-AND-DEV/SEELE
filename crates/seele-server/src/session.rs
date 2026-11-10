@@ -2401,6 +2401,13 @@ async fn run_session(
                         ServerMessage::Membros { membros, .. } => {
                             membros.iter().map(|m| m.id).collect()
                         }
+                        // O apelido gravado de um banido é o alias com a
+                        // marca (`ana#K7Q2`), como o de um membro: a
+                        // identidade apresentada vem atrás, para a lista
+                        // mostrar o nome que a tela mostra em todo lugar.
+                        ServerMessage::Banidos { banidos, .. } => {
+                            banidos.iter().map(|b| b.person).collect()
+                        }
                         _ => Vec::new(),
                     };
                     for id in ids {
@@ -3499,6 +3506,25 @@ async fn run_session(
                                 if limit == 0 { DEFAULT_PAGE } else { limit },
                             )?
                         };
+                        // **A editada volta marcada**, sem campo novo no fio. O
+                        // `MessageReceived` não diz se a mensagem foi editada
+                        // (campo novo em mensagem que existe é proibido,
+                        // ADR 0058), então atrás da página vai um
+                        // `MessageEdited` para cada uma que tem `edited_at`:
+                        // a variante é do 9, todo par a lê, e quem a recebe
+                        // marca «editada» como marcaria uma edição ao vivo.
+                        // Sem isto a marca só existia para quem estava
+                        // olhando na hora da edição.
+                        let editadas: Vec<ServerMessage> = page
+                            .iter()
+                            .rev()
+                            .filter(|stored| stored.edited_at.is_some())
+                            .map(|stored| ServerMessage::MessageEdited {
+                                channel: stored.channel,
+                                id: stored.id,
+                                body: stored.body.clone(),
+                            })
+                            .collect();
                         // Oldest first on the wire, so a client can append.
                         for stored in page.into_iter().rev() {
                             escrever!(&ServerMessage::MessageReceived {
@@ -3512,6 +3538,9 @@ async fn run_session(
                                 client_message_id: stored.client_message_id,
                                 attachment: stored.attachment,
                             }).await?;
+                        }
+                        for editada in &editadas {
+                            escrever!(editada).await?;
                         }
                     }
                     ClientMessage::Ping { timestamp } => {
@@ -3912,6 +3941,169 @@ async fn run_session(
                                     channel: alvo.channel,
                                     id,
                                 });
+                            }
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                        }
+                    }
+                    // **Editar a própria mensagem** (protocolo 13).
+                    //
+                    // As recusas, na ordem em que são perguntadas, e cada uma
+                    // com a resposta que não conta o que a pessoa não pode
+                    // saber:
+                    //
+                    // 1. a mensagem não existe, ou foi apagada: `NaoExiste`;
+                    // 2. quem pede não lê o canal dela: `NaoExiste` também,
+                    //    como no `RemoveMessage` — outra palavra diria a quem
+                    //    não lê quais ids há lá dentro;
+                    // 3. a mensagem é de outra pessoa: `PermissionDenied`.
+                    //    Editar não é moderar, e nem quem administra edita o
+                    //    que outro escreveu (`Messages::edit`);
+                    // 4. a pessoa já não escreve neste canal: a mesma
+                    //    `PermissionDenied`. Quem teve a escrita tirada não
+                    //    continua falando pelas mensagens antigas.
+                    //
+                    // O corpo já veio conferido contra o teto do `SendMessage`
+                    // (`Validate`, na leitura do quadro).
+                    ClientMessage::EditMessage { id, body } => {
+                        let alvo = {
+                            let mut guard = server.persistence.lock().await;
+                            Messages::new(&mut guard).one(id).ok().flatten()
+                        };
+                        let Some(alvo) = alvo else {
+                            nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
+                            continue;
+                        };
+                        if !pode_ler_canal(server, session.person, alvo.channel).await {
+                            nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
+                            continue;
+                        }
+                        let escreve = {
+                            let guard = server.persistence.lock().await;
+                            crate::autorizacao::pode_no_canal(
+                                &guard,
+                                session.person,
+                                alvo.channel,
+                                crate::autorizacao::Acesso::Escrita,
+                            )
+                            .unwrap_or(false)
+                        };
+                        if alvo.author != session.person || !escreve {
+                            recusar(&mut send, session.protocol_version, session.person, "EditMessage").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let mut guard = server.persistence.lock().await;
+                            Messages::new(&mut guard).edit(id, session.person, &body)
+                        };
+                        match feito {
+                            Ok(gravada) => {
+                                tracing::info!(by = %session.person, %id, "message edited");
+                                // O canal e o corpo saem da linha gravada, e
+                                // não do pedido: é o que o histórico vai
+                                // devolver a quem chegar depois.
+                                let _ = server.events.send(Event::MessageEdited {
+                                    channel: gravada.channel,
+                                    id,
+                                    body: gravada.body,
+                                });
+                            }
+                            // Apagada entre a leitura e a gravação, ou de outra
+                            // pessoa (`Messages::edit` confere de novo).
+                            Err(erro) => match erro.downcast_ref::<crate::persistence::messages::MessageRefusal>() {
+                                Some(crate::persistence::messages::MessageRefusal::NotFound) => {
+                                    nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
+                                }
+                                Some(crate::persistence::messages::MessageRefusal::NotTheAuthor) => {
+                                    recusar(&mut send, session.protocol_version, session.person, "EditMessage").await?;
+                                }
+                                None => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                            },
+                        }
+                    }
+                    // **Desbanir** (protocolo 13): a permissão e a hierarquia
+                    // do `BanPerson`. Quem não pode banir uma pessoa não pode
+                    // desfazer o banimento que alguém acima pôs nela.
+                    ClientMessage::UnbanPerson { person: alvo } => {
+                        if alvo == session.person
+                            || !moderavel(server, session.person, alvo, Permission::Ban).await
+                        {
+                            recusar(&mut send, session.protocol_version, session.person, "UnbanPerson").await?;
+                            continue;
+                        }
+                        let (feito, membro, banidos) = {
+                            let guard = server.persistence.lock().await;
+                            let permissions = Permissions::new(&guard);
+                            let feito = permissions.unban(alvo, session.person);
+                            let membro = permissions.person(alvo).ok().map(|pessoa| {
+                                seele_proto::control::Membro {
+                                    id: pessoa.id,
+                                    nickname: pessoa.nickname,
+                                }
+                            });
+                            (feito, membro, permissions.banidos())
+                        };
+                        match feito {
+                            Ok(true) => {
+                                tracing::info!(by = %session.person, %alvo, "unbanned");
+                                // **Voltou a ser membro**, para todo mundo: o
+                                // `MembroBanido` a tirou do FORA DO AR de quem
+                                // estava na sala, e sem isto ela só voltaria
+                                // para quem reconectasse. A variante é a de
+                                // uma conta nova, do 9: quem a recebe põe a
+                                // pessoa na lista de membros, e é isso que
+                                // aconteceu.
+                                if manda_a_lista_de_membros(server) {
+                                    if let Some(membro) = membro {
+                                        let _ = server.events.send(Event::MembroNovo { membro });
+                                    }
+                                }
+                                // E quem pediu recebe a lista como ficou.
+                                match banidos {
+                                    Ok(banidos) => {
+                                        for parte in partes_dos_banidos(banidos) {
+                                            if entende_a_mensagem(&parte, session.protocol_version) {
+                                                escrever!(&parte).await?;
+                                            }
+                                        }
+                                    }
+                                    Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                                }
+                            }
+                            // Não havia banimento valendo: respondido, e não
+                            // ignorado, como o `RemoveMessage` do que já sumiu.
+                            Ok(false) => {
+                                nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(BanimentoNaoExiste)).await?;
+                            }
+                            Err(erro) if matches!(
+                                erro.downcast_ref::<crate::permissions::Refusal>(),
+                                Some(crate::permissions::Refusal::PermissionDenied)
+                            ) => {
+                                recusar(&mut send, session.protocol_version, session.person, "UnbanPerson").await?;
+                            }
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                        }
+                    }
+                    // **A lista de banidos** (protocolo 13), só para quem pode
+                    // banir: o motivo é o registro de quem modera, e não é de
+                    // quem só conversa.
+                    ClientMessage::ListBans => {
+                        if !pode(server, session.person, Permission::Ban).await {
+                            recusar(&mut send, session.protocol_version, session.person, "ListBans").await?;
+                            continue;
+                        }
+                        let banidos = {
+                            let guard = server.persistence.lock().await;
+                            Permissions::new(&guard).banidos()
+                        };
+                        match banidos {
+                            Ok(banidos) => {
+                                for parte in partes_dos_banidos(banidos) {
+                                    // Um par que negociou menos que o 13 não
+                                    // conhece a variante, e não a recebe.
+                                    if entende_a_mensagem(&parte, session.protocol_version) {
+                                        escrever!(&parte).await?;
+                                    }
+                                }
                             }
                             Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
@@ -6217,6 +6409,11 @@ async fn nao_deu(
 #[error("no such message")]
 struct MensagemNaoExiste;
 
+/// O banimento que um pedido quis tirar não existe: a pessoa não está banida.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("no such ban")]
+struct BanimentoNaoExiste;
+
 /// Qual das três causas do fio é esta falha.
 ///
 /// Só as duas que a pessoa resolve sozinha têm nome — o alvo sumiu, o nome é de
@@ -6226,6 +6423,7 @@ fn causa_da_falha(erro: &anyhow::Error) -> CausaDaRecusa {
         .downcast_ref::<crate::persistence::channels::NoSuchChannel>()
         .is_some()
         || erro.downcast_ref::<MensagemNaoExiste>().is_some()
+        || erro.downcast_ref::<BanimentoNaoExiste>().is_some()
     {
         return CausaDaRecusa::NaoExiste;
     }
@@ -6298,6 +6496,31 @@ fn partes_dos_membros(membros: Vec<seele_proto::control::Membro>) -> Vec<ServerM
         .map(|(posicao, parte)| ServerMessage::Membros {
             membros: parte.to_vec(),
             fim: posicao + 1 == quantas,
+        })
+        .collect()
+}
+
+/// Os banidos em quadros de [`ServerMessage::Banidos`]: partes de até
+/// [`seele_proto::control::MAX_BANIDOS_POR_PARTE`], e `ultima` só na última.
+///
+/// Uma lista vazia ainda vira uma parte, vazia e com `ultima`: é ela que diz
+/// a quem pediu que ninguém está banido, em vez de deixá-lo esperando.
+fn partes_dos_banidos(banidos: Vec<seele_proto::control::Banido>) -> Vec<ServerMessage> {
+    if banidos.is_empty() {
+        return vec![ServerMessage::Banidos {
+            banidos,
+            ultima: true,
+        }];
+    }
+    let quantas = banidos
+        .len()
+        .div_ceil(seele_proto::control::MAX_BANIDOS_POR_PARTE);
+    banidos
+        .chunks(seele_proto::control::MAX_BANIDOS_POR_PARTE)
+        .enumerate()
+        .map(|(posicao, parte)| ServerMessage::Banidos {
+            banidos: parte.to_vec(),
+            ultima: posicao + 1 == quantas,
         })
         .collect()
 }
@@ -7841,6 +8064,49 @@ mod o_fora_do_ar {
     #[test]
     fn a_lista_vazia_vira_uma_parte_vazia_com_fim() {
         assert_eq!(forma(0), [(0, true)]);
+    }
+
+    /// A lista de banidos se parte do mesmo jeito: `ultima` só na última, uma
+    /// parte vazia para a lista vazia, e toda parte passa na validação do fio.
+    #[test]
+    fn os_banidos_se_partem_como_os_membros() {
+        use seele_proto::control::{Banido, Validate, MAX_BANIDOS_POR_PARTE};
+
+        let forma = |quantos: usize| -> Vec<(usize, bool)> {
+            let banidos = (0..quantos)
+                .map(|n| Banido {
+                    person: PersonId(n as u64 + 1),
+                    nickname: format!("b{n}"),
+                    reason: None,
+                    expires_at: None,
+                    issued_by: Some(PersonId(1)),
+                })
+                .collect();
+            partes_dos_banidos(banidos)
+                .into_iter()
+                .map(|parte| {
+                    parte.validate().expect("uma parte não passa no fio");
+                    match parte {
+                        ServerMessage::Banidos { banidos, ultima } => (banidos.len(), ultima),
+                        outra => panic!("saiu {outra:?} no lugar de uma parte"),
+                    }
+                })
+                .collect()
+        };
+        assert_eq!(forma(0), [(0, true)]);
+        assert_eq!(forma(1), [(1, true)]);
+        assert_eq!(
+            forma(MAX_BANIDOS_POR_PARTE),
+            [(MAX_BANIDOS_POR_PARTE, true)]
+        );
+        assert_eq!(
+            forma(2 * MAX_BANIDOS_POR_PARTE + 1),
+            [
+                (MAX_BANIDOS_POR_PARTE, false),
+                (MAX_BANIDOS_POR_PARTE, false),
+                (1, true)
+            ]
+        );
     }
 
     /// `fim` só na última, e nenhuma parte vazia a mais quando a conta fecha.

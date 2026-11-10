@@ -257,6 +257,10 @@ impl Sessao {
                 } }));
             }
         }
+        // A lista de banidos (protocolo 13), na ordem da FFI.
+        if mudou.banidos {
+            eventos.push(json!("BanidosChanged"));
+        }
         if mudou.telemetry {
             eventos.push(json!("TelemetryChanged"));
         }
@@ -569,13 +573,14 @@ impl Sessao {
                 Repetir::Mandar {
                     canal,
                     corpo,
+                    responde_a,
                     chave,
                 } => {
                     mudou = true;
                     saida.push(ClientMessage::SendMessage {
                         channel: canal,
                         body: corpo,
-                        replies_to: None,
+                        replies_to: responde_a,
                         client_message_id: chave,
                     });
                 }
@@ -694,8 +699,10 @@ pub fn conversa_de(room: &Room) -> Vec<Value> {
                 "author_nickname": mensagem.author_nickname,
                 "at_seconds": mensagem.at_seconds,
                 "body": mensagem.body,
+                "replies_to": mensagem.replies_to.map(|pai| pai.0),
                 "own": mensagem.own,
                 "edited": mensagem.edited,
+                "mentions_me": mensagem.mentions_me,
                 "estado": "Confirmada",
                 "client_message_id": mensagem.client_message_id.map(|chave| chave.get().to_string()),
                 "attachment": mensagem.attachment.as_ref().map(|anexo| json!({
@@ -721,8 +728,10 @@ pub fn conversa_de(room: &Room) -> Vec<Value> {
             "author_nickname": meu_nome,
             "at_seconds": pendente.at_seconds,
             "body": pendente.body,
+            "replies_to": pendente.replies_to.map(|pai| pai.0),
             "own": true,
             "edited": false,
+            "mentions_me": false,
             "estado": estado_do_envio(&pendente.estado),
             "client_message_id": pendente.client_message_id.get().to_string(),
             "attachment": null,

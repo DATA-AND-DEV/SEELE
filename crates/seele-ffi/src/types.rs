@@ -366,10 +366,25 @@ pub struct Message {
     pub at_seconds: i64,
     /// The body.
     pub body: String,
+    /// A mensagem a que esta responde: o `id` dela, ou `None`.
+    ///
+    /// Só o identificador. A citada pode não estar na página que a casca tem
+    /// (é mais antiga, ou foi apagada): a casca a procura em
+    /// `Connection::messages` pelo `id`, e desenha «mensagem indisponível»
+    /// quando não a acha. Numa pendente, é a resposta que esta máquina anotou
+    /// ao enviar.
+    pub replies_to: Option<u64>,
     /// Whether we wrote it.
     pub own: bool,
     /// Whether it has been edited since.
+    ///
+    /// Vale também para o que veio do histórico: o servidor manda a marca
+    /// atrás da página (um `MessageEdited` por mensagem editada).
     pub edited: bool,
+    /// Se o corpo chama **quem está logado** (`@apelido`), pela regra de
+    /// [`crate::menciona`]. Sempre `false` na própria mensagem e numa
+    /// pendente.
+    pub mentions_me: bool,
     /// The file hanging off it, if any. ADR 0027.
     pub attachment: Option<Attachment>,
     /// Em que pé está o **envio** desta mensagem.
@@ -1181,6 +1196,11 @@ pub enum Event {
         /// Um erro por campo quando o motivo é `Campos`; vazio nos outros.
         campos: Vec<crate::perfis::ErroDeCampo>,
     },
+    /// A lista de banidos desta sessão mudou: chegou inteira (a resposta de
+    /// `Connection::list_bans` ou de `Connection::unban_person`), ou alguém
+    /// saiu dela porque voltou a ser membro. A casca relê
+    /// [`crate::Connection::banidos`].
+    BanidosChanged,
     /// New measurements.
     TelemetryChanged,
     /// Something to surface.
@@ -1998,6 +2018,28 @@ pub enum ConnectionError {
     /// clique numa linha que ainda está subindo. Quem quer largar uma pendente
     /// usa `Connection::descartar_mensagem`.
     UnknownMessage,
+    /// **O servidor desta conexão não conhece o pedido**: ele negociou um
+    /// número de protocolo menor que o do verbo. Nada foi escrito no fio.
+    ///
+    /// Editar uma mensagem, desbanir e listar os banidos nasceram no 13; um
+    /// servidor da 0.19 (12) pularia o verbo calado, e a pessoa clicaria sem
+    /// nada acontecer. A casca diz que o servidor precisa ser atualizado — ou,
+    /// melhor, esconde o controle quando `Connection::protocolo_negociado()`
+    /// é menor que `exige`.
+    ServidorAntigo {
+        /// O número que esta conexão negociou.
+        negociado: u8,
+        /// O número em que o pedido nasceu.
+        exige: u8,
+    },
+    /// O corpo de uma edição ficou vazio. Uma mensagem sem texto não é uma
+    /// edição: quem quer tirá-la usa `Connection::remove_message`.
+    MensagemVazia,
+    /// O corpo de uma edição passa do teto do fio. Nada saiu.
+    MensagemGrandeDemais {
+        /// O teto, em **bytes** (`Connection::limite_da_mensagem`).
+        limite_bytes: u64,
+    },
     /// No voice room or Channel by that name or number.
     UnknownChannel,
     /// The control stream broke.

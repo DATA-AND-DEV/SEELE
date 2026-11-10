@@ -1040,6 +1040,10 @@ impl Client {
     /// `client_message_id` makes the send idempotent (`specs/02-protocolo.md`,
     /// gap G9): resending after a lost acknowledgement does not post twice.
     ///
+    /// `replies_to` é a mensagem a que esta responde, ou `None`. O servidor
+    /// confere que ela existe e é do mesmo canal; a que não é volta como
+    /// `MessageRejected { PermissionDenied }`, com esta chave.
+    ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
@@ -1047,6 +1051,7 @@ impl Client {
         &mut self,
         channel: ChannelId,
         body: &str,
+        replies_to: Option<MessageId>,
         client_message_id: ClientMessageId,
     ) -> Result<()> {
         frame::write_em(
@@ -1055,11 +1060,48 @@ impl Client {
             &ClientMessage::SendMessage {
                 channel,
                 body: body.to_owned(),
-                replies_to: None,
+                replies_to,
                 client_message_id,
             },
         )
         .await
+    }
+
+    /// Reescreve o corpo de uma mensagem **própria** (protocolo 13). O
+    /// servidor recusa a de outra pessoa; a resposta é o `MessageEdited`
+    /// difundido a quem lê o canal.
+    ///
+    /// # Errors
+    ///
+    /// [`ServidorAntigo`] (e nada é escrito) quando a conexão negociou menos
+    /// que o 13: um servidor 12 pularia o verbo calado, e a pessoa editaria
+    /// sem nada acontecer. Fora isso, falha se o fluxo de controle fechou.
+    pub async fn edit_message(&mut self, id: MessageId, body: &str) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::EditMessage {
+            id,
+            body: body.to_owned(),
+        })
+        .await
+    }
+
+    /// Pede ao servidor que tire todo banimento de uma conta (protocolo 13).
+    /// A resposta é a lista de banidos como ficou.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::edit_message`].
+    pub async fn unban_person(&mut self, person: PersonId) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::UnbanPerson { person })
+            .await
+    }
+
+    /// Pede a lista de banidos (protocolo 13). Só responde a quem pode banir.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::edit_message`].
+    pub async fn list_bans(&mut self) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::ListBans).await
     }
 
     // ---- attachments, ADR 0027 ----

@@ -602,6 +602,36 @@ pub struct Membro {
 /// partes.
 pub const MAX_MEMBROS_POR_PARTE: usize = 256;
 
+/// Um banimento que vale agora, como a lista de banidos o mostra a quem pode
+/// banir (protocolo 13, a mesa mínima de texto da 1.0).
+///
+/// O banimento é **por conta** (a chave), e não por endereço. O motivo é o que
+/// quem baniu escreveu para o próprio registro: o mesmo texto do
+/// [`ClientMessage::BanPerson`], com o mesmo teto.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Banido {
+    /// A conta banida.
+    pub person: PersonId,
+    /// O apelido dela.
+    pub nickname: String,
+    /// O que quem baniu escreveu, se escreveu.
+    pub reason: Option<String>,
+    /// Quando o banimento acaba, em segundos desde a época. `None` é
+    /// permanente.
+    pub expires_at: Option<i64>,
+    /// Quem baniu. `None` quando a conta de quem baniu já não existe.
+    pub issued_by: Option<PersonId>,
+}
+
+/// O teto de banidos numa parte de [`ServerMessage::Banidos`].
+///
+/// **É teto de quadro, e não de gosto**, como [`MAX_MEMBROS_POR_PARTE`]: com o
+/// maior identificador, o maior apelido e o maior motivo
+/// ([`MAX_ALERT_TEXT_LEN`]), 24 banidos ainda cabem em [`MAX_FRAME_LEN`] —
+/// preso em `uma_parte_cheia_de_banidos_cabe_num_quadro`. Um servidor com mais
+/// banidos manda mais partes.
+pub const MAX_BANIDOS_POR_PARTE: usize = 24;
+
 /// Uma janela de certificado curto do `h3`: o hash dele e quando ele vale.
 ///
 /// O navegador só aceita, em `serverCertificateHashes`, um certificado válido
@@ -2097,6 +2127,39 @@ pub enum ClientMessage {
         /// Qual das duas.
         lado: crate::perfil::LadoDoPerfil,
     },
+
+    // ---- a mesa mínima de texto da 1.0 (protocolo 13) ----
+    /// Reescreve o corpo de uma mensagem **de quem pede**.
+    ///
+    /// Só o autor edita: editar não é moderar, e nem quem administra o
+    /// servidor põe palavras na boca de outra pessoa (a moderação é o
+    /// [`Self::RemoveMessage`], que aparece como remoção). O corpo tem as
+    /// mesmas regras do [`Self::SendMessage`].
+    ///
+    /// Sem canal, pelo motivo do `RemoveMessage`: o canal do anúncio sai da
+    /// linha gravada, e não de quem pede. A resposta é o
+    /// [`ServerMessage::MessageEdited`] difundido a quem lê o canal; a recusa
+    /// é um [`AlertReason::PedidoRecusado`] (a mensagem não existe) ou
+    /// [`AlertReason::PermissionDenied`] (a mensagem é de outra pessoa).
+    EditMessage {
+        /// Qual mensagem.
+        id: MessageId,
+        /// O corpo novo.
+        body: String,
+    },
+    /// Tira todo banimento de uma conta. A mesma permissão e a mesma
+    /// hierarquia do [`Self::BanPerson`].
+    ///
+    /// A resposta a quem pediu é a lista atualizada
+    /// ([`ServerMessage::Banidos`]); os outros recebem o
+    /// [`ServerMessage::MembroNovo`] de quem voltou a ser membro.
+    UnbanPerson {
+        /// Quem.
+        person: PersonId,
+    },
+    /// Pede a lista de banidos. Só para quem pode banir; a resposta é
+    /// [`ServerMessage::Banidos`], em partes.
+    ListBans,
 }
 
 /// Server to client.
@@ -3073,6 +3136,18 @@ pub enum ServerMessage {
         /// As imagens que não puderam ser trazidas.
         faltou: Vec<crate::perfil::LadoDoPerfil>,
     },
+
+    /// Os banimentos que valem agora, só para quem pediu
+    /// ([`ClientMessage::ListBans`] ou [`ClientMessage::UnbanPerson`]) e pode
+    /// banir (protocolo 13). No padrão de `Membros` e `Perfis`: partes de até
+    /// [`MAX_BANIDOS_POR_PARTE`], e `ultima` fecha a lista. Um banimento que
+    /// já expirou não aparece.
+    Banidos {
+        /// Uma parte da lista.
+        banidos: Vec<Banido>,
+        /// Esta é a última parte.
+        ultima: bool,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -3203,11 +3278,11 @@ pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
 }
 
 impl ListaDeCima for ClientMessage {
-    const CONHECIDAS: u32 = 56;
+    const CONHECIDAS: u32 = 59;
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 66;
+    const CONHECIDAS: u32 = 67;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3809,6 +3884,10 @@ impl Validate for ClientMessage {
                 ..
             } => crate::perfil::conferir_tamanhos(nome_exibido, pronomes, status, bio),
             Self::TirarImagemDoPerfil { .. } => Ok(()),
+            // O mesmo teto do `SendMessage`: uma edição não é uma porta para
+            // um corpo maior do que o que se pode enviar.
+            Self::EditMessage { body, .. } => check("body", body.len(), MAX_BODY_LEN),
+            Self::UnbanPerson { .. } | Self::ListBans => Ok(()),
         }
     }
 }
@@ -4125,6 +4204,18 @@ impl Validate for ServerMessage {
                 check("campos_do_perfil", campos.len(), 5)
             }
             Self::PendenciaDoPerfil { faltou } => check("faltou", faltou.len(), 2),
+            Self::Banidos { banidos, .. } => {
+                check("banidos", banidos.len(), MAX_BANIDOS_POR_PARTE)?;
+                for banido in banidos {
+                    check("nickname", banido.nickname.len(), MAX_NICKNAME_LEN)?;
+                    check(
+                        "reason",
+                        banido.reason.as_ref().map_or(0, String::len),
+                        MAX_ALERT_TEXT_LEN,
+                    )?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -5849,14 +5940,14 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            55,
+            58,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            65,
+            66,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -5950,9 +6041,19 @@ mod o_vocabulario_e_a_versao {
         // `MaquinaParada`, `PedidoDaMaquina`) e o servidor de 58 para 61
         // (`PedidoDeMaquina`, `AvisoParaMaquina`, `MaquinaDispensada`).
         //
+        // **13 em 10/11/2026: a mesa mínima de texto da 1.0.** O 12 **está
+        // publicado** (v0.19.6, commit `f7ea590e9`, conferido no release em
+        // 10/11), então nada pôde pegar carona nele. O cliente foi de 56 para
+        // 59 variantes (o último ordinal, de 55 para 58): `EditMessage`,
+        // `UnbanPerson` e `ListBans`. O servidor, de 66 para 67 (o último
+        // ordinal, de 65 para 66): `Banidos`. Um par 12 continua entrando e
+        // não recebe o `Banidos` (`vocabulario::desde`), e um cliente 13 não
+        // escreve os três verbos a um servidor 12 (`desde_do_cliente`). Editar
+        // e responder não precisaram de mensagem nova do servidor: o
+        // `MessageEdited` e o `replies_to` são do 9.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            12,
+            13,
             "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
              de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
              a mesma história"
@@ -6510,6 +6611,168 @@ mod o_toque {
         let quadro = encode(&tocando).unwrap();
         assert_eq!(quadro, vec![PROTOCOL_VERSION, 41, 45]);
         assert_eq!(decode::<ServerMessage>(&quadro).unwrap(), tocando);
+    }
+}
+
+#[cfg(test)]
+mod mesa_de_texto {
+    //! O vocabulário do protocolo 13: editar a própria mensagem, desbanir e
+    //! a lista de banidos.
+    use super::*;
+
+    fn banido(id: u64) -> Banido {
+        Banido {
+            person: PersonId(id),
+            nickname: "kaworu".into(),
+            reason: Some("spam".into()),
+            expires_at: Some(1_800_000_000),
+            issued_by: Some(PersonId(1)),
+        }
+    }
+
+    #[test]
+    fn as_quatro_mensagens_vao_e_voltam() {
+        for mensagem in [
+            ClientMessage::EditMessage {
+                id: MessageId(3),
+                body: "olá, linha".into(),
+            },
+            ClientMessage::UnbanPerson {
+                person: PersonId(7),
+            },
+            ClientMessage::ListBans,
+        ] {
+            assert_eq!(
+                decode::<ClientMessage>(&encode(&mensagem).unwrap()).unwrap(),
+                mensagem
+            );
+        }
+        for mensagem in [
+            ServerMessage::Banidos {
+                banidos: vec![
+                    banido(7),
+                    Banido {
+                        person: PersonId(8),
+                        nickname: "gendo".into(),
+                        reason: None,
+                        expires_at: None,
+                        issued_by: None,
+                    },
+                ],
+                ultima: false,
+            },
+            ServerMessage::Banidos {
+                banidos: vec![],
+                ultima: true,
+            },
+        ] {
+            assert_eq!(
+                decode::<ServerMessage>(&encode(&mensagem).unwrap()).unwrap(),
+                mensagem
+            );
+        }
+    }
+
+    /// Os três verbos ficam no fim da lista do cliente, e o `Banidos` no fim
+    /// da do servidor: um par 12 lê tudo o que já existia igual.
+    #[test]
+    fn as_variantes_novas_estao_no_fim_das_listas() {
+        let do_cliente = crate::vocabulario::variantes::<ClientMessage>().unwrap();
+        assert_eq!(
+            do_cliente.get(56..),
+            Some(&["EditMessage", "UnbanPerson", "ListBans"][..])
+        );
+        let do_servidor = crate::vocabulario::variantes::<ServerMessage>().unwrap();
+        assert_eq!(do_servidor.get(66..), Some(&["Banidos"][..]));
+    }
+
+    /// A edição tem o teto do envio: editar não é porta para um corpo maior.
+    #[test]
+    fn a_edicao_tem_o_teto_do_envio() {
+        let no_teto = ClientMessage::EditMessage {
+            id: MessageId(1),
+            body: "x".repeat(MAX_BODY_LEN),
+        };
+        assert!(encode(&no_teto).is_ok());
+        let acima = ClientMessage::EditMessage {
+            id: MessageId(1),
+            body: "x".repeat(MAX_BODY_LEN + 1),
+        };
+        assert!(matches!(
+            encode(&acima),
+            Err(ControlError::FieldTooLong { field: "body", .. })
+        ));
+    }
+
+    /// Uma parte cheia, com o maior de cada campo, cabe num quadro: o teto de
+    /// banidos por parte é de quadro, e não de gosto.
+    #[test]
+    fn uma_parte_cheia_de_banidos_cabe_num_quadro() {
+        let cheia = ServerMessage::Banidos {
+            banidos: (0..MAX_BANIDOS_POR_PARTE)
+                .map(|_| Banido {
+                    person: PersonId(u64::MAX),
+                    nickname: "n".repeat(MAX_NICKNAME_LEN),
+                    reason: Some("r".repeat(MAX_ALERT_TEXT_LEN)),
+                    expires_at: Some(i64::MIN),
+                    issued_by: Some(PersonId(u64::MAX)),
+                })
+                .collect(),
+            ultima: false,
+        };
+        let quadro = encode(&cheia).unwrap();
+        assert!(quadro.len() <= MAX_FRAME_LEN, "{} bytes", quadro.len());
+    }
+
+    #[test]
+    fn os_tetos_dos_banidos_valem_nos_dois_sentidos() {
+        let demais = ServerMessage::Banidos {
+            banidos: (0..=MAX_BANIDOS_POR_PARTE)
+                .map(|i| banido(u64::try_from(i).unwrap()))
+                .collect(),
+            ultima: true,
+        };
+        assert!(matches!(
+            encode(&demais),
+            Err(ControlError::FieldTooLong {
+                field: "banidos",
+                ..
+            })
+        ));
+        let mut longo = banido(1);
+        longo.nickname = "n".repeat(MAX_NICKNAME_LEN + 1);
+        assert!(matches!(
+            encode(&ServerMessage::Banidos {
+                banidos: vec![longo],
+                ultima: true,
+            }),
+            Err(ControlError::FieldTooLong {
+                field: "nickname",
+                ..
+            })
+        ));
+        let mut falador = banido(1);
+        falador.reason = Some("r".repeat(MAX_ALERT_TEXT_LEN + 1));
+        let quadro = {
+            // Como um servidor que não validou o escreveria: o teto tem de
+            // valer também para quem lê.
+            let mut bytes = vec![PROTOCOL_VERSION];
+            bytes.extend(
+                postcard::to_allocvec(&ServerMessage::Banidos {
+                    banidos: vec![falador],
+                    ultima: true,
+                })
+                .unwrap(),
+            );
+            bytes
+        };
+        assert!(matches!(
+            decode::<ServerMessage>(&quadro),
+            Err(ControlError::FieldTooLong {
+                field: "reason",
+                ..
+            })
+        ));
     }
 }
 

@@ -667,7 +667,7 @@ async fn o_eco_de_uma_linha_antiga_no_meio_da_busca_nao_a_fecha_antes_do_buraco(
     let mut outra = bia(endereco).await?;
     outra.join_channel(LINHA).await?;
     outra
-        .send_message(LINHA, "velha", seele_proto::ids::ClientMessageId(1))
+        .send_message(LINHA, "velha", None, seele_proto::ids::ClientMessageId(1))
         .await?;
     esperar("ela ver a mensagem velha", || {
         ana.messages().iter().any(|m| m.body == "velha")

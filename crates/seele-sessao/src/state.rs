@@ -120,6 +120,14 @@ pub struct Message {
     pub client_message_id: Option<ClientMessageId>,
     /// Whether it has been edited since.
     pub edited: bool,
+    /// Se o corpo chama **quem está logado** pelo apelido (`@apelido`), pela
+    /// regra de [`crate::mencao::menciona`].
+    ///
+    /// Sempre `false` na própria mensagem: escrever o próprio nome não é ser
+    /// chamado. Conferido quando a mensagem chega e de novo quando ela é
+    /// editada, contra o apelido que esta sessão tinha **nessa hora** — trocar
+    /// de apelido depois não reescreve o que já foi marcado.
+    pub mentions_me: bool,
     /// The file hanging off it, if any. ADR 0027.
     ///
     /// **Still `Some` after the bytes are gone**, carrying
@@ -154,6 +162,12 @@ pub struct Pendente {
     pub client_message_id: ClientMessageId,
     /// O texto, preservado aqui e não no campo da janela.
     pub body: String,
+    /// A mensagem a que ela responde, se responde a alguma.
+    ///
+    /// Guardada aqui pelo mesmo motivo do corpo: tentar de novo depois de uma
+    /// queda tem de mandar **a mesma** mensagem, e uma resposta repetida sem
+    /// isto chegaria solta, fora da conversa a que pertencia.
+    pub replies_to: Option<MessageId>,
     /// Quando **esta** máquina a compôs, em segundos desde a época.
     ///
     /// O relógio local, e não o do servidor: o do servidor só existe depois de
@@ -413,6 +427,19 @@ pub struct Room {
     /// responder «quantas chegaram enquanto eu estava noutro canal», que é a
     /// pergunta que o R02 deixa possível pela primeira vez.
     pub lidas_ate: BTreeMap<ChannelId, MessageId>,
+    /// Os canais cuja página mais nova do histórico foi pedida e cuja cerca
+    /// ainda não voltou. Ver [`Self::esperar_historico`].
+    historico_no_ar: std::collections::BTreeSet<ChannelId>,
+    /// **Os banimentos que valem**, como o servidor os listou da última vez
+    /// que esta sessão pediu (`ListBans` ou `UnbanPerson`, protocolo 13).
+    ///
+    /// Vazia até alguém pedir, e para quem não pode banir: o servidor só
+    /// manda a lista a quem pediu. **Não se atualiza sozinha** quando outra
+    /// pessoa bane; quem abre a tela de banidos pede de novo. Sai daqui quem
+    /// volta a ser membro (`MembroNovo`).
+    pub banidos: Vec<seele_proto::control::Banido>,
+    /// As partes de uma lista de banidos que ainda não fechou.
+    banidos_chegando: Option<Vec<seele_proto::control::Banido>>,
     /// O que **esta** máquina escreveu e o servidor ainda não confirmou.
     ///
     /// Uma lista só, e não um mapa por canal: são poucas — o que cabe entre um
@@ -606,6 +633,9 @@ pub struct Changed {
     /// Chegou uma `PerfilRecusado`; a recusa espera em
     /// [`Room::recusas_de_perfil`].
     pub recusa_de_perfil: bool,
+    /// A lista de banidos chegou inteira ([`Room::banidos`], protocolo 13), ou
+    /// alguém saiu dela porque voltou a ser membro.
+    pub banidos: bool,
     /// The session ended.
     pub ended: bool,
 }
@@ -625,6 +655,7 @@ impl Changed {
             || self.cargos
             || self.perfis
             || self.recusa_de_perfil
+            || self.banidos
             || self.ended
     }
 }
@@ -765,6 +796,11 @@ impl Room {
         self.perfis_chegando = None;
         self.pendencia_do_perfil.clear();
         self.recusas_de_perfil.clear();
+        // A lista de banidos é de uma conexão: a seguinte pede de novo. E uma
+        // cerca de histórico da conexão que caiu não volta mais.
+        self.banidos.clear();
+        self.banidos_chegando = None;
+        self.historico_no_ar.clear();
         self.voice_rooms = voice_rooms;
         self.channels = channels;
         self.permissions = permissions;
@@ -892,8 +928,41 @@ impl Room {
     /// voltava a se misturar. Com as mensagens guardadas por canal, trocar de
     /// canal é trocar de projeção, e a conversa que ficou para trás continua
     /// onde estava, para as não lidas e para quando se voltar a ela.
+    ///
+    /// **E marca como lido**, os dois: o canal que se deixa — tudo o que
+    /// chegou nele enquanto esteve aberto foi visto — e o que se abre. Sem a
+    /// primeira metade, sair de um canal fazia a conversa que a pessoa acabou
+    /// de ler voltar inteira como não lida.
     pub fn open_channel(&mut self, channel: ChannelId) {
+        if let Some(antes) = self.current_channel {
+            self.marcar_lido(antes);
+        }
         self.current_channel = Some(channel);
+        self.marcar_lido(channel);
+    }
+
+    /// Anota que a página **mais nova** do histórico de `channel` foi pedida,
+    /// e devolve o carimbo do `Ping` que tem de sair logo atrás do
+    /// `FetchHistory` ([`crate::volta::carimbo_do_historico`]).
+    ///
+    /// # Por que a sessão precisa saber
+    ///
+    /// O fio não distingue uma mensagem do histórico de uma que acabou de ser
+    /// dita: as duas são `MessageReceived`. Para quem abre um canal, a
+    /// diferença importa duas vezes — uma menção antiga não é alguém chamando
+    /// agora, e uma conversa que já estava lá não é novidade. Entre este
+    /// pedido e o `Pong` da cerca, o que chega neste canal é tratado como
+    /// histórico: marca [`Message::mentions_me`], mas não levanta o aviso, e
+    /// conta como lido.
+    ///
+    /// **Quem pede o histórico sem chamar isto** recebe a página como se fosse
+    /// conversa ao vivo: cada menção antiga levanta o aviso. O defeito aparece,
+    /// em vez de calar. **E uma cerca que o limitador do servidor descartar**
+    /// deixa o canal em histórico até a próxima abertura dele; a busca do
+    /// buraco (`crate::volta`) tem prazo para isso, e esta não.
+    pub fn esperar_historico(&mut self, channel: ChannelId) -> u64 {
+        self.historico_no_ar.insert(channel);
+        crate::volta::carimbo_do_historico(channel)
     }
 
     /// As mensagens de um canal, mais antigas primeiro.
@@ -948,6 +1017,62 @@ impl Room {
             .count()
     }
 
+    /// Quantas das [`Self::nao_lidas`] deste canal chamam quem está logado
+    /// ([`Message::mentions_me`]). Zero no canal aberto, como a outra.
+    #[must_use]
+    pub fn mencoes_nao_lidas(&self, channel: ChannelId) -> usize {
+        if self.current_channel == Some(channel) {
+            return 0;
+        }
+        let desde = self
+            .lidas_ate
+            .get(&channel)
+            .copied()
+            .unwrap_or(MessageId(0));
+        self.mensagens_do_canal(channel)
+            .iter()
+            .filter(|mensagem| mensagem.mentions_me && mensagem.id > desde)
+            .count()
+    }
+
+    /// O apelido pelo qual esta sessão é chamada, e a marca dela: os dois
+    /// argumentos de [`crate::mencao::menciona`].
+    ///
+    /// A base é a da identidade apresentada, que é o nome que a tela mostra.
+    /// Sem ela — um servidor de antes do 11 —, é o apelido do roster, partido
+    /// em base e marca quando tem a forma `base#XXXX`. `None` antes do
+    /// `Session`, ou enquanto o próprio apelido não chegou.
+    #[must_use]
+    pub fn apelido_mencionavel(&self) -> Option<(String, Option<String>)> {
+        let eu = self.me?;
+        let marca_valida = |tag: &str| {
+            tag.len() == 4
+                && tag
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase())
+        };
+        if let Some((base, tag)) = self.identidades_apresentadas.get(&eu.0) {
+            if marca_valida(tag) {
+                return Some((base.clone(), Some(tag.clone())));
+            }
+        }
+        let interno = &self.people.get(&eu)?.nickname;
+        Some(match interno.rsplit_once('#') {
+            Some((base, tag)) if marca_valida(tag) && !base.is_empty() => {
+                (base.to_owned(), Some(tag.to_owned()))
+            }
+            _ => (interno.clone(), None),
+        })
+    }
+
+    /// Se `corpo` chama quem está logado. `false` enquanto esta sessão não
+    /// sabe o próprio apelido.
+    #[must_use]
+    pub fn me_menciona(&self, corpo: &str) -> bool {
+        self.apelido_mencionavel()
+            .is_some_and(|(base, tag)| crate::mencao::menciona(corpo, &base, tag.as_deref()))
+    }
+
     /// Anota que esta máquina entregou uma mensagem ao enlace.
     ///
     /// Chamada **antes** de o texto sair, e é o que torna o campo da janela
@@ -961,6 +1086,22 @@ impl Room {
         body: String,
         at_seconds: i64,
     ) {
+        self.anotar_resposta(channel, client_message_id, body, None, at_seconds);
+    }
+
+    /// [`Self::anotar_envio`], para uma mensagem que responde a outra.
+    ///
+    /// Com `replies_to` em `None` numa chave que já está na fila — a
+    /// repetição da volta, o «tentar de novo» —, a resposta anotada da
+    /// primeira vez **fica**: repetir não desfaz a quem a mensagem responde.
+    pub fn anotar_resposta(
+        &mut self,
+        channel: ChannelId,
+        client_message_id: ClientMessageId,
+        body: String,
+        replies_to: Option<MessageId>,
+        at_seconds: i64,
+    ) {
         // Reenvio da mesma chave: o estado volta a «enviando» em vez de entrar
         // uma segunda linha. Duas linhas para uma mensagem seria a interface
         // dizendo que tentar de novo duplicou o texto.
@@ -972,12 +1113,16 @@ impl Room {
             existente.estado = EstadoDoEnvio::Enviando;
             existente.channel = channel;
             existente.body = body;
+            if replies_to.is_some() {
+                existente.replies_to = replies_to;
+            }
             return;
         }
         self.pendentes.push(Pendente {
             channel,
             client_message_id,
             body,
+            replies_to,
             at_seconds,
             estado: EstadoDoEnvio::Enviando,
         });
@@ -1371,6 +1516,35 @@ impl Room {
                             .retain(|pendente| pendente.client_message_id != *chave);
                     }
                 }
+                // **A menção** é conferida aqui, no cliente, e nada dela viaja
+                // no fio: o corpo é comparado com o apelido de quem está
+                // logado. Na própria mensagem, nunca.
+                let me_chama = !propria && self.me_menciona(body);
+                // Histórico ou conversa: ver [`Self::esperar_historico`].
+                let do_historico = self.historico_no_ar.contains(channel);
+                if do_historico {
+                    // O que a página trouxe já estava na conversa quando a
+                    // pessoa abriu o canal: não é novidade, mesmo que ela
+                    // troque de canal antes de a página acabar de chegar.
+                    let lida = self.lidas_ate.entry(*channel).or_insert(*id);
+                    *lida = (*lida).max(*id);
+                } else if me_chama {
+                    // **Uma vez por mensagem**: a que chega repetida já saiu
+                    // lá em cima, pelo id.
+                    self.notice = Some(Notice {
+                        severity: seele_proto::control::AlertSeverity::Info,
+                        reason: seele_proto::control::AlertReason::Mentioned,
+                        operator_text: None,
+                    });
+                    changed.notice = true;
+                }
+                // **A contagem de não lidas de um canal fechado andou**, e
+                // ela mora na lista de canais: sem isto a casca redesenhava a
+                // conversa aberta, que não mudou, e deixava parado o número
+                // que mudou.
+                if !propria && !do_historico && self.current_channel != Some(*channel) {
+                    changed.channels = true;
+                }
                 let lista = self.mensagens.entry(*channel).or_default();
                 lista.push(Message {
                     id: *id,
@@ -1400,6 +1574,7 @@ impl Room {
                     own: propria,
                     client_message_id: if propria { *client_message_id } else { None },
                     edited: false,
+                    mentions_me: me_chama,
                     attachment: attachment.clone(),
                 });
                 // History arrives oldest-first per page, but a page fetched
@@ -1415,6 +1590,10 @@ impl Room {
             // seria voltar a tratar a coleção como se fosse uma — e o canal vem
             // no fio justamente para não ser preciso adivinhar.
             ServerMessage::MessageEdited { channel, id, body } => {
+                // A edição pode pôr ou tirar a menção. Não levanta aviso: o
+                // aviso é de quando alguém chama, e uma edição é a mesma
+                // mensagem de antes.
+                let me_chama = self.me_menciona(body);
                 if let Some(message) = self
                     .mensagens
                     .get_mut(channel)
@@ -1422,6 +1601,7 @@ impl Room {
                 {
                     message.body.clone_from(body);
                     message.edited = true;
+                    message.mentions_me = !message.own && me_chama;
                     changed.messages = true;
                 }
             }
@@ -1431,6 +1611,8 @@ impl Room {
                     let before = lista.len();
                     lista.retain(|message| message.id != *id);
                     changed.messages = lista.len() != before;
+                    // A apagada pode ser uma não lida de um canal fechado.
+                    changed.channels = changed.messages && self.current_channel != Some(*channel);
                 }
             }
 
@@ -1836,9 +2018,30 @@ impl Room {
             // O `Tocando` também é do aperto de mão, o da sala pessoal: chega
             // antes do `Session`, e quem o lê é quem liga, na fase de chamar
             // (a F7 da 0.16). Uma sessão não tem o que fazer com ele.
-            ServerMessage::Challenge { .. }
-            | ServerMessage::Pong { .. }
-            | ServerMessage::Tocando { .. } => {}
+            ServerMessage::Challenge { .. } | ServerMessage::Tocando { .. } => {}
+
+            // A cerca do histórico: o `Pong` do `Ping` que saiu logo atrás do
+            // `FetchHistory` chega depois da página inteira, e daqui em diante
+            // o que chega neste canal é conversa. Qualquer outro `Pong` não é
+            // desta camada.
+            ServerMessage::Pong { timestamp } => {
+                if let Some(canal) = crate::volta::canal_do_carimbo_do_historico(*timestamp) {
+                    self.historico_no_ar.remove(&canal);
+                }
+            }
+
+            // **A lista de banidos** (protocolo 13), só para quem pediu e pode
+            // banir. Em partes, no padrão de `Membros`: só vale inteira na
+            // `ultima`, e uma parte sem ela não troca a lista anterior.
+            ServerMessage::Banidos { banidos, ultima } => {
+                self.banidos_chegando
+                    .get_or_insert_with(Vec::new)
+                    .extend(banidos.iter().cloned());
+                if *ultima {
+                    self.banidos = self.banidos_chegando.take().unwrap_or_default();
+                    changed.banidos = true;
+                }
+            }
 
             // O FORA DO AR (D-fio-4, P6). A lista chega em partes de até 256,
             // e só vale inteira no `fim`: uma parte sem ele não troca a lista
@@ -1865,6 +2068,12 @@ impl Room {
                 self.membros.insert(membro.id, membro.nickname.clone());
                 changed.roster = true;
                 changed.membros = true;
+                // Quem voltou a ser membro saiu da lista de banidos: é assim
+                // que a lista de quem **não** pediu o desbanimento se corrige
+                // (quem pediu recebe a lista inteira de novo).
+                let antes = self.banidos.len();
+                self.banidos.retain(|banido| banido.person != membro.id);
+                changed.banidos = self.banidos.len() != antes;
             }
             ServerMessage::MembroBanido { person } => {
                 self.membros.remove(person);
@@ -3914,5 +4123,438 @@ mod perfis_testes {
             ultima: true,
         });
         assert_eq!(room.perfis.keys().map(|p| p.0).collect::<Vec<_>>(), vec![2]);
+    }
+}
+
+#[cfg(test)]
+mod mesa_de_texto_testes {
+    //! A mesa mínima de texto da 1.0, do lado de quem recebe: a menção, as
+    //! não lidas por canal, a editada e a lista de banidos.
+    use seele_proto::control::{AlertReason, Banido, ChannelInfo, Membro};
+
+    use super::*;
+
+    const GERAL: ChannelId = ChannelId(1);
+    const AVISOS: ChannelId = ChannelId(2);
+
+    /// Uma sessão da pessoa 7, de apelido `ana` e marca `K7Q2`, com dois
+    /// canais e nenhum aberto.
+    fn sala() -> Room {
+        let mut room = Room::new();
+        room.apply(&ServerMessage::Session {
+            id: SessionId(1),
+            person: PersonId(7),
+            ssrc: Ssrc(700),
+            server: "Casa".into(),
+            voice_rooms: Vec::new(),
+            channels: vec![
+                ChannelInfo {
+                    id: GERAL,
+                    name: "geral".into(),
+                },
+                ChannelInfo {
+                    id: AVISOS,
+                    name: "avisos".into(),
+                },
+            ],
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        });
+        room.apply(&ServerMessage::PersonRenamed {
+            person: PersonId(7),
+            nickname: "ana#K7Q2".into(),
+        });
+        room.apply(&ServerMessage::IdentidadeApresentada {
+            pessoa: PersonId(7),
+            base: "ana".into(),
+            tag: "K7Q2".into(),
+        });
+        room
+    }
+
+    fn dita(id: u64, autor: u64, canal: ChannelId, corpo: &str) -> ServerMessage {
+        ServerMessage::MessageReceived {
+            channel: canal,
+            id: MessageId(id),
+            author: PersonId(autor),
+            author_nickname: format!("pessoa {autor}"),
+            at_seconds: 1_700_000_000,
+            body: corpo.into(),
+            replies_to: None,
+            client_message_id: None,
+            attachment: None,
+        }
+    }
+
+    fn a_mensagem(room: &Room, canal: ChannelId, id: u64) -> &Message {
+        room.mensagens_do_canal(canal)
+            .iter()
+            .find(|m| m.id == MessageId(id))
+            .expect("a mensagem não está no canal")
+    }
+
+    /// **A menção de outra pessoa marca a mensagem e levanta o aviso, uma
+    /// vez.** A mesma mensagem chegando de novo (o histórico que se sobrepõe
+    /// ao que já está na tela) não levanta outro.
+    #[test]
+    fn ser_chamado_marca_a_mensagem_e_levanta_o_aviso_uma_vez() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+
+        let mudou = room.apply(&dita(1, 3, GERAL, "oi @Ana, vem cá"));
+        assert!(a_mensagem(&room, GERAL, 1).mentions_me);
+        assert!(mudou.notice, "ninguém foi avisado da menção");
+        assert_eq!(
+            room.notice.as_ref().map(|aviso| aviso.reason),
+            Some(AlertReason::Mentioned)
+        );
+
+        assert!(room.dispensar_aviso());
+        let de_novo = room.apply(&dita(1, 3, GERAL, "oi @Ana, vem cá"));
+        assert!(!de_novo.notice, "a mesma mensagem avisou duas vezes");
+        assert!(room.notice.is_none());
+    }
+
+    /// O que **não** é ser chamado: a própria mensagem, outro apelido que
+    /// começa igual, um endereço de e-mail, e a marca de outra `ana`.
+    #[test]
+    fn o_que_nao_e_mencao_nao_marca_nem_avisa() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        for (id, autor, corpo) in [
+            (1, 7, "eu mesma: @ana"),
+            (2, 3, "oi @anabela"),
+            (3, 3, "escreva para x@ana.com"),
+            (4, 3, "@ana#ZZZ9 é outra pessoa"),
+            (5, 3, "a ana disse"),
+        ] {
+            let mudou = room.apply(&dita(id, autor, GERAL, corpo));
+            assert!(!a_mensagem(&room, GERAL, id).mentions_me, "{corpo:?}");
+            assert!(!mudou.notice, "{corpo:?} levantou o aviso");
+        }
+        assert!(room.notice.is_none());
+        // E a marca certa chama.
+        assert!(room.apply(&dita(6, 3, GERAL, "@ana#K7Q2")).notice);
+    }
+
+    /// **O histórico marca e não avisa.** Entre `esperar_historico` e o `Pong`
+    /// da cerca, o que chega no canal é a conversa que já estava lá; depois
+    /// do `Pong`, é alguém chamando agora. Um `Pong` de rotina, ou a cerca de
+    /// outro canal, não fecha a deste.
+    #[test]
+    fn o_historico_marca_a_mencao_e_nao_levanta_o_aviso() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        let carimbo = room.esperar_historico(GERAL);
+        assert_eq!(
+            crate::volta::canal_do_carimbo_do_historico(carimbo),
+            Some(GERAL)
+        );
+
+        let mudou = room.apply(&dita(1, 3, GERAL, "ontem: @ana"));
+        assert!(a_mensagem(&room, GERAL, 1).mentions_me);
+        assert!(!mudou.notice, "uma menção do histórico levantou o aviso");
+        assert!(room.notice.is_none());
+
+        // Nem um `Pong` de rotina, nem o do buraco, nem o de entrada, nem a
+        // cerca de outro canal fecham a página deste.
+        for outro in [
+            4,
+            crate::volta::MARCA_DO_PING_DO_BURACO | 1,
+            crate::assento::carimbo_da_entrada(1),
+            crate::volta::carimbo_do_historico(AVISOS),
+        ] {
+            room.apply(&ServerMessage::Pong { timestamp: outro });
+            assert!(
+                !room.apply(&dita(100 + outro % 97, 3, GERAL, "@ana")).notice,
+                "o `Pong` {outro:#x} fechou a página do histórico"
+            );
+        }
+
+        room.apply(&ServerMessage::Pong { timestamp: carimbo });
+        assert!(
+            room.apply(&dita(900, 3, GERAL, "agora: @ana")).notice,
+            "depois da cerca, a menção ao vivo não avisou"
+        );
+    }
+
+    /// Os quatro carimbos de `Ping` não se confundem: o de rotina, o de
+    /// entrada (bit 63), o do buraco (bit 62) e o do histórico (bit 61).
+    #[test]
+    fn o_carimbo_do_historico_nao_se_confunde_com_os_outros() {
+        use crate::volta::{canal_do_carimbo_do_historico, carimbo_do_historico};
+        for canal in [ChannelId(0), ChannelId(1), ChannelId(u32::MAX)] {
+            let carimbo = carimbo_do_historico(canal);
+            assert_eq!(canal_do_carimbo_do_historico(carimbo), Some(canal));
+            assert_eq!(crate::assento::numero_do_carimbo(carimbo), None);
+            assert_eq!(carimbo & crate::volta::MARCA_DO_PING_DO_BURACO, 0);
+        }
+        for outro in [
+            0,
+            1,
+            u64::from(u32::MAX),
+            crate::volta::MARCA_DO_PING_DO_BURACO | 5,
+            crate::assento::carimbo_da_entrada(5),
+            crate::volta::MARCA_DO_PING_DO_HISTORICO | (1 << 40),
+            u64::MAX,
+        ] {
+            assert_eq!(canal_do_carimbo_do_historico(outro), None, "{outro:#x}");
+        }
+    }
+
+    /// Editar pode pôr e tirar a menção, e não levanta aviso.
+    #[test]
+    fn a_edicao_refaz_a_marca_de_mencao_sem_avisar() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        room.apply(&dita(1, 3, GERAL, "oi"));
+        let mudou = room.apply(&ServerMessage::MessageEdited {
+            channel: GERAL,
+            id: MessageId(1),
+            body: "oi @ana".into(),
+        });
+        let editada = a_mensagem(&room, GERAL, 1);
+        assert!(editada.edited && editada.mentions_me);
+        assert!(mudou.messages && !mudou.notice);
+        room.apply(&ServerMessage::MessageEdited {
+            channel: GERAL,
+            id: MessageId(1),
+            body: "oi".into(),
+        });
+        assert!(!a_mensagem(&room, GERAL, 1).mentions_me);
+    }
+
+    /// **As não lidas e as menções de cada canal, no retrato.** O que chega
+    /// num canal fechado conta; o aberto fica em zero; e abrir zera.
+    #[test]
+    fn o_retrato_do_canal_leva_as_nao_lidas_e_as_mencoes() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        room.open_channel(AVISOS);
+        room.apply(&dita(1, 3, GERAL, "oi"));
+        room.apply(&dita(2, 3, GERAL, "@ana, cadê você"));
+        room.apply(&dita(3, 7, GERAL, "a própria não conta"));
+        room.apply(&dita(4, 3, AVISOS, "@ana no canal aberto"));
+
+        let canais = crate::retrato::lines_of(&room);
+        let de = |id: ChannelId| {
+            canais
+                .iter()
+                .find(|canal| canal.id == id.0)
+                .expect("o canal sumiu do retrato")
+        };
+        assert_eq!((de(GERAL).nao_lidas, de(GERAL).mencoes), (2, 1));
+        assert_eq!((de(AVISOS).nao_lidas, de(AVISOS).mencoes), (0, 0));
+        assert!(de(AVISOS).open && !de(GERAL).open);
+
+        room.open_channel(GERAL);
+        let canais = crate::retrato::lines_of(&room);
+        assert!(
+            canais
+                .iter()
+                .all(|canal| canal.nao_lidas == 0 && canal.mencoes == 0),
+            "abrir o canal não o marcou como lido: {canais:?}"
+        );
+    }
+
+    /// **Sair de um canal não devolve como não lido o que foi lido nele.** O
+    /// que chegou com o canal aberto foi visto; só o que chega depois conta.
+    #[test]
+    fn o_que_chegou_com_o_canal_aberto_nao_volta_como_nao_lido() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        room.apply(&dita(1, 3, GERAL, "lida na hora"));
+        room.apply(&dita(2, 3, GERAL, "@ana lida na hora"));
+        room.open_channel(AVISOS);
+        assert_eq!(
+            (room.nao_lidas(GERAL), room.mencoes_nao_lidas(GERAL)),
+            (0, 0),
+            "trocar de canal devolveu como não lido o que estava na tela"
+        );
+        room.apply(&dita(3, 3, GERAL, "esta sim, @ana"));
+        assert_eq!(
+            (room.nao_lidas(GERAL), room.mencoes_nao_lidas(GERAL)),
+            (1, 1)
+        );
+        // E voltar ao canal e sair de novo zera outra vez.
+        room.open_channel(GERAL);
+        room.open_channel(AVISOS);
+        assert_eq!(room.nao_lidas(GERAL), 0);
+    }
+
+    /// A página do histórico que acaba de chegar depois de a pessoa já ter
+    /// trocado de canal não vira uma pilha de não lidas.
+    #[test]
+    fn o_historico_que_chega_atrasado_nao_conta_como_nao_lido() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        let carimbo = room.esperar_historico(GERAL);
+        room.open_channel(AVISOS);
+        room.apply(&dita(1, 3, GERAL, "antiga"));
+        room.apply(&dita(2, 3, GERAL, "antiga, @ana"));
+        assert_eq!(
+            (room.nao_lidas(GERAL), room.mencoes_nao_lidas(GERAL)),
+            (0, 0)
+        );
+        room.apply(&ServerMessage::Pong { timestamp: carimbo });
+        room.apply(&dita(3, 3, GERAL, "nova"));
+        assert_eq!(room.nao_lidas(GERAL), 1);
+    }
+
+    /// O que chega num canal fechado mexe na lista de canais (o número de não
+    /// lidas mora lá); o que chega no aberto, a própria e o histórico, não.
+    #[test]
+    fn so_o_que_muda_a_contagem_avisa_a_lista_de_canais() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        assert!(!room.apply(&dita(1, 3, GERAL, "no aberto")).channels);
+        assert!(room.apply(&dita(2, 3, AVISOS, "no fechado")).channels);
+        assert!(!room.apply(&dita(3, 7, AVISOS, "a própria")).channels);
+        room.esperar_historico(AVISOS);
+        assert!(!room.apply(&dita(4, 3, AVISOS, "histórico")).channels);
+        let apagada = room.apply(&ServerMessage::MessageRemoved {
+            channel: AVISOS,
+            id: MessageId(2),
+        });
+        assert!(apagada.channels && apagada.messages);
+    }
+
+    /// **A resposta sobrevive ao «tentar de novo».** A pendente guarda a quem
+    /// responde, e a repetição da volta — que reanota sem dizer nada — manda a
+    /// mesma mensagem, e não uma solta.
+    #[test]
+    fn a_pendente_guarda_a_quem_responde_e_a_repeticao_a_mantem() {
+        let mut room = sala();
+        room.open_channel(GERAL);
+        let chave = ClientMessageId(41);
+        room.anotar_resposta(GERAL, chave, "concordo".into(), Some(MessageId(9)), 0);
+        assert_eq!(room.pendentes[0].replies_to, Some(MessageId(9)));
+
+        room.envios_sem_resposta();
+        let repetir = crate::volta::repetir(&mut room, chave, 0);
+        assert_eq!(
+            repetir,
+            crate::volta::Repetir::Mandar {
+                canal: GERAL,
+                corpo: "concordo".into(),
+                responde_a: Some(MessageId(9)),
+                chave,
+            }
+        );
+        assert_eq!(
+            room.pendentes[0].replies_to,
+            Some(MessageId(9)),
+            "repetir desfez a quem a mensagem responde"
+        );
+        // E a que não responde a nada continua não respondendo.
+        room.anotar_envio(GERAL, ClientMessageId(42), "solta".into(), 0);
+        assert_eq!(room.pendentes[1].replies_to, None);
+    }
+
+    /// O retrato da lista de banidos leva os números crus e o apelido como
+    /// veio.
+    #[test]
+    fn o_retrato_dos_banidos_e_o_que_o_servidor_listou() {
+        let mut room = sala();
+        room.apply(&ServerMessage::Banidos {
+            banidos: vec![banido(3, "kaworu#A001")],
+            ultima: true,
+        });
+        let json = serde_json::to_value(crate::retrato::banidos_de(&room)).expect("json");
+        assert_eq!(
+            json,
+            serde_json::json!([{
+                "person": 3,
+                "nickname": "kaworu#A001",
+                "reason": "spam",
+                "expires_at": null,
+                "issued_by": 7,
+            }])
+        );
+    }
+
+    fn banido(id: u64, apelido: &str) -> Banido {
+        Banido {
+            person: PersonId(id),
+            nickname: apelido.into(),
+            reason: Some("spam".into()),
+            expires_at: None,
+            issued_by: Some(PersonId(7)),
+        }
+    }
+
+    /// A lista de banidos chega em partes e só vale inteira na `ultima`; uma
+    /// lista nova troca a anterior, e não soma com ela.
+    #[test]
+    fn os_banidos_chegam_em_partes_e_a_lista_nova_troca_a_velha() {
+        let mut room = sala();
+        let parte = room.apply(&ServerMessage::Banidos {
+            banidos: vec![banido(3, "kaworu")],
+            ultima: false,
+        });
+        assert!(!parte.banidos && room.banidos.is_empty());
+        let fim = room.apply(&ServerMessage::Banidos {
+            banidos: vec![banido(4, "gendo")],
+            ultima: true,
+        });
+        assert!(fim.banidos && fim.any());
+        assert_eq!(
+            room.banidos.iter().map(|b| b.person.0).collect::<Vec<_>>(),
+            vec![3, 4]
+        );
+        room.apply(&ServerMessage::Banidos {
+            banidos: vec![banido(4, "gendo")],
+            ultima: true,
+        });
+        assert_eq!(room.banidos, vec![banido(4, "gendo")]);
+    }
+
+    /// Quem volta a ser membro sai da lista de banidos de todo mundo que a
+    /// tinha na mão, e entra no FORA DO AR.
+    #[test]
+    fn quem_volta_a_ser_membro_sai_da_lista_de_banidos() {
+        let mut room = sala();
+        room.apply(&ServerMessage::Banidos {
+            banidos: vec![banido(3, "kaworu"), banido(4, "gendo")],
+            ultima: true,
+        });
+        let mudou = room.apply(&ServerMessage::MembroNovo {
+            membro: Membro {
+                id: PersonId(3),
+                nickname: "kaworu".into(),
+            },
+        });
+        assert!(mudou.banidos && mudou.membros);
+        assert_eq!(room.banidos, vec![banido(4, "gendo")]);
+        assert_eq!(room.fora_do_ar(), vec![(PersonId(3), "kaworu".to_owned())]);
+        // Um membro novo de verdade não mexe na lista.
+        let outro = room.apply(&ServerMessage::MembroNovo {
+            membro: Membro {
+                id: PersonId(9),
+                nickname: "novata".into(),
+            },
+        });
+        assert!(!outro.banidos);
+    }
+
+    /// A lista de banidos é de uma conexão: a seguinte não a herda.
+    #[test]
+    fn reconectar_nao_herda_a_lista_de_banidos() {
+        let mut room = sala();
+        room.apply(&ServerMessage::Banidos {
+            banidos: vec![banido(3, "kaworu")],
+            ultima: true,
+        });
+        room.apply(&ServerMessage::Session {
+            id: SessionId(2),
+            person: PersonId(7),
+            ssrc: Ssrc(701),
+            server: "Casa".into(),
+            voice_rooms: Vec::new(),
+            channels: Vec::new(),
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        });
+        assert!(room.banidos.is_empty());
     }
 }

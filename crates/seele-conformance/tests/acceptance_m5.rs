@@ -499,7 +499,12 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     terminal.join_channel(ChannelId(CHANNEL)).await?;
     room.open_channel(ChannelId(CHANNEL));
     terminal
-        .send_message(ChannelId(CHANNEL), "dito no terminal", ClientMessageId(1))
+        .send_message(
+            ChannelId(CHANNEL),
+            "dito no terminal",
+            None,
+            ClientMessageId(1),
+        )
         .await?;
 
     // Espera a mensagem voltar, que é quando ela está durável.
