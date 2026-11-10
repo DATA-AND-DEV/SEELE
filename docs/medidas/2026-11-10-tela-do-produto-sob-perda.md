@@ -589,3 +589,61 @@ A coluna do orçamento «depois» é a faixa da mediana entre as três rodadas.
 - O conserto 2 foi medido com o codificador de mentira, que espelha a casca. O `VideoEncoder` de verdade e o tempo do IPC do Tauri não entraram.
 - Quanto de cada melhora vem de cada conserto: os três foram medidos juntos.
 - O que continua de pé — a faixa de sinal que nunca se mexe, a sonda que lê perda sorteada como congestionamento, e a partida em 5,58 Mbps — não foi tocado.
+
+## Segundo adendo: a sonda e a partida
+
+Medido no mesmo dia, em cima dos três consertos do adendo anterior (carga média 1,76 no começo, 1,49 entre a grade e o regime, 1,57 no fim). Só a variante «produto», 3 rodadas de 20 s.
+
+### O que fazia o orçamento só descer
+
+A sonda foi instrumentada para dizer, janela a janela, o que viu (a instrumentação não ficou no código). Uma rodada de 60 s a 1% de perda e outra a 3%:
+
+- **O começo é fila de verdade**: cinco a oito janelas seguidas com **todas** as respostas do `Ping` acima da tolerância (140 a 510 ms contra 62 ms de base).
+- **Depois disso, o que derruba a estimativa são eventos de uma janela só**, entre janelas de 62–64 ms: um `Ping` em voo há 125, 131 ou 400 ms no fechamento da janela, ou uma resposta única de 109 ms. A 1% foram quatro em 46 s, e a estimativa foi de 1,71 Mbps a 405 kbps. A 3% foram dois em 28 s, e o teto parou em 588 kbps com a ida e volta em 62 ms durante os 30 s seguintes.
+- É o `Ping` da própria sonda, num canal confiável, sendo o pacote que o caminho perdeu.
+- **A partida**: a estimativa nascia em 9,3 Mbps com o teto preso em 2,79 Mbps pela escolha. As quatro primeiras janelas de fila recuavam a estimativa 20% cada uma sem mover o teto.
+
+### Os dois consertos
+
+4. **Um `Ping` atrasado sozinho é suspeita, e não fila** (`caminho.rs`, `DorDoPing`). A janela conta a **menor** resposta que recebeu. Duas respostas ou mais, todas atrasadas: fila, na hora. Uma resposta só atrasada, ou um `Ping` em voo além da tolerância: a sonda não sobe nem desce, e a janela seguinte decide.
+5. **A sonda parte do caminho que a banda escolhida usa** (`video.rs`, `semente_da_sonda_bps`): 4,65 Mbps para a câmera, em vez de 9,3.
+
+### Primeiros 20 s (mediana de 3 rodadas; «antes» é o adendo anterior)
+
+| cenário | antes: lat p50 / congelado % / quadros/s | depois | depois: p95 | orçamento mediana kbps (antes → depois) |
+|---|--:|--:|--:|--:|
+| 0% | 32 / 1,5 / 29,9 | 32 / 1,5 / 29,9 | 33 | 2790 → 2790 |
+| 0,3% | 34 / 1,5 / 29,3 | 36 / 4,7 / 29,3 | 845 | 618–2286 → 1369–1416 |
+| 1% | 93 / 9,0 / 25,7 | 62 / 5,0 / 27,9 | 1090 | 608–940 → 576–740 |
+| 3% | 1613 / 34,8 / 19,4 | 378 / 34,0 / 20,1 | 3691 | 506–936 → 265–493 |
+| 5% | 2888 / 71,7 / 7,2 | 2756 / 69,0 / 8,7 | 7178 | 936–1170 → 385–731 |
+| 1,0 Mbps, 0% | 48 / 55,9 / 13,3 | 48 / 29,9 / 20,4 | 3477 | 484–1170 → 490–523 |
+| 2,0 Mbps, 1% | 89 / 11,1 / 24,6 | 86 / 8,9 / 26,4 | 1611 | 560–689 → 602–739 |
+
+### Do segundo 40 ao 60 (mediana de 3 rodadas)
+
+| cenário | antes: lat p50 / congelado % / quadros/s | depois | depois: p95 | orçamento mediana kbps (antes → depois) |
+|---|--:|--:|--:|--:|
+| 0% | 33 / 0,0 / 30,1 | 32 / 0,0 / 30,1 | 33 | 2790 → 2790 |
+| 0,3% | 32 / 1,4 / 29,4 | 32 / 0,0 / 29,9 | 117 | 248–553 → 519–1458 |
+| 1% | 32 / 1,1 / 29,9 | 32 / 0,0 / 29,5 | 216 | 200–279 → 585–640 |
+| 3% | 32 / 20,7 / 30,1 | 32 / 24,8 / 29,9 | 2076 | 200 → 234–268 |
+| 5% | 118 / 31,2 / 30,1 | 129 / 46,7 / 30,6 | 1028 | 200 → 200 |
+| 1,0 Mbps, 0% | 48 / 3,5 / 29,1 | 51 / 6,5 / 29,1 | 365 | 480–608 → 529–626 |
+| 2,0 Mbps, 1% | 35 / 1,0 / 29,8 | 41 / 3,2 / 29,4 | 312 | 200–455 → 466–562 |
+
+### O que o segundo adendo mostra
+
+1. **Até 1% de perda o orçamento em regime dobrou ou triplicou sem custo em atraso**: de 200–279 para 585–640 kbps a 1%, e de 248–553 para 519–1458 kbps a 0,3%, com 0% do tempo congelado nas duas.
+2. **A partida num gargalo de 1 Mbps melhorou e continua ruim**: de 56% para 30% do tempo congelado nos primeiros 20 s. A estimativa ainda sobe uma janela antes da primeira dor, e a primeira dor ainda move pouco.
+3. **A 3% e a 5% nada mudou, e o orçamento não é mais o que segura**: com o teto no piso ou perto dele (200–268 kbps) a tela continua 25% e 47% do tempo congelada, com cauda de 1 a 2 s. Nesses dois cenários a medida anterior do canal já dizia o mesmo com outro emissor: sobre SCTP, o que limita é a retransmissão em ordem e a janela de congestionamento.
+4. **As bandas estreitas em regime ficaram dentro do ruído**: 3,5% → 6,5% a 1,0 Mbps (faixa de 1,2 a 13,1 entre as rodadas) e 1,0% → 3,2% a 2,0 Mbps com 1%. Três rodadas não separam isso de piora; se há, é o preço de reagir um segundo mais tarde a uma fila que começa numa janela de uma resposta só.
+5. **O corte do espectador aconteceu em 4 das 42 rodadas, e nas 4 a imagem voltou.**
+
+### O que o segundo adendo NÃO mostra
+
+- O que os anteriores já não mostravam (codificador de verdade, qualidade da imagem, tela do sistema, rajada, jitter, voz).
+- A instrumentação janela a janela foi **uma** rodada de 60 s por cenário, em dois cenários. A contagem dos eventos de uma janela só não tem faixa.
+- Os dois consertos foram medidos juntos, e o «antes» é a execução do adendo anterior, não uma execução intercalada.
+- A regra da suspeita num caminho com jitter de verdade (Wi-Fi), onde uma resposta atrasada sozinha é comum sem perda nenhuma. Pela regra ela deixa de derrubar a estimativa; se isso é bom ou ruim lá não foi medido.
+- A 3% e 5% o que resta é do transporte. RTP não foi medido.
