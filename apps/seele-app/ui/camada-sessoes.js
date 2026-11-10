@@ -604,6 +604,10 @@ function guardarOEstadoDaVista(sessao) {
   // Só uma tela desenhada daquela sessão tem o que guardar: a de transição
   // (escondida, ou já esvaziada) nunca sobrescreve o que ficou guardado.
   if ($("tela-sessao").hidden || desenhado === null) return;
+  // A resposta ou a edição em andamento não atravessa a troca de sessão: uma
+  // edição devolve o rascunho ao campo, e é ele que se guarda — e não o corpo
+  // de uma mensagem já gravada, que voltaria como texto a enviar de novo.
+  largarOModoDeCompor();
   guardarRascunho();
   estadoPorSessao.set(sessao, {
     rascunhos: new Map(rascunhos),

@@ -1991,7 +1991,34 @@
           <progress id="anexo-barra" class="anexo-barra" value="0" max="1" hidden></progress>
           <span id="anexo-estado" class="anexo-estado"></span>
         </div>
+        <!--
+          **A faixa do modo de escrever** (a mesa de texto da 1.0): respondendo
+          a uma mensagem, ou editando uma mensagem própria. Acima do campo, e
+          não dentro dele: ela diz o que o ENVIAR vai fazer com o que está
+          escrito, e o que se escreve continua sendo só o texto.
+
+          Sempre com a saída à vista, o botão e o Esc. `role="status"` na
+          frase, para quem escuta saber em que modo entrou; `role="alert"` no
+          erro, porque uma edição que não foi salva pede atenção agora.
+          As frases são do `frases.js` (`FRASES_DA_CONVERSA`).
+        -->
+        <div id="compor-modo" class="compor-modo" hidden>
+          <span class="compor-modo-texto">
+            <span id="compor-modo-frase" class="compor-modo-frase" role="status"></span>
+            <span id="compor-modo-citacao" class="compor-modo-citacao"></span>
+          </span>
+          <button id="compor-modo-cancelar" class="botao-fantasma compor-modo-cancelar" type="button"></button>
+          <p id="compor-modo-erro" class="erro compor-modo-erro" role="alert" hidden></p>
+        </div>
         <form id="form-mensagem" class="compor" autocomplete="off">
+          <!--
+            **A lista de quem chamar com `@`.** Filha do formulário para se
+            ancorar nele (acima do campo, sem empurrar a conversa), e `listbox`
+            com uma `option` por pessoa: o campo a aponta com `aria-controls` e
+            diz qual opção está acesa com `aria-activedescendant`, sem tirar o
+            foco de quem escreve. Vazia e escondida até alguém digitar `@`.
+          -->
+          <ul id="mencoes-lista" class="mencoes" role="listbox" hidden></ul>
           <label for="campo-mensagem" class="compor-rotulo">Sua mensagem em <span id="compor-rotulo-canal" class="compor-rotulo-canal"></span></label>
           <!--
             O sinal de maior, e não o triângulo desenhado: o comp escreve `>` aqui,
@@ -2041,6 +2068,7 @@
             -->
             <textarea id="campo-mensagem" name="mensagem" rows="1"
                       placeholder="transmitir no canal — Enter envia"
+                      aria-autocomplete="list" aria-controls="mencoes-lista"
                       autocomplete="off"></textarea>
             <!--
               O aviso de tamanho. `role="status"` porque ele aparece enquanto se
@@ -2186,6 +2214,18 @@
       </div>
       <div id="roster-mods" class="roster-mods" hidden></div>
       <ul id="lista-roster" class="roster"></ul>
+      <!--
+        **A porta da lista de banidos** (a mesa de texto da 1.0). Embaixo da
+        lista de pessoas, porque é uma lista de pessoas — as que não podem
+        entrar — e porque a caixa de moderar só se alcança pelo nome de alguém
+        que está aqui: quem foi banido não está, e sem uma porta própria não
+        haveria como chegar ao DESBANIR num servidor vazio.
+
+        Nasce escondida e quem a mostra é o retrato (`atualizarPortaDosBanidos`,
+        em `camada-moderar.js`): só para quem pode banir, e só num servidor que
+        tem a lista. No celular ela não aparece — moderar é pelo computador.
+      -->
+      <button id="abrir-banidos" class="roster-banidos" type="button" hidden></button>
       <!--
         O perfil de outra pessoa (0.19, §5.3): uma folha à direita, no lugar do
         painel PESSOAS, com a capa, a foto, o nome exibido, o apelido#tag, os
@@ -3541,6 +3581,15 @@
               </li>
               <li class="server-atalho">
                 <span class="server-atalho-texto">
+                  <span class="server-atalho-acao">Editar a sua última mensagem</span>
+                  <span class="server-atalho-desc">com o campo de escrever
+                    vazio, num servidor da 1.0 em diante; Enter salva e Esc
+                    cancela</span>
+                </span>
+                <kbd class="server-atalho-tecla" data-tecla="ArrowUp">↑</kbd>
+              </li>
+              <li class="server-atalho">
+                <span class="server-atalho-texto">
                   <span class="server-atalho-acao">Colar uma imagem</span>
                   <span class="server-atalho-desc">cai na prévia acima do
                     campo, pronta para enviar com Enter</span>
@@ -3566,7 +3615,8 @@
                 <span class="server-atalho-texto">
                   <span class="server-atalho-acao">Fechar o que está por cima</span>
                   <span class="server-atalho-desc">a busca, a chamada, ou esta
-                    tela</span>
+                    tela; no campo de escrever, cancela a resposta ou a edição
+                    em andamento</span>
                 </span>
                 <kbd class="server-atalho-tecla" data-tecla="Escape">ESC</kbd>
               </li>
@@ -5362,6 +5412,21 @@
         em vez de dizer «OK»: um botão chamado OK ao lado de um parágrafo é um
         botão que se aperta sem ler o parágrafo.
       -->
+      <!--
+        **A lista de banidos** (protocolo 13): quem está barrado agora, por
+        quê, até quando, e o DESBANIR de cada um — que passa pela mesma
+        confirmação dos outros atos desta caixa, com a consequência escrita.
+
+        `role="status"` na frase de estado: «lendo», «ninguém está banido» e
+        «a lista não chegou» são três coisas diferentes, e nenhuma é uma lista
+        vazia sem explicação. A lista rola por dentro, e a caixa não cresce
+        com o número de banidos.
+      -->
+      <div id="moderar-banidos" class="moderar-corpo moderar-banidos" hidden>
+        <p id="moderar-banidos-estado" class="moderar-vazio" role="status"></p>
+        <ul id="moderar-banidos-lista" class="moderar-banidos-lista"></ul>
+        <span id="moderar-banidos-nota" class="nota"></span>
+      </div>
       <div id="moderar-confirmacao" class="moderar-confirmacao" hidden>
         <p id="moderar-consequencia" class="moderar-consequencia"></p>
         <!--

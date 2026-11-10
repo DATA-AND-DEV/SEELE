@@ -5848,6 +5848,11 @@ const VERBOS_DE_MODERACAO: &[&str] = &[
     // people wrote with nothing anywhere that brings it back.
     "apagar_voice_room",
     "apagar_linha",
+    // The mesa de texto of 1.0 (protocol 13). Unbanning *is* undone — by
+    // banning again — and it still goes through the same machine: it puts back
+    // inside the server somebody that another person put out, and whoever
+    // presses has to read that with the name in it before it leaves.
+    "desbanir_pessoa",
 ];
 
 #[test]
@@ -5929,24 +5934,55 @@ fn no_moderation_act_reaches_the_server_without_a_sentence_that_says_what_it_cos
 }
 
 #[test]
-fn the_ban_says_that_nothing_in_this_product_undoes_it() {
-    // The sharpest edge of the four, and the one a screen can hide by accident.
-    // There is no `unban` verb in this protocol: a permanent ban is undone only
-    // by somebody with the server's own file, by hand, on the machine hosting it.
-    // A confirmation that says «bar this person?» and stops there is describing a
-    // reversible act, and this one is not.
+fn the_ban_says_whether_anything_undoes_it_and_where() {
+    // The sharpest edge of the moderation verbs, and the one a screen can hide
+    // by accident. **What is true changed with protocol 13**, and the sentence
+    // has to say which of the two worlds this server is in:
+    //
+    // - a server that knows `UnbanPerson` (1.0 on): a permanent ban is undone
+    //   by whoever may ban, in the BANIDOS list of this layer — and the
+    //   sentence says where that list is;
+    // - a server from before 1.0: there is no unban verb, and a permanent ban
+    //   is undone only by somebody with the server's own file, by hand, on the
+    //   machine hosting it. That used to be the only case, and this guard was
+    //   `the_ban_says_that_nothing_in_this_product_undoes_it`.
+    //
+    // Either sentence said about the other server is a lie in the one box that
+    // exists to say what an act costs. So the function is *run*, both ways,
+    // with the real `frases.js` — a search for the words would pass with the
+    // branches swapped.
     //
     // The timed ban is in the same sentence for the same reason, from the other
-    // side: it *is* the one that undoes itself, and that is exactly the fact
-    // that makes it worth offering. Whoever is about to press has to be told
-    // which of the two is about to happen.
+    // side: it *is* the one that undoes itself.
     let body = body_of(&scripts(), "function consequenciaDeBanir");
-
     assert!(
-        body.contains("ate === null") || body.contains("ate == null"),
-        "the ban sentence does not branch on whether there is an expiry, so a \
-         ban that lifts itself and a ban that never does read the same:\n{body}"
+        body.contains("quem.nome"),
+        "the ban confirmation does not name who it is about:\n{body}"
     );
+    let fontes = format!(
+        "{}\n{}\nglobalThis.consequenciaDeBanir = consequenciaDeBanir;",
+        read("ui/frases.js"),
+        funcao_js(&read("ui/camada-moderar.js"), "consequenciaDeBanir"),
+    );
+    let Some(saida) = no_node(
+        "a frase de banir",
+        &fontes,
+        r#"
+const quem = { nome: "Lia", voice_room: "Sala" };
+console.log(JSON.stringify({
+  semVolta: consequenciaDeBanir(quem, null, false),
+  comVolta: consequenciaDeBanir(quem, null, true),
+  porOmissao: consequenciaDeBanir(quem, null),
+  comPrazo: consequenciaDeBanir(quem, 1900000000, true),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let frases: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das frases");
+    let frase = |qual: &str| frases[qual].as_str().unwrap_or_default().to_owned();
+
+    let sem_volta = frase("semVolta");
     for (what, needle) in [
         ("that it is forever", "para sempre"),
         (
@@ -5954,21 +5990,50 @@ fn the_ban_says_that_nothing_in_this_product_undoes_it() {
             "Nenhuma tela deste produto desfaz",
         ),
         ("who can undo it, and how", "arquivo do servidor"),
-        ("when a timed one lifts", "cai sozinha"),
+        ("why: the server is older than 1.0", "antes da 1.0"),
     ] {
         assert!(
-            body.contains(needle),
-            "the ban confirmation never says {what}. Without it the sentence \
-             describes a reversible act, and this is the one act in this product \
-             that no screen of it can take back:\n{body}"
+            sem_volta.contains(needle),
+            "on a server with no unban verb, the ban confirmation never says \
+             {what}. Without it the sentence describes a reversible act, and \
+             there this one is not:\n{sem_volta}"
         );
     }
+    assert_eq!(
+        frase("porOmissao"),
+        sem_volta,
+        "a caller that does not know whether the server can unban gets the \
+         sentence that promises a way back"
+    );
 
-    // The name of the person, in the sentence. A consequence written about
-    // nobody is a consequence about the wrong person just as easily.
+    let com_volta = frase("comVolta");
+    for (what, needle) in [
+        ("that it is forever until undone", "para sempre"),
+        ("who undoes it", "pode banir"),
+        ("where it is undone", "BANIDOS"),
+    ] {
+        assert!(
+            com_volta.contains(needle),
+            "on a server that can unban, the ban confirmation never says \
+             {what}:\n{com_volta}"
+        );
+    }
     assert!(
-        body.contains("quem.nome"),
-        "the ban confirmation does not name who it is about:\n{body}"
+        !com_volta.contains("Nenhuma tela deste produto desfaz")
+            && !com_volta.contains("arquivo do servidor"),
+        "on a server that can unban, the ban confirmation still says nothing \
+         in this product undoes it — which stopped being true:\n{com_volta}"
+    );
+    for (qual, texto) in [("semVolta", &sem_volta), ("comVolta", &com_volta)] {
+        assert!(
+            texto.starts_with("Lia sai desta sessão agora"),
+            "the `{qual}` sentence does not open with who it is about:\n{texto}"
+        );
+    }
+    let com_prazo = frase("comPrazo");
+    assert!(
+        com_prazo.contains("cai sozinha") && !com_prazo.contains("para sempre"),
+        "a timed ban does not say it lifts by itself:\n{com_prazo}"
     );
 }
 
@@ -6164,6 +6229,1107 @@ fn opening_the_moderation_carries_the_keyboard_and_closing_gives_it_back() {
          back over the *next* session armed with an act on somebody from the \
          previous Server:\n{fim}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// A mesa de texto da 1.0: editar, responder, ser chamado, o `@`, as não lidas
+// de cada canal e a lista de banidos. O que se vê na tela está na
+// `bancada/mesa-de-texto.cjs` (Chromium e WebKit, e a casca do celular); o que
+// mora aqui roda a fonte real no node, sem navegador, e é o que o CI roda.
+// ---------------------------------------------------------------------------
+
+/// O texto inteiro de uma função de topo de um script (`function nome(…) {…}`,
+/// com o `async` na frente quando ela é uma), para rodá-la no node como ela é.
+fn funcao_js(fonte: &str, nome: &str) -> String {
+    let assinatura = format!("function {nome}(");
+    let Some((antes, depois)) = fonte.split_once(&assinatura) else {
+        panic!("`{nome}` sumiu do script");
+    };
+    let Some(corpo) = depois.split("\n}\n").next() else {
+        panic!("`{nome}` não fecha");
+    };
+    let prefixo = if antes.ends_with("async ") {
+        "async "
+    } else {
+        ""
+    };
+    format!("{prefixo}{assinatura}{corpo}\n}}\n")
+}
+
+/// Roda `fontes` (a fonte real, entregue pela entrada padrão) e depois
+/// `conferencia` num `vm` do node, e devolve o que ela escreveu. `None` quando
+/// não há `node` nesta máquina (e reprova no CI, onde há).
+///
+/// O mundo é o mínimo que as funções de desenho pedem: `elemento` devolve um
+/// nó de mentira que guarda a etiqueta, a classe, o texto, os atributos, o
+/// `dataset` e os filhos; nada de `document`.
+fn no_node(titulo: &str, fontes: &str, conferencia: &str) -> Option<String> {
+    use std::io::Write;
+    let script = format!(
+        r#"
+const fs = require("fs"), vm = require("vm");
+const fontes = fs.readFileSync(0, "utf8");
+function no(tag, classe, texto) {{
+  const n = {{ tag, className: classe ?? "", textContent: texto ?? "", dataset: {{}}, atributos: {{}}, filhos: [],
+    type: "", hidden: false,
+    get childElementCount() {{ return this.filhos.length; }},
+    classList: {{ add(c) {{ n.className = (n.className + " " + c).trim(); }}, contains(c) {{ return n.className.split(" ").includes(c); }} }},
+    append(...f) {{ n.filhos.push(...f); }},
+    setAttribute(k, v) {{ n.atributos[k] = String(v); }}, getAttribute(k) {{ return n.atributos[k] ?? null; }} }};
+  return n;
+}}
+const ctx = vm.createContext({{ console, JSON, Map, Set, Number, String, Boolean, Array, Object, Math, Date, RegExp,
+  elemento: no, relogio: (s) => "10:" + String(s % 60).padStart(2, "0") }});
+vm.runInContext(fontes, ctx);
+vm.runInContext({conferencia:?}, ctx);
+"#
+    );
+    let mut filho = match std::process::Command::new("node")
+        .args(["-e", &script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(filho) => filho,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda «{titulo}» não rodou");
+            return None;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    filho
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(fontes.as_bytes())
+        .expect("as fontes ao node");
+    let saida = filho.wait_with_output().expect("node");
+    assert!(
+        saida.status.success(),
+        "{titulo}: o node não rodou a fonte:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+    Some(String::from_utf8_lossy(&saida.stdout).into_owned())
+}
+
+/// **O número em que a tela passa a oferecer editar, desbanir e a lista de
+/// banidos é o do protocolo**, e ele chega à tela pelas duas pontes.
+///
+/// A tela não oferece o que o servidor não conhece: num servidor da 0.19 o
+/// EDITAR e o BANIDOS somem, em vez de aparecerem e responderem
+/// `ServidorAntigo`. Para isso ela compara o `protocolo` do retrato com uma
+/// constante do `base.js` — e uma constante escrita à mão num script é um
+/// número que fica para trás calado. Com 12 no lugar de 13 o EDITAR aparece
+/// num servidor que pula o verbo; com 14, some de todo servidor da 1.0.
+///
+/// E o campo tem de existir dos dois lados: sem ele o retrato chega com
+/// `undefined`, a conta dá zero, e a mesa de texto inteira some sem erro.
+#[test]
+fn o_numero_da_mesa_de_texto_e_o_do_protocolo() {
+    use seele_proto::control::ClientMessage;
+    use seele_proto::ids::{MessageId, PersonId};
+    use seele_proto::vocabulario::desde_do_cliente;
+
+    let base = without_comments(&read("ui/base.js"));
+    let escrito: u8 = base
+        .split("const PROTOCOLO_DA_MESA_DE_TEXTO = ")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .and_then(|numero| numero.trim().parse().ok())
+        .expect("`PROTOCOLO_DA_MESA_DE_TEXTO` saiu do base.js, ou deixou de ser um número");
+    for verbo in [
+        ClientMessage::EditMessage {
+            id: MessageId(1),
+            body: "x".into(),
+        },
+        ClientMessage::UnbanPerson {
+            person: PersonId(1),
+        },
+        ClientMessage::ListBans,
+    ] {
+        assert_eq!(
+            escrito,
+            desde_do_cliente(&verbo),
+            "o base.js oferece a mesa de texto a partir do protocolo {escrito}, e \
+             `{verbo:?}` nasceu noutro número"
+        );
+    }
+    let teste = body_of(&base, "function servidorTemAMesaDeTexto(");
+    assert!(
+        teste.contains("snapshot?.protocolo") && teste.contains(">= PROTOCOLO_DA_MESA_DE_TEXTO"),
+        "`servidorTemAMesaDeTexto` não compara o `protocolo` do retrato com a constante: {teste}"
+    );
+
+    // O desktop: o retrato achatado leva o número que a conexão negociou.
+    let rust = without_comments(&read("src/main.rs"));
+    let retrato = body_of(&rust, "fn snapshot(");
+    assert!(
+        retrato.contains("protocolo: conexao.protocolo_negociado()"),
+        "o comando `snapshot` não põe o protocolo negociado no retrato: {retrato}"
+    );
+    assert!(
+        read("src/sessoes.rs").contains("pub(crate) protocolo: u8,"),
+        "`RetratoNaSessao` perdeu o campo `protocolo`"
+    );
+    // O navegador: o `.wasm` o diz no retrato da ligação, e a ponte o repassa.
+    let fronteira = without_comments(&read("../../crates/seele-web/src/fronteira.rs"));
+    assert!(
+        body_of(&fronteira, "pub extern \"C\" fn ligacao_retrato(")
+            .contains("\"protocolo\": ligacao.carimbo()"),
+        "o `ligacao_retrato` do seele-web não diz o protocolo negociado"
+    );
+    assert!(
+        body_of(
+            &without_comments(&read("ui/ponte-web.js")),
+            "function retratoDaSessao("
+        )
+        .contains("protocolo: lido.protocolo ?? 0"),
+        "a ponte do navegador não repassa o `protocolo` ao retrato"
+    );
+    // E a conversa é redesenhada quando a resposta muda: o retrato da entrada
+    // não traz o número, e uma reconexão pode trazer outro.
+    let desenhar = body_of(&scripts(), "function desenhar(snapshot)");
+    assert!(
+        desenhar.contains("servidorTemAMesaDeTexto(snapshot)")
+            && desenhar.contains("mesaDeTextoNoServidor = temAMesa")
+            && desenhar.contains("mensagensPorDesenhar = true"),
+        "`desenhar` não redesenha a conversa quando o servidor passa a conhecer \
+         (ou deixa de conhecer) a edição: {desenhar}"
+    );
+}
+
+/// **RESPONDER em toda mensagem gravada; EDITAR só na própria, gravada, e num
+/// servidor que conhece a edição.**
+///
+/// Três maneiras de errar isto sem nada quebrar: oferecer EDITAR na mensagem
+/// de outra pessoa (o servidor recusa, e a pessoa lê «permissão negada» por um
+/// botão que a tela lhe deu); oferecer num servidor 12 (o core responde
+/// `ServidorAntigo` a cada clique); e oferecer numa pendente, que não tem `id`
+/// que o servidor conheça — o clique editaria «a mensagem 0».
+#[test]
+fn a_edicao_e_a_resposta_sao_oferecidas_pelo_que_a_mensagem_e() {
+    let sessao = read("ui/tela-sessao.js");
+    let fontes = format!(
+        "{}\nlet mesaDeTextoNoServidor = true;\n\
+         const apelidoApresentado = (id, legado) => String(legado).split('#')[0];\n{}{}{}{}",
+        read("ui/frases.js"),
+        funcao_js(&sessao, "mensagemGravada"),
+        funcao_js(&sessao, "botaoDeResponder"),
+        funcao_js(&sessao, "podeEditarMensagem"),
+        funcao_js(&sessao, "botaoDeEditar"),
+    );
+    let Some(saida) = no_node(
+        "responder e editar",
+        &fontes,
+        r#"
+const m = (extra) => ({ id: 7, author: 2, author_nickname: "Lia#K7Q2", at_seconds: 30, body: "oi", own: false, estado: "Confirmada", ...extra });
+const casos = {
+  deOutra: m({}),
+  propria: m({ own: true }),
+  propriaSemEstado: m({ own: true, estado: undefined }),
+  pendente: m({ own: true, id: 0, estado: "Enviando" }),
+  semResposta: m({ own: true, id: 0, estado: "SemResposta" }),
+  recusada: m({ own: true, id: 0, estado: { Recusada: "PermissionDenied" } }),
+};
+const ver = (b) => b && { classe: b.className, texto: b.textContent, tipo: b.type, dados: b.dataset, rotulo: b.atributos["aria-label"] };
+const saida = { responder: {}, editar: {}, editarNoDoze: {} };
+for (const [nome, caso] of Object.entries(casos)) {
+  saida.responder[nome] = ver(botaoDeResponder(caso));
+  saida.editar[nome] = ver(botaoDeEditar(caso));
+}
+mesaDeTextoNoServidor = false;
+for (const [nome, caso] of Object.entries(casos)) saida.editarNoDoze[nome] = ver(botaoDeEditar(caso));
+saida.responderNoDoze = ver(botaoDeResponder(casos.deOutra));
+console.log(JSON.stringify(saida));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON dos botões");
+    for gravada in ["deOutra", "propria", "propriaSemEstado"] {
+        assert_eq!(
+            v["responder"][gravada]["dados"]["responder"], "7",
+            "sem RESPONDER na mensagem gravada «{gravada}»: {}",
+            v["responder"][gravada]
+        );
+        assert_eq!(v["responder"][gravada]["tipo"], "button");
+    }
+    assert_eq!(
+        v["responder"]["deOutra"]["rotulo"], "responder à mensagem de Lia das 10:30",
+        "o RESPONDER não diz de quem é a mensagem nem de que hora: repetido em \
+         toda fileira, «responder» sozinho não diz a qual"
+    );
+    for pendente in ["pendente", "semResposta", "recusada"] {
+        assert!(
+            v["responder"][pendente].is_null() && v["editar"][pendente].is_null(),
+            "a mensagem «{pendente}», que o servidor não gravou, oferece responder ou editar"
+        );
+    }
+    assert!(
+        v["editar"]["deOutra"].is_null(),
+        "o EDITAR aparece na mensagem de outra pessoa"
+    );
+    for propria in ["propria", "propriaSemEstado"] {
+        assert_eq!(
+            v["editar"][propria]["dados"]["editar"], "7",
+            "sem EDITAR na própria mensagem gravada «{propria}»"
+        );
+    }
+    assert_eq!(
+        v["editar"]["propria"]["rotulo"],
+        "editar a sua mensagem das 10:30"
+    );
+    for (nome, botao) in v["editarNoDoze"].as_object().expect("os casos") {
+        assert!(
+            botao.is_null(),
+            "num servidor que não conhece a edição, o EDITAR aparece em «{nome}»"
+        );
+    }
+    assert!(
+        !v["responderNoDoze"].is_null(),
+        "responder é do protocolo 9, e sumiu junto com a edição num servidor antigo"
+    );
+}
+
+/// **O envio leva a citação, e a edição não publica nada.**
+///
+/// O `enviar` tem três caminhos, e a ordem deles é o conserto: editando, ele
+/// salva a edição **antes** do anexo e antes do «vazio não manda» (um corpo
+/// vazio numa edição é uma recusa com frase, e não um Enter mudo); e a
+/// resposta lê a citada antes de qualquer espera. O `repliesTo` vai escrito no
+/// `invoke`, e é por ele que `todo_argumento_que_o_frontend_manda_existe_no_comando`
+/// confere o nome contra o `replies_to` do comando.
+#[test]
+fn o_envio_leva_a_citacao_e_a_edicao_nao_publica_nada() {
+    let script = scripts();
+    let enviar = body_of(&script, "async function enviar(evento)");
+    let onde = |trecho: &str| {
+        enviar
+            .find(trecho)
+            .unwrap_or_else(|| panic!("o `enviar` perdeu `{trecho}`:\n{enviar}"))
+    };
+    let edicao = onde("if (modoDeCompor?.tipo === \"editar\") {");
+    assert!(
+        enviar[edicao..]
+            .trim_start()
+            .contains("await salvarAEdicao(corpo);\n    return;"),
+        "editando, o `enviar` não para depois de salvar a edição: publicaria o \
+         corpo editado como mensagem nova"
+    );
+    assert!(
+        edicao < onde("if (anexoPendente) {") && edicao < onde("if (!corpo) return;"),
+        "a edição é conferida depois do anexo ou do corpo vazio: uma edição \
+         vazia viraria um Enter que não faz nada"
+    );
+    assert!(
+        onde("const citada = modoDeCompor?.tipo === \"responder\" ? modoDeCompor.id : null;")
+            < onde("await invoke(\"send_message\""),
+        "a citada é lida depois do envio"
+    );
+    assert!(
+        enviar.contains(
+            "else await invoke(\"send_message\", { channel: linhaAberta, body: corpo, repliesTo: citada });"
+        ) && enviar.contains(
+            "if (citada === null) await invoke(\"send_message\", { channel: linhaAberta, body: corpo });"
+        ),
+        "o `send_message` não leva `repliesTo` quando há a quem responder, ou o \
+         leva sempre:\n{enviar}"
+    );
+
+    // O comando do desktop recebe a citada e escolhe o verbo do núcleo.
+    let rust = without_comments(&read("src/main.rs"));
+    let comando = body_of(&rust, "fn send_message(");
+    assert!(
+        comando.contains("replies_to: Option<u64>")
+            && comando.contains("Some(citada) => conexao.send_reply(channel, body, citada)")
+            && comando.contains("None => conexao.send_message(channel, body)"),
+        "o comando `send_message` não manda a resposta pelo `send_reply`:\n{comando}"
+    );
+
+    // A edição que não sai fica à vista, com a frase do erro, e o texto no campo.
+    let salvar = body_of(&script, "async function salvarAEdicao(corpo)");
+    assert!(
+        salvar.contains("await invoke(\"editar_mensagem\", { message: modo.id, body: corpo });"),
+        "a edição não sai pelo `editar_mensagem`:\n{salvar}"
+    );
+    let recusa = salvar
+        .split("} catch (falha) {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+        .expect("o `salvarAEdicao` não trata a recusa");
+    assert!(
+        recusa.contains("FRASES_DA_CONVERSA.edicaoNaoSaiu(fraseDeErro(falha))")
+            && recusa.contains("desenharOModoDeCompor(frase)")
+            && !recusa.contains("largarOModoDeCompor")
+            && !recusa.contains("console.warn"),
+        "a edição recusada some calada, ou tira a pessoa da edição: {recusa}"
+    );
+    // Editando, o que está no campo não é o rascunho do canal.
+    let rascunho = body_of(&script, "function guardarRascunho()");
+    assert!(
+        rascunho.contains("if (modoDeCompor?.tipo === \"editar\") return;"),
+        "editando, o corpo de uma mensagem já gravada é guardado como rascunho \
+         do canal, e volta como texto a enviar de novo:\n{rascunho}"
+    );
+    // E a troca de sessão larga o modo antes de guardar o campo.
+    let guardar = body_of(&script, "function guardarOEstadoDaVista(sessao)");
+    let largar = guardar
+        .find("largarOModoDeCompor();")
+        .expect("a troca de sessão não larga a edição em andamento");
+    assert!(
+        largar
+            < guardar
+                .find("campo: $(\"campo-mensagem\").value")
+                .expect("o campo guardado"),
+        "a troca de sessão guarda o campo antes de largar a edição"
+    );
+}
+
+/// **A citação de uma resposta mostra a original quando ela está carregada, e
+/// não inventa a que não está.**
+///
+/// O fio só traz o número (`replies_to`). Com a original na página, a citação
+/// é um botão que rola até ela, com o autor e o começo do corpo; sem ela (é
+/// mais antiga, ou foi apagada), é texto, «mensagem anterior» — nunca um botão
+/// que não leva a lugar nenhum, e nunca um corpo que a tela não leu.
+#[test]
+fn a_resposta_cita_a_original_carregada_e_nao_inventa_a_que_nao_esta() {
+    let sessao = read("ui/tela-sessao.js");
+    let fontes = format!(
+        "{}\nlet mensagens = [];\n\
+         const apelidoApresentado = (id, legado) => String(legado).split('#')[0];\n{}{}",
+        read("ui/frases.js"),
+        funcao_js(&sessao, "citacaoDaResposta"),
+        funcao_js(&sessao, "resumoDoCorpo"),
+    );
+    let Some(saida) = no_node(
+        "a citação de uma resposta",
+        &fontes,
+        r#"
+mensagens = [
+  { id: 1, author: 2, author_nickname: "Lia#K7Q2", body: "primeira\n  fileira   e a segunda", attachment: null },
+  { id: 2, author: 3, author_nickname: "Rafa", body: "", attachment: { file_name: "mapa.png" } },
+  { id: 3, author: 3, author_nickname: "Rafa", body: "x".repeat(900), attachment: null },
+  { id: 4, author: 3, author_nickname: "Rafa", body: "  ", attachment: null },
+];
+const ver = (n) => n && { tag: n.tag, classe: n.className, texto: n.textContent, dados: n.dataset, rotulo: n.atributos["aria-label"] ?? null,
+  filhos: n.filhos.map((f) => [f.className, f.textContent]) };
+console.log(JSON.stringify({
+  semResposta: ver(citacaoDaResposta({ replies_to: null })),
+  carregada: ver(citacaoDaResposta({ replies_to: 1 })),
+  soArquivo: ver(citacaoDaResposta({ replies_to: 2 })),
+  longa: citacaoDaResposta({ replies_to: 3 }).filhos[1].textContent.length,
+  vazia: ver(citacaoDaResposta({ replies_to: 4 })),
+  ausente: ver(citacaoDaResposta({ replies_to: 99 })),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON da citação");
+    assert!(
+        v["semResposta"].is_null(),
+        "uma mensagem que não responde ganhou citação"
+    );
+    assert_eq!(v["carregada"]["tag"], "button");
+    assert_eq!(v["carregada"]["dados"]["citada"], "1");
+    assert_eq!(
+        v["carregada"]["filhos"],
+        serde_json::json!([
+            ["mensagem-citacao-autor", "Lia"],
+            ["mensagem-citacao-corpo", "primeira fileira e a segunda"]
+        ]),
+        "a citação não é o autor e o começo do corpo, numa fileira só"
+    );
+    assert_eq!(
+        v["carregada"]["rotulo"],
+        "ir para a mensagem de Lia, a que esta responde"
+    );
+    assert_eq!(v["soArquivo"]["filhos"][1][1], "mapa.png");
+    assert_eq!(v["vazia"]["filhos"][1][1], "mensagem sem texto");
+    assert!(
+        v["longa"].as_u64().is_some_and(|n| n <= 140),
+        "a citação carrega o corpo inteiro de uma mensagem longa: {}",
+        v["longa"]
+    );
+    assert_eq!(
+        (v["ausente"]["tag"].as_str(), v["ausente"]["texto"].as_str()),
+        (Some("span"), Some("mensagem anterior")),
+        "a original que não está carregada virou um botão, ou ganhou um corpo: {}",
+        v["ausente"]
+    );
+    // O clique rola pelo `id` de agora, e não por um nó guardado.
+    let script = scripts();
+    let ir = body_of(&script, "function irParaACitada(id)");
+    assert!(
+        ir.contains("li[data-mensagem-id=\"${id}\"]") && ir.contains("scrollIntoView("),
+        "o clique na citação não procura a original pelo id e rola até ela: {ir}"
+    );
+    assert!(
+        body_of(&script, "function itemDeMensagem(mensagem, indice, segue)")
+            .contains("item.setAttribute(\"data-mensagem-id\", String(mensagem.id))"),
+        "a fileira da mensagem não leva o id que a citação procura"
+    );
+}
+
+/// **O que o `@` escreve é o que a regra da menção lê.**
+///
+/// A regra mora no `seele-sessao` (`mencao::menciona`), e é ela que decide,
+/// do outro lado, quem foi chamado. O autocompletar não a repete: ele só
+/// escreve `@apelido`, e `@apelido#MARCA` quando há duas pessoas com o mesmo
+/// apelido. Este guarda fecha o laço — o texto que a lista insere é passado à
+/// regra de verdade, e tem de chamar quem foi escolhido e ninguém mais.
+///
+/// E a detecção do `@` segue a regra 1: em `x@ana.com` não há menção, e a
+/// lista não abre.
+#[test]
+fn o_autocompletar_escreve_o_que_a_regra_da_mencao_le() {
+    let sessao = read("ui/tela-sessao.js");
+    let fontes = format!(
+        "const TETO_DE_MENCOES = 8;\nlet desenhado = null, foraDoAr = [], identidadesApresentadas = {{}};\n{}{}{}",
+        funcao_js(&sessao, "nomeParaChamar"),
+        funcao_js(&sessao, "pessoasParaChamar"),
+        funcao_js(&sessao, "mencaoEmCurso"),
+    );
+    let Some(saida) = no_node(
+        "o autocompletar do @",
+        &fontes,
+        r#"
+desenhado = { me: 1, presentes: [
+  { id: 1, nickname: "Alex#A1B2", is_self: true },
+  { id: 2, nickname: "Lia#K7Q2" }, { id: 3, nickname: "Rafa#R4F4" }, { id: 4, nickname: "LIA#Z9Z9" },
+  { id: 6, nickname: "Ana Maria#AM01" }, { id: 7, nickname: "legado" }, { id: 8, nickname: "antigo#QQ11" },
+] };
+identidadesApresentadas = { 1: ["Alex", "A1B2"], 2: ["Lia", "K7Q2"], 3: ["Rafa", "R4F4"], 4: ["LIA", "Z9Z9"], 5: ["Marina", "M4R1"], 6: ["Ana Maria", "AM01"] };
+foraDoAr = [{ id: 5, nickname: "Marina#M4R1" }, { id: 1, nickname: "Alex#A1B2" }];
+const campo = (texto, cursor = texto.length) => ({ value: texto, selectionStart: cursor, selectionEnd: cursor });
+console.log(JSON.stringify({
+  todas: pessoasParaChamar(""),
+  li: pessoasParaChamar("LI").map((p) => p.texto),
+  ma: pessoasParaChamar("ma").map((p) => [p.texto, p.fora]),
+  nada: pessoasParaChamar("zzz"),
+  curso: {
+    comeco: mencaoEmCurso(campo("@li")),
+    meio: mencaoEmCurso(campo("oi @Ana M")),
+    endereco: mencaoEmCurso(campo("escreva para x@ana")),
+    sublinhado: mencaoEmCurso(campo("a_@ana")),
+    pontuacao: mencaoEmCurso(campo("(@ra")),
+    outraFileira: mencaoEmCurso(campo("@ana\nmais")),
+    selecao: mencaoEmCurso({ value: "@ana", selectionStart: 1, selectionEnd: 4 }),
+    cursorNoMeio: mencaoEmCurso(campo("oi @rafa tudo", 6)),
+    semArroba: mencaoEmCurso(campo("oi")),
+  },
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON do autocompletar");
+    let todas = v["todas"].as_array().expect("a lista inteira");
+    let textos: Vec<&str> = todas
+        .iter()
+        .map(|p| p["texto"].as_str().unwrap_or_default())
+        .collect();
+    // Quem está aqui (em ordem), e depois o FORA DO AR; os homônimos com a
+    // marca; quem não tem identidade apresentada, pelo apelido partido; e
+    // nunca a própria pessoa, nem pela lista de membros.
+    assert_eq!(
+        textos,
+        [
+            "Ana Maria",
+            "antigo",
+            "legado",
+            "Lia#K7Q2",
+            "LIA#Z9Z9",
+            "Rafa",
+            "Marina"
+        ],
+        "a lista do @ não é a das pessoas do servidor, ou os homônimos saem sem a marca"
+    );
+    assert_eq!(
+        v["li"],
+        serde_json::json!(["Lia#K7Q2", "LIA#Z9Z9"]),
+        "o filtro diferencia maiúsculas, ou dois apelidos iguais sem contar a caixa saem sem a marca"
+    );
+    assert_eq!(
+        v["ma"],
+        serde_json::json!([["Ana Maria", false], ["Marina", true]]),
+        "quem começa pelo termo não vem antes, ou o fora do ar vem antes de quem está aqui"
+    );
+    assert_eq!(v["nada"], serde_json::json!([]));
+
+    // **A regra de verdade**: cada texto que a lista insere chama a pessoa
+    // escolhida, e só ela entre as outras.
+    for escolhida in todas {
+        let corpo = format!(
+            "oi @{} vem cá",
+            escolhida["texto"].as_str().unwrap_or_default()
+        );
+        for outra in todas {
+            let base = outra["base"].as_str().unwrap_or_default();
+            let marca = outra["marca"].as_str().filter(|marca| !marca.is_empty());
+            let chamada = seele_ffi::menciona(&corpo, base, marca);
+            assert_eq!(
+                chamada,
+                outra["id"] == escolhida["id"],
+                "«{corpo}» {} {base}#{}: o que o @ escreve e o que a regra lê discordam",
+                if chamada { "chama" } else { "não chama" },
+                marca.unwrap_or("—"),
+            );
+        }
+    }
+
+    let curso = &v["curso"];
+    assert_eq!(
+        curso["comeco"],
+        serde_json::json!({ "arroba": 0, "termo": "li" })
+    );
+    assert_eq!(
+        curso["meio"],
+        serde_json::json!({ "arroba": 3, "termo": "Ana M" }),
+        "um apelido com espaço não pode ser procurado"
+    );
+    assert_eq!(
+        curso["pontuacao"],
+        serde_json::json!({ "arroba": 1, "termo": "ra" })
+    );
+    assert_eq!(
+        curso["cursorNoMeio"],
+        serde_json::json!({ "arroba": 3, "termo": "ra" })
+    );
+    for (nome, porque) in [
+        (
+            "endereco",
+            "o @ de um endereço abre a lista (a regra 1 de `mencao.rs`)",
+        ),
+        ("sublinhado", "o @ depois de `_` abre a lista"),
+        ("outraFileira", "o termo atravessa uma quebra de fileira"),
+        ("selecao", "a lista abre com texto selecionado"),
+        ("semArroba", "a lista abre sem @"),
+    ] {
+        assert!(curso[nome].is_null(), "{porque}: {}", curso[nome]);
+    }
+
+    // A lista é um `listbox` que o campo aponta, e as teclas dela vêm antes
+    // do Enter que envia.
+    let pagina = read("ui/index.html");
+    assert!(
+        tag_with_id(&pagina, "mencoes-lista").contains("role=\"listbox\""),
+        "a lista do @ não é um `listbox`"
+    );
+    let campo = tag_with_id(&pagina, "campo-mensagem");
+    assert!(
+        campo.contains("aria-controls=\"mencoes-lista\"")
+            && campo.contains("aria-autocomplete=\"list\""),
+        "o campo não diz a quem escuta que tem uma lista de sugestões: {campo}"
+    );
+    let script = without_comments(&scripts());
+    let desenho = body_of(&script, "function desenharAsMencoes()");
+    for o_que in [
+        "setAttribute(\"role\", \"option\")",
+        "setAttribute(\"aria-selected\", indice === escolhida ? \"true\" : \"false\")",
+        "campo.setAttribute(\"aria-activedescendant\", `mencao-${escolhida}`)",
+        "FRASES_DA_CONVERSA.ninguemComEsseNome",
+    ] {
+        assert!(
+            desenho.contains(o_que),
+            "a lista do @ perdeu `{o_que}`:\n{desenho}"
+        );
+    }
+    let teclas = script
+        .split("$(\"campo-mensagem\").addEventListener(\"keydown\", (evento) => {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .expect("o campo de escrever não escuta teclas");
+    let onde = |trecho: &str| {
+        teclas
+            .find(trecho)
+            .unwrap_or_else(|| panic!("o teclado do campo perdeu `{trecho}`:\n{teclas}"))
+    };
+    assert!(
+        onde("if (teclaNasMencoes(evento)) {") < onde("evento.key === \"Escape\" && modoDeCompor")
+            && onde("evento.key === \"Escape\" && modoDeCompor")
+                < onde("evento.key === \"ArrowUp\"")
+            && onde("evento.key === \"ArrowUp\"") < onde("if (evento.key !== \"Enter\""),
+        "as teclas do campo saíram da ordem: a lista do @, o Esc do modo, a seta \
+         para cima e só então o Enter que envia"
+    );
+    let lista = body_of(&script, "function teclaNasMencoes(evento)");
+    for tecla in [
+        "\"Escape\"",
+        "\"ArrowDown\"",
+        "\"ArrowUp\"",
+        "\"Enter\"",
+        "\"Tab\"",
+    ] {
+        assert!(
+            lista.contains(tecla),
+            "a lista do @ não atende a tecla {tecla}"
+        );
+    }
+    assert!(
+        lista.contains("evento.isComposing"),
+        "a lista do @ come o Enter de quem confirma uma palavra no IME"
+    );
+}
+
+/// **As não lidas de um canal são contadas, ditas, e somem no canal aberto.**
+///
+/// O número é o que se vê; a frase inteira é o que um leitor de tela anuncia
+/// com o nome do canal, porque «3» sozinho não diz do que é a conta. E quem
+/// foi chamado lê um `@` antes do número: a pastilha muda de cor, e a
+/// `specs/06` não deixa a cor dizer nada sozinha.
+#[test]
+fn as_nao_lidas_de_um_canal_sao_ditas_e_nao_so_contadas() {
+    let fontes = format!(
+        "{}\n{}",
+        read("ui/frases.js"),
+        funcao_js(&read("ui/tela-sessao.js"), "marcaDeNaoLidas"),
+    );
+    let Some(saida) = no_node(
+        "as não lidas de um canal",
+        &fontes,
+        r#"
+const ver = (n) => n && { classe: n.className, visto: [n.filhos[0].className, n.filhos[0].textContent, n.filhos[0].atributos["aria-hidden"]],
+  dito: [n.filhos[1].className, n.filhos[1].textContent] };
+const c = (extra) => ver(marcaDeNaoLidas({ id: 2, name: "avisos", open: false, nao_lidas: 0, mencoes: 0, ...extra }));
+console.log(JSON.stringify({
+  nenhuma: c({}), semCampos: ver(marcaDeNaoLidas({ id: 2, name: "antigo", open: false })),
+  aberto: c({ open: true, nao_lidas: 4, mencoes: 1 }),
+  uma: c({ nao_lidas: 1 }), tres: c({ nao_lidas: 3 }), chamada: c({ nao_lidas: 5, mencoes: 2 }),
+  umaChamada: c({ nao_lidas: 1, mencoes: 1 }), muitas: c({ nao_lidas: 250, mencoes: 0 }),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das não lidas");
+    for sem in ["nenhuma", "semCampos", "aberto"] {
+        assert!(
+            v[sem].is_null(),
+            "o canal «{sem}» ganhou marca de não lidas: {}",
+            v[sem]
+        );
+    }
+    let marca = |caso: &str| {
+        (
+            v[caso]["classe"].as_str().unwrap_or_default().to_owned(),
+            v[caso]["visto"][1].as_str().unwrap_or_default().to_owned(),
+            v[caso]["dito"][1].as_str().unwrap_or_default().to_owned(),
+        )
+    };
+    assert_eq!(
+        marca("tres"),
+        (
+            "linha-nao-lidas".into(),
+            "3".into(),
+            "3 mensagens não lidas".into()
+        )
+    );
+    assert_eq!(marca("uma").2, "1 mensagem não lida");
+    assert_eq!(
+        marca("chamada"),
+        (
+            "linha-nao-lidas com-chamada".into(),
+            "@ 5".into(),
+            "5 mensagens não lidas, 2 chamam você".into()
+        ),
+        "o canal em que a pessoa foi chamada não o diz com texto"
+    );
+    assert_eq!(marca("umaChamada").2, "1 mensagem não lida, 1 chama você");
+    assert_eq!(
+        marca("muitas").1,
+        "99+",
+        "a conta não tem teto, e a fileira cresce com ela"
+    );
+    assert_eq!(
+        marca("muitas").2,
+        "250 mensagens não lidas",
+        "o teto escondeu a conta de quem escuta"
+    );
+    assert_eq!(
+        v["tres"]["visto"][2], "true",
+        "o número e a frase são lidos os dois, e o leitor de tela diz a conta duas vezes"
+    );
+
+    // A frase sai da vista e fica na árvore: `display: none` a tiraria das duas.
+    let css = without_comments(&styles());
+    let regra = css
+        .split(".linha-nao-lidas-frase {")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("`.linha-nao-lidas-frase` não tem regra");
+    assert!(
+        regra.contains("clip-path: inset(50%)")
+            && regra.contains("position: absolute")
+            && !regra.contains("display: none")
+            && !regra.contains("visibility: hidden"),
+        "a frase das não lidas saiu da árvore de acessibilidade, ou está à vista: {regra}"
+    );
+    // E a marca entra no botão do canal, nas duas cascas (a lista é uma só).
+    let canais = body_of(&scripts(), "function desenharCanais(snapshot)");
+    assert!(
+        canais.contains("const marca = marcaDeNaoLidas(linha);")
+            && canais.contains("if (marca) botao.append(marca);"),
+        "a lista de canais não desenha a marca de não lidas"
+    );
+    assert!(
+        !canais.contains("não há contagem de não-lidas"),
+        "o comentário de que não há contagem de não lidas continua na lista de canais"
+    );
+}
+
+/// **A mensagem que chama é destacada e dita, e o som é o de mensagem.**
+///
+/// O destaque é fundo e barra; a marca «chamou você» é o que sobrevive sem
+/// cor. E o som: o módulo dos alertas é um `const` do topo de um script
+/// clássico, que **não** vira propriedade de `globalThis` — medido em
+/// 10/11/2026, `globalThis.alertasSonoros` é `undefined` no Chromium e no
+/// WebKit, e um `globalThis.alertasSonoros?.tocar(…)` é um som que nunca toca,
+/// calado. O da menção chama pelo nome.
+#[test]
+fn a_mensagem_que_chama_e_destacada_dita_e_toca_o_som_de_mensagem() {
+    let script = without_comments(&scripts());
+    let item = body_of(&script, "function itemDeMensagem(mensagem, indice, segue)");
+    assert!(
+        item.contains("if (mensagem.mentions_me) item.classList.add(\"mensagem-chamou\");"),
+        "a mensagem que chama não é destacada"
+    );
+    assert!(
+        item.contains(
+            "if (mensagem.mentions_me) cabeca.append(elemento(\"span\", \"mensagem-chamou-marca\", FRASES_DA_CONVERSA.chamouVoce));"
+        ),
+        "a mensagem que chama só o diz pela cor"
+    );
+    let css = without_comments(&styles());
+    assert!(
+        css.contains(".mensagem.mensagem-chamou {") && css.contains(".mensagem-chamou-marca {"),
+        "o destaque da mensagem que chama não tem regra"
+    );
+
+    let Some(mencao) = script
+        .split("payload.NoticeRaised?.notice?.reason === \"Mentioned\"")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+    else {
+        panic!("ser chamado não faz nada além do aviso escrito: nenhum ouvinte olha o `Mentioned`");
+    };
+    assert!(
+        mencao.contains(
+            "if (typeof alertasSonoros === \"object\") alertasSonoros.tocar(\"mensagem\");"
+        ),
+        "ser chamado não toca o som de mensagem pelo nome do módulo: {mencao}"
+    );
+    assert!(
+        !mencao.contains("globalThis.alertasSonoros"),
+        "o som da menção voltou a passar por `globalThis.alertasSonoros`, que é \
+         `undefined` no navegador: {mencao}"
+    );
+    // As preferências são do módulo: o som «mensagem» é do grupo «mensagens».
+    let alertas = without_comments(&read("ui/alertas-sonoros.js"));
+    assert!(
+        alertas.contains("mensagem: \"mensagens\","),
+        "o som de mensagem saiu do grupo que a pessoa liga e desliga"
+    );
+    // E o aviso escrito tem frase.
+    assert!(
+        without_comments(&read("ui/frases.js")).contains("Mentioned: \"VOCÊ FOI CHAMADO\","),
+        "o aviso de quem foi chamado perdeu a frase"
+    );
+    // **E a menção não abre a caixa modal de ALERTA**, que cobre a conversa e
+    // oferece MODERAR UMA PESSOA. Visto na captura de 10/11/2026.
+    assert!(
+        without_comments(&read("ui/tela-sessao.js"))
+            .contains("if (!snapshot.notice || snapshot.notice.reason === \"Mentioned\") {"),
+        "ser chamado voltou a abrir a caixa de ALERTA por cima da conversa"
+    );
+}
+
+/// **As ações de uma mensagem recebem o foco do teclado.**
+///
+/// Um botão com `visibility: hidden` não recebe o foco: o Tab passa por cima
+/// dele, e o `:focus-visible` que deveria revelá-lo nunca acontece — o
+/// controle fica só para quem tem ponteiro (medido na bancada: `focus()` num
+/// botão assim não pega). O grupo é apagado com `opacity`, o foco em qualquer
+/// um dos três acende os três, e o `remover`, que mora nele, entra na regra.
+#[test]
+fn as_acoes_de_uma_mensagem_recebem_o_foco_do_teclado() {
+    let css = without_comments(&read("ui/tela-sessao.css"));
+    let bloco = |seletor: &str| {
+        css.split(&format!("\n{seletor} {{"))
+            .nth(1)
+            .and_then(|resto| resto.split('}').next())
+            .unwrap_or_else(|| panic!("`{seletor}` não tem regra em tela-sessao.css"))
+            .to_owned()
+    };
+    assert!(
+        !bloco(".mensagem-acao").contains("visibility"),
+        "o RESPONDER e o EDITAR voltaram a ser escondidos com `visibility`, e o Tab os pula"
+    );
+    assert!(
+        bloco(".mensagem-acoes :is(.mensagem-acao, .moderar-remover)").contains("opacity: 0"),
+        "as ações de uma mensagem não são apagadas com `opacity`"
+    );
+    assert!(
+        bloco(".mensagem-acoes .moderar-remover").contains("visibility: visible"),
+        "o REMOVER dentro do grupo continua com o `visibility: hidden` da folha \
+         da moderação, e o Tab o pula"
+    );
+    assert!(
+        css.contains(
+            ".mensagem-acoes:focus-within :is(.mensagem-acao, .moderar-remover) {\n  opacity: 1;"
+        ),
+        "o foco num dos três não revela o grupo"
+    );
+    // Os três moram no mesmo grupo, e o grupo na cabeça da mensagem.
+    let item = body_of(
+        &scripts(),
+        "function itemDeMensagem(mensagem, indice, segue)",
+    );
+    for botao in ["responder", "editar", "remover"] {
+        assert!(
+            item.contains(&format!("if ({botao}) acoes.append({botao});")),
+            "o `{botao}` saiu do grupo de ações da mensagem"
+        );
+    }
+}
+
+/// **As frases da mesa de texto cabem na régua, e nenhuma falha dela chega
+/// crua.**
+///
+/// Os dois dicionários novos de `frases.js` não estão entre os que
+/// `LIMITE_DE_FRASE` mede (ele lê `Nome: "texto"` de seis dicionários planos),
+/// e metade das entradas é função. Aqui elas são **rodadas**, com nomes de
+/// tamanho real, e medidas: 180 caracteres, como o resto.
+///
+/// E as três recusas da edição que o core dá na hora têm frase pelo
+/// `fraseDeErro` — duas chegam como objeto, e sem os ramos delas caíam em
+/// «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ».
+#[test]
+fn as_frases_da_mesa_de_texto_cabem_e_as_falhas_dela_tem_frase() {
+    let Some(saida) = no_node(
+        "as frases da mesa de texto",
+        &read("ui/frases.js"),
+        r#"
+const nome = "Maria Antonieta das Neves";
+const medir = (dicionario) => Object.entries(dicionario).map(([chave, valor]) =>
+  [chave, typeof valor === "function" ? valor(...[nome, "23:59", 120].slice(0, Math.max(valor.length, 1))) : valor]);
+console.log(JSON.stringify({
+  conversa: medir(FRASES_DA_CONVERSA).concat([["naoLidasComMencao(250, 99)", FRASES_DA_CONVERSA.naoLidasComMencao(250, 99)], ["naoLidas(250)", FRASES_DA_CONVERSA.naoLidas(250)]]),
+  banidos: medir(FRASES_DOS_BANIDOS),
+  falhas: {
+    MensagemVazia: fraseDeErro("MensagemVazia"),
+    MensagemGrandeDemais: fraseDeErro({ MensagemGrandeDemais: { limite_bytes: 4096 } }),
+    ServidorAntigo: fraseDeErro({ ServidorAntigo: { negociado: 12, exige: 13 } }),
+    UnknownMessage: fraseDeErro("UnknownMessage"),
+  },
+  celular: [FRASES_DO_CELULAR.folhas.responder, FRASES_DO_CELULAR.folhas.editarMinha],
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das frases");
+    let mut medidas = 0;
+    for dicionario in ["conversa", "banidos"] {
+        for par in v[dicionario].as_array().expect("as entradas") {
+            let (chave, texto) = (par[0].as_str().unwrap_or_default(), &par[1]);
+            let Some(texto) = texto.as_str() else {
+                panic!("`{dicionario}.{chave}` não devolve uma frase: {texto}");
+            };
+            assert!(
+                !texto.trim().is_empty(),
+                "`{dicionario}.{chave}` está vazia"
+            );
+            let tamanho = texto.chars().count();
+            assert!(
+                tamanho <= LIMITE_DE_FRASE,
+                "`{dicionario}.{chave}` tem {tamanho} caracteres, e a régua é {LIMITE_DE_FRASE}:\n{texto}"
+            );
+            assert!(
+                !texto.contains("undefined") && !texto.contains("[object"),
+                "`{dicionario}.{chave}` escreve um valor que não chegou: {texto}"
+            );
+            medidas += 1;
+        }
+    }
+    assert!(
+        medidas >= 45,
+        "só {medidas} frases medidas: a leitura dos dicionários encolheu"
+    );
+
+    for (falha, frase) in v["falhas"].as_object().expect("as falhas") {
+        let frase = frase.as_str().unwrap_or_default();
+        assert!(
+            !frase.contains("ALGO FALHOU") && frase != falha && !frase.contains('{'),
+            "a falha `{falha}` da edição chega à tela sem frase: {frase}"
+        );
+        assert!(
+            frase.chars().count() <= LIMITE_DE_FRASE,
+            "`{falha}`: {frase}"
+        );
+    }
+    // Sem número de protocolo nem de bytes na frase: não é palavra de quem usa.
+    for falha in ["ServidorAntigo", "MensagemGrandeDemais"] {
+        let frase = v["falhas"][falha].as_str().unwrap_or_default();
+        assert!(
+            !frase
+                .chars()
+                .any(|c| c.is_ascii_digit() && c != '1' && c != '0'),
+            "a frase de `{falha}` traz um número do fio: {frase}"
+        );
+    }
+    assert_eq!(
+        v["celular"],
+        serde_json::json!(["RESPONDER", "EDITAR A MINHA MENSAGEM"])
+    );
+    // As três variantes existem no `ConnectionError`, com estes nomes.
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    for variante in [
+        "    ServidorAntigo {",
+        "    MensagemVazia,",
+        "    MensagemGrandeDemais {",
+    ] {
+        assert!(
+            tipos.contains(variante),
+            "`{}` saiu do `ConnectionError`",
+            variante.trim()
+        );
+    }
+}
+
+/// **A lista de banidos: de quem pode banir, num servidor que a tem, pedida ao
+/// abrir, e nunca muda.**
+///
+/// - a porta é do `may_ban` (quem pode pôr para fora é quem pode trazer de
+///   volta, e é o que o servidor confere) **e** do protocolo: num servidor da
+///   0.19 ela não aparece, em vez de abrir uma lista que nunca chega;
+/// - abrir pede a lista **toda vez**: ela não anda sozinha quando outra
+///   pessoa bane, e a de uma abertura anterior ofereceria desbanir quem já
+///   voltou;
+/// - três estados sem fileira, e cada um com a frase dele — lendo, vazia, e a
+///   que não chegou. Uma lista em branco não diz qual dos três é;
+/// - o DESBANIR volta à lista, e não fecha a caixa: a confirmação de que saiu
+///   é a pessoa sair dela.
+///
+/// (Que o DESBANIR só sai armado, com a consequência escrita, é do
+/// `no_moderation_act_reaches_the_server_without_a_sentence_that_says_what_it_costs`.)
+#[test]
+fn a_lista_de_banidos_e_de_quem_pode_banir_e_nunca_fica_muda() {
+    let script = without_comments(&scripts());
+    let pode = body_of(&script, "function podeVerBanidos(snapshot)");
+    assert!(
+        pode.contains("snapshot.may_ban") && pode.contains("servidorTemAMesaDeTexto(snapshot)"),
+        "a lista de banidos não é oferecida pela permissão de banir e pelo protocolo: {pode}"
+    );
+    assert!(
+        !pode.contains("may_kick") && !pode.contains("may_manage"),
+        "a lista de banidos é oferecida por outra permissão: {pode}"
+    );
+    let porta = body_of(&script, "function atualizarPortaDosBanidos(snapshot)");
+    assert!(
+        porta.contains("porta.hidden = !podeVerBanidos(snapshot);"),
+        "a porta dos banidos não segue o retrato: {porta}"
+    );
+    assert!(
+        tag_with_id(&read("ui/index.html"), "abrir-banidos").contains(" hidden"),
+        "a porta dos banidos nasce à vista, antes de o retrato dizer quem pode banir"
+    );
+    assert!(
+        without_comments(&read("ui/celular-sessao.css"))
+            .contains(":root[data-casca=\"celular\"] .roster-banidos {\n  display: none;"),
+        "a porta dos banidos aparece no celular, onde moderar é pelo computador"
+    );
+
+    let abrir = body_of(&script, "async function abrirBanidos()");
+    assert!(
+        abrir.contains("if (!snapshot || !podeVerBanidos(snapshot)) return;")
+            && abrir.contains("pedirOsBanidos({ pedir: true });"),
+        "abrir a lista de banidos não a pede ao servidor, ou a abre para quem não pode: {abrir}"
+    );
+    let pedir = body_of(&script, "function pedirOsBanidos({ pedir })");
+    assert!(
+        pedir.contains("banidosLidos = null;") && pedir.contains("invoke(\"listar_banidos\")"),
+        "pedir a lista não esquece a anterior, ou não a pede: {pedir}"
+    );
+    assert!(
+        pedir.contains("FRASES_DOS_BANIDOS.naoChegou")
+            && pedir.contains("desenharBanidos(fraseDeErro(falha))"),
+        "a lista que não chega, ou que o core recusa, fica em «lendo» para sempre: {pedir}"
+    );
+    let desenho = body_of(&script, "function desenharBanidos(falha = null)");
+    for estado in [
+        "FRASES_DOS_BANIDOS.lendo",
+        "FRASES_DOS_BANIDOS.vazio",
+        "falha ??",
+    ] {
+        assert!(
+            desenho.contains(estado),
+            "a lista de banidos perdeu o estado `{estado}`: {desenho}"
+        );
+    }
+    for dado in [
+        "apelidoApresentado(banido.person, banido.nickname)",
+        "FRASES_DOS_BANIDOS.semMotivo",
+        "prazoDoBanimento(banido)",
+        "dataset.desbanir",
+    ] {
+        assert!(
+            desenho.contains(dado),
+            "a fileira de um banido perdeu `{dado}`: {desenho}"
+        );
+    }
+    let prazo = body_of(&script, "function prazoDoBanimento(banido)");
+    assert!(
+        prazo.contains("FRASES_DOS_BANIDOS.permanente") && prazo.contains("expires_at * 1000"),
+        "o prazo de um banimento não diz «permanente», ou lê os segundos como milissegundos: {prazo}"
+    );
+
+    // O evento, e a volta à lista depois do ato.
+    assert!(
+        script.contains("if (evento.payload === \"BanidosChanged\") lerOsBanidos();"),
+        "ninguém escuta a lista de banidos chegar"
+    );
+    let confirmar = script
+        .split("$(\"moderar-confirmar\").addEventListener")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .expect("o CONFIRMAR da moderação");
+    let dos_banidos = confirmar
+        .split("if (caixaDosBanidos) {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+        .expect("o CONFIRMAR não sabe voltar à lista de banidos");
+    assert!(
+        dos_banidos.contains("mostrarOPainelDosBanidos();")
+            && !dos_banidos.contains("fecharModeracao"),
+        "o DESBANIR fecha a caixa em vez de voltar à lista: {dos_banidos}"
+    );
+    let cancelar = body_of(&script, "function desarmarAto()");
+    assert!(
+        cancelar.find("if (caixaDosBanidos) {") < cancelar.find("if (!caixaComEscolha) {"),
+        "cancelar um DESBANIR fecha a caixa, ou volta à escolha de uma pessoa"
+    );
+    // Os tipos: os nomes que a fileira lê são os que o `Banido` serializa.
+    let tipos = tipos_da_ponte();
+    let banido = tipos
+        .split("pub struct Banido {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+        .expect("`Banido` saiu dos tipos da ponte");
+    for campo in [
+        "pub person: u64",
+        "pub nickname: String",
+        "pub reason: Option<String>",
+        "pub expires_at: Option<i64>",
+    ] {
+        assert!(
+            banido.contains(campo),
+            "`Banido` não tem mais `{campo}`, que a lista lê"
+        );
+    }
 }
 
 /// **Toda falha unitária de `ConnectionError` tem frase em `FRASES`.**
@@ -19327,6 +20493,8 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
         ("volumesLidos", "esquecerVolumes()"),
         ("geracaoDosVolumes", "esquecerVolumes()"),
         ("campoPrecisaMedir", "restaurarRascunho()"),
+        // A lista do `@` aberta é das pessoas do servidor que ficou para trás.
+        ("mencoesAbertas", "fecharAsMencoes()"),
     ];
     // Os que **atravessam** sessões de propósito, cada um com o motivo. Conferidos
     // um por um na rodada 1: nenhum guarda nada que um servidor tenha dito.

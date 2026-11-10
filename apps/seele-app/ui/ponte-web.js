@@ -193,10 +193,12 @@ const SO_NA_CASCA_LARGA = new Map([
   ["apagar_linha", SO_NO_PC_MODERAR],
   ["apagar_voice_room", SO_NO_PC_MODERAR],
   ["aplicar_icone_do_server", SO_NO_PC_MODERAR],
+  ["banidos", SO_NO_PC_MODERAR],
   ["banir_pessoa", SO_NO_PC_MODERAR],
   ["compartilhar_tela", SO_NO_PC_COMPARTILHAR],
   ["criar_linha", SO_NO_PC_MODERAR],
   ["criar_voice_room", SO_NO_PC_MODERAR],
+  ["desbanir_pessoa", SO_NO_PC_MODERAR],
   ["descrever_arquivo", SO_NO_PC_ARRASTAR],
   ["escolher_icone_do_server", SO_NO_PC_MODERAR],
   ["escolher_saida", SO_NO_PC_SAIDA],
@@ -204,6 +206,7 @@ const SO_NA_CASCA_LARGA = new Map([
   ["estado_do_teste_de_microfone", SO_NO_PC_TESTE],
   ["exclusao_do_som_da_captura", SO_NO_PC_COMPARTILHAR],
   ["expulsar_pessoa", SO_NO_PC_MODERAR],
+  ["listar_banidos", SO_NO_PC_MODERAR],
   ["fontes_de_tela", SO_NO_PC_COMPARTILHAR],
   ["modulo_de_video_a_baixar", SO_NO_PC_COMPARTILHAR],
   ["monitorar_o_microfone", SO_NO_PC_TESTE],
@@ -233,7 +236,7 @@ const COMANDOS_DA_PONTE = new Set([
   "atualizacao_que_nao_pegou", "busca_andar", "busca_limpar", "buscar",
   "calar_a_tela", "cancelar_ligacao", "codigo_do_mod", "conferir_esta_versao", "conhecidos",
   "connect", "consentir_previa", "controles_da_voz", "descartar_mensagem",
-  "destino_do_anexo", "disconnect", "dispensar_aviso", "encerrar_sessao",
+  "destino_do_anexo", "disconnect", "dispensar_aviso", "editar_mensagem", "encerrar_sessao",
   "focar_voz", "sessoes", "ver_sessao",
   "pedir_cargos", "explicar_permissoes", "prever_cargo", "criar_cargo", "editar_cargo",
   "mover_cargo", "apagar_cargo", "atribuir_cargo", "revogar_cargo",
@@ -916,6 +919,10 @@ function retratoDaSessao(sessao) {
   return {
     // O carimbo junto, achatado, como o `RetratoNaSessao` do app.
     carimbo: sessao.idDaPonte ? carimboDaPonte(sessao) : undefined,
+    // O número que a ligação negociou, como o `protocolo` do app: a tela não
+    // oferece editar, desbanir nem a lista de banidos a um servidor que não
+    // os conhece.
+    protocolo: lido.protocolo ?? 0,
     caminho: null,
     link: sessao.enlace(),
     // A WebTransport só abre com um dos hashes que o link trouxe: quem atendeu
@@ -2807,6 +2814,13 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   reenviar_mensagem: pelaSessao("reenviar_mensagem"),
   descartar_mensagem: pelaSessao("descartar_mensagem"),
   remover_mensagem: pelaSessao("remover_mensagem"),
+  // A mesa de texto da 1.0: a edição nas duas cascas, e a lista de banidos
+  // com o desbanir na larga (`SO_NA_CASCA_LARGA`). Responder é o
+  // `send_message` de cima, com `repliesTo`.
+  editar_mensagem: pelaSessao("editar_mensagem"),
+  desbanir_pessoa: pelaSessao("desbanir_pessoa"),
+  listar_banidos: pelaSessao("listar_banidos"),
+  banidos: pelaSessao("banidos"),
   dispensar_aviso: pelaSessao("dispensar_aviso"),
   escolher_apelido: pelaSessao("escolher_apelido"),
   membros_fora_do_ar: pelaSessao("membros_fora_do_ar"),

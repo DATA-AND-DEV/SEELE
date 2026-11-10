@@ -289,6 +289,22 @@
 :where(:root[data-casca="celular"]) .voice_room-aqui { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .linha-sub { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .telemetria-estado { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha-nao-lidas { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mensagem-chamou-marca { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) :is(.mensagem-citacao, .mensagem-citacao-ausente) { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mensagem-acao { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compor-modo { font-size: calc(13px * var(--cel-escala)); }
+@media (max-height: 560px) {
+  :where(:root[data-casca="celular"]) .compor-modo { font-size: calc(12px * var(--cel-escala)); }
+}
+@media (max-height: 560px) {
+  :where(:root[data-casca="celular"]) .compor-modo-cancelar { font-size: calc(12px * var(--cel-escala)); }
+}
+:where(:root[data-casca="celular"]) .mencoes-nome { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mencoes-exibido { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mencoes-fora { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .mencoes-vazio { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .roster-banidos { font-size: calc(12px * var(--cel-escala)); }
 
 /* camada-alerta.css */
 :where(:root[data-casca="celular"]) .alerta-fechar { font-size: calc(20px * var(--cel-escala)); }
@@ -428,6 +444,9 @@
 :where(:root[data-casca="celular"]) .moderar-fechar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-porta { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .moderar-remover { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .moderar-banido-nome { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .moderar-banido-motivo,
+:where(:root[data-casca="celular"]) .moderar-banido-prazo { font-size: calc(13px * var(--cel-escala)); }
 
 /* cargos.css */
 :where(:root[data-casca="celular"]) .cargos-titulo { font-size: calc(32px * var(--cel-escala)); }

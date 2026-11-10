@@ -454,3 +454,56 @@ li:hover .moderar-remover,
   .moderar-acao > button, .moderar-botoes > button { min-height: 44px; }
   .moderar-botoes > button { flex: 1 1 120px; }
 }
+
+/* ---------- a lista de banidos (protocolo 13) ----------
+   Uma fileira por banimento: quem, por quê, até quando, e o DESBANIR. A lista
+   rola por dentro do corpo da caixa, que já rola; a frase de estado quebra em
+   duas linhas quando traz o que fazer. */
+#moderar-banidos-estado { white-space: pre-line; }
+
+.moderar-banidos-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.moderar-banidos-lista[hidden] { display: none; }
+
+.moderar-banido {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: var(--seele-b) solid var(--seele-linha);
+  border-radius: var(--seele-raio-cartao);
+  background: var(--seele-vidro);
+}
+
+.moderar-banido-sobre {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.moderar-banido-nome {
+  font-family: var(--seele-ui);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+.moderar-banido-motivo,
+.moderar-banido-prazo {
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--seele-rotulo-painel);
+  overflow-wrap: anywhere;
+}
+
+.moderar-banido > .moderar-verbo { flex: 0 0 auto; align-self: center; }

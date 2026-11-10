@@ -238,7 +238,13 @@ fn mandar(
     canal: u32,
     corpo: &str,
 ) -> Result<String, ConnectionError> {
-    super::send_message(app.state::<Session>(), carimbo, canal, corpo.to_owned())
+    super::send_message(
+        app.state::<Session>(),
+        carimbo,
+        canal,
+        corpo.to_owned(),
+        None,
+    )
 }
 
 /// **O cenário inteiro, com hospedagem e três sessões**: (1), (2) e (4), as

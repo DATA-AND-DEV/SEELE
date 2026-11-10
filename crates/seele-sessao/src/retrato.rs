@@ -462,9 +462,15 @@ pub struct Channel {
     ///
     /// **Só desta sessão, e só do que chegou.** A conta não é gravada em
     /// lugar nenhum — nem no servidor, nem nesta máquina —, então fechar o
-    /// app a zera. E o servidor só manda a conversa de um canal a quem o
-    /// abriu nesta conexão (`JoinChannel`): um canal que ainda não foi aberto
-    /// nesta sessão fica em zero, haja o que houver nele.
+    /// app a zera, e o que foi dito enquanto se estava fora não entra nela.
+    ///
+    /// **De que canais chega depende do servidor.** Desde o protocolo 13 ele
+    /// manda a conversa de todo canal que a pessoa pode ler, aberto ou não, e
+    /// de novo depois de uma reconexão, sem o cliente pedir
+    /// (`ASSINA_O_QUE_LE_DESDE`, em `seele-server/src/session.rs`): a conta
+    /// vale para o canal que nunca foi aberto. Um servidor de antes do 13 só
+    /// manda a de quem abriu o canal nesta conexão (`JoinChannel`), e ali um
+    /// canal ainda não aberto fica em zero, haja o que houver nele.
     pub nao_lidas: u32,
     /// Quantas dessas chamam quem está logado (`@apelido`,
     /// [`Room::mencoes_nao_lidas`]). Com os mesmos dois limites.

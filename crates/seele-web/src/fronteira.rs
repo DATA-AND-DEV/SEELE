@@ -29,7 +29,7 @@
 //! | `ligacao_fluxo_acabou()` | 0 | `{"passos": […]}` |
 //! | `ligacao_fluxo_acabou_com(codigo)` | 0 | `{"passos": […]}`: com o `CODIGO_FICOU_PARA_TRAS`, antes a despedida `FellBehind` |
 //! | `ligacao_para_o_fio()` | 0 | os bytes enquadrados (talvez nenhum) |
-//! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}, "telemetria": {…}}` |
+//! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}, "telemetria": {…}, "protocolo": n}` |
 //! | | 1 | `{"erro": "sem-sessao"}` |
 //! | `ligacao_medir(rtt_micros, jitter_ms, perda)` | 1 se mudou, 0 se não | — |
 //! | `ligacao_semente(semente)` | — | — |
@@ -631,6 +631,11 @@ pub extern "C" fn ligacao_para_o_fio() -> u32 {
 /// O que sai do `Room` para o retrato: 0 com `{"sala": RetratoDaSala,
 /// "contados": {…}}`, ou 1 com `{"erro": "sem-sessao"}` antes da entrada (e
 /// `"sem-ligacao"` sem ligação).
+///
+/// `"protocolo"` é o número que esta ligação negociou (o
+/// `Connection::protocolo_negociado` do desktop): a casca o lê para não
+/// oferecer o que o servidor não conhece — editar mensagem, desbanir e a
+/// lista de banidos são do 13 —, em vez de oferecer e receber `ServidorAntigo`.
 #[no_mangle]
 pub extern "C" fn ligacao_retrato() -> u32 {
     com_a_ligacao(|ligacao| match ligacao.sessao() {
@@ -642,6 +647,7 @@ pub extern "C" fn ligacao_retrato() -> u32 {
                         "sala": sala,
                         "contados": sessao.contados().em_json(),
                         "telemetria": ligacao.telemetria(perda),
+                        "protocolo": ligacao.carimbo(),
                     })
                     .to_string()
                     .into_bytes(),

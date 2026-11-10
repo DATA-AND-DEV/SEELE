@@ -2575,6 +2575,7 @@ mod a_entrada_velha_que_chega_tarde {
             super::sessoes::CarimboDaJanela::da(&nova),
             canal,
             corpo.to_owned(),
+            None,
         ) {
             vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
         }
@@ -2773,6 +2774,7 @@ mod a_entrada_velha_que_chega_tarde {
             super::sessoes::CarimboDaJanela::da(&nova),
             canal,
             corpo.to_owned(),
+            None,
         ) {
             vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
         }
@@ -6605,6 +6607,7 @@ fn snapshot(
     let retrato = sessoes::RetratoNaSessao {
         carimbo: conexao.carimbo(),
         epoca: session.geracao(),
+        protocolo: conexao.protocolo_negociado(),
         retrato: conexao.snapshot(),
     };
     tracing::trace!("retrato pronto");
@@ -6892,14 +6895,44 @@ fn open_channel(
 ///
 /// Texto e não número: a chave passa de 2^53 e o `Number` do JavaScript a
 /// arredondaria — ver `seele_ffi::Message::client_message_id`.
+///
+/// `replies_to` é a mensagem a que esta responde, quando a pessoa apertou
+/// RESPONDER numa (a mesa de texto da 1.0): o `id` que o servidor deu a ela.
+/// Opcional, e o mesmo comando, como no navegador (`send_message` com
+/// `repliesTo`, em `seele-web`): responder é mandar uma mensagem, e dois
+/// comandos seriam dois caminhos para a pendente, o reenvio e o rascunho.
 #[tauri::command]
 fn send_message(
     session: State<'_, Session>,
     carimbo: sessoes::CarimboDaJanela,
     channel: u32,
     body: String,
+    replies_to: Option<u64>,
 ) -> Result<String, ConnectionError> {
-    session.conexao(carimbo)?.send_message(channel, body)
+    let conexao = session.conexao(carimbo)?;
+    match replies_to {
+        Some(citada) => conexao.send_reply(channel, body, citada),
+        None => conexao.send_message(channel, body),
+    }
+}
+
+/// Reescreve o corpo de uma mensagem **desta pessoa** (protocolo 13).
+///
+/// Pede, e não espera: a confirmação é a mensagem mudar na conversa, com a
+/// marca «editada», pelo `MessagesChanged` de sempre. O que este comando
+/// recusa na hora volta com nome, e a janela tem frase para cada um:
+/// `MensagemVazia`, `MensagemGrandeDemais`, `UnknownMessage` (uma pendente
+/// ainda não tem `id`) e `ServidorAntigo`, quando o servidor negociou menos
+/// que o 13 — a tela nem oferece o EDITAR ali (`RetratoNaSessao::protocolo`).
+/// A de outra pessoa quem recusa é o servidor, com o aviso de permissão.
+#[tauri::command]
+fn editar_mensagem(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    message: u64,
+    body: String,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.edit_message(message, body)
 }
 
 /// Manda de novo uma mensagem que não foi gravada, com a mesma chave.
@@ -12716,6 +12749,50 @@ fn banir_pessoa(
         .ban_person(person, reason, expires_at)
 }
 
+/// Pede ao servidor que tire um banimento — `desbanir` (protocolo 13).
+///
+/// Só quem pode banir, e a hierarquia é a de `banir_pessoa`: quem recusa é o
+/// servidor. A resposta é a lista de banidos inteira de novo
+/// (`Event::BanidosChanged`), e a pessoa volta ao FORA DO AR de todo mundo.
+#[tauri::command]
+fn desbanir_pessoa(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    person: u64,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.unban_person(person)
+}
+
+/// Pede ao servidor a lista dos banimentos que valem (protocolo 13).
+///
+/// Pede, e não espera: a lista chega pelo `BanidosChanged` e é lida em
+/// [`banidos`]. Ela não se atualiza sozinha quando outra pessoa bane — a tela
+/// pede de novo cada vez que abre a lista.
+#[tauri::command]
+fn listar_banidos(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.list_bans()
+}
+
+/// A lista de banidos como chegou da última vez que foi pedida.
+///
+/// Fora do `snapshot`, como o FORA DO AR e pela mesma razão: um MOD recebe o
+/// retrato, e nenhum MOD ganhou a lista de quem foi banido e por quê.
+#[tauri::command]
+fn banidos(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<sessoes::NaSessao<Vec<seele_ffi::Banido>>, ConnectionError> {
+    let conexao = session.conexao(carimbo)?;
+    Ok(sessoes::NaSessao::de(
+        &conexao,
+        session.geracao(),
+        conexao.banidos(),
+    ))
+}
+
 /// Pede ao servidor que tire uma mensagem da Linha.
 ///
 /// Sem permissão nenhuma quando a mensagem é de quem pede: a permissão do
@@ -15747,6 +15824,10 @@ fn main() {
             atribuir_cargo,
             revogar_cargo,
             banir_pessoa,
+            desbanir_pessoa,
+            listar_banidos,
+            banidos,
+            editar_mensagem,
             remover_mensagem,
             mover_pessoa,
             apagar_voice_room,

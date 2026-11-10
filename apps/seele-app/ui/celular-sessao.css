@@ -923,6 +923,61 @@
   display: none;
 }
 
+/* Responder e editar também vão para a folha da mensagem (um toque nela). Os
+   botões ficam no documento, fora da vista: é neles que a folha aperta. */
+:root[data-casca="celular"] #lista-mensagens .mensagem-acoes {
+  display: none;
+}
+
+/* A citação de uma resposta e a marca de quem foi chamado, no tamanho do
+   texto do celular; a própria, alinhada à direita como o balão. */
+:root[data-casca="celular"] #lista-mensagens :is(.mensagem-citacao, .mensagem-citacao-ausente) {
+  min-height: 28px;
+  align-items: center;
+  font-size: calc(13px * var(--cel-escala));
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem.propria :is(.mensagem-citacao, .mensagem-citacao-ausente) {
+  max-width: 82%;
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem.mensagem-chamou {
+  padding-left: 10px;
+  padding-right: 6px;
+}
+
+/* A lista do `@`: cada opção é um alvo de dedo, e a lista ocupa a largura do
+   campo. */
+:root[data-casca="celular"] .mencoes {
+  left: 0;
+  width: 100%;
+  max-height: min(44vh, 300px);
+}
+
+:root[data-casca="celular"] .mencoes-opcao {
+  min-height: var(--cel-alvo);
+  align-items: center;
+}
+
+:root[data-casca="celular"] .mencoes-nome {
+  font-size: calc(15px * var(--cel-escala));
+}
+
+/* A faixa do modo de escrever, com o cancelar no tamanho do dedo. */
+:root[data-casca="celular"] .compor-modo {
+  font-size: calc(14px * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .compor-modo-cancelar {
+  min-height: var(--cel-alvo);
+  min-width: var(--cel-alvo);
+}
+
+/* A porta dos banidos não aparece: moderar é pelo SEELE no computador. */
+:root[data-casca="celular"] .roster-banidos {
+  display: none;
+}
+
 /* O autor no osso e a hora no rótulo do painel: o apagado do desktop é, pelo
    próprio token, «4,11:1 só texto grande». */
 :root[data-casca="celular"] #lista-mensagens .mensagem-autor {

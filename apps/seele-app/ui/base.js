@@ -102,7 +102,27 @@ const COMANDOS_DA_SESSAO = new Set([
   // O perfil padrão (0.19, `perfil-padrao.js`): o registro do servidor da vista
   // e a subida da foto ou da capa guardadas nesta máquina.
   "seguimento_do_perfil_padrao", "enviar_imagem_do_perfil_padrao",
+  // A mesa de texto da 1.0: a edição, e a lista de banidos com o desbanir. A
+  // resposta que chega depois da troca de vista é de outro servidor.
+  "editar_mensagem", "desbanir_pessoa", "listar_banidos", "banidos",
 ]);
+
+/**
+ * **O número de protocolo em que nasceram editar mensagem, desbanir e a lista
+ * de banidos** (a mesa de texto da 1.0).
+ *
+ * O retrato traz o número que a conexão negociou (`protocolo`), e a tela não
+ * oferece o que o servidor não conhece: num servidor da 0.19 o EDITAR e o
+ * BANIDOS não aparecem, em vez de aparecerem e responderem `ServidorAntigo`.
+ * O número é do `seele-proto` (`vocabulario::desde_do_cliente`), e o guarda
+ * `o_numero_da_mesa_de_texto_e_o_do_protocolo` cobra que este seja o mesmo.
+ */
+const PROTOCOLO_DA_MESA_DE_TEXTO = 13;
+
+/** Se o servidor deste retrato conhece editar, desbanir e a lista de banidos. */
+function servidorTemAMesaDeTexto(snapshot) {
+  return Number(snapshot?.protocolo ?? 0) >= PROTOCOLO_DA_MESA_DE_TEXTO;
+}
 
 /** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */
 // A máquina de jogo é do computador, e não da sessão que a janela mostra: o pedido

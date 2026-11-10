@@ -1310,3 +1310,73 @@ fn nenhum_nome_global_e_declarado_por_dois_scripts_da_mesma_pagina() {
         "estes nomes estão na lista dos repetidos de propósito e não se repetem mais; saem dela: {velhos:?}"
     );
 }
+
+// ------------------------------------------------- a mesa de texto da 1.0
+
+/// **No celular, responder e editar moram na folha da mensagem** — e são os
+/// botões do desktop que ela aperta.
+///
+/// A fileira da mensagem não mostra botões no celular (um toque nela abre a
+/// folha), então sem estas duas ações na folha a resposta e a edição não
+/// existiriam ali. E quem decide se há o que oferecer continua sendo o
+/// `tela-sessao.js` (`botaoDeResponder`, `botaoDeEditar`): a folha pergunta
+/// pelo botão na fileira e o aperta. Uma segunda regra aqui — «é minha, então
+/// edita» — ofereceria EDITAR num servidor que não conhece a edição.
+///
+/// O que se vê está na `bancada/mesa-de-texto.cjs` (o caso do celular).
+#[test]
+fn responder_e_editar_moram_na_folha_da_mensagem_e_apertam_o_botao_do_desktop() {
+    let conversa = sem_comentarios_js(&ler("celular-conversa.js"));
+    for (acao, botao) in [
+        ("responder", "button[data-responder]"),
+        ("editar", "button[data-editar]"),
+    ] {
+        let passa = format!(
+            "{acao}: item.querySelector(\"{botao}\") ? () => item.querySelector(\"{botao}\")?.click() : null,"
+        );
+        assert!(
+            conversa.contains(&passa),
+            "a folha da mensagem não recebe o `{acao}` pelo botão do desktop (`{botao}`), \
+             ou o recebe mesmo quando o desktop não o oferece"
+        );
+    }
+    assert!(
+        !conversa.contains("podeEditarMensagem") && !conversa.contains("mesaDeTextoNoServidor"),
+        "o celular decide por conta própria se a mensagem pode ser editada: a regra é uma só, \
+         e mora no tela-sessao.js"
+    );
+
+    let folhas = sem_comentarios_js(&ler("celular-folhas.js"));
+    let folha = folhas
+        .split("function folhaDaMensagem(")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+        .expect("`folhaDaMensagem` saiu do celular-folhas.js");
+    for acao in [
+        "if (responder) acoes.push({ texto: PALAVRAS.responder, dados: { acao: \"responder\" }, fazer: responder });",
+        "if (editar) acoes.push({ texto: PALAVRAS.editarMinha, dados: { acao: \"editar\" }, fazer: editar });",
+    ] {
+        assert!(folha.contains(acao), "a folha da mensagem perdeu `{acao}`:\n{folha}");
+    }
+    // Os botões da fileira saem da vista no celular, e ficam no documento: é
+    // neles que a folha aperta. `display: none` não os tira da árvore do DOM.
+    let css = sem_comentarios_css(&ler("celular-sessao.css"));
+    assert!(
+        css.contains(
+            ":root[data-casca=\"celular\"] #lista-mensagens .mensagem-acoes {\n  display: none;"
+        ),
+        "os botões de responder e editar da fileira aparecem no celular, ao lado da folha"
+    );
+    // E o modo de escrever tem saída sem teclado físico: o botão da faixa.
+    let pagina = ler("index.html");
+    assert!(
+        pagina.contains("<button id=\"compor-modo-cancelar\""),
+        "a faixa do modo de escrever não tem botão de cancelar: no celular não há Esc"
+    );
+    assert!(
+        css.contains(
+            ":root[data-casca=\"celular\"] .compor-modo-cancelar {\n  min-height: var(--cel-alvo);"
+        ),
+        "o cancelar da faixa não tem o tamanho de um alvo de dedo no celular"
+    );
+}

@@ -891,6 +891,11 @@ function fraseDeErro(erro, apelido, deOnde) {
     if (erro.ForaDaVista) {
       return "ISTO FOI FEITO NOUTRO SERVIDOR.\nA resposta chegou depois da troca, e ficou com ele: volte a ele para ver.";
     }
+    // As duas falhas com campo da mesa de texto da 1.0 (`ConnectionError`): o
+    // servidor que negociou menos que o verbo pede, e o corpo de uma edição
+    // acima do teto. Sem estes dois ramos elas caíam na `desconhecida`.
+    if (erro.ServidorAntigo) return FRASES.ServidorAntigo;
+    if (erro.MensagemGrandeDemais) return FRASES.MensagemGrandeDemais;
     if (erro.Recusado?.motivo) {
       const motivo = erro.Recusado.motivo;
       // Um formato que o produto reconhece e não aceita, pelo nome dele: as
@@ -1436,6 +1441,14 @@ const FRASES = {
     LinkLost: "ENLACE PERDIDO",
     UnknownMessage: "NÃO CONHEÇO ESSA MENSAGEM",
     MensagemVazia: "A MENSAGEM FICOU VAZIA\nEscreva alguma coisa, ou apague a mensagem.",
+    // As duas falhas com campo da mesa de texto da 1.0 (`fraseDeErro` as lê
+    // pelo nome). Sem o número do teto (0.19, pedido do dono), como o aviso
+    // do campo de escrever; e sem o número do protocolo, que não é palavra de
+    // quem usa: o que a pessoa pode fazer é pedir a atualização a quem hospeda.
+    MensagemGrandeDemais: "A MENSAGEM FICOU LONGA DEMAIS\nCorte o texto e salve de novo.",
+    ServidorAntigo:
+        "ESTE SERVIDOR É DE ANTES DA 1.0 E AINDA NÃO FAZ ISSO\n" +
+        "Editar mensagem e desbanir chegam quando quem hospeda atualizar o SEELE.",
 
     // **As falhas que chegavam à tela com o nome cru** (revisão de 09/11/2026):
     // variantes unitárias de `ConnectionError` sem entrada aqui. O guarda
@@ -3039,6 +3052,8 @@ const FRASES_DO_CELULAR = Object.freeze({
     fechar: "FECHAR",
     mensagemDe: (quem, hora) => `${quem} · ${hora}`,
     copiar: "COPIAR O TEXTO",
+    responder: "RESPONDER",
+    editarMinha: "EDITAR A MINHA MENSAGEM",
     apagarMinha: "APAGAR A MINHA MENSAGEM",
     remover: "REMOVER",
     foraRemover: "Remover a mensagem de outra pessoa é pelo SEELE no computador.",
@@ -3723,6 +3738,99 @@ const FRASES_DA_FICHA = Object.freeze({
   moderar: "MODERAR",
   moderarDe: (quem) => `Moderar ${quem}: expulsar, banir ou mover`,
   moderarFora: "Moderar é pelo SEELE no computador.",
+});
+
+/**
+ * **A mesa de texto da 1.0, na conversa**: responder, editar, ser chamado, o
+ * autocompletar do `@` e as não lidas de cada canal.
+ *
+ * Minúsculas onde a conversa já escreve em minúsculas (`remover`, `editada`):
+ * o que fica ao lado de uma mensagem não grita mais que ela. As frases que um
+ * leitor de tela anuncia dizem de quem é a mensagem e de que hora, porque
+ * «responder», sozinho e repetido em toda fileira, não diz a qual.
+ */
+const FRASES_DA_CONVERSA = Object.freeze({
+  responder: "responder",
+  responderA: (quem, hora) => `responder à mensagem de ${quem} das ${hora}`,
+  editar: "editar",
+  editarA: (hora) => `editar a sua mensagem das ${hora}`,
+  // A marca ao lado de quem escreveu, na mensagem que chama quem está logado:
+  // o destaque é cor, e a `specs/06` não deixa a cor dizer nada sozinha.
+  chamouVoce: "chamou você",
+  // A citação acima de uma resposta. A segunda é a da mensagem que não está
+  // na página carregada (é mais antiga, ou foi apagada): o fio só traz o
+  // número dela, e a tela não inventa o que ela dizia.
+  irParaACitada: (quem) => `ir para a mensagem de ${quem}, a que esta responde`,
+  citacaoAusente: "mensagem anterior",
+  citacaoSemTexto: "mensagem sem texto",
+  // A faixa acima do campo de escrever, nos dois modos.
+  respondendoA: (quem) => `Respondendo a ${quem}`,
+  editando: "Editando a sua mensagem",
+  cancelar: "cancelar",
+  entendi: "entendi",
+  // O fluxo que leva um arquivo ainda não leva a mensagem citada.
+  arquivoSemCitacao: "Com arquivo, a mensagem vai sem a citação.",
+  cancelarResposta: "cancelar a resposta (Esc)",
+  cancelarEdicao: "cancelar a edição (Esc)",
+  salvar: "SALVAR",
+  salvarEdicao: "Salvar a edição",
+  // O que o leitor de tela ouve ao entrar e ao sair de cada modo.
+  anuncioDeResposta: (quem) => `Respondendo a ${quem}. Escreva e envie; Esc cancela.`,
+  anuncioDeEdicao: "Editando a sua mensagem. Enter salva; Esc cancela e devolve o que você escrevia.",
+  respostaCancelada: "Resposta cancelada.",
+  edicaoCancelada: "Edição cancelada. A mensagem ficou como estava.",
+  // A edição que não saiu fica no campo, com o porquê ao lado.
+  edicaoNaoSaiu: (porque) => `A edição não foi salva. ${porque}`,
+  // A mensagem que se editava ou a que se respondia saiu da conversa.
+  editadaSumiu: "A mensagem saiu da conversa, e não há mais o que editar.",
+  citadaSumiu: "A mensagem a que você respondia saiu da conversa. O que você escreveu vai sem a citação.",
+  semMensagemParaEditar: "Não há mensagem sua neste canal para editar.",
+  // O autocompletar do `@`.
+  pessoasParaChamar: "Pessoas para chamar",
+  ninguemComEsseNome: "Ninguém neste servidor com esse nome.",
+  foraDoAr: "fora do ar",
+  // As não lidas de um canal, para quem escuta a tela: o número sozinho ao
+  // lado do nome não diz do que é a conta.
+  naoLidas: (n) => (n === 1 ? "1 mensagem não lida" : `${n} mensagens não lidas`),
+  naoLidasComMencao: (n, chamadas) =>
+    `${n === 1 ? "1 mensagem não lida" : `${n} mensagens não lidas`}, ` +
+    `${chamadas === 1 ? "1 chama você" : `${chamadas} chamam você`}`,
+});
+
+/**
+ * **A lista de banidos e o DESBANIR** (protocolo 13), em `camada-moderar.js`.
+ *
+ * Banir deixou de ser o ato que nenhuma tela desfaz: quem pode banir lê a
+ * lista e tira o banimento daqui. Num servidor de antes da 1.0 a lista não
+ * existe, e a frase do banimento continua dizendo o que valia antes.
+ */
+const FRASES_DOS_BANIDOS = Object.freeze({
+  abrir: "BANIDOS",
+  abrirDica: "ver quem está banido deste servidor, e tirar um banimento",
+  titulo: "Banidos deste servidor",
+  anuncio: "Banidos deste servidor. A lista é pedida ao servidor cada vez que esta caixa abre.",
+  lendo: "Lendo a lista de banidos…",
+  vazio: "Ninguém está banido deste servidor agora.",
+  // A lista não se atualiza sozinha quando outra pessoa bane: a frase diz de
+  // quando ela é, e como pedir outra.
+  nota: "A lista é a de quando esta caixa abriu. Feche e abra de novo para ler outra vez.",
+  naoChegou: "A lista de banidos não chegou.\nFeche e abra de novo; se repetir, confira a conexão com o servidor.",
+  permanente: "permanente",
+  ate: (quando) => `até ${quando}`,
+  semMotivo: "sem motivo escrito",
+  motivo: (texto) => `motivo: ${texto}`,
+  desbanir: "DESBANIR",
+  desbanirDe: (quem) => `Desbanir ${quem}`,
+  tituloDeDesbanir: (quem) => `Desbanir ${quem}?`,
+  // A consequência, com o nome dentro: o que acontece, o que não acontece, e
+  // que o ato tem volta — banir de novo continua sendo possível.
+  consequenciaDeDesbanir: (quem) =>
+    `${quem} volta a poder entrar neste servidor, e reaparece entre as pessoas como fora do ar.\n` +
+    "Ninguém a avisa: ela entra quando tentar. Dá para banir de novo.",
+  // O fim da frase de BANIR para sempre, num servidor que tem a lista.
+  banirTemVolta:
+    "É para sempre, até alguém que pode banir tirar o banimento: a lista fica em BANIDOS, " +
+    "abaixo da lista de pessoas.",
 });
 
 /** A frase de um `ErroDoPerfil` (ou de um `PerfilRecusado`) para uma imagem. */

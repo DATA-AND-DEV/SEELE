@@ -5156,8 +5156,15 @@ async fn run_session(
                 // num servidor que a `specs/04-servidor-seele.md` dimensiona em
                 // cinquenta pessoas, e as mensagens são de ritmo humano — não é
                 // o caminho de quadro de áudio.
+                //
+                // **E a assinatura, desde o 13, é a própria permissão**
+                // ([`Assinatura`]): quem pode ler o canal recebe o que se diz
+                // nele sem ter mandado `JoinChannel`. A ordem das duas
+                // perguntas é a de antes — a lista, que é de graça, e só
+                // então o banco.
+                let assinatura = Assinatura::de(&channels, session.protocol_version);
                 if let Some(canal) = canal_do_evento(&event) {
-                    if !channels.contains(&canal)
+                    if !assinatura.contem(canal)
                         || !pode_ler_canal(server, session.person, canal).await
                     {
                         continue;
@@ -5188,7 +5195,7 @@ async fn run_session(
                         continue;
                     }
                 }
-                if let Some(message) = translate(&event, &channels, session.person) {
+                if let Some(message) = translate(&event, assinatura, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
                         // **Um evento que não codifica é descartado, e não
                         // encerra a sessão de quem ia recebê-lo.** O conteúdo
@@ -6550,10 +6557,88 @@ fn partes_dos_perfis(perfis: Vec<seele_proto::perfil::PerfilPublico>) -> Vec<Ser
         .collect()
 }
 
+/// **O número de protocolo a partir do qual uma conexão assina, sem pedir,
+/// todo canal de texto que ela pode ler.**
+///
+/// # O defeito que isto conserta
+///
+/// A conversa de um canal só era difundida a quem tivesse mandado
+/// `JoinChannel`, e o cliente só o manda ao **abrir** o canal. As não lidas e
+/// as menções por canal (a mesa de texto da 1.0) contam o que chega: num canal
+/// que a pessoa ainda não abriu nesta conexão não chegava nada, e a lista
+/// mostrava zero com a conversa andando lá dentro. Depois de uma reconexão era
+/// pior: só o canal aberto voltava a ser assinado, e os que já tinham sido
+/// abertos antes da queda ficavam mudos.
+///
+/// # Por que aqui, e não o cliente assinando todos
+///
+/// Medido antes de decidir (10/11/2026):
+///
+/// - a lista de canais do `Session` é **inteira** (`read_server`), e o
+///   `ChannelInfo` é `{id, name}`: o cliente não sabe quais ele pode ler;
+/// - um `JoinChannel` de canal que a pessoa não lê responde com o alerta
+///   `PermissionDenied` (R01, de propósito: a recusa de **abrir** tem de ser
+///   vista). Assinar todos às cegas poria esse aviso na tela de quem entra num
+///   servidor com um canal fechado, sem ter apertado nada;
+///   e o alerta não diz de qual pedido é, então o cliente não tem como calá-lo;
+/// - um canal criado depois, e uma permissão que muda, pediriam do cliente uma
+///   assinatura nova que ele não tem como saber quando mandar.
+///
+/// A difusão já pergunta ao banco, por evento e por destinatário, se a pessoa
+/// pode ler o canal ([`pode_ler_canal`]) — é o guarda do R01 e do R08. Deixar
+/// essa pergunta ser a assinatura resolve os quatro casos de uma vez: a
+/// entrada, a volta de uma queda (uma conexão nova nasce assinada), o canal
+/// criado depois, e a permissão dada ou tirada com a sessão de pé. É o desenho
+/// que o aviso de MOD já tem («pede a permissão, e não a assinatura»).
+///
+/// **O histórico não entra nisto.** Nada é lido do banco nem mandado a mais na
+/// entrada: só passa a chegar o que for dito dali em diante. A página de um
+/// canal continua sendo pedida quando ele é aberto (`FetchHistory`).
+///
+/// # O fio não muda, e um par 12 não vê diferença
+///
+/// Nenhum quadro novo e nenhum campo novo: são os mesmos `MessageReceived`,
+/// `MessageEdited` e `MessageRemoved`. O que muda é a quem eles chegam, e só
+/// para quem negociou o 13 — um cliente da 0.19 continua recebendo exatamente
+/// os canais que assinou, que é o que ele conta e o que a placa de «mensagem
+/// nova» dele espera. O `JoinChannel` continua valendo para todos, e a recusa
+/// dele continua visível.
+///
+/// O custo: uma leitura do banco por destinatário por mensagem, agora também
+/// para quem não está com o canal aberto. A `specs/04-servidor-seele.md`
+/// dimensiona um servidor em cinquenta pessoas, e mensagem é ritmo de gente.
+const ASSINA_O_QUE_LE_DESDE: u8 = 13;
+
+/// Quais canais de texto esta conexão recebe: os que ela pediu, ou — desde o
+/// [`ASSINA_O_QUE_LE_DESDE`] — todos. **Não é a permissão**: quem a confere é
+/// [`pode_ler_canal`], por evento, antes de [`translate`].
+#[derive(Debug, Clone, Copy)]
+struct Assinatura<'a> {
+    /// Os que a conexão pediu com `JoinChannel` (os canais que ela abriu).
+    pedidos: &'a [ChannelId],
+    /// Se ela recebe todo canal que pode ler, sem pedir.
+    todos: bool,
+}
+
+impl<'a> Assinatura<'a> {
+    /// A de uma conexão que negociou `versao` e pediu `pedidos`.
+    const fn de(pedidos: &'a [ChannelId], versao: u8) -> Self {
+        Self {
+            pedidos,
+            todos: versao >= ASSINA_O_QUE_LE_DESDE,
+        }
+    }
+
+    /// Se o que se diz em `canal` é desta conexão.
+    fn contem(self, canal: ChannelId) -> bool {
+        self.todos || self.pedidos.contains(&canal)
+    }
+}
+
 /// Decides whether an event concerns this connection, and what to send.
 fn translate(
     event: &Event,
-    channels: &[ChannelId],
+    channels: Assinatura<'_>,
     self_person: PersonId,
 ) -> Option<ServerMessage> {
     match event {
@@ -6611,7 +6696,7 @@ fn translate(
         Event::MembroBanido { person } => Some(ServerMessage::MembroBanido { person: *person }),
         Event::MessagePosted(message) => {
             channels
-                .contains(&message.channel)
+                .contem(message.channel)
                 .then(|| ServerMessage::MessageReceived {
                     channel: message.channel,
                     id: message.id,
@@ -6660,7 +6745,7 @@ fn translate(
 
         Event::MessageEdited { channel, id, body } => {
             channels
-                .contains(channel)
+                .contem(*channel)
                 .then(|| ServerMessage::MessageEdited {
                     channel: *channel,
                     id: *id,
@@ -6669,7 +6754,7 @@ fn translate(
         }
         Event::MessageRemoved { channel, id } => {
             channels
-                .contains(channel)
+                .contem(*channel)
                 .then_some(ServerMessage::MessageRemoved {
                     channel: *channel,
                     id: *id,
@@ -8164,11 +8249,62 @@ mod a_causa_da_recusa {
     }
 }
 
+/// **Quem recebe a conversa de um canal** ([`Assinatura`]): desde o 13, quem
+/// não pediu nada; antes dele, só quem pediu.
+#[cfg(test)]
+mod a_assinatura_do_que_se_le {
+    use super::{translate, Assinatura, ASSINA_O_QUE_LE_DESDE};
+    use crate::server::Event;
+    use seele_proto::{
+        control::ServerMessage,
+        ids::{ChannelId, MessageId, PersonId},
+    };
+
+    fn editada(canal: u32) -> Event {
+        Event::MessageEdited {
+            channel: ChannelId(canal),
+            id: MessageId(9),
+            body: "outra".into(),
+        }
+    }
+
+    /// O número é o da mesa de texto da 1.0. Baixá-lo põe um par da 0.19 a
+    /// receber canais que ele não assinou; subi-lo devolve o defeito das não
+    /// lidas que só contam em canal aberto.
+    #[test]
+    fn o_treze_recebe_sem_pedir_e_o_doze_so_o_que_pediu() {
+        assert_eq!(ASSINA_O_QUE_LE_DESDE, 13);
+        let chega = |pedidos: &[ChannelId], versao: u8, canal: u32| {
+            translate(
+                &editada(canal),
+                Assinatura::de(pedidos, versao),
+                PersonId(1),
+            )
+            .is_some()
+        };
+        assert!(chega(&[], 13, 4), "o 13 não recebeu sem pedir");
+        assert!(!chega(&[], 12, 4), "o 12 recebeu o que não pediu");
+        assert!(
+            chega(&[ChannelId(4)], 12, 4),
+            "o 12 não recebeu o que pediu"
+        );
+        assert!(!chega(&[ChannelId(5)], 12, 4));
+        assert_eq!(
+            translate(&editada(4), Assinatura::de(&[], 13), PersonId(1)),
+            Some(ServerMessage::MessageEdited {
+                channel: ChannelId(4),
+                id: MessageId(9),
+                body: "outra".into(),
+            })
+        );
+    }
+}
+
 /// O aviso da metade de servidor de um MOD, do barramento ao fio (rascunho da
 /// API 6, §7.3; tarefa 8 do plano da F3).
 #[cfg(test)]
 mod o_aviso_do_mod {
-    use super::translate;
+    use super::{translate, Assinatura};
     use crate::server::Event;
     use seele_proto::{
         control::ServerMessage,
@@ -8188,7 +8324,7 @@ mod o_aviso_do_mod {
                 carga: r#"{"revisao":3}"#.to_owned(),
             };
             assert_eq!(
-                translate(&evento, &[], PersonId(1)),
+                translate(&evento, Assinatura::de(&[], 12), PersonId(1)),
                 Some(ServerMessage::ModAviso {
                     mod_id: "seele/mesa".to_owned(),
                     canal,
@@ -8204,7 +8340,7 @@ mod o_aviso_do_mod {
 /// bytes de sempre, e a do túnel com as duas mensagens do protocolo 12.
 #[cfg(test)]
 mod a_apresentacao {
-    use super::translate;
+    use super::{translate, Assinatura};
     use crate::pares::{MotivoDaApresentacao, Papel};
     use crate::server::Event;
     use seele_proto::{
@@ -8243,7 +8379,7 @@ mod a_apresentacao {
         assert_eq!(
             translate(
                 &apresentacao(tela.clone(), 1, Papel::Serve),
-                &[],
+                Assinatura::de(&[], 12),
                 PersonId(1)
             ),
             Some(ServerMessage::SirvaTelaPara {
@@ -8253,7 +8389,11 @@ mod a_apresentacao {
             })
         );
         assert_eq!(
-            translate(&apresentacao(tela, 2, Papel::Busca), &[], PersonId(2)),
+            translate(
+                &apresentacao(tela, 2, Papel::Busca),
+                Assinatura::de(&[], 12),
+                PersonId(2)
+            ),
             Some(ServerMessage::AssistaTelaPor {
                 screen: ScreenId(7),
                 enderecos: enderecos(),
@@ -8270,7 +8410,7 @@ mod a_apresentacao {
             enderecos: enderecos(),
             impressao: "a".repeat(64),
         };
-        let mensagem = translate(&servir, &[], PersonId(1));
+        let mensagem = translate(&servir, Assinatura::de(&[], 12), PersonId(1));
         assert!(
             matches!(
                 &mensagem,
@@ -8282,7 +8422,11 @@ mod a_apresentacao {
             "Tunel+Serve não virou SirvaTunelPara: {mensagem:?}"
         );
         assert_eq!(
-            translate(&apresentacao(tunel(), 2, Papel::Busca), &[], PersonId(2)),
+            translate(
+                &apresentacao(tunel(), 2, Papel::Busca),
+                Assinatura::de(&[], 12),
+                PersonId(2)
+            ),
             Some(ServerMessage::AlcanceTunelPor {
                 mod_id: "seele/jogo".to_owned(),
                 nome: "mundo".to_owned(),
@@ -8293,7 +8437,11 @@ mod a_apresentacao {
         );
         // E só a quem é endereçada: privacidade do endereço, como sempre.
         assert_eq!(
-            translate(&apresentacao(tunel(), 2, Papel::Busca), &[], PersonId(1)),
+            translate(
+                &apresentacao(tunel(), 2, Papel::Busca),
+                Assinatura::de(&[], 12),
+                PersonId(1)
+            ),
             None
         );
     }

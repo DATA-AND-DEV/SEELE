@@ -401,6 +401,13 @@ pub(crate) struct RetratoNaSessao {
     pub(crate) carimbo: Carimbo,
     /// A época da vista no instante do retrato. Ver [`NaSessao::epoca`].
     pub(crate) epoca: u64,
+    /// O número de protocolo que a conexão desta sessão negociou; zero antes
+    /// do aperto de mão. A tela o lê para **não oferecer** o que o servidor
+    /// não conhece: editar mensagem, desbanir e a lista de banidos nasceram no
+    /// 13, e num servidor da 0.19 o controle some em vez de responder
+    /// `ServidorAntigo`. Relido a cada retrato, porque uma reconexão é outro
+    /// aperto de mão e quem hospeda pode ter atualizado no meio.
+    pub(crate) protocolo: u8,
     /// O retrato.
     #[serde(flatten)]
     pub(crate) retrato: seele_ffi::Snapshot,

@@ -15,16 +15,24 @@
 //
 // ---- por que uma caixa, e não um botão na linha ----
 //
-// Expulsar e banir são irreversíveis **para quem sofre**, e banir não tem
-// desfazer em lugar nenhum deste produto: `unban` não é verbo do protocolo, e
-// um banimento hoje só se desfaz por quem tem acesso ao arquivo do servidor, à
-// mão, no computador que o hospeda. Isso decide a forma: é preciso uma
+// Expulsar e banir são irreversíveis **para quem sofre**: a sessão da pessoa
+// acaba no meio do que ela fazia. Isso decide a forma: é preciso uma
 // superfície larga o bastante para escrever a **consequência** antes de o ato
 // sair, com o nome de quem vai sofrê-la dentro da frase.
 //
+// **Banir deixou de ser o ato que nenhuma tela desfaz** (protocolo 13, a mesa
+// de texto da 1.0): `UnbanPerson` e `ListBans` são verbos, e esta camada tem a
+// lista de banidos com o DESBANIR de cada um (`abrirBanidos`). Até a 0.19 um
+// banimento só se desfazia por quem tinha acesso ao arquivo do servidor, à
+// mão, no computador que o hospeda — e é o que continua valendo diante de um
+// servidor de antes da 1.0, que não conhece os dois verbos: a frase do
+// banimento diz qual dos dois casos é (`consequenciaDeBanir`).
+//
 // «Tem certeza?» não é confirmação: é uma pergunta que não acrescenta
 // informação nenhuma a quem já apertou uma vez. Dizer o que vai acontecer é.
-// Daí `armarAto`, por onde passam os quatro verbos e mais nada.
+// Daí `armarAto`, por onde passam os verbos desta camada e mais nada — o
+// DESBANIR inclusive: ele tem volta, e mesmo assim põe de novo dentro do
+// servidor alguém que outra pessoa pôs para fora.
 //
 // ---- o que este arquivo não decide ----
 //
@@ -76,6 +84,32 @@ let alvoPreferido = null;
  * pediu seria a caixa inventando um passo.
  */
 let caixaComEscolha = false;
+
+/**
+ * Se a caixa aberta é a da lista de banidos.
+ *
+ * Decide para onde o CANCELAR e o desfecho de um DESBANIR voltam: à lista, e
+ * não à escolha de uma pessoa (que não foi por onde se entrou) nem para fora
+ * da caixa — a confirmação de que o banimento saiu é a pessoa sair da lista.
+ */
+let caixaDosBanidos = false;
+
+/**
+ * A lista de banidos como o servidor a mandou, ou `null` enquanto a resposta
+ * ao pedido desta abertura não chegou. Nunca a de uma abertura anterior: a
+ * lista não se atualiza sozinha, e uma lista velha mostrada como a de agora
+ * ofereceria desbanir quem já voltou.
+ */
+let banidosLidos = null;
+
+/** O prazo da resposta do pedido de agora (`setTimeout`), ou zero. */
+let prazoDosBanidos = 0;
+
+/** Quanto se espera a lista antes de dizer que ela não chegou. */
+const ESPERA_PELOS_BANIDOS_MS = 8000;
+
+/** Quanto se espera a lista que responde a um DESBANIR antes de pedi-la. */
+const ESPERA_PELO_DESBANIR_MS = 3000;
 
 /** Onde cada pessoa está, por id, para as frases de consequência. */
 const ondeEstaOPersono = new Map();
@@ -247,6 +281,33 @@ function atualizarPortaDoAlerta(snapshot) {
   porta.title = pode
     ? "escolher quem, e o que fazer: expulsar, banir ou mover"
     : "este servidor não deu a você nenhuma permissão de moderação";
+  // A outra porta desta camada anda com o mesmo retrato.
+  atualizarPortaDosBanidos(snapshot);
+}
+
+/**
+ * Se esta sessão pode ler a lista de banidos e desbanir.
+ *
+ * `may_ban`, e não outra permissão: quem pode pôr para fora é quem pode trazer
+ * de volta, e é o que o servidor confere (`UnbanPerson` e `ListBans` pedem a
+ * permissão de banir). E só num servidor que conhece os dois verbos
+ * (`servidorTemAMesaDeTexto`, em `base.js`): num da 0.19 a porta não aparece,
+ * em vez de abrir uma lista que nunca chega.
+ */
+function podeVerBanidos(snapshot) {
+  return Boolean(snapshot && snapshot.may_ban) && servidorTemAMesaDeTexto(snapshot);
+}
+
+/** Mostra ou esconde a porta da lista de banidos, pelo retrato de agora. */
+function atualizarPortaDosBanidos(snapshot) {
+  const porta = $("abrir-banidos");
+  porta.hidden = !podeVerBanidos(snapshot);
+  // Escrito uma vez: isto roda a cada retrato, e reescrever o mesmo texto
+  // troca o nó de texto debaixo de quem o está lendo (pendência 63).
+  if (porta.textContent !== FRASES_DOS_BANIDOS.abrir) {
+    porta.textContent = FRASES_DOS_BANIDOS.abrir;
+    porta.title = FRASES_DOS_BANIDOS.abrirDica;
+  }
 }
 
 // ------------------------------------------------------------------- desenho
@@ -370,6 +431,7 @@ function armarAto(rotulo, consequencia, executar, titulo = null) {
   if (titulo) $("moderar-titulo").textContent = titulo;
   atoArmado = { rotulo, consequencia, executar };
   $("moderar-escolha").hidden = true;
+  $("moderar-banidos").hidden = true;
   $("moderar-confirmacao").hidden = false;
   $("moderar-consequencia").textContent = consequencia;
   $("moderar-confirmar").textContent = rotulo;
@@ -384,6 +446,11 @@ function armarAto(rotulo, consequencia, executar, titulo = null) {
 /** Desarma sem ter mandado nada. */
 function desarmarAto() {
   atoArmado = null;
+  // Da confirmação de um DESBANIR volta-se à lista, que é por onde se entrou.
+  if (caixaDosBanidos) {
+    mostrarOPainelDosBanidos();
+    return;
+  }
   if (!caixaComEscolha) {
     fecharModeracao();
     return;
@@ -436,6 +503,7 @@ async function abrirModeracao(alvo) {
   alvoPreferido = alvo ?? null;
   $("moderar-fechar").hidden = false;
   caixaComEscolha = true;
+  largarOsBanidos();
   atoArmado = null;
   $("moderar-titulo").textContent = "Moderar uma pessoa";
   $("moderar-confirmacao").hidden = true;
@@ -462,6 +530,7 @@ function abrirConfirmacao(titulo, consequencia, rotulo, executar, aoFechar = nul
   focoAntesDeModerar = document.activeElement;
   alvoPreferido = null;
   caixaComEscolha = false;
+  largarOsBanidos();
   // **Quem abriu pode precisar saber que a caixa fechou**, e não só que o ato
   // rodou. Uma superfície de MOD acorda esta camada enquanto pergunta — ela é
   // irmã do ramo que o modal adormeceu — e precisa readormecê-la nos **dois**
@@ -494,6 +563,7 @@ function abrirRecusa(titulo, frase) {
   focoAntesDeModerar = document.activeElement;
   alvoPreferido = null;
   caixaComEscolha = false;
+  largarOsBanidos();
   atoArmado = null;
   $("moderar-titulo").textContent = titulo;
   $("moderar-escolha").hidden = true;
@@ -524,6 +594,7 @@ function fecharModeracao() {
   atoArmado = null;
   alvoPreferido = null;
   caixaComEscolha = false;
+  largarOsBanidos();
   $("moderar-confirmacao").hidden = true;
   $("moderar-fechar").hidden = false;
   $("moderar-escolha").hidden = false;
@@ -557,11 +628,167 @@ function abandonarModeracao() {
   aoFecharACaixa = null;
   alvoPreferido = null;
   caixaComEscolha = false;
+  largarOsBanidos();
   focoAntesDeModerar = null;
   $("moderar-confirmacao").hidden = true;
   $("moderar-fechar").hidden = false;
   $("moderar-escolha").hidden = false;
   $("moderar-erro").hidden = true;
+}
+
+// ------------------------------------------------------- a lista de banidos
+
+/** Esquece a lista e o prazo, e esconde o painel: a caixa deixou de ser a dos banidos. */
+function largarOsBanidos() {
+  caixaDosBanidos = false;
+  banidosLidos = null;
+  clearTimeout(prazoDosBanidos);
+  prazoDosBanidos = 0;
+  $("moderar-banidos").hidden = true;
+}
+
+/**
+ * Abre a caixa na lista de banidos, e pede a lista ao servidor.
+ *
+ * **Pede cada vez que abre.** O servidor só manda a lista a quem pede, e ela
+ * não anda sozinha quando outra pessoa bane ou desbane: mostrar a de uma
+ * abertura anterior seria oferecer o DESBANIR de quem já voltou.
+ */
+async function abrirBanidos() {
+  const snapshot = await lerSnapshot();
+  if (!snapshot || !podeVerBanidos(snapshot)) return;
+
+  focoAntesDeModerar = document.activeElement;
+  alvoPreferido = null;
+  caixaComEscolha = false;
+  atoArmado = null;
+  caixaDosBanidos = true;
+  $("moderar").hidden = false;
+  mostrarOPainelDosBanidos();
+  pedirOsBanidos({ pedir: true });
+  $("moderar-fechar").focus();
+  anunciar(FRASES_DOS_BANIDOS.anuncio);
+}
+
+/** Põe o painel da lista na frente, no lugar da escolha e da confirmação. */
+function mostrarOPainelDosBanidos() {
+  $("moderar-titulo").textContent = FRASES_DOS_BANIDOS.titulo;
+  $("moderar-escolha").hidden = true;
+  $("moderar-confirmacao").hidden = true;
+  $("moderar-erro").hidden = true;
+  $("moderar-banidos").hidden = false;
+  $("moderar-fechar").hidden = false;
+  $("moderar-banidos-nota").textContent = FRASES_DOS_BANIDOS.nota;
+  desenharBanidos();
+  $("moderar-fechar").focus();
+}
+
+/**
+ * Espera a lista — e a pede, quando `pedir`. Depois de um DESBANIR não se
+ * pede: a resposta do servidor a ele já é a lista inteira.
+ *
+ * A lista de antes sai da tela na hora: até a resposta chegar, o que a caixa
+ * diz é «lendo». E a espera tem prazo, porque o servidor responde a quem não
+ * pode banir com um aviso de permissão, e não com uma lista vazia — sem o
+ * prazo, a caixa ficaria «lendo» para sempre.
+ *
+ * **Um DESBANIR que o servidor recusa não manda lista nenhuma** (a recusa sobe
+ * como aviso, pelo retrato). Passado o prazo curto dele, a lista é pedida de
+ * verdade: a pessoa continua nela, e é isso que a caixa mostra — em vez de
+ * «a lista não chegou» para um pedido que foi respondido com um não.
+ */
+function pedirOsBanidos({ pedir }) {
+  banidosLidos = null;
+  clearTimeout(prazoDosBanidos);
+  desenharBanidos();
+  prazoDosBanidos = setTimeout(() => {
+    prazoDosBanidos = 0;
+    if (!caixaDosBanidos || banidosLidos !== null) return;
+    if (!pedir) {
+      pedirOsBanidos({ pedir: true });
+      return;
+    }
+    desenharBanidos(FRASES_DOS_BANIDOS.naoChegou);
+  }, pedir ? ESPERA_PELOS_BANIDOS_MS : ESPERA_PELO_DESBANIR_MS);
+  if (!pedir) return;
+  invoke("listar_banidos").catch((falha) => {
+    if (!caixaDosBanidos) return;
+    clearTimeout(prazoDosBanidos);
+    prazoDosBanidos = 0;
+    // A recusa que o core dá na hora (o servidor antigo, a sessão que acabou)
+    // tem frase, e é ela que a caixa diz no lugar da lista.
+    desenharBanidos(fraseDeErro(falha));
+  });
+}
+
+/**
+ * Lê a lista que acabou de chegar (`BanidosChanged`) e a desenha.
+ *
+ * O retrato vem junto: o servidor manda a identidade apresentada de cada
+ * banido atrás da lista, e é dela que sai o nome que a tela mostra.
+ */
+async function lerOsBanidos() {
+  if (!caixaDosBanidos) return;
+  try {
+    const lidos = await invoke("banidos");
+    await atualizar();
+    if (!caixaDosBanidos) return;
+    banidosLidos = Array.isArray(lidos) ? lidos : [];
+    clearTimeout(prazoDosBanidos);
+    prazoDosBanidos = 0;
+    // Com a confirmação de um DESBANIR na frente, a lista espera atrás dela.
+    if (atoArmado === null) desenharBanidos();
+  } catch (falha) {
+    if (falha !== "NotConnected") console.warn("banidos:", falha);
+  }
+}
+
+/** Até quando vale um banimento, como uma pessoa lê. */
+function prazoDoBanimento(banido) {
+  if (banido.expires_at === null || banido.expires_at === undefined) return FRASES_DOS_BANIDOS.permanente;
+  return FRASES_DOS_BANIDOS.ate(new Date(banido.expires_at * 1000).toLocaleString());
+}
+
+/**
+ * Escreve o painel: a frase de estado e as fileiras.
+ *
+ * Três estados sem fileira, e cada um com a frase dele: a lista que ainda não
+ * chegou, a que não vai chegar (`falha`), e a que chegou vazia. Uma lista em
+ * branco não diz qual dos três é.
+ */
+function desenharBanidos(falha = null) {
+  const estado = $("moderar-banidos-estado");
+  const lista = $("moderar-banidos-lista");
+  if (falha !== null || banidosLidos === null || banidosLidos.length === 0) {
+    estado.hidden = false;
+    estado.textContent = falha ?? (banidosLidos === null ? FRASES_DOS_BANIDOS.lendo : FRASES_DOS_BANIDOS.vazio);
+    repovoar(lista, []);
+    lista.hidden = true;
+    return;
+  }
+  estado.hidden = true;
+  estado.textContent = "";
+  lista.hidden = false;
+  repovoar(lista, banidosLidos.map((banido) => {
+    const nome = apelidoApresentado(banido.person, banido.nickname);
+    const item = elemento("li", "moderar-banido");
+    const sobre = elemento("span", "moderar-banido-sobre");
+    sobre.append(
+      elemento("span", "moderar-banido-nome", nome),
+      elemento(
+        "span",
+        "moderar-banido-motivo",
+        banido.reason ? FRASES_DOS_BANIDOS.motivo(banido.reason) : FRASES_DOS_BANIDOS.semMotivo,
+      ),
+      elemento("span", "moderar-banido-prazo", prazoDoBanimento(banido)),
+    );
+    const desbanir = elemento("button", "moderar-verbo", FRASES_DOS_BANIDOS.desbanir);
+    desbanir.type = "button";
+    desbanir.dataset.desbanir = String(banido.person);
+    desbanir.setAttribute("aria-label", FRASES_DOS_BANIDOS.desbanirDe(nome));
+    item.append(sobre, desbanir);
+    return item;
+  }));
 }
 
 // ------------------------------------------------------------------ os atos
@@ -586,20 +813,27 @@ function consequenciaDeExpulsar(quem) {
  * A frase de consequência de banir, que muda com o prazo — e é por isso que o
  * prazo existe nesta tela.
  *
- * Banir para sempre é o único ato deste produto que **nenhuma tela dele
- * desfaz**: não há verbo de `unban` no protocolo, então o que foi barrado só
- * volta pelas mãos de quem tem acesso ao arquivo do servidor no computador que o
- * hospeda. Um prazo é o único banimento que se desfaz sozinho, e a frase diz
- * qual dos dois está prestes a sair.
+ * **Banir para sempre tem volta desde o protocolo 13**: quem pode banir tira o
+ * banimento na lista de banidos desta camada, e a frase diz onde ela fica.
+ * `temVolta` é a resposta do retrato (`podeVerBanidos`): diante de um servidor
+ * de antes da 1.0 não há verbo de desbanir, e a frase continua sendo a de
+ * antes — o que foi barrado só volta pelas mãos de quem tem acesso ao arquivo
+ * do servidor no computador que o hospeda. Dizer que há volta onde não há é o
+ * erro que esta caixa existe para não cometer.
+ *
+ * Um prazo é o banimento que se desfaz sozinho, e a frase diz qual dos casos
+ * está prestes a sair.
  */
-function consequenciaDeBanir(quem, ate) {
+function consequenciaDeBanir(quem, ate, temVolta = false) {
   const comum =
     `${quem.nome} sai desta sessão agora e não consegue entrar de novo neste servidor.\n`;
   if (ate === null) {
+    if (temVolta) return comum + FRASES_DOS_BANIDOS.banirTemVolta;
     return (
       comum +
-      "É para sempre. Nenhuma tela deste produto desfaz um banimento: só quem " +
-      "tiver acesso ao arquivo do servidor, à mão, no computador que o hospeda."
+      "É para sempre. Nenhuma tela deste produto desfaz um banimento neste servidor, " +
+      "que é de antes da 1.0: só quem tiver acesso ao arquivo do servidor, à mão, " +
+      "no computador que o hospeda."
     );
   }
   return (
@@ -841,6 +1075,30 @@ $("alerta-ejetar").addEventListener("click", () => {
   abrirModeracao(null);
 });
 
+$("abrir-banidos").addEventListener("click", () => abrirBanidos());
+
+// O DESBANIR, por delegação na lista: as fileiras são reescritas quando a
+// lista chega, e quem diz de quem se trata é o `data-desbanir` de agora.
+$("moderar-banidos-lista").addEventListener("click", (evento) => {
+  const alvo = evento.target.closest("button[data-desbanir]");
+  if (!alvo) return;
+  const banido = banidosLidos?.find((um) => String(um.person) === alvo.dataset.desbanir);
+  if (!banido) return;
+  const nome = apelidoApresentado(banido.person, banido.nickname);
+  armarAto(
+    `${FRASES_DOS_BANIDOS.desbanir} ${nome}`,
+    FRASES_DOS_BANIDOS.consequenciaDeDesbanir(nome),
+    () => invoke("desbanir_pessoa", { person: banido.person }),
+    FRASES_DOS_BANIDOS.tituloDeDesbanir(nome),
+  );
+});
+
+// A lista chega por evento, e não pela resposta do pedido: o servidor a manda
+// em partes, e o core avisa quando ela fecha (`Event::BanidosChanged`).
+listen("seele://event", (evento) => {
+  if (evento.payload === "BanidosChanged") lerOsBanidos();
+});
+
 $("moderar-expulsar").addEventListener("click", () => {
   const quem = quemEstaEscolhido();
   if (!quem) return;
@@ -872,7 +1130,9 @@ $("moderar-banir").addEventListener("click", async () => {
   // janela tem é o desta máquina — a frase de consequência diz isso, porque um
   // computador adiantado barra por mais tempo do que quem apertou escolheu.
   const ate = dias > 0 ? Math.floor(Date.now() / 1000) + dias * SEGUNDOS_POR_DIA : null;
-  armarAto(`BANIR ${quem.nome}`, consequenciaDeBanir(quem, ate), () =>
+  // Se este servidor tem como desfazer um banimento, pelo retrato de agora.
+  const temVolta = podeVerBanidos(await lerSnapshot());
+  armarAto(`BANIR ${quem.nome}`, consequenciaDeBanir(quem, ate, temVolta), () =>
     invoke("banir_pessoa", {
       person: quem.id,
       // O motivo é para o registro de quem hospeda e nunca chega a quem foi
@@ -916,6 +1176,17 @@ $("moderar-confirmar").addEventListener("click", async () => {
     // Um ato que já traduziu a recusa (APAGAR um cargo, `cargos.js`) a manda
     // pronta: a frase dele nomeia o motivo do servidor, e a genérica não.
     erro.textContent = typeof falha?.FrasePronta === "string" ? falha.FrasePronta : fraseDeErro(falha);
+    return;
+  }
+  // **Um DESBANIR volta à lista, e não fecha a caixa**: a confirmação de que
+  // ele saiu é a pessoa sair da lista, e o servidor responde ao pedido com a
+  // lista inteira de novo (`BanidosChanged`). Fechar aqui deixaria quem
+  // apertou sem ver se o ato valeu.
+  if (caixaDosBanidos) {
+    atoArmado = null;
+    pedirOsBanidos({ pedir: false });
+    mostrarOPainelDosBanidos();
+    await atualizar();
     return;
   }
   fecharModeracao();
