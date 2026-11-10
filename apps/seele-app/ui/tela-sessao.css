@@ -1263,6 +1263,13 @@ button.linha-nome:hover { text-decoration: underline; }
 
 .mensagem:not(.mensagem-segue) { margin-top: 10px; }
 .mensagens > li:first-child { margin-top: 0; }
+/* **Nenhuma linha encolhe.** A lista é uma coluna flexível que rola, e um item
+   de coluna flexível cede (`flex-shrink: 1`) antes de a lista rolar. Quem o
+   segura é o `min-height: auto`, e a linha do desktop troca esse `auto` por
+   24px: na janela mínima (720×480, onde sobram ~100px para a conversa) cada
+   mensagem encolhia para 24px e o texto dela saía por cima da seguinte
+   (`bancada/desktop-estreito.cjs`, os extremos da janela). */
+.mensagens > li { flex-shrink: 0; }
 
 /* A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo, com uma
    marca de 2px à esquerda. A marca é onde o comp separa mensagem de sistema e
@@ -2603,7 +2610,33 @@ button.linha-nome:hover { text-decoration: underline; }
 /* As portas das gavetas não existem fora da largura em que as gavetas existem.
    Este é o estado normal delas, e os `@media` de baixo são a exceção. */
 .linha-canais,
-.linha-pessoas { display: none; }
+.linha-pessoas {
+  display: none;
+  /* **A aparência mora aqui, fora dos `@media`.** Ela morava dentro deles — a
+     de `.linha-canais` no de 900px —, e a vista da chamada mostra essa porta em
+     toda largura (a coluna de canais sai de cena): acima de 900px o «SALAS E
+     CANAIS» aparecia como botão nativo, branco, sem estilo nenhum. Os `@media`
+     de baixo decidem só QUANDO a porta existe (`bancada/desktop-estreito.cjs`
+     compara o estilo dela a 800, 1100, 1280 e 1920px). */
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+.linha-canais:hover,
+.linha-canais[aria-expanded="true"],
+.linha-pessoas:hover,
+.linha-pessoas[aria-expanded="true"] {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
 
 
 
@@ -3267,26 +3300,7 @@ button.linha-nome:hover { text-decoration: underline; }
     border-left: 1px solid var(--seele-linha-forte);
   }
 
-  .linha-pessoas {
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
-    flex: 0 0 auto;
-    font: inherit;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    color: var(--seele-osso-apagado);
-    background: none;
-    border: 1px solid var(--seele-linha-forte);
-    cursor: pointer;
-  }
-
-  .linha-pessoas:hover,
-  .linha-pessoas[aria-expanded="true"] {
-    color: var(--seele-laranja-nerv);
-    border-color: var(--seele-laranja-nerv);
-  }
+  .linha-pessoas { display: flex; }
   /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
      colada na borda da janela. */
   .painel-linha { border-right: none; }
@@ -3337,26 +3351,7 @@ button.linha-nome:hover { text-decoration: underline; }
   /* A porta da gaveta. Ela existe só aqui — acima deste ponto a coluna está na
      tela, e um botão que abre o que já está aberto é um botão que não faz
      nada. */
-  .linha-canais {
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
-    flex: 0 0 auto;
-    font: inherit;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    color: var(--seele-osso-apagado);
-    background: none;
-    border: 1px solid var(--seele-linha-forte);
-    cursor: pointer;
-  }
-
-  .linha-canais:hover,
-  .linha-canais[aria-expanded="true"] {
-    color: var(--seele-laranja-nerv);
-    border-color: var(--seele-laranja-nerv);
-  }
+  .linha-canais { display: flex; }
 }
 
 @media (max-width: 700px) {
@@ -3614,7 +3609,13 @@ button.linha-nome:hover { text-decoration: underline; }
   min-height: 24px;
 }
 :root:not([data-casca="celular"]) .mensagem-avatar { display: none; }
-:root:not([data-casca="celular"]) .mensagem-conteudo { display: block; }
+/* **O teto da linha.** O `max-width: 76ch` do `.corpo` (mais acima) não vale
+   aqui: nesta casca o corpo é `inline`, para correr na mesma linha do autor, e
+   largura máxima não se aplica a caixa em linha. A 2560×1440 a mensagem
+   atravessava o painel inteiro (~198 caracteres por linha). O teto passa para
+   o bloco que contém autor e corpo — a mesma medida, 76 caracteres —, e a
+   coluna continua à esquerda, colada na calha da hora. */
+:root:not([data-casca="celular"]) .mensagem-conteudo { display: block; max-width: 76ch; }
 :root:not([data-casca="celular"]) .mensagem-cabeca { display: inline; }
 :root:not([data-casca="celular"]) .mensagem-hora,
 :root:not([data-casca="celular"]) .mensagem-hora-calha {

@@ -708,6 +708,18 @@
    segundo microfone, fone e SAIR DA SALA logo acima dos de verdade
    (`bancada/vista-pessoal-0-17.cjs`, passo 4). */
 #tela-sessao[data-vista="ligacao"] #chamada-controles { display: none; }
+/* **Na janela baixa o cartão deita.** A barra fica grudada no pé por cima do
+   que rola, e na janela mínima (720×480 no `tauri.conf.json`) sobram ~290px
+   para o cabeçalho, a grade e ela: o cartão de 200px não cabia, e a barra
+   pousava em cima dos nomes de duas pessoas, com a vista em repouso
+   (`bancada/desktop-estreito.cjs`, os extremos da janela). Abaixo de 600px de
+   altura o retrato e o nome ficam lado a lado e a fileira desce para a altura
+   do retrato; nada muda de tamanho, de cor nem de lugar acima disso. */
+@media (max-height: 600px) {
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) #chamada-grade { grid-auto-rows: minmax(96px, auto); }
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) #chamada-grade .chamada-cartao-abrir { flex-direction: row; padding: 12px 16px; }
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) #chamada-grade .chamada-cartao-nome { min-width: 0; }
+}
 .chamada-controle {
   display: inline-flex;
   align-items: center;
