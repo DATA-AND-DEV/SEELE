@@ -48,7 +48,8 @@
 //     com a metade de pé e o jogo parado; a lista relida também.
 // 20. (e2e de 31/10, passo 14) o jogo que sobrou de um app que fechou sem
 //     desligá-lo: `maquina-sobra` e `maquinas_sobras` põem na faixa o que se
-//     achou e o que se fez, uma linha por processo.
+//     achou e o que se fez, uma linha por processo; e o que não parou manda
+//     encerrá-lo pela ferramenta do sistema em que a janela roda.
 // 21. (e2e de 31/10, passo 5) o MOD sem o id repetido, e o servidor do SEELE
 //     pelo nome, e não o id do jogo.
 // 22. (API 8 parte 7) o pedido da reserva diz que é a reserva — chip e título à
@@ -68,7 +69,12 @@ async function caso(motor, numero, prova) {
   try {
     await prova();
   } catch (erro) {
-    falhas.push(`${motor} · caso ${numero}: ${String(erro.message).split("\n")[0]}`);
+    // **A mensagem inteira, numa linha só.** Cortada na primeira quebra, a
+    // reprovação do caso 20 mostrava só a primeira linha da faixa (a do
+    // processo 4242), e dali se leu que a linha do 4646 não existia: ela
+    // estava três linhas abaixo, com a frase certa. A faixa tem uma linha por
+    // máquina, então toda mensagem que a cita tem quebras.
+    falhas.push(`${motor} · caso ${numero}: ${String(erro.message).trim().split(/\n+/).join(" ⏎ ")}`);
   }
 }
 
@@ -684,10 +690,38 @@ async function caso(motor, numero, prova) {
           faixa = await pagina.evaluate(() => faixaDeMaquinas());
           assert.equal((faixa.match(/processo 4545/g) ?? []).length, 1, `${motor}: 20 · o parando ficou ao lado do desfecho: ${faixa}`);
           assert.doesNotMatch(faixa, /nenhum jogo sobe/, `${motor}: 20 · o parando não saiu: ${faixa}`);
-          // Que não parou: o caminho vale fora do Mac também (revisão da 0.19, M4).
-          await pagina.evaluate((s) => emitir("maquina-sobra", { ...s, pid: 4646, desfecho: "nao-parou", motivo: "EPERM" }), sobra);
-          faixa = await pagina.evaluate(() => faixaDeMaquinas());
-          assert.match(faixa, /processo 4646.*pelo gerenciador de processos do sistema/s, `${motor}: 20 · nao-parou: ${faixa}`);
+          // Que não parou: a única sobra que pede uma ação de quem lê. O
+          // payload é o do Rust (`sobra_na_tela`: `nao-parou`, zero segundos e
+          // o `motivo`). O caminho vale fora do Mac também (revisão da 0.19,
+          // M4) — e, desde a 0.19.5, a frase nomeia a ferramenta do sistema em
+          // que a janela roda (`ambienteDasInstrucoes`), no lugar de «o
+          // gerenciador de processos do sistema (no Mac, o Monitor de
+          // Atividade)» para todos. Esta bancada ficou esperando a frase
+          // antiga num Mac, e reprovava com o produto certo: agora prova a de
+          // cada sistema, e que nenhuma cita a ferramenta de outro.
+          await pagina.evaluate((s) => emitir("maquina-sobra", { ...s, pid: 4646, desfecho: "nao-parou", segundos: 0, motivo: "EPERM" }), sobra);
+          const ferramentas = { macos: "Monitor de Atividade", windows: "Gerenciador de Tarefas", outro: "gerenciador de processos do sistema" };
+          const plataformaDaBancada = await pagina.evaluate(() => $("barra-janela").dataset.plataforma);
+          assert.equal(plataformaDaBancada, "macos", `${motor}: 20 · a bancada combina um Mac, e a barra diz ${plataformaDaBancada}`);
+          try {
+            for (const [plataforma, ferramenta] of Object.entries(ferramentas)) {
+              faixa = await pagina.evaluate((p) => {
+                $("barra-janela").dataset.plataforma = p;
+                desenharAFaixaDeMaquinas();
+                return faixaDeMaquinas();
+              }, plataforma);
+              const linhas = faixa.split("\n").filter((l) => l.includes("processo 4646"));
+              assert.equal(linhas.length, 1, `${motor}: 20 · nao-parou (${plataforma}): a faixa não tem uma linha, e uma só, do processo 4646: ${faixa}`);
+              assert.match(linhas[0], /o SEELE não conseguiu pará-lo \(EPERM\): ele segue rodando, com o mundo e a porta/, `${motor}: 20 · nao-parou (${plataforma}): ${linhas[0]}`);
+              assert.ok(linhas[0].endsWith(`encerre-o pelo ${ferramenta}.`), `${motor}: 20 · nao-parou (${plataforma}): a linha não manda ao ${ferramenta}: ${linhas[0]}`);
+              for (const [outra, alheia] of Object.entries(ferramentas)) {
+                if (outra !== plataforma) assert.ok(!linhas[0].includes(alheia), `${motor}: 20 · nao-parou (${plataforma}): a linha cita a ferramenta de ${outra}: ${linhas[0]}`);
+              }
+            }
+          } finally {
+            // A barra volta ao sistema combinado: os casos seguintes leem dela.
+            await pagina.evaluate((p) => { $("barra-janela").dataset.plataforma = p; desenharAFaixaDeMaquinas(); }, plataformaDaBancada);
+          }
           await pagina.evaluate(() => { table.maquinas_sobras = () => []; });
         });
 
