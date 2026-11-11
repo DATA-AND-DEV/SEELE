@@ -2333,6 +2333,7 @@ impl Enlace {
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
+            estimativa_da_midia: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),
@@ -3808,6 +3809,10 @@ struct Motor {
     /// na tica que ele já tem — ver [`Motor::medir_o_caminho`]. Era a pergunta
     /// 2 do §8.
     caminho: crate::caminho::Sonda,
+    /// O caminho de saída como a mídia RTP o estima (ADR 0067), já na
+    /// medida que o [`crate::tela::TetoDeVideo`] espera. `None` sem
+    /// transmissão por mídia: aí vale a sonda.
+    estimativa_da_midia: Option<u32>,
     /// Se já há uma tentativa de servir um par em curso.
     ///
     /// No A1 quem empresta serve um par por vez (`crate::par::atender` só
@@ -4251,6 +4256,12 @@ impl Motor {
             // é o que deixa o braço novo do `select!` chamar `cliente.par_falhou`
             // sem pedir `self` de novo.
             let resultados_do_par = &mut self.resultados_do_par;
+            // E a fila do que a mídia RTP diz ao motor, pelo mesmo motivo da
+            // fila de telas. O pedido de quadro-chave precisa do `self`
+            // inteiro, então o braço só o anota, e ele é atendido depois do
+            // `select!`.
+            let fila_da_midia = self.cliente.as_ref().and_then(Client::fila_da_midia);
+            let mut pediram_chave_pela_midia = false;
 
             // Só há o que ler quando há conexão. Sem ela, a espera é o relógio.
             let houve_evento = match self.cliente.as_mut() {
@@ -4261,9 +4272,28 @@ impl Motor {
                     Some(fluxo) = espera_da_fila(&fila_de_telas) => {
                         escoar_tela_alheia(
                             avisos_da_tela.clone(),
-                            fluxo,
+                            FonteDaTelaAlheia::Canal(fluxo),
                             DeOndeVeioATela::Servidor(Arc::clone(&repasse_da_tela)),
                         );
+                        None
+                    }
+                    // A mídia RTP (ADR 0067): a abertura de uma geração da
+                    // transmissão desta pessoa vai ao servidor pelo controle,
+                    // que só este laço escreve.
+                    Some(da_midia) = espera_da_midia(&fila_da_midia) => {
+                        match da_midia {
+                            crate::client::DaMidia::Abertura(abertura) => {
+                                if let Err(erro) = cliente.tela_por_midia(abertura).await {
+                                    tracing::warn!(
+                                        %erro,
+                                        "a abertura da transmissão por RTP não saiu; ninguém vai vê-la"
+                                    );
+                                }
+                            }
+                            crate::client::DaMidia::PediramChave => {
+                                pediram_chave_pela_midia = true;
+                            }
+                        }
                         None
                     }
                     // O que uma tarefa solta do caminho entre pares (ver
@@ -4330,6 +4360,13 @@ impl Motor {
                     _ = tica.tick() => None,
                 },
             };
+
+            if pediram_chave_pela_midia {
+                // O mesmo que um `KeyFrameRequested` do controle faz.
+                if let Some(viva) = self.tela_viva.as_ref() {
+                    viva.produtor.chave();
+                }
+            }
 
             if let Some(evento) = houve_evento {
                 match evento {
@@ -5602,6 +5639,25 @@ impl Motor {
                     }
                 }
             }
+            // Uma transmissão a que esta sessão assiste desce pela mídia RTP
+            // (ADR 0067): a abertura vem aqui, e os quadros, pela faixa.
+            ServerMessage::TelaPorMidia { faixa, abertura }
+                if faixa == crate::tela::FAIXA_DE_SAIDA =>
+            {
+                self.assistir_pela_midia(abertura);
+            }
+            ServerMessage::FimDaTelaPorMidia { faixa, limpo }
+                if faixa == crate::tela::FAIXA_DE_SAIDA =>
+            {
+                if !limpo {
+                    tracing::info!(
+                        "a cópia de uma transmissão por RTP acabou antes da transmissão"
+                    );
+                }
+                if let Some(cliente) = self.cliente.as_ref() {
+                    cliente.fim_da_tela_por_midia();
+                }
+            }
             ServerMessage::ScreenViewers { tela, quantos } => {
                 if self.e_a_minha_tela(tela) {
                     self.espectadores = quantos;
@@ -5845,7 +5901,7 @@ impl Motor {
                         Ok(Ok(fluxo)) => {
                             ler_a_tela_alheia(
                                 avisos,
-                                fluxo,
+                                FonteDaTelaAlheia::Canal(fluxo),
                                 DeOndeVeioATela::Par {
                                     screen,
                                     resultados: resultados.clone(),
@@ -6481,10 +6537,28 @@ async fn espera_da_fila(
 /// estão no doc de [`DeOndeVeioATela`].
 fn escoar_tela_alheia(
     avisos: mpsc::UnboundedSender<Aviso>,
-    fluxo: crate::transporte::Recebe,
+    fonte: FonteDaTelaAlheia,
     de_onde: DeOndeVeioATela,
 ) {
-    tokio::spawn(ler_a_tela_alheia(avisos, fluxo, de_onde));
+    tokio::spawn(ler_a_tela_alheia(avisos, fonte, de_onde));
+}
+
+/// Por onde os quadros de uma transmissão alheia chegam: pelo canal `u`, ou
+/// pela mídia RTP da conexão (ADR 0067), com a abertura já lida do controle.
+enum FonteDaTelaAlheia {
+    Canal(crate::transporte::Recebe),
+    Midia(crate::tela::RecepcaoPorMidia),
+}
+
+/// A espera da fila da mídia, que pode não existir (sem conexão, ou com um
+/// servidor que não fala RTP). Como [`espera_da_fila`].
+async fn espera_da_midia(
+    fila: &Option<crate::client::FilaDaMidia>,
+) -> Option<crate::client::DaMidia> {
+    match fila {
+        Some(fila) => fila.lock().await.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// O corpo de [`escoar_tela_alheia`], sem a tarefa.
@@ -6498,16 +6572,22 @@ fn escoar_tela_alheia(
 /// baixo. Uma tarefa só é o que faz a alça valer.
 async fn ler_a_tela_alheia(
     avisos: mpsc::UnboundedSender<Aviso>,
-    fluxo: crate::transporte::Recebe,
+    fonte: FonteDaTelaAlheia,
     de_onde: DeOndeVeioATela,
 ) {
     {
         {
-            let aberto = match &de_onde {
-                DeOndeVeioATela::Servidor(_) => {
-                    crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await
+            let aberto = match fonte {
+                FonteDaTelaAlheia::Midia(recepcao) => {
+                    Ok(crate::tela::LeituraDeTela::Midia(recepcao))
                 }
-                DeOndeVeioATela::Par { .. } => crate::tela::Recepcao::do_fluxo(fluxo).await,
+                FonteDaTelaAlheia::Canal(fluxo) => match &de_onde {
+                    DeOndeVeioATela::Servidor(_) => {
+                        crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await
+                    }
+                    DeOndeVeioATela::Par { .. } => crate::tela::Recepcao::do_fluxo(fluxo).await,
+                }
+                .map(crate::tela::LeituraDeTela::Canal),
             };
             let mut recepcao = match aberto {
                 Ok(recepcao) => recepcao,
@@ -6673,6 +6753,23 @@ async fn ler_a_tela_alheia(
 
 /// O número da próxima leitura de tela, crescente no processo: o `leitura` de
 /// [`Aviso::TelaAbriu`] e de [`Aviso::TelaFechou`].
+/// A estimativa de banda do RTP, na medida que o [`crate::tela::TetoDeVideo`]
+/// espera como «caminho».
+///
+/// O teto gasta 60% do caminho (a regra da sonda, que mede o cano inteiro). A
+/// estimativa do RTP já é o que **este fluxo** pode mandar, e a medida do
+/// protótipo usou 85% dela (`docs/medidas/2026-11-10-rtp-sob-perda.md`). A
+/// conversão faz os 60% do teto darem 85% da estimativa.
+fn para_a_medida_do_teto(estimativa_bps: u64) -> u32 {
+    u32::try_from(estimativa_bps.saturating_mul(85) / 60).unwrap_or(u32::MAX)
+}
+
+/// O contrário de [`para_a_medida_do_teto`]: de um caminho, a estimativa
+/// que o RTP teria de ter para o teto dar o mesmo.
+fn da_medida_do_teto(caminho_bps: u32) -> u32 {
+    u32::try_from(u64::from(caminho_bps).saturating_mul(60) / 85).unwrap_or(u32::MAX)
+}
+
 fn nova_leitura_de_tela() -> u64 {
     static PROXIMA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     PROXIMA.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -6805,6 +6902,7 @@ impl Motor {
         let Some((pedido, limites)) = self.tela_pedida.take() else {
             return;
         };
+        self.semear_a_midia(&limites);
 
         let (biblioteca, captura, origem) = match *pedido {
             PedidoDeTela::DoSistema {
@@ -6905,11 +7003,57 @@ impl Motor {
     /// assumido para sempre. Enquanto a sonda não mediu nada, ela devolve
     /// exatamente aquela suposição, então a primeira transmissão de uma sessão
     /// abre com o mesmo teto de antes.
+    /// Começa a ler uma transmissão que desce pela mídia RTP.
+    fn assistir_pela_midia(&mut self, abertura: [u8; seele_proto::screen::SCREEN_HEADER_LEN]) {
+        let Some(cliente) = self.cliente.as_ref() else {
+            return;
+        };
+        match cliente.receber_tela_por_midia(abertura) {
+            Ok(Some(recepcao)) => escoar_tela_alheia(
+                self.avisos.clone(),
+                FonteDaTelaAlheia::Midia(recepcao),
+                DeOndeVeioATela::Servidor(Arc::clone(&self.repasse)),
+            ),
+            Ok(None) => tracing::warn!(
+                "o servidor mandou uma transmissão pela mídia a uma conexão que não a ligou"
+            ),
+            Err(erro) => {
+                // Como a abertura ilegível de um canal: a casca fica sabendo.
+                tracing::warn!(
+                    %erro,
+                    "chegou pela mídia uma transmissão de tela que esta versão não sabe ler"
+                );
+                let _ = self.avisos.send(Aviso::TelaIlegivel {
+                    motivo: erro.to_string(),
+                });
+            }
+        }
+    }
+
+    /// A transmissão que vai nascer sobe pela mídia RTP? Então a estimativa
+    /// de banda dela parte de onde a sonda partiria, e não dos 300 kbps de
+    /// quem ainda não mandou nada (que ficam abaixo do piso do vídeo).
+    fn semear_a_midia(&mut self, limites: &crate::video::LimitesDeTela) {
+        self.estimativa_da_midia = None;
+        let Some(remetente) = self.cliente.as_ref().and_then(Client::remetente_de_midia) else {
+            return;
+        };
+        let semente = limites.semente_da_sonda_bps();
+        remetente.semear_estimativa(u64::from(da_medida_do_teto(semente)));
+        // Até onde a estimativa procura: o dobro de onde parte, que cobre a
+        // banda escolhida com folga para o som e a retransmissão.
+        remetente.taxa_desejada(u64::from(semente).saturating_mul(2));
+        self.estimativa_da_midia = Some(semente);
+    }
+
     fn teto_de_video(
         &self,
         limites: Option<&crate::video::LimitesDeTela>,
     ) -> crate::tela::TetoDeVideo {
-        let mut teto = crate::tela::TetoDeVideo::com_caminho(self.caminho.estimativa());
+        let caminho = self
+            .estimativa_da_midia
+            .unwrap_or_else(|| self.caminho.estimativa());
+        let mut teto = crate::tela::TetoDeVideo::com_caminho(caminho);
         // **A escolha é piso enquanto ninguém mediu, e teto sempre.**
         //
         // `caminho_de_quem_hospeda_bps` é `Some` só quando o `HostUplink` veio
@@ -6951,6 +7095,26 @@ impl Motor {
         let (Some(cliente), Some(viva)) = (self.cliente.as_ref(), self.tela_viva.as_ref()) else {
             return;
         };
+        // **Com a transmissão na mídia RTP, quem mede o caminho é ela** (ADR
+        // 0067): a estimativa do TWCC vê a perda e o atraso de cada pacote, e
+        // não lê perda sorteada como congestionamento. A sonda por `Ping`
+        // fica para os servidores antigos.
+        if let (Some(antes), Some(remetente)) =
+            (self.estimativa_da_midia, cliente.remetente_de_midia())
+        {
+            if let Some(bps) = remetente.estimativa_bps() {
+                let agora = para_a_medida_do_teto(bps);
+                self.caminho_medido
+                    .store(agora, std::sync::atomic::Ordering::Relaxed);
+                // Só um passo de mais de 5% reconfigura quem codifica: a
+                // estimativa treme a cada retorno, e o codificador não deve.
+                if agora.abs_diff(antes) > antes / 20 {
+                    self.estimativa_da_midia = Some(agora);
+                    self.reconferir_o_teto();
+                }
+            }
+            return;
+        }
         let amostra = crate::caminho::Amostra {
             transporte: cliente.amostra_do_transporte(),
             teto: self.teto_de_video(Some(&viva.limites)).teto(self.faixa),
@@ -7002,6 +7166,7 @@ impl Motor {
 
     /// Mata a bomba, se houver uma.
     fn parar_a_tela(&mut self) {
+        self.estimativa_da_midia = None;
         // A contagem morre junto: ela é de **uma** transmissão, e deixá-la de pé
         // faria a próxima nascer dividindo a perna de quem hospeda pelo público
         // da anterior — um teto apertado sem que ninguém estivesse assistindo.
@@ -11259,6 +11424,7 @@ mod tests {
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
+            estimativa_da_midia: None,
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             protocolo: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),

@@ -21,6 +21,7 @@ pub use seele_enlace::{
     CanalDeTunel, CertificadoDtls, Conexao, Confiabilidade, ConfigDoAnfitriao, Datagramas,
     Discagem, Envio, FalhaAoDiscar, FalhaDoCanal, Leitura, Motivo, Pino, Ponta, Recebe, Recusa,
 };
+pub use seele_enlace::{EventoDeMidia, Midia, RemetenteDeMidia, Trilha};
 
 /// O código de fechamento do «ficou para trás», o **mesmo** número do servidor:
 /// o do `seele_proto::transport`, reexportado, e não uma cópia.

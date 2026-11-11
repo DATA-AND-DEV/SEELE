@@ -1025,6 +1025,11 @@ pub enum MotivoDeDescarte {
     /// O quadro estava vazio.
     #[error("there was no picture")]
     Vazio,
+    /// A mídia RTP da conexão não aceitou o quadro: a fila dela está cheia.
+    /// Só existe numa transmissão por RTP (ADR 0067). Como todo descarte,
+    /// quebra a cadeia: o próximo quadro que sai tem de ser um quadro-chave.
+    #[error("the connection's media queue is full")]
+    MidiaCheia,
 }
 
 /// O que falta escrever de um quadro-chave espalhado.
@@ -1041,7 +1046,11 @@ struct ChaveEmVoo {
 /// conexão QUIC que já existe (§3.1 e §3.6).
 #[derive(Debug)]
 pub struct Transmissao {
-    fluxo: crate::transporte::Envio,
+    /// O canal `u`. `None` numa transmissão por RTP.
+    fluxo: Option<crate::transporte::Envio>,
+    /// A mídia RTP da conexão e o instante em que a transmissão abriu (o
+    /// zero do relógio dos quadros). `None` numa transmissão pelo canal.
+    midia: Option<(crate::transporte::RemetenteDeMidia, Instant)>,
     cabecalho: ScreenHeader,
     balde: Balde,
     em_voo: Option<ChaveEmVoo>,
@@ -1103,7 +1112,8 @@ impl Transmissao {
 
         Ok(Self {
             som_pendente: std::collections::VecDeque::new(),
-            fluxo,
+            fluxo: Some(fluxo),
+            midia: None,
             cabecalho,
             balde: Balde::novo(teto_bps, agora),
             em_voo: None,
@@ -1111,6 +1121,73 @@ impl Transmissao {
             descartados: 0,
             bytes_enviados: 0,
         })
+    }
+
+    /// Abre uma transmissão **pela mídia RTP** da conexão (ADR 0067), e
+    /// devolve com ela a abertura que tem de ir ao servidor pelo controle
+    /// (`ClientMessage::TelaPorMidia`) antes do primeiro quadro.
+    ///
+    /// Não abre canal nenhum. O teto vale igual: o balde decide o que sai, e
+    /// o RTP cuida do resto (o ritmo dos pacotes, a retransmissão). Um
+    /// quadro-chave sai inteiro de uma vez — quem o espalha é o ritmo de
+    /// saída do RTP, e não quatro escritas.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeTela::Cabecalho`] se o cabeçalho não passa em
+    /// `ScreenHeader::check`.
+    pub fn abrir_por_midia(
+        remetente: crate::transporte::RemetenteDeMidia,
+        cabecalho: ScreenHeader,
+        teto_bps: u32,
+        agora: Instant,
+    ) -> Result<(Self, [u8; SCREEN_HEADER_LEN]), ErroDeTela> {
+        let mut abertura = [0_u8; SCREEN_HEADER_LEN];
+        cabecalho.encode(&mut abertura)?;
+        let transmissao = Self {
+            som_pendente: std::collections::VecDeque::new(),
+            fluxo: None,
+            midia: Some((remetente, agora)),
+            cabecalho,
+            balde: Balde::novo(teto_bps, agora),
+            em_voo: None,
+            enviados: 0,
+            descartados: 0,
+            bytes_enviados: 0,
+        };
+        Ok((transmissao, abertura))
+    }
+
+    /// Um quadro ou um pacote de som pela mídia. O relógio é o tempo desde a
+    /// abertura, na frequência da trilha.
+    fn mandar_pela_midia(
+        &self,
+        trilha: crate::transporte::Trilha,
+        bytes: &[u8],
+        agora: Instant,
+    ) -> Result<Envio, ErroDeTela> {
+        let Some((remetente, comeco)) = &self.midia else {
+            return Err(ErroDeTela::Fluxo("a transmissão não é por mídia".into()));
+        };
+        let micros =
+            u64::try_from(agora.saturating_duration_since(*comeco).as_micros()).unwrap_or(u64::MAX);
+        let por_milissegundo = match trilha {
+            crate::transporte::Trilha::Video => 90,
+            crate::transporte::Trilha::Som => 48,
+        };
+        let tempo = micros.saturating_mul(por_milissegundo) / 1000;
+        match remetente.mandar(FAIXA_DE_SAIDA, trilha, tempo, bytes.into()) {
+            Ok(()) => Ok(Envio::Enviado),
+            Err(crate::transporte::Recusa::Cheia) => {
+                Ok(Envio::Descartado(MotivoDeDescarte::MidiaCheia))
+            }
+            Err(crate::transporte::Recusa::Grande) => {
+                Ok(Envio::Descartado(MotivoDeDescarte::GrandeDemais))
+            }
+            Err(crate::transporte::Recusa::Fechada) => {
+                Err(ErroDeTela::Fluxo("a conexão acabou".into()))
+            }
+        }
     }
 
     /// O cabeçalho com que esta transmissão abriu.
@@ -1190,6 +1267,11 @@ impl Transmissao {
         }
         if bytes.len() > MAX_QUADRO_LEN {
             return Ok(Envio::Descartado(MotivoDeDescarte::GrandeDemais));
+        }
+        if self.midia.is_some() {
+            // Pela mídia o som tem a trilha dele: não há quadro-chave no meio
+            // do caminho para esperar.
+            return self.mandar_pela_midia(crate::transporte::Trilha::Som, bytes, Instant::now());
         }
 
         while self.som_pendente.len() >= TETO_DA_FILA {
@@ -1302,6 +1384,16 @@ impl Transmissao {
             self.descartados += 1;
             return Ok(Envio::Descartado(MotivoDeDescarte::AcimaDoTeto));
         }
+        if self.midia.is_some() {
+            let envio = self.mandar_pela_midia(crate::transporte::Trilha::Video, bytes, agora)?;
+            if matches!(envio, Envio::Enviado) {
+                self.enviados += 1;
+                self.bytes_enviados += total as u64;
+            } else {
+                self.descartados += 1;
+            }
+            return Ok(envio);
+        }
 
         // `u32` cabe: `MAX_QUADRO_LEN` é 4 MiB e já foi conferido acima.
         let tamanho = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
@@ -1355,7 +1447,11 @@ impl Transmissao {
     }
 
     async fn escrever(&mut self, bytes: &[u8]) -> Result<(), ErroDeTela> {
-        self.fluxo
+        let Some(fluxo) = self.fluxo.as_mut() else {
+            // Uma transmissão por mídia nunca chega aqui: ela não tem canal.
+            return Err(ErroDeTela::Fluxo("a transmissão não tem canal".into()));
+        };
+        fluxo
             .write_all(bytes)
             .await
             .map_err(|erro| ErroDeTela::Fluxo(erro.to_string()))
@@ -1374,14 +1470,101 @@ impl Transmissao {
     /// uma delas — esta — também acontece quando a máquina simplesmente some, e
     /// o §3.6 quer que a sala consiga distinguir «ela parou de compartilhar» de
     /// «o enlace dela caiu».
+    ///
+    /// Numa transmissão por mídia não há fluxo para fechar: quem diz que
+    /// acabou é o controle, sempre.
     pub fn encerrar(mut self) {
-        let _ = self.fluxo.finish();
+        if let Some(fluxo) = self.fluxo.as_mut() {
+            let _ = fluxo.finish();
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
 // O lado de quem assiste
 // ---------------------------------------------------------------------------
+
+/// A faixa da mídia por onde a transmissão desta pessoa sobe, e por onde
+/// desce a que ela assiste. O servidor usa a mesma (`seele-server/src/midia.rs`).
+pub const FAIXA_DE_SAIDA: u8 = 0;
+
+/// Uma transmissão alheia que desce **pela mídia RTP** (ADR 0067): a abertura
+/// veio pelo controle (`ServerMessage::TelaPorMidia`), e os quadros chegam
+/// por uma fila que quem lê a mídia da conexão enche.
+///
+/// O fim é a fila fechar: quem a enche a larga quando o servidor diz que a
+/// cópia acabou, quando outra transmissão toma a faixa, ou quando a conexão
+/// cai.
+#[derive(Debug)]
+pub struct RecepcaoPorMidia {
+    cabecalho: ScreenHeader,
+    abertura: [u8; SCREEN_HEADER_LEN],
+    quadros: tokio::sync::mpsc::UnboundedReceiver<QuadroRecebido>,
+}
+
+impl RecepcaoPorMidia {
+    /// Lê a abertura e devolve a recepção e o lado que a enche.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeTela::Cabecalho`] para uma abertura que esta versão não lê.
+    pub fn nova(
+        abertura: [u8; SCREEN_HEADER_LEN],
+    ) -> Result<(Self, tokio::sync::mpsc::UnboundedSender<QuadroRecebido>), ErroDeTela> {
+        let (cabecalho, _) = ScreenHeader::decode(&abertura)?;
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        Ok((
+            Self {
+                cabecalho,
+                abertura,
+                quadros: rx,
+            },
+            tx,
+        ))
+    }
+}
+
+/// De onde uma transmissão alheia é lida: do canal `u`, ou da mídia RTP.
+#[derive(Debug)]
+pub enum LeituraDeTela {
+    /// Do canal, como sempre.
+    Canal(Recepcao),
+    /// Da mídia da conexão.
+    Midia(RecepcaoPorMidia),
+}
+
+impl LeituraDeTela {
+    /// O cabeçalho com que a transmissão abriu.
+    #[must_use]
+    pub const fn cabecalho(&self) -> &ScreenHeader {
+        match self {
+            Self::Canal(recepcao) => recepcao.cabecalho(),
+            Self::Midia(recepcao) => &recepcao.cabecalho,
+        }
+    }
+
+    /// Os onze bytes da abertura, como vieram.
+    #[must_use]
+    pub fn abertura(&self) -> &[u8] {
+        match self {
+            Self::Canal(recepcao) => recepcao.abertura(),
+            Self::Midia(recepcao) => &recepcao.abertura,
+        }
+    }
+
+    /// O próximo quadro. `Ok(None)` é o fim.
+    ///
+    /// # Errors
+    ///
+    /// O que [`Recepcao::proximo_quadro`] devolve; a mídia não tem erro de
+    /// leitura (um quadro que se perdeu não chega aqui).
+    pub async fn proximo_quadro(&mut self) -> Result<Option<QuadroRecebido>, ErroDeTela> {
+        match self {
+            Self::Canal(recepcao) => recepcao.proximo_quadro().await,
+            Self::Midia(recepcao) => Ok(recepcao.quadros.recv().await),
+        }
+    }
+}
 
 /// Um quadro codificado que chegou inteiro.
 #[derive(Debug, Clone, PartialEq, Eq)]

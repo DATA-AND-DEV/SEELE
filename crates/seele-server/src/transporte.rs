@@ -21,6 +21,7 @@
 //! - a [`Leitura`] da conexão não tem perdas nem eventos de congestionamento: o
 //!   SCTP do `str0m` não os expõe (ver `crate::tela::LeituraDaConexao`).
 
+pub use seele_enlace::{annex_b_valido, EventoDeMidia, Midia, Recusa, RemetenteDeMidia, Trilha};
 /// O que um teste de ponta a ponta (a conformidade) precisa do enlace sem
 /// depender dele: o `U` de quem liga, o prazo do aperto e o teto do furo.
 pub use seele_enlace::{sortear_credencial, APERTO, INDICACOES_POR_CANDIDATO};
@@ -28,4 +29,3 @@ pub use seele_enlace::{
     CertificadoDtls, Conexao, ConfigDoAnfitriao, Discagem, Envio, FalhaAoDiscar, FalhaDoCanal,
     Leitura, Motivo, Pino, Ponta, Recebe,
 };
-pub use seele_enlace::{EventoDeMidia, Midia, Recusa, RemetenteDeMidia, Trilha};

@@ -118,7 +118,11 @@ async fn quem_compartilha(endereco: SocketAddr) -> Result<(par_cru::Par, u32)> {
             } else {
                 seele_core::tela::TipoDeQuadro::Comum
             };
-            let corpo = seq.to_be_bytes().repeat(16);
+            // Com forma de H.264 em Annex B (o prefixo, a NAL de fatia IDR ou
+            // comum, e um corpo sem prefixo dentro): é o que o produto manda,
+            // e o caminho por RTP empacota H.264 de verdade (ADR 0067).
+            let mut corpo = vec![0, 0, 0, 1, if seq.is_multiple_of(3) { 0x65 } else { 0x41 }];
+            corpo.extend_from_slice(format!("{seq:064}").as_bytes());
             let mut quadro = vec![tipo.byte()];
             quadro.extend_from_slice(&u32::try_from(corpo.len()).unwrap().to_be_bytes());
             quadro.extend_from_slice(&corpo);

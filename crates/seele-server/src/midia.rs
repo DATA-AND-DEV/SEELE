@@ -296,6 +296,7 @@ impl SaidaPorMidia {
         }
         let comeco = Instant::now();
         let mut espera_chave = false;
+        let mut malformado_dito = false;
         let mut limpo = false;
         'fluxo: while let Some(pedaco) = convite.pedacos.recv().await {
             let bytes = match pedaco {
@@ -316,6 +317,23 @@ impl SaidaPorMidia {
                 let (trilha, tempo) = match tipo {
                     TipoDeQuadro::Som => (Trilha::Som, micros.saturating_mul(48) / 1000),
                     TipoDeQuadro::Chave | TipoDeQuadro::Comum => {
+                        if !crate::transporte::annex_b_valido(&bytes) {
+                            // **O que quem transmite mandou não é H.264 em
+                            // Annex B.** No canal isso passava como bytes e
+                            // morria no decodificador de quem assiste; na
+                            // mídia o empacotador o recusa. O quadro é largado
+                            // aqui, e os comuns param até uma chave que sirva.
+                            if !malformado_dito {
+                                malformado_dito = true;
+                                tracing::warn!(
+                                    person = %self.person,
+                                    %screen,
+                                    "um quadro de tela que não é Annex B não foi à mídia do espectador"
+                                );
+                            }
+                            espera_chave = true;
+                            continue;
+                        }
                         if espera_chave && tipo != TipoDeQuadro::Chave {
                             continue;
                         }

@@ -246,24 +246,34 @@ async fn cliente(endereco: SocketAddr, semente: u8, apelido: &str) -> Result<Enl
 /// número da sequência dentro dele, quem assiste pode dizer **qual**, e o teste
 /// pode exigir um que só existiu depois de o cano do servidor ter sido
 /// desligado.
+///
+/// **Com forma de H.264 em Annex B** (o prefixo de início, a NAL de fatia IDR
+/// ou comum, e um corpo sem zeros, que não forma prefixo): é o que o produto
+/// manda, e o caminho por RTP empacota H.264 de verdade (ADR 0067).
 fn corpo(seq: u32) -> Vec<u8> {
-    let mut bytes = vec![0_u8; 256];
-    if let Some(cabeca) = bytes.get_mut(..4) {
-        cabeca.copy_from_slice(&seq.to_be_bytes());
-    }
-    for (i, byte) in bytes.iter_mut().enumerate().skip(4) {
+    let chave = seq.is_multiple_of(A_CADA_QUANTOS_UMA_CHAVE);
+    let mut bytes = vec![0, 0, 0, 1, if chave { 0x65 } else { 0x41 }];
+    bytes.extend_from_slice(format!("{seq:08x}").as_bytes());
+    for i in bytes.len()..256 {
         // `as` truncando de propósito: o que importa é o padrão depender de
-        // `seq`, não o valor em si.
-        *byte = (seq as u8).wrapping_add(i as u8);
+        // `seq`, não o valor em si. O bit alto afasta o zero.
+        bytes.push((seq as u8).wrapping_add(i as u8) | 0x80);
     }
     bytes
 }
 
+/// Um quadro sem o prefixo de início. Quem desempacota do RTP devolve o
+/// prefixo com três ou com quatro bytes, e o corpo é o mesmo.
+fn sem_prefixo(bytes: &[u8]) -> Option<&[u8]> {
+    let inicio = bytes.windows(3).position(|janela| janela == [0, 0, 1])?;
+    bytes.get(inicio + 3..)
+}
+
 /// De que quadro este corpo é, se é de algum.
 fn seq_de(bytes: &[u8]) -> Option<u32> {
-    let cabeca: [u8; 4] = bytes.get(..4)?.try_into().ok()?;
-    let seq = u32::from_be_bytes(cabeca);
-    (bytes == corpo(seq)).then_some(seq)
+    let nal = sem_prefixo(bytes)?;
+    let seq = u32::from_str_radix(std::str::from_utf8(nal.get(1..9)?).ok()?, 16).ok()?;
+    (Some(nal) == sem_prefixo(&corpo(seq))).then_some(seq)
 }
 
 /// Os bytes de um quadro no fio: tipo, tamanho, corpo.

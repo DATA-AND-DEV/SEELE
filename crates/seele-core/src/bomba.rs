@@ -1064,6 +1064,20 @@ pub struct Contagem {
 #[derive(Clone)]
 pub struct Escoadouro {
     conexao: crate::transporte::Conexao,
+    /// Com isto, a transmissão sobe pela mídia RTP da conexão (ADR 0067) em
+    /// vez de pelo canal `u`.
+    midia: Option<SaidaDeMidia>,
+}
+
+/// Por onde uma transmissão sobe pela mídia RTP: o remetente, e por onde a
+/// abertura de cada geração chega ao motor do enlace, que é quem a escreve no
+/// controle (`ClientMessage::TelaPorMidia`).
+#[derive(Clone, Debug)]
+pub struct SaidaDeMidia {
+    /// O remetente da mídia da conexão.
+    pub remetente: crate::transporte::RemetenteDeMidia,
+    /// A fila do que a mídia diz ao motor.
+    pub avisos: tokio::sync::mpsc::UnboundedSender<crate::client::DaMidia>,
 }
 
 impl std::fmt::Debug for Escoadouro {
@@ -1078,7 +1092,17 @@ impl Escoadouro {
     /// Um escoadouro sobre esta conexão.
     #[must_use]
     pub const fn nova(conexao: crate::transporte::Conexao) -> Self {
-        Self { conexao }
+        Self {
+            conexao,
+            midia: None,
+        }
+    }
+
+    /// O mesmo escoadouro, com a transmissão subindo pela mídia RTP.
+    #[must_use]
+    pub fn pela_midia(mut self, midia: SaidaDeMidia) -> Self {
+        self.midia = Some(midia);
+        self
     }
 
     /// O mesmo que [`escoar`], sobre a conexão que este punho segura.
@@ -1092,7 +1116,16 @@ impl Escoadouro {
         fonte: ScreenSource,
         eventos: &mut canal::Receiver<EventoDaBomba>,
     ) -> Result<Contagem, ErroDeTela> {
-        escoar(&self.conexao, tela, fonte, eventos).await
+        escoar_com_espelho(
+            &self.conexao,
+            self.midia.as_ref(),
+            tela,
+            fonte,
+            eventos,
+            |_| {},
+            None,
+        )
+        .await
     }
 
     /// O mesmo, com um espelho que vê o que está saindo.
@@ -1110,6 +1143,7 @@ impl Escoadouro {
     ) -> Result<Contagem, ErroDeTela> {
         escoar_com_espelho(
             &self.conexao,
+            self.midia.as_ref(),
             tela,
             fonte,
             eventos,
@@ -1170,7 +1204,7 @@ pub async fn escoar(
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
 ) -> Result<Contagem, ErroDeTela> {
-    escoar_com_espelho(conexao, tela, fonte, eventos, |_| {}, None).await
+    escoar_com_espelho(conexao, None, tela, fonte, eventos, |_| {}, None).await
 }
 
 /// [`escoar`], com alguém olhando o que passa. Ver [`EspelhoDaTela`].
@@ -1184,6 +1218,7 @@ pub async fn escoar(
 /// As mesmas de [`escoar`].
 pub async fn escoar_com_espelho(
     conexao: &crate::transporte::Conexao,
+    midia: Option<&SaidaDeMidia>,
     tela: ScreenId,
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
@@ -1223,8 +1258,26 @@ pub async fn escoar_com_espelho(
                     width: u16::try_from(medidas.0).unwrap_or(u16::MAX),
                     height: u16::try_from(medidas.1).unwrap_or(u16::MAX),
                 };
-                transmissao =
-                    Some(Transmissao::abrir(conexao, cabecalho, teto_bps, Instant::now()).await?);
+                transmissao = Some(match midia {
+                    Some(saida) => {
+                        let (nova, abertura) = Transmissao::abrir_por_midia(
+                            saida.remetente.clone(),
+                            cabecalho,
+                            teto_bps,
+                            Instant::now(),
+                        )?;
+                        // A abertura vai pelo controle, e quem escreve nele é
+                        // o motor. Sem motor para ouvir, a transmissão acabou.
+                        saida
+                            .avisos
+                            .send(crate::client::DaMidia::Abertura(abertura))
+                            .map_err(|_| ErroDeTela::Fluxo("o enlace acabou".into()))?;
+                        nova
+                    }
+                    None => {
+                        Transmissao::abrir(conexao, cabecalho, teto_bps, Instant::now()).await?
+                    }
+                });
                 geracao = nova;
                 chave_pendente = None;
                 precisa_chave = false;
@@ -2131,6 +2184,7 @@ pub(crate) mod tests {
             let escoando = tokio::spawn(async move {
                 escoar_com_espelho(
                     &saida,
+                    None,
                     ScreenId(1),
                     ScreenSource::Monitor,
                     &mut eventos,
@@ -2230,6 +2284,7 @@ pub(crate) mod tests {
         let mut vistos = Vec::new();
         let contagem = escoar_com_espelho(
             &saida,
+            None,
             ScreenId(43),
             ScreenSource::Monitor,
             &mut eventos,
@@ -2285,6 +2340,7 @@ pub(crate) mod tests {
         let escoando = tokio::spawn(async move {
             escoar_com_espelho(
                 &saida,
+                None,
                 ScreenId(42),
                 ScreenSource::Monitor,
                 &mut eventos,
