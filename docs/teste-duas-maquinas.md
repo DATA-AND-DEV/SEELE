@@ -527,3 +527,53 @@ transmissões no ar. O que se anota lá é o que a suíte local não alcança:
 apresentado como medido.** A suíte local prova que o mecanismo funciona; ela
 não prova que ele alivia. As duas frases são diferentes, e escrever a segunda
 com a evidência da primeira é o erro que este documento existe para impedir.
+
+---
+
+## A conferência automática entre duas máquinas (11/11/2026)
+
+O roteiro acima é o de gente, com microfone e ouvido, e continua sendo o único
+que diz como a chamada **soa**. Para o que dá para conferir sem gente — o vídeo
+por RTP e a voz do produto atravessando uma rede de verdade entre dois sistemas
+— há o exemplo `tela_entre_maquinas` (`crates/seele-conformance/examples/`):
+
+```sh
+# na máquina do servidor (a porta é UDP)
+mkdir -p /tmp/seele-teste && cd /tmp/seele-teste && \
+  SEELE_DB=/tmp/seele-teste/seele.db <repo>/target/release/seeled 0.0.0.0:8383
+
+# numa máquina, quem transmite; na outra, quem assiste
+cargo run --release --config 'profile.release.debug-assertions=true' \
+  -p seele-conformance --example tela_entre_maquinas -- transmite <ip>:8383 --segundos 75
+cargo run --release --config 'profile.release.debug-assertions=true' \
+  -p seele-conformance --example tela_entre_maquinas -- assiste <ip>:8383 --segundos 60
+```
+
+O vídeo entra pela porta da câmera com um codificador de mentira, e a voz é o
+tom do aparelho de mentira: é o transporte, o servidor e o controle de taxa do
+produto, e não a captura, o codec nem o som de verdade. O log do `seeled` diz
+`a mídia RTP desta sessão foi ligada` uma vez por pessoa; a FFI ainda não
+expõe por onde o vídeo foi, e a linha `transporte_esperado` é a regra refeita.
+
+### O que deu, commit `b8d83422`
+
+Um Mac (macOS 27.2, Apple Silicon) e um PC (Windows, x64) na mesma rede por
+cabo, o `seeled` no Mac, 60 s assistidos em cada sentido:
+
+| quem transmite | orçamento | kbps recebidos | congelado nos 10 s iniciais / depois | maior intervalo | voz do outro tocada |
+|---|--:|--:|--:|--:|--:|
+| Windows → Mac assiste | 2790 kbps | 2341 | 0,0% / 0,0% | 116 ms | 99,9% |
+| Mac → Windows assiste | 2790 kbps | 2117 | 0,0% / 0,0% | 46 ms | 99,8% |
+
+Nenhuma pausa, um pedido de quadro-chave por rodada (o do começo), a mídia RTP
+ligada nas quatro sessões.
+
+**O que esta conferência achou antes de dar isso**: no Windows o vídeo rodava a
+um terço da taxa (orçamento de 640 a 1723 kbps, numa rede local e até com tudo
+na mesma máquina). O laço do transporte acordava no tique de 15,6 ms do relógio
+do sistema, os pacotes saíam em rajadas e a estimativa lia fila no caminho. O
+conserto é o `despertador` do `seele-enlace` (`390da789`).
+
+**O que ela não cobre**: o aplicativo de verdade (janela, captura, codificador
+H.264, microfone), o navegador, uma rede com perda ou Wi-Fi, e mais de um
+espectador.
