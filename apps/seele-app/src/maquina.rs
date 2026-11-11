@@ -4297,7 +4297,9 @@ mod testes {
     /// **O guarda do de cima**: no macOS, o executável que um teste roda como
     /// filho não divide o arquivo com o de nenhum outro teste (nem com este
     /// binário). Com um hard link, o arquivo teria mais de um nome.
-    #[cfg(target_os = "macos")]
+    // `unix` escrito por extenso: o guarda de plataforma do xtask procura a
+    // palavra antes de todo `std::os::unix`.
+    #[cfg(all(unix, target_os = "macos"))]
     #[test]
     fn o_filho_de_cada_teste_e_um_arquivo_so_dele() {
         use std::os::unix::fs::MetadataExt as _;
