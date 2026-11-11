@@ -132,6 +132,112 @@ pub struct SyncInputs {
     pub loss_fraction: f32,
 }
 
+/// De quanto em quanto tempo um cliente relata a própria recepção
+/// ([`Recepcao`]), em milissegundos.
+///
+/// O compasso do anúncio de sinal do servidor (um por segundo): relatar mais
+/// depressa não muda nada, porque a conta do sinal só lê o último relato a
+/// cada anúncio.
+pub const INTERVALO_DO_RELATO_MS: u64 = 1_000;
+
+/// Por quanto tempo um relato de recepção ainda vale como medida, em
+/// milissegundos.
+///
+/// O relato descreve uma janela deste tamanho (a mesma dos cinco segundos da
+/// perda de subida da voz), e sai a cada [`INTERVALO_DO_RELATO_MS`] **enquanto
+/// há o que medir**: quem para de ouvir voz para de relatar. Passado este
+/// tempo sem relato novo, a parcela deixa de entrar na conta — um cliente que
+/// se calou não fica com a última medida para sempre.
+pub const VALIDADE_DO_RELATO_MS: u64 = 5_000;
+
+/// O maior jitter que um relato de recepção pode trazer, em milissegundos.
+///
+/// A penalidade satura em [`JITTER_FULL_MS`]; o teto aqui é de forma, e não de
+/// conta. O jitter de chegada da RFC 3550 é uma média de diferenças entre
+/// pacotes de um caminho vivo, e o enlace desiste de um caminho calado por
+/// vinte segundos: um número acima de dez segundos não saiu de uma medida.
+pub const JITTER_MAXIMO_DO_RELATO_MS: f32 = 10_000.0;
+
+/// **O que um cliente mede da própria recepção** (protocolo 13), e relata ao
+/// servidor em `ClientMessage::RelatoDeRecepcao`.
+///
+/// # Por que existe
+///
+/// O servidor compõe o sinal de cada pessoa com o que ele mesmo mede do
+/// caminho dela: a ida e volta do ICE e a perda do que ela manda. De quem
+/// está calado e sem vídeo ele não mede perda nenhuma, e jitter ele não mede
+/// de ninguém — as duas grandezas só existem no receptor. Isto é o receptor
+/// dizendo o que viu.
+///
+/// # O que os números são
+///
+/// Os dois vêm do buffer de jitter da voz que este cliente **ouve**, sobre uma
+/// janela de [`VALIDADE_DO_RELATO_MS`]. `None` é «não medido» — ninguém falou
+/// o bastante na janela —, e nunca zero. Um relato com os dois vazios não tem
+/// o que dizer e não é mandado.
+///
+/// # De quem é o número
+///
+/// É **do próprio cliente sobre si**: o servidor só o põe na conta do sinal de
+/// quem relatou. Um cliente que minta consegue piorar ou melhorar o próprio
+/// indicador, e o de mais ninguém. Não é fronteira de segurança, é a
+/// honestidade do indicador — e o servidor confere a forma ([`Self::confere`])
+/// antes de usar.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Recepcao {
+    /// Da voz que devia ter tocado na janela, a fração que faltou: de 0.0 a
+    /// 1.0. A pior entre as pessoas ouvidas.
+    pub perda: Option<f32>,
+    /// O jitter de chegada da voz (RFC 3550), em milissegundos: de 0.0 a
+    /// [`JITTER_MAXIMO_DO_RELATO_MS`]. O menor entre as pessoas ouvidas, que é
+    /// o que mais se aproxima do caminho de quem relata.
+    pub jitter_ms: Option<f32>,
+}
+
+/// Por que um [`Recepcao`] não entra na conta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecepcaoRecusada {
+    /// Nenhum dos dois números veio: não há o que relatar.
+    Vazia,
+    /// A perda não é um número de 0.0 a 1.0.
+    Perda,
+    /// O jitter não é um número de 0.0 a [`JITTER_MAXIMO_DO_RELATO_MS`].
+    Jitter,
+}
+
+impl Recepcao {
+    /// Confere a forma do relato: os dois lados usam esta mesma regra — o
+    /// cliente para não mandar o que seria recusado, o servidor para não pôr
+    /// na conta um número que não é medida.
+    ///
+    /// Recusa em vez de aparar: um `NaN`, uma perda de 7.0 ou um jitter
+    /// negativo não são uma medida ruim, são um defeito de quem mandou, e
+    /// apará-los os transformaria num número com aparência de medida.
+    ///
+    /// # Errors
+    ///
+    /// [`RecepcaoRecusada`], que nomeia o campo.
+    pub fn confere(&self) -> Result<(), RecepcaoRecusada> {
+        if self.perda.is_none() && self.jitter_ms.is_none() {
+            return Err(RecepcaoRecusada::Vazia);
+        }
+        // As comparações dão `false` para `NaN`, que por isso cai na recusa.
+        if self
+            .perda
+            .is_some_and(|perda| !(0.0..=1.0).contains(&perda))
+        {
+            return Err(RecepcaoRecusada::Perda);
+        }
+        if self
+            .jitter_ms
+            .is_some_and(|jitter| !(0.0..=JITTER_MAXIMO_DO_RELATO_MS).contains(&jitter))
+        {
+            return Err(RecepcaoRecusada::Jitter);
+        }
+        Ok(())
+    }
+}
+
 /// Penalty for round-trip time, 0 to [`RTT_MAX_PENALTY`].
 ///
 /// Zero **below** [`RTT_FREE_MS`], not above — see the module docs on C6.
@@ -238,6 +344,40 @@ impl Signal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A forma do relato de recepção: o que entra na conta e o que não entra.
+    #[test]
+    fn o_relato_de_recepcao_so_passa_com_numeros_que_sao_medida() {
+        let relato = |perda, jitter_ms| Recepcao { perda, jitter_ms };
+        for bom in [
+            relato(Some(0.0), Some(0.0)),
+            relato(Some(1.0), Some(JITTER_MAXIMO_DO_RELATO_MS)),
+            relato(Some(0.1), None),
+            relato(None, Some(12.5)),
+        ] {
+            assert_eq!(bom.confere(), Ok(()), "{bom:?}");
+        }
+        assert_eq!(relato(None, None).confere(), Err(RecepcaoRecusada::Vazia));
+        for perda in [-0.01, 1.01, 7.0, f32::NAN, f32::INFINITY, -f32::INFINITY] {
+            assert_eq!(
+                relato(Some(perda), Some(1.0)).confere(),
+                Err(RecepcaoRecusada::Perda),
+                "perda {perda}"
+            );
+        }
+        for jitter in [
+            -0.1,
+            JITTER_MAXIMO_DO_RELATO_MS + 1.0,
+            f32::NAN,
+            f32::INFINITY,
+        ] {
+            assert_eq!(
+                relato(Some(0.0), Some(jitter)).confere(),
+                Err(RecepcaoRecusada::Jitter),
+                "jitter {jitter}"
+            );
+        }
+    }
 
     fn inputs(rtt: f32, jitter: f32, loss: f32) -> SyncInputs {
         SyncInputs {

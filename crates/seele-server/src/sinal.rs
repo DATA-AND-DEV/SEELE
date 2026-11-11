@@ -31,22 +31,52 @@
 //!     recebe vídeo;
 //!   - a de entrada do RTP (o que ela mandou e não chegou) — só enquanto ela
 //!     transmite vídeo;
-//!   - a de subida da voz ([`crate::perda_de_subida`]) — só enquanto ela fala.
-//! - Jitter: medido no receptor; o servidor não tem, e não inventa.
+//!   - a de subida da voz ([`crate::perda_de_subida`]) — só enquanto ela fala;
+//!   - a que **ela mesma relata** da voz que ouve
+//!     ([`seele_proto::signal::Recepcao`], protocolo 13) — enquanto alguém
+//!     fala para ela.
+//! - Jitter: medido no receptor; o servidor não tem, e não inventa. O que
+//!   entra é o do relato dela, na parcela que o [`seele_proto::signal`] já
+//!   previa para ele.
 //!
-//! # O que este número **não** sabe, dito aqui para ninguém supor o contrário
+//! # O relato de recepção, e o buraco que ele fecha
 //!
 //! Quem está calado e sem vídeo nenhum não tem perda medida por este servidor:
 //! não há tráfego de mídia dele para contar, e o SCTP do str0m não expõe
-//! retransmissão. O sinal dessa pessoa reflete o atraso do caminho e nada diz
-//! da perda — a perda do que ela **ouve** é medida no cliente dela, e não
-//! atravessa o fio. Fechar isso pede uma mensagem nova de protocolo (o cliente
-//! relatando a própria recepção), que não foi feita aqui.
+//! retransmissão. Até o protocolo 13 o sinal dessa pessoa refletia o atraso do
+//! caminho e nada dizia da perda — a perda do que ela **ouve** é medida no
+//! cliente dela, e não atravessava o fio.
+//!
+//! Agora atravessa: o cliente relata a cada segundo a perda e o jitter da voz
+//! que chega a ele (`ClientMessage::RelatoDeRecepcao`), e
+//! [`SinalDaSessao::relatou`] guarda o último. Três regras:
+//!
+//! - **A forma é conferida aqui** ([`seele_proto::signal::Recepcao::confere`]):
+//!   um número que não é medida (`NaN`, perda fora de 0..=1, jitter negativo
+//!   ou acima do teto) não entra, e o relato anterior continua valendo até
+//!   envelhecer. A sessão não cai por isso.
+//! - **O relato envelhece** ([`VALIDADE_DO_RELATO`]): o cliente só relata
+//!   enquanto ouve voz, e um relato que parou de chegar deixa de ser medida.
+//! - **É do próprio cliente sobre si.** O relato só entra no sinal de quem o
+//!   mandou: um cliente que minta piora ou melhora o próprio indicador, e o de
+//!   mais ninguém. Não é fronteira de segurança, é a honestidade do indicador.
+//!
+//! A frequência não é contada aqui: todo quadro de controle passa pelo
+//! [`crate::taxa::Vigia`] antes de chegar a um tratador, e guardar um relato é
+//! uma atribuição — mil por segundo custam o que o limitador deixa passar, e
+//! só o último é lido, uma vez por anúncio.
+//!
+//! # O que este número **não** sabe, dito aqui para ninguém supor o contrário
+//!
+//! - Um cliente do protocolo 12 não relata: o sinal de quem está calado e sem
+//!   vídeo, nele, continua refletindo só o atraso.
+//! - Numa sala em que ninguém fala não há voz chegando a ninguém, e portanto
+//!   não há perda de recepção a medir: o relato cessa, e a parcela sai.
 
 use std::time::{Duration, Instant};
 
 use seele_enlace::Leitura;
-use seele_proto::signal::{Signal, SyncInputs};
+use seele_proto::signal::{Recepcao, RecepcaoRecusada, Signal, SyncInputs};
 
 /// Por quanto tempo o último relato de perda da voz ainda vale como medida.
 ///
@@ -56,6 +86,14 @@ use seele_proto::signal::{Signal, SyncInputs};
 /// o sinal piscaria a cada pausa entre duas frases; mais longo e ele afirmaria
 /// uma perda que ninguém mais está medindo.
 pub const VALIDADE_DA_PERDA_DA_VOZ: Duration = crate::perda_de_subida::JANELA;
+
+/// Por quanto tempo o último relato de recepção ainda vale como medida.
+///
+/// O número é do protocolo ([`seele_proto::signal::VALIDADE_DO_RELATO_MS`]),
+/// porque os dois lados contam com ele: o cliente relata a cada segundo uma
+/// janela deste tamanho, e para de relatar quando não há voz chegando.
+pub const VALIDADE_DO_RELATO: Duration =
+    Duration::from_millis(seele_proto::signal::VALIDADE_DO_RELATO_MS);
 
 /// O que se mediu do caminho de uma pessoa neste instante. `None` é «não
 /// medido», e nunca zero.
@@ -69,12 +107,17 @@ pub struct Medidas {
     pub perda_na_entrada: Option<f32>,
     /// Da voz que ela mandou, a fração que se perdeu.
     pub perda_da_voz: Option<f32>,
+    /// Da voz que ela **ouve**, a fração que faltou. Relatada por ela.
+    pub perda_relatada: Option<f32>,
+    /// O jitter de chegada da voz que ela ouve, em milissegundos. Relatado
+    /// por ela: é a única fonte de jitter que este servidor tem.
+    pub jitter_relatado_ms: Option<f32>,
 }
 
 impl Medidas {
     /// A maior perda medida, ou `None` se nenhuma fonte mediu.
     ///
-    /// A maior e não a média: as três olham o mesmo caminho por tráfegos
+    /// A maior e não a média: todas olham o mesmo caminho por tráfegos
     /// diferentes, e a que viu mais perda é a que a pessoa está sentindo.
     #[must_use]
     pub fn perda(&self) -> Option<f32> {
@@ -82,6 +125,7 @@ impl Medidas {
             self.perda_na_saida,
             self.perda_na_entrada,
             self.perda_da_voz,
+            self.perda_relatada,
         ]
         .into_iter()
         .flatten()
@@ -95,15 +139,18 @@ impl Medidas {
     pub fn entradas(&self) -> Option<SyncInputs> {
         let rtt_ms = self.ida_e_volta.map(|volta| volta.as_secs_f32() * 1000.0);
         let perda = self.perda();
-        if rtt_ms.is_none() && perda.is_none() {
+        let jitter_ms = self
+            .jitter_relatado_ms
+            .filter(|jitter| jitter.is_finite() && *jitter >= 0.0);
+        if rtt_ms.is_none() && perda.is_none() && jitter_ms.is_none() {
             return None;
         }
         Some(SyncInputs {
             // A parcela sem medida não penaliza. Não é afirmar zero: é não
             // descontar pontos por algo que ninguém viu.
             rtt_ms: rtt_ms.unwrap_or(0.0),
-            // Medido no receptor; o servidor não tem.
-            jitter_ms: 0.0,
+            // Medido no receptor: só existe se o cliente relatou.
+            jitter_ms: jitter_ms.unwrap_or(0.0),
             loss_fraction: perda.unwrap_or(0.0),
         })
     }
@@ -114,6 +161,8 @@ impl Medidas {
 pub struct SinalDaSessao {
     sync: Signal,
     perda_da_voz: Option<(f32, Instant)>,
+    /// O último relato de recepção que passou na conferência, e quando.
+    relato: Option<(Recepcao, Instant)>,
 }
 
 impl Default for SinalDaSessao {
@@ -129,6 +178,7 @@ impl SinalDaSessao {
         Self {
             sync: Signal::new(),
             perda_da_voz: None,
+            relato: None,
         }
     }
 
@@ -137,11 +187,36 @@ impl SinalDaSessao {
         self.perda_da_voz = Some((fracao, agora));
     }
 
+    /// O cliente desta sessão relatou a própria recepção.
+    ///
+    /// Só o que passa em [`Recepcao::confere`] é guardado. Um relato recusado
+    /// não apaga o anterior: ele não é uma medida nova, e o anterior segue
+    /// valendo até envelhecer ([`VALIDADE_DO_RELATO`]).
+    ///
+    /// # Errors
+    ///
+    /// [`RecepcaoRecusada`], para quem chama dizer no registro o que veio.
+    pub fn relatou(&mut self, relato: Recepcao, agora: Instant) -> Result<(), RecepcaoRecusada> {
+        relato.confere()?;
+        self.relato = Some((relato, agora));
+        Ok(())
+    }
+
+    /// O relato de recepção que ainda vale em `agora`.
+    fn relato_valido(&self, agora: Instant) -> Option<Recepcao> {
+        self.relato.and_then(|(relato, quando)| {
+            (agora.saturating_duration_since(quando) <= VALIDADE_DO_RELATO).then_some(relato)
+        })
+    }
+
     /// O que há de medido agora, juntando a leitura do enlace ao último relato
-    /// da voz que ainda vale.
+    /// da voz e ao último relato de recepção que ainda valem.
     #[must_use]
     pub fn medidas(&self, leitura: &Leitura, agora: Instant) -> Medidas {
+        let relato = self.relato_valido(agora);
         Medidas {
+            perda_relatada: relato.and_then(|relato| relato.perda),
+            jitter_relatado_ms: relato.and_then(|relato| relato.jitter_ms),
             ida_e_volta: leitura.ida_e_volta,
             perda_na_saida: leitura.fracao_de_perda_na_saida,
             perda_na_entrada: leitura.fracao_de_perda_na_entrada,
@@ -270,6 +345,167 @@ mod tests {
         let depois = no_limite + Duration::from_millis(1);
         assert_eq!(sinal.medidas(&limpa, depois).perda_da_voz, None);
         assert_eq!(regime(&mut sinal, &limpa, depois), 100);
+    }
+
+    fn relato(perda: Option<f32>, jitter_ms: Option<f32>) -> Recepcao {
+        Recepcao { perda, jitter_ms }
+    }
+
+    /// **O buraco, fechado**: calado e sem vídeo, o enlace só tem a ida e
+    /// volta. Sem relato o sinal fica alto; com 10% de perda relatada ele
+    /// perde os 30 pontos da parcela.
+    #[test]
+    fn a_perda_relatada_move_o_sinal_de_quem_esta_calado() {
+        let agora = Instant::now();
+        let calado = leitura(Some(10), None, None);
+
+        let mut sem_relato = SinalDaSessao::novo();
+        assert_eq!(regime(&mut sem_relato, &calado, agora), 100);
+
+        let mut com_relato = SinalDaSessao::novo();
+        assert_eq!(com_relato.relatou(relato(Some(0.10), None), agora), Ok(()));
+        assert_eq!(regime(&mut com_relato, &calado, agora), 70);
+    }
+
+    /// A relatada é mais uma entre as perdas, e vale a maior.
+    #[test]
+    fn a_perda_relatada_entra_no_maior_entre_as_perdas() {
+        let agora = Instant::now();
+        let mut sinal = SinalDaSessao::novo();
+        sinal.a_voz_perdeu(0.04, agora);
+        assert_eq!(sinal.relatou(relato(Some(0.02), None), agora), Ok(()));
+        let medidas = sinal.medidas(&leitura(Some(10), Some(0.01), None), agora);
+        assert_eq!(medidas.perda_relatada, Some(0.02));
+        assert_eq!(medidas.perda(), Some(0.04), "a maior é a da voz");
+
+        assert_eq!(sinal.relatou(relato(Some(0.08), None), agora), Ok(()));
+        let medidas = sinal.medidas(&leitura(Some(10), Some(0.01), None), agora);
+        assert_eq!(medidas.perda(), Some(0.08), "a maior é a relatada");
+    }
+
+    /// O jitter entra com a parcela que o `seele_proto::signal` já tinha para
+    /// ele, e com os pesos de lá: nenhum número novo nesta conta.
+    #[test]
+    fn o_jitter_relatado_entra_com_a_parcela_do_protocolo() {
+        use seele_proto::signal::{jitter_penalty, JITTER_FULL_MS, JITTER_MAX_PENALTY};
+
+        let agora = Instant::now();
+        let calado = leitura(Some(10), None, None);
+
+        let mut sinal = SinalDaSessao::novo();
+        assert_eq!(
+            sinal.relatou(relato(None, Some(JITTER_FULL_MS)), agora),
+            Ok(())
+        );
+        let entradas = sinal.medidas(&calado, agora).entradas();
+        assert_eq!(entradas.map(|e| e.jitter_ms), Some(JITTER_FULL_MS));
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let esperado = 100 - JITTER_MAX_PENALTY as u8;
+        assert_eq!(regime(&mut sinal, &calado, agora), esperado);
+
+        // Um valor do meio, contra a função do protocolo.
+        let mut meio = SinalDaSessao::novo();
+        assert_eq!(meio.relatou(relato(None, Some(40.0)), agora), Ok(()));
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let esperado = (100.0 - jitter_penalty(40.0)).round() as u8;
+        assert_eq!(regime(&mut meio, &calado, agora), esperado);
+
+        // Sem relato, a parcela não penaliza e não é afirmada.
+        let sem = SinalDaSessao::novo().medidas(&calado, agora);
+        assert_eq!(sem.jitter_relatado_ms, None);
+        assert_eq!(sem.entradas().map(|e| e.jitter_ms), Some(0.0));
+    }
+
+    /// Só um relato já alimenta a conta: é uma medida como as outras.
+    #[test]
+    fn o_relato_sozinho_ja_e_uma_medida() {
+        let agora = Instant::now();
+        let mut sinal = SinalDaSessao::novo();
+        assert_eq!(sinal.relatou(relato(None, Some(2.0)), agora), Ok(()));
+        sinal.tique(&leitura(None, None, None), agora);
+        assert!(sinal.medido());
+    }
+
+    /// **Fora da faixa não entra, e não apaga o que valia.** A sessão não cai:
+    /// quem chama recebe o motivo e segue.
+    #[test]
+    fn um_relato_fora_da_faixa_e_recusado_e_o_anterior_continua() {
+        let agora = Instant::now();
+        let calado = leitura(Some(10), None, None);
+        let mut sinal = SinalDaSessao::novo();
+        assert_eq!(sinal.relatou(relato(Some(0.10), Some(3.0)), agora), Ok(()));
+
+        for (ruim, motivo) in [
+            (relato(Some(f32::NAN), Some(3.0)), RecepcaoRecusada::Perda),
+            (relato(Some(-0.5), None), RecepcaoRecusada::Perda),
+            (relato(Some(7.0), None), RecepcaoRecusada::Perda),
+            (relato(Some(0.0), Some(-1.0)), RecepcaoRecusada::Jitter),
+            (
+                relato(Some(0.0), Some(f32::INFINITY)),
+                RecepcaoRecusada::Jitter,
+            ),
+            (relato(None, Some(1.0e9)), RecepcaoRecusada::Jitter),
+            (relato(None, None), RecepcaoRecusada::Vazia),
+        ] {
+            assert_eq!(sinal.relatou(ruim, agora), Err(motivo), "{ruim:?}");
+            let medidas = sinal.medidas(&calado, agora);
+            assert_eq!(medidas.perda_relatada, Some(0.10), "depois de {ruim:?}");
+            assert_eq!(medidas.jitter_relatado_ms, Some(3.0), "depois de {ruim:?}");
+        }
+
+        // E um sinal que só recebeu lixo não tem relato nenhum.
+        let mut so_lixo = SinalDaSessao::novo();
+        assert!(so_lixo
+            .relatou(relato(Some(f32::NAN), None), agora)
+            .is_err());
+        assert_eq!(so_lixo.medidas(&calado, agora).perda_relatada, None);
+        assert_eq!(regime(&mut so_lixo, &calado, agora), 100);
+    }
+
+    /// **O relato que cessa deixa de valer.** O cliente só relata enquanto
+    /// ouve voz; passada a validade, a perda relatada não é mais medida e o
+    /// sinal volta ao que o resto diz.
+    #[test]
+    fn o_relato_que_cessa_deixa_de_valer_depois_da_janela() {
+        let inicio = Instant::now();
+        let calado = leitura(Some(10), None, None);
+        let mut sinal = SinalDaSessao::novo();
+        assert_eq!(
+            sinal.relatou(relato(Some(0.10), Some(50.0)), inicio),
+            Ok(())
+        );
+        assert!(regime(&mut sinal, &calado, inicio) < 70);
+
+        let no_limite = inicio + VALIDADE_DO_RELATO;
+        let medidas = sinal.medidas(&calado, no_limite);
+        assert_eq!(medidas.perda_relatada, Some(0.10));
+        assert_eq!(medidas.jitter_relatado_ms, Some(50.0));
+
+        let depois = no_limite + Duration::from_millis(1);
+        let medidas = sinal.medidas(&calado, depois);
+        assert_eq!(medidas.perda_relatada, None);
+        assert_eq!(medidas.jitter_relatado_ms, None);
+        assert_eq!(regime(&mut sinal, &calado, depois), 100);
+
+        // Um relato novo volta a valer, a partir de quando chegou.
+        assert_eq!(sinal.relatou(relato(Some(0.10), None), depois), Ok(()));
+        assert_eq!(regime(&mut sinal, &calado, depois), 70);
+    }
+
+    /// Mil relatos no mesmo instante custam mil atribuições, e a conta lê o
+    /// último, uma vez por anúncio. (Quem limita a chegada é o `Vigia`, antes
+    /// de qualquer tratador: ver `tests/relato_de_recepcao.rs`.)
+    #[test]
+    fn mil_relatos_valem_o_ultimo() {
+        let agora = Instant::now();
+        let calado = leitura(Some(10), None, None);
+        let mut sinal = SinalDaSessao::novo();
+        for _ in 0..1000 {
+            assert_eq!(sinal.relatou(relato(Some(1.0), None), agora), Ok(()));
+        }
+        assert_eq!(sinal.relatou(relato(Some(0.0), None), agora), Ok(()));
+        assert_eq!(sinal.medidas(&calado, agora).perda_relatada, Some(0.0));
+        assert_eq!(sinal.tique(&calado, agora), 100);
     }
 
     #[test]
