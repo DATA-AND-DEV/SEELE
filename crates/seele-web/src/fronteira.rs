@@ -1067,6 +1067,7 @@ fn campos_do_pedido<const N: usize>(bytes: &[u8], nomes: [&str; N]) -> [String; 
 }
 
 /// **O `midia_do_mod`** ([`crate::mods::midia`]): `{"id", "hash", "caminho"}`
+/// e, quando a página o nomeia, `"uso"` (o lugar em que a imagem aparece),
 /// sobre o último pacote entregue. Devolve 0 com o `MidiaDoMod` do desktop
 /// (sem `uri` para o som), ou 1 com `{"Recusado": {"motivo"}}`.
 ///
@@ -1076,9 +1077,12 @@ fn campos_do_pedido<const N: usize>(bytes: &[u8], nomes: [&str; N]) -> [String; 
 #[no_mangle]
 pub unsafe extern "C" fn mod_midia(ptr: *const u8, len: usize) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `entrada`.
-    let [id, hash, caminho] =
-        campos_do_pedido(unsafe { entrada(ptr, len) }, ["id", "hash", "caminho"]);
-    match crate::mods::midia(&mut o_pacote(), &id, &hash, &caminho) {
+    let [id, hash, caminho, uso] = campos_do_pedido(
+        unsafe { entrada(ptr, len) },
+        ["id", "hash", "caminho", "uso"],
+    );
+    let uso = (!uso.is_empty()).then_some(uso.as_str());
+    match crate::mods::midia(&mut o_pacote(), &id, &hash, &caminho, uso) {
         Ok(midia) => dizer(midia.to_string().into_bytes(), 0),
         Err(motivo) => recusa_de_mod(&motivo),
     }

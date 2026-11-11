@@ -732,6 +732,40 @@ function pedidoAoServidor(doServidor) {
  * @returns {Promise<HTMLImageElement>} A imagem decodificada — a do fundo de
  *   tela é pintada com ela mesma.
  */
+/**
+ * O que esta casca pintou no fundo de cada caixa de MOD (`fundoDeMidia`): o
+ * `data:` da imagem, guardado **ao lado** do elemento.
+ *
+ * É a regra de `pintarOFundo` (`tela-sessao.js`), aqui: escrever um `data:` no
+ * estilo faz a janela reler o texto inteiro (37 ms por elemento com 10 MB,
+ * medido em 10/11/2026), e ler o estilo de volta para comparar devolveria o
+ * mesmo texto enorme. A comparação é com esta anotação.
+ */
+const fundosDeMidiaPintados = new WeakMap();
+
+/**
+ * **Põe a imagem de fundo de uma caixa de MOD, e só quando ela mudou.** A
+ * citação `daPessoa` reaplica o fundo a cada troca de imagem da pessoa citada
+ * (`seele-mods-citacao`), e a imagem que volta é quase sempre a mesma.
+ *
+ * @param {HTMLElement} elem A caixa.
+ * @param {string | null} uri O `data:` da imagem, ou `null` para tirá-la.
+ * @returns {boolean} Se o estilo foi escrito.
+ */
+function pintarOFundoDeMidia(elem, uri) {
+  if ((fundosDeMidiaPintados.get(elem) ?? null) === (uri || null)) return false;
+  if (uri) {
+    elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${uri}")`;
+    elem.style.backgroundSize = "cover";
+    elem.style.backgroundPosition = "center";
+    fundosDeMidiaPintados.set(elem, uri);
+  } else {
+    elem.style.backgroundImage = "";
+    fundosDeMidiaPintados.delete(elem);
+  }
+  return true;
+}
+
 function provarImagem(uri) {
   const imagem = new Image();
   imagem.src = uri;
@@ -2031,7 +2065,7 @@ class RegiaoDeMod {
     let cancelado = false, bytes = 0;
     this.guardar(elem, `fundo ${plano.chave}`, () => {
       cancelado = true; this[bolso.conta] -= bytes; this.contagem[bolso.quantas] -= 1;
-      elem.style.backgroundImage = "";
+      pintarOFundoDeMidia(elem, null);
       this.esquecerCitacao(elem);
       this.esquecerMidia(elem);
     });
@@ -2043,8 +2077,11 @@ class RegiaoDeMod {
     const vindo = soImagem(fonte.daPessoa
       ? this.imagemCitada(fonte.daPessoa, pessoaNomeada(fonte))
       : fonte.doServidor
-        ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
-        : this.dono.carregarMidia(fonte.fonte));
+        // **`"fundo"`**: o Rust reduz a imagem ao lugar em que ela aparece
+        // antes de ela atravessar a ponte (`reducao::teto_do_uso`). Ela vai
+        // morar no estilo do elemento, onde o tamanho do `data:` custa.
+        ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes", "fundo")
+        : this.dono.carregarMidia(fonte.fonte, "fundo"));
     // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
     // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
     const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
@@ -2053,9 +2090,8 @@ class RegiaoDeMod {
     const aplicar = (midia) => {
       if (!midia || cancelado || this.solta) return;
       if (!this.dono.podeFalar()) { devolver(); return; }
-      elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
-      elem.style.backgroundSize = "cover";
-      elem.style.backgroundPosition = "center";
+      // Só quando mudou: a citação reaplica a mesma imagem a cada troca.
+      pintarOFundoDeMidia(elem, midia.uri);
       this.anotarMidia(elem, "pronta");
     };
     const recusar = (falha) => {

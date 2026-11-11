@@ -137,22 +137,35 @@ pub fn bytes_declarados(
 /// só com o papel e o tamanho (a janela o lê cru, pelo `som_do_mod`), e só a
 /// imagem ganha o `data:`.
 ///
+/// **A imagem chega reduzida ao lugar em que aparece**, pelo caminho comum
+/// (`seele_sessao::midia_de_mod::reduzir_ao_uso`), como no desktop: ao `uso`
+/// que a página nomeia, ou ao teto geral da mídia de MOD. Ia à página do
+/// tamanho que o pacote a trouxe (a varredura do incidente da capa em 4K).
+///
 /// # Errors
 ///
-/// Os de [`bytes_declarados`], e `formato-desconhecido`.
+/// Os de [`bytes_declarados`], `formato-desconhecido`, e
+/// `imagem-grande-demais-decodificada: …`.
 pub fn midia(
     arquivos: &mut [(String, Vec<u8>)],
     id: &str,
     hash: &str,
     caminho: &str,
+    uso: Option<&str>,
 ) -> Result<Value, String> {
     let bytes = bytes_declarados(arquivos, id, hash, caminho)?;
     let tipo = pacote::ler_tipo(&bytes).ok_or_else(|| "formato-desconhecido".to_owned())?;
     if tipo.papel == "som" {
         return Ok(json!({ "papel": tipo.papel, "bytes": bytes.len() }));
     }
+    let teto = uso.and_then(seele_sessao::reducao::teto_do_uso);
+    let (bytes, decodificados) = seele_sessao::midia_de_mod::reduzir_ao_uso(bytes, teto.as_ref())?;
     let lida = pacote::ler_midia(&bytes).ok_or_else(|| "formato-desconhecido".to_owned())?;
-    Ok(json!({ "uri": lida.uri, "papel": lida.papel, "bytes": lida.bytes }))
+    let mut midia = json!({ "uri": lida.uri, "papel": lida.papel, "bytes": lida.bytes });
+    if let (Some(decodificados), Value::Object(campos)) = (decodificados, &mut midia) {
+        campos.insert("decodificados".into(), json!(decodificados));
+    }
+    Ok(midia)
 }
 
 /// **O `som_do_mod`**: os bytes crus do som declarado, recusado antes se,
@@ -344,6 +357,36 @@ mod tests {
         );
     }
 
+    /// **A imagem do pacote passa pelo teto de pixels antes de ir à página**
+    /// (a varredura do incidente da capa em 4K, 11/11/2026): um PNG que
+    /// declara 30 000 × 30 000 no cabeçalho — poucos bytes, e gigabytes aberto —
+    /// saía daqui como um `data:` para o `decode()` da página. A recusa tem o
+    /// nome e os números, com uso nomeado ou sem.
+    #[test]
+    fn a_imagem_do_pacote_com_pixels_demais_nao_vai_a_pagina() {
+        // Um PNG de 69 bytes: o IHDR declara 30 000 × 30 000, e o IDAT quase
+        // não tem dados. É o que as medidas leem, e ninguém o decodifica.
+        let bomba = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x75\x30\x00\x00\x75\x30\x08\x06\x00\x00\x00\x66\x27\xf8\xba\x00\x00\x00\x0cIDAT\x78\xda\x63\x60\xa0\x0c\x00\x00\x00\x40\x00\x01\x89\xc9\xaf\x43\x00\x00\x00\x00IEND\xae\x42\x60\x82";
+        let mut com_imagem = arquivos();
+        com_imagem[2].1 = bomba.to_vec();
+        let hash = pacote::hash_do_conjunto(&mut com_imagem.clone());
+        for uso in [None, Some("fundo"), Some("um uso que não existe")] {
+            let motivo = midia(
+                &mut com_imagem.clone(),
+                "ana/mesa",
+                &hash,
+                "som/toque.wav",
+                uso,
+            )
+            .unwrap_err();
+            assert!(
+                motivo.starts_with("imagem-grande-demais-decodificada")
+                    && motivo.contains("30000 × 30000"),
+                "{motivo}"
+            );
+        }
+    }
+
     #[test]
     fn a_midia_do_pacote_recusa_na_ordem_do_desktop() {
         // Um WAV de verdade (o cabeçalho que o `sniff` lê) no lugar do declarado.
@@ -353,7 +396,14 @@ mod tests {
         com_som[2].1 = wav;
         let hash = pacote::hash_do_conjunto(&mut com_som.clone());
         // O som volta sem `data:`, e os bytes dele vêm crus.
-        let lida = midia(&mut com_som.clone(), "ana/mesa", &hash, "som/toque.wav").unwrap();
+        let lida = midia(
+            &mut com_som.clone(),
+            "ana/mesa",
+            &hash,
+            "som/toque.wav",
+            None,
+        )
+        .unwrap();
         assert_eq!(
             (lida["papel"].as_str(), lida.get("uri")),
             (Some("som"), None)
@@ -370,11 +420,17 @@ mod tests {
             Err("formato-desconhecido".to_owned())
         );
         assert_eq!(
-            midia(&mut com_som.clone(), "ana/mesa", &hash, "leia.txt"),
+            midia(&mut com_som.clone(), "ana/mesa", &hash, "leia.txt", None),
             Err("arquivo-nao-declarado".to_owned())
         );
         assert_eq!(
-            midia(&mut com_som.clone(), "ana/outro", &hash, "som/toque.wav"),
+            midia(
+                &mut com_som.clone(),
+                "ana/outro",
+                &hash,
+                "som/toque.wav",
+                None
+            ),
             Err("conteudo-de-outro-mod".to_owned())
         );
         assert_eq!(

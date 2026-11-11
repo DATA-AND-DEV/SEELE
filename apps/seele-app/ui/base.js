@@ -1508,8 +1508,15 @@ function donoDaRegiao(mod, instancia) {
       if (!meu()) return Promise.resolve();
       return invoke("soltar_escolhido", { geracao, id: mod.id, arquivo }).catch(() => {});
     },
-    /** Um arquivo que o manifesto deste MOD declarou. */
-    carregarMidia: async (caminho) => {
+    /**
+     * Um arquivo que o manifesto deste MOD declarou.
+     *
+     * `uso` nomeia o lugar em que a imagem vai aparecer (`"fundo"`), como em
+     * `carregarMidiaDoServidor`, e o Rust a reduz a ele; sem uso, ao teto
+     * geral da mídia de MOD. A imagem do pacote ia à janela do tamanho que o
+     * MOD a trouxe (a varredura do incidente da capa em 4K, 11/11/2026).
+     */
+    carregarMidia: async (caminho, uso) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
       const midia = await invoke("midia_do_mod", {
@@ -1517,6 +1524,7 @@ function donoDaRegiao(mod, instancia) {
         id: mod.id,
         hash: mod.hash,
         caminho,
+        uso,
       });
       // Depois do `await`: a sessão pode ter acabado enquanto os bytes vinham,
       // e montá-los seria tocar som de uma sessão que já não existe.

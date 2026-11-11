@@ -13,8 +13,9 @@
 //! # O uso é um nome, e não um tamanho
 //!
 //! A janela diz **para que** a imagem serve (`"capa"`), e o teto daquele uso
-//! mora aqui. Nem a janela nem o MOD escolhem números: um uso desconhecido não
-//! reduz nada, e o teto de cada um é deste arquivo.
+//! mora aqui. Nem a janela nem o MOD escolhem números: o teto de cada uso é
+//! deste arquivo, e a mídia de MOD sem uso conhecido vai pelo teto geral
+//! ([`TETO_DA_MIDIA_DE_MOD`]) — até 11/11/2026 ela não era reduzida.
 //!
 //! # Os números são de partida
 //!
@@ -102,16 +103,109 @@ pub fn imagem_do_perfil_para_a_janela(bytes: &[u8], capa: bool) -> Result<Vec<u8
     reduzir(bytes, &teto).map(|reduzida| reduzida.bytes)
 }
 
+/// **A mídia de um MOD que não nomeia uso**: a imagem de uma região, o fundo
+/// de uma `tela`, um retrato. O maior lugar em que ela aparece é uma página de
+/// MOD do tamanho da janela, e 1920 × 1080 a cobre: uma imagem em 4K cabe nele
+/// com um quarto dos pixels.
+///
+/// **Por que existe** (11/11/2026, a varredura do incidente da capa em 4K):
+/// a redução só valia para o uso que a janela nomeava (`capa`, `avatar`), e
+/// tudo o mais que um MOD mostra — do pacote ou do servidor dele — ia à janela
+/// do tamanho que veio, como um `data:` de até 10 MiB, sem teto de pixels. Um
+/// PNG de 30 000 × 30 000 chegava inteiro ao `decode()` da janela.
+///
+/// Os quadros e a duração só valem para a animação **maior** que o lugar, que
+/// é regravada; a que cabe segue com os bytes que tinha ([`para_a_janela`]).
+pub const TETO_DA_MIDIA_DE_MOD: Teto = Teto {
+    largura: 1920,
+    altura: 1080,
+    quadros: 60,
+    milissegundos: 10_000,
+};
+
+/// **O fundo de uma caixa de MOD** (`fundoDeMidia`): cortado
+/// (`background-size: cover`) atrás do conteúdo, como a capa de um perfil, e
+/// com o teto dela. É a imagem que mora no **estilo** do elemento, onde o
+/// tamanho do texto do `data:` custa a cada leitura
+/// ([`TETO_DA_CAPA_DO_PERFIL`]).
+pub const TETO_DO_FUNDO_DE_MOD: Teto = TETO_DA_CAPA_DO_PERFIL;
+
 /// O teto de um uso, pelo nome que a janela manda. `None` para um nome que
-/// este produto não conhece: nada é reduzido, e a imagem segue como veio.
+/// este produto não conhece: a mídia de MOD sem uso conhecido vai pelo teto
+/// geral ([`TETO_DA_MIDIA_DE_MOD`], em `midia_de_mod::reduzir_ao_uso`).
 pub fn teto_do_uso(uso: &str) -> Option<Teto> {
     match uso {
         "capa" => Some(TETO_DA_CAPA),
         // O avatar que um MOD põe numa pessoa: o mesmo lugar da foto do perfil
         // oficial, e o mesmo teto. Ia à janela do tamanho que o MOD mandou.
         "avatar" => Some(TETO_DA_FOTO_DO_PERFIL),
+        "fundo" => Some(TETO_DO_FUNDO_DE_MOD),
         _ => None,
     }
+}
+
+/// **As medidas de uma imagem, lidas do cabeçalho**, sem decodificar um pixel.
+///
+/// **A imagem grande demais até para o decodificador abrir o cabeçalho** é o
+/// caso do navegador: no `wasm32` o endereço tem 32 bits, e um PNG que declara
+/// 30 000 × 30 000 não tem tamanho que caiba num `usize` — o decodificador o
+/// recusa por limite antes de dizer as medidas (medido em 11/11/2026: no
+/// desktop a mesma imagem dizia as medidas, e na página virava «não abriu»).
+/// As do PNG saem então do `IHDR`, lidas à mão, para a recusa levar os números
+/// nas duas pontas; a dos outros formatos volta como [`GRANDE_DEMAIS`].
+///
+/// # Errors
+///
+/// `formato-desconhecido`, quando os bytes não são uma imagem que este
+/// produto decodifica, e [`GRANDE_DEMAIS`], quando o decodificador a recusa
+/// por limite e as medidas não puderam ser lidas.
+pub fn medidas(bytes: &[u8]) -> Result<(u32, u32), String> {
+    let formato = image::guess_format(bytes).map_err(|_| desconhecido())?;
+    match image::ImageReader::with_format(Cursor::new(bytes), formato).into_dimensions() {
+        Ok(medidas) => Ok(medidas),
+        Err(image::ImageError::Limits(_)) => {
+            medidas_do_ihdr(bytes).ok_or_else(|| GRANDE_DEMAIS.to_owned())
+        }
+        Err(_) => Err(desconhecido()),
+    }
+}
+
+/// A largura e a altura que o `IHDR` de um PNG declara: os oito bytes depois
+/// da assinatura (8), do tamanho do pedaço (4) e do nome dele (4). `None`
+/// para o que não começa como um PNG.
+fn medidas_do_ihdr(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.get(..8)? != b"\x89PNG\r\n\x1a\n" || bytes.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let lado = |de: usize| {
+        let quatro: [u8; 4] = bytes.get(de..de + 4)?.try_into().ok()?;
+        Some(u32::from_be_bytes(quatro))
+    };
+    Some((lado(16)?, lado(20)?))
+}
+
+/// **Uma imagem como ela vai à janela, sem abrir a que já cabe.** As medidas
+/// saem do cabeçalho: a que passa de [`TETO_DE_PIXELS`] é recusada, a que cabe
+/// no teto sai com **os mesmos bytes e sem ser decodificada** (uma animação
+/// longa que cabe no lugar continua inteira), e só a maior que o lugar passa
+/// por [`reduzir`].
+///
+/// É o caminho de quem é pedido a cada montagem (a mídia de um MOD) ou não
+/// pode perder quadros (o GIF de uma conversa): [`reduzir`] decodifica sempre,
+/// e regrava toda animação.
+///
+/// # Errors
+///
+/// `formato-desconhecido` e [`GRANDE_DEMAIS`], como [`reduzir`].
+pub fn para_a_janela(bytes: Vec<u8>, teto: &Teto) -> Result<Vec<u8>, String> {
+    let (largura, altura) = medidas(&bytes)?;
+    if u64::from(largura) * u64::from(altura) > TETO_DE_PIXELS {
+        return Err(GRANDE_DEMAIS.to_owned());
+    }
+    if largura <= teto.largura && altura <= teto.altura {
+        return Ok(bytes);
+    }
+    reduzir(&bytes, teto).map(|reduzida| reduzida.bytes)
 }
 
 /// Uma imagem reduzida, e quanto ela pesa decodificada.
@@ -646,7 +740,61 @@ mod testes {
         );
     }
 
-    /// O uso é um nome de lista fechada: um nome desconhecido não reduz.
+    /// **A imagem que cabe vai à janela sem ser aberta, a maior é reduzida, e
+    /// a que declara pixels demais é recusada** ([`para_a_janela`]: a mídia de
+    /// MOD sem uso, e a prévia de um anexo).
+    #[test]
+    fn para_a_janela_reduz_so_o_que_nao_cabe() {
+        let teto = TETO_DA_MIDIA_DE_MOD;
+        // 4K vira 1080p, com a proporção mantida.
+        let reduzida = para_a_janela(png(3840, 2160), &teto).expect("reduz");
+        assert_eq!(dimensoes(&reduzida), (1920, 1080));
+        // O que cabe sai com os mesmos bytes.
+        let pequena = png(1920, 1080);
+        assert_eq!(
+            para_a_janela(pequena.clone(), &teto).expect("passa"),
+            pequena
+        );
+        // **Sem decodificar**: uma animação longa que cabe no lugar continua
+        // com todos os quadros (`reduzir` a cortaria em 60).
+        let longa = gif(40, 20, 120, 50);
+        assert_eq!(para_a_janela(longa.clone(), &teto).expect("passa"), longa);
+        // A animação maior que o lugar é reduzida quadro a quadro.
+        let animada = para_a_janela(gif(2560, 1440, 3, 100), &teto).expect("reduz");
+        assert_eq!(dimensoes(&animada), (1920, 1080));
+        assert_eq!(quadros_e_duracao(&animada).0, 3);
+        // 45 megapixels num arquivo pequeno: recusada pelo cabeçalho.
+        assert_eq!(
+            para_a_janela(png(9000, 5000), &teto).unwrap_err(),
+            GRANDE_DEMAIS
+        );
+        assert_eq!(
+            para_a_janela(b"nada disto".to_vec(), &teto).unwrap_err(),
+            "formato-desconhecido"
+        );
+        assert_eq!(medidas(&png(300, 100)), Ok((300, 100)));
+    }
+
+    /// As medidas do `IHDR`, lidas à mão: o que a recusa por pixels usa
+    /// quando o decodificador nem abre o cabeçalho (o `wasm32`).
+    #[test]
+    fn as_medidas_do_ihdr_sao_as_que_o_png_declara() {
+        assert_eq!(medidas_do_ihdr(&png(300, 100)), Some((300, 100)));
+        assert_eq!(medidas_do_ihdr(&gif(40, 20, 2, 50)), None);
+        assert_eq!(
+            medidas_do_ihdr(b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0"),
+            None
+        );
+    }
+
+    /// O fundo de uma caixa de MOD tem o teto da capa de um perfil.
+    #[test]
+    fn o_fundo_de_mod_tem_o_teto_da_capa_do_perfil() {
+        assert_eq!(teto_do_uso("fundo"), Some(TETO_DA_CAPA_DO_PERFIL));
+    }
+
+    /// O uso é um nome de lista fechada: um nome desconhecido não tem teto
+    /// próprio (a mídia de MOD vai então pelo teto geral).
     #[test]
     fn so_um_uso_conhecido_tem_teto() {
         assert_eq!(teto_do_uso("capa"), Some(TETO_DA_CAPA));

@@ -10570,6 +10570,7 @@ fn midia_declarada_do_mod(
     id: &str,
     hash: &str,
     caminho: &str,
+    teto: Option<&reducao::Teto>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     bytes_declarados_do_mod(pasta, id, hash, caminho)
         .and_then(|bytes| {
@@ -10585,12 +10586,21 @@ fn midia_declarada_do_mod(
                     decodificados: None,
                 });
             }
+            // **Reduzida ao lugar em que aparece antes do `data:`**, como a
+            // do servidor (`seele_ffi::midia_de_mod::reduzir_ao_uso`). A
+            // imagem do pacote ia à janela do tamanho que o MOD a trouxe — até
+            // 10 MiB, qualquer medida —, e era o irmão do incidente da capa em
+            // 4K (10/11/2026) que a varredura daquela vez deixou sem conserto.
+            // A que declara pixels demais é recusada aqui, pelo nome e com os
+            // números, e a recusa vai ao registro logo abaixo.
+            let (bytes, decodificados) = seele_ffi::midia_de_mod::reduzir_ao_uso(bytes, teto)
+                .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
             let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(desconhecido)?;
             Ok(MidiaDoMod {
                 uri: Some(lida.uri),
                 papel: lida.papel,
                 bytes: lida.bytes,
-                decodificados: None,
+                decodificados,
             })
         })
         .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))
@@ -10618,7 +10628,12 @@ fn midia_declarada_do_mod(
 /// Toda recusa, exceto a de geração morta (contada em
 /// `comandos_de_geracao_morta`), vai ao `seele.log` por
 /// [`recusa_de_midia_dita`], com o id do MOD e o motivo.
-#[tauri::command]
+///
+/// **`uso`** nomeia o lugar em que a imagem vai aparecer (`"fundo"`), como em
+/// [`midia_em_bytes`]; sem ele, vale o teto geral da mídia de MOD. Fora da
+/// thread da janela (`async`), pelo mesmo motivo de lá: reduzir uma imagem
+/// grande leva tempo, e um comando síncrono do Tauri roda na thread principal.
+#[tauri::command(async)]
 fn midia_do_mod(
     app: AppHandle,
     session: State<'_, Session>,
@@ -10626,6 +10641,7 @@ fn midia_do_mod(
     id: String,
     hash: String,
     caminho: String,
+    uso: Option<String>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     session.recusar_se_morta(geracao)?;
     let midia = midia_declarada_do_mod(
@@ -10635,6 +10651,7 @@ fn midia_do_mod(
         &id,
         &hash,
         &caminho,
+        uso.as_deref().and_then(reducao::teto_do_uso).as_ref(),
     )?;
     // **Dito, como o código do MOD é dito.** Um arquivo que sai do pacote de um
     // terceiro e vira som na máquina de quem está numa conversa é um evento que
@@ -18805,8 +18822,20 @@ mod a_supervisao_dos_mods_nativos {
         // 2000 × 700 cabe em 960 × 320 como 914 × 320.
         let esperado = Some(914 * 320 * 4);
 
+        // Sem uso, o teto geral da mídia de MOD (1920 × 1080): 2000 × 700
+        // vira 1920 × 672, e só o uso nomeado diz quanto pesa decodificada.
         let sem_uso = super::ler_midia_do_servidor(&base64, None).expect("imagem aceita");
-        assert_eq!((sem_uso.bytes, sem_uso.decodificados), (grande.len(), None));
+        assert_eq!(sem_uso.decodificados, None);
+        let reduzida = seele_ffi::de_base64(
+            sem_uso
+                .uri
+                .as_deref()
+                .and_then(|uri| uri.split_once(','))
+                .expect("um data:")
+                .1,
+        )
+        .expect("base64");
+        assert_eq!(seele_ffi::reducao::medidas(&reduzida), Ok((1920, 672)));
 
         let com_uso = super::ler_midia_do_servidor(&base64, Some(&teto)).expect("imagem reduzida");
         assert!(
@@ -18829,11 +18858,22 @@ mod a_supervisao_dos_mods_nativos {
 
     #[test]
     fn imagem_do_perfis_em_data_uri_chega_ao_decodificador() {
+        // Imagens de verdade, e não só a assinatura: as medidas saem do
+        // cabeçalho antes de a imagem ir à janela (o teto de pixels).
+        let gravada = |formato: image::ImageFormat| {
+            let quadro = image::RgbImage::from_pixel(4, 3, image::Rgb([40, 200, 120]));
+            let mut saida = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgb8(quadro)
+                .write_to(&mut saida, formato)
+                .expect("gravar a imagem de teste");
+            saida.into_inner()
+        };
         for (mime, bytes) in [
-            ("image/png", b"\x89PNG\r\n\x1a\n".as_slice()),
-            ("image/jpeg", b"\xff\xd8\xff\xe0".as_slice()),
-            ("image/webp", b"RIFF\0\0\0\0WEBP".as_slice()),
+            ("image/png", gravada(image::ImageFormat::Png)),
+            ("image/jpeg", gravada(image::ImageFormat::Jpeg)),
+            ("image/webp", gravada(image::ImageFormat::WebP)),
         ] {
+            let bytes = bytes.as_slice();
             let base64 = seele_ffi::base64_de(bytes);
             for entrada in [base64.clone(), format!("data:{mime};base64,{base64}")] {
                 let midia = super::ler_midia_do_servidor(&entrada, None).expect("imagem aceita");
@@ -18850,7 +18890,7 @@ mod a_supervisao_dos_mods_nativos {
 
     #[test]
     fn midia_do_servidor_confere_bytes_e_limite_mesmo_com_cabecalho() {
-        let png = b"\x89PNG\r\n\x1a\n";
+        let png = crate::pacote_de_teste::PNG;
         let alegada = format!("data:image/jpeg;base64,{}", seele_ffi::base64_de(png));
         assert!(
             super::ler_midia_do_servidor(&alegada, None)
@@ -18875,7 +18915,7 @@ mod a_supervisao_dos_mods_nativos {
         // PNG, isto tem de gritar, não passar de lado.
         bytes
             .get_mut(..png.len())
-            .expect("o teto de mídia cabe uma assinatura de PNG")
+            .expect("o teto de mídia cabe um PNG de 1 × 1")
             .copy_from_slice(png);
         let uri = format!("data:image/png;base64,{}", seele_ffi::base64_de(&bytes));
         assert_eq!(
@@ -21895,8 +21935,10 @@ mod o_id_do_pedido_de_mod_no_registro {
 mod pacote_de_teste {
     /// O menor WAV que o `sniff` aceita (`seele-proto/src/midia_de_mod.rs:73`).
     pub(crate) const WAV: &[u8] = b"RIFF\0\0\0\0WAVEfmt ";
-    /// A assinatura de um PNG.
-    pub(crate) const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    /// Um PNG de verdade, de 1 × 1. **Inteiro, e não só a assinatura**: a
+    /// imagem de um MOD vai à janela depois de as medidas dela serem lidas do
+    /// cabeçalho (o teto de pixels), e a assinatura sozinha não tem medidas.
+    pub(crate) const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0dIDAT\x78\xda\x63\xd0\x08\xa8\xf8\x0f\x00\x03\x84\x01\xf0\xb6\x34\x04\x4b\x00\x00\x00\x00IEND\xae\x42\x60\x82";
     /// Texto, que nenhum decodificador deste produto aceita.
     pub(crate) const TEXTO: &[u8] = b"so texto";
     /// O id do MOD de todo pacote daqui.
@@ -21990,6 +22032,7 @@ mod a_midia_recusada_e_dita_no_registro {
                 ID,
                 &hash,
                 "img/escondido.png",
+                None,
             )
         });
         let falha = resultado
@@ -22028,6 +22071,7 @@ mod a_midia_recusada_e_dita_no_registro {
                 ID,
                 &hash,
                 "doc/leia.txt",
+                None,
             )
         });
         let falha = resultado.err().expect("texto foi servido como mídia");
@@ -22044,6 +22088,119 @@ mod a_midia_recusada_e_dita_no_registro {
         );
     }
 
+    /// Um PNG liso de verdade, com as medidas pedidas: comprime a quase nada.
+    fn png_de(largura: u32, altura: u32) -> Vec<u8> {
+        use image::ImageEncoder as _;
+        let quadro = image::RgbaImage::from_pixel(largura, altura, image::Rgba([40, 80, 120, 255]));
+        let mut saida = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut saida)
+            .write_image(&quadro, largura, altura, image::ExtendedColorType::Rgba8)
+            .expect("gravar a imagem de teste");
+        saida
+    }
+
+    /// As medidas da imagem que um `data:` carrega.
+    fn medidas_do_uri(uri: &str) -> (u32, u32) {
+        let (_, conteudo) = uri.split_once(',').expect("um data:");
+        let bytes = seele_ffi::de_base64(conteudo).expect("base64");
+        seele_ffi::reducao::medidas(&bytes).expect("uma imagem")
+    }
+
+    /// **A imagem do pacote de um MOD vai à janela reduzida ao lugar em que
+    /// aparece** (a varredura do incidente da capa em 4K, 11/11/2026).
+    ///
+    /// Só a mídia do servidor que nomeava uso era reduzida; a do pacote ia do
+    /// tamanho que o MOD a trouxe, como um `data:` de até 10 MiB. Sem uso, o
+    /// teto geral da mídia de MOD; como fundo de uma caixa, o da capa de um
+    /// perfil. A que já cabe sai com os bytes que tinha.
+    #[test]
+    fn a_imagem_do_pacote_vai_a_janela_reduzida() {
+        let grande = png_de(3840, 2160);
+        let pequena = png_de(640, 360);
+        let (raiz, hash) = publicar(&[("img/4k.png", &grande), ("img/pequena.png", &pequena)]);
+        let pedir = |caminho: &str, uso: &str| {
+            let (resultado, rastro) = capturar(|| {
+                midia_declarada_do_mod(
+                    &BaldesDoRegistro::default(),
+                    origem(),
+                    &pasta(&raiz),
+                    ID,
+                    &hash,
+                    caminho,
+                    crate::reducao::teto_do_uso(uso).as_ref(),
+                )
+            });
+            assert!(
+                recusa(&rastro).is_none(),
+                "uma recusa foi escrita: {rastro}"
+            );
+            resultado.unwrap_or_else(|falha| panic!("`{caminho}` recusado: {}", motivo_de(&falha)))
+        };
+        let sem_uso = pedir("img/4k.png", "");
+        let uri = sem_uso.uri.as_deref().expect("a imagem sai com o data:");
+        assert_eq!(
+            medidas_do_uri(uri),
+            (1920, 1080),
+            "a imagem em 4K do pacote foi à janela do tamanho que veio"
+        );
+        let fundo = pedir("img/4k.png", "fundo");
+        assert_eq!(
+            medidas_do_uri(fundo.uri.as_deref().expect("o data:")),
+            (1280, 720),
+            "o fundo de uma caixa não chegou com o teto dele"
+        );
+        let cabia = pedir("img/pequena.png", "");
+        assert_eq!(
+            cabia.bytes,
+            pequena.len(),
+            "a imagem que cabia foi regravada"
+        );
+    }
+
+    /// **A imagem do pacote que declara pixels demais é recusada pelo nome,
+    /// com os números, e a recusa vai ao registro.** O arquivo cabe no teto de
+    /// bytes (uma cor só comprime a quase nada) e aberto pediria centenas de
+    /// megabytes à janela; ela saía daqui inteira, para o `decode()` de lá.
+    #[test]
+    fn a_imagem_do_pacote_com_pixels_demais_e_recusada_e_dita() {
+        let bomba = png_de(9000, 5000);
+        assert!(bomba.len() < seele_ffi::mods::TETO_DE_MIDIA);
+        let (raiz, hash) = publicar(&[("img/bomba.png", &bomba)]);
+        let (resultado, rastro) = capturar(|| {
+            midia_declarada_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                "img/bomba.png",
+                None,
+            )
+        });
+        let falha = resultado
+            .err()
+            .expect("uma imagem de 45 megapixels foi servida à janela");
+        let motivo = motivo_de(&falha);
+        assert!(
+            motivo.starts_with("imagem-grande-demais-decodificada")
+                && motivo.contains("9000 × 5000")
+                && motivo.contains("36000000"),
+            "a recusa não diz o nome, as medidas e o teto: {motivo}"
+        );
+        let linha = recusa(&rastro).unwrap_or_else(|| {
+            panic!("a recusa não chegou ao registro: o MOD fica sem imagem e o seele.log sem uma palavra — {rastro}")
+        });
+        traz(
+            linha,
+            &[
+                "WARN",
+                "mod_id=prova/midia",
+                "imagem-grande-demais-decodificada",
+                "origem=\"img/bomba.png\"",
+            ],
+        );
+    }
+
     #[test]
     fn uma_imagem_aceita_nao_escreve_recusa() {
         let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
@@ -22055,6 +22212,7 @@ mod a_midia_recusada_e_dita_no_registro {
                 ID,
                 &hash,
                 "img/rosto.png",
+                None,
             )
         });
         let midia = resultado.expect("uma imagem declarada foi recusada");
@@ -22822,6 +22980,7 @@ mod o_som_do_mod_sai_em_bytes {
                     ID,
                     &hash,
                     caminho,
+                    None,
                 )
             });
             let midia = resultado

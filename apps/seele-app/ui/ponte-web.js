@@ -2989,9 +2989,11 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   // A mídia declarada do pacote: o som volta sem `data:`, e os bytes dele
   // pelo `som_do_mod`.
-  midia_do_mod: async ({ geracao, id, hash, caminho } = {}) => {
+  // A imagem chega reduzida ao `uso` que a região nomeia, ou ao teto geral
+  // da mídia de MOD, pela mesma conta do desktop.
+  midia_do_mod: async ({ geracao, id, hash, caminho, uso } = {}) => {
     recusarSeMorta(geracao);
-    const lido = (await osModsDaPagina()).midia(await pacoteDoArmazem(hash), { id, hash, caminho });
+    const lido = (await osModsDaPagina()).midia(await pacoteDoArmazem(hash), { id, hash, caminho, uso: String(uso ?? "") });
     if (lido.falha) throw lido.falha;
     return lido.ok;
   },

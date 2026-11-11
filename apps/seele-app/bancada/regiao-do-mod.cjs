@@ -3745,6 +3745,96 @@ async function aCitacaoComPessoaCitaQuemOModNomeia() {
 }
 
 /**
+ * **O fundo de uma caixa chega reduzido, e o estilo só é escrito quando a
+ * imagem muda** (a varredura do incidente da capa em 4K, 11/11/2026).
+ *
+ * O fundo mora no **estilo** do elemento, como um `data:`. Uma imagem grande
+ * de MOD ia à janela do tamanho que veio, e a citação `daPessoa` reescrevia o
+ * mesmo `data:` a cada troca de imagem da pessoa citada — e escrever megabytes
+ * no estilo custa a cada vez (37 ms por elemento com 10 MB, medido em 10/11).
+ *
+ * 1. O fundo nomeia o uso `"fundo"` nos dois caminhos — o do pacote e o do
+ *    servidor —, e é por ele que o Rust o reduz ao lugar em que aparece.
+ * 2. A citação que reaplica **a mesma** imagem não escreve o estilo; a que
+ *    traz outra escreve uma vez.
+ * 3. O descarte tira a imagem, e a remontagem a põe de novo.
+ */
+async function oFundoNomeiaOUsoEOEstiloSoEEscritoQuandoMuda() {
+  const caso = "o fundo reduzido e escrito uma vez";
+  const b = bancada();
+  const d = dono(b);
+  const usos = [];
+  d.api.carregarMidia = (caminho, uso) => {
+    usos.push({ de: "pacote", caminho, uso });
+    return Promise.resolve({ papel: "imagem", bytes: 64, uri: "data:do-pacote" });
+  };
+  d.api.carregarMidiaDoServidor = (canal, pedido, campo, uso) => {
+    usos.push({ de: "servidor", uso });
+    return Promise.resolve({ papel: "imagem", bytes: 64, uri: "data:do-servidor" });
+  };
+  let daPessoa = "data:capa-A";
+  d.api.imagemDaPessoa = () => Promise.resolve({ papel: "imagem", bytes: 0, uri: daPessoa });
+  d.api.estaNaSessao = () => true;
+  const ouvintes = new Map();
+  b.janela.addEventListener = (nome, fn) => ouvintes.set(nome, [...(ouvintes.get(nome) ?? []), fn]);
+  b.janela.removeEventListener = (nome, fn) => ouvintes.set(nome, (ouvintes.get(nome) ?? []).filter((f) => f !== fn));
+  const trocar = (ponto, pessoa) => {
+    for (const fn of ouvintes.get("seele-mods-citacao") ?? []) fn({ detail: { ponto, pessoa } });
+  };
+
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const arvore = [
+    { forma: "caixa", chave: "pacote", fundoDeMidia: { fonte: "img/f.png" }, dentro: "A" },
+    { forma: "caixa", chave: "servidor", fundoDeMidia: { doServidor: { pedido: { path: "x" } } }, dentro: "B" },
+    { forma: "caixa", chave: "citada", fundoDeMidia: { daPessoa: "capa", pessoa: 3 }, dentro: "C" },
+  ];
+  regiao.aplicar(arvore);
+  await assentar();
+  const [doPacote, doServidor, citada] = regiao.raiz.children;
+  confere(caso, String(doPacote.style.backgroundImage ?? "").includes("data:do-pacote")
+    && String(doServidor.style.backgroundImage ?? "").includes("data:do-servidor")
+    && String(citada.style.backgroundImage ?? "").includes("data:capa-A"),
+    `os três fundos não foram pintados: «${doPacote.style.backgroundImage}», «${doServidor.style.backgroundImage}», «${citada.style.backgroundImage}»`);
+
+  // 1. O uso, nos dois caminhos.
+  confere(caso, usos.length === 2 && usos.every((u) => u.uso === "fundo"),
+    `o fundo não nomeou o uso «fundo» ao pedir a imagem, e ela chega do tamanho que veio: ${JSON.stringify(usos)}`);
+
+  // 2. As escritas do estilo, contadas dali em diante.
+  let escritas = 0;
+  let valor = citada.style.backgroundImage;
+  Object.defineProperty(citada.style, "backgroundImage", {
+    configurable: true,
+    get: () => valor,
+    set: (novo) => { escritas += 1; valor = novo; },
+  });
+  for (let i = 0; i < 5; i += 1) trocar("pessoa.capa", "3");
+  await assentar();
+  confere(caso, escritas === 0,
+    `a citação que reaplicou a mesma imagem cinco vezes escreveu o estilo ${escritas} vezes: cada escrita relê o data: inteiro`);
+  daPessoa = "data:capa-B";
+  trocar("pessoa.capa", "3");
+  await assentar();
+  confere(caso, escritas === 1 && String(valor).includes("data:capa-B"),
+    `a imagem citada trocou, e o estilo foi escrito ${escritas} vezes, com «${valor}»`);
+  // A árvore reaplicada sem mudança não repinta nada.
+  regiao.aplicar(arvore);
+  await assentar();
+  confere(caso, escritas === 1 && usos.length === 2,
+    `reaplicar a mesma árvore escreveu o estilo (${escritas}) ou pediu a imagem de novo (${usos.length})`);
+
+  // 3. O descarte tira a imagem; montada de novo, ela volta.
+  regiao.aplicar([]);
+  await assentar();
+  confere(caso, !valor, `a caixa descartada ficou com o fundo: «${valor}»`);
+  regiao.aplicar(arvore);
+  await assentar();
+  confere(caso, String(regiao.raiz.children[2].style.backgroundImage ?? "").includes("data:capa-B"),
+    `a caixa montada de novo ficou sem o fundo: «${regiao.raiz.children[2].style.backgroundImage}»`);
+  regiao.soltar();
+}
+
+/**
  * **A recusa diz o que recusou** (`nos-recusados`, D-api-8; o achado 5 da
  * auditoria). Uma montagem com nós que não couberam respondia só a conta, e
  * quantos e por quê iam ao `seele.log`. A região guarda, ao lado da conta, uma
@@ -7030,6 +7120,7 @@ async function osTresOficiaisCabemNoTetoDoSomPorMod() {
     oFundoDeTelaDizOEstado,
     osBytesSaoReservadosAntesDoDecode,
     aCitacaoComPessoaCitaQuemOModNomeia,
+    oFundoNomeiaOUsoEOEstiloSoEEscritoQuandoMuda,
     aRecusaDizOQueRecusou,
     aplicarQueLancaNaoViraRecusa,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
