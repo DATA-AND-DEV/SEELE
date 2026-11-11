@@ -49,7 +49,8 @@
 // 20. (e2e de 31/10, passo 14) o jogo que sobrou de um app que fechou sem
 //     desligá-lo: `maquina-sobra` e `maquinas_sobras` põem na faixa o que se
 //     achou e o que se fez, uma linha por processo; e o que não parou manda
-//     encerrá-lo pela ferramenta do sistema em que a janela roda.
+//     encerrá-lo pela ferramenta do sistema em que a janela roda, na primeira
+//     linha da faixa, à vista sem rolar mesmo com outras três sobras.
 // 21. (e2e de 31/10, passo 5) o MOD sem o id repetido, e o servidor do SEELE
 //     pelo nome, e não o id do jogo.
 // 22. (API 8 parte 7) o pedido da reserva diz que é a reserva — chip e título à
@@ -721,6 +722,37 @@ async function caso(motor, numero, prova) {
           } finally {
             // A barra volta ao sistema combinado: os casos seguintes leem dela.
             await pagina.evaluate((p) => { $("barra-janela").dataset.plataforma = p; desenharAFaixaDeMaquinas(); }, plataformaDaBancada);
+          }
+          // **A que não parou é a primeira linha, e fica à vista sem rolar.** A
+          // faixa rola a partir de 30% da altura da janela: na ordem de
+          // chegada, esta era a quarta linha e, numa janela de 1000×640, ficava
+          // inteira abaixo da dobra, atrás de três sobras que não pedem nada.
+          // Na tela de entrada, que é onde a faixa mora no alto.
+          assert.deepEqual(
+            await pagina.evaluate(() => [...document.querySelectorAll("#maquinas .maquina-bloco")].map((b) => /processo (\d+)/.exec(b.innerText)?.[1])),
+            ["4646", "4242", "4343", "4545"],
+            `${motor}: 20 · a ordem das linhas`,
+          );
+          await pagina.setViewportSize({ width: 1000, height: 640 });
+          await pagina.evaluate(() => { $("tela-sessao").hidden = true; $("tela-boot").hidden = false; });
+          try {
+            await pagina.waitForFunction(() => document.documentElement.dataset.jogosNaBarra === "nao", null, { timeout: 5000 });
+            const medida = await pagina.evaluate(() => {
+              const caixa = $("maquinas").getBoundingClientRect();
+              const bloco = [...document.querySelectorAll("#maquinas .maquina-bloco")].find((b) => b.innerText.includes("processo 4646"));
+              const r = bloco.getBoundingClientRect();
+              const no = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return {
+                topo: r.top, pe: r.bottom, caixaTopo: caixa.top, caixaPe: caixa.bottom,
+                rola: $("maquinas").scrollHeight > $("maquinas").clientHeight, alcanca: bloco.contains(no),
+              };
+            });
+            assert.equal(medida.rola, true, `${motor}: 20 · com quatro sobras a faixa devia rolar nesta janela, ou a prova não prova nada: ${JSON.stringify(medida)}`);
+            assert.ok(medida.topo >= medida.caixaTopo - 1 && medida.pe <= medida.caixaPe + 1, `${motor}: 20 · a que não parou está fora da vista: ${JSON.stringify(medida)}`);
+            assert.equal(medida.alcanca, true, `${motor}: 20 · a que não parou está coberta: ${JSON.stringify(medida)}`);
+          } finally {
+            await pagina.evaluate(() => { $("tela-boot").hidden = true; $("tela-sessao").hidden = false; });
+            await pagina.setViewportSize({ width: 1400, height: 900 });
           }
           await pagina.evaluate(() => { table.maquinas_sobras = () => []; });
         });

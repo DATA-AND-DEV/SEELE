@@ -501,10 +501,27 @@ async function desligarUmaMaquina(entrada, botao) {
   // Se deu certo, quem muda a linha é `maquina-estado`: a faixa só diz o que o Rust confirmou.
 }
 
+/**
+ * As linhas na ordem em que a faixa as desenha: **o jogo que o SEELE não
+ * conseguiu parar vem primeiro**; as outras seguem na ordem em que chegaram.
+ *
+ * É a única linha que pede uma ação de quem lê (encerrar o processo, que segue
+ * com o mundo e a porta), e a faixa rola a partir de 30% da altura da janela:
+ * na ordem de chegada ela ficava depois das sobras que já tinham saído, e,
+ * medido numa janela de 1000×640 com quatro sobras, a terceira e a quarta
+ * linhas estavam inteiras abaixo da dobra, sem nada que dissesse que havia
+ * mais. O produto sabia que um jogo seguia rodando, e contava fora da vista.
+ */
+function maquinasNaOrdemDaFaixa() {
+  const pedeAcao = (entrada) => entrada.sobra?.desfecho === "nao-parou";
+  const todas = [...maquinasNaFaixa.values()];
+  return [...todas.filter(pedeAcao), ...todas.filter((entrada) => !pedeAcao(entrada))];
+}
+
 function desenharAFaixaDeMaquinas() {
   const faixa = document.getElementById("maquinas");
   if (!faixa) return;
-  faixa.replaceChildren(...[...maquinasNaFaixa.values()].map(desenharUmaMaquina));
+  faixa.replaceChildren(...maquinasNaOrdemDaFaixa().map(desenharUmaMaquina));
   faixa.hidden = maquinasNaFaixa.size === 0;
   if (typeof desenharOsJogosNaBarra === "function") desenharOsJogosNaBarra();
 }
