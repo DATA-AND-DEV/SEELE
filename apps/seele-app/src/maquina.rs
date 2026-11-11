@@ -2767,6 +2767,17 @@ pub(crate) fn sobras<R: tauri::Runtime>(app: &AppHandle<R>) -> Vec<SobraNaTela> 
 
 #[cfg(test)]
 mod testes {
+    /// Quanto um teste espera por algo que depende de um processo de verdade
+    /// subir (a metade roda este mesmo executável de teste como filho).
+    ///
+    /// Eram 5 s (e 20 s num deles), e a bateria inteira os estourava. Medido em
+    /// 11/11/2026: a **primeira** execução depois de compilar falha, e as
+    /// seguintes passam em 1 s — o filho é um executável recém-gravado de
+    /// centenas de megabytes, e o sistema o confere antes de deixá-lo rodar.
+    /// O teste volta assim que a coisa acontece; o prazo só é gasto quando ela
+    /// não acontece.
+    const ESPERA_DOS_TESTES: Duration = Duration::from_secs(60);
+
     use super::*;
 
     fn tunel(nome: &str, protocolo: &str, porta: u16) -> TunelOferecidoFfi {
@@ -3153,7 +3164,7 @@ mod testes {
         }
         /// Espera uma linha que comece com `prefixo`, até 5 s.
         fn esperar(&self, prefixo: &str) -> Vec<String> {
-            let fim = Instant::now() + Duration::from_secs(5);
+            let fim = Instant::now() + ESPERA_DOS_TESTES;
             while Instant::now() < fim {
                 let anotado = self.anotado();
                 if anotado.iter().any(|l| l.starts_with(prefixo)) {
@@ -3464,7 +3475,7 @@ mod testes {
 
     /// Espera o batimento passar de `antes`, até 5 s.
     fn bate_depois_de(raiz: &std::path::Path, antes: u64) -> bool {
-        let fim = Instant::now() + Duration::from_secs(5);
+        let fim = Instant::now() + ESPERA_DOS_TESTES;
         while Instant::now() < fim {
             if batimento(raiz).is_some_and(|n| n > antes) {
                 return true;
@@ -3588,7 +3599,7 @@ mod testes {
             anota.lock().unwrap().push(rodando);
         }));
         parar_todas(maquinas.tirar_ligadas(|_, _| true));
-        let fim = Instant::now() + Duration::from_secs(10);
+        let fim = Instant::now() + ESPERA_DOS_TESTES;
         while Instant::now() < fim && !ouvidos.lock().unwrap().contains(&false) {
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -3712,7 +3723,7 @@ mod testes {
             raiz.join("parou-no-stop").exists(),
             "o stop não chegou ao jogo"
         );
-        let fim = Instant::now() + Duration::from_secs(5);
+        let fim = Instant::now() + ESPERA_DOS_TESTES;
         while viva.processos_vivos() > 0 && Instant::now() < fim {
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -3850,7 +3861,7 @@ mod testes {
             "(async () => { throw new Error('quebrou'); })();",
             Arc::clone(&falhas),
         );
-        let fim = Instant::now() + Duration::from_secs(5);
+        let fim = Instant::now() + ESPERA_DOS_TESTES;
         while falhas.lock().unwrap().is_empty() && Instant::now() < fim {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -4323,7 +4334,7 @@ mod testes {
         );
         let anotado = fio.esperar("pedir ");
         assert!(anotado[0].starts_with(r#"pedir "rodou "#), "{anotado:?}");
-        let fim = Instant::now() + Duration::from_secs(20);
+        let fim = Instant::now() + ESPERA_DOS_TESTES;
         while batimento(&raiz).unwrap_or(0) < 3 {
             assert!(Instant::now() < fim, "o processo não bateu");
             std::thread::sleep(Duration::from_millis(20));
