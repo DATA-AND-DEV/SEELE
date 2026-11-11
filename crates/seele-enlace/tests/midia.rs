@@ -225,3 +225,67 @@ async fn quem_nao_ligou_a_midia_larga_o_pacote_e_conta() {
         .await
         .unwrap();
 }
+
+/// **Um quadro que não é H.264 não derruba a conexão.** O vídeo que o
+/// servidor repassa vem de um par: lixo num quadro tem de custar aquele
+/// quadro, e nunca a voz e o controle de quem assiste.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn um_quadro_que_nao_e_h264_nao_derruba_a_conexao() {
+    let par = par_em_loopback().await;
+    let mut de_la = par.anfitriao.ligar_midia();
+    let para_la = par.cliente.ligar_midia().remetente();
+
+    // Sem prefixo de início, só zeros, um prefixo sem NAL, e um corpo vazio
+    // depois do prefixo.
+    let lixos: [&[u8]; 5] = [
+        &[0xAB; 64],
+        &[0; 64],
+        &[0, 0, 1],
+        &[0, 0, 0, 1],
+        &[0, 0, 0, 1, 0x65, 0, 0, 1],
+    ];
+    for (n, lixo) in lixos.iter().enumerate() {
+        let _ = para_la.mandar(FAIXA, Trilha::Video, n as u64 * 3000, (*lixo).into());
+    }
+    // Depois do lixo, um quadro de verdade ainda chega…
+    para_la
+        .mandar(FAIXA, Trilha::Video, 30_000, quadro(9, true, 2_000))
+        .unwrap();
+    loop {
+        let evento = proximo(&mut de_la, Duration::from_secs(5))
+            .await
+            .expect("a mídia depois do lixo");
+        if let EventoDeMidia::Quadro { bytes, .. } = evento {
+            if numero_de(&bytes, 2_000) == Some((9, true)) {
+                break;
+            }
+        }
+    }
+    // …e a conexão segue de pé nos dois lados.
+    let (mut envio, _) = par.cliente.controle().unwrap();
+    tokio::io::AsyncWriteExt::write_all(&mut envio, b"ainda aqui")
+        .await
+        .unwrap();
+    // Cada lixo foi recusado antes de chegar ao empacotador, e contado.
+    assert_eq!(par.cliente.contadores().midia_nao_saiu, lixos.len() as u64);
+}
+
+/// A forma do Annex B, caso a caso: é ela que decide o que entra no
+/// empacotador.
+#[test]
+fn a_forma_do_annex_b() {
+    use seele_enlace::annex_b_valido;
+    assert!(annex_b_valido(&[0, 0, 1, 0x65, 1, 2]));
+    assert!(annex_b_valido(&[
+        0, 0, 0, 1, 0x67, 9, 0, 0, 1, 0x68, 8, 0, 0, 0, 1, 0x65, 7
+    ]));
+    // Um zero no fim da última NAL é dela (não há prefixo depois).
+    assert!(annex_b_valido(&[0, 0, 1, 0x41, 0]));
+    assert!(!annex_b_valido(&[]));
+    assert!(!annex_b_valido(&[0x65, 1, 2]));
+    assert!(!annex_b_valido(&[0, 0, 1]));
+    assert!(!annex_b_valido(&[0, 0, 0, 1]));
+    assert!(!annex_b_valido(&[0, 0, 1, 0x65, 0, 0, 1]));
+    assert!(!annex_b_valido(&[0, 0, 1, 0, 0, 1, 0x65]));
+    assert!(!annex_b_valido(&[0; 64]));
+}

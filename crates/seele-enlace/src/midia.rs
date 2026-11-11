@@ -216,6 +216,18 @@ impl RemetenteDeMidia {
         });
     }
 
+    /// Recomeça a estimativa de banda deste valor. Para o começo de uma
+    /// transmissão: a estimativa nasce em [`ESTIMATIVA_INICIAL_BPS`], que é
+    /// de quem ainda não mandou nada, e quem transmite sabe de onde quer
+    /// partir. [`Self::estimativa_bps`] passa a devolver este valor até o
+    /// primeiro retorno do par.
+    pub fn semear_estimativa(&self, bps: u64) {
+        let _ = self.cmd.send(Comando::SemearEstimativa {
+            par: self.comp.id,
+            bps,
+        });
+    }
+
     /// A banda que o caminho de saída carrega, pela estimativa do RTP (TWCC).
     /// `None` enquanto nenhum retorno chegou.
     #[must_use]
@@ -289,6 +301,43 @@ fn pt_de(rtc: &Rtc, codec: Codec) -> Option<Pt> {
         .map(|p| p.pt())
 }
 
+/// O quadro é H.264 em Annex B bem formado: começa por um prefixo de início
+/// (`00 00 01` ou `00 00 00 01`) e toda NAL tem ao menos o byte de cabeçalho.
+///
+/// Só a forma: o que há dentro de cada NAL não é olhado.
+#[must_use]
+pub fn annex_b_valido(bytes: &[u8]) -> bool {
+    let comeco = match bytes {
+        [0, 0, 1, ..] => 3,
+        [0, 0, 0, 1, ..] => 4,
+        _ => return false,
+    };
+    let mut resto = bytes.get(comeco..).unwrap_or_default();
+    loop {
+        // A NAL vai até o próximo prefixo, ou até o fim.
+        let (nal, depois) = match resto.windows(3).position(|j| j == [0, 0, 1]) {
+            Some(p) => (
+                resto.get(..p).unwrap_or_default(),
+                Some(resto.get(p + 3..).unwrap_or_default()),
+            ),
+            None => (resto, None),
+        };
+        // Um prefixo de quatro bytes deixa um zero no fim da NAL anterior:
+        // ele é do prefixo, e não dela.
+        let nal = match (nal, depois) {
+            ([corpo @ .., 0], Some(_)) => corpo,
+            _ => nal,
+        };
+        if nal.is_empty() {
+            return false;
+        }
+        match depois {
+            Some(depois) => resto = depois,
+            None => return true,
+        }
+    }
+}
+
 /// De que faixa e de que mídia é um `mid`.
 fn faixa_do_mid(mid: Mid) -> Option<(u8, Trilha)> {
     (0..FAIXAS).find_map(|faixa| {
@@ -319,6 +368,14 @@ impl MidiaDoPar {
         tempo: u64,
         bytes: Arc<[u8]>,
     ) -> bool {
+        // **O vídeo que sai é de quem manda, e quem manda pode ser um par**
+        // (o servidor repassa o que recebeu). O empacotador do `str0m`
+        // devolve erro para um quadro que não é Annex B, e um erro dele já
+        // derrubou a conexão inteira (medido em 10/11/2026). O quadro é
+        // conferido antes de entrar: lixo custa o quadro, e só ele.
+        if trilha == Trilha::Video && !annex_b_valido(&bytes) {
+            return false;
+        }
         let (mid, pt, relogio) = match trilha {
             Trilha::Video => (mid_do_video(faixa), self.video, Frequency::NINETY_KHZ),
             Trilha::Som => (mid_do_som(faixa), self.som, Frequency::FORTY_EIGHT_KHZ),

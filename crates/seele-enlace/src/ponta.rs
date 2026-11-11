@@ -1482,7 +1482,11 @@ impl Motor {
             })
         };
         if let Err(erro) = resultado {
-            self.falhou(id, &erro);
+            if self.e_so_um_pacote_de_midia(id, &erro) {
+                self.drenar(id);
+            } else {
+                self.falhou(id, &erro);
+            }
             return;
         }
         self.drenar(id);
@@ -1944,6 +1948,15 @@ impl Motor {
                 }
                 self.drenar(par);
             }
+            Comando::SemearEstimativa { par, bps } => {
+                if let Some(p) = self.pares.get_mut(&par) {
+                    if p.midia.is_some() {
+                        p.rtc.bwe().reset(Bitrate::bps(bps));
+                        p.comp.estimativa_bps.store(bps.max(1), Ordering::Relaxed);
+                    }
+                }
+                self.drenar(par);
+            }
             Comando::TaxaDaMidia { par, desejada_bps } => {
                 if let Some(p) = self.pares.get_mut(&par) {
                     if p.midia.is_some() {
@@ -2386,11 +2399,38 @@ impl Motor {
                 }
                 Ok(Output::Event(evento)) => self.evento(id, evento),
                 Err(erro) => {
+                    // Um pacote de mídia estragado custa o pacote; o laço
+                    // segue (e é contado pelo teto de voltas, como tudo aqui).
+                    if self.e_so_um_pacote_de_midia(id, &erro) {
+                        continue;
+                    }
                     self.falhou(id, &erro);
                     return;
                 }
             }
         }
+    }
+
+    /// **Um erro de empacotar ou desempacotar mídia não é da conexão.** É de
+    /// um quadro (que este lado escreveu) ou de um pacote (que o par mandou),
+    /// e derrubar a sessão por ele daria a qualquer um que manda vídeo o poder
+    /// de derrubar a voz e o controle de quem o recebe. É contado, e segue.
+    fn e_so_um_pacote_de_midia(&mut self, id: usize, erro: &str0m::RtcError) -> bool {
+        if !matches!(erro, str0m::RtcError::Packet(..)) {
+            return false;
+        }
+        if let Some(par) = self.pares.get(&id) {
+            let total = par
+                .comp
+                .contadores
+                .midia_malformada
+                .fetch_add(1, Ordering::Relaxed)
+                + 1;
+            if total == 1 || total.is_multiple_of(1000) {
+                tracing::warn!(par = id, %erro, total, "um pacote de mídia malformado foi largado");
+            }
+        }
+        true
     }
 
     fn falhou(&mut self, id: usize, erro: &str0m::RtcError) {

@@ -128,6 +128,9 @@ pub struct Contadores {
     /// Quadros de mídia que o `Rtc` não aceitou (a mídia não estava ligada,
     /// ou a conexão não estava pronta).
     pub midia_nao_saiu: u64,
+    /// Pacotes ou quadros de mídia que o `str0m` recusou ao empacotar ou
+    /// desempacotar: largados, sem derrubar a conexão.
+    pub midia_malformada: u64,
     /// O maior volume (canais "u" e "b") que o escalonador já deixou no SCTP na
     /// frente da voz, em bytes. Fica abaixo de `LIMIAR_DE_VOLUME` mais uma
     /// mensagem: é a garantia do R4, medida.
@@ -149,6 +152,7 @@ pub(crate) struct ContadoresVivos {
     pub(crate) voz_descartada: AtomicU64,
     pub(crate) voz_nao_saiu: AtomicU64,
     pub(crate) midia_nao_saiu: AtomicU64,
+    pub(crate) midia_malformada: AtomicU64,
     pub(crate) maior_volume_no_sctp: AtomicU64,
     pub(crate) tunel_descartado: AtomicU64,
     pub(crate) tunel_grande_demais: AtomicU64,
@@ -232,6 +236,11 @@ pub(crate) enum Comando {
     PedirChave {
         par: usize,
         faixa: u8,
+    },
+    /// Recomeça a estimativa de banda de um valor.
+    SemearEstimativa {
+        par: usize,
+        bps: u64,
     },
     /// Até onde a estimativa de banda deve procurar.
     TaxaDaMidia {
@@ -745,6 +754,7 @@ impl Conexao {
             voz_descartada: c.voz_descartada.load(Ordering::Relaxed),
             voz_nao_saiu: c.voz_nao_saiu.load(Ordering::Relaxed),
             midia_nao_saiu: c.midia_nao_saiu.load(Ordering::Relaxed),
+            midia_malformada: c.midia_malformada.load(Ordering::Relaxed),
             maior_volume_no_sctp: c.maior_volume_no_sctp.load(Ordering::Relaxed),
             tunel_descartado: c.tunel_descartado.load(Ordering::Relaxed),
             tunel_grande_demais: c.tunel_grande_demais.load(Ordering::Relaxed),
