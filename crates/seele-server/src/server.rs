@@ -615,6 +615,11 @@ pub enum Event {
     UplinkLoss {
         /// De quem é a subida medida.
         person: PersonId,
+        /// Em que sala ela fala. **Não vai a cliente nenhum**: é o que deixa a
+        /// sessão de quem a **ouve** descontar esta subida da perda que o
+        /// cliente dela relata (`crate::sinal`), sem perguntar à sala quem
+        /// está nela.
+        voice_room: VoiceRoomId,
         /// A fração perdida, de zero a um.
         fraction: f32,
     },

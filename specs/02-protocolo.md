@@ -178,6 +178,8 @@ Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: �
 - **`perda`**: a maior entre as que o servidor mede do caminho da pessoa (a de saída e a de entrada do RTP, a de subida da voz) e a que **ela mesma relata** da voz que ouve (`RelatoDeRecepcao`, protocolo 13). É o relato que dá perda a quem está calado e sem vídeo, de quem o servidor não mede nenhuma;
 - **`jitter_ms`**: só o do relato. O jitter existe no receptor, e o servidor não o mede.
 
+A perda que um cliente relata é de ponta a ponta: nela está também o que a subida de quem **fala** perdeu, porque o servidor encaminha a voz com o `seq` de quem fala e o receptor não separa um buraco do outro. Quem separa é o servidor, que mede a subida de cada pessoa que fala: da perda relatada ele desconta a pior subida entre as pessoas que falam na mesma sala — `(1 − relatada) = (1 − subida) × (1 − descida)` —, e o que entra na conta de quem relatou é a descida (`descontar`, em `sinal.rs`). Sem isso, uma pessoa com a subida ruim derrubaria o sinal de todos que a ouvem. Do jitter o servidor não tem com o que descontar; por isso o cliente relata o **menor** entre as pessoas que ouve, que é o que mais se aproxima do caminho dele, e com uma pessoa só falando o número ainda carrega a subida dela.
+
 ## Keepalive e queda
 
 - `Ping` a cada 5 s. Três perdidos consecutivos → estado `Reconectando`.

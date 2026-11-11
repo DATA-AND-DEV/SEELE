@@ -1304,6 +1304,7 @@ impl VoiceRoom {
             if let Some(eventos) = self.eventos.as_ref() {
                 let _ = eventos.send(Event::UplinkLoss {
                     person,
+                    voice_room: self.id,
                     fraction: fracao,
                 });
             }
@@ -3238,8 +3239,14 @@ mod tests {
 
         let mut relatada = None;
         while let Ok(evento) = ouvinte.try_recv() {
-            if let Event::UplinkLoss { person, fraction } = evento {
+            if let Event::UplinkLoss {
+                person,
+                fraction,
+                voice_room: sala,
+            } = evento
+            {
                 assert_eq!(person, PersonId(1), "a perda foi atribuída a outra pessoa");
+                assert_eq!(sala, voice_room.id, "a perda foi atribuída a outra sala");
                 relatada = Some(fraction);
             }
         }

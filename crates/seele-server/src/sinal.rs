@@ -61,6 +61,45 @@
 //!   mandou: um cliente que minta piora ou melhora o próprio indicador, e o de
 //!   mais ninguém. Não é fronteira de segurança, é a honestidade do indicador.
 //!
+//! # O que se desconta da perda relatada: a subida de quem fala
+//!
+//! A perda que um cliente relata é de **ponta a ponta**. O servidor encaminha
+//! a voz com o `seq` de quem fala, intacto; um quadro que a subida de quem
+//! fala perdeu chega a quem ouve como um buraco igual ao de um quadro que a
+//! descida dela perdeu, e o buffer de jitter não tem como saber de quem ele é.
+//!
+//! Posta inteira na conta, essa perda acusaria a pessoa errada. Medido em
+//! `seele-conformance/tests/sinal_de_quem_so_ouve.rs`, antes do desconto: com
+//! 10% de perda só na subida de quem fala, o sinal de quem **ouve**, num
+//! caminho limpo, caía para 72 junto com o de quem falava. Uma pessoa com a
+//! subida ruim pintaria a sala inteira, e o indicador deixaria de dizer quem é
+//! — que é a única coisa que ele promete.
+//!
+//! Quem separa as duas é este servidor, que já mede a subida de cada pessoa
+//! que fala ([`crate::perda_de_subida`]). As duas perdas estão em série, então
+//!
+//! ```text
+//! (1 − relatada) = (1 − subida de quem fala) × (1 − descida de quem ouve)
+//! ```
+//!
+//! e o que entra na conta é a descida, tirada daí ([`descontar`]). O cliente
+//! relata a **pior** perda entre as pessoas que ouve, e daqui se desconta a
+//! **pior** subida entre as pessoas da sala dela que estão falando
+//! ([`SinalDaSessao::a_voz_ouvida_perdeu`]): a descida é comum a todas as
+//! vozes, e a pior fonte é a de pior subida.
+//!
+//! O erro que sobra é para o lado seguro. Se o servidor tem a subida de
+//! alguém que o cliente não contou, desconta demais, e a pessoa fica com um
+//! sinal melhor do que merece por uns segundos; o contrário — acusar quem
+//! ouve pela subida de outro — pede que o cliente conte uma fonte de que o
+//! servidor não tem medida, e o cliente só conta quem falou o dobro do que o
+//! servidor exige para medir (`seele_voz::recepcao::MINIMO_DE_LUGARES`).
+//!
+//! **Do jitter não há o que descontar**: o servidor não mede o de ninguém.
+//! Por isso o cliente relata o **menor** jitter entre as pessoas que ouve, que
+//! é o que mais se aproxima do caminho dele; com uma pessoa só falando, o
+//! número ainda carrega a subida dela.
+//!
 //! A frequência não é contada aqui: todo quadro de controle passa pelo
 //! [`crate::taxa::Vigia`] antes de chegar a um tratador, e guardar um relato é
 //! uma atribuição — mil por segundo custam o que o limitador deixa passar, e
@@ -72,10 +111,16 @@
 //!   vídeo, nele, continua refletindo só o atraso.
 //! - Numa sala em que ninguém fala não há voz chegando a ninguém, e portanto
 //!   não há perda de recepção a medir: o relato cessa, e a parcela sai.
+//! - O jitter relatado é de ponta a ponta quando só uma pessoa fala (acima).
+//! - O desconto compara duas janelas de cinco segundos que não começam no
+//!   mesmo instante. Com a subida de quem fala ruim, sobra na conta de quem
+//!   ouve um resto de um ou dois por cento que vai e vem: o sinal dela fica
+//!   uns pontos abaixo de 100, e não em 100.
 
 use std::time::{Duration, Instant};
 
 use seele_enlace::Leitura;
+use seele_proto::ids::PersonId;
 use seele_proto::signal::{Recepcao, RecepcaoRecusada, Signal, SyncInputs};
 
 /// Por quanto tempo o último relato de perda da voz ainda vale como medida.
@@ -107,8 +152,12 @@ pub struct Medidas {
     pub perda_na_entrada: Option<f32>,
     /// Da voz que ela mandou, a fração que se perdeu.
     pub perda_da_voz: Option<f32>,
-    /// Da voz que ela **ouve**, a fração que faltou. Relatada por ela.
+    /// Da voz que ela **ouve**, a fração que faltou. Relatada por ela, e de
+    /// ponta a ponta: o que entra na conta é [`Self::perda_na_recepcao`].
     pub perda_relatada: Option<f32>,
+    /// A pior perda de subida entre as pessoas que ela ouve agora. Medida por
+    /// este servidor; é o que se desconta de [`Self::perda_relatada`].
+    pub subida_de_quem_fala: Option<f32>,
     /// O jitter de chegada da voz que ela ouve, em milissegundos. Relatado
     /// por ela: é a única fonte de jitter que este servidor tem.
     pub jitter_relatado_ms: Option<f32>,
@@ -125,13 +174,25 @@ impl Medidas {
             self.perda_na_saida,
             self.perda_na_entrada,
             self.perda_da_voz,
-            self.perda_relatada,
+            self.perda_na_recepcao(),
         ]
         .into_iter()
         .flatten()
         .filter(|fracao| fracao.is_finite())
         .map(|fracao| fracao.clamp(0.0, 1.0))
         .reduce(f32::max)
+    }
+
+    /// Da perda que ela relata, a parte que é do caminho **dela**: a relatada
+    /// menos a pior subida de quem fala para ela ([`descontar`]). `None` sem
+    /// relato; sem subida medida de ninguém, a relatada inteira.
+    #[must_use]
+    pub fn perda_na_recepcao(&self) -> Option<f32> {
+        let relatada = self.perda_relatada.filter(|fracao| fracao.is_finite())?;
+        Some(match self.subida_de_quem_fala {
+            Some(subida) if subida.is_finite() => descontar(relatada, subida),
+            _ => relatada.clamp(0.0, 1.0),
+        })
     }
 
     /// As entradas da conta, ou `None` se nada foi medido.
@@ -156,6 +217,27 @@ impl Medidas {
     }
 }
 
+/// Tira de uma perda de ponta a ponta a parte que a subida de quem fala
+/// explica, e devolve a que sobra para a descida de quem ouve.
+///
+/// As duas estão em série — um quadro chega se passou pelas duas —, então
+/// `(1 − ponta a ponta) = (1 − subida) × (1 − descida)`. Não é peso nem
+/// limiar: é a mesma perda, escrita do outro lado da igualdade.
+///
+/// Nunca devolve menos que zero (as duas medidas são janelas que não começam
+/// no mesmo instante, e a diferença às vezes sai negativa), e com a subida
+/// inteira perdida devolve zero: de uma voz que não chegou ao servidor nada se
+/// pode dizer do caminho de quem a ouviria.
+#[must_use]
+pub fn descontar(ponta_a_ponta: f32, subida: f32) -> f32 {
+    let ponta_a_ponta = ponta_a_ponta.clamp(0.0, 1.0);
+    let subida = subida.clamp(0.0, 1.0);
+    if subida >= 1.0 {
+        return 0.0;
+    }
+    (1.0 - (1.0 - ponta_a_ponta) / (1.0 - subida)).clamp(0.0, 1.0)
+}
+
 /// O sinal de uma sessão, e o que ele lembra entre um tique e outro.
 #[derive(Debug)]
 pub struct SinalDaSessao {
@@ -163,6 +245,10 @@ pub struct SinalDaSessao {
     perda_da_voz: Option<(f32, Instant)>,
     /// O último relato de recepção que passou na conferência, e quando.
     relato: Option<(Recepcao, Instant)>,
+    /// A perda de subida de cada pessoa que esta sessão ouve, e quando a sala
+    /// a relatou. Uma entrada por pessoa que fala na sala; as vencidas saem a
+    /// cada relato novo.
+    subidas_ouvidas: Vec<(PersonId, f32, Instant)>,
 }
 
 impl Default for SinalDaSessao {
@@ -179,12 +265,39 @@ impl SinalDaSessao {
             sync: Signal::new(),
             perda_da_voz: None,
             relato: None,
+            subidas_ouvidas: Vec::new(),
         }
     }
 
     /// A sala relatou a perda de subida da voz desta pessoa.
     pub fn a_voz_perdeu(&mut self, fracao: f32, agora: Instant) {
         self.perda_da_voz = Some((fracao, agora));
+    }
+
+    /// A sala relatou a perda de subida da voz de **outra** pessoa, que esta
+    /// sessão ouve (as duas estão na mesma sala).
+    ///
+    /// Vale pelo mesmo tempo que a da própria voz
+    /// ([`VALIDADE_DA_PERDA_DA_VOZ`]): quem para de falar para de ser medido,
+    /// e a subida dela deixa de explicar o que esta pessoa relata.
+    pub fn a_voz_ouvida_perdeu(&mut self, de_quem: PersonId, fracao: f32, agora: Instant) {
+        self.subidas_ouvidas.retain(|(pessoa, _, quando)| {
+            *pessoa != de_quem
+                && agora.saturating_duration_since(*quando) <= VALIDADE_DA_PERDA_DA_VOZ
+        });
+        self.subidas_ouvidas.push((de_quem, fracao, agora));
+    }
+
+    /// A pior subida, ainda válida, entre as pessoas que esta sessão ouve.
+    fn pior_subida_ouvida(&self, agora: Instant) -> Option<f32> {
+        self.subidas_ouvidas
+            .iter()
+            .filter(|(_, fracao, quando)| {
+                fracao.is_finite()
+                    && agora.saturating_duration_since(*quando) <= VALIDADE_DA_PERDA_DA_VOZ
+            })
+            .map(|(_, fracao, _)| fracao.clamp(0.0, 1.0))
+            .reduce(f32::max)
     }
 
     /// O cliente desta sessão relatou a própria recepção.
@@ -216,6 +329,7 @@ impl SinalDaSessao {
         let relato = self.relato_valido(agora);
         Medidas {
             perda_relatada: relato.and_then(|relato| relato.perda),
+            subida_de_quem_fala: self.pior_subida_ouvida(agora),
             jitter_relatado_ms: relato.and_then(|relato| relato.jitter_ms),
             ida_e_volta: leitura.ida_e_volta,
             perda_na_saida: leitura.fracao_de_perda_na_saida,
@@ -381,6 +495,116 @@ mod tests {
         assert_eq!(sinal.relatou(relato(Some(0.08), None), agora), Ok(()));
         let medidas = sinal.medidas(&leitura(Some(10), Some(0.01), None), agora);
         assert_eq!(medidas.perda(), Some(0.08), "a maior é a relatada");
+    }
+
+    /// **A perda de quem fala não cai em quem ouve.** A pessoa relata 10% no
+    /// que ouve, e a sala mediu 10% na subida de quem fala para ela: da
+    /// descida dela não sobrou nada, e o sinal fica alto. Sem a medida da
+    /// subida, os mesmos 10% são dela.
+    #[test]
+    fn a_subida_de_quem_fala_e_descontada_da_perda_relatada() {
+        let agora = Instant::now();
+        let calado = leitura(Some(10), None, None);
+
+        let mut sinal = SinalDaSessao::novo();
+        assert_eq!(sinal.relatou(relato(Some(0.10), None), agora), Ok(()));
+        sinal.a_voz_ouvida_perdeu(PersonId(2), 0.10, agora);
+        let medidas = sinal.medidas(&calado, agora);
+        assert_eq!(medidas.perda_relatada, Some(0.10));
+        assert_eq!(medidas.subida_de_quem_fala, Some(0.10));
+        assert!(medidas.perda_na_recepcao().is_some_and(|p| p < 1e-6));
+        assert_eq!(regime(&mut sinal, &calado, agora), 100);
+
+        let mut sem_a_subida = SinalDaSessao::novo();
+        assert_eq!(
+            sem_a_subida.relatou(relato(Some(0.10), None), agora),
+            Ok(())
+        );
+        assert_eq!(regime(&mut sem_a_subida, &calado, agora), 70);
+    }
+
+    /// As duas perdas em série: quem fala perde 10% na subida e quem ouve
+    /// perde 10% na descida. Chegam 81%, o cliente relata 19%, e o que entra
+    /// na conta de quem ouve são os 10% dela.
+    #[test]
+    fn com_as_duas_perdas_sobra_a_de_quem_ouve() {
+        let agora = Instant::now();
+        let calado = leitura(Some(10), None, None);
+        let mut sinal = SinalDaSessao::novo();
+        assert_eq!(sinal.relatou(relato(Some(0.19), None), agora), Ok(()));
+        sinal.a_voz_ouvida_perdeu(PersonId(2), 0.10, agora);
+        let dela = sinal.medidas(&calado, agora).perda_na_recepcao();
+        assert!(dela.is_some_and(|p| (p - 0.10).abs() < 1e-5), "{dela:?}");
+        assert_eq!(regime(&mut sinal, &calado, agora), 70);
+    }
+
+    /// Com mais de uma pessoa falando, desconta-se a **pior** subida — a que
+    /// explica a pior fonte, que é a que o cliente relata. E a subida de quem
+    /// parou de falar deixa de explicar qualquer coisa.
+    #[test]
+    fn desconta_a_pior_subida_e_so_enquanto_ela_vale() {
+        let inicio = Instant::now();
+        let calado = leitura(Some(10), None, None);
+        let mut sinal = SinalDaSessao::novo();
+        sinal.a_voz_ouvida_perdeu(PersonId(2), 0.02, inicio);
+        sinal.a_voz_ouvida_perdeu(PersonId(3), 0.10, inicio);
+        sinal.a_voz_ouvida_perdeu(PersonId(4), 0.05, inicio);
+        assert_eq!(
+            sinal.medidas(&calado, inicio).subida_de_quem_fala,
+            Some(0.10)
+        );
+        // A mesma pessoa, medida de novo: vale a nova, e não a maior das duas.
+        sinal.a_voz_ouvida_perdeu(PersonId(3), 0.01, inicio);
+        assert_eq!(
+            sinal.medidas(&calado, inicio).subida_de_quem_fala,
+            Some(0.05)
+        );
+
+        let no_limite = inicio + VALIDADE_DA_PERDA_DA_VOZ;
+        assert_eq!(
+            sinal.medidas(&calado, no_limite).subida_de_quem_fala,
+            Some(0.05)
+        );
+        let depois = no_limite + Duration::from_millis(1);
+        assert_eq!(sinal.medidas(&calado, depois).subida_de_quem_fala, None);
+
+        // Vencida a subida, a perda relatada volta a ser toda de quem relata.
+        assert_eq!(sinal.relatou(relato(Some(0.10), None), depois), Ok(()));
+        assert_eq!(regime(&mut sinal, &calado, depois), 70);
+        // E as vencidas não ficam guardadas para sempre.
+        sinal.a_voz_ouvida_perdeu(PersonId(9), 0.0, depois);
+        assert_eq!(sinal.subidas_ouvidas.len(), 1);
+    }
+
+    /// A conta do desconto nas bordas: nunca negativa, nunca acima de um, e
+    /// uma subida inteira perdida não diz nada de quem ouve.
+    #[test]
+    fn o_desconto_nao_sai_da_faixa() {
+        assert!(descontar(0.10, 0.0) - 0.10 < 1e-6);
+        assert!(descontar(0.0, 0.0).abs() < 1e-6);
+        assert!(
+            descontar(0.05, 0.10).abs() < 1e-6,
+            "a diferença negativa não é perda"
+        );
+        assert!((descontar(1.0, 0.10) - 1.0).abs() < 1e-6);
+        assert!(descontar(1.0, 1.0).abs() < 1e-6);
+        assert!(descontar(0.5, 1.0).abs() < 1e-6);
+        assert!((descontar(0.19, 0.10) - 0.10).abs() < 1e-5);
+        // Fora da faixa, as entradas são aparadas antes da conta.
+        assert!((descontar(7.0, -3.0) - 1.0).abs() < 1e-6);
+    }
+
+    /// O desconto é só da perda **relatada**: a que este servidor mede da
+    /// própria pessoa (a subida da voz dela) não é explicada pela subida de
+    /// ninguém.
+    #[test]
+    fn a_subida_de_outro_nao_desconta_a_perda_da_propria_voz() {
+        let agora = Instant::now();
+        let calado = leitura(Some(10), None, None);
+        let mut sinal = SinalDaSessao::novo();
+        sinal.a_voz_perdeu(0.10, agora);
+        sinal.a_voz_ouvida_perdeu(PersonId(2), 0.10, agora);
+        assert_eq!(regime(&mut sinal, &calado, agora), 70);
     }
 
     /// O jitter entra com a parcela que o `seele_proto::signal` já tinha para

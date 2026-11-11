@@ -21,6 +21,17 @@
 //! O que se lê é o `signal` de quem só ouve **como o servidor o anuncia aos
 //! outros**: no retrato de quem fala, que é onde a lista de pessoas o mostra.
 //!
+//! # As três cenas
+//!
+//! - perda só na **descida de quem ouve**: o sinal dela cai, o de quem fala
+//!   não;
+//! - sem perda: os dois ficam altos;
+//! - perda só na **subida de quem fala**: o sinal de quem fala cai, e o de quem
+//!   ouve **não** — o cliente dela relata a mesma perda (o buffer de jitter não
+//!   sabe de quem é o buraco), e o servidor desconta a subida que ele mesmo
+//!   mediu (`seele_server::sinal::descontar`). Antes do desconto esta cena
+//!   reprovava com o sinal de quem ouve em 72.
+//!
 //! # Por que aqui, e não ao lado de `sinal_segue_a_rede.rs`
 //!
 //! O relato tem de vir do caminho real — o buffer de jitter, a janela, o
@@ -331,6 +342,44 @@ async fn sem_perda_o_sinal_de_quem_esta_calado_fica_alto() -> Result<()> {
             .all(|s| *s >= NOMINAL_FLOOR),
         "sem perda nenhuma o sinal de quem fala não ficou alto: {:?}",
         cena.de_quem_fala
+    );
+    Ok(())
+}
+
+/// **A perda de quem fala é de quem fala.** Dez por cento de perda só na
+/// **subida** de quem fala: quem ouve recebe a voz com os mesmos buracos, e o
+/// buffer de jitter dela não tem como saber de quem eles são. O sinal de quem
+/// fala cai (o servidor mede a subida da voz dela); o de quem só ouve, num
+/// caminho limpo, **não** pode cair junto — senão uma pessoa com a subida ruim
+/// pintaria a sala inteira, e o indicador deixaria de dizer quem é.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_perda_na_subida_de_quem_fala_nao_cai_no_sinal_de_quem_ouve() -> Result<()> {
+    let _vaga = vaga::minha();
+    let cena = cena(0.0, 0.10, 33).await?;
+    assert!(
+        cena.subida.0 > 500 && cena.subida.1 > 20,
+        "a voz não subiu pelo cano, ou o cano não tirou nada: {:?}",
+        cena.subida
+    );
+    assert!(
+        cena.tocados > 500,
+        "quem ouve quase não ouviu: {}",
+        cena.tocados
+    );
+
+    assert!(
+        regime(&cena.de_quem_fala)
+            .iter()
+            .all(|s| *s < NOMINAL_FLOOR),
+        "10% de perda na subida de quem fala e o sinal dela continuou nominal: {:?}",
+        cena.de_quem_fala
+    );
+    assert!(
+        regime(&cena.de_quem_ouve)
+            .iter()
+            .all(|s| *s >= NOMINAL_FLOOR),
+        "a perda na subida de quem fala caiu no sinal de quem só ouve, num caminho limpo: {:?}",
+        cena.de_quem_ouve
     );
     Ok(())
 }

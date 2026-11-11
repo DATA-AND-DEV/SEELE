@@ -5014,9 +5014,19 @@ async fn run_session(
                 // sala já a media e só a dizia a quem fala (`translate`,
                 // abaixo, continua a filtrar o relato por destinatário); o
                 // sinal é o que os outros veem dela, e é agregado.
-                if let Event::UplinkLoss { person, fraction } = &event {
+                //
+                // E a subida de quem esta pessoa **ouve** — as outras da sala
+                // dela — é o que se desconta da perda que o cliente dela
+                // relata: o receptor não separa o que a descida dele perdeu do
+                // que a subida de quem fala perdeu, e este servidor separa.
+                // Fica dentro da conta do sinal desta sessão; a ninguém é dito
+                // (a promessa do ADR 0036 é do `translate`, e segue valendo).
+                if let Event::UplinkLoss { person, fraction, voice_room } = &event {
+                    let agora = std::time::Instant::now();
                     if *person == session.person {
-                        sinal.a_voz_perdeu(*fraction, std::time::Instant::now());
+                        sinal.a_voz_perdeu(*fraction, agora);
+                    } else if current_voice_room == Some(*voice_room) {
+                        sinal.a_voz_ouvida_perdeu(*person, *fraction, agora);
                     }
                 }
 
@@ -6882,11 +6892,11 @@ fn translate(
         // não conhece sessão nenhuma — o barramento é o único caminho de uma
         // para outra. Difundir contaria a toda a sala a qualidade da rede de
         // cada um, que é o oposto da promessa do ADR 0036.
-        Event::UplinkLoss { person, fraction } if *person == self_person => {
-            Some(ServerMessage::UplinkLoss {
-                fraction: *fraction,
-            })
-        }
+        Event::UplinkLoss {
+            person, fraction, ..
+        } if *person == self_person => Some(ServerMessage::UplinkLoss {
+            fraction: *fraction,
+        }),
         Event::UplinkLoss { .. } => None,
 
         // Nunca por aqui. A audiência deste depende de `AdministerServer`, e
