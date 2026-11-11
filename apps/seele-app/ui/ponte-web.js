@@ -3255,6 +3255,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
       if (!(await sondarATela(await pelaPagina("codec_da_tela")({})))) return Promise.reject("ScreenShareUnavailable");
       return [{ id: 1, nome: FONTE_DO_NAVEGADOR, monitor: true, largura: Math.round(screen.width * devicePixelRatio), altura: Math.round(screen.height * devicePixelRatio) }];
     }),
+  // **As prévias das fontes**: nesta casca a única fonte é o seletor do
+  // navegador, e é ele quem mostra a prévia de cada tela e janela. Não há o
+  // que mandar à caixa, e o cartão fica só com o nome.
+  previas_de_tela: () => Promise.resolve(null),
   permissao_de_tela: () => comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
   pedir_permissao_de_tela: () =>
     comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
