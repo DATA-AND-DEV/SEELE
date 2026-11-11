@@ -88,21 +88,66 @@ async function vista() {
           window.escolhas = [];
           const acao = () => {};
           window.vistaSaida = criarVistaDaConversaPessoal({ acoes: { voltar: acao, criar: acao, chamar: acao, copiar: acao, atender: acao,
-            recusar: acao, encerrar: acao, enviarTexto: acao, microfone: acao, compartilhar: acao, podeCompartilhar: () => true,
+            recusar: acao, encerrar: acao, enviarTexto: acao, microfone: acao, compartilhar: acao, camera: acao, trocarTela: acao, podeCompartilhar: () => true, podeLigarCamera: () => window.temCamera === true,
             saida: id => escolhas.push(id === undefined ? 'seletor-nativo' : id) } });
           vistaSaida.elemento.id = "saida-pessoal-bancada"; document.body.append(vistaSaida.elemento); vistaSaida.abrir(); vistaSaida.estado({ estado: 'dentro', apelido: 'Par' });
         });
         const raiz = page.locator('#saida-pessoal-bancada');
         assert.equal(await raiz.locator('.pessoal-web-saida').isVisible(), false);
         await page.evaluate(() => vistaSaida.saida({ disponivel: true, nativa: true, aparelhos: [{ id: 'fone-real', nome: '<Fone>' }], id: '', nome: 'Sistema' }));
-        for (const [width, height] of [[320, 568], [390, 844], [568, 320]]) {
-          await page.setViewportSize({ width, height });
-          const botoes = await raiz.locator('.pessoal-web-rodape button:visible').evaluateAll(bs => bs.map(b => {
-            const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, x: r.x, fim: r.right, baixo: r.bottom };
-          }));
-          assert.ok(botoes.every(b => b.w >= 44 && b.h >= 44 && b.x >= 0 && b.fim <= width + 1 && b.baixo <= height + 1), JSON.stringify(botoes));
-          assert.equal(await raiz.evaluate(e => e.scrollWidth > innerWidth + 1), false, JSON.stringify(await raiz.evaluate(e => ({ width: innerWidth, scroll: e.scrollWidth, rect: e.getBoundingClientRect().toJSON() }))));
+        // A barra com a câmera da 1.0: cinco controles com a saída à vista, seis enquanto a tela está no ar (entra o TROCAR TELA).
+        // Cada caso é medido com a câmera sem codificador (botão apagado) e com ela (o caso de um navegador de verdade).
+        const casos = [
+          ['cinco, câmera indisponível', { temCamera: false, tela: false, camera: false }, 5],
+          ['cinco, câmera disponível', { temCamera: true, tela: false, camera: false }, 5],
+          ['cinco, câmera no ar', { temCamera: true, tela: false, camera: true }, 5],
+          ['seis, tela no ar', { temCamera: true, tela: true, camera: false }, 6],
+        ];
+        for (const [caso, { temCamera, tela, camera }, quantos] of casos) {
+          await page.evaluate(({ temCamera, tela, camera }) => {
+            window.temCamera = temCamera;
+            vistaSaida.compartilhando(tela || camera, { camera });
+          }, { temCamera, tela, camera });
+          for (const [width, height] of [[320, 568], [390, 844], [568, 320]]) {
+            await page.setViewportSize({ width, height });
+            const onde = `${motor} ${width}x${height} ${caso}`;
+            const botoes = await raiz.locator('.pessoal-web-rodape button:visible').evaluateAll(bs => bs.map(b => {
+              const r = b.getBoundingClientRect();
+              const palavra = [...b.querySelectorAll('span')].find(s => s.getClientRects().length);
+              const p = palavra?.getBoundingClientRect();
+              const g = b.querySelector('.glifo').getBoundingClientRect();
+              return { nome: b.getAttribute('aria-label'), w: r.width, h: r.height, x: r.x, fim: r.right, baixo: r.bottom,
+                transborda: b.scrollWidth > b.clientWidth + 1, palavra: palavra?.textContent ?? null,
+                palavraFora: p ? p.left < r.left - 1 || p.right > r.right + 1 : false,
+                circulo: [g.width, g.height], desenho: b.querySelector('.glifo').innerHTML, apagado: b.disabled };
+            }));
+            assert.equal(botoes.length, quantos, `${onde}: ${JSON.stringify(botoes.map(b => b.nome))}`);
+            assert.ok(botoes.every(b => b.w >= 44 && b.h >= 44 && b.x >= 0 && b.fim <= width + 1 && b.baixo <= height + 1), `${onde}: ${JSON.stringify(botoes)}`);
+            assert.equal(await raiz.evaluate(e => e.scrollWidth > innerWidth + 1), false, `${onde}: ` + JSON.stringify(await raiz.evaluate(e => ({ width: innerWidth, scroll: e.scrollWidth, rect: e.getBoundingClientRect().toJSON() }))));
+            // Nenhuma palavra maior que o botão dela, e nenhum botão em cima do vizinho.
+            assert.deepEqual(botoes.filter(b => b.transborda || b.palavraFora).map(b => [b.nome, b.palavra]), [], `${onde}: rótulo maior que o botão`);
+            const emOrdem = [...botoes].sort((a, b) => a.x - b.x);
+            for (let i = 1; i < emOrdem.length; i++) assert.ok(emOrdem[i].x >= emOrdem[i - 1].fim - 0.5, `${onde}: ${emOrdem[i].nome} sobre ${emOrdem[i - 1].nome}`);
+            // A palavra aparece em todos ou em nenhum: uma barra meio rotulada lê como defeito.
+            assert.ok(new Set(botoes.map(b => b.palavra === null)).size === 1, `${onde}: barra meio rotulada ${JSON.stringify(botoes.map(b => b.palavra))}`);
+            // O círculo é o alvo do toque: nunca menor que 44, e sempre redondo.
+            assert.ok(botoes.every(b => b.circulo[0] >= 44 && Math.abs(b.circulo[0] - b.circulo[1]) < 0.5), `${onde}: círculo ${JSON.stringify(botoes.map(b => b.circulo))}`);
+            // A 390 e deitado as cinco palavras cabem; a 320 fica só o círculo, e o nome inteiro segue no `aria-label`.
+            if (quantos === 5) assert.equal(botoes[0].palavra !== null, width >= 390, `${onde}: ${JSON.stringify(botoes.map(b => b.palavra))}`);
+            const daCamera = botoes.find(b => /CÂMERA/.test(b.nome));
+            assert.equal(daCamera.nome, camera ? 'DESLIGAR CÂMERA' : 'LIGAR CÂMERA', onde);
+            assert.equal(daCamera.apagado, !temCamera, `${onde}: câmera apagada`);
+            if (daCamera.palavra !== null) assert.equal(daCamera.palavra, 'CÂMERA', onde);
+            // A câmera tem o desenho dela, e não a seta de «entrar» em que um rótulo sem desenho cai.
+            assert.equal(daCamera.desenho, await page.evaluate(() => glifo('camera').innerHTML), `${onde}: desenho da câmera`);
+            assert.notEqual(daCamera.desenho, await page.evaluate(() => glifo('avancar').innerHTML), `${onde}: a câmera com a seta`);
+            if (process.env.SEELE_PREVIEW_DIR) {
+              fs.mkdirSync(process.env.SEELE_PREVIEW_DIR, { recursive: true });
+              await page.screenshot({ path: path.join(process.env.SEELE_PREVIEW_DIR, `${motor}-saida-${width}x${height}-${caso.replace(/[^a-z0-9]+/gi, '-')}.png`) });
+            }
+          }
         }
+        await page.evaluate(() => { window.temCamera = false; vistaSaida.compartilhando(false); });
         await raiz.getByRole('button', { name: 'Saída de áudio: Sistema', exact: true }).click();
         await raiz.getByRole('combobox', { name: 'Saída de áudio', exact: true }).selectOption('fone-real');
         await raiz.getByRole('button', { name: 'ESCOLHER DISPOSITIVO', exact: true }).click();

@@ -31,7 +31,7 @@ const engines = require('./playwright.cjs');
                 if (window.adiarEnvio) return new Promise(resolve => { window.concluirEnvio = resolve; });
                 vistaPessoal.texto({ id: 1, de: 'eu', texto });
               },
-              microfone: () => {}, compartilhar: () => {}, podeCompartilhar: () => false,
+              microfone: () => {}, compartilhar: () => {}, podeCompartilhar: () => false, podeLigarCamera: () => false,
             } });
             vistaPessoal.elemento.id = 'vista-pessoal-bancada';
             document.body.append(vistaPessoal.elemento);

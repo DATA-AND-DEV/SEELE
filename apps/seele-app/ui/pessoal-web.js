@@ -76,12 +76,18 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     el.textContent = texto;
     return el;
   };
-  const desenhos = { "SAÍDA DE ÁUDIO": "fone", VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "tela", "PARAR COMPARTILHAMENTO": "tela", "TROCAR TELA": "trocar", "SAIR DA CONVERSA": "xis", CANCELAR: "sair", "ENCERRAR CONVITE": "sair" };
+  const desenhos = { "SAÍDA DE ÁUDIO": "fone", VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "tela", "PARAR COMPARTILHAMENTO": "tela", "TROCAR TELA": "trocar", "SAIR DA CONVERSA": "xis", CANCELAR: "sair", "ENCERRAR CONVITE": "sair",
+    // A câmera tem o desenho dela: sem esta linha o botão caía no `avancar`, a seta de «entrar».
+    [FRASES_DA_CAMERA.pessoalLigar]: "camera", [FRASES_DA_CAMERA.pessoalDesligar]: "camera" };
   const rotular = (el, texto) => {
     if (el.getAttribute("aria-label") === texto && el.querySelector(".glifo")) return;
     el.setAttribute("aria-label", texto);
     const icone = texto === "LIGAR MICROFONE" ? glifoComEstado("microfone", true) : glifo(desenhos[texto] || "avancar");
-    const curto = { "LIGAR MICROFONE": "MICROFONE", "DESLIGAR MICROFONE": "MICROFONE", "COMPARTILHAR TELA": "TELA", "PARAR COMPARTILHAMENTO": "PARAR TELA", "SAIR DA CONVERSA": "SAIR" };
+    const curto = { "LIGAR MICROFONE": "MICROFONE", "DESLIGAR MICROFONE": "MICROFONE", "COMPARTILHAR TELA": "TELA", "PARAR COMPARTILHAMENTO": "PARAR TELA", "SAIR DA CONVERSA": "SAIR",
+      // No celular a palavra sob o círculo é o nome da coisa, como no microfone: o estado
+      // quem diz é o `aria-pressed` (o anel laranja), e o rótulo inteiro segue no `aria-label`.
+      [FRASES_DA_CAMERA.pessoalLigar]: FRASES_DA_CAMERA.rotulos.camera, [FRASES_DA_CAMERA.pessoalDesligar]: FRASES_DA_CAMERA.rotulos.camera,
+      "TROCAR TELA": "TROCAR", "SAÍDA DE ÁUDIO": "SAÍDA" };
     // Em janela larga o botão diz o rótulo inteiro (o canvas); em janela estreita, o curto.
     el.replaceChildren(icone, no("span", "pessoal-web-botao-texto", curto[texto] || texto), no("span", "pessoal-web-botao-longo", texto));
   };
