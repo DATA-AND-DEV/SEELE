@@ -569,8 +569,15 @@ listen("seele://event", (evento) => {
     cameraDaJanela.banda = bps;
     const codificador = cameraDaJanela.codificador;
     if (codificador && codificador.state === "configured") {
+      // **Sem pedir quadro-chave.** Trocar a banda não troca as medidas nem
+      // o codec, e quem assiste segue decodificando a mesma cadeia. A chave
+      // pedida aqui a cada troca era uma rajada por mudança de orçamento, e
+      // num caminho estreito a rajada derrubava a estimativa que acabara de
+      // subir (medido em 11/11/2026 a 1 Mbps: 13 chaves e 370 kbps em 40 s com
+      // ela, 1 chave e 526 kbps sem). Se o codificador deste navegador
+      // precisar recomeçar de uma imagem inteira, ele mesmo a emite, e o
+      // `pedaco.type` a anuncia como chave.
       codificador.configure(configuracaoDaCamera(cameraDaJanela.codificacao, bps));
-      cameraDaJanela.chave = true;
     }
   } else if (carga.CameraPaused) {
     const { screen, reason } = carga.CameraPaused;

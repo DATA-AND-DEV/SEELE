@@ -357,6 +357,7 @@ async function aCameraNoAr(navegador, servidor, medida) {
   assert.equal((await quadros(pagina)).slice(depoisDoPedido, depoisDoPedido + 6).filter((quadro) => quadro.cabecalhos["seele-chave"] === "1").length, 0,
     "o pedido de chave de outra transmissão fez esta câmera mandar uma");
 
+  const naTroca = (await quadros(pagina)).length;
   const configuracoes = await pagina.evaluate(async () => {
     const vistas = [];
     const original = VideoEncoder.prototype.configure;
@@ -367,6 +368,11 @@ async function aCameraNoAr(navegador, servidor, medida) {
     return vistas;
   });
   assert.equal(configuracoes.length, 1, "a banda nova não reconfigurou o codificador");
+  // E a troca de banda não custa um quadro-chave: os quadros seguintes
+  // continuam a mesma cadeia.
+  await pagina.waitForFunction((n) => banca.quadros.length >= n + 8, naTroca);
+  assert.equal((await quadros(pagina)).slice(naTroca, naTroca + 8).filter((quadro) => quadro.cabecalhos["seele-chave"] === "1").length, 0,
+    "a troca de banda fez a câmera mandar um quadro-chave");
   assert.ok(configuracoes[0] < 600_000 && configuracoes[0] >= 400_000, `o codificador não mira abaixo do teto do fluxo: ${configuracoes[0]}`);
 
   await pagina.evaluate(() => banca.emitir({ CameraPaused: { screen: banca.camera.tela, reason: "SinalCritico" } }));

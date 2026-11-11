@@ -11,7 +11,7 @@
 //! … --example tela_do_produto_sob_perda -- \
 //!     [--segundos 20] [--rodadas 3] [--semente 20261110] [--so <pedaço do cenário>] \
 //!     [--variante produto|fixo|cru|ambas|todas] [--aquecimento 0] [--atraso-ms 30] \
-//!     [--fracao 0.85] [--fator-da-chave 8] [--sem-chave-na-troca] [--recusa-sem-chave] \
+//!     [--fracao 0.85] [--fator-da-chave 8] [--com-chave-na-troca] [--recusa-sem-chave] \
 //!     [--sem-contrapressao] \
 //!     [--escolha-bps 1470000] [--caminho-do-servidor-bps 50000000]
 //! ```
@@ -44,8 +44,9 @@
 //!   (`apps/seele-app/ui/camera.js`): mira `--fracao` (0,85, o
 //!   `FRACAO_DO_TETO_DA_CAMERA` de lá) do `Event::CameraBudget`, a 30 quadros;
 //!   manda chave (`--fator-da-chave` × o delta, 8 por padrão) no começo, a cada
-//!   `Event::CameraKeyFrameRequested`, depois de um quadro recusado e — como a
-//!   casca, que reconfigura o codificador — a cada troca de orçamento; pula 3
+//!   `Event::CameraKeyFrameRequested` e depois de um quadro recusado (com
+//!   `--com-chave-na-troca`, também a cada troca de orçamento, como a casca
+//!   fazia até 11/11/2026); pula 3
 //!   quadros depois de uma chave (`QUADROS_APOS_A_CHAVE`); e para em
 //!   `Event::CameraPaused`.
 //! - **fixo** — o controle: ignora o orçamento. Deltas de 6 KiB a 30 quadros/s
@@ -242,7 +243,7 @@ fn opcoes() -> Opcoes {
         variantes: vec![Variante::Produto, Variante::Fixo],
         fracao: 0.85,
         fator_da_chave: 8,
-        chave_na_troca: true,
+        chave_na_troca: false,
         escolha_bps: None,
         caminho_do_servidor_bps: 50_000_000,
         aquecimento: 0,
@@ -272,6 +273,7 @@ fn opcoes() -> Opcoes {
             "--fator-da-chave" => {
                 opcoes.fator_da_chave = valor().parse().expect("--fator-da-chave");
             }
+            "--com-chave-na-troca" => opcoes.chave_na_troca = true,
             "--sem-chave-na-troca" => opcoes.chave_na_troca = false,
             "--escolha-bps" => opcoes.escolha_bps = Some(valor().parse().expect("--escolha-bps")),
             "--caminho-do-servidor-bps" => {
@@ -969,8 +971,9 @@ async fn celula(
                 }
                 let orcamento = olhos.orcamento_bps.load(Ordering::SeqCst);
                 if variante == Variante::Produto && orcamento != configurado {
-                    // A casca reconfigura o codificador, e o primeiro quadro de
-                    // um codificador reconfigurado é chave.
+                    // A casca reconfigura o codificador. Até 11/11/2026 ela
+                    // pedia uma chave a cada troca; `--com-chave-na-troca`
+                    // repete aquele comportamento, para comparar.
                     if configurado != 0 && opcoes.chave_na_troca {
                         olhos.quer_chave.store(true, Ordering::SeqCst);
                     }
