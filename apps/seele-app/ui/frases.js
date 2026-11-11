@@ -3030,6 +3030,12 @@ function fraseDoLinkDoNavegador(link, data, hora, alcanceDoConvite = null) {
 const PAGINA_DO_APP = "https://get.seele.sh/#baixar";
 
 /**
+ * A página de apoio (GitHub Sponsors e Pix), no mesmo site. Lá e não no app:
+ * a chave Pix e o QR mudam sem que ninguém precise de uma versão nova.
+ */
+const PAGINA_DE_APOIO = "https://get.seele.sh/#apoie";
+
+/**
  * O aviso de fone no navegador (P9; matriz, achado E-6).
  *
  * O do desktop diz que o SEELE não cancela eco, o que no navegador conta só

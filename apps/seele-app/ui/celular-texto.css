@@ -513,6 +513,9 @@
 :where(:root[data-casca="celular"]) .ajuda-diz { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .ajuda-tecla,
 :where(:root[data-casca="celular"]) .ajuda-dica-tecla { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ajuda-apoio-diz { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ajuda-apoiar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .ajuda-apoio-estado { font-size: calc(12px * var(--cel-escala)); }
 @media (max-width: 700px) {
   :where(:root[data-casca="celular"]) .ajuda-titulo { font-size: calc(26px * var(--cel-escala)); }
 }
