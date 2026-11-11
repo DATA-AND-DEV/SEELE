@@ -1003,6 +1003,8 @@ const vozDaSessao = {
   /** O número da voz com que ela entrou: a volta traz outro. */
   numero: null,
   ligando: null,
+  /** A abertura guardada em `ligando` falhou: a próxima entrada tenta outra. */
+  aberturaFalhou: false,
   /**
    * O PEDIDO mais novo de entrar ou sair da sala (cada ENTRAR e cada SAIR toma um número). Uma resposta (a rejeição de uma entrada, a resposta de um
    * sair) só age sobre a captura se o pedido dela ainda é o mais novo: a resposta velha de um pedido não solta nem desliga a captura de um pedido novo.
@@ -1036,20 +1038,33 @@ const BYTE_DO_MODO = Object.freeze({ PushToTalk: 0, VoiceActivated: 1, Open: 2 }
  * nada espera antes do `ligar`.
  */
 function ligarOAudioNoGesto() {
-  const voz = vozDaPonte.atual;
-  if (!voz || vozDaSessao.ligando) return;
-  // **A abertura é dona do próprio `ligando`**: uma abertura antiga que falha
-  // depois de uma nova ter nascido (o `pagehide`, a sessão que acabou) não zera
-  // o da nova.
+  // Uma abertura de pé, ou a caminho, não se repete. A que **falhou** dá lugar
+  // a outra: é assim que sair e entrar de novo tenta de novo.
+  if (vozDaSessao.ligando && !vozDaSessao.aberturaFalhou) return;
   vozDaSessao.geracao += 1;
-  const esta = voz
-    .ligar({ microfone: guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone), saida: guardadoNaOrigem(CHAVES_DA_ORIGEM.saida) })
-    .catch((falha) => {
-      if (vozDaSessao.ligando === esta) vozDaSessao.ligando = null;
-      throw falha;
-    });
+  vozDaSessao.aberturaFalhou = false;
+  const pedido = { microfone: guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone), saida: guardadoNaOrigem(CHAVES_DA_ORIGEM.saida) };
+  // **A voz da página pode ainda estar nascendo** (o `.wasm` dela carrega com
+  // a sessão): espera-se por ela em vez de voltar calado. Voltar calado deixava
+  // a sala «SEM ÁUDIO» sem nada ter sido tentado.
+  // **Com a voz já de pé, o `ligar` é chamado aqui mesmo, dentro do gesto**: o
+  // `AudioContext` e o `play()` do iOS só valem nele. Só a voz que ainda não
+  // nasceu é esperada.
+  const voz = vozDaPonte.atual;
+  const esta = voz ? voz.ligar(pedido) : aVozDaPonte().then((nascida) => nascida.ligar(pedido));
   vozDaSessao.ligando = esta;
-  esta.catch(() => {});
+  // **A abertura que falha continua guardada, com o erro dentro.** Ela era
+  // trocada por `null` e o erro, engolido: se o microfone falhasse antes de o
+  // servidor confirmar a entrada (o Chrome do Android sem a permissão do
+  // sistema recusa na hora, sem perguntar), quem confirmava a sala achava que
+  // nada tinha sido aberto, dizia «SEM ÁUDIO» e deixava a pessoa sem ouvir —
+  // com a saída já tocando. Guardada, `conferirAVozDaSessao` lê a etapa do
+  // erro e mantém a escuta. Só a própria abertura marca a própria falha.
+  esta.catch((falha) => {
+    if (vozDaSessao.ligando !== esta) return;
+    vozDaSessao.aberturaFalhou = true;
+    console.warn(`ponte: o áudio da sala não abriu (etapa: ${falha?.etapaDaVoz ?? "?"}):`, falha);
+  });
 }
 
 /**
@@ -1077,7 +1092,7 @@ function conferirAVozDaSessao(sessao) {
   // A conexão nova da volta tem outro número de voz: a voz sai e entra com ele, e o microfone FICA (outra captura pediria a permissão de novo).
   if (vozDaSessao.dentro && vozDaSessao.numero !== lido.resposta.voz) sairDaVozMantendoOMicrofone();
   if (vozDaSessao.dentro) return;
-  if (!voz || !vozDaSessao.ligando) {
+  if (!vozDaSessao.ligando) {
     mudarAAbertura("sem_aparelho");
     return;
   }
@@ -1087,6 +1102,14 @@ function conferirAVozDaSessao(sessao) {
   vozDaSessao.numero = numero;
   const geracao = vozDaSessao.geracao;
   const entrarNaVoz = (comMicrofone) => {
+    // A voz de agora, e não a de quando a sala foi conferida: ela pode ter
+    // acabado de nascer (ver `ligarOAudioNoGesto`).
+    const voz = vozDaPonte.atual;
+    if (!voz) {
+      vozDaSessao.dentro = false;
+      mudarAAbertura("nao_abriu_no_prazo");
+      return;
+    }
     voz.mudo(comMicrofone ? vozDaSessao.mudo : true);
     voz.isolar(vozDaSessao.isolado);
     voz.modo(BYTE_DO_MODO[modoDeVozGuardado()] ?? 1);
@@ -1112,7 +1135,6 @@ function conferirAVozDaSessao(sessao) {
       // Só a recusa do MICROFONE conta como recusa: o `play()` da saída que o
       // navegador barra também se chama `NotAllowedError`.
       if (doMicrofone && falha.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
-      console.warn(`ponte: a voz da sala não abriu (etapa: ${falha?.etapaDaVoz ?? "?"}):`, falha);
       // **O microfone que não abriu não tira a escuta** (0.19): a saída do
       // motor segue de pé, e a pessoa ouve a sala, com a tela dizendo que
       // ninguém a ouve, em vez de ficar sem nada e sem saber por quê.
@@ -1120,8 +1142,11 @@ function conferirAVozDaSessao(sessao) {
         entrarNaVoz(false);
         return;
       }
+      // **A saída não abriu, e a tela diz** (o `nao_abriu_no_prazo` tem a
+      // frase; o `sem_aparelho` não tem nenhuma, e num celular não há console
+      // para ler o porquê).
       vozDaSessao.dentro = false;
-      mudarAAbertura("sem_aparelho");
+      mudarAAbertura("nao_abriu_no_prazo");
     },
   );
 }

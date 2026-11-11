@@ -25739,7 +25739,7 @@ const montar = ({ segurarGum = [] } = {}) => {
     sessaoCom: (voz) => ({ acabou: false, transporteDaVoz: { ouvir: () => () => {}, enviar: () => true }, atender: () => ({ resposta: { sala: 1, voz } }) }),
     pagehide: () => (janela.ouvintes?.pagehide ?? []).slice().forEach((f) => f({ type: "pagehide", persisted: true })),
     pageshow: () => (janela.ouvintes?.pageshow ?? []).slice().forEach((f) => f({ type: "pageshow", persisted: true })),
-    estado: () => roda("({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null, abertura: vozDaSessao.abertura, numero: vozDaSessao.numero })"),
+    estado: () => roda("({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null && !vozDaSessao.aberturaFalhou, abertura: vozDaSessao.abertura, numero: vozDaSessao.numero })"),
   };
 };
 const vivas = (m) => m.faixas.length > 0 && m.faixas.every((f) => f.readyState === "live");
@@ -26868,7 +26868,7 @@ async function cenarios(pecas) {
     ctx.__remoto = async (nome) => { if (ctx.__recusar && nome === "enter_voice_room") throw "Recusada"; return {}; };
     vm.runInContext(`${declaracao}\n${pecas.mudar}\n${pecas.soltar}\n${pecas.sair}\n${pecas.manter}\n${pecas.conferir}\n${pecas.ligar}\n${pecas.trocar}
       const manipuladores = {\n${pecas.manipuladores}\n};
-      globalThis.__estado = () => ({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null, abertura: vozDaSessao.abertura, geracao: vozDaSessao.geracao });
+      globalThis.__estado = () => ({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null && !vozDaSessao.aberturaFalhou, abertura: vozDaSessao.abertura, geracao: vozDaSessao.geracao });
       globalThis.__M = manipuladores; globalThis.__conferir = conferirAVozDaSessao; globalThis.__ligar = ligarOAudioNoGesto; globalThis.__soltar = soltarOMicrofoneDaVoz;`, ctx, { filename: "ponte-recortada.js" });
     return {
       ctx, faixas, aberturas, chamadas, sessao, voz,
@@ -26929,6 +26929,20 @@ async function cenarios(pecas) {
     const p = c.ctx.__M.enter_voice_room({}); c.pôrSala("Sala 1", 1); await p;
     c.aberturas[0].e(Object.assign(new Error("negado"), { name: "NotAllowedError" })); await tick(); await tick();
     chk("5. getUserMedia que falha: 0 faixas, voz fora, abertura coerente", c.vivas() === 0 && c.ctx.__estado().dentro === false && c.ctx.__estado().ligando === false); }
+  // 5b. **A falha que chega ANTES de o servidor confirmar a sala** (o Chrome do Android sem a permissão do sistema recusa na hora, sem perguntar):
+  // a do MICROFONE mantém a escuta (a saída já toca) e a tela diz SÓ OUVINDO; a da SAÍDA diz que o áudio não abriu. Antes, as duas viravam
+  // «SEM ÁUDIO» sem frase, com o erro engolido, e a pessoa não ouvia nem falava.
+  for (const [etapa, esperada, entra] of [["microfone", "so_ouvindo", true], ["saida", "nao_abriu_no_prazo", false]]) {
+    const c = montar();
+    c.ctx.__recusar = false;
+    const p = c.ctx.__M.enter_voice_room({});
+    // A recusa na hora, no mesmo passo do pedido: ela chega antes de o servidor confirmar a entrada.
+    c.aberturas[0].e(Object.assign(new Error("negado"), { name: "NotAllowedError", etapaDaVoz: etapa }));
+    c.pôrSala("Sala 1", 1); await p; await tick(); await tick();
+    const estado = c.ctx.__estado();
+    chk(`5b. a falha de ${etapa} antes da confirmação: abertura ${estado.abertura}, dentro ${estado.dentro}`,
+      estado.abertura === esperada && estado.dentro === entra && c.chamadas.some((x) => x.startsWith("entrar:")) === entra);
+  }
   { const c = montar();
     c.ctx.__recusar = true;
     let recusou = false;
