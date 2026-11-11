@@ -121,7 +121,7 @@ const SONDA_DA_FILA_DA_CAMERA: Duration = Duration::from_millis(100);
 /// O piso de `configuracaoDaCamera` em `camera.js`: `Math.max(100_000, …)`.
 const PISO_DO_CODIFICADOR_BPS: f64 = 100_000.0;
 /// Código de início, tipo da NAL, número do quadro (8) e instante (8).
-const CABECALHO: usize = 5 + 8 + 8;
+const CABECALHO: usize = 5 + 16 + 16;
 const ATRASO: Duration = Duration::from_millis(30);
 const CONGELADO_ACIMA_DE: Duration = Duration::from_millis(200);
 const AMOSTRA: Duration = Duration::from_millis(250);
@@ -358,11 +358,20 @@ impl EventListener for DeQuemAssiste {
                 let Some(bytes) = seele_ffi::de_base64(&data) else {
                     return;
                 };
-                if bytes.len() < CABECALHO {
+                // O prefixo de início volta com três ou com quatro bytes,
+                // conforme o caminho (o RTP o reescreve).
+                let Some(inicio) = bytes.windows(3).position(|j| j == [0, 0, 1]) else {
                     return;
-                }
-                let numero = u64::from_be_bytes(bytes[5..13].try_into().unwrap());
-                let capturado_ns = u64::from_be_bytes(bytes[13..21].try_into().unwrap());
+                };
+                let hex = |de: usize| {
+                    bytes
+                        .get(inicio + 4 + de..inicio + 20 + de)
+                        .and_then(|b| std::str::from_utf8(b).ok())
+                        .and_then(|t| u64::from_str_radix(t, 16).ok())
+                };
+                let (Some(numero), Some(capturado_ns)) = (hex(0), hex(16)) else {
+                    return;
+                };
                 self.chegadas.lock().unwrap().push(Chegada {
                     numero,
                     capturado_ns,
@@ -389,9 +398,12 @@ fn quadro(chave: bool, numero: u64, capturado_ns: u64, tamanho: usize) -> Vec<u8
     let tamanho = tamanho.max(CABECALHO);
     let mut bytes = Vec::with_capacity(tamanho);
     bytes.extend_from_slice(&[0, 0, 0, 1, if chave { 0x65 } else { 0x41 }]);
-    bytes.extend_from_slice(&numero.to_be_bytes());
-    bytes.extend_from_slice(&capturado_ns.to_be_bytes());
-    bytes.extend((CABECALHO..tamanho).map(|i| (i % 251) as u8));
+    // Em hexadecimal, e o enchimento sem zeros: um número binário traz
+    // `00 00 01` dentro do quadro, que é um prefixo de início de NAL. No canal
+    // isso passa como bytes; no RTP o empacotador de H.264 partiria o quadro
+    // ali e a volta não teria os mesmos bytes.
+    bytes.extend_from_slice(format!("{numero:016x}{capturado_ns:016x}").as_bytes());
+    bytes.extend((CABECALHO..tamanho).map(|i| (i % 251) as u8 | 0x80));
     bytes
 }
 
