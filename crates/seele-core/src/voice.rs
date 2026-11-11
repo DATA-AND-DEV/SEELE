@@ -2133,7 +2133,12 @@ async fn pipeline(
     //
     // Uma por caminho de voz, como o ganho, e pelo mesmo motivo: ela guarda o piso
     // aprendido entre quadros. Ver `seele_audio::supressao`.
-    let mut supressao = seele_audio::supressao::Supressao::nova(forca_da_supressao(&controls));
+    // **A rede neural, e não mais a subtração espectral** (10/11/2026): a
+    // espectral aprende o ruído que fica e deixa a batida de teclado passar
+    // inteira; a rede a baixa a cerca de um terço. A mesma interface e o mesmo
+    // atraso. `docs/medidas/2026-11-11-teclado-na-supressao.md`.
+    let mut supressao =
+        seele_audio::supressao_neural::SupressaoNeural::nova(forca_da_supressao(&controls));
     let mut limpo: Vec<f32> = Vec::new();
     let mut a_transmitir: Vec<Vec<f32>> = Vec::new();
     let mut supressao_avisada = false;
@@ -2331,7 +2336,8 @@ async fn pipeline(
                 supressao_avisada = true;
                 tracing::info!(
                     forca = supressao.forca(),
-                    atraso_amostras = seele_audio::supressao::Supressao::atraso_em_amostras(),
+                    atraso_amostras =
+                        seele_audio::supressao_neural::SupressaoNeural::atraso_em_amostras(),
                     "a supressão de ruído do microfone está tratando o sinal"
                 );
             }

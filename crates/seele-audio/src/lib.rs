@@ -38,6 +38,7 @@ pub mod resample;
 pub mod rt;
 pub mod supervisor;
 pub mod supressao;
+pub mod supressao_neural;
 pub mod telemetry;
 pub mod toque;
 

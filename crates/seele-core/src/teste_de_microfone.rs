@@ -40,7 +40,9 @@ use seele_audio::device;
 
 use crate::voice::DeviceChoice;
 use seele_audio::gate::{GateConfig, GateMode, VoiceGate};
-use seele_audio::supressao::Supressao;
+// A mesma supressão da voz de verdade: o teste de microfone tem de soar
+// como a sala vai ouvir.
+use seele_audio::supressao_neural::SupressaoNeural as Supressao;
 use seele_audio::{FRAME_SAMPLES, SAMPLE_RATE_HZ};
 
 /// Quanta folga os anéis do dispositivo guardam, em milissegundos.

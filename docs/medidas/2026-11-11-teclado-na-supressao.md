@@ -28,3 +28,7 @@ O sinal: piso de sala a −55 dBFS e, a cada 180 ms, um estalo de banda larga a 
 ## O que NÃO mostram
 
 Um estalo de ruído branco não é uma tecla, e uma série de harmônicos não é fala: o RNNoise foi treinado com gravações, e o que ele faz com uma tecla de verdade pode ser melhor ou pior que isto. A decisão de trocar o filtro do produto pede uma gravação real (fala e digitação no mesmo microfone), passada pelos candidatos.
+
+## Depois da medida (11/11/2026)
+
+O dono decidiu integrar o RNNoise já, sem esperar a gravação real. O laço de voz e o teste de microfone passaram a usar `seele_audio::supressao_neural::SupressaoNeural`: a mesma interface, o mesmo atraso de 10 ms, e a força do produto como mistura entre o sinal da rede e o original. Com a mistura em 1,0 o estalo sintético cai 7,7 dB no teste do módulo. A subtração espectral fica na árvore como referência e como caminho de volta. **A avaliação com fala e teclado de verdade continua por fazer.**

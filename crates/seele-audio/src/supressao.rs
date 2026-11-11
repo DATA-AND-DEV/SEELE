@@ -1,5 +1,11 @@
 //! Reduz o ruído de fundo do microfone antes de qualquer decisão sobre ele.
 //!
+//! **Desde 11/11/2026 o laço de voz não usa este módulo**: quem está ligado é
+//! [`crate::supressao_neural::SupressaoNeural`], que baixa a batida de teclado
+//! que este deixa passar (`docs/medidas/2026-11-11-teclado-na-supressao.md`).
+//! Este fica como a referência contra a qual a rede é medida, e como o
+//! caminho de volta se a rede se mostrar pior com voz de verdade.
+//!
 //! F02 de `docs/features-v15.md`: «adicionar um filtro de voz ao áudio do
 //! microfone, a la Discord». O escopo escolhido é o que aquele documento
 //! escreve — **supressão de ruído com preservação da fala natural** — e não

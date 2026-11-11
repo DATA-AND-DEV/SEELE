@@ -30,6 +30,12 @@ rubato = "4.0.0"
 # modelo, uma licença e um arquivo a empacotar — a troca está escrita no
 # cabeçalho de `supressao.rs`.
 realfft = "3.5.0"
+# A supressão de ruído por rede neural (`supressao_neural.rs`): a porta em Rust
+# puro do RNNoise da Xiph, BSD-3-Clause, com o modelo dentro do crate. Nenhuma
+# ligação em C (ADR 0007) e nenhum arquivo a empacotar. Sem as features padrão,
+# que trazem um binário e conversores de formato. A medida que a trouxe:
+# `docs/medidas/2026-11-11-teclado-na-supressao.md`.
+nnnoiseless = { version = "=0.5.2", default-features = false }
 # `source-build` em toda plataforma: compila o libopus do código-fonte em vez
 # de baixar o pré-compilado do crate. Não é preferência, é que o pré-compilado
 # não serve para nós em três frentes, todas verificadas:
@@ -113,10 +119,6 @@ indexing_slicing = "warn"
 [dev-dependencies]
 assert_no_alloc = "1.1.2"
 criterion = { version = "0.8.2", features = ["html_reports"] }
-# **Só para a bancada de medida** (`examples/teclado_na_supressao.rs`): a porta em
-# Rust puro do RNNoise (BSD-3-Clause), para comparar com a supressão de hoje no
-# mesmo sinal. Sem as features padrão, que trazem um binário e conversores.
-nnnoiseless = { version = "=0.5.2", default-features = false }
 
 [[bench]]
 name = "opus_frame"
