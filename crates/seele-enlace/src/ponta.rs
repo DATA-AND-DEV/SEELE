@@ -1022,6 +1022,9 @@ impl Motor {
         let mut buf = vec![0_u8; 2048];
         let mut revisar_em = Instant::now();
         let mut acordar = revisar_em;
+        // No Windows o relógio do `tokio` acorda de 15,6 em 15,6 ms, e o
+        // cadenciador da mídia pede prazos de poucos milissegundos.
+        let mut despertador = crate::despertador::Despertador::desta_plataforma();
         loop {
             let agora = Instant::now();
             // O fan-out gera um comando por destinatário. Varrer todos os pares
@@ -1033,7 +1036,9 @@ impl Motor {
                 acordar = self.proximo_acordar(agora);
                 revisar_em = agora + Duration::from_millis(1);
             }
+            despertador.armar(agora, acordar);
             tokio::select! {
+                () = despertador.tocou() => {}
                 lido = self.socket.recv_from(&mut buf) => {
                     // A entrada pode antecipar um prazo antes distante.
                     acordar = acordar.min(revisar_em);

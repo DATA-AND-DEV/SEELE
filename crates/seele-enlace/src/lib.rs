@@ -31,6 +31,7 @@
 mod conexao;
 mod credencial;
 mod cripto;
+mod despertador;
 mod dtls;
 pub mod envelope;
 mod midia;
