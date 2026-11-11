@@ -4241,6 +4241,27 @@ fn faixa_nova(
     (nova != atual).then_some(nova)
 }
 
+/// **A faixa que corta o teto do vídeo**, que não é sempre a do sinal.
+///
+/// No canal confiável, a faixa é o único jeito de o vídeo ceder quando a rede
+/// piora: Degraded corta o teto pela metade, Critical para. Na mídia RTP quem
+/// regula a taxa é a estimativa do TWCC (ADR 0067), que vê o atraso e a perda
+/// de cada pacote e já cede ao congestionamento — e que **não** lê perda
+/// sorteada como falta de banda. Cortar de novo pela faixa era cobrar a mesma
+/// perda duas vezes: medido em 11/11/2026 a 5% de perda, o vídeo caía de
+/// 2,4 para 1,4 Mbps com o caminho livre, e com perda e atraso juntos a faixa
+/// Critical o parava — a parada que a estimativa já não causa.
+///
+/// A faixa continua valendo para o que a tela **mostra** (o sinal) e para o
+/// canal. Só o teto do vídeo pela mídia deixa de segui-la.
+const fn faixa_para_o_teto(do_sinal: SignalBand, pela_midia: bool) -> SignalBand {
+    if pela_midia {
+        SignalBand::Nominal
+    } else {
+        do_sinal
+    }
+}
+
 impl Motor {
     async fn rodar(mut self, mut comandos: mpsc::Receiver<Comando>) {
         let mut tica = tokio::time::interval(TICA);
@@ -6946,7 +6967,7 @@ impl Motor {
         };
         let arranjo = crate::bomba::Arranjo {
             teto: self.teto_de_video(Some(&limites)),
-            faixa: self.faixa,
+            faixa: self.faixa_do_teto(),
             escolha_de_resolucao: limites.resolucao,
             cadencia: limites.cadencia,
             prioridade: limites.prioridade,
@@ -7002,7 +7023,9 @@ impl Motor {
             );
             return;
         }
-        let teto = self.teto_de_video(Some(&limites)).teto(self.faixa);
+        let teto = self
+            .teto_de_video(Some(&limites))
+            .teto(self.faixa_do_teto());
         let avisos = self.avisos.clone();
         let (alca, eventos, pedido_de_chave) = crate::de_fora::ligar_de_fora(
             quadros,
@@ -7230,6 +7253,12 @@ impl Motor {
         }
     }
 
+    /// A faixa que o teto do vídeo segue agora: a do sinal no canal, e a
+    /// nominal enquanto a transmissão vai pela mídia ([`faixa_para_o_teto`]).
+    const fn faixa_do_teto(&self) -> SignalBand {
+        faixa_para_o_teto(self.faixa, self.estimativa_da_midia.is_some())
+    }
+
     /// Conta à bomba que o teto andou.
     ///
     /// Uma ordem só para as três coisas que o mexem, porque o N já mora dentro
@@ -7239,7 +7268,7 @@ impl Motor {
             return;
         };
         let teto = self.teto_de_video(Some(&viva.limites));
-        viva.produtor.teto(teto, self.faixa);
+        viva.produtor.teto(teto, self.faixa_do_teto());
     }
 
     /// Mata a bomba, se houver uma.
@@ -12600,9 +12629,41 @@ mod a_maquina {
 
 #[cfg(test)]
 mod a_medida_do_teto_pela_midia {
-    use super::{da_medida_do_teto, para_a_medida_do_teto};
+    use super::{da_medida_do_teto, faixa_para_o_teto, para_a_medida_do_teto};
     use crate::tela::{Teto, TetoDeVideo, PISO_DE_BANDA_BPS};
     use seele_proto::signal::SignalBand;
+
+    /// **Pela mídia, o sinal ruim não corta o vídeo de novo.** A estimativa
+    /// do RTP já cedeu à rede; a faixa do sinal cortando por cima era a mesma
+    /// perda cobrada duas vezes, e a Critical parava o vídeo. No canal a
+    /// faixa continua mandando. Devolver `do_sinal` nos dois casos reprova
+    /// aqui.
+    #[test]
+    fn pela_midia_a_faixa_do_sinal_nao_corta_o_teto() {
+        let teto = TetoDeVideo::com_caminho(para_a_medida_do_teto(3_000_000));
+        let cheio = teto.teto(SignalBand::Nominal);
+        for do_sinal in [
+            SignalBand::Nominal,
+            SignalBand::Degraded,
+            SignalBand::Critical,
+        ] {
+            assert_eq!(
+                teto.teto(faixa_para_o_teto(do_sinal, true)),
+                cheio,
+                "pela mídia, a faixa {do_sinal:?} cortou o teto"
+            );
+            assert_eq!(faixa_para_o_teto(do_sinal, false), do_sinal);
+        }
+        // E no canal o corte continua existindo.
+        assert_ne!(
+            teto.teto(faixa_para_o_teto(SignalBand::Degraded, false)),
+            cheio
+        );
+        assert!(matches!(
+            teto.teto(faixa_para_o_teto(SignalBand::Critical, false)),
+            Teto::Parado(_)
+        ));
+    }
 
     /// **A estimativa do RTP nunca para o vídeo.** Por baixa que ela esteja, o
     /// teto fica no piso: com o vídeo parado a estimativa não teria de onde
