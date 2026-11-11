@@ -47,7 +47,11 @@ const PAYLOAD: [u8; 80] = [7; 80];
 
 /// Quanto tempo cada cenário observa. O sinal sai uma vez por segundo, a janela
 /// da perda de subida tem cinco, e a primeira medida do ICE leva até dois.
-const OBSERVACAO: Duration = Duration::from_secs(9);
+// Doze e não nove: a 10% de perda a suavização cruza o piso nominal no sexto
+// anúncio, e com nove segundos uma rodada que perdia um anúncio (máquina
+// carregada) ficava com o sexto dentro do regime e reprovava: 1 em 7 na
+// bateria de 11/11/2026.
+const OBSERVACAO: Duration = Duration::from_secs(12);
 
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
