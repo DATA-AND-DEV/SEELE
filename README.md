@@ -536,7 +536,8 @@ Se ele é útil para você e você quiser pagar um café:
 
 - **GitHub Sponsors:** <https://github.com/sponsors/DATA-AND-DEV>, uma vez ou
   todo mês.
-- **Pix:** `PIX-A-PREENCHER`
+- **Pix:** chave aleatória `a0edea74-322f-4001-8a65-00701a9dc621`. O QR code e o
+  «copia e cola» estão em <https://get.seele.sh/#apoie>.
 
 Não dá nada em troca, e o produto não muda para quem não apoia.
 
