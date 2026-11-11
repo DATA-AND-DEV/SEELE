@@ -1,0 +1,9 @@
+{
+  "alcance": "SoRedeLocal",
+  "aqui": "127.0.0.1:60267",
+  "convite": "seele://192.168.50.142:60267?fp=d7707a833f9ca7e71a3557089a801169641496f5716d4e98ab9cb080dfc79b12&v=1.0",
+  "encontro_recusado": null,
+  "firewall": null,
+  "porta_nao_canonica": null,
+  "porta_recusada": null
+}

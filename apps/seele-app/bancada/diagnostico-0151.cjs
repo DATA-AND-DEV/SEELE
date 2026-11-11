@@ -2,7 +2,7 @@
 // CSS e JS reais), com a ponte do Tauri devolvendo as respostas GRAVADAS do
 // backend real da 0.16.0 (o teste `reproducao_0151::b_*` sobre a fixture da
 // 0.15.1, docs/evidencias/diagnostico-0151/v016/reproducao_0151.rs, as escreve;
-// as de 24/10 estão em docs/evidencias/diagnostico-0151/respostas-0.16/). Numa
+// as de 24/10 estão em bancada/medidas/diagnostico-0151/respostas-0.16/). Numa
 // árvore da 0.16 exportada, passe a pasta como primeiro argumento.
 //
 // O que é real e o que não é:
@@ -38,8 +38,8 @@ const webkit = args.includes('--webkit');
 const iCapt = args.indexOf('--capturas');
 const capturas = iCapt >= 0 ? args[iCapt + 1] : null;
 const pastaRespostas = args.find((a, i) => !a.startsWith('--') && (iCapt < 0 || i !== iCapt + 1))
-  // As gravadas em 24/10, no repositório (docs/evidencias/diagnostico-0151/respostas-0.16).
-  ?? path.resolve(__dirname, '../../../docs/evidencias/diagnostico-0151/respostas-0.16');
+  // As gravadas em 24/10, no repositório (bancada/medidas/diagnostico-0151/respostas-0.16).
+  ?? path.resolve(__dirname, 'medidas/diagnostico-0151/respostas-0.16');
 const ler = (nome) => JSON.parse(fs.readFileSync(path.join(pastaRespostas, `${nome}.json`), 'utf8'));
 
 const GRAVADO = {

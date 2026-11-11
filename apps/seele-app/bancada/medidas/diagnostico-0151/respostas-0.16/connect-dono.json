@@ -1,0 +1,69 @@
+{
+  "error": {
+    "ModsNaoAceitos": {
+      "mods": [
+        {
+          "id": "seele/estilo",
+          "version": "4.0.0",
+          "hash": "a8d25604f16bddcf7f0fb066bfaa92958f717d642a544b062fe367cb6e99fbde",
+          "repo": "https://github.com/DATA-AND-DEV/ESTILO",
+          "reach": [
+            "tema do servidor"
+          ],
+          "no_servidor": true,
+          "tema": false
+        }
+      ],
+      "conjunto": "c3efd2a9dd911af1458a07c3e27f969c6b54cb225634e99484db7e01e64e6062"
+    }
+  },
+  "trail": [
+    {
+      "etapa": {
+        "Parada": {
+          "candidatos": 1,
+          "com_bilhete_e_impressao": false
+        }
+      },
+      "em_ms": 0
+    },
+    {
+      "etapa": {
+        "Tentando": {
+          "candidato": 0,
+          "de": 1,
+          "onde": "127.0.0.1:60267",
+          "avisou": false
+        }
+      },
+      "em_ms": 2
+    },
+    {
+      "etapa": {
+        "Desistiu": {
+          "motivo": {
+            "ModsNaoAceitos": {
+              "mods": [
+                {
+                  "id": "seele/estilo",
+                  "version": "4.0.0",
+                  "hash": "a8d25604f16bddcf7f0fb066bfaa92958f717d642a544b062fe367cb6e99fbde",
+                  "repo": "https://github.com/DATA-AND-DEV/ESTILO",
+                  "reach": [
+                    "tema do servidor"
+                  ],
+                  "no_servidor": true,
+                  "tema": false
+                }
+              ],
+              "conjunto": "c3efd2a9dd911af1458a07c3e27f969c6b54cb225634e99484db7e01e64e6062"
+            }
+          }
+        }
+      },
+      "em_ms": 16
+    }
+  ],
+  "origem_da_impressao": null,
+  "a_lista_guardou": false
+}

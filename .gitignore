@@ -66,3 +66,6 @@ apps/seele-app/binaries/
 
 # As regras de trabalho de assistentes de IA ficam só na máquina de quem as usa.
 CLAUDE.md
+
+# O que as bancadas escrevem ao rodar (capturas de tela), que não é fonte.
+docs/evidencias/
