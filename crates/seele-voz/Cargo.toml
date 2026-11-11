@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # Sem dependência nenhuma (a linha dele em `xtask/src/check_deps.rs`): é o que
 # deixa o navegador compilá-lo, e o `cargo xtask web` confere a cada vez.

@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # `specs/01-arquitetura.md`, regra de dependência: este crate vê `seele-proto` e
 # mais nada. Guardado por `cargo xtask check-deps` (ADR 0002).

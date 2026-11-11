@@ -63,10 +63,9 @@ ignore = [
 [licenses]
 version = 2
 confidence-threshold = 0.9
-# Our own crates carry no `license` field yet: the rights posture around the
-# Evangelion vocabulary is still open (specs/07-estetica.md), and inventing
-# a licence before that decision would be worse than leaving it blank. They are
-# all `publish = false`, so skip them rather than fail on them.
+# Our own crates are `AGPL-3.0-only` (10/11/2026; the text is in LICENSE) and
+# all `publish = false`. They are skipped here: the list below is about what we
+# *depend on*, and AGPL stays out of it on purpose.
 private = { ignore = true }
 # Permissive, plus MPL-2.0 under the exception below. Anything stronger — GPL,
 # AGPL, LGPL — stays denied by omission and must be discussed before it enters

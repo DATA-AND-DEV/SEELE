@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # Uma folha do grafo (a linha dele em `xtask/src/check_deps.rs`): o motor não
 # conhece o protocolo nem o manifesto. As capacidades de uma API entram como

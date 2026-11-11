@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # ADR 0002 and specs/06: the desktop shell sees `seele-ffi`, which sees
 # `seele-core`. Nothing here may reach past it — a Tauri command that names an

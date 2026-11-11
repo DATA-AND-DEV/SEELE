@@ -524,7 +524,12 @@ explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
 ## Licença
 
-AGPL-3.0; o texto fica em LICENSE.
+AGPL-3.0, e só ela (`AGPL-3.0-only`); o texto fica em [LICENSE](LICENSE).
+
+Para quem não pode usar a AGPL — uma empresa que quer instalar o SEELE na
+própria rede sob outros termos — há licença comercial do mesmo código. Por
+enquanto o projeto não aceita contribuições de código, justamente para que isso
+continue possível: [CONTRIBUTING.md](CONTRIBUTING.md) diz o que é bem-vindo.
 
 O que segurava a decisão era a interface carregar vocabulário e citações de uma
 obra de terceiro. Isso saiu: os nomes passaram a ser o que as coisas são, e a

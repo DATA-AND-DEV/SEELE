@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # ADR 0002: the daemon sees the wire format and nothing else. It must not depend
 # on `seele-core` (the headless *client*) nor on `seele-audio` — specs/04 states

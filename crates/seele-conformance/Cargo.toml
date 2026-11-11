@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # This crate exists because an end-to-end protocol test needs a server and a
 # client at once, and ADR 0002 forbids either of them depending on the other —

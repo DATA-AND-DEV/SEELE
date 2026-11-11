@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 description = "O núcleo do launcher: resolve, instala e inicia versões lado a lado. Ver ADR 0046."
 
 # **Nenhuma dependência do produto, e isto é regra e não economia.**
