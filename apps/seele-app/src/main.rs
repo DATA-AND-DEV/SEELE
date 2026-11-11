@@ -13432,6 +13432,68 @@ fn fontes_de_tela(
     session.conexao(carimbo)?.fontes_de_tela()
 }
 
+/// Uma prévia como ela vai à janela: de qual fonte (o `id` e o nome que a lista
+/// deu) e a imagem, em `data:`.
+#[derive(Clone, serde::Serialize)]
+struct PreviaNaJanela {
+    id: u64,
+    nome: String,
+    url: String,
+}
+
+/// **Tira a prévia de cada fonte da última lista** e as manda à janela uma a
+/// uma (`seele://previa-de-tela`), para a caixa de compartilhar mostrar o que
+/// cada monitor e cada janela tem, e não só o título.
+///
+/// Volta na hora: capturar leva tempo, e a lista não espera por isso. Uma
+/// rodada por vez; um pedido no meio de outra não faz nada (a tela pede de
+/// novo quando a lista muda).
+#[tauri::command]
+fn previas_de_tela(
+    app: AppHandle,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static EM_CURSO: AtomicBool = AtomicBool::new(false);
+
+    let conexao = session.conexao(carimbo)?;
+    if EM_CURSO.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        conexao.previas_de_tela(|id, nome, previa| {
+            let Some(url) = previa_em_data(&previa) else {
+                return;
+            };
+            let _ = app.emit(
+                "seele://previa-de-tela",
+                PreviaNaJanela {
+                    id,
+                    nome: nome.to_owned(),
+                    url,
+                },
+            );
+        });
+        EM_CURSO.store(false, Ordering::Release);
+    });
+    Ok(())
+}
+
+/// A prévia em JPEG, como `data:`. Uma miniatura de 320 pontos fica em poucos
+/// kilobytes; `None` se as medidas não batem com os bytes.
+fn previa_em_data(previa: &seele_ffi::PreviaDeTela) -> Option<String> {
+    let imagem = image::RgbImage::from_raw(previa.largura, previa.altura, previa.rgb.clone())?;
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 70)
+        .encode_image(&imagem)
+        .ok()?;
+    Some(format!(
+        "data:image/jpeg;base64,{}",
+        seele_ffi::base64_de(&jpeg)
+    ))
+}
+
 /// O que o sistema operacional respondeu sobre gravar a tela.
 #[tauri::command]
 fn permissao_de_tela(
@@ -16052,6 +16114,7 @@ fn main() {
             volumes_locais,
             avisos_dos_dados_locais,
             fontes_de_tela,
+            previas_de_tela,
             permissao_de_tela,
             pedir_permissao_de_tela,
             compartilhar_tela,

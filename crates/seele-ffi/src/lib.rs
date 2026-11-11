@@ -90,6 +90,10 @@ pub use types::{
 /// [`seele_core::enlace::este_processo_tem_tela`] — é o que fecha a corrida com
 /// os pedidos que o servidor manda na chegada. Só o `main` do app chama.
 pub use seele_core::enlace::este_processo_tem_tela;
+pub use seele_core::PreviaDeTela;
+
+/// Quantas fontes ganham prévia numa abertura da caixa de compartilhar.
+pub const MAX_PREVIAS_DE_TELA: usize = 24;
 
 /// **A regra da menção**, pura: se `corpo` chama a pessoa de apelido `base` e
 /// marca `tag`. É a função que a sessão usa para marcar
@@ -4420,6 +4424,59 @@ impl Connection {
     /// Lista de novo quando não há listagem guardada, e **só** nesse caso: uma
     /// casca que desenhou o menu tem a lista, e relistar por baixo dela
     /// renumeraria os índices no meio da escolha.
+    /// **As prévias da última lista de fontes** ([`Self::fontes_de_tela`]): a
+    /// imagem de cada monitor e de cada janela, entregue a `cada` com o `id` e
+    /// o nome que a lista deu, uma por vez e na ordem da lista.
+    ///
+    /// Capturar leva tempo (abrir a captura, esperar o primeiro quadro), e
+    /// quem chama roda isto fora da linha principal. A trava da lista só é
+    /// tomada para abrir cada captura: a espera pelo quadro é fora dela, e um
+    /// `compartilhar_tela` no meio não fica preso. Uma fonte que não entrega
+    /// quadro (minimizada, fechada entre a lista e agora) fica sem prévia.
+    ///
+    /// No máximo [`MAX_PREVIAS_DE_TELA`] fontes: além disso a caixa já é uma
+    /// lista longa, e cada prévia custa uma captura.
+    pub fn previas_de_tela(&self, mut cada: impl FnMut(u64, &str, seele_core::PreviaDeTela)) {
+        let ids: Vec<u64> = self.shared.fontes_de_tela.lock().map_or_else(
+            |_| Vec::new(),
+            |guardadas| {
+                guardadas
+                    .iter()
+                    .map(seele_core::FonteDeTela::id)
+                    .take(MAX_PREVIAS_DE_TELA)
+                    .collect()
+            },
+        );
+        for id in ids {
+            let comecada = self
+                .shared
+                .fontes_de_tela
+                .lock()
+                .ok()
+                .and_then(|guardadas| {
+                    guardadas
+                        .iter()
+                        .find(|fonte| fonte.id() == id)
+                        .map(|fonte| (fonte.rotulo().to_owned(), fonte.comecar_previa()))
+                });
+            let Some((nome, em_curso)) = comecada else {
+                // A lista mudou (uma relista, uma fonte escolhida): o resto é
+                // de outra lista, e a tela pede de novo.
+                return;
+            };
+            match em_curso {
+                Ok(em_curso) => {
+                    if let Some(previa) = em_curso.esperar(seele_core::PRAZO_DA_PREVIA) {
+                        cada(id, &nome, previa);
+                    }
+                }
+                Err(erro) => {
+                    tracing::debug!(%erro, fonte = %nome, "a prévia desta fonte não abriu");
+                }
+            }
+        }
+    }
+
     fn fonte_escolhida(&self, fonte: u64) -> Result<seele_core::FonteDeTela, ConnectionError> {
         let mut guardadas = self
             .shared

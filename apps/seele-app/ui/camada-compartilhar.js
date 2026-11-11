@@ -412,6 +412,61 @@ function desenharPermissaoDeTela(permissao) {
  * não ofereceu nada» não tem, e «o pedido falhou» já está escrito na linha de
  * erro. As três embaixo de uma lista vazia são indistinguíveis.
  */
+/**
+ * **As prévias das fontes**: a imagem de cada monitor e de cada janela, para
+ * escolher pelo que se vê e não só pelo título (duas janelas do mesmo programa
+ * têm o mesmo nome).
+ *
+ * Elas chegam uma a uma, depois da lista (`seele://previa-de-tela`): capturar
+ * uma imagem de cada janela leva tempo, e a lista não espera por isso. Cada uma
+ * vem com o `id` **e o nome** da fonte na lista de que saiu: o `id` é a posição
+ * naquela lista, e uma relista o troca de dono — a prévia só é posta no cartão
+ * cujo nome também bate.
+ */
+const previasDasFontes = new Map();
+const chaveDaPrevia = (id, nome) => `${id}\u0000${nome}`;
+let previasPedidasPara = null;
+
+/** Pede as prévias da lista de agora, uma vez por lista. */
+function pedirAsPrevias(fontes) {
+  const desta = fontes.map((fonte) => chaveDaPrevia(fonte.id, fonte.nome)).join("\u0001");
+  if (desta === previasPedidasPara || fontes.length === 0) return;
+  previasPedidasPara = desta;
+  // Uma prévia de uma lista que já não é esta não tem a quem servir.
+  for (const chave of [...previasDasFontes.keys()]) {
+    if (!fontes.some((fonte) => chaveDaPrevia(fonte.id, fonte.nome) === chave)) previasDasFontes.delete(chave);
+  }
+  invoke("previas_de_tela").catch((falha) => {
+    // Sem prévia a caixa segue como sempre foi: o nome e as medidas.
+    previasPedidasPara = null;
+    console.warn("previas_de_tela:", falha);
+  });
+}
+
+/** Põe a prévia num cartão (ou tira a que ele tinha). */
+function vestirAPrevia(botao, url) {
+  // Sem prévia e sem nada posto antes: não há o que mexer no cartão.
+  if (!url && botao.dataset.comPrevia !== "sim") return;
+  if (url) {
+    botao.style.setProperty("--previa-da-fonte", `url(${url})`);
+    botao.dataset.comPrevia = "sim";
+  } else {
+    botao.style.removeProperty("--previa-da-fonte");
+    delete botao.dataset.comPrevia;
+  }
+}
+
+listen("seele://previa-de-tela", ({ payload }) => {
+  if (!payload || typeof payload.url !== "string" || !payload.url.startsWith("data:image/")) return;
+  previasDasFontes.set(chaveDaPrevia(payload.id, payload.nome), payload.url);
+  if ($("compartilhar").hidden) return;
+  for (const botao of $("compartilhar-fontes").querySelectorAll(".compartilhar-fonte")) {
+    if (botao.dataset.fonte === String(payload.id) && botao.dataset.nomeDaFonte === payload.nome) {
+      vestirAPrevia(botao, payload.url);
+    }
+  }
+});
+
 function desenharFontesDeTela(fontes, permissao, listou) {
   fontes = fontes.filter(fonte => fonte.largura > 0 && fonte.altura > 0
     && !/^(WindowManager|StatusIndicator|Control Center|Notification Center)$/i.test(fonte.nome));
@@ -433,6 +488,7 @@ function desenharFontesDeTela(fontes, permissao, listou) {
   }
 
   vazio.hidden = true;
+  pedirAsPrevias(fontes);
   // Rede: a lista é a mesma em que se escolheu (só uma relista a troca, e ela já
   // desarmou), mas um `id` que não está nela nunca vai ao `compartilhar_tela`.
   if (fonteArmada !== null && !fontes.some((fonte) => fonte.id === fonteArmada)) {
@@ -446,6 +502,8 @@ function desenharFontesDeTela(fontes, permissao, listou) {
       const botao = elemento("button", "compartilhar-fonte");
       botao.type = "button";
       botao.dataset.fonte = String(fonte.id);
+      botao.dataset.nomeDaFonte = fonte.nome;
+      vestirAPrevia(botao, previasDasFontes.get(chaveDaPrevia(fonte.id, fonte.nome)) ?? null);
       const armada = fonte.id === fonteArmada;
       // `aria-pressed` e a palavra `ESCOLHIDA` dizem a mesma coisa que a cor de
       // fundo diz. `specs/06-clientes-gui.md` proíbe informação transmitida só
@@ -704,6 +762,9 @@ async function abrirCompartilhar() {
 /** Fecha, devolvendo o teclado a quem abriu. */
 function fecharCompartilhar() {
   $("compartilhar").hidden = true;
+  // As prévias são da caixa aberta: a próxima abertura pede as de então.
+  previasDasFontes.clear();
+  previasPedidasPara = null;
   // A mesma conferência de `voltarParaTela`: a tela de baixo pode ter trocado
   // enquanto a caixa estava aberta, e `focus()` num nó fora da árvore não faz
   // nada e não reporta nada.

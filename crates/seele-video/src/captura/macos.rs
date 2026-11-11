@@ -76,6 +76,45 @@ use screencapturekit::prelude::{
 };
 
 use crate::codec::{Cadencia, QuadroI420, Resolucao};
+
+/// **Uma foto parada de uma fonte**, em RGBA, já do tamanho pedido: a prévia
+/// da caixa de compartilhar.
+///
+/// Pela foto do sistema (`SCScreenshotManager`, macOS 14 em diante), e não por
+/// uma captura: uma janela que não muda não entrega quadro a uma captura, e a
+/// prévia dela nunca chegaria (medido em 11/11/2026: WhatsApp, Docker e um
+/// navegador parados ficaram sem quadro em 1,2 s cada).
+///
+/// # Errors
+///
+/// O que o sistema disse: sem permissão, um macOS que não tem a foto, ou uma
+/// fonte que sumiu. Quem chama cai para a captura.
+pub fn foto(
+    fonte: &Fonte,
+    largura: usize,
+    altura: usize,
+) -> Result<(usize, usize, Vec<u8>), String> {
+    use screencapturekit::screenshot_manager::{CGImageExt, SCScreenshotManager};
+
+    if !permissao().concedida() {
+        return Err(ErroDeCaptura::SemPermissaoDeTela.to_string());
+    }
+    let filtro = match fonte {
+        Fonte::Monitor { alvo, .. } => SCContentFilter::create()
+            .with_display(alvo)
+            .with_excluding_windows(&[])
+            .build(),
+        Fonte::Janela { alvo, .. } => SCContentFilter::create().with_window(alvo).build(),
+    };
+    let config = SCStreamConfiguration::new()
+        .with_width(u32::try_from(largura.max(1)).unwrap_or(u32::MAX))
+        .with_height(u32::try_from(altura.max(1)).unwrap_or(u32::MAX));
+    let imagem =
+        SCScreenshotManager::capture_image(&filtro, &config).map_err(|erro| erro.to_string())?;
+    let rgba = imagem.rgba_data().map_err(|erro| erro.to_string())?;
+    Ok((imagem.width(), imagem.height(), rgba))
+}
+
 use crate::erro::ErroDeVideo;
 
 /// Por que a tela não foi capturada, sempre com um nome.

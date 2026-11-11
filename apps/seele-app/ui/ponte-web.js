@@ -219,6 +219,7 @@ const SO_NA_CASCA_LARGA = new Map([
   ["permissao_de_tela", SO_NO_PC_COMPARTILHAR],
   ["peso_da_linha", SO_NO_PC_MODERAR],
   ["preparar_icone_do_server", SO_NO_PC_MODERAR],
+  ["previas_de_tela", SO_NO_PC_COMPARTILHAR],
   ["renomear_linha", SO_NO_PC_MODERAR],
   ["renomear_server", SO_NO_PC_MODERAR],
   ["renomear_voice_room", SO_NO_PC_MODERAR],

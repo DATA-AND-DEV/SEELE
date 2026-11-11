@@ -149,10 +149,10 @@ pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 /// sabe»: uma casca não pode implementar o trait — não vê `seele-video` — e não
 /// tinha o que passar para a bomba.
 pub use video::{
-    fontes_de_tela, pedir_permissao_de_tela, permissao_de_tela, Ajuste, Captura, CapturaDoSistema,
-    CapturaEmCaixa, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, ErroDeFontes,
-    FonteDeQuadros, FonteDeTela, LimitesDeTela, Passo as PassoDeVideo, PedidoDeTela,
-    PermissaoDeTela,
+    fontes_de_tela, pedir_permissao_de_tela, permissao_de_tela, previa_do_quadro, Ajuste, Captura,
+    CapturaDoSistema, CapturaEmCaixa, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento,
+    ErroDeFontes, FonteDeQuadros, FonteDeTela, LimitesDeTela, Passo as PassoDeVideo, PedidoDeTela,
+    PermissaoDeTela, PreviaDeTela, PreviaEmCurso, LADO_DA_PREVIA, PRAZO_DA_PREVIA,
 };
 
 pub use seele_audio::device::{consentimento_do_microfone, ConsentimentoDoMicrofone};

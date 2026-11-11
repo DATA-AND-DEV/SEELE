@@ -613,6 +613,191 @@ impl FonteDeTela {
     }
 }
 
+/// A prévia de uma fonte: uma imagem pequena do que ela mostra agora, em RGB
+/// (três bytes por ponto, linha a linha).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviaDeTela {
+    /// A largura, em pontos.
+    pub largura: u32,
+    /// A altura, em pontos.
+    pub altura: u32,
+    /// `largura × altura × 3` bytes.
+    pub rgb: Vec<u8>,
+}
+
+/// O maior lado de uma prévia. O cartão da caixa de compartilhar tem cerca de
+/// 190 pontos de largura; 320 cobre uma tela de densidade dupla sem pesar.
+pub const LADO_DA_PREVIA: usize = 320;
+
+/// Quanto se espera pelo primeiro quadro de uma fonte ao tirar a prévia dela.
+/// Uma janela minimizada ou parada pode não entregar quadro nenhum.
+pub const PRAZO_DA_PREVIA: std::time::Duration = std::time::Duration::from_millis(1200);
+
+/// **Um quadro da captura reduzido a uma prévia.** Um ponto a cada `passo`, sem
+/// média: para uma miniatura de 320 pontos, a diferença não se vê, e não custa
+/// um quadro inteiro de trabalho por janela.
+///
+/// A conversão de cor é a do vídeo (BT.709, faixa limitada), que é o que a
+/// captura entrega. `None` para um quadro sem lado, ou com planos menores do
+/// que as medidas dizem.
+#[must_use]
+pub fn previa_do_quadro(quadro: &QuadroI420, lado_max: usize) -> Option<PreviaDeTela> {
+    let (largura, altura) = (quadro.largura(), quadro.altura());
+    if largura == 0 || altura == 0 || lado_max == 0 {
+        return None;
+    }
+    let passo = largura.max(altura).div_ceil(lado_max).max(1);
+    let (nova_largura, nova_altura) = ((largura / passo).max(1), (altura / passo).max(1));
+    let largura_do_croma = largura.div_ceil(2);
+    let (luma, u, v) = (quadro.luma(), quadro.croma_u(), quadro.croma_v());
+    let mut rgb = Vec::with_capacity(nova_largura * nova_altura * 3);
+    for linha in 0..nova_altura {
+        let y_da_fonte = linha * passo;
+        for coluna in 0..nova_largura {
+            let x_da_fonte = coluna * passo;
+            let no_croma = (y_da_fonte / 2) * largura_do_croma + x_da_fonte / 2;
+            let y = i32::from(*luma.get(y_da_fonte * largura + x_da_fonte)?) - 16;
+            let cb = i32::from(*u.get(no_croma)?) - 128;
+            let cr = i32::from(*v.get(no_croma)?) - 128;
+            // BT.709, faixa limitada, em ponto fixo de 10 bits.
+            let base = 1192 * y;
+            let ponto = |valor: i32| u8::try_from((valor >> 10).clamp(0, 255)).unwrap_or(u8::MAX);
+            rgb.push(ponto(base + 1836 * cr));
+            rgb.push(ponto(base - 218 * cb - 546 * cr));
+            rgb.push(ponto(base + 2163 * cb));
+        }
+    }
+    Some(PreviaDeTela {
+        largura: u32::try_from(nova_largura).ok()?,
+        altura: u32::try_from(nova_altura).ok()?,
+        rgb,
+    })
+}
+
+/// A prévia de uma fonte a caminho: já tirada (a foto do sistema, no macOS),
+/// ou uma captura aberta de que se espera o primeiro quadro.
+pub struct PreviaEmCurso(EstadoDaPrevia);
+
+enum EstadoDaPrevia {
+    Pronta(Option<PreviaDeTela>),
+    Capturando(FonteDoSistema),
+}
+
+/// A foto do sistema, em RGBA, como a prévia em RGB. `None` se as medidas não
+/// batem com os bytes.
+#[cfg(target_os = "macos")]
+fn previa_da_foto(largura: usize, altura: usize, rgba: &[u8]) -> Option<PreviaDeTela> {
+    if largura == 0 || altura == 0 || rgba.len() < largura * altura * 4 {
+        return None;
+    }
+    let mut rgb = Vec::with_capacity(largura * altura * 3);
+    for ponto in rgba.chunks_exact(4).take(largura * altura) {
+        rgb.extend_from_slice(ponto.get(..3)?);
+    }
+    Some(PreviaDeTela {
+        largura: u32::try_from(largura).ok()?,
+        altura: u32::try_from(altura).ok()?,
+        rgb,
+    })
+}
+
+impl std::fmt::Debug for PreviaEmCurso {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PreviaEmCurso")
+    }
+}
+
+impl PreviaEmCurso {
+    /// Espera o primeiro quadro, até `prazo`, e devolve a prévia dele. A
+    /// captura fecha ao sair daqui.
+    #[must_use]
+    pub fn esperar(self, prazo: std::time::Duration) -> Option<PreviaDeTela> {
+        let captura = match self.0 {
+            EstadoDaPrevia::Pronta(previa) => return previa,
+            EstadoDaPrevia::Capturando(captura) => captura,
+        };
+        let fim = std::time::Instant::now() + prazo;
+        loop {
+            if let Some(quadro) = FonteDeQuadros::tomar(&captura) {
+                return previa_do_quadro(&quadro, LADO_DA_PREVIA);
+            }
+            if std::time::Instant::now() >= fim {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+    }
+}
+
+impl FonteDeTela {
+    /// **Abre a captura desta fonte só para a prévia** da caixa de
+    /// compartilhar: no menor degrau e na menor cadência, e sem o som (no
+    /// Windows, a captura de som de um programa é outra coisa a abrir, e uma
+    /// miniatura não a ouve). Quem chama espera o quadro com
+    /// [`PreviaEmCurso::esperar`], fora de qualquer trava.
+    ///
+    /// # Errors
+    ///
+    /// O que o sistema disse ao recusar a captura.
+    pub fn comecar_previa(&self) -> Result<PreviaEmCurso, String> {
+        #[cfg(target_os = "macos")]
+        {
+            let (largura, altura) = self.alvo.tamanho();
+            // **A foto do sistema primeiro**: uma janela parada não entrega
+            // quadro a uma captura, e ficaria sem prévia. Só se a foto não
+            // sair (um macOS anterior ao 14) é que se abre a captura.
+            // O dobro do lado: o cartão é desenhado em densidade dupla nas
+            // telas de hoje, e a foto do sistema já sai do tamanho pedido.
+            let passo = largura.max(altura).div_ceil(LADO_DA_PREVIA * 2).max(1);
+            let foto = seele_video::captura::macos::foto(
+                &self.alvo,
+                (largura / passo).max(1),
+                (altura / passo).max(1),
+            );
+            if let Ok((l, a, rgba)) = foto {
+                return Ok(PreviaEmCurso(EstadoDaPrevia::Pronta(previa_da_foto(
+                    l, a, &rgba,
+                ))));
+            }
+            let medidas = seele_video::codec::medidas_para(Resolucao::P540, largura, altura);
+            seele_video::captura::macos::CapturaDaTela::iniciar_com_medidas(
+                &self.alvo,
+                Resolucao::P540,
+                Cadencia::Q8,
+                medidas,
+            )
+            .map(|captura| PreviaEmCurso(EstadoDaPrevia::Capturando(captura)))
+            .map_err(|erro| erro.to_string())
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let (largura, altura) = self.alvo.tamanho();
+            let medidas = seele_video::codec::medidas_para(
+                Resolucao::P540,
+                largura as usize,
+                altura as usize,
+            );
+            seele_video::captura::windows::Captura::iniciar_com_medidas(
+                &self.alvo,
+                Resolucao::P540,
+                Cadencia::Q8,
+                medidas,
+            )
+            .map(|imagem| {
+                PreviaEmCurso(EstadoDaPrevia::Capturando(CapturaComSom {
+                    imagem,
+                    som: None,
+                }))
+            })
+            .map_err(|erro| erro.to_string())
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            match self.alvo {}
+        }
+    }
+}
+
 /// O que esta máquina pode transmitir, na ordem em que o sistema enumera:
 /// monitores primeiro, janelas depois.
 ///
