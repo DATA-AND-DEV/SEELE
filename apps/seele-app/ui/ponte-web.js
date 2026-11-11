@@ -2353,7 +2353,13 @@ async function lerAImagemDoPerfil({ pessoa, lado, hash }) {
   if (!sessao) throw "NotConnected";
   const montado = sessao.perfil.ler({ pessoa, lado, hash });
   if (montado.falha) throw montado.falha;
-  const bytes = await transferirAImagemDoPerfil(sessao, montado.pedido, null, hash);
+  const lidos = await transferirAImagemDoPerfil(sessao, montado.pedido, null, hash);
+  // **Reduzida ao lugar em que aparece**, pela mesma conta do desktop: a
+  // imagem chega do tamanho que subiu, e uma capa em 4K virava um `data:` de
+  // megabytes que deixava a página inteira lenta (relato de 10/11/2026).
+  const reduzida = sessao.perfil.paraAJanela(lado === "Capa", lidos);
+  if (reduzida.falha) throw reduzida.falha;
+  const bytes = reduzida.bytes;
   const url = `data:${tipoDaImagemDoPerfil(bytes)};base64,${(await osModsDaPagina()).base64De(bytes)}`;
   guardarAImagemDoPerfil(hash, url, bytes.length);
   return url;

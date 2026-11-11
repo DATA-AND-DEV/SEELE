@@ -12313,6 +12313,19 @@ async fn imagem_do_perfil(
     // Um hash que não tem forma de hash é um perfil que mudou debaixo da tela.
     let hash = hash_de_hex(&hash).ok_or(ErroDoPerfil::Mudou)?;
     let bytes = conexao.imagem_do_perfil(pessoa, lado, hash).await?;
+    conferir_imagem(&bytes).map_err(|_| ErroDoPerfil::TipoRecusado)?;
+    // **Reduzida ao lugar em que aparece, antes de atravessar a ponte.** A
+    // imagem chega do tamanho que subiu (até 10 MiB, qualquer medida), e uma
+    // capa em 4K ia à janela como um `data:` de megabytes: o aplicativo inteiro
+    // ficava lento (relato do dono, 10/11/2026). Fora da linha principal:
+    // decodificar e reduzir uma imagem grande leva tempo.
+    let capa = lado == seele_ffi::perfis::LadoDoPerfil::Capa;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        seele_ffi::reducao::imagem_do_perfil_para_a_janela(&bytes, capa)
+    })
+    .await
+    .map_err(|_| ErroDoPerfil::TipoRecusado)?
+    .map_err(|_| ErroDoPerfil::TipoRecusado)?;
     let tipo = conferir_imagem(&bytes).map_err(|_| ErroDoPerfil::TipoRecusado)?;
     Ok(format!(
         "data:{};base64,{}",

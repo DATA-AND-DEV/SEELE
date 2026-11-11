@@ -157,6 +157,11 @@ function fronteiraDaLigacao(w) {
       const codigo = comBytes(bytes, (p, n) => w.perfil_icone(p, n));
       return codigo === 0 ? { png: saida() } : { falha: saidaEmJson() };
     },
+    /** A imagem de um perfil reduzida ao lugar em que aparece (a mesma conta do desktop). */
+    perfilParaAJanela(capa, bytes) {
+      const codigo = comBytes(bytes, (p, n) => w.perfil_para_a_janela(capa ? 1 : 0, p, n));
+      return codigo === 0 ? { bytes: saida() } : { falha: saidaEmJson() };
+    },
     /** A queda: a sessão fica guardada, e os eventos dela saem. */
     largar: () => (w.ligacao_largar() === 0 ? saidaEmJson() : []),
     /** A volta: o pedido de antes (sem o convite) e as escolhas; `null`, ou a recusa. */
@@ -1042,6 +1047,7 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       respostaChegou: (alca, pedaco) => ligacao.perfilRespostaChegou(alca, pedaco),
       acabou: (alca, viva, hash) => ligacao.perfilAcabou(alca, viva, hash),
       icone: (bytes) => ligacao.perfilIcone(bytes),
+      paraAJanela: (capa, bytes) => ligacao.perfilParaAJanela(capa, bytes),
     }),
     /**
      * Fecha a sessão, sem `Ended`: quem fecha é esta ponta (o `disconnect`, a

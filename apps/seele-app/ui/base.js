@@ -1688,7 +1688,8 @@ const LIMITES_DA_CAPA = Object.freeze({ bytesDecodificados: 128 * 1024 * 1024 })
 const IMAGENS_DE_PESSOA = Object.freeze({
   "pessoa.avatar": {
     chave: "avatar",
-    uso: undefined,
+    // Reduzido ao lugar em que aparece (`reducao::teto_do_uso`), como a capa.
+    uso: "avatar",
     teto: () => LIMITES_DO_CARTAO.bytesDeMidia,
     custo: (midia) => midia.bytes,
     redesenhar: () => redesenharAvatares(),

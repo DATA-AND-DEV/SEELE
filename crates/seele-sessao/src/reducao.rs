@@ -56,11 +56,60 @@ pub const TETO_DA_CAPA: Teto = Teto {
     milissegundos: 10_000,
 };
 
+/// **A capa de um perfil oficial, para a janela.** A capa aparece cortada
+/// (`background-size: cover`) numa faixa, e 1280 × 720 cobre a maior delas com
+/// folga: uma capa 4K cabe nele com um nono dos pixels.
+///
+/// **O tamanho do arquivo também conta, e não só o dos pixels.** A imagem vai
+/// à janela como `data:`, e a janela relê esse texto inteiro em cada elemento
+/// que a mostra: medido em 10/11/2026, 37 ms por elemento com 10 MB, 3,7 ms
+/// com 1 MB.
+///
+/// **Por que existe** (10/11/2026, relato do dono): uma capa em 4K deixou o
+/// aplicativo inteiro lento. A imagem do perfil ia à janela do tamanho que
+/// subiu, como um `data:` de megabytes, e a janela a decodificava em 33 MB por
+/// lugar em que aparecia. As imagens de MOD já passavam por este arquivo; as
+/// do perfil oficial, não.
+pub const TETO_DA_CAPA_DO_PERFIL: Teto = Teto {
+    largura: 1280,
+    altura: 720,
+    quadros: 60,
+    milissegundos: 10_000,
+};
+
+/// **A foto de um perfil oficial, para a janela**: o maior lugar em que ela
+/// aparece é o cartão do perfil, e 512 px cobrem uma tela de densidade dupla.
+pub const TETO_DA_FOTO_DO_PERFIL: Teto = Teto {
+    largura: 512,
+    altura: 512,
+    quadros: 60,
+    milissegundos: 10_000,
+};
+
+/// **A imagem de um perfil oficial como ela vai à janela**: reduzida ao teto
+/// do lado (`capa`, ou a foto). Uma que já cabe sai com os mesmos bytes.
+///
+/// # Errors
+///
+/// `formato-desconhecido`, quando os bytes não são uma imagem que este
+/// produto decodifica.
+pub fn imagem_do_perfil_para_a_janela(bytes: &[u8], capa: bool) -> Result<Vec<u8>, String> {
+    let teto = if capa {
+        TETO_DA_CAPA_DO_PERFIL
+    } else {
+        TETO_DA_FOTO_DO_PERFIL
+    };
+    reduzir(bytes, &teto).map(|reduzida| reduzida.bytes)
+}
+
 /// O teto de um uso, pelo nome que a janela manda. `None` para um nome que
 /// este produto não conhece: nada é reduzido, e a imagem segue como veio.
 pub fn teto_do_uso(uso: &str) -> Option<Teto> {
     match uso {
         "capa" => Some(TETO_DA_CAPA),
+        // O avatar que um MOD põe numa pessoa: o mesmo lugar da foto do perfil
+        // oficial, e o mesmo teto. Ia à janela do tamanho que o MOD mandou.
+        "avatar" => Some(TETO_DA_FOTO_DO_PERFIL),
         _ => None,
     }
 }
@@ -88,6 +137,17 @@ pub struct Reduzida {
 /// decodifica; é o nome que a janela já conhece (rascunho §7.1).
 pub fn reduzir(bytes: &[u8], teto: &Teto) -> Result<Reduzida, String> {
     let formato = image::guess_format(bytes).map_err(|_| desconhecido())?;
+    // **As medidas, lidas do cabeçalho, antes de decodificar um pixel.** O
+    // teto de bytes não limita o que a imagem ocupa aberta: um PNG de poucos
+    // megabytes pode declarar 30 000 × 30 000, e decodificá-lo pediria 3,6 GB a
+    // este processo. Quem manda a imagem é um par (o perfil de outra pessoa,
+    // o MOD de um servidor).
+    let (largura, altura) = image::ImageReader::with_format(Cursor::new(bytes), formato)
+        .into_dimensions()
+        .map_err(|_| desconhecido())?;
+    if u64::from(largura) * u64::from(altura) > TETO_DE_PIXELS {
+        return Err(GRANDE_DEMAIS.to_owned());
+    }
     if let Some(quadros) = quadros_dentro_do_teto(bytes, formato, teto)? {
         return reduzir_animacao(quadros, teto);
     }
@@ -321,6 +381,15 @@ fn achatar_cores(quadro: &mut image::RgbaImage, bits: u8) {
 }
 
 /// O nome com que uma imagem ilegível volta à janela.
+/// O maior número de pixels (largura × altura) que este produto decodifica:
+/// cabe uma imagem em 8K (33 megapixels), e a decodificação de uma só não
+/// passa de 144 MB.
+pub const TETO_DE_PIXELS: u64 = 36_000_000;
+
+/// O nome da recusa de uma imagem acima de [`TETO_DE_PIXELS`]. É um nome que
+/// a janela já conhece (o da mídia grande demais).
+pub const GRANDE_DEMAIS: &str = "midia-grande-demais";
+
 fn desconhecido() -> String {
     "formato-desconhecido".to_owned()
 }
@@ -385,6 +454,23 @@ fn quadros_dentro_do_teto(
             break;
         }
         duracao = duracao.saturating_add(deste);
+        // **Reduzido ao chegar, e não depois de juntar todos**: sessenta
+        // quadros de uma animação em 4K, guardados inteiros, são 2 GB. Assim a
+        // memória segura um quadro grande por vez.
+        let (largura, altura) = quadro.buffer().dimensions();
+        let quadro = if largura > teto.largura || altura > teto.altura {
+            let (nova_largura, nova_altura) = caber(largura, altura, teto);
+            let atraso = quadro.delay();
+            let menor = image::imageops::resize(
+                quadro.buffer(),
+                nova_largura,
+                nova_altura,
+                FilterType::Triangle,
+            );
+            Frame::from_parts(menor, 0, 0, atraso)
+        } else {
+            quadro
+        };
         mantidos.push(quadro);
     }
     Ok((mantidos.len() > 1).then_some(mantidos))
@@ -724,5 +810,69 @@ mod testes {
         .expect("gravar");
         let pronto = icone_do_perfil(saida.get_ref()).expect("é imagem");
         assert!(pronto.len() <= TETO_DO_ICONE);
+    }
+
+    /// **Uma capa em 4K vai à janela com um quarto dos pixels, e uma foto
+    /// grande vira 512 px** (o relato de 10/11/2026: a capa em 4K deixou o
+    /// aplicativo inteiro lento). O que já cabe sai com os mesmos bytes.
+    #[test]
+    fn a_imagem_do_perfil_vai_a_janela_dentro_do_teto() {
+        let medidas = |bytes: &[u8]| {
+            let imagem = image::load_from_memory(bytes).expect("decodifica");
+            (imagem.width(), imagem.height())
+        };
+        let capa_4k = png(3840, 2160);
+        let reduzida = imagem_do_perfil_para_a_janela(&capa_4k, true).expect("reduz");
+        assert_eq!(medidas(&reduzida), (1280, 720));
+
+        // Uma faixa larga cabe pela largura, com a proporção mantida.
+        let faixa = imagem_do_perfil_para_a_janela(&png(3840, 1280), true).expect("reduz");
+        let (largura, altura) = medidas(&faixa);
+        assert_eq!(largura, 1280);
+        assert!((426..=427).contains(&altura), "{altura}");
+
+        let foto = imagem_do_perfil_para_a_janela(&png(3000, 3000), false).expect("reduz");
+        assert_eq!(medidas(&foto), (512, 512));
+
+        // O que já cabe não é regravado.
+        let pequena = png(1024, 576);
+        assert_eq!(
+            imagem_do_perfil_para_a_janela(&pequena, true).expect("passa"),
+            pequena
+        );
+        // E o que não é imagem é dito, e não entregue.
+        assert!(imagem_do_perfil_para_a_janela(b"nada disto", true).is_err());
+    }
+
+    /// Uma capa animada grande também é reduzida: é o caso mais caro (cada
+    /// quadro é uma imagem inteira decodificada).
+    #[test]
+    fn a_capa_animada_do_perfil_tambem_cabe_no_teto() {
+        let animada = gif(2560, 1440, 4, 100);
+        let reduzida = imagem_do_perfil_para_a_janela(&animada, true).expect("reduz");
+        let decodificador = GifDecoder::new(Cursor::new(&reduzida)).expect("continua um GIF");
+        let quadros = decodificador
+            .into_frames()
+            .collect_frames()
+            .expect("quadros");
+        assert_eq!(quadros.len(), 4);
+        let primeiro = quadros[0].buffer();
+        assert_eq!((primeiro.width(), primeiro.height()), (1280, 720));
+    }
+
+    /// **Uma imagem que declara mais pixels que o teto é recusada pelo
+    /// cabeçalho, sem ser decodificada.** O arquivo é pequeno (uma cor só
+    /// comprime a quase nada) e aberto pediria gigabytes.
+    #[test]
+    fn a_imagem_com_pixels_demais_e_recusada_antes_de_decodificar() {
+        // 9000 × 5000 = 45 megapixels, acima do teto; 8K (7680 × 4320) passa.
+        let bomba = png(9000, 5000);
+        assert!(bomba.len() < 1024 * 1024, "o arquivo de teste é pequeno");
+        assert_eq!(reduzir(&bomba, &TETO_DA_CAPA).unwrap_err(), GRANDE_DEMAIS,);
+        assert_eq!(
+            imagem_do_perfil_para_a_janela(&bomba, true).unwrap_err(),
+            GRANDE_DEMAIS,
+        );
+        assert!(reduzir(&png(7680, 4320), &TETO_DA_CAPA).is_ok());
     }
 }

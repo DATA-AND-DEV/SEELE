@@ -28445,7 +28445,7 @@ m.$("perfis-entrada").removeAttribute = () => {};
 m.$("perfis-diretorio").hidden = true;
 m.$("perfil-folha").hidden = true;
 carregar(m, "frases.js", "perfis.js");
-for (const nome of ["aplicarAvatar", "aplicarCapa", "capaDaPessoa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+for (const nome of ["fundos", "pintarOFundo", "fundoDe", "aplicarAvatar", "aplicarCapa", "capaDaPessoa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
 vm.runInContext("sincronizarPerfis({ perfis_revision: 1, me: 1 })", m.ctx);
 await tick();
 const quadrado = comEstilo(new El("q"));
@@ -29055,7 +29055,7 @@ Object.assign(m.ctx, {
   capaDaPessoa: () => capa,
   perfilOficial: (id) => perfis[String(id)] ?? null,
 });
-for (const nome of ["aplicarCapa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+for (const nome of ["fundos", "pintarOFundo", "fundoDe", "aplicarCapa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
 const quadro = comEstilo(new El("q"));
 quadro.dataset.pessoaDaCapa = "7";
 const aplicar = () => { m.ctx.q = quadro; vm.runInContext("aplicarCapa(q)", m.ctx); return quadro; };

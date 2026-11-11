@@ -2822,6 +2822,8 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
       }
     }
     const no = velho ?? novo;
+    // Um nó novo que não tem par na tela vai entrar nela: é pintado antes.
+    if (!velho) assentarOsFundosDe(novo);
     contexto.usados.add(no);
     desejados.push(no);
     pares.push([no, novo]);
@@ -2970,12 +2972,21 @@ function vestirComo(velho, novo) {
     return;
   }
   const detalhe = velho.localName === "details";
+  // Um dos dois tem imagem de fundo: o `style` deles não se compara pelo
+  // atributo (ver `vestirOEstiloComFundo`). O novo com a imagem já escrita (não
+  // foi montado solto) segue o caminho de sempre.
+  const { pintados, pedidos } = fundos();
+  const comFundo = !pintados.has(novo) && (pedidos.has(novo) || pintados.has(velho));
   for (const nome of velho.getAttributeNames()) {
     if (detalhe && nome === "open") continue;
+    if (comFundo && nome === "style") continue;
     if (!novo.hasAttribute(nome)) velho.removeAttribute(nome);
   }
+  if (comFundo) vestirOEstiloComFundo(velho, novo);
   for (const nome of novo.getAttributeNames()) {
     if (detalhe && nome === "open") continue;
+    // A marca do pedido é do elemento solto, e não vai para o que está na tela.
+    if (nome === "data-fundo-pendente" || (comFundo && nome === "style")) continue;
     const valor = novo.getAttribute(nome);
     if (velho.getAttribute(nome) === valor) continue;
     if (nome === "style") velho.style.cssText = novo.style.cssText;
@@ -7126,15 +7137,135 @@ function aplicarCapa(quadro) {
   }
   quadro.dataset.comCapa = "sim";
   if (url) {
-    camada.style.backgroundImage = `url(${url})`;
+    pintarOFundo(camada, url);
     delete quadro.dataset.capaDeCor;
     quadro.style.removeProperty("--cor-do-perfil");
   } else {
-    camada.style.removeProperty("background-image");
+    pintarOFundo(camada, null);
     quadro.dataset.capaDeCor = "sim";
     quadro.style.setProperty("--cor-do-perfil", cor);
   }
   return quadro;
+}
+
+/**
+ * O que se sabe do fundo de cada elemento: o que **esta casca** pintou nele
+ * (`pintados`), o que foi pedido para um elemento ainda solto (`pedidos`), e o
+ * resto do estilo em linha que a lista vestiu nele (`restos`). Um lugar só,
+ * criado na primeira vez.
+ */
+function fundos() {
+  return (globalThis.fundosDoSeele ??= {
+    pintados: new WeakMap(),
+    pedidos: new WeakMap(),
+    restos: new WeakMap(),
+  });
+}
+
+/**
+ * **Põe uma imagem de fundo num elemento, e só quando é preciso.** A imagem é
+ * um `data:`, e escrevê-la no estilo faz a janela reler o texto inteiro: 37 ms
+ * por elemento com 10 MB, 3,7 ms com 1 MB (medido em 10/11/2026). Uma capa em
+ * 4K, repintada a cada redesenho em cada lugar em que aparece, deixou o
+ * aplicativo inteiro lento (relato do dono).
+ *
+ * - **A mesma imagem não é escrita de novo.** A comparação é com o que esta
+ *   função pôs, guardado ao lado do elemento: ler o estilo de volta devolveria
+ *   o mesmo texto enorme.
+ * - **Num elemento solto, o pedido fica anotado e nada é escrito.** A lista de
+ *   pessoas é refeita a cada meio segundo com elementos novos, que quase
+ *   sempre só servem para comparar com os que já estão na tela
+ *   (`vestirComo`). Quem entra na tela de verdade é pintado ao entrar
+ *   (`assentarOFundo`).
+ */
+function pintarOFundo(alvo, url, agora = false) {
+  const { pintados, pedidos } = fundos();
+  if (alvo.isConnected === false && !agora) {
+    if (url) {
+      pedidos.set(alvo, url);
+      alvo.setAttribute("data-fundo-pendente", "sim");
+    } else {
+      pedidos.delete(alvo);
+      alvo.removeAttribute?.("data-fundo-pendente");
+    }
+    return;
+  }
+  if ((pintados.get(alvo) ?? null) === url) return;
+  if (url) {
+    alvo.style.backgroundImage = `url(${url})`;
+    pintados.set(alvo, url);
+  } else {
+    alvo.style.removeProperty("background-image");
+    pintados.delete(alvo);
+  }
+}
+
+/** A imagem de fundo que um elemento tem, ou vai ter ao entrar na tela. */
+function fundoDe(alvo) {
+  const { pintados, pedidos } = fundos();
+  return pedidos.get(alvo) ?? pintados.get(alvo) ?? null;
+}
+
+/** Um elemento que entrou na tela com o fundo pedido: é agora que ele é pintado. */
+function assentarOFundo(alvo) {
+  const { pedidos, restos } = fundos();
+  const pedido = pedidos.get(alvo);
+  if (pedido === undefined) return;
+  pedidos.delete(alvo);
+  alvo.removeAttribute("data-fundo-pendente");
+  // O resto do estilo, lido antes da imagem: é curto, e é o que `vestirComo`
+  // compara depois sem precisar reler o `data:`.
+  restos.set(alvo, alvo.getAttribute("style") ?? "");
+  pintarOFundo(alvo, pedido, true);
+}
+
+/**
+ * Pinta os fundos pedidos de uma árvore que **vai entrar na tela agora**. Quem
+ * a põe no documento chama isto antes: o elemento entra já pintado, e ninguém
+ * que observe a lista vê uma mudança depois da entrada. O observador abaixo
+ * fica para quem entra sem avisar.
+ */
+function assentarOsFundosDe(raiz) {
+  if (raiz.nodeType !== 1) return;
+  if (raiz.hasAttribute("data-fundo-pendente")) assentarOFundo(raiz);
+  raiz.querySelectorAll("[data-fundo-pendente]").forEach(assentarOFundo);
+}
+
+// Todo elemento que entra no documento com um fundo pedido é pintado ali.
+if (typeof MutationObserver === "function" && typeof document !== "undefined" && document.documentElement) {
+  new MutationObserver((mudancas) => {
+    for (const mudanca of mudancas) {
+      for (const no of mudanca.addedNodes) {
+        assentarOsFundosDe(no);
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+}
+
+/**
+ * **O estilo em linha de um elemento com fundo, vestido sem reler a imagem.**
+ * O novo foi montado solto e nunca levou a imagem; o velho a tem. Comparar os
+ * dois atributos `style` era ler megabytes duas vezes por linha, a cada meio
+ * segundo. Aqui se compara o resto (curto) com o que foi vestido da última
+ * vez, e a imagem, pela anotação.
+ */
+function vestirOEstiloComFundo(velho, novo) {
+  const { pintados, restos } = fundos();
+  const resto = novo.getAttribute("style") ?? "";
+  // A primeira vez diante de um elemento que foi pintado já na tela: se ele
+  // só tem a imagem no estilo e o novo não traz mais nada, o resto já está
+  // certo, e nada se escreve. `style.length` conta as propriedades sem ler o
+  // texto delas.
+  if (!restos.has(velho) && resto === "" && velho.style.length === (pintados.has(velho) ? 1 : 0)) {
+    restos.set(velho, "");
+  }
+  if (restos.get(velho) !== resto) {
+    velho.style.cssText = resto;
+    restos.set(velho, resto);
+    // O `cssText` levou a imagem embora junto com o resto.
+    pintados.delete(velho);
+  }
+  pintarOFundo(velho, fundoDe(novo));
 }
 
 /** A cor do perfil oficial de uma pessoa (`#rrggbb`), ou `null` sem perfil. */
@@ -7171,11 +7302,11 @@ function aplicarAvatar(quadrado) {
       || (typeof fotoOficial === "function" ? fotoOficial(id) : null)
       || retratos.get(Number(id)) || retratos.get(id);
   if (uri) {
-    quadrado.style.backgroundImage = `url(${uri})`;
+    pintarOFundo(quadrado, uri);
     quadrado.dataset.comRetrato = "sim";
     quadrado.textContent = "";
   } else {
-    quadrado.style.removeProperty("background-image");
+    pintarOFundo(quadrado, null);
     delete quadrado.dataset.comRetrato;
     quadrado.textContent = quadrado.dataset.iniciaisDoAvatar ?? "";
   }

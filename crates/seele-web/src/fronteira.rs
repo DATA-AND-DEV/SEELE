@@ -100,6 +100,8 @@
 //! | | 1 | o `ErroDoPerfil` |
 //! | `perfil_icone(bytes)` | 0 | o PNG do ícone nativo (até 256 px e 8 KiB) |
 //! | | 1 | `"IconNotAPicture"` |
+//! | `perfil_para_a_janela(capa, bytes)` | 0 | a imagem do perfil reduzida ao lugar em que aparece |
+//! | | 1 | `"TipoRecusado"` |
 //! | `catalogo_endereco()` | 0 | o endereço do catálogo |
 //! | `catalogo_ler(catalogo, assinatura)` | 0 | nada: conferido e lido |
 //! | | 1 | a `FalhaNoCatalogo` do desktop |
@@ -1603,6 +1605,25 @@ pub unsafe extern "C" fn perfil_icone(ptr: *const u8, len: usize) -> u32 {
     match crate::perfil::icone_nativo(bytes) {
         Some(png) => dizer(png, 0),
         None => dizer(b"\"IconNotAPicture\"".to_vec(), 1),
+    }
+}
+
+/// **A imagem de um perfil como ela vai à página**: reduzida ao lugar em que
+/// aparece (`seele_sessao::reducao::imagem_do_perfil_para_a_janela`), pelo
+/// mesmo código do desktop. `capa` diferente de zero é a capa; zero, a foto.
+/// Devolve 0 com os bytes (os mesmos, quando já cabiam), ou 1 com
+/// `"TipoRecusado"`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_para_a_janela(capa: u32, ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    match seele_sessao::reducao::imagem_do_perfil_para_a_janela(bytes, capa != 0) {
+        Ok(reduzida) => dizer(reduzida, 0),
+        Err(_) => dizer(b"\"TipoRecusado\"".to_vec(), 1),
     }
 }
 

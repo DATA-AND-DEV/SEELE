@@ -467,7 +467,10 @@ const engines = require('./playwright.cjs');
     assert.equal(bolso.pediuOUso, 'capa', `a capa não pediu o uso ao Rust: ${JSON.stringify(bolso)}`);
     assert.ok(bolso.leveAceita, `a capa de arquivo grande e pouco decodificada foi recusada: ${JSON.stringify(bolso)}`);
     assert.ok(bolso.pesadaRecusada, `a capa de 200 MiB decodificados não foi recusada e dita: ${JSON.stringify(bolso)}`);
-    assert.equal(bolso.avatarSemUso, null, `o avatar nomeou um uso: ${JSON.stringify(bolso)}`);
+    // **O avatar também nomeia o uso dele** (10/11/2026): ele ia à janela do
+    // tamanho que o MOD mandou, e é a mesma classe de defeito da capa em 4K.
+    // O bolso do avatar continua contando os bytes do arquivo.
+    assert.equal(bolso.avatarSemUso, 'avatar', `o avatar não pediu a redução ao Rust: ${JSON.stringify(bolso)}`);
 
     // 7. **No máximo seis capas animadas ao mesmo tempo** (rascunho §4; tarefa
     //    6, Step 5c): escolhidas pela vista — as visíveis, e entre elas quem
@@ -857,8 +860,49 @@ const engines = require('./playwright.cjs');
       { chave: 'site', aberto: true, porque: null },
     ], `o MOD não ouviu o \`link\` de cada endereço como foi: ${JSON.stringify(links)}`);
 
+    // **Redesenhar não reescreve a capa que não mudou.** A capa é um `data:`
+    // (megabytes, quando a imagem é grande), e reatribuí-la ao estilo de cada
+    // elemento a cada redesenho ocupava um núcleo do WebView (relato de
+    // 10/11/2026, capa em 4K). Vinte redesenhos, nenhuma escrita.
+    const reescritas = await page.evaluate(() => {
+      const comImagem = [...document.querySelectorAll('[data-pessoa-da-capa] > .capa-camada')]
+        .filter(camada => camada.style.backgroundImage.startsWith('url('));
+      // O `style` de cada camada e de cada avatar é trocado por um procurador
+      // que conta as atribuições ao fundo. Um `MutationObserver` não serve: o
+      // navegador não registra mudança quando o valor é o mesmo, e é
+      // justamente a reatribuição do mesmo valor que custa (medido: 37 ms por
+      // elemento com um `data:` de 10 MB).
+      let escritas = 0;
+      const alvos = [...comImagem, ...document.querySelectorAll('[data-pessoa-do-avatar]')];
+      for (const alvo of alvos) {
+        const estilo = alvo.style;
+        const procurador = new Proxy(estilo, {
+          get: (_, chave) => {
+            const valor = estilo[chave];
+            return typeof valor === 'function' ? valor.bind(estilo) : valor;
+          },
+          set: (_, chave, valor) => {
+            if (chave === 'backgroundImage') escritas += 1;
+            estilo[chave] = valor;
+            return true;
+          },
+        });
+        Object.defineProperty(alvo, 'style', { configurable: true, get: () => procurador });
+      }
+      for (let i = 0; i < 20; i += 1) {
+        redesenharCapas();
+        redesenharAvatares();
+      }
+      for (const alvo of alvos) delete alvo.style;
+      return { capas: comImagem.length, escritas };
+    });
+    assert.ok(reescritas.capas > 0,
+      `não há capa com imagem na tela, e este caso não mediria nada: ${JSON.stringify(reescritas)}`);
+    assert.equal(reescritas.escritas, 0,
+      `redesenhar reescreveu a imagem de fundo sem ela ter mudado: ${JSON.stringify(reescritas)}`);
+
     assert.deepEqual(errors, []);
-    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre o véu (sem placas no cartão), o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha.');
+    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre o véu (sem placas no cartão), o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha; e redesenhar não reescreve a capa que não mudou.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

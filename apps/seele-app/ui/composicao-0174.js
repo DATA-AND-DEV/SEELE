@@ -294,8 +294,14 @@
       const redesenharMini = () => {
         if (sessao?.dataset.pessoasRecolhidas !== "sim" || !roster) return;
         const linhas = [...roster.querySelectorAll("li.pessoa[data-pessoa-id]")];
+        // **Um quadrado por pessoa, reaproveitado.** A faixa é refeita a cada
+        // mudança da lista (várias por segundo com alguém falando), e um
+        // quadrado novo a cada vez pagaria a leitura da imagem inteira de novo
+        // (ver `pintarOFundo`).
+        const antigos = new Map([...mini.children].map((item) => [item.dataset.pessoaId, item]));
         mini.replaceChildren(...linhas.map((linha) => {
-          const item = document.createElement("li");
+          const item = antigos.get(linha.dataset.pessoaId) ?? document.createElement("li");
+          item.dataset.pessoaId = linha.dataset.pessoaId;
           const quadro = linha.querySelector("[data-pessoa-do-avatar]");
           const nome = (linha.querySelector(".pessoa-nome")?.textContent || "").trim();
           const falando = linha.classList.contains("falando");
@@ -303,13 +309,16 @@
           item.dataset.fala = falando ? "sim" : "nao";
           item.title = falando ? `${nome} · falando` : nome;
           item.setAttribute("aria-label", item.title);
-          const imagem = quadro?.style.backgroundImage;
-          if (imagem && imagem !== "none") item.style.backgroundImage = imagem;
-          else item.textContent = (quadro?.dataset.iniciaisDoAvatar || nome).slice(0, 1).toUpperCase();
+          // A imagem vem da anotação, e não do estilo: ler o estilo de volta
+          // devolveria o `data:` inteiro, por pessoa, a cada mudança.
+          const imagem = quadro && typeof fundoDe === "function" ? fundoDe(quadro) : null;
+          const iniciais = imagem ? "" : (quadro?.dataset.iniciaisDoAvatar || nome).slice(0, 1).toUpperCase();
+          if (typeof pintarOFundo === "function") pintarOFundo(item, imagem);
+          if (item.textContent !== iniciais) item.textContent = iniciais;
           return item;
         }));
       };
-      if (roster) new MutationObserver(redesenharMini).observe(roster, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+      if (roster) new MutationObserver(redesenharMini).observe(roster, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-fundo-pendente"] });
       alternar.addEventListener("click", () => {
         if (!sessao) return;
         if (sessao.dataset.pessoasRecolhidas === "sim") delete sessao.dataset.pessoasRecolhidas;

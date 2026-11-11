@@ -410,11 +410,37 @@ impl Armazem {
                 let url = self
                     .bytes_da_imagem(lado, &imagem.hash)
                     .map(|bytes| {
-                        format!(
-                            "data:{};base64,{}",
-                            imagem.tipo,
-                            seele_ffi::base64_de(&bytes)
-                        )
+                        // **Reduzida ao lugar em que aparece**, como a de
+                        // qualquer perfil (`imagem_do_perfil`): o arquivo
+                        // guardado é o que a pessoa escolheu, do tamanho que
+                        // for, e a tela não precisa dele inteiro. Uma imagem
+                        // que não reduz (não decodifica, ou tem pixels demais)
+                        // não vai à tela.
+                        let capa = lado == LadoDoPerfil::Capa;
+                        match seele_ffi::reducao::imagem_do_perfil_para_a_janela(&bytes, capa) {
+                            Ok(reduzida) => {
+                                let tipo = seele_ffi::perfis::conferir_imagem(&reduzida)
+                                    .map(seele_ffi::perfis::tipo_de_midia)
+                                    .map_or_else(|_| imagem.tipo.clone(), ToOwned::to_owned);
+                                format!("data:{tipo};base64,{}", seele_ffi::base64_de(&reduzida))
+                            }
+                            // Pixels demais: não vai à tela, e fica dito.
+                            Err(motivo) if motivo == seele_ffi::reducao::GRANDE_DEMAIS => {
+                                tracing::warn!(
+                                    %motivo,
+                                    "a imagem do perfil padrão é grande demais para a tela"
+                                );
+                                String::new()
+                            }
+                            // O que não decodifica aqui segue como estava: é o
+                            // arquivo que a pessoa escolheu, e quem diz que ele
+                            // não é imagem é a conferência do envio.
+                            Err(_) => format!(
+                                "data:{};base64,{}",
+                                imagem.tipo,
+                                seele_ffi::base64_de(&bytes)
+                            ),
+                        }
                     })
                     .unwrap_or_default();
                 ImagemDoPadraoNaTela {
