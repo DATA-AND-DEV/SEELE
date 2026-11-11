@@ -8748,7 +8748,16 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // down — the head-of-channel block that ADR 0027 gave each transfer
             // its own stream to avoid.
             tokio::spawn(async move {
-                let _ = answer.send(preview_of(attachment.get(), &claimed, caixa.await.ok()));
+                let fetched = caixa.await.ok();
+                // Off the async workers: a preview larger than where it is
+                // drawn is decoded and reduced here, and that takes time.
+                let previa = tokio::task::spawn_blocking(move || {
+                    preview_of(attachment.get(), &claimed, fetched)
+                })
+                .await;
+                if let Ok(previa) = previa {
+                    let _ = answer.send(previa);
+                }
             });
         }
         Command::ShareScreen { pedido, limites } => {
@@ -8889,7 +8898,8 @@ fn preview_of(
     fetched: Option<seele_core::enlace::Previa>,
 ) -> Preview {
     use seele_core::enlace::Previa;
-    use seele_core::preview::{data_uri, judge, Verdict};
+    use seele_core::preview::{judge, Verdict};
+    use seele_core::reducao::{previa_na_janela, PreviaNaJanela, TETO_DE_PIXELS};
 
     let refused = |refusal: PreviewRefusal, found: Option<String>| Preview {
         attachment,
@@ -8908,13 +8918,35 @@ fn preview_of(
             None,
         ),
         Some(Previa::Bytes(bytes)) => match judge(claimed, &bytes) {
-            Verdict::Draw(format) => Preview {
-                attachment,
-                image: Some(data_uri(format, &bytes)),
-                claimed: claimed.to_owned(),
-                found: Some(format.media_type().to_owned()),
-                refusal: None,
-            },
+            // **Reduced to where it is drawn before it crosses the bridge**,
+            // and refused from its header when it declares too many pixels.
+            // The byte limit bounds the download and nothing else: the picture
+            // went to the window at the size it came, and the conversation,
+            // rebuilt on every message, wrote the whole `data:` URI into a new
+            // `<img>` each time (the sweep after the 4K cover, 11/11/2026).
+            // `found` stays what the sender's bytes were; the URI carries the
+            // type of the bytes that actually cross.
+            Verdict::Draw(format) => {
+                let found = Some(format.media_type().to_owned());
+                match previa_na_janela(bytes) {
+                    PreviaNaJanela::Pronta(uri) => Preview {
+                        attachment,
+                        image: Some(uri),
+                        claimed: claimed.to_owned(),
+                        found,
+                        refusal: None,
+                    },
+                    PreviaNaJanela::PixelsDemais { largura, altura } => refused(
+                        PreviewRefusal::TooManyPixels {
+                            width: largura,
+                            height: altura,
+                            limit: TETO_DE_PIXELS,
+                        },
+                        found,
+                    ),
+                    PreviaNaJanela::Ilegivel => refused(PreviewRefusal::Unreadable, found),
+                }
+            }
             Verdict::Disagrees { found, .. } => refused(
                 PreviewRefusal::Disagrees,
                 found.map(|format| format.media_type().to_owned()),
@@ -12732,8 +12764,51 @@ mod previa {
 
     use super::*;
 
-    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+    /// A real picture, 1 × 1, and not a signature alone: a preview's
+    /// dimensions are read from its header before it is drawn.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0dIDAT\x78\xda\x63\xd0\x08\xa8\xf8\x0f\x00\x03\x84\x01\xf0\xb6\x34\x04\x4b\x00\x00\x00\x00IEND\xae\x42\x60\x82";
     const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1];
+
+    /// A PNG of 69 bytes whose header declares 30 000 × 30 000.
+    const BOMBA: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x75\x30\x00\x00\x75\x30\x08\x06\x00\x00\x00\x66\x27\xf8\xba\x00\x00\x00\x0cIDAT\x78\xda\x63\x60\xa0\x0c\x00\x00\x00\x40\x00\x01\x89\xc9\xaf\x43\x00\x00\x00\x00IEND\xae\x42\x60\x82";
+
+    /// **A file within the byte limit that declares too many pixels is not
+    /// drawn, and says so with the numbers** (the sweep after the 4K cover,
+    /// 11/11/2026). It is 69 bytes, it agrees with its claim, and opened it
+    /// would ask the window for 3.6 GB: it used to come back as a picture.
+    #[test]
+    fn a_picture_that_declares_too_many_pixels_is_refused_with_the_numbers() {
+        let previa = preview_of(
+            7,
+            "image/png",
+            Some(seele_core::enlace::Previa::Bytes(BOMBA.to_vec())),
+        );
+        assert_eq!(previa.image, None, "900 megapixels went to the window");
+        assert_eq!(
+            previa.refusal,
+            Some(PreviewRefusal::TooManyPixels {
+                width: 30_000,
+                height: 30_000,
+                limit: seele_core::reducao::TETO_DE_PIXELS,
+            }),
+            "«too many pixels» with no number sends somebody nowhere"
+        );
+        assert_eq!(previa.found.as_deref(), Some("image/png"));
+    }
+
+    /// Bytes that start as a picture and carry no readable header are not
+    /// handed to the window to find out: with no dimensions there is no bound.
+    #[test]
+    fn a_picture_whose_header_cannot_be_read_is_not_drawn() {
+        let so_a_assinatura = PNG.get(..12).unwrap_or_default().to_vec();
+        let previa = preview_of(
+            7,
+            "image/png",
+            Some(seele_core::enlace::Previa::Bytes(so_a_assinatura)),
+        );
+        assert_eq!(previa.image, None);
+        assert_eq!(previa.refusal, Some(PreviewRefusal::Unreadable));
+    }
 
     #[test]
     fn bytes_that_agree_with_the_claim_come_back_as_a_picture() {
@@ -12752,8 +12827,11 @@ mod previa {
         assert_eq!(previa.refusal, None);
         assert_eq!(previa.found.as_deref(), Some("image/png"));
         assert_eq!(
-            previa.image.as_deref(),
-            Some("data:image/png;base64,iVBORw0KGgoAAAAN"),
+            previa.image,
+            Some(seele_core::preview::data_uri(
+                seele_core::ImageFormat::Png,
+                PNG
+            )),
             "the URI a window draws from was not written from the bytes"
         );
     }

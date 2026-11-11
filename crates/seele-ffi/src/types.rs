@@ -1763,7 +1763,7 @@ pub struct LimitesDosCampos {
 
 /// Why a file was not drawn.
 ///
-/// Four, and they are four because they ask different things of the person
+/// Six, and each is its own because they ask different things of the person
 /// reading. One says the file is fine and this window will not spend the memory;
 /// another says the file is not what it claimed to be, which is not a transfer
 /// problem and not something to retry.
@@ -1784,6 +1784,27 @@ pub enum PreviewRefusal {
         /// no number is a sentence nobody can act on.
         limit: u64,
     },
+    /// The file fits the byte limit and declares more pixels than a window
+    /// will decode: a few megabytes of PNG can open into gigabytes.
+    ///
+    /// Refused from the header, before a pixel is decoded on either side of
+    /// the bridge. Carries the numbers for the reason [`Self::TooBig`] does.
+    TooManyPixels {
+        /// The declared width, in pixels.
+        width: u32,
+        /// The declared height, in pixels.
+        height: u32,
+        /// The most pixels (width × height) a preview will decode.
+        limit: u64,
+    },
+    /// The bytes start as a picture's and do not open as one: the header that
+    /// carries the dimensions could not be read, or the picture was larger
+    /// than where it is drawn and could not be decoded to be reduced.
+    ///
+    /// Not [`Self::Disagrees`]: the leading bytes are what the file claimed.
+    /// And not drawn, because a picture whose size cannot be read is one whose
+    /// cost to the window cannot be bounded.
+    Unreadable,
     /// Never a picture in the first place — a document, a build, a text file.
     ///
     /// A window should not have asked, and this is what it gets if it did.

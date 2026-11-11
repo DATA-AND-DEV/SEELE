@@ -2461,7 +2461,13 @@ function comLinks(texto) {
         img.setAttribute("title", url);
         pedacos.push(img);
       } else if (pronta && typeof pronta === "object" && pronta.dominio) {
-        pedacos.push(convitePrevia(url, pronta.dominio));
+        pedacos.push(convitePrevia(url, pronta.dominio, pronta.recolhida === true));
+      } else if (pronta && typeof pronta === "object" && pronta.recusada) {
+        // A imagem que não coube numa prévia é dita no lugar dela: só o link,
+        // sem uma palavra, lia-se como «a prévia não funciona».
+        const recusa = elemento("span", "previa-convite");
+        recusa.append(elemento("span", "previa-convite-frase", pronta.recusada));
+        pedacos.push(recusa);
       }
     }
     cursor = comeco + url.length;
@@ -2473,12 +2479,139 @@ function comLinks(texto) {
 }
 
 /**
+ * **Quanto as prévias guardadas desta janela podem ocupar**, por bolso (o dos
+ * anexos e o dos links): quantas imagens, e quanto texto de `data:` somado.
+ *
+ * 48 imagens e 24 MiB de texto: uma prévia reduzida ao lugar dela pesa umas
+ * centenas de KiB, e um GIF no teto de bytes da prévia, 5,6 MiB — cabem quatro
+ * desses, ou dezenas das outras.
+ *
+ * **Por que existe** (11/11/2026, a varredura do incidente da capa em 4K): os
+ * dois mapas só cresciam até o fim da sessão. Cada prévia aberta numa sessão
+ * longa ficava na memória da janela para sempre, como um `data:` de megabytes.
+ */
+const TETO_DAS_PREVIAS = Object.freeze({ imagens: 48, texto: 24 * 1024 * 1024 });
+
+/**
+ * **Um bolso de prévias: um mapa com teto, que despeja a menos usada.**
+ *
+ * Tem a cara de um `Map` (`get`, `has`, `set`, `delete`, `clear`) porque é o
+ * que os dois caminhos de prévia já usavam. O que ele acrescenta:
+ *
+ * - **Conta só o que pesa.** Uma recusa, ou «não deu», é uma entrada de
+ *   poucos bytes; o que ocupa a janela é a imagem (`imagemDe` a acha no valor).
+ * - **`get` é uso.** A conversa pergunta por toda prévia que desenha a cada
+ *   redesenho, e é isso que deixa por último na fila as que estão à vista.
+ * - **Despeja a que foi usada há mais tempo**, nunca a que acabou de entrar,
+ *   até caber de novo. `aoDespejar` decide o que fica no lugar — e **diz**: uma
+ *   imagem que some da conversa sem uma palavra é a pergunta que volta depois.
+ */
+class BolsoDePrevias {
+  /**
+   * @param {(valor: unknown) => (string | null | undefined)} imagemDe O `data:` de um valor, quando ele tem.
+   * @param {(chave: unknown, valor: unknown, bolso: BolsoDePrevias) => void} aoDespejar Chamado depois de a entrada sair.
+   * @param {{ imagens: number, texto: number }} [teto]
+   */
+  constructor(imagemDe, aoDespejar, teto = TETO_DAS_PREVIAS) {
+    this.imagemDe = imagemDe;
+    this.aoDespejar = aoDespejar;
+    this.teto = teto;
+    this.mapa = new Map();
+    /** Quantas entradas têm imagem, e quanto texto de `data:` elas somam. */
+    this.imagens = 0;
+    this.texto = 0;
+  }
+
+  pesoDe(valor) {
+    const imagem = this.imagemDe(valor);
+    return typeof imagem === "string" ? imagem.length : 0;
+  }
+
+  /** Quantas entradas há, com imagem ou sem: o `size` de um `Map`. */
+  get size() {
+    return this.mapa.size;
+  }
+
+  has(chave) {
+    return this.mapa.has(chave);
+  }
+
+  get(chave) {
+    const valor = this.mapa.get(chave);
+    // Usada agora: vai para o fim da fila do despejo.
+    if (valor !== undefined && this.pesoDe(valor) > 0) {
+      this.mapa.delete(chave);
+      this.mapa.set(chave, valor);
+    }
+    return valor;
+  }
+
+  set(chave, valor) {
+    this.delete(chave);
+    this.mapa.set(chave, valor);
+    const peso = this.pesoDe(valor);
+    if (peso > 0) {
+      this.imagens += 1;
+      this.texto += peso;
+      this.despejarAteCaber(chave);
+    }
+    return this;
+  }
+
+  delete(chave) {
+    if (!this.mapa.has(chave)) return false;
+    const peso = this.pesoDe(this.mapa.get(chave));
+    if (peso > 0) {
+      this.imagens -= 1;
+      this.texto -= peso;
+    }
+    return this.mapa.delete(chave);
+  }
+
+  clear() {
+    this.mapa.clear();
+    this.imagens = 0;
+    this.texto = 0;
+  }
+
+  /** Tira as imagens usadas há mais tempo até o bolso caber, poupando `poupada`. */
+  despejarAteCaber(poupada) {
+    if (this.imagens <= this.teto.imagens && this.texto <= this.teto.texto) return;
+    // Uma cópia das chaves: `aoDespejar` pode pôr uma marca no lugar da que saiu.
+    for (const [chave, valor] of [...this.mapa]) {
+      if (this.imagens <= this.teto.imagens && this.texto <= this.teto.texto) return;
+      if (chave === poupada || this.pesoDe(valor) === 0) continue;
+      this.delete(chave);
+      this.aoDespejar(chave, valor, this);
+    }
+  }
+}
+
+/**
  * O que já se sabe de cada link de imagem: a imagem, ou que não deu.
  *
  * Uma busca por endereço e por sessão. Sem isto, a conversa redesenha e busca
  * de novo — e cada busca é a janela aparecendo para quem controla o endereço.
+ *
+ * **Com teto** (`BolsoDePrevias`). A imagem despejada **não é buscada de novo
+ * sozinha**: no lugar dela fica o convite com o domínio (`recolhida`), e quem
+ * manda buscar é o clique. Apagar a entrada faria o próximo desenho buscá-la,
+ * que despejaria outra, que seria buscada no desenho seguinte — uma batida
+ * sem fim na porta de quem controla os endereços.
  */
-const previasDeLink = new Map();
+const previasDeLink = new BolsoDePrevias(
+  (valor) => (typeof valor === "string" ? valor : null),
+  (url, _valor, bolso) => {
+    let dominio = "";
+    try {
+      dominio = new URL(url).hostname.toLowerCase();
+    } catch {
+      dominio = "";
+    }
+    // Sem domínio não há convite a fazer: fica «não deu», que também não busca.
+    bolso.set(url, dominio ? { dominio, recolhida: true } : false);
+  },
+);
 
 /**
  * Só o que **parece** imagem é buscado, e isso é a metade que protege.
@@ -2548,7 +2681,18 @@ function considerarAPrevia(url) {
       // novo a cada desenho, e um endereço que não responde viraria uma batida
       // constante na porta de alguém.
       const dominioPendente = falha?.SemConsentimento?.dominio;
-      previasDeLink.set(url, dominioPendente ? { dominio: dominioPendente } : false);
+      // **Pixels demais é dito na conversa, com os números** (`PixelsDemais`,
+      // do Rust e da página): a imagem cabe no teto de bytes e, aberta,
+      // pediria memória demais a esta janela. Só a primeira linha da frase: o
+      // «salve-a» da segunda é do anexo, e um link não tem o que salvar.
+      const pixels = falha?.PixelsDemais;
+      const recusada = pixels
+        ? fraseDePrevia({
+            refusal: { kind: "TooManyPixels", width: pixels.largura, height: pixels.altura, limit: pixels.teto },
+          }).split("\n")[0]
+        : "";
+      const guardado = dominioPendente ? { dominio: dominioPendente } : false;
+      previasDeLink.set(url, recusada ? { recusada } : guardado);
       if (!dominioPendente) console.warn("prévia de link:", falha);
       desenharMensagens();
     });
@@ -2568,9 +2712,16 @@ function considerarAPrevia(url) {
  * Consentir vale para o **domínio**, uma vez, e fica gravado — e a configuração
  * lista o que foi liberado, para poder desfazer.
  */
-function convitePrevia(url, dominio) {
+function convitePrevia(url, dominio, recolhida = false) {
   const convite = elemento("span", "previa-convite");
-  convite.append(elemento("span", "previa-convite-frase", `imagem de ${dominio}`));
+  // **A recolhida diz que foi recolhida** (`BolsoDePrevias`): a imagem estava
+  // na conversa e saiu da memória para dar lugar a outras. Buscá-la de novo
+  // custa o mesmo que da primeira vez, e por isso volta a ser um clique.
+  convite.append(elemento(
+    "span",
+    "previa-convite-frase",
+    recolhida ? `imagem de ${dominio}, recolhida para dar lugar a outras` : `imagem de ${dominio}`,
+  ));
   const botao = elemento("button", "previa-convite-acao", "MOSTRAR IMAGEM");
   botao.type = "button";
   botao.dataset.previa = url;
@@ -4807,8 +4958,25 @@ let regrasDePrevia = null;
  *
  * Recusa também entra aqui. Um arquivo cujos bytes discordaram do nome não
  * discorda menos na segunda tentativa.
+ *
+ * **Com teto** (`BolsoDePrevias`, `TETO_DAS_PREVIAS`): só crescia até o fim da
+ * sessão. A prévia despejada volta a ser o botão PRÉVIA, que diz que ela foi
+ * recolhida (`previasRecolhidas`); apertar baixa de novo.
  */
-const previas = new Map();
+const previas = new BolsoDePrevias(
+  (previa) => previa?.image,
+  (anexo) => {
+    previasRecolhidas.add(anexo);
+    previasFechadas.delete(anexo);
+  },
+);
+
+/**
+ * Quais prévias saíram da memória para dar lugar a outras, por id de anexo.
+ * É o que o botão PRÉVIA lê para dizer que reabrir **custa o arquivo de
+ * novo** — o contrário do que ele diz de uma prévia só fechada.
+ */
+const previasRecolhidas = new Set();
 
 /**
  * Quais prévias a pessoa **fechou**, por id de anexo.
@@ -5196,7 +5364,10 @@ function blocoDeAnexo(anexo) {
       // no `previas`. O aviso só vale para a primeira vez.
       ver.title = buscada
         ? "mostra de novo o que já foi baixado"
-        : "baixa o arquivo e desenha, se os bytes forem de imagem";
+        : previasRecolhidas.has(anexo.id)
+          ? "esta prévia foi recolhida para dar lugar a outras; apertar baixa o arquivo de novo"
+          : "baixa o arquivo e desenha, se os bytes forem de imagem";
+      if (!buscada && previasRecolhidas.has(anexo.id)) ver.dataset.recolhida = "sim";
       bloco.append(ver);
     }
   }
@@ -5296,12 +5467,22 @@ async function verPrevia(anexo) {
     previa = { attachment: anexo, image: null, claimed: "", found: null,
                refusal: { kind: "DidNotArrive" } };
   }
+  previasRecolhidas.delete(anexo);
+  const antes = previasRecolhidas.size;
   previas.set(anexo, previa);
   const nomeDoArquivo = botao?.closest(".anexo")?.querySelector(".anexo-arquivo")
     ?.textContent ?? "";
   const desenho = desenhoDaPrevia(previa, nomeDoArquivo, anexo);
   if (botao) botao.replaceWith(desenho);
   if (!previa.image) anunciar(fraseDePrevia(previa));
+  // **Guardar esta despejou outra**: a conversa é redesenhada agora, para a
+  // figura recolhida virar o botão que diz isso (e soltar a memória dela), e o
+  // leitor de tela ouve que uma saiu. Sem o redesenho ela ficaria na tela até
+  // a próxima mensagem, e sumiria então sem motivo à vista.
+  if (previasRecolhidas.size > antes) {
+    desenharMensagens();
+    if (previa.image) anunciar("Uma prévia mais antiga foi recolhida para dar lugar a esta.");
+  }
 }
 
 /**
@@ -5842,6 +6023,7 @@ function esquecerOEstadoDaSessao() {
   rascunhos.clear();
   previas.clear();
   previasFechadas.clear();
+  previasRecolhidas.clear();
   previasDeLink.clear();
   // Os volumes lidos, e a leitura deles que ainda estiver em voo (M-3).
   esquecerVolumes();

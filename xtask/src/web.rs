@@ -7,7 +7,9 @@
 //!    pelo JavaScript (`xtask/web/ouro.mjs`); e os casos do link do navegador
 //!    da F1 passam pela fronteira (`xtask/web/links.mjs`); e a voz pela fronteira
 //!    manda os pacotes e separa as fontes das sequências fixas que o desktop
-//!    grava (`xtask/web/voz.mjs`);
+//!    grava (`xtask/web/voz.mjs`); e a imagem que declara pixels demais é
+//!    recusada com as medidas, e a grande chega reduzida
+//!    (`xtask/web/imagens.mjs`);
 //! 2. o `seele-sessao` (o `Room` que o navegador dobra, Tarefa 2.2) compila
 //!    para `wasm32-unknown-unknown`: uma dependência nova dele que não compile
 //!    no navegador para aqui, e não no dia em que o `seele-web` a usar;
@@ -251,6 +253,16 @@ pub(crate) fn run() -> ExitCode {
         "a voz do desktop pela fronteira, dentro do .wasm (xtask/web/voz.mjs)",
         deu_certo(rodar(
             Command::new("node").arg("xtask/web/voz.mjs").arg(&web),
+        )),
+    ));
+
+    // O teto de pixels e a redução: no `wasm32` o decodificador recusa por
+    // limite, antes de dizer as medidas, a imagem que no desktop as diz — um
+    // ramo (`reducao::medidas`, pelo `IHDR`) que o teste nativo não atravessa.
+    passos.push((
+        "o teto de pixels e a redução dentro do .wasm (xtask/web/imagens.mjs)",
+        deu_certo(rodar(
+            Command::new("node").arg("xtask/web/imagens.mjs").arg(&web),
         )),
     ));
 

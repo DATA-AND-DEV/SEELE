@@ -2625,20 +2625,31 @@ function fraseDeNaoSalvo(recusa) {
 /**
  * Por que um arquivo não foi desenhado. ADR 0027.
  *
- * Quatro, e a primeira é a que este caminho inteiro existe para poder dizer.
+ * Seis, e a primeira é a que este caminho inteiro existe para poder dizer.
  * As `NOTAS-DE-RELEASE` deste projeto separam duas perguntas — «o arquivo
  * chegou inteiro?» e «como sei que ele é o que diz ser?» — e um anexo só
  * alcançava a primeira. O hash respondeu sim a ela; a segunda tem resposta
  * agora, e quando a resposta é não ela merece a frase própria em vez de virar
  * um silêncio que se lê como defeito.
  *
- * **Não desenhar não é esconder.** Em todas as quatro o arquivo continua na
+ * **Não desenhar não é esconder.** Em todas elas o arquivo continua na
  * tela, com nome, tamanho e o botão de salvar. O que ele perde é a figura.
+ *
+ * `TooManyPixels` é o teto que o de bytes não dá (11/11/2026): um arquivo de
+ * poucos megabytes pode declarar dezenas de milhares de pixels de lado, e
+ * aberto pediria gigabytes a esta janela. As medidas e o máximo entram no
+ * título, como o máximo do `TooBig` (`fraseDePrevia`).
  */
 const PREVIAS = {
   TooBig:
     "ESTE ARQUIVO É GRANDE DEMAIS PARA UMA PRÉVIA.\n" +
     "Salve-o e abra no seu sistema, fora daqui.",
+  TooManyPixels:
+    "ESTA IMAGEM TEM PIXELS DEMAIS PARA UMA PRÉVIA.\n" +
+    "Salve-a e abra no seu sistema, fora daqui.",
+  Unreadable:
+    "ESTA IMAGEM NÃO ABRIU.\n" +
+    "Os bytes dela começam como os de uma imagem e não formam uma. Ela continua aqui, para salvar.",
   NotAPicture:
     "ESTE ARQUIVO NÃO É UMA DAS IMAGENS QUE ESTA JANELA DESENHA.\n" +
     "Ele continua aqui, com nome e tamanho, para salvar.",
@@ -2672,6 +2683,15 @@ function fraseDePrevia(previa) {
   // qualifica o «grande demais» — ele pertence à frase que o diz.
   if (nome === "TooBig" && typeof razao.limit === "number") {
     return PREVIAS.TooBig.replace(".\n", `: O MÁXIMO É ${emBytes(razao.limit)}.\n`);
+  }
+  // As medidas e o máximo, pela mesma razão: «pixels demais» sem número não
+  // diz a ninguém quanto a imagem tem nem quanto caberia.
+  if (nome === "TooManyPixels" && [razao.width, razao.height, razao.limit].every((n) => typeof n === "number")) {
+    const megapixels = Math.round(razao.limit / 1e6);
+    return PREVIAS.TooManyPixels.replace(
+      ".\n",
+      `: ELA TEM ${razao.width} × ${razao.height}, E O MÁXIMO É ${megapixels} MEGAPIXELS.\n`,
+    );
   }
   return PREVIAS[nome] ?? `FALHA NÃO IDENTIFICADA (${nome})`;
 }

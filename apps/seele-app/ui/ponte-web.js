@@ -1504,10 +1504,22 @@ async function buscarComTeto(endereco) {
   return { alegado, bytes };
 }
 
-/** O `data:` de uns bytes que o juiz do desktop desenha, ou `null`. */
+/**
+ * O `data:` de uns bytes que o juiz do desktop desenha, ou `null`.
+ *
+ * **Reduzido ao lugar em que aparece**, pelo mesmo caminho da prévia de um
+ * anexo. A imagem que declara pixels demais rejeita com as medidas e o teto,
+ * no formato do desktop (`FalhaNaPrevia::PixelsDemais`): a conversa a diz no
+ * lugar da imagem, em vez de mostrar só o link.
+ */
 async function desenhavel({ alegado, bytes }) {
   const { instancia } = await carregarOWasmDaPagina();
-  return fronteiraDaLigacao(instancia.exports).previa({ attachment: 0, claimed: alegado, chegada: "bytes" }, bytes).image;
+  const previa = fronteiraDaLigacao(instancia.exports).previa({ attachment: 0, claimed: alegado, chegada: "bytes" }, bytes);
+  const recusa = previa.refusal;
+  if (recusa?.kind === "TooManyPixels") {
+    return Promise.reject({ PixelsDemais: { largura: recusa.width, altura: recusa.height, teto: recusa.limit } });
+  }
+  return previa.image;
 }
 
 /** Se o endereço é de um domínio de GIF desta máquina, ou de um subdomínio dele. */

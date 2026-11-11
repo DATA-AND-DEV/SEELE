@@ -9838,6 +9838,17 @@ enum FalhaNaPrevia {
     GrandeDemais,
     /// Respondeu, e o que veio não é imagem — ou não é a imagem que disse ser.
     NaoEImagem,
+    /// Respondeu uma imagem que cabe no teto de bytes e declara mais pixels do
+    /// que uma prévia decodifica. Com os números: a janela a diz no lugar da
+    /// imagem, e «grande demais» sem número não diz o que passou.
+    PixelsDemais {
+        /// A largura declarada.
+        largura: u32,
+        /// A altura declarada.
+        altura: u32,
+        /// O teto, em pixels (largura × altura).
+        teto: u64,
+    },
     /// O destino é desta máquina, desta rede, ou de um endereço reservado.
     ///
     /// ADR 0053. Separada de [`Self::NaoEAberto`] porque não é o esquema que
@@ -9903,9 +9914,8 @@ async fn previa_de_link(app: AppHandle, url: String) -> Result<String, FalhaNaPr
     // A mesma conferência do anexo, e não uma segunda cópia dela: o tipo
     // alegado tem de bater com o que os bytes dizem ser. Um endereço que
     // promete `image/gif` e entrega HTML é recusado aqui.
-    if let seele_ffi::preview::Verdict::Draw(formato) = seele_ffi::preview::judge(&alegado, &bytes)
-    {
-        return Ok(seele_ffi::preview::data_uri(formato, &bytes));
+    if let seele_ffi::preview::Verdict::Draw(_) = seele_ffi::preview::judge(&alegado, &bytes) {
+        return imagem_de_link_para_a_janela(bytes).await;
     }
 
     // **A página de um site de GIF, resolvida até a mídia que ela declara.**
@@ -9926,14 +9936,49 @@ async fn previa_de_link(app: AppHandle, url: String) -> Result<String, FalhaNaPr
         }
         let (alegado, bytes) = buscar_com_teto(&midia).await?;
         return match seele_ffi::preview::judge(&alegado, &bytes) {
-            seele_ffi::preview::Verdict::Draw(formato) => {
-                Ok(seele_ffi::preview::data_uri(formato, &bytes))
-            }
+            seele_ffi::preview::Verdict::Draw(_) => imagem_de_link_para_a_janela(bytes).await,
             _ => Err(FalhaNaPrevia::NaoEImagem),
         };
     }
 
     Err(FalhaNaPrevia::NaoEImagem)
+}
+
+/// **A imagem de um link como ela vai à janela**: o `data:` com o tipo que os
+/// bytes provaram ser, reduzida ao lugar em que a prévia aparece
+/// (`reducao::previa_na_janela`, o mesmo caminho da prévia de um anexo).
+///
+/// O teto de bytes (`PREVIEW_LIMIT`) limita a busca, e não o que a imagem
+/// ocupa aberta: quem controla o endereço escolhia as medidas, e um PNG de
+/// poucos megabytes que declara 30 000 × 30 000 ia inteiro ao `<img>` da
+/// conversa (a varredura do incidente da capa em 4K, 11/11/2026). Fora da
+/// linha do runtime: decodificar e reduzir uma imagem grande leva tempo.
+///
+/// # Errors
+///
+/// [`FalhaNaPrevia::PixelsDemais`], com as medidas e o teto, e
+/// [`FalhaNaPrevia::NaoEImagem`] para a que não abre.
+async fn imagem_de_link_para_a_janela(bytes: Vec<u8>) -> Result<String, FalhaNaPrevia> {
+    let previa = tauri::async_runtime::spawn_blocking(move || reducao::previa_na_janela(bytes))
+        .await
+        .map_err(|_| FalhaNaPrevia::NaoEImagem)?;
+    imagem_de_link_pronta(previa)
+}
+
+/// O desfecho de [`reducao::previa_na_janela`], na resposta de
+/// [`previa_de_link`]. Fora da função assíncrona para um teste a ler.
+fn imagem_de_link_pronta(previa: reducao::PreviaNaJanela) -> Result<String, FalhaNaPrevia> {
+    match previa {
+        reducao::PreviaNaJanela::Pronta(uri) => Ok(uri),
+        reducao::PreviaNaJanela::PixelsDemais { largura, altura } => {
+            Err(FalhaNaPrevia::PixelsDemais {
+                largura,
+                altura,
+                teto: reducao::TETO_DE_PIXELS,
+            })
+        }
+        reducao::PreviaNaJanela::Ilegivel => Err(FalhaNaPrevia::NaoEImagem),
+    }
 }
 
 /// Os domínios cuja **página** é resolvida até a mídia que ela declara.
@@ -17453,6 +17498,31 @@ mod o_que_sai_desta_janela_por_um_link {
     /// Isso é o ponto: uma segunda busca escrita à mão, ao lado, é uma segunda
     /// busca sem as três travas, e este teste é o que obriga as duas a
     /// passarem pela mesma porta.
+    /// **A imagem de um link que declara pixels demais não vai à janela, e a
+    /// recusa leva as medidas e o teto** (a varredura do incidente da capa em
+    /// 4K, 11/11/2026). São 69 bytes de PNG que declaram 30 000 × 30 000: cabem
+    /// no teto de bytes da busca, e abertos pediriam 3,6 GB ao `<img>` da
+    /// conversa. A que cabe sai como `data:`, com o tipo dos bytes.
+    #[test]
+    fn a_imagem_de_link_com_pixels_demais_e_recusada_com_os_numeros() {
+        let bomba = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x75\x30\x00\x00\x75\x30\x08\x06\x00\x00\x00\x66\x27\xf8\xba\x00\x00\x00\x0cIDAT\x78\xda\x63\x60\xa0\x0c\x00\x00\x00\x40\x00\x01\x89\xc9\xaf\x43\x00\x00\x00\x00IEND\xae\x42\x60\x82";
+        let recusa = super::imagem_de_link_pronta(crate::reducao::previa_na_janela(bomba.to_vec()))
+            .expect_err("uma imagem de 900 megapixels foi à janela");
+        assert_eq!(
+            serde_json::to_value(&recusa).expect("a recusa atravessa a ponte"),
+            serde_json::json!({ "PixelsDemais": { "largura": 30000, "altura": 30000, "teto": 36_000_000 } }),
+            "a janela lê as medidas e o teto desta forma, para dizê-los no lugar da imagem"
+        );
+        let pequena = crate::pacote_de_teste::PNG;
+        assert_eq!(
+            super::imagem_de_link_pronta(crate::reducao::previa_na_janela(pequena.to_vec())).ok(),
+            Some(seele_ffi::preview::data_uri(
+                seele_ffi::preview::ImageFormat::Png,
+                pequena
+            )),
+        );
+    }
+
     #[test]
     fn a_busca_de_imagem_de_link_confere_esquema_teto_e_bytes() {
         let sem_comentario = super::fonte_sem_comentarios();
@@ -17472,6 +17542,24 @@ mod o_que_sai_desta_janela_por_um_link {
         );
 
         let comando = super::corpo_de(&sem_comentario, "async fn previa_de_link(");
+        // **Nenhuma das duas buscas monta o `data:` direto dos bytes que
+        // vieram**: as duas passam pelo teto de pixels e pela redução
+        // (`imagem_de_link_para_a_janela`). O teto de bytes não limita o que a
+        // imagem ocupa aberta, e quem controla o endereço escolhe as medidas.
+        assert!(
+            comando
+                .matches("imagem_de_link_para_a_janela(bytes).await")
+                .count()
+                == 2
+                && !comando.contains("data_uri("),
+            "uma das duas buscas voltou a mandar a imagem à janela do tamanho \
+             que veio, sem teto de pixels: {comando}"
+        );
+        let pronta = super::corpo_de(&sem_comentario, "async fn imagem_de_link_para_a_janela(");
+        assert!(
+            pronta.contains("reducao::previa_na_janela(bytes)"),
+            "a imagem de um link deixou de passar pelo teto de pixels da prévia: {pronta}"
+        );
         assert!(
             comando.matches("judge(&alegado, &bytes)").count() == 2,
             "uma das duas buscas deixou de conferir os bytes contra o tipo \

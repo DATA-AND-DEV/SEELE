@@ -130,6 +130,66 @@ pub const TETO_DA_MIDIA_DE_MOD: Teto = Teto {
 /// ([`TETO_DA_CAPA_DO_PERFIL`]).
 pub const TETO_DO_FUNDO_DE_MOD: Teto = TETO_DA_CAPA_DO_PERFIL;
 
+/// **A prévia de uma imagem da conversa** — o anexo que alguém mandou, e a
+/// imagem de um link. A folha a desenha com no máximo 320 px de altura
+/// (`.anexo-desenho img`), e 1280 × 720 cobre isso numa tela de densidade
+/// dupla.
+///
+/// **Por que existe** (11/11/2026, a varredura do incidente da capa em 4K): o
+/// teto da prévia era só de bytes ([`crate::preview::PREVIEW_LIMIT`]), e o
+/// próprio `preview.rs` dizia que os pixels não tinham limite. A imagem ia à
+/// janela do tamanho que veio, e a conversa, refeita a cada mensagem, punha o
+/// `data:` inteiro num `<img>` novo.
+///
+/// Os quadros e a duração só valem para a animação **maior** que o lugar; o
+/// GIF que cabe segue inteiro ([`para_a_janela`]).
+pub const TETO_DA_PREVIA: Teto = Teto {
+    largura: 1280,
+    altura: 720,
+    quadros: 60,
+    milissegundos: 10_000,
+};
+
+/// O que a prévia de uma imagem da conversa vira a caminho da janela.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviaNaJanela {
+    /// O `data:` inteiro, com o tipo que os bytes **de saída** provaram ser
+    /// (a redução pode trocar o formato: um WebP parado sai PNG).
+    Pronta(String),
+    /// A imagem declara mais pixels que [`TETO_DE_PIXELS`]: recusada pelo
+    /// cabeçalho, sem ser aberta aqui nem na janela.
+    PixelsDemais {
+        /// A largura declarada.
+        largura: u32,
+        /// A altura declarada.
+        altura: u32,
+    },
+    /// Os bytes começam como os de uma imagem e não abrem como uma: sem as
+    /// medidas, não há como saber o que a janela decodificaria.
+    Ilegivel,
+}
+
+/// **A prévia de uma imagem da conversa, pronta para a janela**: recusada
+/// pelo cabeçalho quando declara pixels demais, reduzida a [`TETO_DA_PREVIA`]
+/// quando é maior que o lugar, e com os bytes que tinha quando já cabe. Os
+/// dois produtores da prévia (o desktop e o navegador) passam por aqui.
+#[must_use]
+pub fn previa_na_janela(bytes: Vec<u8>) -> PreviaNaJanela {
+    let Ok((largura, altura)) = medidas(&bytes) else {
+        return PreviaNaJanela::Ilegivel;
+    };
+    if u64::from(largura) * u64::from(altura) > TETO_DE_PIXELS {
+        return PreviaNaJanela::PixelsDemais { largura, altura };
+    }
+    let Ok(pronta) = para_a_janela(bytes, &TETO_DA_PREVIA) else {
+        return PreviaNaJanela::Ilegivel;
+    };
+    match crate::preview::sniff(&pronta) {
+        Some(formato) => PreviaNaJanela::Pronta(crate::preview::data_uri(formato, &pronta)),
+        None => PreviaNaJanela::Ilegivel,
+    }
+}
+
 /// O teto de um uso, pelo nome que a janela manda. `None` para um nome que
 /// este produto não conhece: a mídia de MOD sem uso conhecido vai pelo teto
 /// geral ([`TETO_DA_MIDIA_DE_MOD`], em `midia_de_mod::reduzir_ao_uso`).
@@ -773,6 +833,52 @@ mod testes {
             "formato-desconhecido"
         );
         assert_eq!(medidas(&png(300, 100)), Ok((300, 100)));
+    }
+
+    /// **A prévia de uma imagem da conversa vai à janela dentro do teto dela**
+    /// (a varredura do incidente da capa em 4K): a grande é reduzida, a que
+    /// cabe passa com os bytes que tinha, o GIF que cabe fica com todos os
+    /// quadros, e a que declara pixels demais é recusada com as medidas.
+    #[test]
+    fn a_previa_vai_a_janela_dentro_do_teto() {
+        let bytes_de = |previa: PreviaNaJanela| {
+            let PreviaNaJanela::Pronta(uri) = previa else {
+                panic!("a prévia não ficou pronta: {previa:?}");
+            };
+            let (cabecalho, conteudo) = uri.split_once(',').expect("um data:");
+            (
+                cabecalho.to_owned(),
+                crate::base64::de_base64(conteudo).expect("base64"),
+            )
+        };
+        // Uma foto em 4K: reduzida, e ainda PNG.
+        let (tipo, reduzida) = bytes_de(previa_na_janela(png(3840, 2160)));
+        assert_eq!(tipo, "data:image/png;base64");
+        assert_eq!(dimensoes(&reduzida), (1280, 720));
+        // Uma captura comprida cabe pela altura, com a proporção mantida.
+        let (_, comprida) = bytes_de(previa_na_janela(png(1080, 4320)));
+        assert_eq!(dimensoes(&comprida), (180, 720));
+        // O que cabe passa com os mesmos bytes.
+        let pequena = png(640, 360);
+        assert_eq!(bytes_de(previa_na_janela(pequena.clone())).1, pequena);
+        // O GIF que cabe no lugar não perde quadro nenhum.
+        let longo = gif(64, 48, 120, 50);
+        let (tipo, passou) = bytes_de(previa_na_janela(longo.clone()));
+        assert_eq!(tipo, "data:image/gif;base64");
+        assert_eq!(passou, longo);
+        // 45 megapixels num arquivo pequeno: recusada com as medidas.
+        assert_eq!(
+            previa_na_janela(png(9000, 5000)),
+            PreviaNaJanela::PixelsDemais {
+                largura: 9000,
+                altura: 5000
+            }
+        );
+        // Só a assinatura: não há medidas para ler.
+        assert_eq!(
+            previa_na_janela(b"\x89PNG\r\n\x1a\n\0\0\0\x0d".to_vec()),
+            PreviaNaJanela::Ilegivel
+        );
     }
 
     /// As medidas do `IHDR`, lidas à mão: o que a recusa por pixels usa

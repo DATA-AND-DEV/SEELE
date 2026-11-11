@@ -341,6 +341,13 @@ jobs:
       - run: node apps/seele-app/bancada/gif-na-conversa.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # As prévias de imagem da conversa têm teto (11/11/2026, a varredura do
+      # incidente da capa em 4K): os dois mapas que as guardam só cresciam até
+      # o fim da sessão. O bolso despeja e diz o que recolheu, a recusa por
+      # pixels tem frase, e despejar uma imagem de link não a busca de novo.
+      - run: node apps/seele-app/bancada/teto-das-previas.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # O texto da sessão sob um tema claro, pelo contraste que o navegador
       # computa (09/10/2026): a cor resolvida acima de `#tela-sessao` deixava o
       # corpo das mensagens a 1,09:1 com um tema que a validação aceitava.

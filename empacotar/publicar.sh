@@ -1363,6 +1363,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/ajustes-v013.cjs
     uma_bancada node apps/seele-app/bancada/escolha-de-versao-de-mod.cjs
     uma_bancada node apps/seele-app/bancada/gif-na-conversa.cjs
+    uma_bancada node apps/seele-app/bancada/teto-das-previas.cjs
     uma_bancada node apps/seele-app/bancada/tema-claro-legivel.cjs
     uma_bancada node apps/seele-app/bancada/regioes-do-produto.cjs
     uma_bancada node apps/seele-app/bancada/capa.cjs
