@@ -95,6 +95,11 @@ pub use seele_core::PreviaDeTela;
 /// Quantas fontes ganham prévia numa abertura da caixa de compartilhar.
 pub const MAX_PREVIAS_DE_TELA: usize = 24;
 
+/// Quantas capturas de prévia ficam abertas ao mesmo tempo. Abertas juntas,
+/// uma fonte que não entrega quadro não segura as outras; em lotes, a caixa
+/// não abre vinte e quatro capturas de uma vez.
+const LOTE_DE_PREVIAS: usize = 8;
+
 /// **A regra da menção**, pura: se `corpo` chama a pessoa de apelido `base` e
 /// marca `tag`. É a função que a sessão usa para marcar
 /// [`Message::mentions_me`]; a casca a usa no autocompletar e no realce, para
@@ -4447,32 +4452,42 @@ impl Connection {
                     .collect()
             },
         );
-        for id in ids {
-            let comecada = self
-                .shared
-                .fontes_de_tela
-                .lock()
-                .ok()
-                .and_then(|guardadas| {
-                    guardadas
-                        .iter()
-                        .find(|fonte| fonte.id() == id)
-                        .map(|fonte| (fonte.rotulo().to_owned(), fonte.comecar_previa()))
-                });
-            let Some((nome, em_curso)) = comecada else {
-                // A lista mudou (uma relista, uma fonte escolhida): o resto é
-                // de outra lista, e a tela pede de novo.
-                return;
-            };
-            match em_curso {
-                Ok(em_curso) => {
-                    if let Some(previa) = em_curso.esperar(seele_core::PRAZO_DA_PREVIA) {
-                        cada(id, &nome, previa);
+        for lote in ids.chunks(LOTE_DE_PREVIAS) {
+            let mut abertas = Vec::with_capacity(lote.len());
+            let mut a_lista_mudou = false;
+            for id in lote {
+                let comecada = self
+                    .shared
+                    .fontes_de_tela
+                    .lock()
+                    .ok()
+                    .and_then(|guardadas| {
+                        guardadas
+                            .iter()
+                            .find(|fonte| fonte.id() == *id)
+                            .map(|fonte| (fonte.rotulo().to_owned(), fonte.comecar_previa()))
+                    });
+                match comecada {
+                    Some((nome, Ok(em_curso))) => abertas.push(((*id, nome), em_curso)),
+                    Some((nome, Err(erro))) => {
+                        tracing::debug!(%erro, fonte = %nome, "a prévia desta fonte não abriu");
+                    }
+                    None => {
+                        // A lista mudou (uma relista, uma fonte escolhida): o
+                        // resto é de outra lista, e a tela pede de novo.
+                        a_lista_mudou = true;
+                        break;
                     }
                 }
-                Err(erro) => {
-                    tracing::debug!(%erro, fonte = %nome, "a prévia desta fonte não abriu");
-                }
+            }
+            seele_core::colher_previas(
+                abertas,
+                seele_core::PRAZO_DA_PREVIA,
+                seele_core::PreviaEmCurso::olhar,
+                |(id, nome), previa| cada(id, &nome, previa),
+            );
+            if a_lista_mudou {
+                return;
             }
         }
     }

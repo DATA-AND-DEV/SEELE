@@ -679,6 +679,7 @@ pub fn previa_do_quadro(quadro: &QuadroI420, lado_max: usize) -> Option<PreviaDe
 pub struct PreviaEmCurso(EstadoDaPrevia);
 
 enum EstadoDaPrevia {
+    #[cfg(target_os = "macos")]
     Pronta(Option<PreviaDeTela>),
     Capturando(FonteDoSistema),
 }
@@ -707,25 +708,81 @@ impl std::fmt::Debug for PreviaEmCurso {
     }
 }
 
+/// O que se vê ao olhar uma prévia em curso, sem esperar por ela.
+#[derive(Debug)]
+pub enum Olhada<P> {
+    /// Veio: é esta.
+    Veio(P),
+    /// Não vem mais (a foto falhou, o quadro não serviu).
+    NaoVem,
+    /// Ainda não há quadro: olhar de novo adiante.
+    Ainda,
+}
+
 impl PreviaEmCurso {
+    /// Olha se a prévia já veio, **sem esperar**. Depois de [`Olhada::Veio`]
+    /// ou [`Olhada::NaoVem`] não há mais o que olhar: quem chama a larga, e a
+    /// captura fecha.
+    pub fn olhar(&mut self) -> Olhada<PreviaDeTela> {
+        match &mut self.0 {
+            #[cfg(target_os = "macos")]
+            EstadoDaPrevia::Pronta(previa) => previa.take().map_or(Olhada::NaoVem, Olhada::Veio),
+            EstadoDaPrevia::Capturando(captura) => match FonteDeQuadros::tomar(captura) {
+                Some(quadro) => {
+                    previa_do_quadro(&quadro, LADO_DA_PREVIA).map_or(Olhada::NaoVem, Olhada::Veio)
+                }
+                None => Olhada::Ainda,
+            },
+        }
+    }
+
     /// Espera o primeiro quadro, até `prazo`, e devolve a prévia dele. A
     /// captura fecha ao sair daqui.
     #[must_use]
     pub fn esperar(self, prazo: std::time::Duration) -> Option<PreviaDeTela> {
-        let captura = match self.0 {
-            EstadoDaPrevia::Pronta(previa) => return previa,
-            EstadoDaPrevia::Capturando(captura) => captura,
-        };
-        let fim = std::time::Instant::now() + prazo;
-        loop {
-            if let Some(quadro) = FonteDeQuadros::tomar(&captura) {
-                return previa_do_quadro(&quadro, LADO_DA_PREVIA);
+        let mut veio = None;
+        colher_previas(vec![((), self)], prazo, Self::olhar, |(), previa| {
+            veio = Some(previa);
+        });
+        veio
+    }
+}
+
+/// De quanto em quanto se olha de novo o que ainda não veio.
+const ENTRE_OLHADAS: std::time::Duration = std::time::Duration::from_millis(15);
+
+/// **Colhe várias prévias abertas juntas**, entregando cada uma a `cada`
+/// **assim que vem**, até `prazo` no todo.
+///
+/// Uma por vez, cada fonte que não entrega quadro (uma janela minimizada)
+/// segurava a fila pelo prazo inteiro: medido no Windows, 4,2 s para oito
+/// fontes com duas minimizadas, contra 0,5 s para as seis que têm imagem
+/// quando abertas juntas. Aqui a que não vem só custa o prazo no fim, e a ela
+/// mesma.
+///
+/// `olhar` é [`PreviaEmCurso::olhar`]; é parâmetro para a regra ter teste sem
+/// tela.
+pub fn colher_previas<C, E, P>(
+    mut em_curso: Vec<(C, E)>,
+    prazo: std::time::Duration,
+    mut olhar: impl FnMut(&mut E) -> Olhada<P>,
+    mut cada: impl FnMut(C, P),
+) {
+    let fim = std::time::Instant::now() + prazo;
+    loop {
+        let mut faltam = Vec::with_capacity(em_curso.len());
+        for (chave, mut previa) in em_curso {
+            match olhar(&mut previa) {
+                Olhada::Veio(pronta) => cada(chave, pronta),
+                Olhada::NaoVem => {}
+                Olhada::Ainda => faltam.push((chave, previa)),
             }
-            if std::time::Instant::now() >= fim {
-                return None;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(15));
         }
+        em_curso = faltam;
+        if em_curso.is_empty() || std::time::Instant::now() >= fim {
+            return;
+        }
+        std::thread::sleep(ENTRE_OLHADAS);
     }
 }
 
