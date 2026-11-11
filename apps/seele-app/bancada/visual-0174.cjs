@@ -31,9 +31,15 @@ async function main() {
           if(cena==='audio'){fecharPerfil();abrirServer('tela-boot');document.getElementById('secao-audio').click();}
           if(cena==='sessao') { document.getElementById('tela-server').hidden=true; for(const el of document.querySelectorAll('.tela'))el.hidden=true; document.getElementById('tela-sessao').hidden=false; window.desenhar(foto); }
           if(cena==='chamada') abrirChamada();
-          if(cena==='pessoal') { const vista=criarVistaDaConversaPessoal({acoes:{voltar(){},criar(){},chamar(){},atender(){},recusar(){},copiar(){},microfone(){},compartilhar(){},encerrar(){},podeCompartilhar:()=>false,enviarTexto(){}}}); vista.elemento.id='vista-pessoal-bancada'; document.body.append(vista.elemento); vista.abrir({apelido:'Alex'}); }
+          if(cena==='pessoal') { const vista=criarVistaDaConversaPessoal({acoes:{voltar(){},criar(){},chamar(){},atender(){},recusar(){},copiar(){},microfone(){},compartilhar(){},camera(){},encerrar(){},podeCompartilhar:()=>false,podeLigarCamera:()=>false,enviarTexto(){}}}); vista.elemento.id='vista-pessoal-bancada'; document.body.append(vista.elemento); vista.abrir({apelido:'Alex'}); }
         },{cena,foto:retrato()}).catch(e=>erros.push(cena+':'+e.message));
         await page.waitForTimeout(200);
+        // A cena que não montou diz por quê, na hora. Sem isto a exceção ficava
+        // guardada em `erros` e a bancada esperava 30 s por uma raiz que não viria:
+        // foi assim que a câmera da 1.0 (`podeLigarCamera`, que a vista pessoal
+        // passou a pedir a quem a monta) apareceu como «locator.evaluate: Timeout».
+        const naoMontou=erros.find(e=>e.startsWith(cena+':'));
+        if(naoMontou) throw new Error(`a cena ${cena} não montou a ${largura}px — ${naoMontou}`);
         const raiz={inicio:'#tela-boot',perfil:'#perfil',audio:'#tela-server',sessao:'#tela-sessao',chamada:'#tela-sessao',pessoal:'#vista-pessoal-bancada'}[cena];
         const medidas=await page.locator(raiz).evaluate(el=>({largura:el.clientWidth,conteudo:el.scrollWidth,fundo:getComputedStyle(el).backgroundColor,rolagens:[...el.querySelectorAll('*')].filter(n=>n.clientWidth>0&&n.scrollWidth>n.clientWidth+2&&getComputedStyle(n).overflowX!=='auto'&&getComputedStyle(n).overflowX!=='scroll').slice(0,8).map(n=>n.id||n.className)}));
         await page.screenshot({path:path.join(pasta,`${cena}-${largura}.png`)});
