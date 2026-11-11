@@ -645,11 +645,9 @@ async fn transmitir_por(
                 }
                 let orcamento = olhos.orcamento_bps.load(Ordering::SeqCst);
                 if orcamento != configurado {
-                    // A casca reconfigura o codificador, e o primeiro quadro de
-                    // um codificador reconfigurado é chave.
-                    if configurado != 0 {
-                        olhos.quer_chave.store(true, Ordering::SeqCst);
-                    }
+                    // A casca reconfigura o codificador **sem pedir chave**
+                    // (`camera.js`, desde 11/11/2026): a troca de orçamento
+                    // não muda as medidas nem o codec.
                     configurado = orcamento;
                 }
                 let chave = olhos.quer_chave.load(Ordering::SeqCst);
