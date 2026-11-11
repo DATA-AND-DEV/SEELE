@@ -5509,48 +5509,6 @@ const fn o_enlace_recusou_algo(c: &seele_enlace::Contadores) -> bool {
         > 0
 }
 
-#[cfg(test)]
-mod o_aviso_do_enlace {
-    use super::o_enlace_recusou_algo;
-    use seele_enlace::Contadores;
-
-    /// O volume que esperou na frente da voz é medida, e não recusa: sozinho
-    /// não acende o aviso. Comparar com `Contadores::default()` reprova aqui.
-    #[test]
-    fn so_o_volume_medido_nao_e_recusa() {
-        let so_volume = Contadores {
-            maior_volume_no_sctp: 48_000,
-            ..Contadores::default()
-        };
-        assert!(!o_enlace_recusou_algo(&so_volume));
-        assert!(!o_enlace_recusou_algo(&Contadores::default()));
-    }
-
-    /// Cada contador de recusa acende o aviso, inclusive os da mídia e do
-    /// túnel, que a linha antiga nem imprimia.
-    #[test]
-    fn cada_recusa_acende_o_aviso() {
-        let um = |muda: fn(&mut Contadores)| {
-            let mut c = Contadores::default();
-            muda(&mut c);
-            c
-        };
-        for c in [
-            um(|c| c.canais_recusados = 1),
-            um(|c| c.cortes_por_fila = 1),
-            um(|c| c.violacoes = 1),
-            um(|c| c.voz_descartada = 1),
-            um(|c| c.voz_nao_saiu = 1),
-            um(|c| c.midia_nao_saiu = 1),
-            um(|c| c.midia_malformada = 1),
-            um(|c| c.tunel_descartado = 1),
-            um(|c| c.tunel_grande_demais = 1),
-        ] {
-            assert!(o_enlace_recusou_algo(&c), "{c:?} não acendeu o aviso");
-        }
-    }
-}
-
 /// O que uma saída alcança.
 ///
 /// Duas e não quatro: ou a conexão acabou — e aí a pessoa sai de toda sala, da
@@ -8750,5 +8708,47 @@ mod batida_com_disco_ocupado {
             "não houve disputa real no SQLite"
         );
         assert!(rodadas >= 20, "o executor só rodou {rodadas} vezes durante {transcorrido:?} de escrita: a batida parou a rede");
+    }
+}
+
+#[cfg(test)]
+mod o_aviso_do_enlace {
+    use super::o_enlace_recusou_algo;
+    use seele_enlace::Contadores;
+
+    /// O volume que esperou na frente da voz é medida, e não recusa: sozinho
+    /// não acende o aviso. Comparar com `Contadores::default()` reprova aqui.
+    #[test]
+    fn so_o_volume_medido_nao_e_recusa() {
+        let so_volume = Contadores {
+            maior_volume_no_sctp: 48_000,
+            ..Contadores::default()
+        };
+        assert!(!o_enlace_recusou_algo(&so_volume));
+        assert!(!o_enlace_recusou_algo(&Contadores::default()));
+    }
+
+    /// Cada contador de recusa acende o aviso, inclusive os da mídia e do
+    /// túnel, que a linha antiga nem imprimia.
+    #[test]
+    fn cada_recusa_acende_o_aviso() {
+        let um = |muda: fn(&mut Contadores)| {
+            let mut c = Contadores::default();
+            muda(&mut c);
+            c
+        };
+        for c in [
+            um(|c| c.canais_recusados = 1),
+            um(|c| c.cortes_por_fila = 1),
+            um(|c| c.violacoes = 1),
+            um(|c| c.voz_descartada = 1),
+            um(|c| c.voz_nao_saiu = 1),
+            um(|c| c.midia_nao_saiu = 1),
+            um(|c| c.midia_malformada = 1),
+            um(|c| c.tunel_descartado = 1),
+            um(|c| c.tunel_grande_demais = 1),
+        ] {
+            assert!(o_enlace_recusou_algo(&c), "{c:?} não acendeu o aviso");
+        }
     }
 }
