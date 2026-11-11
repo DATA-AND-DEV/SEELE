@@ -206,6 +206,24 @@ pub enum RecepcaoRecusada {
 }
 
 impl Recepcao {
+    /// O relato do que um receptor mediu, ou `None` se não há o que relatar.
+    ///
+    /// É por aqui que um cliente monta o relato, para que o que sai seja
+    /// sempre o que [`Self::confere`] aceita do outro lado: um número que não
+    /// é finito ou é negativo vira «não medido» (o receptor não tem medida, e
+    /// não uma medida ruim), a perda é aparada em 1.0 e o jitter em
+    /// [`JITTER_MAXIMO_DO_RELATO_MS`]. Sem nenhum dos dois, não há relato.
+    #[must_use]
+    pub fn medida(perda: Option<f32>, jitter_ms: Option<f32>) -> Option<Self> {
+        let perda = perda
+            .filter(|perda| perda.is_finite() && *perda >= 0.0)
+            .map(|perda| perda.min(1.0));
+        let jitter_ms = jitter_ms
+            .filter(|jitter| jitter.is_finite() && *jitter >= 0.0)
+            .map(|jitter| jitter.min(JITTER_MAXIMO_DO_RELATO_MS));
+        (perda.is_some() || jitter_ms.is_some()).then_some(Self { perda, jitter_ms })
+    }
+
     /// Confere a forma do relato: os dois lados usam esta mesma regra — o
     /// cliente para não mandar o que seria recusado, o servidor para não pôr
     /// na conta um número que não é medida.
@@ -344,6 +362,47 @@ impl Signal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O que um cliente monta com [`Recepcao::medida`] sempre passa na
+    /// conferência do servidor, e o que não é medida não vira relato.
+    #[test]
+    fn o_relato_montado_pelo_cliente_sempre_passa_na_conferencia() {
+        let numeros = [
+            None,
+            Some(0.0),
+            Some(0.3),
+            Some(1.0),
+            Some(2.0),
+            Some(-1.0),
+            Some(1.0e12),
+            Some(f32::NAN),
+            Some(f32::INFINITY),
+            Some(f32::NEG_INFINITY),
+        ];
+        for perda in numeros {
+            for jitter in numeros {
+                if let Some(relato) = Recepcao::medida(perda, jitter) {
+                    assert_eq!(relato.confere(), Ok(()), "{perda:?} {jitter:?}");
+                }
+            }
+        }
+        assert_eq!(Recepcao::medida(None, None), None);
+        assert_eq!(Recepcao::medida(Some(f32::NAN), Some(-3.0)), None);
+        assert_eq!(
+            Recepcao::medida(Some(0.25), Some(f32::NAN)),
+            Some(Recepcao {
+                perda: Some(0.25),
+                jitter_ms: None
+            })
+        );
+        assert_eq!(
+            Recepcao::medida(Some(3.0), Some(1.0e12)),
+            Some(Recepcao {
+                perda: Some(1.0),
+                jitter_ms: Some(JITTER_MAXIMO_DO_RELATO_MS)
+            })
+        );
+    }
 
     /// A forma do relato de recepção: o que entra na conta e o que não entra.
     #[test]

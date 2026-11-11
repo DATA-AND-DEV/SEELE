@@ -47,7 +47,7 @@ use seele_proto::control::{
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId,
 };
-use seele_proto::signal::SignalBand;
+use seele_proto::signal::{Recepcao, SignalBand};
 use seele_proto::tunel::{ProtocoloDeTunel, RecusaDeTunel};
 use tokio::sync::mpsc;
 
@@ -708,6 +708,9 @@ enum Comando {
         pessoa: PersonId,
     },
     ListarBanidos,
+    /// O que esta ponta mede da voz que ouve (protocolo 13). Não volta na
+    /// reconexão: é uma medida de agora, e a seguinte sai em um segundo.
+    RelatarRecepcao(Recepcao),
     MoverPersono {
         pessoa: PersonId,
         voice_room: VoiceRoomId,
@@ -879,6 +882,7 @@ impl Comando {
             Self::EditarMensagem { .. } => "EditarMensagem",
             Self::Desbanir { .. } => "Desbanir",
             Self::ListarBanidos => "ListarBanidos",
+            Self::RelatarRecepcao(_) => "RelatarRecepcao",
             Self::MoverPersono { .. } => "MoverPersono",
             Self::ApagarVoiceRoom { .. } => "ApagarVoiceRoom",
             Self::ApagarLinha { .. } => "ApagarLinha",
@@ -2916,6 +2920,29 @@ impl Enlace {
         self.mandar(Comando::ListarBanidos).await
     }
 
+    /// Relata ao servidor o que esta ponta mede da voz que ouve (protocolo
+    /// 13): a perda e o jitter que só existem no receptor, e que entram no
+    /// sinal que os outros veem **desta** pessoa.
+    ///
+    /// Devolve se o relato foi para a fila. **`false` não é erro**: o servidor
+    /// de agora negociou menos que o 13 ([`o_servidor_ouve_o_relato`]) e não
+    /// conhece a mensagem — nada sai, e o sinal desta pessoa segue, lá, como
+    /// sempre foi. O portão é conferido aqui, a cada relato, porque o número
+    /// negociado muda com a volta do enlace; o motor confere de novo
+    /// (`Client::relatar_recepcao`), e essa segunda cerca vai ao registro —
+    /// uma vez por segundo, se a primeira não existisse.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn relatar_recepcao(&self, relato: Recepcao) -> Result<bool, Fechado> {
+        if !o_servidor_ouve_o_relato(self.versao_negociada()) {
+            return Ok(false);
+        }
+        self.mandar(Comando::RelatarRecepcao(relato)).await?;
+        Ok(true)
+    }
+
     /// Pede ao servidor que mova alguém para uma sala de voz.
     ///
     /// # Errors
@@ -3516,6 +3543,21 @@ impl Enlace {
     async fn mandar(&self, comando: Comando) -> Result<(), Fechado> {
         self.comandos.send(comando).await.map_err(|_| Fechado)
     }
+}
+
+/// Se um servidor que negociou `negociado` conhece o relato de recepção
+/// (`ClientMessage::RelatoDeRecepcao`).
+///
+/// A tabela é a do protocolo (`desde_do_cliente`), pela mesma porta dos outros
+/// verbos: um servidor 12 — a v0.19.6 publicada — leria uma variante que não
+/// conhece. Zero, o «ainda sem aperto de mão», também não ouve.
+#[must_use]
+pub fn o_servidor_ouve_o_relato(negociado: u8) -> bool {
+    let relato = ClientMessage::RelatoDeRecepcao(Recepcao {
+        perda: None,
+        jitter_ms: None,
+    });
+    seele_sessao::perfil::portao_do_cliente(&relato, negociado).is_ok()
 }
 
 /// A resposta que [`Enlace::pedir_servico_de_tunel`] ainda espera.
@@ -4989,6 +5031,7 @@ impl Motor {
             }
             Comando::Desbanir { pessoa } => cliente.unban_person(pessoa).await,
             Comando::ListarBanidos => cliente.list_bans().await,
+            Comando::RelatarRecepcao(relato) => cliente.relatar_recepcao(relato).await,
             Comando::MoverPersono { pessoa, voice_room } => {
                 cliente.move_person(pessoa, voice_room).await
             }
@@ -10940,6 +10983,39 @@ mod tests {
             motor.voice_room,
             Some(VoiceRoomId(2)),
             "moderar outra pessoa mexeu em onde este cliente está"
+        );
+    }
+
+    /// **Um servidor do 12 não ouve o relato de recepção**, e antes do aperto
+    /// de mão (zero) ninguém ouve. O 12 é a v0.19.6 publicada: ele pularia a
+    /// variante calado, a cada segundo, e contaria cada uma como desconhecida.
+    #[test]
+    fn so_um_servidor_do_treze_ouve_o_relato_de_recepcao() {
+        assert!(!o_servidor_ouve_o_relato(0));
+        for antigo in seele_proto::version::VERSAO_MINIMA..13 {
+            assert!(!o_servidor_ouve_o_relato(antigo), "protocolo {antigo}");
+        }
+        assert!(o_servidor_ouve_o_relato(13));
+        assert!(o_servidor_ouve_o_relato(seele_proto::PROTOCOL_VERSION));
+    }
+
+    /// O relato não é intenção que se refaz na volta: é uma medida de agora.
+    #[test]
+    fn o_relato_de_recepcao_nao_e_lembrado() {
+        let mut motor = motor_de_teste();
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
+        motor.lembrar(&Comando::RelatarRecepcao(Recepcao {
+            perda: Some(0.1),
+            jitter_ms: Some(3.0),
+        }));
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
+        assert_eq!(
+            Comando::RelatarRecepcao(Recepcao {
+                perda: None,
+                jitter_ms: None
+            })
+            .nome(),
+            "RelatarRecepcao"
         );
     }
 

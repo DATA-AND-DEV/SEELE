@@ -94,6 +94,7 @@ pub mod mods;
 pub mod par;
 pub mod preferences;
 pub mod programa;
+pub mod recepcao;
 /// O juiz das prévias mora no `seele-sessao` desde a Tarefa 2.6 da F4, como a
 /// busca: é a mesma regra no desktop e no navegador.
 pub use seele_sessao::preview;

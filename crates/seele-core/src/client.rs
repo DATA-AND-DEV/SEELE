@@ -21,6 +21,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ConsentimentoDePar, Lido, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
+use seele_proto::signal::Recepcao;
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 
 use crate::frame;
@@ -1128,6 +1129,31 @@ impl Client {
     /// Os de [`Self::edit_message`].
     pub async fn list_bans(&mut self) -> Result<()> {
         self.escrever_com_portao(&ClientMessage::ListBans).await
+    }
+
+    /// Relata ao servidor o que esta ponta mede da voz que ouve (protocolo
+    /// 13): é o que dá perda e jitter ao sinal de quem está calado e sem
+    /// vídeo. Sem resposta.
+    ///
+    /// Um relato que o servidor recusaria ([`Recepcao::confere`]) não é
+    /// escrito: quem o monta por [`Recepcao::medida`] nunca chega a isso, e o
+    /// registro diz se alguém chegar.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::edit_message`]: [`ServidorAntigo`] (e nada é escrito)
+    /// quando a conexão negociou menos que o 13.
+    pub async fn relatar_recepcao(&mut self, relato: Recepcao) -> Result<()> {
+        if let Err(motivo) = relato.confere() {
+            tracing::warn!(
+                ?motivo,
+                ?relato,
+                "um relato de recepção fora da faixa foi montado deste lado, e não saiu"
+            );
+            return Ok(());
+        }
+        self.escrever_com_portao(&ClientMessage::RelatoDeRecepcao(relato))
+            .await
     }
 
     // ---- attachments, ADR 0027 ----

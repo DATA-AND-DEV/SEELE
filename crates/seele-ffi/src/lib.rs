@@ -5902,6 +5902,9 @@ async fn drive(
 
     let mut sync = Signal::new();
     let mut next_tick = Instant::now() + TICK;
+    // O que esta ponta mede da voz que ouve, dito ao servidor uma vez por
+    // segundo (protocolo 13): ver `relatar_a_recepcao`.
+    let mut relator = seele_core::recepcao::Relator::novo(Instant::now());
 
     // **A volta do enlace** (lote P61): a busca do buraco do canal aberto, e o
     // que ficou sem resposta saindo de novo com a mesma chave. Ver `volta`.
@@ -6275,6 +6278,7 @@ async fn drive(
                 if measure(&mut sync, &client, &shared) {
                     shared.notify(&Event::TelemetryChanged);
                 }
+                relatar_a_recepcao(&mut relator, &client, &shared).await;
             }
         }
 
@@ -8060,6 +8064,36 @@ fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {
     #[cfg(all(debug_assertions, feature = "aparelho-de-mentira"))]
     let _ = diagnostico_da_voz::relatar(shared.carimbo(), telemetria.as_ref(), Instant::now());
     medir_a_volta(sync, shared, telemetria.as_ref(), rtt_micros)
+}
+
+/// **A vez do relato de recepção** (protocolo 13): uma vez por segundo, o que
+/// esta ponta mede da voz que ouve vai ao servidor, que o põe no sinal que os
+/// outros veem desta pessoa.
+///
+/// Só a fiação, como [`measure`]: o que é relatado e quando é do
+/// [`seele_core::recepcao::Relator`], e para quem o relato pode ir (um
+/// servidor do 12 não o conhece) é do [`Enlace::relatar_recepcao`]. Sem voz
+/// chegando não há medida, e nada sai.
+///
+/// A telemetria é lida de novo aqui, e não aproveitada de `measure`: o relator
+/// só a pede na vez dele, uma vez por segundo, e `measure` roda a cada volta.
+async fn relatar_a_recepcao(
+    relator: &mut seele_core::recepcao::Relator,
+    client: &Enlace,
+    shared: &Arc<Shared>,
+) {
+    let relato = relator.vez(Instant::now(), || {
+        shared
+            .voice
+            .lock()
+            .ok()
+            .and_then(|voice| voice.as_ref().map(Voice::telemetry))
+    });
+    if let Some(relato) = relato {
+        // `Err` é a sessão que acabou, e quem diz isso à casca é o laço.
+        // `Ok(false)` é um servidor que não ouve o relato: nada saiu.
+        let _ = client.relatar_recepcao(relato).await;
+    }
 }
 
 /// **Diagnóstico da entrada de voz, só na build de teste do CUA.**
@@ -17729,6 +17763,8 @@ mod o_diagnostico_da_voz {
                         jitter_depth_ms: 60.0,
                         jitter_ms: 1.25,
                         loss_fraction: 0.5,
+                        expected_frames: 520,
+                        missing_frames: 260,
                         concealed_frames: 260,
                         comfort_frames: 240,
                         late_frames: 9,
