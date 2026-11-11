@@ -46,7 +46,76 @@ pub const FILA_DE_ENTRADA: usize = 64;
 pub const ESPERA_DA_ENTRADA: Duration = Duration::from_millis(250);
 
 /// O menor intervalo entre dois pedidos de quadro-chave a quem transmite.
-pub const ENTRE_PEDIDOS_DE_CHAVE: Duration = Duration::from_millis(300);
+///
+/// **Um segundo, e não 300 ms** (medido em 10/11/2026,
+/// `docs/medidas/2026-11-10-rtp-no-produto.md`): um quadro-chave leva de 300 ms
+/// a um segundo para atravessar o caminho, e um pedido repetido antes de ele
+/// chegar custava outro quadro-chave, que atrasava o primeiro.
+pub const ENTRE_PEDIDOS_DE_CHAVE: Duration = Duration::from_secs(1);
+
+/// De onde parte a estimativa de banda da perna de descida de um espectador:
+/// o maior orçamento de vídeo do produto (1080p), com folga para o som e a
+/// retransmissão.
+pub const PARTIDA_DA_DESCIDA_BPS: u64 = 8_000_000;
+
+/// Quantos quadros ficam guardados enquanto a entrada não abriu
+/// ([`Guardados`]).
+pub const QUADROS_GUARDADOS: usize = 64;
+
+/// Por quanto tempo um quadro guardado ainda serve.
+pub const VALIDADE_DOS_GUARDADOS: Duration = Duration::from_secs(2);
+
+/// **Os quadros que chegaram antes de a entrada abrir**, desde o último
+/// quadro-chave.
+///
+/// A abertura de uma transmissão vai pelo controle (`TelaPorMidia`) e os
+/// quadros, pela mídia: são dois caminhos, e os primeiros quadros chegam antes
+/// da abertura. Eles eram largados, e o primeiro deles é o quadro-chave: a
+/// entrada abria sem ele, pedia outro, e a transmissão começava com meio
+/// segundo de imagem parada e um quadro-chave a mais (medido: 12 quadros-chave
+/// nos primeiros 20 s, contra 1 no canal).
+///
+/// Só a cadeia inteira serve, então a guarda começa num quadro-chave e
+/// recomeça no seguinte. Tem teto e validade: o que sobrou do fim de uma
+/// transmissão não entra na próxima.
+#[derive(Debug, Default)]
+struct Guardados {
+    quadros: Vec<QuadroQueSobe>,
+    desde: Option<Instant>,
+}
+
+impl Guardados {
+    fn guardar(&mut self, quadro: QuadroQueSobe, agora: Instant) {
+        let chave = quadro.trilha == Trilha::Video && e_quadro_chave_h264(&quadro.bytes);
+        if chave {
+            self.quadros.clear();
+            self.desde = Some(agora);
+        } else if self.quadros.is_empty()
+            || !quadro.contiguo
+            || self.quadros.len() >= QUADROS_GUARDADOS
+        {
+            // Sem chave antes, com um buraco, ou cheio: a cadeia não serve.
+            self.quadros.clear();
+            self.desde = None;
+            return;
+        }
+        self.quadros.push(quadro);
+    }
+
+    /// Os guardados que ainda valem, na ordem. Esvazia a guarda.
+    fn tirar(&mut self, agora: Instant) -> Vec<QuadroQueSobe> {
+        let valem = self
+            .desde
+            .take()
+            .is_some_and(|desde| agora.saturating_duration_since(desde) <= VALIDADE_DOS_GUARDADOS);
+        let quadros = std::mem::take(&mut self.quadros);
+        if valem {
+            quadros
+        } else {
+            Vec::new()
+        }
+    }
+}
 
 /// Um quadro que subiu pela mídia de quem transmite.
 #[derive(Debug)]
@@ -123,6 +192,7 @@ impl MidiaDaSessao {
 pub async fn ler(mut midia: Midia, sessao: MidiaDaSessao, server: Arc<Server>, person: PersonId) {
     // Um quadro largado por fila cheia: o próximo de vídeo não é contíguo.
     let mut furo = false;
+    let mut guardados = Guardados::default();
     while let Some(evento) = midia.receber().await {
         match evento {
             EventoDeMidia::Quadro {
@@ -132,18 +202,31 @@ pub async fn ler(mut midia: Midia, sessao: MidiaDaSessao, server: Arc<Server>, p
                 bytes,
                 ..
             } => {
-                let destino = sessao.entrada.lock().ok().and_then(|e| e.clone());
-                let Some(destino) = destino else {
-                    // Mídia de quem não abriu transmissão: nada a fazer com
-                    // ela. Quem abre sem pedir já é recusado no controle.
-                    continue;
-                };
                 let video = trilha == Trilha::Video;
                 let quadro = QuadroQueSobe {
                     trilha,
                     contiguo: contiguo && !(furo && video),
                     bytes,
                 };
+                // A entrada de agora. Uma que já fechou (a transmissão ou a
+                // geração anterior) não é entrada: os quadros são da próxima.
+                let destino = sessao
+                    .entrada
+                    .lock()
+                    .ok()
+                    .and_then(|e| e.clone())
+                    .filter(|destino| !destino.is_closed());
+                let Some(destino) = destino else {
+                    // A abertura ainda não chegou pelo controle: os quadros
+                    // esperam por ela (ver `Guardados`). Quem manda mídia sem
+                    // nunca abrir transmissão só ocupa a guarda, que tem teto.
+                    guardados.guardar(quadro, Instant::now());
+                    furo = false;
+                    continue;
+                };
+                for guardado in guardados.tirar(Instant::now()) {
+                    let _ = destino.try_send(guardado);
+                }
                 let entrou = destino.try_send(quadro).is_ok();
                 if video {
                     furo = !entrou;
@@ -175,6 +258,12 @@ async fn pedir_a_chave(server: &Server, person: PersonId, screen: ScreenId) {
             sharer,
         });
     }
+}
+
+/// O zero do relógio dos quadros que este servidor escreve na mídia.
+fn inicio_do_relogio_de_midia() -> Instant {
+    static INICIO: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *INICIO.get_or_init(Instant::now)
 }
 
 /// O que a entrada leu.
@@ -281,6 +370,16 @@ impl SaidaPorMidia {
         if let Ok(mut assistindo) = self.assistindo.lock() {
             *assistindo = Some(screen);
         }
+        // **A perna de descida não parte de 300 kbps.** A estimativa de banda
+        // de um `Rtc` nasce nesse valor, que é de quem ainda não mandou nada,
+        // e o ritmo de saída a segue: um quadro-chave de 80 kB levava mais de
+        // dois segundos para sair, a fila de envio estourava, e quem assistia
+        // perdia quadros com a rede perfeita (medido em 11/11/2026). O
+        // servidor repassa o que quem transmite manda; ele parte do teto do
+        // vídeo, e a estimativa desce sozinha se o caminho deste espectador
+        // carregar menos.
+        self.remetente.semear_estimativa(PARTIDA_DA_DESCIDA_BPS);
+        self.remetente.taxa_desejada(PARTIDA_DA_DESCIDA_BPS);
         // A abertura vai pelo controle, antes do primeiro quadro: é ela que
         // diz a quem assiste de que transmissão é a faixa.
         if self
@@ -294,7 +393,10 @@ impl SaidaPorMidia {
         {
             return;
         }
-        let comeco = Instant::now();
+        // O relógio é do processo, e não desta transmissão: a faixa é a
+        // mesma para todas as que este espectador vê, e os carimbos do RTP só
+        // podem andar para frente.
+        let comeco = inicio_do_relogio_de_midia();
         let mut espera_chave = false;
         let mut malformado_dito = false;
         let mut limpo = false;

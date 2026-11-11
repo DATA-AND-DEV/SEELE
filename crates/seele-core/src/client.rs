@@ -2221,7 +2221,18 @@ pub type FilaDaMidia =
 
 /// De quanto em quanto quem assiste repete o pedido de quadro-chave (PLI)
 /// enquanto a cadeia está quebrada.
-const ENTRE_PEDIDOS_DE_CHAVE: std::time::Duration = std::time::Duration::from_millis(300);
+///
+/// Um segundo, e não 300 ms: um quadro-chave leva de 300 ms a um segundo para
+/// atravessar o caminho, e pedir de novo antes de ele chegar custava outro
+/// (`docs/medidas/2026-11-10-rtp-no-produto.md`).
+const ENTRE_PEDIDOS_DE_CHAVE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Quantos quadros ficam guardados enquanto a abertura não chegou, e por
+/// quanto tempo eles servem. A abertura de uma transmissão vem pelo controle
+/// e os quadros, pela mídia: os primeiros chegam antes dela, e o primeiro é o
+/// quadro-chave. Largá-los era começar toda transmissão pedindo outro.
+const QUADROS_GUARDADOS: usize = 64;
+const VALIDADE_DOS_GUARDADOS: std::time::Duration = std::time::Duration::from_secs(2);
 
 type DestinoDaFaixa = std::sync::Arc<
     std::sync::Mutex<
@@ -2274,6 +2285,10 @@ impl MidiaDoCliente {
                 // Para quem os quadros iam, da última vez: uma transmissão
                 // nova na faixa recomeça numa chave.
                 let mut geracao_anterior = 0_u64;
+                // Os quadros que chegaram sem destino, desde o último
+                // quadro-chave, e quando ele chegou.
+                let mut guardados: Vec<QuadroRecebido> = Vec::new();
+                let mut guardados_desde: Option<std::time::Instant> = None;
                 while let Some(evento) = leitura.receber().await {
                     match evento {
                         EventoDeMidia::PediramChave {
@@ -2290,11 +2305,46 @@ impl MidiaDoCliente {
                         } => {
                             let destino = descendo.lock().ok().and_then(|d| d.clone());
                             let Some((geracao, destino)) = destino else {
+                                // A abertura ainda não chegou pelo controle:
+                                // a cadeia desde o último quadro-chave espera.
+                                let chave = trilha == Trilha::Video
+                                    && seele_proto::screen::e_quadro_chave_h264(&bytes);
+                                if chave {
+                                    guardados.clear();
+                                    guardados_desde = Some(std::time::Instant::now());
+                                } else if guardados.is_empty()
+                                    || !contiguo
+                                    || guardados.len() >= QUADROS_GUARDADOS
+                                {
+                                    guardados.clear();
+                                    guardados_desde = None;
+                                    continue;
+                                }
+                                guardados.push(QuadroRecebido {
+                                    tipo: match trilha {
+                                        Trilha::Som => TipoDeQuadro::Som,
+                                        Trilha::Video if chave => TipoDeQuadro::Chave,
+                                        Trilha::Video => TipoDeQuadro::Comum,
+                                    },
+                                    bytes: bytes.to_vec(),
+                                });
                                 continue;
                             };
                             if geracao != geracao_anterior {
                                 espera_chave = true;
                                 geracao_anterior = geracao;
+                                // O que esperava pela abertura vai na frente,
+                                // e a cadeia segue dele: não se pede chave.
+                                let valem = guardados_desde
+                                    .take()
+                                    .is_some_and(|desde| desde.elapsed() <= VALIDADE_DOS_GUARDADOS);
+                                let esperavam = std::mem::take(&mut guardados);
+                                if valem && !esperavam.is_empty() {
+                                    for quadro in esperavam {
+                                        let _ = destino.send(quadro);
+                                    }
+                                    espera_chave = false;
+                                }
                             }
                             let tipo = match trilha {
                                 Trilha::Som => TipoDeQuadro::Som,

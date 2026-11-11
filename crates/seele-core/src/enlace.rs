@@ -2334,6 +2334,9 @@ impl Enlace {
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
             estimativa_da_midia: None,
+            ultima_chave_pela_midia: None,
+            chave_devida: false,
+            ultima_mudanca_da_midia: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),
@@ -3813,6 +3816,14 @@ struct Motor {
     /// medida que o [`crate::tela::TetoDeVideo`] espera. `None` sem
     /// transmissão por mídia: aí vale a sonda.
     estimativa_da_midia: Option<u32>,
+    /// Quando o último quadro-chave foi pedido a quem codifica, numa
+    /// transmissão por mídia, e se há um pedido esperando a vez
+    /// ([`ENTRE_CHAVES_PELA_MIDIA`]).
+    ultima_chave_pela_midia: Option<Instant>,
+    chave_devida: bool,
+    /// Quando a estimativa da mídia mudou o teto pela última vez
+    /// ([`SUBIDA_DO_TETO_PELA_MIDIA`]).
+    ultima_mudanca_da_midia: Option<Instant>,
     /// Se já há uma tentativa de servir um par em curso.
     ///
     /// No A1 quem empresta serve um par por vez (`crate::par::atender` só
@@ -4363,9 +4374,7 @@ impl Motor {
 
             if pediram_chave_pela_midia {
                 // O mesmo que um `KeyFrameRequested` do controle faz.
-                if let Some(viva) = self.tela_viva.as_ref() {
-                    viva.produtor.chave();
-                }
+                self.pedir_a_chave_da_tela();
             }
 
             if let Some(evento) = houve_evento {
@@ -4447,6 +4456,10 @@ impl Motor {
 
     /// Um passo da bateria. Devolve `true` quando a sessão acabou.
     async fn passo(&mut self) -> bool {
+        // Um pedido de quadro-chave que esperava a vez (`pedir_a_chave_da_tela`).
+        if self.chave_devida {
+            self.pedir_a_chave_da_tela();
+        }
         // Antes da bateria, e não depois: o passo pode encerrar a sessão, e uma
         // leitura depois disso seria contra um cliente que já foi embora.
         self.medir_o_caminho();
@@ -5633,10 +5646,8 @@ impl Motor {
             // §3.3: quadro-chave quando quem recebe pede, e nunca periódico.
             // Um de 1080p custa 65 KiB, quatro vezes um quadro comum.
             ServerMessage::KeyFrameRequested { screen, .. } => {
-                if let Some(viva) = self.tela_viva.as_ref() {
-                    if viva.tela == screen {
-                        viva.produtor.chave();
-                    }
+                if self.e_a_minha_tela(screen) {
+                    self.pedir_a_chave_da_tela();
                 }
             }
             // Uma transmissão a que esta sessão assiste desce pela mídia RTP
@@ -6753,6 +6764,14 @@ async fn ler_a_tela_alheia(
 
 /// O número da próxima leitura de tela, crescente no processo: o `leitura` de
 /// [`Aviso::TelaAbriu`] e de [`Aviso::TelaFechou`].
+/// O menor intervalo entre duas subidas do teto pela estimativa da mídia.
+/// Ver [`Motor::medir_o_caminho`].
+const SUBIDA_DO_TETO_PELA_MIDIA: Duration = Duration::from_secs(3);
+
+/// O menor intervalo entre dois quadros-chave pedidos numa transmissão por
+/// mídia. Ver [`Motor::pedir_a_chave_da_tela`].
+const ENTRE_CHAVES_PELA_MIDIA: Duration = Duration::from_secs(2);
+
 /// A estimativa de banda do RTP, na medida que o [`crate::tela::TetoDeVideo`]
 /// espera como «caminho».
 ///
@@ -7003,6 +7022,40 @@ impl Motor {
     /// assumido para sempre. Enquanto a sonda não mediu nada, ela devolve
     /// exatamente aquela suposição, então a primeira transmissão de uma sessão
     /// abre com o mesmo teto de antes.
+    /// Pede um quadro-chave a quem codifica a transmissão desta pessoa.
+    ///
+    /// **Por mídia, no máximo um a cada [`ENTRE_CHAVES_PELA_MIDIA`], e o que
+    /// chega antes disso espera a vez em vez de sumir.** Um quadro-chave leva
+    /// de 300 ms a um segundo para atravessar o caminho; cada pedido que chegava
+    /// nesse meio-tempo (de quem assiste, do servidor) fazia outro, que atrasava
+    /// o primeiro. Num caminho de 1 Mbps isso virava um quadro-chave atrás do
+    /// outro: 30 em 20 s, e um quarto do tempo com a imagem parada
+    /// (`docs/medidas/2026-11-10-rtp-no-produto.md`). O pedido adiado não se
+    /// perde: quem entrou no meio da transmissão só é ligado num quadro-chave,
+    /// e o servidor pede uma vez só por ele.
+    ///
+    /// Pelo canal nada muda: lá quem junta os pedidos é quem escoa.
+    fn pedir_a_chave_da_tela(&mut self) {
+        let Some(viva) = self.tela_viva.as_ref() else {
+            return;
+        };
+        if self.estimativa_da_midia.is_none() {
+            viva.produtor.chave();
+            return;
+        }
+        let agora = Instant::now();
+        let cedo = self
+            .ultima_chave_pela_midia
+            .is_some_and(|antes| agora.saturating_duration_since(antes) < ENTRE_CHAVES_PELA_MIDIA);
+        if cedo {
+            self.chave_devida = true;
+            return;
+        }
+        self.ultima_chave_pela_midia = Some(agora);
+        self.chave_devida = false;
+        viva.produtor.chave();
+    }
+
     /// Começa a ler uma transmissão que desce pela mídia RTP.
     fn assistir_pela_midia(&mut self, abertura: [u8; seele_proto::screen::SCREEN_HEADER_LEN]) {
         let Some(cliente) = self.cliente.as_ref() else {
@@ -7044,6 +7097,7 @@ impl Motor {
         // banda escolhida com folga para o som e a retransmissão.
         remetente.taxa_desejada(u64::from(semente).saturating_mul(2));
         self.estimativa_da_midia = Some(semente);
+        self.ultima_mudanca_da_midia = Some(Instant::now());
     }
 
     fn teto_de_video(
@@ -7106,10 +7160,24 @@ impl Motor {
                 let agora = para_a_medida_do_teto(bps);
                 self.caminho_medido
                     .store(agora, std::sync::atomic::Ordering::Relaxed);
-                // Só um passo de mais de 5% reconfigura quem codifica: a
-                // estimativa treme a cada retorno, e o codificador não deve.
-                if agora.abs_diff(antes) > antes / 20 {
+                // **Mudar o teto custa um quadro-chave**: quem codifica é
+                // reconfigurado, e o codificador recomeça de uma imagem
+                // inteira. A estimativa do RTP muda a cada retorno; repassar
+                // cada mudança fazia chover quadro-chave, e num caminho de
+                // 1 Mbps a rajada deles derrubava a própria estimativa
+                // (medido em 11/11/2026: de 3,3 Mbps a 260 kbps em 6 s, sem
+                // perda). Então:
+                // - **cair é na hora**, mas só de 15% para mais;
+                // - **subir é devagar**: 25% para mais, e no máximo uma vez a
+                //   cada [`SUBIDA_DO_TETO_PELA_MIDIA`].
+                let caiu = agora < antes.saturating_sub(antes / 7);
+                let pode_subir = self
+                    .ultima_mudanca_da_midia
+                    .is_none_or(|quando| quando.elapsed() >= SUBIDA_DO_TETO_PELA_MIDIA);
+                let subiu = pode_subir && agora > antes.saturating_add(antes / 4);
+                if caiu || subiu {
                     self.estimativa_da_midia = Some(agora);
+                    self.ultima_mudanca_da_midia = Some(Instant::now());
                     self.reconferir_o_teto();
                 }
             }
@@ -7167,6 +7235,9 @@ impl Motor {
     /// Mata a bomba, se houver uma.
     fn parar_a_tela(&mut self) {
         self.estimativa_da_midia = None;
+        self.ultima_mudanca_da_midia = None;
+        self.ultima_chave_pela_midia = None;
+        self.chave_devida = false;
         // A contagem morre junto: ela é de **uma** transmissão, e deixá-la de pé
         // faria a próxima nascer dividindo a perna de quem hospeda pelo público
         // da anterior — um teto apertado sem que ninguém estivesse assistindo.
@@ -11425,6 +11496,9 @@ mod tests {
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
             estimativa_da_midia: None,
+            ultima_chave_pela_midia: None,
+            chave_devida: false,
+            ultima_mudanca_da_midia: None,
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             protocolo: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),

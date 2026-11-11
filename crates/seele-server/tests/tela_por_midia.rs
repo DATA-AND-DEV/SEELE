@@ -433,3 +433,64 @@ async fn o_quadro_comum_antes_da_chave_nao_vai_a_sala() -> Result<()> {
     daemon.shutdown();
     Ok(())
 }
+
+/// **Os quadros que chegam antes da abertura não se perdem.** A abertura vai
+/// pelo controle e os quadros, pela mídia: os primeiros chegam antes dela, e o
+/// primeiro é o quadro-chave. O servidor os guarda; quem assiste recebe a
+/// transmissão desde aquele quadro-chave, e ninguém pede outro.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_quadros_de_antes_da_abertura_sao_guardados() -> Result<()> {
+    let (endereco, daemon) = servidor().await?;
+    let mut mostra = entrar(endereco, 1, 13, true).await?;
+    let do_doze = entrar(endereco, 2, 12, false).await?;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let screen = pedir(&mut mostra).await?;
+    let saida = mostra.remetente();
+    let chave = h264(true, 0xD1, 2_500);
+    let primeiro = h264(false, 0xD2, 600);
+    let segundo = h264(false, 0xD3, 600);
+    // Os três quadros saem **antes** de a abertura ser dita.
+    for (n, quadro) in [&chave, &primeiro, &segundo].into_iter().enumerate() {
+        saida
+            .mandar(FAIXA, Trilha::Video, n as u64 * 3000, quadro.clone().into())
+            .unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    mostra
+        .mandar(&ClientMessage::TelaPorMidia {
+            abertura: abertura(screen),
+        })
+        .await?;
+    // Mais um, depois da abertura: é ele que faz o servidor soltar os guardados.
+    let terceiro = h264(false, 0xD4, 600);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    saida
+        .mandar(FAIXA, Trilha::Video, 9000, terceiro.clone().into())
+        .unwrap();
+
+    let (_, quadros) = quadros_do_canal(&do_doze, 4).await?;
+    assert_eq!(quadros[0].0, TipoDeQuadro::Chave);
+    for (chegou, mandado) in quadros.iter().zip([&chave, &primeiro, &segundo, &terceiro]) {
+        assert_eq!(
+            corpo(&chegou.1),
+            &mandado[4..],
+            "a transmissão não começou do quadro-chave que saiu antes da abertura"
+        );
+    }
+    // E o servidor não pediu outro quadro-chave a quem transmite.
+    let midia = mostra.midia.as_mut().unwrap();
+    let pediu = tokio::time::timeout(Duration::from_millis(1500), async {
+        loop {
+            if let Some(EventoDeMidia::PediramChave { .. }) = midia.receber().await {
+                break;
+            }
+        }
+    })
+    .await
+    .is_ok();
+    assert!(!pediu, "o servidor pediu um quadro-chave que já tinha");
+
+    daemon.shutdown();
+    Ok(())
+}

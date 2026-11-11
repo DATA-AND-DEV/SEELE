@@ -1169,8 +1169,16 @@ impl Transmissao {
         let Some((remetente, comeco)) = &self.midia else {
             return Err(ErroDeTela::Fluxo("a transmissão não é por mídia".into()));
         };
-        let micros =
-            u64::try_from(agora.saturating_duration_since(*comeco).as_micros()).unwrap_or(u64::MAX);
+        // **O relógio é do processo, e não desta transmissão.** A segunda
+        // transmissão da mesma conexão sai pela mesma trilha RTP: recomeçar o
+        // tempo do zero faria os carimbos andarem para trás.
+        let _ = comeco;
+        let micros = u64::try_from(
+            agora
+                .saturating_duration_since(inicio_do_relogio_de_midia())
+                .as_micros(),
+        )
+        .unwrap_or(u64::MAX);
         let por_milissegundo = match trilha {
             crate::transporte::Trilha::Video => 90,
             crate::transporte::Trilha::Som => 48,
@@ -1380,7 +1388,15 @@ impl Transmissao {
         }
 
         let total = CABECALHO_DE_QUADRO_LEN.saturating_add(bytes.len());
-        if !self.balde.gastar(total, agora) {
+        // **Pela mídia, o balde não decide.** Ele existe para o canal: lá o
+        // vídeo divide o SCTP com a voz, e um quadro acima do teto atrasaria
+        // tudo. No RTP quem dosa a saída é o próprio transporte (o ritmo de
+        // saída e a estimativa de banda), e o balde só atrapalhava: com ele
+        // baixo, recusava o **quadro-chave**; a recusa pedia outro, recusado de
+        // novo, e a imagem ficava parada até o balde encher. Medido em
+        // 11/11/2026: 40 quadros-chave recusados em 20 s sem perda nenhuma, e
+        // era isso o «defeito de partida» do RTP.
+        if self.midia.is_none() && !self.balde.gastar(total, agora) {
             self.descartados += 1;
             return Ok(Envio::Descartado(MotivoDeDescarte::AcimaDoTeto));
         }
@@ -1483,6 +1499,13 @@ impl Transmissao {
 // ---------------------------------------------------------------------------
 // O lado de quem assiste
 // ---------------------------------------------------------------------------
+
+/// O zero do relógio dos quadros que saem pela mídia: o mesmo para toda
+/// transmissão deste processo, para os carimbos do RTP só andarem para frente.
+fn inicio_do_relogio_de_midia() -> Instant {
+    static INICIO: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *INICIO.get_or_init(Instant::now)
+}
 
 /// A faixa da mídia por onde a transmissão desta pessoa sobe, e por onde
 /// desce a que ela assiste. O servidor usa a mesma (`seele-server/src/midia.rs`).
@@ -2597,6 +2620,44 @@ pub(crate) mod tests {
             "o quadro-chave não chegou igual ao que saiu"
         );
         assert_eq!(depois.bytes, comum);
+    }
+
+    /// **Pela mídia, o balde não recusa quadro nenhum, e muito menos o
+    /// quadro-chave.** Com o balde baixo ele recusava a chave; a recusa pedia
+    /// outra, recusada de novo, e a imagem ficava parada (medido em
+    /// 11/11/2026: 40 quadros-chave recusados em 20 s sem perda nenhuma). O
+    /// mesmo teto que descarta no canal (o teste abaixo) deixa passar aqui.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pela_midia_o_balde_nao_recusa_o_quadro_chave() {
+        let (saida, entrada) = par().await;
+        let remetente = saida.ligar_midia().remetente();
+        let _do_outro_lado = entrada.ligar_midia();
+        let agora = Instant::now();
+        // 80 kbps: 10 000 bytes por segundo de orçamento, e um quadro-chave de 50 000.
+        let (mut transmissao, _abertura) =
+            Transmissao::abrir_por_midia(remetente, cabecalho(), 80_000, agora).expect("abrir");
+        let mut chave = vec![0, 0, 0, 1, 0x65];
+        chave.resize(50_000, 0x5A);
+        let mut comum = vec![0, 0, 0, 1, 0x41];
+        comum.resize(9_000, 0x5A);
+        assert_eq!(
+            transmissao
+                .enviar_quadro(&chave, true, agora)
+                .await
+                .expect("enviar"),
+            Envio::Enviado,
+            "o quadro-chave foi recusado pelo balde numa transmissão por mídia"
+        );
+        for _ in 0..5 {
+            assert_eq!(
+                transmissao
+                    .enviar_quadro(&comum, false, agora)
+                    .await
+                    .expect("enviar"),
+                Envio::Enviado
+            );
+        }
+        assert_eq!(transmissao.contagem().1, 0, "algum quadro foi descartado");
     }
 
     #[tokio::test(flavor = "multi_thread")]
