@@ -1817,6 +1817,16 @@ print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || csp_or
     passo "sinal ($csp_url): POST responde SEELE-SINAL/1 NINGUEM, com o CORS só de https://$csp_origem"
 }
 
+# **Nada vai a público com um marcador no lugar de um dado de verdade.** A
+# chave Pix do README entra pela mão do dono; enquanto o marcador estiver lá, a
+# seção «Apoie» mandaria quem quer apoiar para lugar nenhum.
+conferir_marcadores() {
+    if grep -q 'PIX-A-PREENCHER' "${RAIZ}/README.md"; then
+        morrer "o README ainda tem o marcador «PIX-A-PREENCHER» na seção «Apoie»." \
+            "Troque-o pela chave Pix aleatória (ou tire a linha do Pix) e publique de novo."
+    fi
+}
+
 conferir_arvore() {
     if ! git -C "$RAIZ" rev-parse --git-dir >/dev/null 2>&1; then
         morrer "«${RAIZ}» não é um repositório git." \
@@ -2656,6 +2666,7 @@ printf -- '--- conferindo antes de compilar ---\n'
 conferir_versao
 conferir_ferramentas
 conferir_condicoes_das_notas
+conferir_marcadores
 conferir_arvore
 conferir_validacao
 conferir_config_tauri

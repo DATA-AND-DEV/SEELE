@@ -522,6 +522,19 @@ explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
 ---
 
+## Apoie
+
+O SEELE é feito por uma pessoa e não tem anúncio, cadastro nem serviço no meio.
+Se ele é útil para você e você quiser pagar um café:
+
+- **GitHub Sponsors:** <https://github.com/sponsors/DATA-AND-DEV>, uma vez ou
+  todo mês.
+- **Pix:** `PIX-A-PREENCHER`
+
+Não dá nada em troca, e o produto não muda para quem não apoia.
+
+---
+
 ## Licença
 
 AGPL-3.0, e só ela (`AGPL-3.0-only`); o texto fica em [LICENSE](LICENSE).
