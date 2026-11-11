@@ -2770,12 +2770,18 @@ mod testes {
     /// Quanto um teste espera por algo que depende de um processo de verdade
     /// subir (a metade roda este mesmo executável de teste como filho).
     ///
-    /// Eram 5 s (e 20 s num deles), e a bateria inteira os estourava. Medido em
-    /// 11/11/2026: a **primeira** execução depois de compilar falha, e as
-    /// seguintes passam em 1 s — o filho é um executável recém-gravado de
-    /// centenas de megabytes, e o sistema o confere antes de deixá-lo rodar.
-    /// O teste volta assim que a coisa acontece; o prazo só é gasto quando ela
-    /// não acontece.
+    /// Eram 5 s (e 20 s num deles), e a bateria inteira os estourava: o filho
+    /// é um executável de centenas de megabytes, e o macOS o confere antes de
+    /// deixá-lo rodar. Medido em 11/11/2026, em 150 rodadas, quanto o filho
+    /// leva para dar o primeiro sinal: mediana de 0,8 s e máximo de 1,3 s com
+    /// um hard link deste executável; mediana de 1,4 s e máximo de 2,3 s com
+    /// um arquivo novo a cada rodada, que é o que
+    /// [`por_este_executavel_em`] faz no macOS — e isso com outras baterias
+    /// rodando na mesma máquina, não com ela parada. O teste volta assim que
+    /// a coisa acontece; o prazo só é gasto quando ela não acontece.
+    ///
+    /// **Este prazo não era o defeito**: os testes falhavam em paralelo com
+    /// qualquer prazo, porque o filho morria ([`por_este_executavel_em`]).
     const ESPERA_DOS_TESTES: Duration = Duration::from_secs(60);
 
     use super::*;
@@ -3458,6 +3464,7 @@ mod testes {
         let fonte = fonte.replace("ARGUMENTOS", &serde_json::to_string(&argumentos).unwrap());
         let viva = subir_com_programa(&fio, oferta, programa, &fonte);
         fio.esperar(r#"pedir "rodou""#);
+        esperar_o_filho_de_pe(&viva, &raiz);
         let maquinas = Maquinas::default();
         maquinas.estado().ligadas.insert(
             viva.chave.clone(),
@@ -4186,6 +4193,7 @@ mod testes {
     #[test]
     #[ignore = "é o processo filho dos testes do programa, e não um teste"]
     fn um_processo_que_bate() {
+        let _ = std::fs::write(DE_PE, "");
         for n in 0_u64..3000 {
             let _ = std::fs::write("batimento", n.to_string());
             std::thread::sleep(Duration::from_millis(20));
@@ -4200,6 +4208,7 @@ mod testes {
     #[test]
     #[ignore = "é o processo filho dos testes do programa, e não um teste"]
     fn um_processo_que_para_no_stop() {
+        let _ = std::fs::write(DE_PE, "");
         let (manda, recebe) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             for linha in std::io::stdin().lines() {
@@ -4213,6 +4222,102 @@ mod testes {
         if recebe.recv_timeout(Duration::from_secs(60)).is_ok() {
             let _ = std::fs::write("parou-no-stop", "sim");
         }
+    }
+
+    /// Põe este executável de testes em `alvo`, para um teste o rodar como
+    /// filho pelo `programa`.
+    ///
+    /// **No macOS, uma cópia com inode próprio, e nunca um hard link.** Era o
+    /// que estes testes dividiam, e por que falhavam em paralelo e passavam
+    /// um de cada vez: com hard links, todos rodavam o **mesmo arquivo** por
+    /// nomes diferentes. O macOS confere um executável que sobe
+    /// (`syspolicyd`, a pedido do kernel) lendo o arquivo por **um** nome,
+    /// que o kernel tira do arquivo e não de quem o rodou — e, com vários
+    /// nomes em uso ao mesmo tempo, esse nome era o da pasta de outro teste,
+    /// que acabava e a apagava, ou um que nunca existiu (a pasta de um, o
+    /// nome de outro). A leitura falhava (`errno: 2`) e o sistema matava o
+    /// filho com `SIGKILL`, ainda subindo: «Terminating process due to
+    /// Malware rejection», no log do sistema.
+    ///
+    /// Medido em 11/11/2026, `maquina` em paralelo: com hard link, 7 de 150
+    /// rodadas falharam, com 9 filhos de 900 mortos assim (os 9 com aquela
+    /// linha no log); com a cópia e a espera de [`esperar_o_filho_de_pe`],
+    /// nenhuma de 235.
+    ///
+    /// **A cópia sozinha não basta**, e troca um defeito por outro: é um
+    /// arquivo novo a cada rodada, que o sistema confere inteiro (o filho
+    /// leva perto de meio segundo a mais para subir), e apagá-lo no meio
+    /// dessa conferência é o que [`esperar_o_filho_de_pe`] evita. No APFS a
+    /// cópia é um clone, e não gasta disco.
+    ///
+    /// **Fora do macOS segue o hard link**, como era: nada disto foi medido
+    /// lá, e no Linux uma cópia escrita por um teste enquanto outro cria um
+    /// processo pode ter a execução recusada (`ETXTBSY`).
+    fn por_este_executavel_em(alvo: &std::path::Path) {
+        let eu = std::env::current_exe().unwrap();
+        if cfg!(target_os = "macos") || std::fs::hard_link(&eu, alvo).is_err() {
+            std::fs::copy(&eu, alvo).unwrap();
+        }
+    }
+
+    /// O arquivo que o filho de um teste grava, na pasta em que roda, quando
+    /// começa a rodar ([`esperar_o_filho_de_pe`]).
+    const DE_PE: &str = "de-pe";
+
+    /// **Espera o filho de um teste começar a rodar de verdade**, e não só
+    /// existir: o `rodar` volta quando o processo foi criado, e no macOS ele
+    /// fica parado, antes da primeira instrução, até o sistema acabar de
+    /// conferir o executável (perto de 1 s num arquivo novo deste tamanho).
+    ///
+    /// **Todo teste que roda um filho passa por aqui antes de seguir**, porque
+    /// seguir é matar o filho e apagar a pasta — e fazer isso com a
+    /// conferência do executável ainda em curso derruba o `syspolicyd`
+    /// (`SIGSEGV` em `SecStaticCodeCheckValidityWithErrors`; três relatórios
+    /// em `/Library/Logs/DiagnosticReports`, 11/11/2026, cada um a
+    /// milissegundos de um teste fazer isso). Com ele caído, os executáveis
+    /// novos da máquina esperam mais de um minuto para subir: 3 de 34 rodadas
+    /// de `maquina` falharam assim, quatro testes de uma vez. O filho que
+    /// roda já foi conferido — com a espera, nenhuma queda em 235 rodadas.
+    ///
+    /// Um filho que morre antes de rodar é dito na hora, e não depois do
+    /// prazo: é o que o sistema faz com um executável que ele recusa.
+    fn esperar_o_filho_de_pe(viva: &Viva, raiz: &std::path::Path) {
+        let fim = Instant::now() + ESPERA_DOS_TESTES;
+        while !raiz.join(DE_PE).exists() {
+            assert!(
+                viva.processos_vivos() > 0,
+                "o filho do teste morreu antes de rodar (no macOS, o log do \
+                 sistema diz por quê: procure o pid dele em `syspolicyd`)"
+            );
+            assert!(Instant::now() < fim, "o filho do teste não subiu");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// **O guarda do de cima**: no macOS, o executável que um teste roda como
+    /// filho não divide o arquivo com o de nenhum outro teste (nem com este
+    /// binário). Com um hard link, o arquivo teria mais de um nome.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn o_filho_de_cada_teste_e_um_arquivo_so_dele() {
+        use std::os::unix::fs::MetadataExt as _;
+        let casa = pasta_do_teste("inode");
+        let (um, outro) = (casa.0.join("um"), casa.0.join("outro"));
+        por_este_executavel_em(&um);
+        por_este_executavel_em(&outro);
+        let eu = std::fs::metadata(std::env::current_exe().unwrap()).unwrap();
+        let (um, outro) = (
+            std::fs::metadata(um).unwrap(),
+            std::fs::metadata(outro).unwrap(),
+        );
+        assert_eq!(um.len(), eu.len(), "a cópia não é o executável inteiro");
+        assert_eq!(
+            (um.nlink(), outro.nlink()),
+            (1, 1),
+            "o filho de um teste é um hard link: divide o arquivo com outro nome"
+        );
+        assert_ne!(um.ino(), outro.ino(), "dois testes dividem o arquivo");
+        assert_ne!(um.ino(), eu.ino(), "o teste divide o arquivo com o binário");
     }
 
     /// Um `Programa` que roda o próprio binário de testes, com `argumentos`.
@@ -4238,10 +4343,7 @@ mod testes {
         let alvo = raiz
             .join("bin")
             .join(format!("servidor{}", std::env::consts::EXE_SUFFIX));
-        let eu = std::env::current_exe().unwrap();
-        if std::fs::hard_link(&eu, &alvo).is_err() {
-            std::fs::copy(&eu, &alvo).unwrap();
-        }
+        por_este_executavel_em(&alvo);
         (Ok(programa), aceite.oferta, raiz)
     }
 
@@ -4272,6 +4374,7 @@ mod testes {
             ),
         );
         fio.esperar(r#"pedir "rodou""#);
+        esperar_o_filho_de_pe(&viva, &raiz);
         let relogio = Instant::now();
         assert!(viva.encerrar(Fim::PeloDono));
         let levou = relogio.elapsed();
@@ -4317,10 +4420,7 @@ mod testes {
         let alvo = raiz
             .join("bin")
             .join(format!("servidor{}", std::env::consts::EXE_SUFFIX));
-        let eu = std::env::current_exe().unwrap();
-        if std::fs::hard_link(&eu, &alvo).is_err() {
-            std::fs::copy(&eu, &alvo).unwrap();
-        }
+        por_este_executavel_em(&alvo);
         let fio = Arc::new(FioDeMentira::default());
         let viva = subir_com_programa(
             &fio,
@@ -4334,6 +4434,7 @@ mod testes {
         );
         let anotado = fio.esperar("pedir ");
         assert!(anotado[0].starts_with(r#"pedir "rodou "#), "{anotado:?}");
+        esperar_o_filho_de_pe(&viva, &raiz);
         let fim = Instant::now() + ESPERA_DOS_TESTES;
         while batimento(&raiz).unwrap_or(0) < 3 {
             assert!(Instant::now() < fim, "o processo não bateu");
