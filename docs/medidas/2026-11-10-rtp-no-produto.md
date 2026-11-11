@@ -47,3 +47,46 @@ Um espectador só, e o `Cano` só no caminho de quem transmite; codificador de m
 ## O que fica aberto
 
 Os itens 3 e 4 são defeitos do caminho novo, e não da medida. Enquanto não forem consertados e medidos de novo, o RTP não está pronto para ser o padrão sem ressalva.
+
+## Adendo de 11/11/2026: os dois defeitos, consertados e medidos de novo
+
+**Árvore:** `entrega/1.0`, commit `277b87cf` mais o piso do teto pela mídia deste commit. As saídas inteiras estão em `brutos-2026-11-11-rtp-no-produto/`.
+
+Dois consertos por suposição (guardar os quadros de antes da abertura, espaçar os quadros-chave) **não mudaram os números**. Com o código instrumentado, as causas eram outras três:
+
+1. **O balde do canal recusava o quadro-chave no RTP.** Cada recusa pedia outro, recusado de novo: 40 recusas em 20 s sem perda. No RTP quem dosa a saída é o transporte, e o balde deixou de decidir ali.
+2. **O servidor começava cada espectador a 300 kbps** (a estimativa inicial do `str0m`). Um quadro-chave levava segundos para sair, a fila de envio estourava, e quem assistia perdia quadros com a rede perfeita. A perna de descida passou a partir do teto do vídeo.
+3. **Cada pequena mudança da estimativa reconfigurava o codificador**, e reconfigurar custa um quadro-chave. A 1 Mbps a rajada derrubava a própria estimativa (de 3,3 Mbps a 260 kbps em 6 s). O teto passou a cair na hora, mas só de 15% para mais, e a subir de 25% para mais, no máximo a cada 3 s.
+
+E um quarto, achado na medida seguinte: a estimativa caindo abaixo do piso **parava** o vídeo, e parado ele não tem de onde subir (18 s de imagem parada numa rodada). O teto pela mídia não vai mais abaixo do piso.
+
+### Primeiros 20 s: atraso p50 ms / p95 ms / congelado % / quadros-chave
+
+| cenário | RTP antes | RTP agora | canal |
+|---|--:|--:|--:|
+| 0% | 66 / 777 / 9,2 / 12 | 66 / 72 / 2,8 / 3 | 32 / 33 / 1,5 / 1 |
+| 0,3% | 67 / 756 / 10,1 / 16 | 66 / 129 / 2,7 / 3 | 37 / 465 / 2,5 / 3 |
+| 1% | 86 / 744 / 8,3 / 16 | 67 / 142 / 3,0 / 3 | 57 / 1324 / 7,5 / 6 |
+| 3% | 126 / 794 / 8,1 / 10 | 96 / 156 / 1,6 / 3 | 662 / 3678 / 35,2 / 15 |
+| 5% | 141 / 794 / 10,6 / 19 | 124 / 176 / 2,8 / 3 | 1073 / 5797 / 52,8 / 17 |
+| 1,0 Mbps, 0% | 41 / 974 / 30,1 / 60 | 43 / 221 / 5,0 / 8 | 48 / 3170 / 33,2 / 10 |
+| 2,0 Mbps, 1% | 62 / — / 21,0 / 39 | 38 / 304 / 6,1 / 8 | — |
+
+### Regime (40–60 s): atraso p50 ms / congelado % / kbps oferecidos
+
+| cenário | RTP antes | RTP agora | canal |
+|---|--:|--:|--:|
+| 0% | 64 / 0,0 / 2375 | 66 / 0,0 / 2375 | 32 / 0,0 / 2375 |
+| 1% | 69 / 0,0 / 2375 | 66 / 0,0 / 2375 | 32 / 2,4 / 479 |
+| 3% | 109 / 0,0 / 2375 | 111 / 0,0 / 2335 | 32 / 20,6 / 191 |
+| 5% | 127 / 0,0 / 2375 | 123 / 0,0 / 2375 | 64 / 37,1 / 170 |
+| 1,0 Mbps, 0% | 55 / 25,6 / 599 | 51 / 0,0 / 455 | 51 / 3,4 / 585 |
+| 2,0 Mbps, 1% | 60 / 7,9 / 1117 | 43 / 0,0 / 401 | 45 / 7,1 / 567 |
+
+Nenhum pedido de quadro-chave em nenhuma célula, e nenhuma pausa do vídeo em 42 rodadas.
+
+### O que fica
+
+- **Em banda estreita o RTP usa menos do caminho do que ele carrega**: 455 kbps de 1 Mbps, e 401 kbps de 2 Mbps com 1% de perda. A imagem não congela, mas sai com menos qualidade do que podia. A estimativa só cresce com o que é mandado, e a subida do teto é lenta de propósito; sondar o caminho com enchimento não está ligado.
+- O RTP custa cerca de 30 ms de atraso sem perda (66 contra 32 ms).
+- Os limites da medida são os de antes: um espectador, o `Cano` só no caminho de quem transmite, codificador de mentira, nenhum navegador, nenhuma chamada no aplicativo de verdade.

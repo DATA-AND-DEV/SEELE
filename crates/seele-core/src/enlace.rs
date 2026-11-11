@@ -6779,8 +6779,18 @@ const ENTRE_CHAVES_PELA_MIDIA: Duration = Duration::from_secs(2);
 /// estimativa do RTP já é o que **este fluxo** pode mandar, e a medida do
 /// protótipo usou 85% dela (`docs/medidas/2026-11-10-rtp-sob-perda.md`). A
 /// conversão faz os 60% do teto darem 85% da estimativa.
+///
+/// **Nunca abaixo do que dá o piso do vídeo.** Pela sonda, um caminho que não
+/// carrega o piso para o vídeo, e ele volta quando a sonda mede de novo. Pela
+/// mídia isso é um beco sem saída: a estimativa vem do que é mandado, e com o
+/// vídeo parado ela não tem como subir (medido em 11/11/2026: uma queda
+/// passageira da estimativa a 1 Mbps parou a imagem por 18 s). O vídeo segue no
+/// piso, e a estimativa volta com ele.
 fn para_a_medida_do_teto(estimativa_bps: u64) -> u32 {
-    u32::try_from(estimativa_bps.saturating_mul(85) / 60).unwrap_or(u32::MAX)
+    let caminho = u32::try_from(estimativa_bps.saturating_mul(85) / 60).unwrap_or(u32::MAX);
+    // O teto gasta 60% do caminho: este é o caminho cujos 60% dão o piso.
+    let do_piso = crate::tela::PISO_DE_BANDA_BPS.saturating_mul(100) / 60 + 1;
+    caminho.max(do_piso)
 }
 
 /// O contrário de [`para_a_medida_do_teto`]: de um caminho, a estimativa
@@ -12585,5 +12595,44 @@ mod a_maquina {
             ),
             "{avisos:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod a_medida_do_teto_pela_midia {
+    use super::{da_medida_do_teto, para_a_medida_do_teto};
+    use crate::tela::{Teto, TetoDeVideo, PISO_DE_BANDA_BPS};
+    use seele_proto::signal::SignalBand;
+
+    /// **A estimativa do RTP nunca para o vídeo.** Por baixa que ela esteja, o
+    /// teto fica no piso: com o vídeo parado a estimativa não teria de onde
+    /// subir. Tirar o piso de `para_a_medida_do_teto` reprova aqui.
+    #[test]
+    fn a_estimativa_baixa_deixa_o_video_no_piso_e_nao_parado() {
+        for estimativa in [0_u64, 10_000, 100_000, 200_000] {
+            let teto = TetoDeVideo::com_caminho(para_a_medida_do_teto(estimativa))
+                .teto(SignalBand::Nominal);
+            assert!(
+                matches!(teto, Teto::Bps(bps) if bps >= PISO_DE_BANDA_BPS),
+                "com a estimativa em {estimativa} bps o teto foi {teto:?}"
+            );
+        }
+    }
+
+    /// O teto gasta 60% do caminho, e a conversão faz esses 60% darem 85% da
+    /// estimativa; a ida e a volta se desfazem.
+    #[test]
+    fn o_teto_gasta_oitenta_e_cinco_por_cento_da_estimativa() {
+        let Teto::Bps(bps) =
+            // A perna de quem hospeda larga, para sobrar só a de quem transmite.
+            TetoDeVideo::com_caminho(para_a_medida_do_teto(2_000_000))
+                .com_caminho_de_quem_hospeda(100_000_000)
+                .teto(SignalBand::Nominal)
+        else {
+            panic!("parado com 2 Mbps");
+        };
+        assert!((1_690_000..=1_710_000).contains(&bps), "{bps}");
+        let ida = da_medida_do_teto(3_000_000);
+        assert!(para_a_medida_do_teto(u64::from(ida)).abs_diff(3_000_000) < 10);
     }
 }
