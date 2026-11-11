@@ -98,7 +98,12 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
       await until(()=>!document.fullscreenElement&&!document.webkitFullscreenElement);
      }else{a.parar();await until(()=>document.getElementById('b').hidden);blue.stop();}
      // Resolver o seletor após fechar não deixa captura órfã.
-     let deliver;Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{configurable:true,value:()=>new Promise(ok=>deliver=ok)});
+     // O dublê vai no protótipo, e não em `navigator.mediaDevices`: no WebKit o
+     // objeto que esse getter devolve pode ser recriado entre dois `await`, e
+     // a propriedade posta nele sumia. O produto chamava então a captura de
+     // verdade, a entrega daqui não chegava a ninguém, e «captura após prazo
+     // fechada» reprovava 5 em 30 rodadas sem defeito nenhum do produto.
+     let deliver;Object.defineProperty(MediaDevices.prototype,'getDisplayMedia',{configurable:true,value:()=>new Promise(ok=>deliver=ok)});
      const pending=a.compartilhar();a.fechar();await pending;const late=artificial('#ffffff');deliver(late.stream);await tick();
      check(late.stream.getTracks().every(t=>t.readyState==='ended'),'captura tardia fechada');late.stop();
      // Relógio acelerado só para o seletor: prazo recusa e faixas tardias param.
