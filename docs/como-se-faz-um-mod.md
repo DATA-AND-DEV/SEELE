@@ -1772,7 +1772,7 @@ sabe dela por `retrato.onde`, `retrato.regioes` e o evento `lugar`.
   rodam coisa no computador, e o navegador (o celular com ele) não faz nenhum
   dos dois; um MOD assim pula nele, e `SeeleUI.tunel.entrar` rejeita com
   `so-no-app` se algum dia o chamarem lá. Para o que os MODs oficiais fazem no navegador hoje, ver
-  [`docs/evidencias/api-8/mods-oficiais-no-navegador.md`](evidencias/api-8/mods-oficiais-no-navegador.md).
+  `docs/evidencias/api-8/mods-oficiais-no-navegador.md` (`evidencias/api-8/mods-oficiais-no-navegador.md`, no histórico do git).
 
 ## Testar antes de publicar
 

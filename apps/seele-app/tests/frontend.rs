@@ -19200,13 +19200,8 @@ fn toda_recusa_do_registro_de_contribuicoes_tem_nome() {
             "«{nome}» é usado como recusa e não está em `RECUSAS_DAS_CONTRIBUICOES`"
         );
     }
-    let rascunho = read("../../docs/superpowers/specs/2026-10-08-api-6-rascunho.md");
-    for nome in &nomes {
-        assert!(
-            rascunho.contains(&format!("`{nome}`")),
-            "«{nome}» é uma recusa que o MOD da 6 recebe, e o rascunho §7.1 não a lista"
-        );
-    }
+    // (A segunda metade conferia cada nome contra o rascunho da API 6, em
+    // `docs/superpowers`. O rascunho saiu do repositório na limpeza da 1.0.)
 }
 
 /// **Todo `perfil` da tabela de pontos é o orçamento com que o ponto monta.**

@@ -7,7 +7,7 @@
 
 ## Contexto
 
-O §6 item 10 do [design do compartilhamento de tela](../superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md)
+O §6 item 10 do design do compartilhamento de tela (`superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`, no histórico do git)
 punha três coisas fora da primeira versão numa linha só:
 
 > **HDR, mais de 1080p, mais de 30 quadros.** Nada disso cabe no §2 nem no §3.

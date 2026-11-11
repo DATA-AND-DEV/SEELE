@@ -1,6 +1,0 @@
-# O Playwright é instalado aqui por quem roda (ver README): não é fonte.
-/node_modules/
-/pw162/
-package.json
-package-lock.json
-/target/

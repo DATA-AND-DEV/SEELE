@@ -83,7 +83,7 @@ saem da segunda.
 
 ### O roteiro
 
-Em [`docs/evidencias/m3-custo-dos-mods/`](../evidencias/m3-custo-dos-mods/LEIA.md).
+Em `docs/evidencias/m3-custo-dos-mods/` (`evidencias/m3-custo-dos-mods/LEIA.md`, no histórico do git).
 Em uma frase: um servidor novo por cenário, com 0, 1 ou 3 MODs oficiais (os
 pacotes publicados no indexador, com o hash conferido contra o catálogo); o
 **app publicado, sem mudança nenhuma no binário**, aberto com uma pasta de dados
@@ -206,7 +206,7 @@ aparece esticado na largura da página, com casas de ~57 pontos.
 ### Os números depois (a API 6, 10/10 e 11/10)
 
 A campanha da API 6: 24 cenários válidos no `6e845e0d`
-([`medidas-api6.json`](../evidencias/m3-custo-dos-mods/medidas-api6.json), lidos
+(`medidas-api6.json` (`evidencias/m3-custo-dos-mods/medidas-api6.json`, no histórico do git), lidos
 pelo `resumir-api6.py` contra o `sem-mod` da própria campanha, porque a 0.16 sobe
 a sala pessoal ao abrir). Cada ponto da API 6 foi posto no teto por um MOD de
 carga sintético, um de cada vez e todos juntos (`carga-tudo`). **O critério que

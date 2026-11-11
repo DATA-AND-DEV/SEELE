@@ -1452,16 +1452,9 @@ fn os_cabecalhos_da_origem_sao_um_so() {
         );
     }
 
-    // 4.
-    let passos = std::fs::read_to_string(
-        raiz_do_repositorio().join("docs/superpowers/sdd/2026-10-08-0.16/F4/origem-para-o-dono.md"),
-    )
-    .expect("os passos do dono");
-    assert!(
-        passos.contains(&texto),
-        "os passos do dono (`F4/origem-para-o-dono.md`) não trazem o `web/_headers` de hoje, \
-         inteiro: o dono configuraria outros cabeçalhos"
-    );
+    // 4. (Conferia que os passos do dono, num documento de `docs/superpowers`,
+    // traziam o `web/_headers` de hoje. O documento saiu do repositório na
+    // limpeza da 1.0, e a conferência saiu com ele.)
 
     // 5.
     let bancada = app_dir().join("bancada");

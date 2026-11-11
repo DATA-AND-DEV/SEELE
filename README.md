@@ -520,6 +520,13 @@ que foi decidido, o que foi descartado, e o que custa voltar atrás. O código a
 cita mais de mil vezes, e não por formalidade — quando um comentário
 explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
+**O que saiu do repositório na 1.0.** Comentários do código e alguns ADRs citam
+`docs/evidencias/`, `docs/superpowers/` e `spikes/`: os registros de validações
+concluídas, os planos de trabalho e os experimentos que embasaram decisões.
+Eles saíram da árvore para ela ficar só com o que vale hoje, e continuam no
+histórico: `git log --all -- <caminho>` mostra o commit, e
+`git show <commit>:<caminho>` mostra o arquivo.
+
 ---
 
 ## Apoie

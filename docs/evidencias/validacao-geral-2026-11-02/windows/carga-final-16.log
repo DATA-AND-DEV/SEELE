@@ -1,7 +1,0 @@
-
-running 1 test
-{"atraso_laco_ms":28.748800000000003,"blocos":527,"blocos_com_som":527,"duracao_s":5.2650895,"entradas":8,"envios_recusados":0,"falantes":16,"fontes":16,"maior_intervalo_microfone_ms":41.283899999999996,"pacotes_microfone":263,"pior_perda":0.0,"quadros_ocultados":0,"reacertos":0,"reposicoes":2,"underruns":1920}
-test muitas_vozes_e_novas_entradas_nao_param_o_microfone_nem_a_saida ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.91s
-
