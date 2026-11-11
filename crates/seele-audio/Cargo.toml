@@ -113,6 +113,10 @@ indexing_slicing = "warn"
 [dev-dependencies]
 assert_no_alloc = "1.1.2"
 criterion = { version = "0.8.2", features = ["html_reports"] }
+# **Só para a bancada de medida** (`examples/teclado_na_supressao.rs`): a porta em
+# Rust puro do RNNoise (BSD-3-Clause), para comparar com a supressão de hoje no
+# mesmo sinal. Sem as features padrão, que trazem um binário e conversores.
+nnnoiseless = { version = "=0.5.2", default-features = false }
 
 [[bench]]
 name = "opus_frame"
