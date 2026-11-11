@@ -5468,7 +5468,7 @@ async fn run_session(
     // violações do envelope, voz descartada na chegada e voz que não saiu.
     // Zero em todos é o normal e não merece linha.
     let contadores = connection.contadores();
-    if contadores != seele_enlace::Contadores::default() {
+    if o_enlace_recusou_algo(&contadores) {
         tracing::warn!(
             person = %session.person,
             canais_recusados = contadores.canais_recusados,
@@ -5476,11 +5476,79 @@ async fn run_session(
             violacoes = contadores.violacoes,
             voz_descartada = contadores.voz_descartada,
             voz_nao_saiu = contadores.voz_nao_saiu,
+            midia_nao_saiu = contadores.midia_nao_saiu,
+            midia_malformada = contadores.midia_malformada,
+            tunel_descartado = contadores.tunel_descartado,
+            tunel_grande_demais = contadores.tunel_grande_demais,
             "o enlace recusou ou descartou coisas desta conexão"
         );
     }
 
     Ok(())
+}
+
+/// Se o enlace recusou ou descartou alguma coisa desta conexão: algum dos
+/// contadores **de recusa** saiu do zero.
+///
+/// O `maior_volume_no_sctp` fica de fora: é uma medida (o maior volume que já
+/// esperou na frente da voz), e não uma recusa. Comparar a estrutura inteira
+/// com a vazia fazia toda conexão que mandou um arquivo ou uma tela pelo canal
+/// sair com o aviso — e com todos os números impressos em zero, porque a
+/// linha só listava cinco dos campos. Um aviso que aparece sempre e não diz o
+/// quê ensina a não ler o aviso.
+const fn o_enlace_recusou_algo(c: &seele_enlace::Contadores) -> bool {
+    c.canais_recusados
+        + c.cortes_por_fila
+        + c.violacoes
+        + c.voz_descartada
+        + c.voz_nao_saiu
+        + c.midia_nao_saiu
+        + c.midia_malformada
+        + c.tunel_descartado
+        + c.tunel_grande_demais
+        > 0
+}
+
+#[cfg(test)]
+mod o_aviso_do_enlace {
+    use super::o_enlace_recusou_algo;
+    use seele_enlace::Contadores;
+
+    /// O volume que esperou na frente da voz é medida, e não recusa: sozinho
+    /// não acende o aviso. Comparar com `Contadores::default()` reprova aqui.
+    #[test]
+    fn so_o_volume_medido_nao_e_recusa() {
+        let so_volume = Contadores {
+            maior_volume_no_sctp: 48_000,
+            ..Contadores::default()
+        };
+        assert!(!o_enlace_recusou_algo(&so_volume));
+        assert!(!o_enlace_recusou_algo(&Contadores::default()));
+    }
+
+    /// Cada contador de recusa acende o aviso, inclusive os da mídia e do
+    /// túnel, que a linha antiga nem imprimia.
+    #[test]
+    fn cada_recusa_acende_o_aviso() {
+        let um = |muda: fn(&mut Contadores)| {
+            let mut c = Contadores::default();
+            muda(&mut c);
+            c
+        };
+        for c in [
+            um(|c| c.canais_recusados = 1),
+            um(|c| c.cortes_por_fila = 1),
+            um(|c| c.violacoes = 1),
+            um(|c| c.voz_descartada = 1),
+            um(|c| c.voz_nao_saiu = 1),
+            um(|c| c.midia_nao_saiu = 1),
+            um(|c| c.midia_malformada = 1),
+            um(|c| c.tunel_descartado = 1),
+            um(|c| c.tunel_grande_demais = 1),
+        ] {
+            assert!(o_enlace_recusou_algo(&c), "{c:?} não acendeu o aviso");
+        }
+    }
 }
 
 /// O que uma saída alcança.
