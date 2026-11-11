@@ -251,6 +251,38 @@ async function principal() {
     await esperar(1000);
     const escutaAposRecusa = await aba.evaluate(async () => ({ chamadas: window.bancada.pediuCaptura, ...(await window.bancada.ouvinte.contas()) }));
     confere("recusar captura preserva escuta", escutaAposRecusa.chamadas === 1 && escutaAposRecusa.contexto === "running" && escutaAposRecusa.pagina.decodificados > escutaSemMic.pagina.decodificados, JSON.stringify(escutaAposRecusa));
+    // **A saída que o sistema pausa volta sozinha com a página à vista**, e
+    // com a página escondida fica pausada até a volta. No celular, outro
+    // aplicativo que toca som toma o áudio e o navegador pausa a tag; ninguém
+    // a retomava, e quem voltava para a sala não ouvia mais nada.
+    const pausa = await aba.evaluate(async () => {
+      const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      const tags = [...document.querySelectorAll("audio")].filter((tag) => tag.srcObject && !tag.paused);
+      const fingir = (escondida) => {
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => escondida });
+        document.dispatchEvent(new Event("visibilitychange"));
+      };
+      // À vista: a pausa do sistema é desfeita na hora.
+      for (const tag of tags) tag.pause();
+      await esperar(300);
+      const aVista = tags.map((tag) => tag.paused);
+      // Escondida: a saída fica pausada (retomar seria tomar o áudio do outro aplicativo)…
+      fingir(true);
+      for (const tag of tags) tag.pause();
+      await esperar(300);
+      const escondida = tags.map((tag) => tag.paused);
+      // …e volta quando a página volta.
+      fingir(false);
+      await esperar(300);
+      const naVolta = tags.map((tag) => tag.paused);
+      delete document.hidden;
+      return { tags: tags.length, aVista, escondida, naVolta };
+    });
+    confere("saída pausada", pausa.tags > 0, `nenhuma tag de áudio tocando para pausar: ${JSON.stringify(pausa)}`);
+    confere("saída pausada", pausa.aVista.every((p) => !p), `com a página à vista, a saída pausada não voltou: ${JSON.stringify(pausa)}`);
+    confere("saída pausada", pausa.escondida.every((p) => p), `com a página escondida, a saída foi retomada: ${JSON.stringify(pausa)}`);
+    confere("saída pausada", pausa.naVolta.every((p) => !p), `na volta da página, a saída não voltou: ${JSON.stringify(pausa)}`);
+
     await aba.evaluate(async () => { window.bancada.restaurarCaptura(); await window.bancada.ouvinte.desligar(); });
 
     // 2. O mudo para o envio; o isolamento cala a saída.

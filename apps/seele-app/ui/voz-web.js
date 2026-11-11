@@ -186,6 +186,8 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     fonte: null,
     /** Se os ouvintes do fim da página estão registrados (um só jogo, sem duplicar). */
     escutandoAPagina: false,
+    /** A saída foi pausada pelo sistema (outro aplicativo tomou o áudio) e ainda não voltou. */
+    saidaPausada: false,
     faixa: null,
     captura: null,
     reproducao: null,
@@ -643,9 +645,32 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     aoAcontecer({ tipo: "audio-fechado", motivo: "pagina" });
   };
 
+  /**
+   * Toca de novo a saída que o sistema pausou, e acorda o contexto se ele
+   * dormiu junto. Sem efeito com o áudio fechado. Um `play()` recusado (a
+   * página sem gesto recente) fica dito, e a próxima volta tenta de novo.
+   */
+  function retomarASaida() {
+    const { elemento, ctx } = vivo;
+    if (!elemento || !ctx) return;
+    if (ctx.state !== "running" && typeof ctx.resume === "function") {
+      ctx.resume().catch((erro) => falha("saída", erro));
+    }
+    if (elemento.paused) {
+      Promise.resolve(elemento.play()).catch((erro) => falha("saída", erro));
+    }
+  }
+
+  /** A página voltou à vista: o que o sistema pausou enquanto ela estava escondida volta. */
+  const aoMudarAVista = () => {
+    if (document.hidden || !vivo.ctx) return;
+    if (vivo.saidaPausada || vivo.elemento?.paused || vivo.ctx.state !== "running") retomarASaida();
+  };
+
   function escutarAPagina() {
     if (vivo.escutandoAPagina) return;
     vivo.escutandoAPagina = true;
+    document.addEventListener("visibilitychange", aoMudarAVista);
     window.addEventListener("pagehide", aoSairDaPagina);
     window.addEventListener("freeze", aoSairDaPagina);
     document.addEventListener("freeze", aoSairDaPagina);
@@ -654,6 +679,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
   function pararDeEscutarAPagina() {
     if (!vivo.escutandoAPagina) return;
     vivo.escutandoAPagina = false;
+    document.removeEventListener("visibilitychange", aoMudarAVista);
     window.removeEventListener("pagehide", aoSairDaPagina);
     window.removeEventListener("freeze", aoSairDaPagina);
     document.removeEventListener("freeze", aoSairDaPagina);
@@ -729,10 +755,25 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     const elemento = document.createElement("audio");
     elemento.playsInline = true;
     elemento.srcObject = destino.stream;
-    elemento.onpause = () => aoAcontecer({ tipo: "saida", estado: "pausada" });
-    elemento.onplay = () => aoAcontecer({ tipo: "saida", estado: "tocando" });
+    // **A saída que o sistema pausa volta sozinha quando a página está à
+    // vista.** No celular, outro aplicativo que toca som (um vídeo, uma
+    // ligação) toma o áudio, e o navegador pausa esta tag. Ninguém a retomava:
+    // a pessoa voltava para a sala e não ouvia mais nada, sem aviso, até sair
+    // e entrar de novo. Com a página **escondida** a saída fica pausada de
+    // propósito: retomá-la ali seria tomar o áudio de volta do aplicativo que
+    // a pessoa abriu. Quem a retoma é a volta (`aoMudarAVista`).
+    elemento.onpause = () => {
+      vivo.saidaPausada = true;
+      aoAcontecer({ tipo: "saida", estado: "pausada" });
+      if (!document.hidden) retomarASaida();
+    };
+    elemento.onplay = () => {
+      vivo.saidaPausada = false;
+      aoAcontecer({ tipo: "saida", estado: "tocando" });
+    };
     document.body.append(elemento);
     vivo.elemento = elemento;
+    vivo.saidaPausada = false;
     if (aparelhoDeSaida && elemento.setSinkId) {
       await elemento.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
       conferir();
