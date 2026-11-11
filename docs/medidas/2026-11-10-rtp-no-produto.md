@@ -90,3 +90,46 @@ Nenhum pedido de quadro-chave em nenhuma célula, e nenhuma pausa do vídeo em 4
 - **Em banda estreita o RTP usa menos do caminho do que ele carrega**: 455 kbps de 1 Mbps, e 401 kbps de 2 Mbps com 1% de perda. A imagem não congela, mas sai com menos qualidade do que podia. A estimativa só cresce com o que é mandado, e a subida do teto é lenta de propósito; sondar o caminho com enchimento não está ligado.
 - O RTP custa cerca de 30 ms de atraso sem perda (66 contra 32 ms).
 - Os limites da medida são os de antes: um espectador, o `Cano` só no caminho de quem transmite, codificador de mentira, nenhum navegador, nenhuma chamada no aplicativo de verdade.
+
+## Adendo de 11/11/2026, à tarde: o sinal, a faixa e a chave na troca de orçamento
+
+Três mudanças depois da tabela acima, e a medida de novo (commit `9ab54567`,
+mediana de 3 rodadas, variante **produto**, os mesmos cenários; brutos em
+`brutos-2026-11-11-rtp-no-produto/rtp4-grade.out` e `rtp4-regime.out`):
+
+1. **O sinal deixou de ficar em 100** (`22d022b1`). Com ele se mexendo, a faixa
+   do sinal passou a cortar o teto do vídeo — o laço nunca tinha rodado. Numa
+   medida intermediária a 5% de perda o vídeo caiu de 2375 para 1215–1459 kbps
+   com o caminho livre.
+2. **Pela mídia, a faixa não corta o teto de novo** (`9865e553`): quem regula
+   a taxa no RTP é a estimativa do TWCC.
+3. **A troca de orçamento não custa mais um quadro-chave à câmera**
+   (`9ab54567`). A 1 Mbps, cada subida do teto reconfigurava o codificador, a
+   chave saía em rajada e a estimativa que acabara de subir caía a um terço:
+   uma serra. Numa rodada de 40 s, 13 chaves e 370 kbps com a chave na troca,
+   1 chave e 526 kbps sem. O exemplo segue a casca; `--com-chave-na-troca`
+   repete o comportamento antigo.
+
+Latência p50 (ms) / congelado (%) / kbps oferecidos:
+
+| cenário | primeiros 20 s | em regime (aquecimento de 20 s) | regime antes (tabela acima) |
+|---|--:|--:|--:|
+| 0% | 65 / 0,0 / 1993 | 66 / 0,0 / 2375 | — |
+| 0,3% | 66 / 0,0 / 1990 | 67 / 0,0 / 2375 | — |
+| 1% | 66 / 0,0 / 1993 | 69 / 0,0 / 2330 | — |
+| 3% | 91 / 0,0 / 1980 | 104 / 0,0 / 2375 | 111 / 0,0 / 2335 |
+| 5% | 123 / 1,0 / 1771 | 129 / 0,0 / 2375 | 123 / 0,0 / 2375 |
+| 1,0 Mbps, 0% | 47 / 1,5 / 312 | 53 / 0,0 / 499 | 51 / 0,0 / 455 |
+| 2,0 Mbps, 1% | 64 / 0,0 / 1090 | 64 / 0,0 / 1203 | 43 / 0,0 / 401 |
+
+Nos primeiros 20 s o congelado era de 1,6% a 6,1%; agora é de 0% a 1,5%. Um
+quadro-chave por rodada (o do começo), nenhum pedido de chave, nenhuma pausa,
+nenhuma tentativa falhada em 42 rodadas.
+
+### O que fica, depois deste adendo
+
+- **A 1 Mbps o RTP ainda usa menos do caminho que o canal**: 499 contra 585
+  kbps. A 2 Mbps com 1% de perda passou dele (1203 contra 567).
+- **Entre duas máquinas de verdade** (um Mac e um Windows na mesma rede, o
+  `seeled` no Mac, `tela_entre_maquinas`): ver o fim de `docs/teste-duas-maquinas.md`.
+- Os limites da medida são os de antes.
