@@ -138,6 +138,7 @@ async fn a_leitura_diz_nao_sei_em_vez_de_zero() {
         assert_eq!(leitura.pacotes_perdidos, None);
         assert_eq!(leitura.eventos_de_congestionamento, None);
         assert_eq!(leitura.fracao_de_perda_na_saida, None);
+        assert_eq!(leitura.fracao_de_perda_na_entrada, None);
         assert!(leitura.bytes_enviados > 0 && leitura.pacotes_enviados > 0);
     }
     assert!(

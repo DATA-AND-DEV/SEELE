@@ -1796,6 +1796,7 @@ impl Motor {
             bytes_recebidos: Default::default(),
             rtt_us: Default::default(),
             perda_na_saida: Mutex::new(None),
+            perda_na_entrada: Mutex::new(None),
             voz_na_fila: Default::default(),
             midia_na_fila: Default::default(),
             estimativa_bps: Default::default(),
@@ -2510,6 +2511,9 @@ impl Motor {
                     }
                     if let Ok(mut perda) = par.comp.perda_na_saida.lock() {
                         *perda = stats.egress_loss_fraction;
+                    }
+                    if let Ok(mut perda) = par.comp.perda_na_entrada.lock() {
+                        *perda = stats.ingress_loss_fraction;
                     }
                     if let Some(caminho) = &stats.selected_candidate_pair {
                         if let Ok(mut remoto) = par.comp.remoto.lock() {

@@ -43,7 +43,6 @@ use seele_proto::ids::{
     ChannelId, ClientMessageId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId,
 };
 use seele_proto::screen::SCREEN_HEADER_LEN;
-use seele_proto::signal::{Signal, SyncInputs};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
@@ -2554,7 +2553,7 @@ async fn run_session(
     // the whole `PersonState` in, so a field left at a default is not left
     // alone, it is overwritten.
     let mut last_ratio = 0_u8;
-    let mut sync = Signal::new();
+    let mut sinal = crate::sinal::SinalDaSessao::novo();
     let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -4983,6 +4982,16 @@ async fn run_session(
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
 
+                // A perda de subida da voz desta pessoa entra no sinal dela. A
+                // sala já a media e só a dizia a quem fala (`translate`,
+                // abaixo, continua a filtrar o relato por destinatário); o
+                // sinal é o que os outros veem dela, e é agregado.
+                if let Event::UplinkLoss { person, fraction } = &event {
+                    if *person == session.person {
+                        sinal.a_voz_perdeu(*fraction, std::time::Instant::now());
+                    }
+                }
+
                 // O que desta conexão o escritor anunciou deixa de estar no ar,
                 // gravado ou recusado. Antes de qualquer filtro: a conta é do
                 // que esta conexão mandou, e não do que ela vê.
@@ -5386,21 +5395,17 @@ async fn run_session(
                 }
 
                 // **O que o enlace não mede vai como `None`** (a Telemetry da
-                // linha 2), e nunca como zero. O Sync Ratio só é alimentado
-                // quando há RTT e perda medidos; sem eles a sessão não inventa
-                // uma medida, e o valor é o «ainda sem medida» do `Signal`
-                // (`Signal::value` sem nenhum `update`).
+                // linha 2), e nunca como zero.
                 let rtt_ms = stats.ida_e_volta.map(|volta| volta.as_secs_f32() * 1000.0);
                 let loss_fraction = stats.fracao_de_perda_na_saida;
-                let ratio = match (rtt_ms, loss_fraction) {
-                    (Some(rtt_ms), Some(loss_fraction)) => sync.update(SyncInputs {
-                        rtt_ms,
-                        // Medido no receptor; o servidor não tem.
-                        jitter_ms: 0.0,
-                        loss_fraction,
-                    }),
-                    _ => sync.value(),
-                };
+                // **O sinal, com tudo o que este servidor mede desta pessoa.**
+                //
+                // Aqui havia um `match (rtt_ms, loss_fraction)` que só
+                // alimentava a conta com as duas medidas juntas, e a perda de
+                // saída só existe para quem recebe RTP: todos os outros
+                // ficavam no «ainda sem medida», que vale 100, para sempre.
+                // Que medida entra, e quando, é de `crate::sinal`.
+                let ratio = sinal.tique(&stats, std::time::Instant::now());
                 last_ratio = ratio;
 
                 escrever!(&ServerMessage::Telemetry(Telemetry {

@@ -141,6 +141,73 @@ async fn o_video_atravessa_tres_por_cento_de_perda_sem_buraco() {
     assert_eq!(par.cliente.contadores().midia_nao_saiu, 0);
 }
 
+/// O que as duas pontas leram da perda enquanto um vídeo atravessava `perda`:
+/// a maior fração de saída vista por quem manda e a maior de entrada vista por
+/// quem recebe (`None`: nunca houve medida).
+async fn perdas_lidas(perda: f64, semente: u64) -> (Option<f32>, Option<f32>) {
+    let sentido = Sentido {
+        perda,
+        atraso: Duration::from_millis(10),
+        ..Sentido::limpo()
+    };
+    let (par, _cano) = par_por_cano(ConfigDoCano::simetrico(sentido, semente)).await;
+    let emissor = par.cliente.ligar_midia().remetente();
+    let mut receptor = par.anfitriao.ligar_midia();
+    emissor.taxa_desejada(2_000_000);
+    let consumir = tokio::spawn(async move { while receptor.receber().await.is_some() {} });
+
+    let maior = |atual: Option<f32>, lida: Option<f32>| match (atual, lida) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    };
+    let (mut saida, mut entrada) = (None, None);
+    let mut relogio = tokio::time::interval(Duration::from_millis(1000 / QUADROS_POR_SEGUNDO));
+    for n in 0..(6 * QUADROS_POR_SEGUNDO) {
+        relogio.tick().await;
+        let tempo = n * u64::from(RELOGIO_DO_VIDEO) / QUADROS_POR_SEGUNDO;
+        emissor
+            .mandar(FAIXA, Trilha::Video, tempo, quadro(n, n == 0, 5_000))
+            .unwrap();
+        saida = maior(saida, par.cliente.leitura().fracao_de_perda_na_saida);
+        entrada = maior(entrada, par.anfitriao.leitura().fracao_de_perda_na_entrada);
+    }
+    consumir.abort();
+    (saida, entrada)
+}
+
+/// **A perda do caminho é um número nas duas pontas**, e não só em quem manda.
+///
+/// A de saída já era lida (o retorno de TWCC); a de entrada o str0m também
+/// conta e ninguém a tirava dele. É ela que diz ao anfitrião quanto do vídeo
+/// de quem **transmite** se perde a caminho — e quem transmite não recebe RTP
+/// nenhum do anfitrião, então a de saída dele fica em `None` para sempre.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_perda_do_caminho_aparece_na_leitura_das_duas_pontas() {
+    let (saida, entrada) = perdas_lidas(0.08, 21).await;
+    println!("8% de perda: saída {saida:?}, entrada {entrada:?}");
+    let entrada = entrada.expect("quem recebe RTP não mediu perda de entrada nenhuma");
+    assert!(
+        (0.03..0.25).contains(&entrada),
+        "8% de perda no caminho e a entrada leu {entrada}"
+    );
+    let saida = saida.expect("quem manda RTP não mediu perda de saída nenhuma");
+    assert!(
+        (0.03..0.25).contains(&saida),
+        "8% de perda no caminho e a saída leu {saida}"
+    );
+
+    let (saida, entrada) = perdas_lidas(0.0, 22).await;
+    println!("sem perda: saída {saida:?}, entrada {entrada:?}");
+    assert!(
+        entrada.is_some_and(|f| f < 0.01),
+        "caminho limpo e a entrada leu {entrada:?}"
+    );
+    assert!(
+        saida.is_some_and(|f| f < 0.01),
+        "caminho limpo e a saída leu {saida:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
     let par = par_em_loopback().await;

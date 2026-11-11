@@ -109,6 +109,11 @@ pub struct Leitura {
     /// A fração de perda na saída que o str0m calcula (`PeerStats::egress_loss_fraction`).
     /// Vem dos relatórios RTCP, então sem mídia RTP fica em `None`.
     pub fracao_de_perda_na_saida: Option<f32>,
+    /// A fração de perda na **entrada** (`PeerStats::ingress_loss_fraction`): do
+    /// que o par mandou por RTP, quanto não chegou aqui, desde a estatística
+    /// anterior. É a perda **antes** da retransmissão — o que o caminho tirou, e
+    /// não o que faltou no quadro. Sem mídia RTP chegando fica em `None`.
+    pub fracao_de_perda_na_entrada: Option<f32>,
 }
 
 /// Os contadores de uma conexão: o que foi recusado ou descartado, para quem investiga.
@@ -172,6 +177,7 @@ pub(crate) struct Compartilhado {
     pub(crate) bytes_recebidos: AtomicU64,
     pub(crate) rtt_us: AtomicU64,
     pub(crate) perda_na_saida: Mutex<Option<f32>>,
+    pub(crate) perda_na_entrada: Mutex<Option<f32>>,
     pub(crate) voz_na_fila: AtomicUsize,
     /// Os quadros de mídia que esperam a tarefa ([`crate::FILA_DE_MIDIA`]).
     pub(crate) midia_na_fila: AtomicUsize,
@@ -661,6 +667,7 @@ impl Conexao {
             pacotes_perdidos: None,
             eventos_de_congestionamento: None,
             fracao_de_perda_na_saida: self.comp.perda_na_saida.lock().ok().and_then(|p| *p),
+            fracao_de_perda_na_entrada: self.comp.perda_na_entrada.lock().ok().and_then(|p| *p),
         }
     }
 

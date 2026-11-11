@@ -52,6 +52,7 @@ pub(crate) mod rastro_de_teste;
 pub mod recepcao;
 pub mod server;
 pub mod session;
+pub mod sinal;
 pub mod taxa;
 pub mod tela;
 pub mod tls;
