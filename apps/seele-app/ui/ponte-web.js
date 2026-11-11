@@ -2139,6 +2139,10 @@ async function enviarAImagemDoPerfil(lado) {
   } catch {
     throw "ArquivoIlegivel";
   }
+  // **Sobe do tamanho em que aparece**, e não do que a pessoa escolheu: quem
+  // recebe uma capa em 4K paga por ela, e os clientes de antes desta regra não
+  // a reduzem ao mostrar.
+  bytes = await reduzirAImagemDoPerfil(lado, bytes);
   const montado = sessao.perfil.enviar(lado, bytes);
   if (montado.falha) throw montado.falha;
   await transferirAImagemDoPerfil(sessao, montado.pedido, bytes, "");
@@ -2244,6 +2248,13 @@ async function regraDoPadrao() {
       const codigo = com(bytes, (p, n) => w.perfil_conferir(p, n));
       return codigo === 0 ? { tipo: saida() } : { falha: JSON.parse(saida()) };
     },
+    /** A imagem reduzida ao lugar em que aparece (a mesma conta do desktop), sem sessão. */
+    paraAJanela(capa, bytes) {
+      const codigo = com(bytes, (p, n) => w.perfil_para_a_janela(capa ? 1 : 0, p, n));
+      return codigo === 0
+        ? { bytes: memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()) }
+        : { falha: JSON.parse(saida()) };
+    },
   };
 }
 
@@ -2259,16 +2270,52 @@ function dataUriDe(bytes, tipo) {
   return `data:${tipo};base64,${btoa(binario)}`;
 }
 
-/** `perfil_padrao`: os textos, a revisão e as imagens em `data:`. */
+/**
+ * **A imagem de um perfil reduzida ao lugar em que aparece**, pela conta do
+ * desktop (`reducao::imagem_do_perfil_para_a_janela`): a capa em até 1280 × 720
+ * e a foto em até 512. Uma imagem grande ia à tela e ao servidor do tamanho que
+ * a pessoa escolheu, e uma capa em 4K deixava tudo lento (relato de 10/11/2026).
+ * Lança `TipoRecusado` para o que não decodifica ou tem pixels demais.
+ */
+async function reduzirAImagemDoPerfil(lado, bytes) {
+  const capa = lado === "capa" || lado === "Capa";
+  const reduzida = (await regraDoPadrao()).paraAJanela(capa, bytes);
+  if (reduzida.falha) throw reduzida.falha;
+  return reduzida.bytes;
+}
+
+/** As imagens do padrão já prontas para a tela, pelo hash: reduzir é decodificar, e a tela pede o padrão a cada gravação. */
+const IMAGENS_DO_PADRAO_NA_TELA = new Map();
+
+/** `perfil_padrao`: os textos, a revisão e as imagens em `data:`, reduzidas ao lugar em que aparecem. */
 async function perfilPadraoNaOrigem() {
   const padrao = await padraoGuardado();
   const naTela = { ...padrao };
+  const vivas = new Set();
   for (const lado of ["foto", "capa"]) {
     const imagem = padrao[lado];
     if (!imagem) continue;
-    const guardada = await noBancoDoPadrao(["imagens"], "readonly", (loja) => loja.get(imagem.hash));
-    if (!guardada) console.warn(`ponte: a ${lado} do perfil padrão sumiu do armazém desta origem`);
-    naTela[lado] = { ...imagem, url: guardada ? dataUriDe(guardada, imagem.tipo) : "" };
+    vivas.add(imagem.hash);
+    let url = IMAGENS_DO_PADRAO_NA_TELA.get(imagem.hash);
+    if (url === undefined) {
+      const guardada = await noBancoDoPadrao(["imagens"], "readonly", (loja) => loja.get(imagem.hash));
+      if (!guardada) console.warn(`ponte: a ${lado} do perfil padrão sumiu do armazém desta origem`);
+      url = "";
+      if (guardada) {
+        try {
+          const reduzida = await reduzirAImagemDoPerfil(lado, guardada);
+          url = dataUriDe(reduzida, tipoDaImagemDoPerfil(reduzida));
+        } catch (falha) {
+          // O que foi guardado antes desta regra e não reduz não vai à tela, e fica dito.
+          console.warn(`ponte: a ${lado} do perfil padrão não pôde ser reduzida para a tela:`, falha);
+        }
+      }
+      IMAGENS_DO_PADRAO_NA_TELA.set(imagem.hash, url);
+    }
+    naTela[lado] = { ...imagem, url };
+  }
+  for (const hash of IMAGENS_DO_PADRAO_NA_TELA.keys()) {
+    if (!vivas.has(hash)) IMAGENS_DO_PADRAO_NA_TELA.delete(hash);
   }
   return naTela;
 }
@@ -2331,6 +2378,12 @@ async function escolherAImagemDoPadrao(lado) {
   } catch {
     throw "ArquivoIlegivel";
   }
+  const original = (await regraDoPadrao()).conferir(bytes);
+  if (original.falha) throw original.falha;
+  // **Guardada do tamanho em que aparece.** O que fica guardado é o que sobe
+  // a cada servidor, e o hash dele é o que diz se o servidor já tem esta
+  // imagem: reduzir só na hora de enviar faria os dois nunca baterem.
+  bytes = await reduzirAImagemDoPerfil(lado, bytes);
   const conferido = (await regraDoPadrao()).conferir(bytes);
   if (conferido.falha) throw conferido.falha;
   const imagem = { hash: await hashDaImagemDoPadrao(bytes), tipo: conferido.tipo, bytes: bytes.length };

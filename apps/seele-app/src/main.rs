@@ -12261,6 +12261,7 @@ async fn enviar_imagem_do_perfil(
     })
     .await
     .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
+    let bytes = imagem_de_perfil_para_subir(bytes, lado).await?;
 
     let para_o_icone = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
     conexao.enviar_imagem_do_perfil(lado, bytes).await?;
@@ -12289,6 +12290,35 @@ async fn enviar_imagem_do_perfil(
         escolheu: true,
         icone_nativo,
     })
+}
+
+/// **A imagem de perfil que a pessoa escolheu, do tamanho em que aparece**
+/// (`reducao::imagem_do_perfil_para_a_janela`: a capa em até 1280 × 720, a foto
+/// em até 512), fora da linha principal.
+///
+/// É o que sobe ao servidor e o que fica guardado no perfil padrão. Subia o
+/// arquivo inteiro, e quem recebia uma capa em 4K pagava por ela: os clientes
+/// de antes da redução ao mostrar (a 0.19.6) ficam lentos com ela.
+///
+/// O que não decodifica aqui segue como veio: quem diz que os bytes não são
+/// uma imagem é a conferência do envio, com o erro dela. Só o que tem pixels
+/// demais é recusado.
+async fn imagem_de_perfil_para_subir(
+    bytes: Vec<u8>,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+) -> Result<Vec<u8>, seele_ffi::perfis::ErroDoPerfil> {
+    let capa = lado == seele_ffi::perfis::LadoDoPerfil::Capa;
+    tauri::async_runtime::spawn_blocking(move || {
+        match seele_ffi::reducao::imagem_do_perfil_para_a_janela(&bytes, capa) {
+            Ok(reduzida) => Ok(reduzida),
+            Err(motivo) if motivo == seele_ffi::reducao::GRANDE_DEMAIS => {
+                Err(seele_ffi::perfis::ErroDoPerfil::TipoRecusado)
+            }
+            Err(_) => Ok(bytes),
+        }
+    })
+    .await
+    .map_err(|_| seele_ffi::perfis::ErroDoPerfil::ArquivoIlegivel)?
 }
 
 /// A imagem de um perfil, em `data:` para a janela desenhar. `hash` é o que o
@@ -12421,6 +12451,10 @@ async fn escolher_imagem_do_perfil_padrao(
     })
     .await
     .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
+    // **Guardada do tamanho em que aparece.** O que fica guardado é o que
+    // sobe a cada servidor, e o hash dele é o que diz se o servidor já tem
+    // esta imagem: reduzir só ao enviar faria os dois nunca baterem.
+    let bytes = imagem_de_perfil_para_subir(bytes, lado).await?;
     let para_o_retrato = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
     armazem.guardar_imagem(lado, &bytes)?;
     if let Some(bytes) = para_o_retrato {
@@ -24020,5 +24054,65 @@ mod o_tunel_de_jogo_pelo_app {
             !tabela.pode(geracao, "x/jogo", "retrato"),
             "outra capacidade"
         );
+    }
+}
+
+#[cfg(test)]
+mod imagem_de_perfil_para_subir_testes {
+    use super::imagem_de_perfil_para_subir;
+    use seele_ffi::perfis::{ErroDoPerfil, LadoDoPerfil};
+
+    fn png(largura: u32, altura: u32) -> Vec<u8> {
+        let imagem = image::RgbaImage::from_pixel(largura, altura, image::Rgba([9, 90, 200, 255]));
+        let mut saida = Vec::new();
+        image::DynamicImage::ImageRgba8(imagem)
+            .write_to(
+                &mut std::io::Cursor::new(&mut saida),
+                image::ImageFormat::Png,
+            )
+            .expect("gravar o PNG de teste");
+        saida
+    }
+
+    fn medidas(bytes: &[u8]) -> (u32, u32) {
+        let imagem = image::load_from_memory(bytes).expect("decodifica");
+        (imagem.width(), imagem.height())
+    }
+
+    /// **O que sobe ao servidor é do tamanho em que aparece.** Uma capa em 4K
+    /// subia inteira, e quem a recebia num cliente de antes da redução ao
+    /// mostrar ficava lento (relato de 10/11/2026).
+    #[test]
+    fn a_imagem_escolhida_sobe_reduzida() {
+        tauri::async_runtime::block_on(async {
+            let capa = imagem_de_perfil_para_subir(png(3840, 2160), LadoDoPerfil::Capa)
+                .await
+                .expect("reduz");
+            assert_eq!(medidas(&capa), (1280, 720));
+            let foto = imagem_de_perfil_para_subir(png(2000, 2000), LadoDoPerfil::Foto)
+                .await
+                .expect("reduz");
+            assert_eq!(medidas(&foto), (512, 512));
+            // O que já cabe sobe com os mesmos bytes.
+            let pequena = png(640, 360);
+            assert_eq!(
+                imagem_de_perfil_para_subir(pequena.clone(), LadoDoPerfil::Capa)
+                    .await
+                    .expect("passa"),
+                pequena
+            );
+            // Pixels demais: recusada. O que não é imagem segue, e quem a
+            // recusa é a conferência do envio.
+            assert!(matches!(
+                imagem_de_perfil_para_subir(png(9000, 5000), LadoDoPerfil::Capa).await,
+                Err(ErroDoPerfil::TipoRecusado)
+            ));
+            assert_eq!(
+                imagem_de_perfil_para_subir(b"nada".to_vec(), LadoDoPerfil::Foto)
+                    .await
+                    .expect("segue"),
+                b"nada"
+            );
+        });
     }
 }
