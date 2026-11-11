@@ -504,6 +504,21 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
                 abertura: [1, 0, 0, 0, 7, 0, 0, 5, 0, 2, 208],
             },
         ),
+        (
+            "RelatoDeRecepcao",
+            ClientMessage::RelatoDeRecepcao(seele_proto::signal::Recepcao {
+                perda: Some(0.25),
+                jitter_ms: Some(12.5),
+            }),
+        ),
+        // O «não medido» de cada campo tem byte próprio no fio.
+        (
+            "RelatoDeRecepcao.SoPerda",
+            ClientMessage::RelatoDeRecepcao(seele_proto::signal::Recepcao {
+                perda: Some(1.0),
+                jitter_ms: None,
+            }),
+        ),
     ]
 }
 

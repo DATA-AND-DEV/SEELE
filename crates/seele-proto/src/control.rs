@@ -2185,6 +2185,22 @@ pub enum ClientMessage {
         /// A abertura, como iria no canal.
         abertura: [u8; crate::screen::SCREEN_HEADER_LEN],
     },
+    /// **O que este cliente mede da própria recepção** (protocolo 13): a perda
+    /// e o jitter da voz que chega a ele, que só existem no receptor.
+    ///
+    /// Sai cerca de uma vez por segundo
+    /// ([`crate::signal::INTERVALO_DO_RELATO_MS`]) enquanto há o que medir, e
+    /// vale por [`crate::signal::VALIDADE_DO_RELATO_MS`]. O servidor o põe na
+    /// conta do sinal **de quem relatou** e de mais ninguém: é o que fecha o
+    /// buraco de quem está calado e sem vídeo, de quem o servidor não mede
+    /// perda nenhuma.
+    ///
+    /// Sem resposta. A forma dos números é conferida por
+    /// [`crate::signal::Recepcao::confere`], **e não pelo [`Validate`]**, de
+    /// propósito: o `Validate` roda no `decode`, e um quadro que ele recusa
+    /// encerra a leitura do controle. Um número torto num relato de telemetria
+    /// não vale a sessão — o servidor o ignora e segue.
+    RelatoDeRecepcao(crate::signal::Recepcao),
 }
 
 /// Server to client.
@@ -3333,7 +3349,7 @@ pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
 }
 
 impl ListaDeCima for ClientMessage {
-    const CONHECIDAS: u32 = 61;
+    const CONHECIDAS: u32 = 62;
 }
 
 impl ListaDeCima for ServerMessage {
@@ -3945,7 +3961,10 @@ impl Validate for ClientMessage {
             Self::UnbanPerson { .. }
             | Self::ListBans
             | Self::MidiaLigada
-            | Self::TelaPorMidia { .. } => Ok(()),
+            | Self::TelaPorMidia { .. }
+            // A faixa dos números é do `Recepcao::confere`, que o servidor
+            // aplica sem derrubar a sessão. Ver a variante.
+            | Self::RelatoDeRecepcao(_) => Ok(()),
         }
     }
 }
@@ -5999,7 +6018,7 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            60,
+            61,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
@@ -6132,6 +6151,12 @@ mod o_vocabulario_e_a_versao {
         // 10/11): `MidiaLigada` e `TelaPorMidia` no fim da lista do cliente,
         // que foi de 59 para 61, e `TelaPorMidia` e `FimDaTelaPorMidia` no fim
         // da do servidor, que foi de 67 para 69. ADR 0067.
+        //
+        // **E o relato de recepção (11/11/2026), ainda no 13**, que continua
+        // sem publicar (o último release é a v0.19.6, commit `f7ea590e9`, do
+        // 12, conferido em 11/11): `RelatoDeRecepcao` no fim da lista do
+        // cliente, que foi de 61 para 62. A do servidor não mudou: o relato
+        // não tem resposta. Um servidor 12 não o recebe (`desde_do_cliente`).
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
             13,
@@ -6767,7 +6792,8 @@ mod mesa_de_texto {
                     "UnbanPerson",
                     "ListBans",
                     "MidiaLigada",
-                    "TelaPorMidia"
+                    "TelaPorMidia",
+                    "RelatoDeRecepcao"
                 ][..]
             )
         );

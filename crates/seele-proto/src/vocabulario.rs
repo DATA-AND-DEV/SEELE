@@ -277,6 +277,9 @@ pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
         ClientMessage::MidiaLigada | ClientMessage::TelaPorMidia { .. } => {
             crate::screen::PROTOCOLO_DA_MIDIA
         }
+        // O relato de recepção (11/11/2026), no mesmo 13: um servidor 12 o
+        // leria como variante desconhecida.
+        ClientMessage::RelatoDeRecepcao(_) => 13,
     }
 }
 
@@ -803,6 +806,19 @@ mod tests {
             desde_do_cliente(&ClientMessage::TelaPorMidia { abertura }),
             13
         );
+    }
+
+    /// **O relato de recepção é do 13**: um servidor 12 (a v0.19.6 publicada)
+    /// não o conhece, e um cliente não o escreve para ele. Baixar o braço
+    /// reprova aqui.
+    #[test]
+    fn o_relato_de_recepcao_nao_vai_a_um_servidor_doze() {
+        let relato = ClientMessage::RelatoDeRecepcao(crate::signal::Recepcao {
+            perda: Some(0.02),
+            jitter_ms: Some(7.5),
+        });
+        assert_eq!(desde_do_cliente(&relato), 13);
+        assert!(desde_do_cliente(&relato) > 12);
     }
 
     /// **Um par 12 não recebe a lista de banidos, e um servidor 12 não recebe

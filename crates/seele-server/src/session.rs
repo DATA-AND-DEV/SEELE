@@ -2554,6 +2554,9 @@ async fn run_session(
     // alone, it is overwritten.
     let mut last_ratio = 0_u8;
     let mut sinal = crate::sinal::SinalDaSessao::novo();
+    // Quantos relatos de recepção desta sessão não passaram na conferência. O
+    // primeiro vai ao registro; o total, ao fim da sessão.
+    let mut relatos_recusados = 0_u32;
     let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -4630,6 +4633,31 @@ async fn run_session(
                         }));
                     }
 
+                    // **O cliente relata a própria recepção** (protocolo 13):
+                    // a perda e o jitter da voz que chega a ele, que este
+                    // servidor não tem como medir. Entra no sinal **desta**
+                    // sessão e de nenhuma outra — o relato é de quem manda
+                    // sobre si. A forma, a validade e a conta são de
+                    // `crate::sinal`; a frequência já foi julgada pelo `vigia`
+                    // acima, antes de este braço rodar.
+                    ClientMessage::RelatoDeRecepcao(relato) => {
+                        if let Err(motivo) = sinal.relatou(relato, std::time::Instant::now()) {
+                            // Ignorado, e a sessão segue. Dito uma vez por
+                            // sessão: um cliente defeituoso relata a cada
+                            // segundo, e o registro não é lugar para isso.
+                            relatos_recusados = relatos_recusados.saturating_add(1);
+                            if relatos_recusados == 1 {
+                                tracing::warn!(
+                                    person = %session.person,
+                                    ?motivo,
+                                    ?relato,
+                                    "relato de recepção fora da faixa, ignorado: o sinal \
+                                     desta pessoa segue sem ele"
+                                );
+                            }
+                        }
+                    }
+
                     ClientMessage::EmprestarSubida {
                         consentimento,
                         impressao,
@@ -5457,6 +5485,16 @@ async fn run_session(
             recusados,
             "o transporte recusou quadros de voz para este cliente; \
              o caminho até ele não comporta o tamanho do datagrama"
+        );
+    }
+
+    // Os relatos de recepção que não entraram na conta, quando a primeira
+    // linha não disse tudo.
+    if relatos_recusados > 1 {
+        tracing::warn!(
+            person = %session.person,
+            total = relatos_recusados,
+            "relatos de recepção fora da faixa ignorados nesta sessão"
         );
     }
 
