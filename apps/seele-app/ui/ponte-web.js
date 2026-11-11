@@ -1005,6 +1005,8 @@ const vozDaSessao = {
   ligando: null,
   /** A abertura guardada em `ligando` falhou: a próxima entrada tenta outra. */
   aberturaFalhou: false,
+  /** O que a abertura dizia antes de o sistema pausar o som (`som_pausado`). */
+  aberturaAntesDaPausa: null,
   /**
    * O PEDIDO mais novo de entrar ou sair da sala (cada ENTRAR e cada SAIR toma um número). Uma resposta (a rejeição de uma entrada, a resposta de um
    * sair) só age sobre a captura se o pedido dela ainda é o mais novo: a resposta velha de um pedido não solta nem desliga a captura de um pedido novo.
@@ -1674,6 +1676,19 @@ function aoEventoDaVoz(evento) {
   // e a faixa chegou encerrada): a sala diz isso a quem fala, em uma frase.
   if (evento && evento.tipo === "audio-ligado") {
     vozDaSessao.semEco = Boolean(evento.semEcoPorque);
+    return;
+  }
+  // **O sistema pausou o som da sala** (no celular, outro aplicativo que toca
+  // som toma o áudio): a tela diz, em vez de a pessoa voltar e achar que a sala
+  // está em silêncio. Quando a saída volta a tocar, a tela volta ao que era.
+  if (evento && evento.tipo === "saida") {
+    const tocando = evento.estado === "tocando";
+    if (!tocando && (vozDaSessao.abertura === "aberto" || vozDaSessao.abertura === "so_ouvindo")) {
+      vozDaSessao.aberturaAntesDaPausa = vozDaSessao.abertura;
+      mudarAAbertura("som_pausado");
+    } else if (tocando && vozDaSessao.abertura === "som_pausado") {
+      mudarAAbertura(vozDaSessao.aberturaAntesDaPausa ?? "aberto");
+    }
     return;
   }
   if (!evento || evento.tipo !== "audio-fechado") return;

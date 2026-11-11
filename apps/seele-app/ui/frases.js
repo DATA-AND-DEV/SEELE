@@ -446,6 +446,14 @@ const ABERTURA_DO_AUDIO = {
     medidor: "— MICROFONE FECHADO",
     frase: FRASE_DO_SO_OUVINDO,
   },
+  // **O sistema pausou o som da sala** (no celular, outro aplicativo que toca
+  // som toma o áudio do aparelho). O microfone pode seguir aberto; o que parou
+  // foi a escuta, e ela volta quando a pessoa volta para a página.
+  som_pausado: {
+    rodape: "SOM PAUSADO",
+    medidor: "— SOM PAUSADO PELO SISTEMA",
+    frase: "O SISTEMA PAUSOU O SOM DA SALA. Outro aplicativo está usando o áudio. O som volta quando você voltar para cá; se não voltar, saia da sala e entre de novo.",
+  },
   // **A voz está noutra sessão** (E3 da 0.17; fronteiras.md §5). Um microfone
   // por máquina, e ele está com outro servidor: nada aqui abre aparelho, nada
   // sai e nada toca. Não é falta de áudio, e a palavra do rodapé não diz que é.

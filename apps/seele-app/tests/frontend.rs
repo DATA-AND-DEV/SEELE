@@ -26820,7 +26820,7 @@ const manipuladores = fonte.slice(iniH, fimH);
 if (!declaracao.includes("ligando") || iniH < 0 || fimH < 0) { console.log("a ponte mudou de forma: o guarda ficou cego"); process.exit(1); }
 const pecas = {
   conferir: pegar("conferirAVozDaSessao"), ligar: pegar("ligarOAudioNoGesto"), sair: pegar("sairDaVozDaSessao"),
-  manter: pegar("sairDaVozMantendoOMicrofone"), soltar: pegar("soltarOMicrofoneDaVoz"), mudar: pegar("mudarAAbertura"),
+  manter: pegar("sairDaVozMantendoOMicrofone"), soltar: pegar("soltarOMicrofoneDaVoz"), mudar: pegar("mudarAAbertura"), evento: pegar("aoEventoDaVoz"),
   trocar: pegar("trocarOFocoDaPonte"), manipuladores,
   voltar: fonte.match(/  sessao\.aoVoltar = \(\) => \{[\s\S]*?\n  \};/)[0],
 };
@@ -26866,10 +26866,10 @@ async function cenarios(pecas) {
     });
     ctx.__recusar = false;
     ctx.__remoto = async (nome) => { if (ctx.__recusar && nome === "enter_voice_room") throw "Recusada"; return {}; };
-    vm.runInContext(`${declaracao}\n${pecas.mudar}\n${pecas.soltar}\n${pecas.sair}\n${pecas.manter}\n${pecas.conferir}\n${pecas.ligar}\n${pecas.trocar}
+    vm.runInContext(`${declaracao}\n${pecas.mudar}\n${pecas.soltar}\n${pecas.sair}\n${pecas.manter}\n${pecas.conferir}\n${pecas.ligar}\n${pecas.trocar}\n${pecas.evento}
       const manipuladores = {\n${pecas.manipuladores}\n};
       globalThis.__estado = () => ({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null && !vozDaSessao.aberturaFalhou, abertura: vozDaSessao.abertura, geracao: vozDaSessao.geracao });
-      globalThis.__M = manipuladores; globalThis.__conferir = conferirAVozDaSessao; globalThis.__ligar = ligarOAudioNoGesto; globalThis.__soltar = soltarOMicrofoneDaVoz;`, ctx, { filename: "ponte-recortada.js" });
+      globalThis.__M = manipuladores; globalThis.__conferir = conferirAVozDaSessao; globalThis.aoEventoDaVoz = aoEventoDaVoz; globalThis.__ligar = ligarOAudioNoGesto; globalThis.__soltar = soltarOMicrofoneDaVoz;`, ctx, { filename: "ponte-recortada.js" });
     return {
       ctx, faixas, aberturas, chamadas, sessao, voz,
       voltar: () => { ctx.sessao = sessao; ctx.id = 1; vm.runInContext(pecas.voltar, ctx); sessao.aoVoltar(); },
@@ -26943,6 +26943,21 @@ async function cenarios(pecas) {
     chk(`5b. a falha de ${etapa} antes da confirmação: abertura ${estado.abertura}, dentro ${estado.dentro}`,
       estado.abertura === esperada && estado.dentro === entra && c.chamadas.some((x) => x.startsWith("entrar:")) === entra);
   }
+  // 5c. **O sistema pausa o som da sala** (outro aplicativo toma o áudio do celular): a tela diz SOM PAUSADO, e volta ao que era quando a saída
+  // volta a tocar. Fora de uma sala aberta, a pausa não muda nada.
+  { const c = montar();
+    c.ctx.__recusar = false;
+    const p = c.ctx.__M.enter_voice_room({}); c.pôrSala("Sala 1", 1); await p;
+    c.aberturas[0].r(); await tick(); await tick();
+    const aberta = c.ctx.__estado().abertura;
+    c.ctx.aoEventoDaVoz({ tipo: "saida", estado: "pausada" });
+    const pausada = c.ctx.__estado().abertura;
+    c.ctx.aoEventoDaVoz({ tipo: "saida", estado: "tocando" });
+    const voltou = c.ctx.__estado().abertura;
+    chk(`5c. a pausa do sistema: ${aberta} -> ${pausada} -> ${voltou}`, aberta === "aberto" && pausada === "som_pausado" && voltou === "aberto");
+    const fora = montar();
+    fora.ctx.aoEventoDaVoz({ tipo: "saida", estado: "pausada" });
+    chk("5c. fora de sala a pausa não muda a abertura", fora.ctx.__estado().abertura === "fora_de_sala"); }
   { const c = montar();
     c.ctx.__recusar = true;
     let recusou = false;
