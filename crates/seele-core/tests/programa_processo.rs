@@ -97,26 +97,200 @@ async fn esperar_o_fim(processo: &mut Processo) -> (Vec<EventoDoProcesso>, FimDo
     }
 }
 
-fn batimento(arquivo: &Path) -> u64 {
+/// Uma amostra do batimento, com o que a leitura viu — para a asserção que
+/// reprova poder dizer **por que** leu o que leu.
+struct Amostra {
+    /// O contador, se alguma leitura virou número.
+    contador: Option<u64>,
+    /// O que a última leitura trouxe, cru; ou o erro dela.
+    cru: String,
+    /// Quantas leituras a amostra custou (a primeira que vira número encerra).
+    leituras: u32,
+}
+
+impl Amostra {
+    /// O contador que vale para a conta: sem número, zero.
+    fn valor(&self) -> u64 {
+        self.contador.unwrap_or(0)
+    }
+}
+
+impl std::fmt::Display for Amostra {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.contador {
+            Some(contador) => write!(
+                f,
+                "{contador} (na {}ª leitura; o arquivo cru: {:?})",
+                self.leituras, self.cru
+            ),
+            None => write!(
+                f,
+                "SEM NÚMERO em {} leituras, e por isso vale zero (a última leitura, crua: {:?})",
+                self.leituras, self.cru
+            ),
+        }
+    }
+}
+
+/// Quantas vezes uma amostra relê o arquivo, e quanto espera entre duas.
+const LEITURAS_DA_AMOSTRA: u32 = 20;
+const ENTRE_LEITURAS: Duration = Duration::from_millis(2);
+
+fn amostra(arquivo: &Path) -> Amostra {
     // O programa de teste reescreve o arquivo (`fs::write` trunca antes de
     // escrever): uma leitura no meio vê o arquivo vazio, e isso não é «parou».
-    for _ in 0..20 {
-        if let Some(n) = std::fs::read_to_string(arquivo)
-            .ok()
-            .and_then(|t| t.trim().parse().ok())
-        {
-            return n;
+    //
+    // A releitura já existia aqui (20 × 2 ms, 40 ms), e é a regra que o
+    // `reserva.rs` da conformidade ganhou em 12/11/2026 («vazio não é zero»,
+    // lá por até 100 ms). A janela daqui não foi mexida: a causa da reprovação
+    // de 12/11 não foi determinada, e alargar às cegas apagaria a pista. Uma
+    // amostra que esgota as releituras sai na frase da asserção como «SEM
+    // NÚMERO» — se a janela for curta, é isso que a próxima reprovação diz.
+    let mut cru = String::new();
+    for leitura in 1..=LEITURAS_DA_AMOSTRA {
+        match std::fs::read_to_string(arquivo) {
+            Ok(texto) => {
+                if let Ok(contador) = texto.trim().parse() {
+                    return Amostra {
+                        contador: Some(contador),
+                        cru: texto,
+                        leituras: leitura,
+                    };
+                }
+                cru = texto;
+            }
+            Err(erro) => cru = format!("<a leitura falhou: {erro}>"),
         }
-        std::thread::sleep(Duration::from_millis(2));
+        std::thread::sleep(ENTRE_LEITURAS);
     }
-    0
+    Amostra {
+        contador: None,
+        cru,
+        leituras: LEITURAS_DA_AMOSTRA,
+    }
+}
+
+fn batimento(arquivo: &Path) -> u64 {
+    amostra(arquivo).valor()
+}
+
+/// Quanto se espera entre as duas amostras que dizem se o batimento anda.
+const ENTRE_AMOSTRAS: Duration = Duration::from_millis(300);
+
+/// As duas amostras de [`esta_vivo`], para quem precisa dizê-las.
+async fn duas_amostras(arquivo: &Path) -> (Amostra, Amostra) {
+    let antes = amostra(arquivo);
+    tokio::time::sleep(ENTRE_AMOSTRAS).await;
+    (antes, amostra(arquivo))
 }
 
 /// Espera o batimento começar, e devolve se ele anda.
 async fn esta_vivo(arquivo: &Path) -> bool {
-    let antes = batimento(arquivo);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    batimento(arquivo) > antes
+    let (antes, depois) = duas_amostras(arquivo).await;
+    depois.valor() > antes.valor()
+}
+
+/// O que o sistema diz de um processo, cru. Só para a frase de uma reprovação:
+/// quem decide se o processo morreu continua sendo o batimento.
+fn estado_do_processo(pid: Option<u32>) -> String {
+    let Some(pid) = pid else {
+        return "sem pid conhecido".to_owned();
+    };
+    let saida = if cfg!(windows) {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+    } else {
+        std::process::Command::new("ps")
+            .args(["-o", "pid=,ppid=,pgid=,stat=,etime=,command=", "-p"])
+            .arg(pid.to_string())
+            .output()
+    };
+    match saida {
+        Ok(saida) => {
+            let texto = format!(
+                "{}{}",
+                String::from_utf8_lossy(&saida.stdout),
+                String::from_utf8_lossy(&saida.stderr)
+            );
+            let texto = texto.trim();
+            if texto.is_empty() {
+                format!(
+                    "pid {pid}: o sistema não lista esse processo ({})",
+                    saida.status
+                )
+            } else {
+                format!("pid {pid}: {texto}")
+            }
+        }
+        Err(erro) => format!("pid {pid}: não consegui perguntar ao sistema ({erro})"),
+    }
+}
+
+/// **O retrato de um neto que não se comportou**, para a frase da asserção.
+///
+/// O teste reprovou uma vez no Linux do `ci.yml` (execução 43313171939,
+/// 12/11/2026) com «matar: o neto não bate», e a frase não dizia mais nada: a
+/// causa ficou sem ser determinada. Este retrato é o que faltou — as duas
+/// amostras com o que cada leitura viu, o arquivo cru agora e nas leituras
+/// seguintes (um neto que só engasgou volta a contar; um morto, não), o que há
+/// na fila do filho (o `neto PID` que ele disse, e se já há `Terminou`) e o que
+/// o sistema diz dos dois processos.
+///
+/// Esvazia a fila do `processo`: só serve para quem vai reprovar em seguida.
+async fn retrato_do_neto(
+    arquivo: &Path,
+    antes: &Amostra,
+    depois: &Amostra,
+    processo: &mut Processo,
+) -> String {
+    let agora = std::fs::read(arquivo).map_or_else(
+        |erro| format!("<a leitura falhou: {erro}>"),
+        |bytes| {
+            format!(
+                "{:?} ({} bytes)",
+                String::from_utf8_lossy(&bytes),
+                bytes.len()
+            )
+        },
+    );
+    let idade = std::fs::metadata(arquivo)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|quando| quando.elapsed().ok());
+    let mut seguintes = Vec::new();
+    for _ in 0..10 {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        seguintes.push(std::fs::read_to_string(arquivo).unwrap_or_else(|erro| format!("<{erro}>")));
+    }
+    let pid_do_filho = processo.pid();
+    let mut fila = Vec::new();
+    while let Ok(Some(evento)) =
+        tokio::time::timeout(Duration::from_millis(100), processo.proximo()).await
+    {
+        fila.push(evento);
+    }
+    let pid_do_neto = fila.iter().find_map(|evento| match evento {
+        EventoDoProcesso::Saida(linha) => linha.strip_prefix("neto ")?.trim().parse::<u32>().ok(),
+        _ => None,
+    });
+    let terminou = fila
+        .iter()
+        .any(|evento| matches!(evento, EventoDoProcesso::Terminou(_)));
+    format!(
+        "  primeira amostra: {antes}\n  \
+         segunda amostra, {ENTRE_AMOSTRAS:?} depois: {depois}\n  \
+         (cada amostra relê o arquivo até {LEITURAS_DA_AMOSTRA} vezes, a cada \
+         {ENTRE_LEITURAS:?}, e sem número vale zero)\n  \
+         o arquivo do batimento agora: {agora}, escrito pela última vez há {idade:?}\n  \
+         as dez leituras seguintes, a cada 30 ms: {seguintes:?}\n  \
+         a fila do filho ({} evento(s), já com `Terminou`: {terminou}): {fila:?}\n  \
+         o filho: {}\n  \
+         o neto: {}",
+        fila.len(),
+        estado_do_processo(pid_do_filho),
+        estado_do_processo(pid_do_neto),
+    )
 }
 
 async fn esperar_o_primeiro_batimento(arquivo: &Path) {
@@ -535,7 +709,15 @@ async fn parar_mata_os_netos_por_todos_os_caminhos() {
         // O neto começou (o filho que sai sozinho só sai depois disso).
         esperar_o_primeiro_batimento(&arquivo).await;
         if caminho != "sai-sozinho" {
-            assert!(esta_vivo(&arquivo).await, "{caminho}: o neto não bate");
+            // A mesma conta de `esta_vivo`, com as duas amostras na mão para
+            // a frase: a reprovação tem de dizer o que viu.
+            let (antes, depois) = duas_amostras(&arquivo).await;
+            if depois.valor() <= antes.valor() {
+                panic!(
+                    "{caminho}: o neto não bate\n{}",
+                    retrato_do_neto(&arquivo, &antes, &depois, &mut processo).await
+                );
+            }
         }
         match caminho {
             "matar" => {
@@ -552,15 +734,19 @@ async fn parar_mata_os_netos_por_todos_os_caminhos() {
             }
         }
         let mut morreu = false;
+        let mut ultimas = duas_amostras(&arquivo).await;
         for _ in 0..50 {
-            if !esta_vivo(&arquivo).await {
+            if ultimas.1.valor() <= ultimas.0.valor() {
                 morreu = true;
                 break;
             }
+            ultimas = duas_amostras(&arquivo).await;
         }
-        assert!(
-            morreu,
-            "{caminho}: o neto seguiu batendo depois de o filho parar"
-        );
+        if !morreu {
+            panic!(
+                "{caminho}: o neto seguiu batendo depois de o filho parar\n{}",
+                retrato_do_neto(&arquivo, &ultimas.0, &ultimas.1, &mut processo).await
+            );
+        }
     }
 }
