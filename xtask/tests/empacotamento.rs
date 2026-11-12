@@ -1297,11 +1297,20 @@ esac
     /// `--list` só pega o `git tag --list`, e `--format=%s` só pega o `git log`
     /// que classifica os assuntos, e não o que lista os commits.
     fn git_que_falha(&self, falha: &str, deixa_passar: usize) {
+        // Com o sufixo do sistema: no Windows o arquivo é `git.exe`, e procurar
+        // `git` não achava nada num `PATH` que tinha o git — quatro testes
+        // morriam aqui, antes de rodar o que vieram provar (CI de 12/11/2026).
+        let nome = format!("git{}", std::env::consts::EXE_SUFFIX);
         let caminho = std::env::var_os("PATH").unwrap_or_default();
         let de_verdade = std::env::split_paths(&caminho)
-            .map(|pasta| pasta.join("git"))
+            .map(|pasta| pasta.join(&nome))
             .find(|git| git.is_file())
-            .expect("o git de verdade tem que estar no PATH");
+            .unwrap_or_else(|| {
+                panic!(
+                    "o git de verdade tem que estar no PATH: procurei «{nome}» em {}",
+                    caminho.to_string_lossy()
+                )
+            });
         let ferramentas = self.base.join("ferramentas");
         escrever(&ferramentas.join("git.falha"), falha, false);
         escrever(
