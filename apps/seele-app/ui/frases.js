@@ -842,10 +842,16 @@ function fraseDaLigacao(erro, nome, trilha) {
     );
   }
   if (localizar === "NinguemMora") {
-    return (
+    const frase =
       `${quem} NÃO ESTÁ DISPONÍVEL: o SEELE do outro lado está fechado ` +
-      "ou não está recebendo ligações"
-    );
+      "ou não está recebendo ligações";
+    // **O app não liga para quem só tem a página** (ADR 0068): essa pessoa não
+    // hospeda sala, e o app não tem mais a conversa direta. O caminho é ela
+    // ligar para o código de quem tem o app, e a frase orienta. Na página a
+    // conversa direta já foi tentada antes desta frase.
+    return PONTE_NO_LUGAR_DO_TAURI
+      ? frase
+      : `${frase}. Se a pessoa usa o SEELE pelo navegador ou pelo celular, peça para ela ligar para o seu código`;
   }
   // O ponto achou a sala, e ela não respondeu ao chamado dele a tempo.
   if (localizar === "AnfitriaoCalado" || localizar === "SoAEscuta") {

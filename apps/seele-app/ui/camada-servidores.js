@@ -377,8 +377,9 @@ function irParaOServidor(alvo, apelido, token, nome, linkColado = null, ligar = 
   // que é o caminho com o motor nativo e com até seis pessoas, nunca era usada.
   // No app e na página o código passa pelo `conectar` de sempre: o app disca a
   // sala, e a página entra nela como convidada (`ponte-web.js`). A direta ficou
-  // como recuo de um código sem sala (`recuarParaAConversaDireta`), e quem a
-  // chama é o `catch` do `conectar`, com o motivo na mão.
+  // só na página, como recuo de um código sem sala
+  // (`recuarParaAConversaDireta`), e quem a chama é o `catch` do `conectar`,
+  // com o motivo na mão.
   return irParaOServidorNativo(alvo, apelido, token, nome, linkColado, ligar);
 }
 
@@ -398,10 +399,13 @@ function dizerQueALigacaoNaoComecou() {
  * direta também não acha ninguém (`ausente`), `dizer` escreve a frase da sala,
  * que é a que orienta.
  *
- * **Provisório na casca nativa**: a direta sai dela, e o recuo fica só na página.
+ * **Só na página.** O app não tem conversa direta: entre apps a conversa
+ * pessoal é a sala, e para quem só tem a página o caminho é essa pessoa ligar
+ * para o código de quem tem o app. A frase de «não está disponível» do app diz
+ * isso (`fraseDaLigacao`).
  */
 function recuarParaAConversaDireta(alvo, apelido, motivo, dizer) {
-  const pessoal = window.seelePessoalWeb;
+  const pessoal = PONTE_NO_LUGAR_DO_TAURI ? window.seelePessoalWeb : null;
   const semSala = typeof alvo === "string" && alvo.startsWith("@") && Boolean(motivo?.NaoLocalizou);
   if (!semSala || !pessoal?.chamarCodigo) return false;
   Promise.resolve(pessoal.chamarCodigo({ codigo: alvo, apelido: apelido || undefined }))

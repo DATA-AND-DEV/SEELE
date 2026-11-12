@@ -15134,7 +15134,8 @@ fn compartilhar_a_tela_tem_uma_porta_so_e_ela_e_a_barra_da_chamada() {
         .and_then(|resto| resto.split("const comGlifo").next())
         .unwrap_or_default();
     assert!(
-        espelhar.contains("aria-disabled") && espelhar.contains("porOTitulo(botao, original.title)"),
+        espelhar.contains("aria-disabled")
+            && espelhar.contains("porOTitulo(botao, original.title)"),
         "a barra não repassa o `aria-disabled` e o `title` do operador: o COMPARTILHAR \
          indisponível ficaria mudo, sem dizer por quê:\n{espelhar}"
     );
@@ -23750,14 +23751,15 @@ confere("quem toca não tomou o lugar da faixa de quem não coube: " + c.m.$("to
     );
 }
 
-/// **`@CÓDIGO` disca a sala pessoal primeiro** (ADR 0068), e a conversa direta
-/// só é tentada quando o ponto de encontro diz que a sala não mora lá
-/// (`NaoLocalizou`).
+/// **`@CÓDIGO` disca a sala pessoal primeiro** (ADR 0068), nas duas cascas, e a
+/// conversa direta só é tentada **na página**, quando o ponto de encontro diz
+/// que a sala não mora lá (`NaoLocalizou`).
 ///
 /// A ordem era a contrária: a direta primeiro, e a sala só quando a direta
 /// respondia «ausente». Entre dois apps a direta sempre respondia, e a sala (o
-/// motor nativo, até seis pessoas) nunca era usada. A regra é a mesma na página,
-/// que entra na sala de quem tem o app como convidada. O `node` roda a fonte real
+/// motor nativo, até seis pessoas) nunca era usada. Agora o app só disca a
+/// sala, e a página entra nela como convidada; a direta ficou na página, para o
+/// código de quem também só tem a página. O `node` roda a fonte real
 /// de `irParaOServidor` e do recuo; o `conectar` é o duble de sempre, que chama o
 /// `connect` e, na falha, chama o recuo como o `catch` real faz (conferido na
 /// fonte logo abaixo).
@@ -23769,16 +23771,17 @@ fn o_codigo_disca_a_sala_primeiro_e_so_sem_sala_recua_para_a_direta() {
         "o `catch` do `conectar` deixou de oferecer a falha ao recuo da conversa direta"
     );
     rodar_node(
-        "a sala primeiro, a direta como recuo",
+        "a sala primeiro, a direta como recuo da página",
         r##"
 const CODIGO = "@K9P2-CSM7-NBFR-AYQ3";
 function cenario({ connect = null, direta, pagina = false }) {
   const m = mundo({ connect });
+  // Antes das frases: a de «não está disponível» depende da casca.
+  m.ctx.PONTE_NO_LUGAR_DO_TAURI = pagina;
   carregar(m, "frases.js");
   const ordem = [];
   m.$("tela-sessao").hidden = true;
   m.$("boot-erro").hidden = true;
-  m.ctx.PONTE_NO_LUGAR_DO_TAURI = pagina;
   if (direta) m.ctx.window.seelePessoalWeb = { chamarCodigo: async (pedido) => { ordem.push("direta:" + pedido.codigo); return direta(); } };
   Object.assign(m.ctx, {
     conectar: async (alvo, apelido, token, link, ligacao) => {
@@ -23803,62 +23806,198 @@ function cenario({ connect = null, direta, pagina = false }) {
 }
 const SEM_SALA = () => Promise.reject({ NaoLocalizou: { motivo: "NinguemMora" } });
 const ligar = async (c) => { c.m.ctx.irParaOServidor(CODIGO, null, null, "Ana", null, true); await tick(); await tick(); };
+const SO_A_SALA = "sala:" + CODIGO;
+const SALA_E_DIRETA = "sala:" + CODIGO + ",direta:" + CODIGO;
 
-// A sala atende: a direta nem é tentada.
-let c = cenario({ direta: async () => ({}) });
-await ligar(c);
-confere("com a sala no ar, a direta foi tentada: " + c.ordem, c.ordem.join() === "sala:" + CODIGO);
-confere("com a sala no ar, apareceu erro", c.m.$("boot-erro").hidden === true);
+for (const pagina of [false, true]) {
+  const onde = pagina ? "na página" : "no app";
+  // A sala atende: a direta nem é tentada.
+  let c = cenario({ direta: async () => ({}), pagina });
+  await ligar(c);
+  confere(onde + ", com a sala no ar, a direta foi tentada: " + c.ordem, c.ordem.join() === SO_A_SALA);
+  confere(onde + ", com a sala no ar, apareceu erro", c.m.$("boot-erro").hidden === true);
 
-// A sala não mora no ponto: só então a direta, e depois da sala.
-c = cenario({ connect: SEM_SALA, direta: async () => ({}) });
+  // Uma recusa da sala não é «sem sala»: quem recebe recusou, e a direta não entra.
+  for (const reason of ["ChamadaRecusada", "NinguemAtendeu", "ServerFull"]) {
+    c = cenario({ connect: () => Promise.reject({ Refused: { reason } }), direta: async () => ({}), pagina });
+    await ligar(c);
+    confere(onde + ", " + reason + ": a direta foi tentada depois de a sala responder: " + c.ordem, c.ordem.join() === SO_A_SALA);
+    confere(onde + ", " + reason + ": a frase não apareceu", c.m.$("boot-erro").hidden === false);
+  }
+
+  // Um endereço não é um código: nada de conversa direta.
+  c = cenario({ connect: SEM_SALA, direta: async () => ({}), pagina });
+  c.m.ctx.irParaOServidor("10.0.0.2:8383", null, null, undefined, null, false);
+  await tick(); await tick();
+  confere(onde + ", um endereço recuou para a conversa direta: " + c.ordem, c.ordem.join() === "sala:10.0.0.2:8383");
+}
+
+// **No app não há conversa direta** (ADR 0068), nem com um serviço dela ao
+// alcance: sem sala, a frase diz que a pessoa não está disponível e orienta
+// quem só tem a página a ligar de volta.
+let c = cenario({ connect: SEM_SALA, direta: async () => ({}) });
 await ligar(c);
-confere("sem sala, a ordem não foi sala e depois direta: " + c.ordem, c.ordem.join() === "sala:" + CODIGO + ",direta:" + CODIGO);
+confere("no app, sem sala, a conversa direta foi tentada: " + c.ordem, c.ordem.join() === SO_A_SALA);
+confere("no app, sem sala, a frase não orienta quem só tem a página: " + c.m.$("boot-erro").textContent,
+  c.m.$("boot-erro").hidden === false &&
+  /ANA NÃO ESTÁ DISPONÍVEL/.test(c.m.$("boot-erro").textContent) &&
+  /peça para ela ligar para o seu código/.test(c.m.$("boot-erro").textContent));
+
+// **Na página**, a sala não mora no ponto: só então a direta, e depois da sala.
+c = cenario({ connect: SEM_SALA, direta: async () => ({}), pagina: true });
+await ligar(c);
+confere("na página, sem sala, a ordem não foi sala e depois direta: " + c.ordem, c.ordem.join() === SALA_E_DIRETA);
 confere("a direta assumiu e a linha vermelha apareceu", c.m.$("boot-erro").hidden === true);
 
-// Nem sala nem caixa direta: a frase da sala, que é a que orienta.
-c = cenario({ connect: SEM_SALA, direta: async () => ({ ausente: true }) });
+// Nem sala nem caixa direta: a frase da sala, sem mandar ligar de volta (a
+// outra pessoa não tem como: quem liga também só tem a página).
+c = cenario({ connect: SEM_SALA, direta: async () => ({ ausente: true }), pagina: true });
 await ligar(c);
-confere("sem ninguém, a frase de quem liga não apareceu: " + c.m.$("boot-erro").textContent,
-  c.m.$("boot-erro").hidden === false && /ANA NÃO ESTÁ DISPONÍVEL/.test(c.m.$("boot-erro").textContent));
+confere("na página, sem ninguém, a frase de quem liga não apareceu: " + c.m.$("boot-erro").textContent,
+  c.m.$("boot-erro").hidden === false && /ANA NÃO ESTÁ DISPONÍVEL/.test(c.m.$("boot-erro").textContent) &&
+  !/ligar para o seu código/.test(c.m.$("boot-erro").textContent));
 
 // A direta que não começa diz isso, e não some.
-c = cenario({ connect: SEM_SALA, direta: () => Promise.reject(new Error("caiu")) });
+c = cenario({ connect: SEM_SALA, direta: () => Promise.reject(new Error("caiu")), pagina: true });
 await ligar(c);
 confere("a direta que falhou ficou muda", c.m.$("boot-erro").hidden === false && /Não foi possível iniciar a ligação/.test(c.m.$("boot-erro").textContent));
 
-// Uma recusa da sala não é «sem sala»: quem recebe recusou, e a direta não entra.
-for (const reason of ["ChamadaRecusada", "NinguemAtendeu", "ServerFull"]) {
-  c = cenario({ connect: () => Promise.reject({ Refused: { reason } }), direta: async () => ({}) });
-  await ligar(c);
-  confere(reason + ": a direta foi tentada depois de a sala responder: " + c.ordem, c.ordem.join() === "sala:" + CODIGO);
-  confere(reason + ": a frase não apareceu", c.m.$("boot-erro").hidden === false);
-}
-
-// Um endereço não é um código: nada de conversa direta.
-c = cenario({ connect: SEM_SALA, direta: async () => ({}) });
-c.m.ctx.irParaOServidor("10.0.0.2:8383", null, null, undefined, null, false);
-await tick(); await tick();
-confere("um endereço recuou para a conversa direta: " + c.ordem, c.ordem.join() === "sala:10.0.0.2:8383");
-
-// Na página a regra é a mesma: a sala de quem tem o app primeiro, e a conversa
-// direta só quando o código não tem sala (a outra pessoa só tem a página).
-c = cenario({ direta: async () => ({}), pagina: true });
-await ligar(c);
-confere("na página, com a sala no ar, a direta foi tentada: " + c.ordem, c.ordem.join() === "sala:" + CODIGO);
-c = cenario({ connect: SEM_SALA, direta: async () => ({}), pagina: true });
-await ligar(c);
-confere("na página, sem sala, a ordem não foi sala e depois direta: " + c.ordem, c.ordem.join() === "sala:" + CODIGO + ",direta:" + CODIGO);
 // A sala existe e a página não consegue fechar a conexão com ela (o ponto, ou o
 // SEELE de quem hospeda, é de antes da 1.0): a direta é tentada, e sem ela a
 // frase diz o porquê e o que fazer.
 c = cenario({ connect: () => Promise.reject({ NaoLocalizou: { motivo: "SemImpressao" } }), direta: async () => ({ ausente: true }), pagina: true });
 await ligar(c);
-confere("sem a impressão da sala, a direta não foi tentada: " + c.ordem, c.ordem.join() === "sala:" + CODIGO + ",direta:" + CODIGO);
+confere("sem a impressão da sala, a direta não foi tentada: " + c.ordem, c.ordem.join() === SALA_E_DIRETA);
 confere("sem a impressão da sala, a frase não orienta: " + c.m.$("boot-erro").textContent,
   /ANA ESTÁ NO AR, MAS ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO/.test(c.m.$("boot-erro").textContent));
 "##,
     );
+}
+
+/// **A casca nativa não registra caixa de chamada direta** (ADR 0068, decisão
+/// 1): entre apps a conversa pessoal é a sala pessoal, e a direta saiu do app.
+/// Ela continua na página, que é o único caminho entre duas pessoas sem o app.
+///
+/// Três provas:
+///
+/// 1. o `node` roda a fonte real de `pessoal-web-entrada.js` como o app a
+///    carrega (com `PONTE_NO_LUGAR_DO_TAURI` falso): nada se instala, nenhum
+///    serviço de chamadas nasce (é ele que registra a caixa no ponto), e
+///    `window.seelePessoalWeb` não existe. Com a ponte no lugar do Tauri (a
+///    página) a mesma fonte instala, e é isso que diz que a prova não é vazia;
+/// 2. o app não tem mais os comandos que serviam a direta (`pessoal_*`), nem o
+///    módulo que assinava por ela no núcleo e na fachada, nem os eventos que a
+///    acordavam; e a ponte não guarda os nomes deles;
+/// 3. nada do que roda no app fala com a caixa do ponto (`/chamada/1`).
+#[test]
+fn a_casca_nativa_nao_registra_caixa_de_chamada_direta() {
+    rodar_node(
+        "a casca nativa sem conversa direta",
+        r##"
+function carga(pagina) {
+  const m = mundo({});
+  const chamados = [];
+  const anotar = (nome, volta) => (...args) => { chamados.push(nome); return volta?.(...args); };
+  m.ctx.PONTE_NO_LUGAR_DO_TAURI = pagina;
+  m.ctx.document.readyState = "complete";
+  m.ctx.document.getElementById = anotar("getElementById", () => null);
+  Object.assign(m.ctx, {
+    // É este o serviço que registra a caixa no ponto de encontro.
+    criarServicoDeChamadasWeb: anotar("criarServicoDeChamadasWeb", async () => { throw new Error("não devia nascer"); }),
+    criarVistaDaConversaPessoal: anotar("criarVistaDaConversaPessoal"),
+    fetch: anotar("fetch", async () => { throw new Error("sem rede"); }),
+  });
+  carregar(m, "pessoal-web-entrada.js");
+  return { m, chamados };
+}
+let c = carga(false);
+await tick();
+confere("no app, a conversa direta se instalou: " + c.chamados, c.chamados.length === 0);
+confere("no app, existe um serviço de conversa direta", c.m.ctx.window.seelePessoalWeb === undefined);
+// O controle: na página a mesma fonte procura o botão dela para se instalar.
+c = carga(true);
+await tick();
+confere("na página, a conversa direta deixou de se instalar: a prova de cima não mede nada", c.chamados.includes("getElementById"));
+
+// E um serviço que sobrasse ao alcance não seria discado pelo app.
+const m = mundo({});
+m.ctx.window.seelePessoalWeb = { chamarCodigo: async () => { m.chamadas.push({ cmd: "chamarCodigo" }); return {}; } };
+vm.runInContext(`
+  ${funcao("camada-servidores.js", "dizerQueALigacaoNaoComecou")}
+  ${funcao("camada-servidores.js", "recuarParaAConversaDireta")}`, m.ctx);
+const recuou = m.ctx.recuarParaAConversaDireta("@K9P2-CSM7-NBFR-AYQ3", "ana", { NaoLocalizou: { motivo: "NinguemMora" } }, () => {});
+await tick();
+confere("o app recuou para a conversa direta", recuou === false && so(m, "chamarCodigo").length === 0);
+"##,
+    );
+
+    // 2. Os comandos, o módulo e os eventos saíram do app.
+    let main = without_comments(&read("src/main.rs"));
+    let toque = without_comments(&read("src/toque.rs"));
+    for sobra in [
+        "fn pessoal_",
+        "pessoal_identidade",
+        "pessoal_assinar",
+        "pessoal_conferir_par",
+        "pessoal_reservar",
+        "chamada_pessoal",
+        "seele://preferencia-pessoal",
+        "seele://foco-pessoal",
+        "pessoal_web",
+    ] {
+        assert!(
+            !main.contains(sobra) && !toque.contains(sobra),
+            "o app ainda tem `{sobra}`, que só servia à conversa direta"
+        );
+    }
+    for modulo in [
+        "../../crates/seele-core/src/chamada_pessoal.rs",
+        "../../crates/seele-ffi/src/chamada_pessoal.rs",
+    ] {
+        assert!(
+            !app_dir().join(modulo).exists(),
+            "`{modulo}` voltou: é o que assinava a conversa direta pelo app"
+        );
+    }
+    let ponte = without_comments(&read("ui/ponte-web.js"));
+    assert!(
+        !ponte.contains("\"pessoal_"),
+        "a ponte ainda guarda o nome de um comando `pessoal_*`, que casca nenhuma chama"
+    );
+    let entrada = without_comments(&read("ui/pessoal-web-entrada.js"));
+    assert!(
+        !entrada.contains("__TAURI__") && !entrada.contains("pessoal_"),
+        "a conversa direta voltou a falar com o app (um comando ou um evento do Tauri)"
+    );
+
+    // 3. Nada do que roda no app conhece a caixa do ponto.
+    fn fontes(pasta: &std::path::Path, achados: &mut Vec<std::path::PathBuf>) {
+        for entrada in std::fs::read_dir(pasta).into_iter().flatten().flatten() {
+            let caminho = entrada.path();
+            if caminho.is_dir() {
+                fontes(&caminho, achados);
+            } else if caminho.extension().is_some_and(|ext| ext == "rs") {
+                achados.push(caminho);
+            }
+        }
+    }
+    let mut do_app = Vec::new();
+    for pasta in [
+        "src",
+        "../../crates/seele-core/src",
+        "../../crates/seele-ffi/src",
+    ] {
+        fontes(&app_dir().join(pasta), &mut do_app);
+    }
+    assert!(do_app.len() > 20, "a leitura das fontes do app quebrou");
+    for arquivo in do_app {
+        let texto = std::fs::read_to_string(&arquivo).unwrap_or_default();
+        assert!(
+            !texto.contains("/chamada/1") && !texto.contains("seele_proto::chamada"),
+            "{} fala com a caixa de chamada direta do ponto de encontro",
+            arquivo.display()
+        );
+    }
 }
 
 /// 0.17, achado do mobile: ao entrar no 2º servidor aparecia UMA vez «Não foi

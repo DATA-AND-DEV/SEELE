@@ -99,7 +99,6 @@ const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica �
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
 // A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
 const RECUSA_SALA = "este comando controla a sala nativa; no navegador a conversa pessoal usa a conexão direta";
-const RECUSA_ASSINADOR_NATIVO = "a identidade do navegador assina localmente; este comando pertence ao aplicativo";
 // A tecla de falar com outra janela na frente (`tecla_global.rs`): é um atalho
 // do sistema, e a página não registra um. Ligá-la é recusado pelo nome; a
 // pergunta pelo estado (`estado_da_tecla_global`) é atendida com `null`, que a
@@ -109,10 +108,6 @@ const RECUSA_ATALHO = "o navegador não tem atalho para o computador inteiro: a 
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
-  ["pessoal_identidade", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_assinar", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_conferir_par", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_reservar", RECUSA_ASSINADOR_NATIVO],
   ["abrir_a_porta_no_firewall", RECUSA_REDE],
   ["abrir_ajustes_de_acessibilidade", RECUSA_SISTEMA],
   ["abrir_ajustes_do_microfone", RECUSA_SISTEMA],
