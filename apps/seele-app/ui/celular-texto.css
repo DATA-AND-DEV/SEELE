@@ -396,6 +396,7 @@
 }
 
 /* camada-sala.css */
+:where(:root[data-casca="celular"]) .ligacao-convidar-link { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .ligacao-desligar { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .ligacao-cabeca-estado { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .amigo-nome { font-size: calc(17px * var(--cel-escala)); }

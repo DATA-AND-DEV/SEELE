@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 use seele_encontro::sinal::Sinal;
 use seele_encontro::{Ponto, Quarto};
 use seele_proto::encontro::{
-    analisar3, atende, chama, ler_resposta2, ler_resposta3, ler_resposta_do_sinal, mora3,
-    pedido_do_sinal, quem2, quem3, Atende, Chama, Credencial, Marca, Marcas, Pedido3, Resposta3,
-    RespostaDoSinal, Vizinhanca, TAMANHO3,
+    analisar3, atende, chama, ler_resposta2, ler_resposta3, ler_resposta_do_sinal, mora3, moro3,
+    pedido_do_sinal, quem2, quem3, Atende, Chama, Credencial, Marca, Marcas, Moro2, Pedido3,
+    Resposta3, RespostaDoSinal, Vizinhanca, TAMANHO3,
 };
 
 const PRAZO: Duration = Duration::from_secs(5);
@@ -144,6 +144,7 @@ fn a_chamada_vira_chamado_na_escuta_e_aqui_para_quem_liga() {
                 id: chamado.id,
                 endereco: servidor.local_addr().unwrap(),
                 dicas: vec![dica],
+                impressao: None,
             }),
             ponto,
         )
@@ -180,6 +181,7 @@ fn um_atende_de_outro_ip_ou_com_outro_id_nao_vale() {
                 id: outro,
                 endereco: servidor.local_addr().unwrap(),
                 dicas: Vec::new(),
+                impressao: None,
             }),
             ponto,
         )
@@ -310,6 +312,7 @@ fn o_sinal_do_navegador_chama_e_ouve_aqui_com_o_cors_exato() {
                     id: chamado.id,
                     endereco: servidor.local_addr().unwrap(),
                     dicas: Vec::new(),
+                    impressao: None,
                 }),
                 ponto,
             )
@@ -332,7 +335,8 @@ fn o_sinal_do_navegador_chama_e_ouve_aqui_com_o_cors_exato() {
         ler_resposta_do_sinal(&resposta),
         Some(RespostaDoSinal::Aqui {
             endereco: do_servidor,
-            dicas: Vec::new()
+            dicas: Vec::new(),
+            impressao: None,
         })
     );
 
@@ -379,5 +383,180 @@ fn um_pedido_analisado_pelo_enc3_e_o_mesmo_que_o_sinal_leva() {
     assert_eq!(
         seele_proto::encontro::ler_pedido_do_sinal(&pedido_do_sinal(&pedido)),
         Some(pedido)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A impressão DTLS da sala pessoal no sinal (ADR 0068, 1.0)
+// ---------------------------------------------------------------------------
+
+/// A impressão do certificado DTLS efêmero de uma sala de mentira.
+const DTLS_DA_SALA: [u8; 32] = [0x5A; 32];
+
+/// Registra uma marca de sala pelo `MORO3` assinado, com a volta do `DESAFIO`.
+fn registrar_assinado(
+    socket: &UdpSocket,
+    ponto: SocketAddr,
+    chave: &ed25519_dalek::SigningKey,
+    marca: &Marca,
+) {
+    use ed25519_dalek::Signer as _;
+    let publica = chave.verifying_key().to_bytes();
+    let carimbo = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mensagem = seele_proto::encontro::mensagem_do_moro3(marca, &publica, carimbo, &[]);
+    let mut pedido = Moro2 {
+        marca: marca.clone(),
+        chave: publica,
+        carimbo,
+        dicas: Vec::new(),
+        assinatura: chave.sign(&mensagem).to_bytes(),
+        cookie: None,
+    };
+    socket.send_to(&moro3(&pedido), ponto).unwrap();
+    let Resposta3::Desafio { cookie, .. } = resposta(socket) else {
+        panic!("sem cookie, o MORO3 ouve um DESAFIO");
+    };
+    pedido.cookie = Some(cookie);
+    socket.send_to(&moro3(&pedido), ponto).unwrap();
+    assert!(
+        matches!(resposta(socket), Resposta3::Morou { .. }),
+        "com o cookie, o MORO3 assinado mora"
+    );
+}
+
+/// Uma sala pessoal de mentira: registra as duas marcas do código, assinadas.
+fn sala(ponto: SocketAddr) -> (UdpSocket, UdpSocket, Marcas) {
+    let chave = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+    let marcas = Marcas::da_sala(&seele_proto::codigo::Codigo::da_chave(
+        &chave.verifying_key().to_bytes(),
+    ));
+    let escuta = socket();
+    let servidor = socket();
+    registrar_assinado(&escuta, ponto, &chave, marcas.escuta());
+    registrar_assinado(&servidor, ponto, &chave, marcas.servidor());
+    (escuta, servidor, marcas)
+}
+
+/// A escuta atende o próximo `CHAMADO`, dizendo (ou não) a impressão DTLS.
+fn atender_o_chamado(
+    escuta: UdpSocket,
+    servidor: SocketAddr,
+    ponto: SocketAddr,
+    impressao: Option<[u8; 32]>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let Resposta3::Chamado(chamado) = resposta(&escuta) else {
+            panic!("a escuta tinha de ouvir o CHAMADO");
+        };
+        escuta
+            .send_to(
+                &atende(&Atende {
+                    escuta: chamado.escuta,
+                    id: chamado.id,
+                    endereco: servidor,
+                    dicas: Vec::new(),
+                    impressao,
+                }),
+                ponto,
+            )
+            .unwrap();
+    })
+}
+
+/// **A página acha a sala pelo código, e a resposta do sinal traz a impressão
+/// DTLS que a sala disse** (ADR 0068). Sem ela o navegador não fecha o DTLS
+/// com a sala, cujo certificado é efêmero.
+#[test]
+fn o_sinal_devolve_a_impressao_dtls_que_a_sala_disse_no_atende() {
+    let (ponto, quarto) = ponto_no_ar();
+    let sinal = sinal_no_ar(quarto);
+    let (escuta, servidor, marcas) = sala(ponto);
+    let do_servidor = servidor.local_addr().unwrap();
+    let atendente = atender_o_chamado(escuta, do_servidor, ponto, Some(DTLS_DA_SALA));
+
+    let corpo = pedido_do_sinal(&um_chama(&marcas, vec!["127.0.0.1:51000".parse().unwrap()]));
+    let (cabecalho, resposta) = post(sinal, &corpo, &seele_encontro::sinal::origem_do_produto());
+    atendente.join().unwrap();
+    assert!(cabecalho.starts_with("HTTP/1.1 200"), "{cabecalho}");
+    assert_eq!(
+        ler_resposta_do_sinal(&resposta),
+        Some(RespostaDoSinal::Aqui {
+            endereco: do_servidor,
+            dicas: Vec::new(),
+            impressao: Some(DTLS_DA_SALA),
+        }),
+        "a resposta do sinal não trouxe a impressão DTLS da sala: {resposta}"
+    );
+}
+
+/// **Uma sala de antes da 1.0 continua sendo achada.** O `ATENDE` dela não diz
+/// impressão nenhuma, e a resposta do sinal é a linha de sempre, de dois
+/// campos: quem chama fica sabendo que a sala existe, e que não dá para fechar
+/// o DTLS com ela pelo navegador.
+#[test]
+fn uma_sala_que_nao_diz_a_impressao_continua_achada_com_a_linha_de_sempre() {
+    let (ponto, quarto) = ponto_no_ar();
+    let sinal = sinal_no_ar(quarto);
+    let (escuta, servidor, marcas) = sala(ponto);
+    let do_servidor = servidor.local_addr().unwrap();
+    let atendente = atender_o_chamado(escuta, do_servidor, ponto, None);
+
+    let corpo = pedido_do_sinal(&um_chama(&marcas, vec!["127.0.0.1:51000".parse().unwrap()]));
+    let (_, resposta) = post(sinal, &corpo, &seele_encontro::sinal::origem_do_produto());
+    atendente.join().unwrap();
+    assert_eq!(
+        resposta,
+        format!("SEELE-SINAL/1 AQUI {do_servidor} -"),
+        "a linha do sinal para uma sala de antes da 1.0 mudou"
+    );
+}
+
+/// **Um servidor guardado nunca ganha o terceiro campo**, mesmo que diga uma
+/// impressão no `ATENDE`: uma página de antes da 1.0 só chama servidores
+/// guardados, e ela não lê um `AQUI` com um campo a mais.
+#[test]
+fn o_sinal_de_um_servidor_guardado_nunca_leva_o_terceiro_campo() {
+    let (ponto, quarto) = ponto_no_ar();
+    let sinal = sinal_no_ar(quarto);
+    let (escuta, servidor, marcas) = anfitriao(ponto);
+    let do_servidor = servidor.local_addr().unwrap();
+    let atendente = atender_o_chamado(escuta, do_servidor, ponto, Some(DTLS_DA_SALA));
+
+    let corpo = pedido_do_sinal(&um_chama(&marcas, vec!["127.0.0.1:51000".parse().unwrap()]));
+    let (_, resposta) = post(sinal, &corpo, &seele_encontro::sinal::origem_do_produto());
+    atendente.join().unwrap();
+    assert_eq!(
+        resposta,
+        format!("SEELE-SINAL/1 AQUI {do_servidor} -"),
+        "um servidor guardado ganhou um campo que uma página antiga não lê"
+    );
+}
+
+/// **O `AQUI` do ENC/3 não muda**: quem liga por UDP (o app) recebe o
+/// datagrama de sempre, com ou sem a impressão no `ATENDE` da sala.
+#[test]
+fn o_aqui_do_enc3_e_o_de_sempre_com_a_impressao_no_atende() {
+    let (ponto, _) = ponto_no_ar();
+    let (escuta, servidor, marcas) = sala(ponto);
+    let do_servidor = servidor.local_addr().unwrap();
+    let atendente = atender_o_chamado(escuta, do_servidor, ponto, Some(DTLS_DA_SALA));
+
+    let quem_liga = socket();
+    quem_liga
+        .send_to(&chama(&um_chama(&marcas, Vec::new())), ponto)
+        .unwrap();
+    let datagrama = ouvir(&quem_liga);
+    atendente.join().unwrap();
+    assert_eq!(
+        datagrama,
+        seele_proto::encontro::resposta3(&Resposta3::Aqui {
+            marca: marcas.servidor().clone(),
+            endereco: do_servidor,
+            dicas: Vec::new(),
+        }),
+        "o AQUI que o app recebe por UDP mudou de bytes"
     );
 }

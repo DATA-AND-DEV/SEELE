@@ -836,7 +836,8 @@ async function identidadePessoalDoNavegador() {
   return identidadePessoalPrometida;
 }
 let wasmDoCodigoPessoal = null;
-async function operarCodigoPessoalWeb(intencao) {
+/** Uma intenção da conversa pessoal ao `.wasm` (`chamada_operar`), e a resposta inteira. */
+async function operarPessoalWeb(intencao) {
   if (!wasmDoCodigoPessoal) wasmDoCodigoPessoal = instanciarOWasmDaSessao().catch(erro => { wasmDoCodigoPessoal = null; throw erro; });
   const wasm = await wasmDoCodigoPessoal;
   const bytes = new TextEncoder().encode(JSON.stringify(intencao));
@@ -845,8 +846,11 @@ async function operarCodigoPessoalWeb(intencao) {
     new Uint8Array(wasm.memory.buffer).set(bytes, p); wasm.chamada_operar(p, bytes.length);
     const valor = JSON.parse(new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, wasm.saida_ptr(), wasm.saida_len()).slice()));
     if (valor.erro) throw valor.erro;
-    return valor.codigo;
+    return valor;
   } finally { wasm.liberar(p, bytes.length); }
+}
+async function operarCodigoPessoalWeb(intencao) {
+  return (await operarPessoalWeb(intencao)).codigo;
 }
 async function meuCodigoPessoalWeb() {
   return operarCodigoPessoalWeb({ acao: "codigo_da_chave", chave: (await identidadePessoalDoNavegador()).publica });
@@ -887,6 +891,79 @@ async function conferirParPessoalWeb(codigo, publica, apelido = null, direcao = 
   });
   if (falha) throw new Error(falha);
   return codigo;
+}
+
+// --------------------------------------------- a sala pessoal de quem tem o app
+//
+// **A página entra na sala de quem tem o app, pelo código** (ADR 0068). Ela não
+// hospeda: liga, toca, e entra como convidada numa sessão comum. O que muda da
+// entrada num servidor é de onde vêm as três coisas que um convite traria:
+//
+// - o endereço e a impressão DTLS, que o ponto de encontro diz (`rtc-web.js`);
+// - a chave que se apresenta, que é a identidade pessoal desta origem (a do
+//   código da página), e não uma chave nascida para um servidor;
+// - a prova de quem atendeu, que é a apresentação da sala, conferida contra o
+//   código antes do `Hello` (`sessao-web.js`), e o pino da chave inteira, que
+//   mora no mesmo contato da conversa direta (`conferirParPessoalWeb`).
+
+/** O que a entrada pelo código devolve à ponte: o alvo da sessão do navegador. */
+async function alvoDaSalaPessoalWeb(escrito) {
+  const codigo = await codigoPessoalWebLido(escrito);
+  if (codigo === await meuCodigoPessoalWeb()) throw "SeuCodigo";
+  const identidade = await identidadePessoalDoNavegador();
+  const contato = await noBancoPessoalWeb("contatos", "readonly", loja => loja.get(codigo));
+  const { ponto } = await operarPessoalWeb({ acao: "configuracao" });
+  return {
+    codigo,
+    endereco: `@${codigo}`,
+    alternativos: [],
+    // A chave do registro das sessões e dos aceites: uma pessoa, e não um
+    // servidor. A impressão de verdade só existe depois da apresentação.
+    impressao: `@${codigo}`,
+    bilhete: { ponto },
+    chave: identidade.chave,
+    // A chave de quem atendeu numa ligação completa anterior, ou `null`.
+    pino: contato?.chavePublica ?? null,
+    // Com o pino, a pessoa já é conhecida: o veredito é o de quem volta.
+    conhecido: Boolean(contato?.chavePublica),
+  };
+}
+
+/**
+ * Fixa a chave de quem atendeu, depois de uma ligação completa: daí em diante a
+ * conferência é a chave inteira, e não os 75 bits do código (ADR 0060). O
+ * contato é o mesmo da conversa direta. Uma agenda que não grava não derruba a
+ * ligação: a próxima confere pelo código, como a primeira.
+ */
+async function fixarQuemAtendeuPeloCodigoWeb(codigo, chaveEmHex) {
+  const publica = (String(chaveEmHex).match(/../g) ?? []).map(par => parseInt(par, 16));
+  if (publica.length !== 32) return;
+  try { await conferirParPessoalWeb(codigo, publica, null, "liguei"); }
+  catch (falha) { console.warn("sala pessoal: a chave de quem atendeu não ficou guardada:", falha); }
+}
+
+/**
+ * A falha do enlace de uma ligação pelo código, no vocabulário de quem liga
+ * (`ConnectionError`): «a sala não mora no ponto» é o `NaoLocalizou` do
+ * desktop, e é por ele que a casca recua para a conversa direta
+ * (`recuarParaAConversaDireta`). `SemImpressao` só existe na página: o ponto
+ * achou a sala e não disse a impressão DTLS, porque ele ou o SEELE de quem
+ * hospeda é de antes da 1.0. A conexão segura que não se verificou vira
+ * `CodigoNaoBate`: a impressão do ponto é pista, e uma pista errada é «quem
+ * atendeu não é o dono deste código», com nada enviado.
+ */
+function motivoDaLigacaoPeloCodigoWeb(erro, codigo) {
+  const motivo = erro?.FalhaDoEnlace?.motivo;
+  const naoLocalizou = {
+    NinguemNoPonto: "NinguemMora",
+    AnfitriaoCalado: "AnfitriaoCalado",
+    PontoRecusou: "PontoRecusou",
+    SinalMudo: "PontoMudo",
+    SalaSemImpressao: "SemImpressao",
+  }[motivo];
+  if (naoLocalizou) return { NaoLocalizou: { motivo: naoLocalizou } };
+  if (motivo === "VerificacaoDaConexaoSegura") return { CodigoNaoBate: { esperado: codigo, veio: null } };
+  return erro;
 }
 
 async function preferenciaDeReceberPessoalWeb(receber) {

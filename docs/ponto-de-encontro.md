@@ -433,6 +433,45 @@ Na ordem:
 Reiniciar o ponto esvazia os dois quartos por uns quinze segundos: cada
 anfitrião e cada sala voltam no reavivamento seguinte.
 
+### Antes de publicar a 1.0: a impressão DTLS da sala no sinal
+
+Na 1.0 a página do navegador e do celular entra na sala pessoal de quem tem o
+app, pelo código (ADR 0068). Para isso o ponto passa a repassar uma coisa a
+mais, **só no sinal HTTP**: a impressão do certificado DTLS que a sala disse.
+
+**O fio, e por que nada antigo quebra:**
+
+| quem fala | o que mudou | o que o antigo faz com isso |
+|---|---|---|
+| a sala (app 1.0), no `ATENDE` | uma segunda linha no mesmo datagrama: `DTLS <impressão em base64url>` | o ponto antigo lê só a primeira linha (toda leitura do fio para na primeira quebra de linha) e responde como sempre |
+| o ponto novo, no `AQUI` do **sinal** | um terceiro campo, a impressão, só quando a marca chamada é de sala e a sala a disse | uma página antiga só chama servidores guardados, e nunca recebe o terceiro campo |
+| o ponto novo, no `AQUI` do ENC/3 (UDP) | nada | — |
+
+O ponto não guarda nada novo: a impressão chega com o `ATENDE` e sai com a
+resposta daquele pedido. Ela é pista, e não prova: quem autentica a sala é a
+apresentação que a chave dela assina (`specs/08-seguranca.md`).
+
+**A ordem, e o que acontece no meio:**
+
+1. **Reimplantar o ponto**, como em «Subir o seu» (`cargo build --release -p
+   seele-encontro`, da versão que vai sair, e o `systemctl restart`). Nada muda
+   para quem já usa: um app 0.19.6 continua se registrando e sendo achado, e
+   um app 1.0 também.
+2. **Conferir** com o roteiro da seção de cima (`sondar --exige-enc2
+   --exige-enc3` e o `curl` do sinal). **Esse roteiro não confere a impressão**:
+   ele prova que o ponto fala o ENC/3 e o sinal, e um ponto de antes da 1.0
+   também passa nele. A conferência da impressão é de ponta a ponta, com uma
+   sala de verdade: a bancada `apps/seele-app/bancada/sala-pelo-codigo.cjs`
+   contra um ponto local, ou uma ligação de uma página para um app 1.0 pelo
+   ponto reimplantado.
+3. **Publicar a 1.0** (o app e a página).
+
+**Enquanto o ponto antigo estiver no ar com a 1.0 publicada**: de app para app
+tudo funciona. A página 1.0 que liga para um app 1.0 acha a sala e não recebe
+a impressão: ela diz que a pessoa está no ar e que não consegue entrar na
+ligação, e não entra. A página que liga para um app 0.19.6 cai na conversa
+direta, que a 0.19.6 ainda atende. Página com página não depende disto.
+
 ## O que ele **não** resolve
 
 **NAT simétrico dos dois lados não fura.** Nesse caso o mapeamento do roteador
@@ -463,8 +502,10 @@ Duas propriedades que o código guarda de propósito, e que valem ser mantidas s
 alguém mexer:
 
 - **O ponto de encontro nunca copia bytes de um pedido para uma resposta.** A
-  resposta é montada campo a campo. O único pedaço do pedido que reaparece é a
-  marca, que é alfanumérica e curta justamente por isso.
+  resposta é montada campo a campo. O que reaparece é lido e escrito de novo,
+  na forma canônica: a marca, que é alfanumérica e curta justamente por isso;
+  o endereço e as dicas do `ATENDE`; e, só no sinal, a impressão DTLS de uma
+  sala (32 bytes, ADR 0068).
 - **Todo datagrama do ENC/1 tem 96 bytes, e todo do ENC/2 e do ENC/3 tem 384:
   pedido e resposta, sempre do mesmo tamanho.** Um refletor que responde mais
   do que recebe é uma arma apontada para quem nunca ouviu falar deste

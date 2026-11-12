@@ -199,8 +199,8 @@
 
 
 
-/* O chat e o DESLIGAR só existem na barra da ligação pessoal. */
-#tela-sessao:not([data-vista="ligacao"]) :is(#ligacao-chat, #ligacao-desligar) {
+/* O chat, o CONVIDAR e o DESLIGAR só existem na barra da ligação pessoal. */
+#tela-sessao:not([data-vista="ligacao"]) :is(#ligacao-chat, #ligacao-convidar, #ligacao-desligar, #ligacao-convidar-dito, #ligacao-convidar-link) {
   display: none;
 }
 
@@ -209,6 +209,7 @@
 #tela-sessao[data-vista="ligacao"] #operador-vista { order: 1; }
 #tela-sessao[data-vista="ligacao"] #operador-camera { order: 1; }
 #tela-sessao[data-vista="ligacao"] #ligacao-chat { order: 2; }
+#tela-sessao[data-vista="ligacao"] #ligacao-convidar { order: 2; }
 #tela-sessao[data-vista="ligacao"] #operador-sair { order: 3; color: var(--nucleo-apagado); }
 #tela-sessao[data-vista="ligacao"] #ligacao-desligar { order: 4; margin-left: var(--seele-e3); }
 
@@ -221,6 +222,26 @@
   order: 9;
   margin: 0;
   text-align: center;
+}
+
+/* O que o CONVIDAR copiou, e o link selecionado quando a cópia falha. */
+.ligacao-convidar-dito:not([hidden]),
+.ligacao-convidar-link:not([hidden]) {
+  flex: 1 1 100%;
+  order: 10;
+  margin: 0;
+  text-align: center;
+}
+
+.ligacao-convidar-link {
+  min-height: 44px;
+  padding: 0 var(--seele-e2);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: var(--seele-raio);
 }
 
 .ligacao-desligar {

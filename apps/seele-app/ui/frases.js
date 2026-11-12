@@ -842,9 +842,34 @@ function fraseDaLigacao(erro, nome, trilha) {
     );
   }
   if (localizar === "NinguemMora") {
-    return (
+    const frase =
       `${quem} NÃO ESTÁ DISPONÍVEL: o SEELE do outro lado está fechado ` +
-      "ou não está recebendo ligações"
+      "ou não está recebendo ligações";
+    // **O app não liga para quem só tem a página** (ADR 0068): essa pessoa não
+    // hospeda sala, e o app não tem mais a conversa direta. O caminho é ela
+    // ligar para o código de quem tem o app, e a frase orienta. Na página a
+    // conversa direta já foi tentada antes desta frase.
+    return PONTE_NO_LUGAR_DO_TAURI
+      ? frase
+      : `${frase}. Se a pessoa usa o SEELE pelo navegador ou pelo celular, peça para ela ligar para o seu código`;
+  }
+  // O ponto achou a sala, e ela não respondeu ao chamado dele a tempo.
+  if (localizar === "AnfitriaoCalado" || localizar === "SoAEscuta") {
+    return `${quem} ESTÁ NO AR, MAS NÃO RESPONDEU AO PONTO DE ENCONTRO: tente de novo em alguns segundos`;
+  }
+  if (localizar === "PontoRecusou") {
+    return "O PONTO DE ENCONTRO RECUSOU A CHAMADA POR EXCESSO: espere um pouco e ligue de novo";
+  }
+  if (localizar === "SemPonto") {
+    return "O PONTO DE ENCONTRO ESTÁ DESLIGADO NESTE COMPUTADOR: sem ele, código não funciona";
+  }
+  // Só na página (ADR 0068): o ponto achou a sala e não disse com que
+  // certificado ela atende, e sem isso o navegador não fecha a conexão segura.
+  if (localizar === "SemImpressao") {
+    return (
+      `${quem} ESTÁ NO AR, MAS ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO: ` +
+      "o SEELE do outro lado, ou o ponto de encontro, é de uma versão anterior. " +
+      "Peça para a pessoa atualizar o SEELE, ou ligue pelo app"
     );
   }
   if (erro?.CodigoNaoBate) return "QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO. Nada foi enviado.";
@@ -2204,6 +2229,17 @@ const FRASES_DAS_SESSOES = Object.freeze({
   // O que cada botão da barra faz, em duas frases (a barra da ligação pessoal).
   dicaDaBarra:
     "SAIR DA SALA para a sua voz e a ligação continua aberta. DESLIGAR encerra a ligação e sai só desta sessão.",
+  // CONVIDAR (ADR 0068): o grupo cresce com mais alguém ligando para o código
+  // de quem hospeda a ligação. A frase diz o que foi copiado, de quem é o
+  // código e quem atende, porque é essa pessoa que decide quem entra.
+  convidar: "CONVIDAR",
+  convidarCopiou: (link, meu) =>
+    meu
+      ? `COPIADO: ${link}. É o seu código: quem ligar para ele toca aqui, e entra nesta ligação quando você atender.`
+      : `COPIADO: ${link}. É o código de quem hospeda esta ligação: quem ligar para ele entra quando essa pessoa atender.`,
+  convidarNaoCopiou: (tecla) =>
+    `NÃO DEU PARA COPIAR SOZINHO: o link desta ligação está selecionado aqui embaixo. Copie com ${tecla}.`,
+  convidarSemCodigo: "NÃO DEU PARA LER O CÓDIGO DESTA LIGAÇÃO, e nada foi copiado.",
   estadoDaLigacao: Object.freeze({
     naSala: "NA SALA DE VOZ",
     fora: "FORA DA SALA DE VOZ",
@@ -2937,6 +2973,23 @@ const SALA_PESSOAL = Object.freeze({
     const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
     return `${quem} · ${codigo} está ligando`;
   },
+  /**
+   * A mesma faixa com uma ligação em curso (ADR 0068): quem recebe já está na
+   * própria sala, e atender põe quem liga na mesma ligação.
+   */
+  ligandoNaConversa: ({ apelido, codigo, nome_na_agenda: nome }) => {
+    const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
+    return `${quem} · ${codigo} quer entrar na ligação em curso`;
+  },
+  atenderNaConversa: "ADICIONAR À LIGAÇÃO",
+  /**
+   * Atendido, e não coube: a ligação já tem o teto de pessoas, contando quem
+   * recebe (`TETO_DA_LIGACAO`, ADR 0059). Quem ligava lê «a ligação está cheia».
+   */
+  conversaCheia: ({ apelido, nome_na_agenda: nome }) => {
+    const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
+    return `A LIGAÇÃO ESTÁ CHEIA (6 PESSOAS): ${quem} não entrou. Alguém precisa sair antes.`;
+  },
   semSom: "SEM SOM: nenhuma saída de áudio abriu, e este aviso é o único.",
   atenderSaiDe: (daqui) => `ATENDER SAI DE ${daqui}`,
   naoEntrou: "VOCÊ ATENDEU, MAS NÃO CONSEGUIU ENTRAR NA SUA SALA",
@@ -2989,7 +3042,7 @@ const SALA_PESSOAL = Object.freeze({
     recusada: "LIGAÇÃO RECUSADA",
     ninguem_atendeu: "CHAMADA PERDIDA",
     caiu_antes: "QUEM LIGAVA DESISTIU",
-    cheia: "A LIGAÇÃO ESTÁ CHEIA",
+    cheia: "A LIGAÇÃO ESTÁ CHEIA (6 PESSOAS)",
     sala_fechou: "A SUA SALA FECHOU",
   }),
 });
@@ -3524,6 +3577,13 @@ const FRASES_DO_TRANSPORTE = Object.freeze({
     SinalMudo:
       "O PONTO DE ENCONTRO NÃO RESPONDEU À PÁGINA.\n" +
       "Ele pode estar fora do ar. O caminho direto do link também não abriu.",
+    // A sala pessoal de um código (ADR 0068): o ponto a achou e não disse a
+    // impressão DTLS dela. A casca troca este motivo pelo `NaoLocalizou` de
+    // quem liga (`motivoDaLigacaoPeloCodigoWeb`); a frase fica para quem o ler
+    // cru.
+    SalaSemImpressao:
+      "ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO DESTA PESSOA.\n" +
+      "O SEELE do outro lado, ou o ponto de encontro, é de uma versão anterior.",
     CaminhoNaoAbriu:
       "AS DUAS REDES NÃO SE ALCANÇARAM.\n" +
       "Quem hospeda pode abrir a porta no roteador.",

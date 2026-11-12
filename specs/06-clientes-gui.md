@@ -154,6 +154,31 @@ de outra sessão não são aplicados à que está na tela. O que a pessoa estava
 fazendo numa sessão — o rascunho, o anexo, a busca — fica com ela, e volta
 quando ela volta. O navegador e o celular seguem o mesmo contrato, sem hospedar.
 
+### A conversa pessoal (1.0, ADR 0068)
+
+**Ligar para o código de alguém disca a sala pessoal dessa pessoa**, nas duas cascas. Um lugar só decide
+o caminho (`irParaOServidor`, em `camada-servidores.js`):
+
+| quem liga | para quem tem o app | para quem só tem a página |
+|---|---|---|
+| o app | a sala pessoal | não liga: a frase orienta a pessoa da página a ligar para o código de quem tem o app |
+| a página | a sala pessoal, como convidada | a conversa direta, a dois, depois de o ponto dizer que não há sala |
+
+- **A conversa direta só existe na página.** O app não a registra, não a disca e não a atende.
+- **A faixa do toque** diz quem liga, com o apelido entre aspas e o código. Com uma ligação em curso, diz
+  que a pessoa quer entrar nela, e o botão é ADICIONAR À LIGAÇÃO. Atendida com a ligação no teto, a faixa
+  fica à vista dizendo quem não entrou e por quê.
+- **CONVIDAR**, na barra da ligação, copia o link do código de quem hospeda (`seele://@CÓDIGO`) e diz o
+  que copiou, de quem é o código e quem atende. Se a cópia falhar, a falha é dita e o link fica
+  selecionado num campo.
+- **A página confere quem atendeu antes do `Hello`**, no `.wasm`, e guarda a chave de quem atendeu no
+  mesmo contato da conversa direta: a ligação seguinte confere a chave inteira.
+
+**Limites ditos**: quem liga e é atendido ainda passa pela tela de entrar, como em qualquer servidor; a
+página que liga para outra página paga uma pergunta ao ponto (a sala que não existe) antes de a conversa
+direta começar; e a entrada da página numa sala depende de o ponto de encontro já repassar a impressão DTLS
+(`docs/ponto-de-encontro.md`).
+
 ### Atualizar para além da quebra (0.17)
 
 Uma atualização que muda a versão do servidor (a 0.16 para a 0.17) avisa ANTES

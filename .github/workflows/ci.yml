@@ -835,6 +835,10 @@ jobs:
         if: ${{ !cancelled() }}
       - run: cargo build --quiet --package seele-encontro
         if: ${{ !cancelled() }}
+      # A sala pessoal de verdade, para a página entrar nela pelo código
+      # (`sala-pelo-codigo.cjs`, ADR 0068).
+      - run: cargo build --quiet --package seele-server --example sala_da_bancada
+        if: ${{ !cancelled() }}
       - run: cargo test --package xtask pacote_web::tests
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -922,6 +926,9 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/sala-pelo-codigo.cjs target/debug/seele-encontro target/debug/examples/sala_da_bancada target/wasm32-unknown-unknown/release/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
 

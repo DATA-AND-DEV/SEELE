@@ -372,18 +372,48 @@ window.addEventListener(
  * troca pergunta antes, e volta pelo alvo.
  */
 function irParaOServidor(alvo, apelido, token, nome, linkColado = null, ligar = false) {
-  const argumentos = [alvo, apelido, token, nome, linkColado, ligar];
-  const pessoal = window.seelePessoalWeb;
-  if (typeof alvo === "string" && alvo.startsWith("@") && pessoal?.chamarCodigo) {
-    return Promise.resolve(pessoal.chamarCodigo({ codigo: alvo, apelido })).then(resultado => {
-      if (resultado?.ausente && !PONTE_NO_LUGAR_DO_TAURI) return irParaOServidorNativo(...argumentos);
-    }).catch(() => {
-      const erro = $("boot-erro");
-      erro.hidden = false;
-      erro.textContent = "Não foi possível iniciar a ligação. Tente novamente.";
-    });
-  }
-  return irParaOServidorNativo(...argumentos);
+  // **`@CÓDIGO` disca a sala pessoal primeiro, nas duas cascas** (ADR 0068). A
+  // conversa direta vinha antes, e entre dois apps ela sempre respondia: a sala,
+  // que é o caminho com o motor nativo e com até seis pessoas, nunca era usada.
+  // No app e na página o código passa pelo `conectar` de sempre: o app disca a
+  // sala, e a página entra nela como convidada (`ponte-web.js`). A direta ficou
+  // só na página, como recuo de um código sem sala
+  // (`recuarParaAConversaDireta`), e quem a chama é o `catch` do `conectar`,
+  // com o motivo na mão.
+  return irParaOServidorNativo(alvo, apelido, token, nome, linkColado, ligar);
+}
+
+/** A conversa direta não chegou a começar: a frase, na linha de erro da entrada. */
+function dizerQueALigacaoNaoComecou() {
+  const erro = $("boot-erro");
+  erro.hidden = false;
+  erro.textContent = "Não foi possível iniciar a ligação. Tente novamente.";
+}
+
+/**
+ * **O recuo de um código sem sala** (ADR 0068): o ponto de encontro disse que a
+ * sala de `@CÓDIGO` não mora lá (`NaoLocalizou`), e a pessoa pode ter só a
+ * página, que não hospeda. Tenta a conversa direta, a dois.
+ *
+ * Devolve se assumiu a falha: aí o `conectar` não escreve a linha vermelha. Se a
+ * direta também não acha ninguém (`ausente`), `dizer` escreve a frase da sala,
+ * que é a que orienta.
+ *
+ * **Só na página.** O app não tem conversa direta: entre apps a conversa
+ * pessoal é a sala, e para quem só tem a página o caminho é essa pessoa ligar
+ * para o código de quem tem o app. A frase de «não está disponível» do app diz
+ * isso (`fraseDaLigacao`).
+ */
+function recuarParaAConversaDireta(alvo, apelido, motivo, dizer) {
+  const pessoal = PONTE_NO_LUGAR_DO_TAURI ? window.seelePessoalWeb : null;
+  const semSala = typeof alvo === "string" && alvo.startsWith("@") && Boolean(motivo?.NaoLocalizou);
+  if (!semSala || !pessoal?.chamarCodigo) return false;
+  Promise.resolve(pessoal.chamarCodigo({ codigo: alvo, apelido: apelido || undefined }))
+    .then((resultado) => {
+      if (resultado?.ausente) dizer();
+    })
+    .catch(dizerQueALigacaoNaoComecou);
+  return true;
 }
 
 function irParaOServidorNativo(alvo, apelido, token, nome, linkColado = null, ligar = false) {

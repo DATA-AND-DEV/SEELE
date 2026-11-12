@@ -79,6 +79,27 @@ dono e registra o aviso acionável.
 **Sem sobrescritas por canal na 0.17.** Fica o «cargo exigido» de leitura e escrita da Linha: a pessoa
 tem de ter aquele cargo, e quem administra passa.
 
+## A sala pessoal (a conversa pessoal, desde a 1.0)
+
+**A conversa pessoal é a sala pessoal** (ADR 0068). Quem recebe uma ligação hospeda, no próprio app, um
+`seele-server` em memória: uma sessão comum, com a campainha do ADR 0059 na frente.
+
+- **Quem entra**: outro app, pelo código, e a página do navegador ou do celular, também pelo código, como
+  convidada. A página não hospeda.
+- **O grupo**: até 6 pessoas, contando quem hospeda (`TETO_DA_LIGACAO`). A terceira pessoa entra **ligando
+  para o código de quem hospeda**, que atende com a conversa em curso. Quem liga com a ligação no teto lê
+  `ServerFull`.
+- **O fim**: quando quem hospeda sai, todos leem `ChamadaEncerrada`. A sala não passa para outra pessoa.
+- **O que a sala diz ao ponto de encontro**: além do registro assinado, a impressão do certificado DTLS
+  efêmero dela, no `ATENDE` (uma segunda linha do datagrama). É por ela que o navegador fecha o DTLS; quem
+  autentica a sala continua sendo a apresentação `0x03` (`08-seguranca.md`).
+
+O protocolo de controle não mudou para isto: o `Tocando` e as razões `ChamadaRecusada`, `NinguemAtendeu`,
+`ChamadaEncerrada` e `ServerFull` são os de antes.
+
+**Limites ditos**: a ligação não sobrevive a quem hospeda sair nem à troca de rede dele; quem hospeda não é
+avisado de uma ligação recusada sem tocar (a ligação cheia, ou alguém bloqueado).
+
 ## Concorrência
 
 - Uma task `tokio` por conexão, tratando o stream de controle.

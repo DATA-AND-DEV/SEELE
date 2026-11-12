@@ -1399,6 +1399,8 @@ todas_as_bancadas_de_navegador() {
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS portaria-da-bancada"
     cargo build --quiet --package seele-enlace --example eco --package seele-encontro ||
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS eco-e-encontro"
+    cargo build --quiet --package seele-server --example sala_da_bancada ||
+        BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS sala-da-bancada"
     cargo test --package xtask pacote_web::tests || BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS cache-web-fixture"
     cargo xtask pacote-web || BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS pacote-web"
     uma_bancada node apps/seele-app/bancada/entrada-celular-sem-marca.cjs
@@ -1478,6 +1480,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-credito.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright
+    uma_bancada node apps/seele-app/bancada/sala-pelo-codigo.cjs target/debug/seele-encontro target/debug/examples/sala_da_bancada target/wasm32-unknown-unknown/release/seele_web.wasm
     uma_bancada python3 tools/bancada-do-celular.py "$TEMPORARIO/bancada-do-celular"
     if [ -n "$BANCADAS_VERMELHAS" ]; then
         printf 'bancadas que reprovaram:%s\n' "$BANCADAS_VERMELHAS"

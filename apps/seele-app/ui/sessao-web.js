@@ -94,6 +94,14 @@ function fronteiraDaLigacao(w) {
     semente: (numero) => w.ligacao_semente(numero),
     /** `null`, ou o que recusou (`{recusa}` ou `{erro}`). */
     abrir: (pedido) => (comJson(pedido, (p, n) => w.ligacao_abrir(p, n)) === 0 ? null : saidaEmJson()),
+    /**
+     * **A apresentação da sala pessoal, conferida antes do `Hello`** (ADR
+     * 0068): `{ apresentacao, impressao_dtls, pino }`, em hex. O `.wasm` confere
+     * a assinatura da sala sobre a impressão DTLS desta conexão, o código contra
+     * a chave e o pino, e **só então** põe o `Hello` na fila. Devolve
+     * `{ chave }`, ou `{ recusa }` (o `ConnectionError` do desktop).
+     */
+    apresentada: (visto) => (comJson(visto, (p, n) => w.ligacao_apresentada(p, n)), saidaEmJson()),
     chegou: (bytes) => passos(comBytes(bytes, (p, n) => w.ligacao_chegou(p, n))),
     assinado: (bytes) => passos(comBytes(bytes, (p, n) => w.ligacao_assinado(p, n))),
     /**
@@ -276,6 +284,9 @@ function abrirOEnlace({ alvos, alvo, preparo, sinal, aoMudar }) {
   return criarEnlaceRtc({
     alvos,
     impressao: alvo.impressao,
+    // A sala pessoal de um código (ADR 0068): sem alvos nem impressão, que o
+    // ponto de encontro diz.
+    codigo: alvo.codigo ?? null,
     certificado: preparo,
     bilhete: alvo.bilhete ?? null,
     sinal,
@@ -338,12 +349,40 @@ function motivoDaFalhaDoEnlace(falha) {
 }
 
 /**
+ * **Confere quem atendeu uma ligação pelo código, antes do `Hello`** (ADR
+ * 0068; no desktop, `seele_core::confere_codigo`).
+ *
+ * A impressão DTLS veio do ponto de encontro, que não é confiável: é pista. O
+ * navegador fechou o DTLS com ela, e a sala manda, como primeira mensagem do
+ * controle, a chave Ed25519 dela e a assinatura sobre essa mesma impressão. O
+ * `.wasm` confere a assinatura, o código contra a chave e o pino da chave
+ * inteira (`alvo.pino`, de uma ligação anterior). Só depois disso o `Hello`
+ * existe para ser escrito: sem esta chamada, a fila do `.wasm` fica vazia.
+ *
+ * Devolve `{ chave, impressao }` de quem atendeu, em hex (a impressão é a da
+ * chave, a do veredito). Rejeita com o `ConnectionError` do desktop
+ * (`CodigoNaoBate`, `SePassouPorCodigo`).
+ */
+function conferirQuemAtendeuPeloCodigo(ligacao, wt, alvo) {
+  const visto = ligacao.apresentada({
+    apresentacao: hexDe(wt.apresentacao ?? new Uint8Array(0)),
+    impressao_dtls: wt.impressaoDoAnfitriao ?? "",
+    pino: alvo.pino ?? null,
+  });
+  if (typeof visto?.chave !== "string") throw visto?.recusa ?? "Unreachable";
+  return { chave: visto.chave, impressao: visto.impressao ?? null };
+}
+
+/**
  * Abre a sessão do navegador e resolve quando o servidor a aceitou.
  *
  * - `wasm`: as exportações da instância **desta sessão**
  *   (`instanciarOWasmDaSessao`); duas sessões nunca dividem uma;
  * - `alvo`: o da identidade (`endereco`, `alternativos`, `impressao`,
- *   `bilhete` e `chave`);
+ *   `bilhete` e `chave`). **Uma ligação pelo código** (ADR 0068) traz `codigo`
+ *   no lugar da impressão e dos endereços, e `pino` (a chave de quem atendeu da
+ *   outra vez, ou `null`): o ponto diz onde a sala mora, e quem atendeu é
+ *   conferido contra o código antes do `Hello`;
  * - `apelido`, `convite` (o segredo do convite, ou `null`) e `aceito` (o
  *   conjunto de MODs já aceito neste servidor, ou `null`);
  * - `emitir(evento)`: cada `seele_ffi::Event` para a casca;
@@ -391,6 +430,8 @@ async function abrirASessaoDoNavegador({
     impressao: alvo.impressao,
     impressao_dtls: preparo.impressao,
     aceito,
+    // Com um código, o `.wasm` segura o `Hello` até a apresentação conferir.
+    ...(alvo.codigo ? { codigo: alvo.codigo } : {}),
   };
   const recusa = ligacao.abrir({ ...pedido, convite });
   if (recusa) throw recusa.recusa ?? "Unreachable";
@@ -433,6 +474,19 @@ async function abrirASessaoDoNavegador({
     ligacao.fechar();
     throw cancelada();
   }
+  // **Antes do `Hello`**: numa ligação pelo código, quem atendeu prova que é o
+  // dono dele, ou a entrada acaba aqui, sem nada dito a quem atendeu.
+  let quemAtendeu = null;
+  if (alvo.codigo) {
+    try {
+      quemAtendeu = conferirQuemAtendeuPeloCodigo(ligacao, wt, alvo);
+    } catch (motivo) {
+      wt.close();
+      ligacao.fechar();
+      etapa({ Desistiu: { motivo: typeof motivo === "string" ? motivo : "CodigoNaoBate" } });
+      throw motivo;
+    }
+  }
 
   // A volta entra pelo endereço que atendeu (e os outros, atrás dele), com a
   // mesma chave e sem o convite: o servidor já conhece a chave, e o convite é
@@ -451,6 +505,10 @@ async function abrirASessaoDoNavegador({
   };
   const sessao = criarASessaoAberta({ ligacao, wt, alvo, pedido, reabrir, emitir, aoAcabar, podeUsarAVoz, aoTocar });
   sessao.wasm = wasm;
+  // A chave provada de quem atendeu pelo código, para a casca a fixar depois
+  // de uma ligação completa, e a impressão dela, para o veredito.
+  sessao.chaveDeQuemAtendeu = quemAtendeu?.chave ?? null;
+  sessao.impressaoDeQuemAtendeu = quemAtendeu?.impressao ?? null;
   const desistiu = new Promise((_, rejeitar) => {
     cancelamento.aoCancelar = () => rejeitar("Cancelada");
   });
@@ -758,6 +816,9 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       if (acabou) return;
       const recusa = ligacao.retomar(pedido, sessao.escolhas());
       if (recusa) throw recusa.recusa ?? "Unreachable";
+      // A volta de uma ligação pelo código confere de novo quem atendeu, na
+      // conexão nova, antes do `Hello` dela; o pino é a chave da entrada.
+      if (alvo.codigo) conferirQuemAtendeuPeloCodigo(ligacao, novo, { ...alvo, pino: sessao.chaveDeQuemAtendeu ?? alvo.pino ?? null });
       const prazo = prazoDoAperto();
       const esperando = new Promise((resolver, rejeitar) => {
         volta = { resolver, rejeitar, prazo };

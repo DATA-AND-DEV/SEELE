@@ -823,6 +823,7 @@ fn sondar_enc3(chamador: &UdpSocket, destino: SocketAddr) -> EstadoDoEnc3 {
             id: chamado.id,
             endereco: registrado,
             dicas: Vec::new(),
+            impressao: None,
         });
         if anfitriao.send_to(&resposta, destino).is_err() {
             break;

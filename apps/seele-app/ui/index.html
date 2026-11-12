@@ -1635,6 +1635,14 @@
           -->
           <button id="ligacao-chat" class="botao-fantasma ligacao-chat" type="button"
                   aria-haspopup="dialog" aria-expanded="false">CHAT</button>
+          <!--
+            CONVIDAR (1.0, ADR 0068): o grupo cresce com a terceira pessoa
+            ligando para o código de quem hospeda a ligação. O botão copia o
+            link desse código (`seele://@CÓDIGO`), e a linha de baixo diz o que
+            foi copiado, de quem é o código e quem atende; se a cópia falhar, o
+            link fica selecionado num campo, para copiar pelo teclado.
+          -->
+          <button id="ligacao-convidar" class="botao-fantasma ligacao-convidar" type="button">CONVIDAR</button>
           <button id="ligacao-desligar" class="ligacao-desligar" type="button">DESLIGAR</button>
           <!--
             **`DESCONECTAR` saiu, e a saída não sumiu com ele.**
@@ -1654,6 +1662,9 @@
           -->
         </div>
         <p id="ligacao-barra-dica" class="nota ligacao-barra-dica"></p>
+        <p id="ligacao-convidar-dito" class="nota ligacao-convidar-dito" role="status" hidden></p>
+        <input id="ligacao-convidar-link" class="ligacao-convidar-link" readonly spellcheck="false"
+               autocomplete="off" aria-label="Link desta ligação, para copiar" hidden>
       </div>
     </section>
 

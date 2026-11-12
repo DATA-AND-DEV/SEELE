@@ -99,7 +99,6 @@ const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica �
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
 // A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
 const RECUSA_SALA = "este comando controla a sala nativa; no navegador a conversa pessoal usa a conexão direta";
-const RECUSA_ASSINADOR_NATIVO = "a identidade do navegador assina localmente; este comando pertence ao aplicativo";
 // A tecla de falar com outra janela na frente (`tecla_global.rs`): é um atalho
 // do sistema, e a página não registra um. Ligá-la é recusado pelo nome; a
 // pergunta pelo estado (`estado_da_tecla_global`) é atendida com `null`, que a
@@ -109,10 +108,6 @@ const RECUSA_ATALHO = "o navegador não tem atalho para o computador inteiro: a 
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
-  ["pessoal_identidade", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_assinar", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_conferir_par", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_reservar", RECUSA_ASSINADOR_NATIVO],
   ["abrir_a_porta_no_firewall", RECUSA_REDE],
   ["abrir_ajustes_de_acessibilidade", RECUSA_SISTEMA],
   ["abrir_ajustes_do_microfone", RECUSA_SISTEMA],
@@ -558,8 +553,8 @@ function sessoesNaPonte() {
       foco_de_voz: sessao.idDaPonte === focoDaPonte,
       na_sala_de_voz: naSala,
       onde: sessao.onde ?? "Outro",
-      // O navegador não liga por código: aqui é sempre `null`. Só a costura das
-      // bancadas põe `ligacao` numa sessão de mentira, para provar a vista.
+      // O código da sala pessoal em que a página entrou (ADR 0068), ou `null`
+      // num servidor.
       ligacao: sessao.ligacao ?? null,
       enlace: sessao.acabou ? "encerrada" : sessao.voltando ? "reconectando" : "online",
       encerrada: sessao.motivoDoFim ?? null,
@@ -717,6 +712,15 @@ async function lerOLink(texto) {
  * que confere quem atendeu, e é recusado com a frase.
  */
 async function entrarPeloEndereco({ server, nickname } = {}) {
+  // **Uma pessoa, e não um servidor** (ADR 0068): `@CÓDIGO` entra na sala
+  // pessoal de quem tem o app, como convidada. O alvo e o vocabulário da falha
+  // são da identidade pessoal (`identidade-web.js`).
+  if (typeof server === "string" && server.startsWith("@")) {
+    const alvo = await alvoDaSalaPessoalWeb(server);
+    const apelido = (nickname ?? "").trim() || guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido) || "pessoa";
+    return abrirASessaoPelaPonte({ alvo, nickname: apelido })
+      .catch((erro) => Promise.reject(motivoDaLigacaoPeloCodigoWeb(erro, alvo.codigo)));
+  }
   const identidade = await identidadeDaPagina();
   if (identidade.ler()?.estado === "armazenamento-indisponivel") await identidade.reler();
   const apelido = (nickname ?? "").trim() || guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido) || "pessoa";
@@ -783,6 +787,7 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
   // **Várias sessões** (E3): uma entrada nova soma, e não recusa. Só duas
   // entradas no MESMO servidor ao mesmo tempo são recusadas, como no desktop.
   if ([...sessoesDaPonte.values()].some((s) => !s.acabou && s.alvo?.impressao === alvo.impressao)) {
+    // (Uma ligação pelo código registra `@CÓDIGO` como a impressão do alvo.)
     return Promise.reject("AlreadyConnected");
   }
   geracaoDaPonte += 1;
@@ -872,6 +877,12 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
   sessao.idDaPonte = id;
   sessao.geracao = geracao;
   sessao.alvo = alvo;
+  // Uma ligação pelo código (ADR 0068): a vista é a da ligação, e a chave de
+  // quem atendeu fica fixada para a próxima.
+  if (alvo.codigo) {
+    sessao.ligacao = alvo.codigo;
+    if (sessao.chaveDeQuemAtendeu) void fixarQuemAtendeuPeloCodigoWeb(alvo.codigo, sessao.chaveDeQuemAtendeu);
+  }
   sessao.snapshot = () => retratoDaSessao(sessao);
   sessao.transmissao = criarATransmissaoDoNavegador({
     sessao,
@@ -928,7 +939,7 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
     carimbo: carimboDaPonte(sessao),
     vista: geracao,
     snapshot: sessao.snapshot(),
-    veredito: alvo.conhecido ? "Known" : { FirstContactVerified: { fingerprint: alvo.impressao } },
+    veredito: alvo.conhecido ? "Known" : { FirstContactVerified: { fingerprint: sessao.impressaoDeQuemAtendeu ?? alvo.impressao } },
     geracao,
     origem_da_impressao: alvo.conhecido ? "Lista" : "Link",
     a_lista_guardou: false,
