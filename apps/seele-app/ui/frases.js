@@ -2867,6 +2867,23 @@ const SALA_PESSOAL = Object.freeze({
     const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
     return `${quem} · ${codigo} está ligando`;
   },
+  /**
+   * A mesma faixa com uma ligação em curso (ADR 0068): quem recebe já está na
+   * própria sala, e atender põe quem liga na mesma ligação.
+   */
+  ligandoNaConversa: ({ apelido, codigo, nome_na_agenda: nome }) => {
+    const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
+    return `${quem} · ${codigo} quer entrar na ligação em curso`;
+  },
+  atenderNaConversa: "ADICIONAR À LIGAÇÃO",
+  /**
+   * Atendido, e não coube: a ligação já tem o teto de pessoas, contando quem
+   * recebe (`TETO_DA_LIGACAO`, ADR 0059). Quem ligava lê «a ligação está cheia».
+   */
+  conversaCheia: ({ apelido, nome_na_agenda: nome }) => {
+    const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
+    return `A LIGAÇÃO ESTÁ CHEIA (6 PESSOAS): ${quem} não entrou. Alguém precisa sair antes.`;
+  },
   semSom: "SEM SOM: nenhuma saída de áudio abriu, e este aviso é o único.",
   atenderSaiDe: (daqui) => `ATENDER SAI DE ${daqui}`,
   naoEntrou: "VOCÊ ATENDEU, MAS NÃO CONSEGUIU ENTRAR NA SUA SALA",
@@ -2919,7 +2936,7 @@ const SALA_PESSOAL = Object.freeze({
     recusada: "LIGAÇÃO RECUSADA",
     ninguem_atendeu: "CHAMADA PERDIDA",
     caiu_antes: "QUEM LIGAVA DESISTIU",
-    cheia: "A LIGAÇÃO ESTÁ CHEIA",
+    cheia: "A LIGAÇÃO ESTÁ CHEIA (6 PESSOAS)",
     sala_fechou: "A SUA SALA FECHOU",
   }),
 });

@@ -23642,6 +23642,114 @@ confere("sem várias sessões a troca deixou de confirmar", so(m, "pedirTroca").
     );
 }
 
+/// **A faixa do toque com uma ligação em curso, e a ligação cheia** (ADR 0068,
+/// decisão 4: a terceira pessoa entra ligando para o código de quem hospeda).
+///
+/// Quem recebe já está na própria sala (`onde_estou` em `Pessoal`), e a faixa
+/// dizia «está ligando» com ATENDER, como se fosse outra ligação. Agora ela diz
+/// que a pessoa quer entrar na ligação em curso, e o botão, que a adiciona; o
+/// atender não passa pelo `conectar` (quem recebe já está dentro). E quando a
+/// campainha responde `cheia` (o teto da ligação, `TETO_DA_LIGACAO`), a faixa
+/// fica à vista dizendo quem não entrou e por quê, em vez de sumir como se a
+/// pessoa tivesse entrado. O `node` roda a fonte real de `camada-toque.js` e do
+/// `frases.js`.
+#[test]
+fn a_faixa_do_toque_diz_a_ligacao_em_curso_e_a_ligacao_cheia() {
+    // O número da frase é o teto da campainha: mudar um sem o outro reprova.
+    let campainha = read("../../crates/seele-server/src/campainha.rs");
+    let teto = campainha
+        .split("pub const TETO_DA_LIGACAO: usize = ")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .unwrap_or_else(|| panic!("a campainha não tem mais o `TETO_DA_LIGACAO`"));
+    let frases = without_comments(&read("ui/frases.js"));
+    for frase in ["  conversaCheia:", "    cheia:"] {
+        let dita = frases
+            .split(&format!("\n{frase}"))
+            .nth(1)
+            .unwrap_or_default();
+        let linhas: String = dita.lines().take(4).collect();
+        assert!(
+            linhas.contains(&format!("({teto} PESSOAS)")),
+            "a frase `{frase}` não diz o teto da ligação ({teto}, da campainha): {linhas}"
+        );
+    }
+    rodar_node(
+        "a faixa com a ligação em curso",
+        r##"
+const ANA = { evento: "Tocou", quem: "aa11", apelido: "ana", codigo: "K9P2-CSM7-NBFR-AYQ3", nome_na_agenda: null, com_som: true };
+function cenario(onde, atender = { ja_na_sala: onde === "Pessoal", alvo: "127.0.0.1:8385" }) {
+  const m = mundo({ onde_estou: onde, toques_agora: [], atender, recusar: null });
+  const ditas = [];
+  const raiz = new El("html");
+  raiz.style = { setProperty() {}, removeProperty() {} };
+  raiz.removeAttribute = () => {};
+  m.ctx.document.documentElement = raiz;
+  m.$("toque").hidden = true;
+  m.$("toque").getBoundingClientRect = () => ({ bottom: 40 });
+  Object.assign(m.ctx, {
+    ResizeObserver: class { observe() {} },
+    anunciar: (frase) => ditas.push(frase),
+    nomeDesteServidor: () => "CASA",
+    conectar: async (...a) => { m.chamadas.push({ cmd: "conectar", args: a }); },
+    irParaAEntradaSemSair: () => {},
+  });
+  carregar(m, "frases.js", "camada-toque.js");
+  const toque = (payload) => { m.ouvintes["seele://toque"]({ payload }); return tick(); };
+  return { m, ditas, toque };
+}
+
+// Sem ligação nenhuma: a faixa de sempre.
+let c = cenario("Nenhum");
+await tick();
+await c.toque(ANA);
+confere("fora de ligação, a faixa não diz que está ligando: " + c.m.$("toque-texto").textContent,
+  c.m.$("toque").hidden === false && /«ana» · K9P2-CSM7-NBFR-AYQ3 está ligando/.test(c.m.$("toque-texto").textContent));
+confere("fora de ligação, o botão não é ATENDER", c.m.$("toque-atender").textContent === "ATENDER");
+
+// Com uma ligação em curso: a faixa e o botão dizem que a pessoa entra nela.
+c = cenario("Pessoal");
+await tick();
+await c.toque(ANA);
+confere("com a ligação em curso, a faixa não diz que a pessoa quer entrar nela: " + c.m.$("toque-texto").textContent,
+  /«ana» · K9P2-CSM7-NBFR-AYQ3 quer entrar na ligação em curso/.test(c.m.$("toque-texto").textContent));
+confere("com a ligação em curso, o botão não diz que adiciona: " + c.m.$("toque-atender").textContent,
+  c.m.$("toque-atender").textContent === "ADICIONAR À LIGAÇÃO");
+confere("a faixa não foi dita uma vez", c.ditas.length === 1 && /quer entrar na ligação em curso/.test(c.ditas[0]));
+await c.m.$("toque-atender").click();
+confere("adicionar não atendeu quem tocava", so(c.m, "atender").length === 1 && so(c.m, "atender")[0].args.quem === "aa11");
+confere("adicionar passou pelo conectar, com quem recebe já na sala", so(c.m, "conectar").length === 0);
+await c.toque({ evento: "Parou", quem: "aa11", desfecho: "atendida" });
+confere("atendida, a faixa não saiu", c.m.$("toque").hidden === true);
+
+// A ligação no teto: atender não põe ninguém dentro, e a faixa fica dizendo.
+c = cenario("Pessoal");
+await tick();
+await c.toque(ANA);
+await c.m.$("toque-atender").click();
+await c.toque({ evento: "Parou", quem: "aa11", desfecho: "cheia" });
+const cheia = c.m.$("toque-texto").textContent;
+confere("cheia, a faixa sumiu como se a pessoa tivesse entrado", c.m.$("toque").hidden === false);
+confere("cheia, a faixa não diz quem não entrou nem o teto: " + cheia, /A LIGAÇÃO ESTÁ CHEIA \(6 PESSOAS\): «ana» não entrou/.test(cheia));
+confere("cheia, ainda há o que atender", c.m.$("toque-atender").hidden === true);
+confere("cheia, o segundo botão não fecha", c.m.$("toque-recusar").textContent === "FECHAR");
+confere("cheia, o desfecho não foi dito", c.ditas.some((d) => /A LIGAÇÃO ESTÁ CHEIA \(6 PESSOAS\)/.test(d)));
+await c.m.$("toque-recusar").click();
+confere("FECHAR não fechou a faixa de quem não coube", c.m.$("toque").hidden === true);
+confere("FECHAR recusou alguém", so(c.m, "recusar").length === 0);
+
+// Outra pessoa toca com a faixa de «não coube» à vista: a pergunta vem antes.
+c = cenario("Pessoal");
+await tick();
+await c.toque(ANA);
+await c.toque({ evento: "Parou", quem: "aa11", desfecho: "cheia" });
+await c.toque({ ...ANA, quem: "bb22", apelido: "caio" });
+confere("quem toca não tomou o lugar da faixa de quem não coube: " + c.m.$("toque-texto").textContent,
+  /«caio»/.test(c.m.$("toque-texto").textContent) && c.m.$("toque-atender").hidden === false);
+"##,
+    );
+}
+
 /// **`@CÓDIGO` disca a sala pessoal primeiro** (ADR 0068), e a conversa direta
 /// só é tentada quando o ponto de encontro diz que a sala não mora lá
 /// (`NaoLocalizou`).
