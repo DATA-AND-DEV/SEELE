@@ -526,23 +526,34 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
     } else if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
     } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "", esta)) {
-      erro.hidden = false;
-      // O apelido que esta tentativa mandou, para a recusa por nome tomado
-      // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
-      // para a recusa por ela acusar o link ou a lista. Ver `fraseDeErro`.
-      erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
-      // **Numa ligação, a frase de quem liga**, com o nome de quem foi chamado
-      // (tarefa 28 da F7; spec de 23/09, «Erros e frases»). O que não é dela
-      // fica com a frase de sempre, logo acima.
-      if (ligacao) {
-        erro.textContent =
-          fraseDaLigacao(motivo, ligacao.nome, falha?.trail) ?? erro.textContent;
+      const dizerAFalha = () => {
+        erro.hidden = false;
+        // O apelido que esta tentativa mandou, para a recusa por nome tomado
+        // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
+        // para a recusa por ela acusar o link ou a lista. Ver `fraseDeErro`.
+        erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
+        // **Numa ligação, a frase de quem liga**, com o nome de quem foi chamado
+        // (tarefa 28 da F7; spec de 23/09, «Erros e frases»). O que não é dela
+        // fica com a frase de sempre, logo acima.
+        if (ligacao) {
+          erro.textContent =
+            fraseDaLigacao(motivo, ligacao.nome, falha?.trail) ?? erro.textContent;
+        }
+      };
+      // **Um código sem sala recua para a conversa direta** (ADR 0068), e só
+      // se ela também não achar ninguém a frase da sala aparece: a de uma
+      // tentativa que outra já substituiu, não.
+      const recuou = recuarParaAConversaDireta(alvo, apelido, motivo, () => {
+        if (esta === tentativas) dizerAFalha();
+      });
+      if (!recuou) {
+        dizerAFalha();
+        // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
+        // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
+        // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
+        // pessoa, e esta tentativa termina agora, devolvendo o CONECTAR.
+        entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn("entrar pela recusa:", f));
       }
-      // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
-      // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
-      // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
-      // pessoa, e esta tentativa termina agora, devolvendo o CONECTAR.
-      entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn("entrar pela recusa:", f));
     }
   } finally {
     // **Só a tentativa mais nova devolve o CONECTAR** (lote W2 da F5). A que

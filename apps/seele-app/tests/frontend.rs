@@ -23642,6 +23642,104 @@ confere("sem várias sessões a troca deixou de confirmar", so(m, "pedirTroca").
     );
 }
 
+/// **`@CÓDIGO` disca a sala pessoal primeiro** (ADR 0068), e a conversa direta
+/// só é tentada quando o ponto de encontro diz que a sala não mora lá
+/// (`NaoLocalizou`).
+///
+/// A ordem era a contrária: a direta primeiro, e a sala só quando a direta
+/// respondia «ausente». Entre dois apps a direta sempre respondia, e a sala (o
+/// motor nativo, até seis pessoas) nunca era usada. O `node` roda a fonte real
+/// de `irParaOServidor` e do recuo; o `conectar` é o duble de sempre, que chama o
+/// `connect` e, na falha, chama o recuo como o `catch` real faz (conferido na
+/// fonte logo abaixo).
+#[test]
+fn o_codigo_disca_a_sala_primeiro_e_so_sem_sala_recua_para_a_direta() {
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    assert!(
+        boot.contains("recuarParaAConversaDireta(alvo, apelido, motivo,"),
+        "o `catch` do `conectar` deixou de oferecer a falha ao recuo da conversa direta"
+    );
+    rodar_node(
+        "a sala primeiro, a direta como recuo",
+        r##"
+const CODIGO = "@K9P2-CSM7-NBFR-AYQ3";
+function cenario({ connect = null, direta, pagina = false }) {
+  const m = mundo({ connect });
+  carregar(m, "frases.js");
+  const ordem = [];
+  m.$("tela-sessao").hidden = true;
+  m.$("boot-erro").hidden = true;
+  m.ctx.PONTE_NO_LUGAR_DO_TAURI = pagina;
+  if (direta) m.ctx.window.seelePessoalWeb = { chamarCodigo: async (pedido) => { ordem.push("direta:" + pedido.codigo); return direta(); } };
+  Object.assign(m.ctx, {
+    conectar: async (alvo, apelido, token, link, ligacao) => {
+      ordem.push("sala:" + alvo);
+      try { await m.invoke("connect", { server: alvo }); }
+      catch (motivo) {
+        const dizer = () => {
+          m.$("boot-erro").hidden = false;
+          m.$("boot-erro").textContent = m.ctx.fraseDaLigacao(motivo, ligacao?.nome, []) ?? JSON.stringify(motivo);
+        };
+        if (!m.ctx.recuarParaAConversaDireta(alvo, apelido, motivo, dizer)) dizer();
+      }
+    },
+    variasSessoes: () => true, pedirTrocaDeServidor: () => {},
+  });
+  vm.runInContext(`
+    ${funcao("camada-servidores.js", "dizerQueALigacaoNaoComecou")}
+    ${funcao("camada-servidores.js", "recuarParaAConversaDireta")}
+    ${funcao("camada-servidores.js", "irParaOServidorNativo")}
+    ${funcao("camada-servidores.js", "irParaOServidor")}`, m.ctx);
+  return { m, ordem };
+}
+const SEM_SALA = () => Promise.reject({ NaoLocalizou: { motivo: "NinguemMora" } });
+const ligar = async (c) => { c.m.ctx.irParaOServidor(CODIGO, null, null, "Ana", null, true); await tick(); await tick(); };
+
+// A sala atende: a direta nem é tentada.
+let c = cenario({ direta: async () => ({}) });
+await ligar(c);
+confere("com a sala no ar, a direta foi tentada: " + c.ordem, c.ordem.join() === "sala:" + CODIGO);
+confere("com a sala no ar, apareceu erro", c.m.$("boot-erro").hidden === true);
+
+// A sala não mora no ponto: só então a direta, e depois da sala.
+c = cenario({ connect: SEM_SALA, direta: async () => ({}) });
+await ligar(c);
+confere("sem sala, a ordem não foi sala e depois direta: " + c.ordem, c.ordem.join() === "sala:" + CODIGO + ",direta:" + CODIGO);
+confere("a direta assumiu e a linha vermelha apareceu", c.m.$("boot-erro").hidden === true);
+
+// Nem sala nem caixa direta: a frase da sala, que é a que orienta.
+c = cenario({ connect: SEM_SALA, direta: async () => ({ ausente: true }) });
+await ligar(c);
+confere("sem ninguém, a frase de quem liga não apareceu: " + c.m.$("boot-erro").textContent,
+  c.m.$("boot-erro").hidden === false && /ANA NÃO ESTÁ DISPONÍVEL/.test(c.m.$("boot-erro").textContent));
+
+// A direta que não começa diz isso, e não some.
+c = cenario({ connect: SEM_SALA, direta: () => Promise.reject(new Error("caiu")) });
+await ligar(c);
+confere("a direta que falhou ficou muda", c.m.$("boot-erro").hidden === false && /Não foi possível iniciar a ligação/.test(c.m.$("boot-erro").textContent));
+
+// Uma recusa da sala não é «sem sala»: quem recebe recusou, e a direta não entra.
+for (const reason of ["ChamadaRecusada", "NinguemAtendeu", "ServerFull"]) {
+  c = cenario({ connect: () => Promise.reject({ Refused: { reason } }), direta: async () => ({}) });
+  await ligar(c);
+  confere(reason + ": a direta foi tentada depois de a sala responder: " + c.ordem, c.ordem.join() === "sala:" + CODIGO);
+  confere(reason + ": a frase não apareceu", c.m.$("boot-erro").hidden === false);
+}
+
+// Um endereço não é um código: nada de conversa direta.
+c = cenario({ connect: SEM_SALA, direta: async () => ({}) });
+c.m.ctx.irParaOServidor("10.0.0.2:8383", null, null, undefined, null, false);
+await tick(); await tick();
+confere("um endereço recuou para a conversa direta: " + c.ordem, c.ordem.join() === "sala:10.0.0.2:8383");
+
+// A página ainda não entra numa sala: nela o código segue pela direta.
+c = cenario({ direta: async () => ({}), pagina: true });
+await ligar(c);
+confere("na página, o código não foi pela conversa direta: " + c.ordem, c.ordem.join() === "direta:" + CODIGO);
+"##,
+    );
+}
+
 /// 0.17, achado do mobile: ao entrar no 2º servidor aparecia UMA vez «Não foi
 /// possível conferir os MODs: disconnected». Era o pedido da sessão que acabou
 /// de sair (`pedirAoServidor` lança `disconnected` quando a geração não é mais
