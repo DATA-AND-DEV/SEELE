@@ -14,6 +14,25 @@
 //! `allow` vive nos módulos de plataforma — este e o `macos.rs` — e em nenhum
 //! outro arquivo do crate.
 //!
+//! # Só os que fornecem a própria saída
+//!
+//! `colher` chama `ProcessOutput` sem amostra de saída, e isso só vale para o
+//! MFT que aloca a dele — os de hardware. O «H264 Encoder MFT» de software da
+//! Microsoft, que é o que uma máquina sem codificador de hardware enumera,
+//! espera a amostra de quem chama e responde `E_INVALIDARG` a todo quadro. Por
+//! isso [`Codificador::novo`] **pergunta** (`GetOutputStreamInfo`) e recusa o
+//! que não fornece: a recusa é o que faz [`super::armar`] cair para o OpenH264
+//! em vez de armar um codificador que nunca entrega um quadro.
+//!
+//! A tabela do que cada um respondeu, medida em 12/11/2026 numa máquina com
+//! placa da NVIDIA (`MFTEnumEx` com as bandeiras do produto, nesta ordem):
+//!
+//! | codificador                  | tipo               | bandeiras | fornece |
+//! |------------------------------|--------------------|-----------|---------|
+//! | «NVIDIA H.264 Encoder MFT»   | hardware, assínc.  | 0x103     | sim     |
+//! | «Microsoft AVC DX12 Encoder» | hardware, assínc.  | 0x100     | sim     |
+//! | «H264 Encoder MFT»           | software, síncrono | 0x0       | não     |
+//!
 //! # O que este código **não** foi
 //!
 //! **Executado.** Ele compila para `x86_64-pc-windows-msvc` a partir de um Mac,
@@ -30,14 +49,16 @@ use windows::Win32::Media::MediaFoundation::{
     CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVLowLatencyMode,
     ICodecAPI, IMFActivate, IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform,
     METransformHaveOutput, METransformNeedInput, MFCreateMediaType, MFCreateMemoryBuffer,
-    MFCreateSample, MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx, MFVideoFormat_H264,
-    MFVideoFormat_NV12, MFVideoInterlace_Progressive, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
-    MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_ASYNCMFT, MFT_ENUM_FLAG_HARDWARE,
+    MFCreateSample, MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx,
+    MFT_FRIENDLY_NAME_Attribute, MFVideoFormat_H264, MFVideoFormat_NV12,
+    MFVideoInterlace_Progressive, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
+    MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG, MFT_ENUM_FLAG_ASYNCMFT, MFT_ENUM_FLAG_HARDWARE,
     MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
     MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
-    MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER, MFT_REGISTER_TYPE_INFO,
-    MF_E_TRANSFORM_NEED_MORE_INPUT, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
-    MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_TRANSFORM_ASYNC,
+    MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER,
+    MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES,
+    MFT_REGISTER_TYPE_INFO, MF_E_TRANSFORM_NEED_MORE_INPUT, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE,
+    MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_TRANSFORM_ASYNC,
     MF_TRANSFORM_ASYNC_UNLOCK, MF_VERSION,
 };
 
@@ -76,6 +97,37 @@ fn comecar() -> Result<(), ErroDeVideo> {
     unsafe { MFStartup(MF_VERSION, 0) }.map_err(|erro| recusa("iniciar o Media Foundation", erro))
 }
 
+/// Onde [`procurar`] olha.
+///
+/// Existe por causa da segunda: a máquina em que este código é testado tem
+/// codificador de hardware, e o defeito que custou a tela a quem não tem só
+/// aparece quando a enumeração devolve o de software primeiro.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Busca {
+    /// A do produto: hardware primeiro, e a ordem é do sistema.
+    DoProduto,
+    /// Só os síncronos de software — o que `MFTEnumEx` devolve a uma máquina
+    /// sem codificador de hardware (máquina virtual, driver básico, o runner do
+    /// CI). Só os testes pedem.
+    #[cfg(test)]
+    SoDeSoftware,
+}
+
+impl Busca {
+    fn bandeiras(self) -> MFT_ENUM_FLAG {
+        match self {
+            Self::DoProduto => {
+                MFT_ENUM_FLAG_HARDWARE
+                    | MFT_ENUM_FLAG_ASYNCMFT
+                    | MFT_ENUM_FLAG_SYNCMFT
+                    | MFT_ENUM_FLAG_SORTANDFILTER
+            }
+            #[cfg(test)]
+            Self::SoDeSoftware => MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER,
+        }
+    }
+}
+
 /// Procura um codificador de H.264 que aceite NV12, preferindo o de hardware.
 ///
 /// **Hardware primeiro, e a ordem é do sistema.** `MFT_ENUM_FLAG_SORTANDFILTER`
@@ -86,7 +138,7 @@ fn comecar() -> Result<(), ErroDeVideo> {
 /// Assíncronos entram na busca porque **quase todo encoder de hardware é
 /// assíncrono**: excluí-los seria pedir hardware e aceitar só software. O preço
 /// é o laço de eventos em [`Codificador::codificar`].
-fn procurar() -> Result<(IMFActivate, IMFTransform), ErroDeVideo> {
+fn procurar(busca: Busca) -> Result<(IMFActivate, IMFTransform), ErroDeVideo> {
     let entrada = MFT_REGISTER_TYPE_INFO {
         guidMajorType: MFMediaType_Video,
         guidSubtype: MFVideoFormat_NV12,
@@ -103,10 +155,7 @@ fn procurar() -> Result<(IMFActivate, IMFTransform), ErroDeVideo> {
     unsafe {
         MFTEnumEx(
             MFT_CATEGORY_VIDEO_ENCODER,
-            MFT_ENUM_FLAG_HARDWARE
-                | MFT_ENUM_FLAG_ASYNCMFT
-                | MFT_ENUM_FLAG_SYNCMFT
-                | MFT_ENUM_FLAG_SORTANDFILTER,
+            busca.bandeiras(),
             Some(&entrada),
             Some(&saida),
             &mut achados,
@@ -142,6 +191,46 @@ fn procurar() -> Result<(IMFActivate, IMFTransform), ErroDeVideo> {
     // `ActivateObject` montou é `ShutdownObject`, e para chamá-lo é preciso
     // ainda ter o ativador na mão.
     Ok((ativador, transformador))
+}
+
+/// O nome que o sistema dá ao codificador, para o registro dizer **qual** foi.
+///
+/// «O codificador do sistema» são vários: o do fabricante da placa, o da
+/// Microsoft sobre DX12, o de software. Quem lê o registro depois precisa saber
+/// de qual a linha está falando.
+fn nome_de(ativador: &IMFActivate) -> String {
+    let mut texto = windows::core::PWSTR::null();
+    let mut letras = 0_u32;
+    // SAFETY: os dois destinos são locais válidos, e a cadeia devolvida é nossa
+    // para liberar.
+    let leu = unsafe {
+        ativador.GetAllocatedString(&MFT_FRIENDLY_NAME_Attribute, &mut texto, &mut letras)
+    };
+    if leu.is_err() || texto.is_null() {
+        return "sem nome".to_owned();
+    }
+    // SAFETY: o sistema acabou de entregar uma cadeia terminada em zero.
+    let nome = unsafe { texto.to_string() }.unwrap_or_else(|_| "sem nome".to_owned());
+    // SAFETY: `GetAllocatedString` documenta `CoTaskMemFree`.
+    unsafe { windows::Win32::System::Com::CoTaskMemFree(Some(texto.0.cast())) };
+    nome
+}
+
+/// A operação da recusa de um codificador que não fornece a própria saída.
+///
+/// Uma constante porque o teste a reconhece pelo nome: ver
+/// `o_codificador_de_software_e_recusado_ao_armar`.
+const CONFERIR_A_SAIDA: &str = "conferir como o codificador entrega a saída";
+
+/// Se o MFT aloca as amostras de saída, pelo que `GetOutputStreamInfo` disse.
+///
+/// `PROVIDES_SAMPLES` é o MFT que sempre aloca; `CAN_PROVIDE_SAMPLES`, o que
+/// aloca quando quem chama não passa nenhuma. Os dois aceitam o `pSample` nulo
+/// de [`Codificador::colher`]. Sem nenhuma das duas, a amostra é de quem chama.
+const fn fornece_as_amostras(bandeiras: u32) -> bool {
+    let fornece =
+        (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 | MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES.0) as u32;
+    bandeiras & fornece != 0
 }
 
 /// Um tipo de mídia com major, subtipo e as medidas que os dois lados pedem.
@@ -189,6 +278,8 @@ pub struct Codificador {
     /// `ActivateObject` alocou, e sem esta referência não há como pedir.
     ativador: IMFActivate,
     transformador: IMFTransform,
+    /// O nome que o sistema dá a este codificador. Ver [`nome_de`].
+    nome: String,
     /// Presente quando o transformador é assíncrono, que é o caso da maioria
     /// dos de hardware. É por ele que o laço sabe quando entregar e quando
     /// colher.
@@ -238,9 +329,81 @@ impl Codificador {
     /// [`ErroDeVideo::CodecRecusou`] em qualquer passo. Quem chama **cai para o
     /// software**: ver [`super::armar`].
     pub fn novo(config: &super::ConfigDoCodificador) -> Result<Self, ErroDeVideo> {
+        Self::novo_com(config, Busca::DoProduto)
+    }
+
+    /// O [`Self::novo`], dizendo onde procurar.
+    ///
+    /// # Errors
+    ///
+    /// As de [`Self::novo`].
+    pub(super) fn novo_com(
+        config: &super::ConfigDoCodificador,
+        busca: Busca,
+    ) -> Result<Self, ErroDeVideo> {
         let medidas = config.medidas_efetivas()?;
         comecar()?;
-        let (ativador, transformador) = procurar()?;
+        // **Uma recusa desfaz o que montou.** Recusar deixou de ser raro: numa
+        // máquina sem codificador de hardware é o que acontece a cada vez que a
+        // tela é armada — e ela é rearmada a cada troca de degrau. O `Drop` só
+        // existe para o codificador que nasceu; daqui até ele nascer, quem
+        // devolve a sessão do ativador e o `MFStartup` é este caminho.
+        let montado = procurar(busca).and_then(|(ativador, transformador)| {
+            let nome = nome_de(&ativador);
+            match Self::preparar(&transformador, &nome, config, medidas) {
+                Ok(eventos) => Ok((ativador, transformador, nome, eventos)),
+                Err(erro) => {
+                    // SAFETY: o ativador é o que montou este transformador, e os
+                    // dois ainda são válidos.
+                    let _ = unsafe { ativador.ShutdownObject() };
+                    Err(erro)
+                }
+            }
+        });
+        let (ativador, transformador, nome, eventos) = match montado {
+            Ok(montado) => montado,
+            Err(erro) => {
+                // SAFETY: fecha o `MFStartup` de `comecar`, logo acima.
+                let _ = unsafe { MFShutdown() };
+                return Err(erro);
+            }
+        };
+
+        let (largura, altura) = medidas;
+        Ok(Self {
+            ativador,
+            transformador,
+            nome,
+            eventos,
+            resolucao: config.resolucao,
+            medidas,
+            cadencia: config.cadencia,
+            quadros_por_segundo: config.cadencia.hz(),
+            teto_bps: config.teto_bps,
+            contador: 0,
+            anel: Vec::with_capacity(ANEL),
+            proxima_do_anel: 0,
+            disse_da_chave: false,
+            // Y inteiro mais um plano de croma com metade das linhas.
+            nv12: vec![0; largura * altura + largura * altura.div_ceil(2)],
+        })
+    }
+
+    /// O nome que o sistema dá ao codificador armado.
+    #[must_use]
+    pub fn nome(&self) -> &str {
+        &self.nome
+    }
+
+    /// Ajusta, negocia e abre o fluxo do transformador recém-ativado.
+    ///
+    /// Devolve a fila de eventos, quando ele é assíncrono.
+    fn preparar(
+        transformador: &IMFTransform,
+        nome: &str,
+        config: &super::ConfigDoCodificador,
+        medidas: (usize, usize),
+    ) -> Result<Option<IMFMediaEventGenerator>, ErroDeVideo> {
         let quadros = config.cadencia.hz();
 
         // **Assíncrono precisa ser destrancado antes de qualquer outra coisa.**
@@ -274,7 +437,7 @@ impl Codificador {
         // Latência baixa **antes** dos tipos, que é o que a documentação do MFT
         // pede: depois de negociado, o modo já não muda.
         botao_dito(
-            &transformador,
+            transformador,
             "AVLowLatencyMode",
             &CODECAPI_AVLowLatencyMode,
             Valor::Booleano(true),
@@ -283,13 +446,13 @@ impl Codificador {
         // vários encoders é mirar **qualidade** e ignorar o número — e um teto
         // ignorado é uma imagem que não usa a banda que tem.
         botao_dito(
-            &transformador,
+            transformador,
             "AVEncCommonRateControlMode",
             &CODECAPI_AVEncCommonRateControlMode,
             Valor::Ui4(u32::try_from(eAVEncCommonRateControlMode_CBR.0).unwrap_or(0)),
         );
         botao_dito(
-            &transformador,
+            transformador,
             "AVEncCommonMeanBitRate",
             &CODECAPI_AVEncCommonMeanBitRate,
             Valor::Ui4(config.teto_bps),
@@ -298,7 +461,7 @@ impl Codificador {
         // um quadro que só decodifica depois do que vem adiante troca latência
         // por bits, e esta é uma conversa.
         botao_dito(
-            &transformador,
+            transformador,
             "AVEncMPVDefaultBPictureCount",
             &CODECAPI_AVEncMPVDefaultBPictureCount,
             Valor::Ui4(0),
@@ -307,7 +470,7 @@ impl Codificador {
         // macOS: é o piso que faz quem chega atrasado não esperar para sempre
         // se ninguém pedir.
         botao_dito(
-            &transformador,
+            transformador,
             "AVEncMPVGOPSize",
             &CODECAPI_AVEncMPVGOPSize,
             Valor::Ui4(quadros.saturating_mul(2)),
@@ -328,6 +491,46 @@ impl Codificador {
         unsafe { transformador.SetInputType(0, &entrada, 0) }
             .map_err(|erro| recusa("declarar a entrada do codificador", erro))?;
 
+        // **Quem aloca a amostra de saída: perguntado, e não suposto.**
+        //
+        // `colher` chama `ProcessOutput` sem amostra, e isso só vale para o MFT
+        // que fornece a dele. Este código supunha que os outros responderiam
+        // `MF_E_TRANSFORM_NEED_MORE_INPUT`; medido em 12/11/2026, o «H264
+        // Encoder MFT» de software da Microsoft — bandeiras 0x0, `cbSize` de
+        // 1 728 000 a 720p — responde `E_INVALIDARG` (0x80070057) a todo
+        // quadro. Como ele é o que `MFTEnumEx` devolve primeiro a uma máquina
+        // sem codificador de hardware, `novo` passava, o OpenH264 nunca era
+        // tentado e a transmissão abria sem imagem nenhuma. Apareceu no runner
+        // do CI, que não tem placa de vídeo.
+        //
+        // Recusar aqui é o que devolve a queda ao [`super::armar`]. Conduzir o
+        // de software — alocando a amostra de `cbSize` em `colher` — funciona
+        // (30 quadros de 30, chave a pedido), e não é o que este caminho faz:
+        // o codificador do sistema está aqui para tirar o custo da CPU, e o de
+        // software da Microsoft seria um terceiro codificador, sem medida
+        // nenhuma, no lugar do que o §2 escolheu e mediu.
+        //
+        // Depois dos tipos, e não antes: é só então que a resposta vale (o
+        // `cbSize` do de software é zero até a saída ser declarada).
+        //
+        // SAFETY: o transformador é nosso e o fluxo 0 é o único de saída.
+        let fluxo = unsafe { transformador.GetOutputStreamInfo(0) }.map_err(|erro| {
+            recusa(
+                CONFERIR_A_SAIDA,
+                format!("«{nome}» não disse quem aloca as amostras ({erro})"),
+            )
+        })?;
+        if !fornece_as_amostras(fluxo.dwFlags) {
+            return Err(recusa(
+                CONFERIR_A_SAIDA,
+                format!(
+                    "«{nome}» não fornece as próprias amostras de saída (bandeiras 0x{:x}), \
+                     e este caminho só conduz os que fornecem, que são os de hardware",
+                    fluxo.dwFlags
+                ),
+            ));
+        }
+
         // SAFETY: mensagens de ciclo de vida, sem ponteiros nossos.
         unsafe {
             transformador
@@ -336,33 +539,14 @@ impl Codificador {
         }
         .map_err(|erro| recusa("iniciar o fluxo do codificador", erro))?;
 
-        let eventos = if assincrono {
-            Some(
-                transformador
-                    .cast::<IMFMediaEventGenerator>()
-                    .map_err(|erro| recusa("obter a fila de eventos do codificador", erro))?,
-            )
+        if assincrono {
+            transformador
+                .cast::<IMFMediaEventGenerator>()
+                .map(Some)
+                .map_err(|erro| recusa("obter a fila de eventos do codificador", erro))
         } else {
-            None
-        };
-
-        let (largura, altura) = medidas;
-        Ok(Self {
-            ativador,
-            transformador,
-            eventos,
-            resolucao: config.resolucao,
-            medidas,
-            cadencia: config.cadencia,
-            quadros_por_segundo: quadros,
-            teto_bps: config.teto_bps,
-            contador: 0,
-            anel: Vec::with_capacity(ANEL),
-            proxima_do_anel: 0,
-            disse_da_chave: false,
-            // Y inteiro mais um plano de croma com metade das linhas.
-            nv12: vec![0; largura * altura + largura * altura.div_ceil(2)],
-        })
+            Ok(None)
+        }
     }
 
     /// Converte o I420 da captura no NV12 que o Media Foundation aceita.
@@ -511,10 +695,12 @@ impl Codificador {
     fn colher(&self) -> Result<Option<super::QuadroCodificado>, ErroDeVideo> {
         let mut saida = [MFT_OUTPUT_DATA_BUFFER::default()];
         let mut estado = 0_u32;
-        // SAFETY: o vetor de saída é local e o transformador é nosso. Quando o
-        // MFT aloca a amostra — o caso dos de hardware —, ele preenche
-        // `pSample`; quando não aloca, `ProcessOutput` devolve o erro de
-        // transformação que este ramo trata como «ainda não».
+        // **Sem amostra nossa, e só porque `novo` conferiu.** O MFT que chega
+        // até aqui disse que fornece as dele e preenche `pSample`; o que espera
+        // a de quem chama responde `E_INVALIDARG` a esta chamada, e é recusado
+        // em `novo` por isso mesmo — ver o comentário de lá.
+        //
+        // SAFETY: o vetor de saída é local e o transformador é nosso.
         let resultado = unsafe { self.transformador.ProcessOutput(0, &mut saida, &mut estado) };
         if let Err(erro) = resultado {
             // `MF_E_TRANSFORM_NEED_MORE_INPUT` é o codificador dizendo que ainda
@@ -757,8 +943,9 @@ impl super::CodificaVideo for Codificador {
             .contador
             .saturating_add(10_000_000 / i64::from(self.quadros_por_segundo.max(1)));
 
-        // **O caminho síncrono é o simples**, e é o que os MFTs de software
-        // seguem: entrega, colhe, acabou.
+        // **O caminho síncrono é o simples**: entrega, colhe, acabou. É o de um
+        // MFT síncrono que forneça as próprias amostras; o de software da
+        // Microsoft é síncrono e não fornece, e não chega até aqui.
         let Some(eventos) = self.eventos.clone() else {
             // SAFETY: a amostra é nossa e vive até o fim desta função.
             unsafe { self.transformador.ProcessInput(0, &amostra, 0) }
@@ -907,9 +1094,12 @@ mod testes {
     #[test]
     fn o_pedido_de_quadro_chave_vale_no_meio_do_fluxo() {
         let resolucao = Resolucao::P720;
-        let Ok(mut codificador) = Codificador::novo(&config(resolucao)) else {
-            eprintln!("PULADO: esta máquina não deu um codificador de H.264.");
-            return;
+        let mut codificador = match Codificador::novo(&config(resolucao)) {
+            Ok(codificador) => codificador,
+            Err(erro) => {
+                eprintln!("PULADO: esta máquina não deu um codificador de H.264 ({erro}).");
+                return;
+            }
         };
         let mut passo = 0;
         let (_, primeiro) =
@@ -957,9 +1147,12 @@ mod testes {
     #[test]
     fn sai_um_quadro_chave_sozinho_pelo_gop() {
         let resolucao = Resolucao::P720;
-        let Ok(mut codificador) = Codificador::novo(&config(resolucao)) else {
-            eprintln!("PULADO: esta máquina não deu um codificador de H.264.");
-            return;
+        let mut codificador = match Codificador::novo(&config(resolucao)) {
+            Ok(codificador) => codificador,
+            Err(erro) => {
+                eprintln!("PULADO: esta máquina não deu um codificador de H.264 ({erro}).");
+                return;
+            }
         };
         let mut passo = 0;
         let (_, primeiro) =
@@ -980,12 +1173,81 @@ mod testes {
         );
     }
 
+    /// As bandeiras medidas em 12/11/2026, e o que cada uma manda fazer.
+    ///
+    /// 0x103 é o «NVIDIA H.264 Encoder MFT» e 0x100 o «Microsoft AVC DX12
+    /// Encoder», os dois de hardware; 0x0 é o «H264 Encoder MFT» de software.
+    #[test]
+    fn so_quem_fornece_as_amostras_e_conduzido() {
+        assert!(fornece_as_amostras(0x103));
+        assert!(fornece_as_amostras(0x100));
+        assert!(fornece_as_amostras(
+            MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES.0 as u32
+        ));
+        assert!(!fornece_as_amostras(0x0));
+        // Amostra inteira, uma por buffer, tamanho fixo: nenhuma delas diz
+        // quem aloca.
+        assert!(!fornece_as_amostras(0x7));
+    }
+
+    /// **A máquina sem codificador de hardware**: o de software é recusado ao
+    /// armar, e a recusa diz por quê.
+    ///
+    /// O defeito de 12/11/2026, que só o runner do CI mostrou porque só ele não
+    /// tem placa de vídeo: `novo` aceitava o «H264 Encoder MFT» de software, e
+    /// todo quadro morria em `colher` com `E_INVALIDARG` (0x80070057). Com
+    /// `novo` passando, o [`super::super::armar`] nunca caía para o OpenH264 —
+    /// e a pessoa ficava com uma transmissão aberta e sem imagem.
+    ///
+    /// Aqui a enumeração é restrita ao software, que é o que aquela máquina
+    /// enxerga. Os dois desfechos honestos passam: ou `novo` recusa dizendo o
+    /// motivo, ou entrega um codificador **que codifica**. O que reprova é o
+    /// terceiro — armar e não entregar quadro —, que é o defeito.
+    #[test]
+    fn o_codificador_de_software_e_recusado_ao_armar() {
+        let resolucao = Resolucao::P720;
+        let mut codificador = match Codificador::novo_com(&config(resolucao), Busca::SoDeSoftware) {
+            Err(ErroDeVideo::CodecRecusou { operacao, detalhe }) => {
+                if operacao == "procurar um codificador de H.264" {
+                    eprintln!(
+                        "PULADO: esta máquina não tem codificador de H.264 de software ({detalhe})."
+                    );
+                    return;
+                }
+                assert_eq!(
+                    operacao, CONFERIR_A_SAIDA,
+                    "o codificador de software foi recusado por outro motivo ({detalhe}): \
+                     a recusa que este teste guarda é a de quem não fornece as amostras"
+                );
+                assert!(
+                    detalhe.contains("não fornece as próprias amostras"),
+                    "a recusa não diz o motivo a quem lê o registro: {detalhe}"
+                );
+                return;
+            }
+            Err(outro) => panic!("uma recusa sem nome: {outro:?}"),
+            Ok(codificador) => codificador,
+        };
+
+        // Ele disse que fornece as amostras: então tem de entregar um quadro.
+        let mut passo = 0;
+        let saiu = ate_sair(&mut codificador, resolucao, &mut passo, true);
+        assert!(
+            saiu.is_some(),
+            "«{}» foi aceito ao armar e não entregou quadro em vinte entregas",
+            codificador.nome()
+        );
+    }
+
     /// Um quadro de outro tamanho é recusado antes de tocar no sistema.
     #[test]
     fn um_quadro_de_outro_tamanho_e_recusado() {
-        let Ok(mut codificador) = Codificador::novo(&config(Resolucao::P720)) else {
-            eprintln!("PULADO: esta máquina não deu um codificador de H.264.");
-            return;
+        let mut codificador = match Codificador::novo(&config(Resolucao::P720)) {
+            Ok(codificador) => codificador,
+            Err(erro) => {
+                eprintln!("PULADO: esta máquina não deu um codificador de H.264 ({erro}).");
+                return;
+            }
         };
         let erro = codificador
             .codificar(&quadro(Resolucao::P540, 0), true)
@@ -1058,9 +1320,12 @@ mod medida_de_memoria {
         let quadros: Vec<QuadroI420> = (0..60).map(|p| quadro(resolucao, p)).collect();
         let antes = memoria_mb();
 
-        let Ok(mut codificador) = Codificador::novo(&config) else {
-            eprintln!("PULADO: esta máquina não deu um codificador de H.264.");
-            return;
+        let mut codificador = match Codificador::novo(&config) {
+            Ok(codificador) => codificador,
+            Err(erro) => {
+                eprintln!("PULADO: esta máquina não deu um codificador de H.264 ({erro}).");
+                return;
+            }
         };
         let armado = memoria_mb();
 
@@ -1093,6 +1358,44 @@ mod medida_de_memoria {
                 .map(|m| format!("{m:.1}"))
                 .collect::<Vec<_>>()
                 .join(" ")
+        );
+    }
+
+    /// Quanto cem recusas deixam no processo.
+    ///
+    /// Recusar deixou de ser raro: numa máquina sem codificador de hardware o
+    /// de software é recusado **a cada vez que a tela é armada**, e ela é
+    /// rearmada a cada troca de degrau. Uma recusa que não devolvesse a sessão
+    /// do ativador e o `MFStartup` seria o vazamento do relato de campo, só que
+    /// sem transmissão nenhuma por hardware para explicá-lo.
+    ///
+    /// Medido em 12/11/2026, com a enumeração restrita ao software: **−0,6 MB**
+    /// depois de cem recusas com o desmonte de `novo_com`, **+27,6 MB** sem ele.
+    ///
+    /// Não reprova por número, pelo motivo da medida de cima e por mais um: o
+    /// conjunto de trabalho é do processo inteiro, e os outros testes deste
+    /// binário alocam quadros de 1080p ao mesmo tempo — rodando junto com eles
+    /// ela já imprimiu +86 MB com o desmonte no lugar. **O número só responde
+    /// com `--test-threads=1`.**
+    #[test]
+    fn quanto_cem_recusas_deixam_no_processo() {
+        let config = ConfigDoCodificador {
+            medidas: None,
+            resolucao: Resolucao::P720,
+            cadencia: Cadencia::Q30,
+            teto_bps: 2_000_000,
+        };
+        let antes = memoria_mb();
+        let mut recusas = 0;
+        for _ in 0..100 {
+            if Codificador::novo_com(&config, Busca::SoDeSoftware).is_err() {
+                recusas += 1;
+            }
+        }
+        let depois = memoria_mb();
+        eprintln!(
+            "RECUSAS: {recusas} de 100 | antes {antes:.1} MB | depois {depois:.1} MB ({:+.1})",
+            depois - antes
         );
     }
 }

@@ -629,27 +629,55 @@ pub fn armar(
     // responde é «por que este computador ferveu transmitindo», e ela é feita
     // depois do fato, por alguém lendo o arquivo.
     #[cfg(target_os = "windows")]
-    match windows::Codificador::novo(&config) {
-        Ok(codificador) => {
-            tracing::info!(
-                resolucao = ?config.resolucao,
-                "a tela vai pelo codificador do sistema"
-            );
-            return Ok(Box::new(codificador));
-        }
-        Err(erro) => {
-            tracing::info!(
-                %erro,
-                "o codificador do sistema recusou; a tela vai por software"
-            );
-        }
+    {
+        armar_no_windows(biblioteca, config, windows::Busca::DoProduto)
     }
 
-    #[cfg(target_os = "macos")]
-    match macos::Codificador::novo(&config) {
+    #[cfg(not(target_os = "windows"))]
+    {
+        #[cfg(target_os = "macos")]
+        match macos::Codificador::novo(&config) {
+            Ok(codificador) => {
+                tracing::info!(
+                    resolucao = ?config.resolucao,
+                    "a tela vai pelo codificador do sistema"
+                );
+                return Ok(Box::new(codificador));
+            }
+            Err(erro) => {
+                tracing::info!(
+                    %erro,
+                    "o codificador do sistema recusou; a tela vai por software"
+                );
+            }
+        }
+
+        Ok(Box::new(Codificador::novo(biblioteca, config)?))
+    }
+}
+
+/// O [`armar`] do Windows, dizendo onde procurar o codificador do sistema.
+///
+/// Separado por causa da `busca`: é por ela que o teste põe esta máquina no
+/// lugar de uma sem codificador de hardware e confere **a queda inteira** — que
+/// sai um quadro —, e não só a recusa. O produto só passa
+/// [`windows::Busca::DoProduto`].
+///
+/// **As duas linhas do registro dizem qual codificador**, pelo nome que o
+/// sistema dá. «O do sistema» são vários, e a recusa de um deles — a do de
+/// software, que não fornece as próprias amostras — é o que explica, a quem lê
+/// depois, por que a CPU subiu.
+#[cfg(target_os = "windows")]
+fn armar_no_windows(
+    biblioteca: &BibliotecaDeVideo,
+    config: ConfigDoCodificador,
+    busca: windows::Busca,
+) -> Result<Box<dyn CodificaVideo>, ErroDeVideo> {
+    match windows::Codificador::novo_com(&config, busca) {
         Ok(codificador) => {
             tracing::info!(
                 resolucao = ?config.resolucao,
+                codificador = codificador.nome(),
                 "a tela vai pelo codificador do sistema"
             );
             return Ok(Box::new(codificador));
@@ -657,7 +685,7 @@ pub fn armar(
         Err(erro) => {
             tracing::info!(
                 %erro,
-                "o codificador do sistema recusou; a tela vai por software"
+                "o codificador do sistema recusou; a tela vai por software (OpenH264)"
             );
         }
     }
@@ -1225,6 +1253,89 @@ mod testes {
         // deste ponto e o que não aparece num teste de tamanho.
         let plano = vec![1, 2, 3, 9, 9, 4, 5, 6, 9, 9];
         assert_eq!(compactar(&plano, 5, 3, 2), vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    /// **A queda inteira, na máquina sem codificador de hardware**: armar com a
+    /// enumeração restrita ao software entrega um codificador de que sai um
+    /// quadro-chave em Annex-B.
+    ///
+    /// É a outra metade de `windows::testes::o_codificador_de_software_e_recusado_ao_armar`:
+    /// aquele guarda a recusa, este guarda o que a pessoa vê — tela. Antes do
+    /// conserto de 12/11/2026 o `armar` devolvia o «H264 Encoder MFT» de
+    /// software, e todo quadro morria com `E_INVALIDARG` (0x80070057).
+    ///
+    /// Precisa do módulo do Cisco, que o produto não distribui: `SEELE_OPENH264`
+    /// aponta para ele, como nos testes de `tests/`.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn sem_codificador_de_hardware_a_tela_sai_por_software() {
+        let mut pastas = Vec::new();
+        if let Some(apontado) = std::env::var_os("SEELE_OPENH264") {
+            let caminho = std::path::PathBuf::from(apontado);
+            pastas.push(if caminho.is_dir() {
+                caminho
+            } else {
+                caminho
+                    .parent()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or(caminho)
+            });
+        }
+        pastas.push(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("target"),
+        );
+        let biblioteca = match BibliotecaDeVideo::procurar_e_carregar(&pastas) {
+            Ok(biblioteca) => biblioteca,
+            Err(motivo) => {
+                eprintln!(
+                    "PULADO: {motivo}. Sem o módulo do Cisco não há para onde cair; \
+                     aponte-o com SEELE_OPENH264."
+                );
+                return;
+            }
+        };
+
+        let resolucao = Resolucao::P720;
+        let config = ConfigDoCodificador {
+            medidas: None,
+            resolucao,
+            cadencia: Cadencia::Q30,
+            teto_bps: 2_000_000,
+        };
+        let mut codificador = armar_no_windows(&biblioteca, config, windows::Busca::SoDeSoftware)
+            .expect("armar numa máquina sem codificador de hardware");
+
+        let (largura, altura) = (resolucao.largura(), resolucao.altura());
+        let mut primeiro = None;
+        for passo in 0..20 {
+            // Bordas duras, que é o conteúdo de uma tela de trabalho.
+            let luma = (0..largura * altura)
+                .map(|i| {
+                    let (linha, coluna) = (i / largura, i % largura);
+                    if ((coluna + passo) / 8 + linha / 12).is_multiple_of(2) {
+                        235
+                    } else {
+                        16
+                    }
+                })
+                .collect();
+            let croma = vec![128_u8; largura.div_ceil(2) * altura.div_ceil(2)];
+            let quadro = QuadroI420::novo(largura, altura, luma, croma.clone(), croma)
+                .expect("os planos de um I420 montado aqui");
+            if let Some(saiu) = codificador
+                .codificar(&quadro, true)
+                .expect("codificar numa máquina sem codificador de hardware")
+            {
+                primeiro = Some(saiu);
+                break;
+            }
+        }
+        let primeiro = primeiro.expect("nenhum quadro saiu em vinte entregas");
+        assert!(primeiro.chave, "o primeiro quadro não é porta de entrada");
+        assert_eq!(primeiro.bytes.get(..4), Some(&[0, 0, 0, 1][..]));
     }
 
     #[test]
