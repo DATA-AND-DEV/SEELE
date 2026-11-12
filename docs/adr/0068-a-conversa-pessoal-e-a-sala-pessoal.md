@@ -45,7 +45,7 @@ Um lugar só (`irParaOServidor`, em `camada-servidores.js`), e a regra é a mesm
 ## Consequências
 
 - **O app deixa de conseguir ligar para quem só tem a página.** Essa pessoa não hospeda sala, e o app não disca mais a direta. O caminho passa a ser **a pessoa da página ligar para o código de quem tem o app**. A frase de «não localizou» do app diz isso por extenso.
-- **A página só entra numa sala quando o ponto de encontro já repassa a impressão.** Com o ponto antigo no ar, a resposta do sinal vem sem ela, e a página diz que não achou a sala e segue pela direta, que um app novo não atende mais. Por isso o ponto novo tem de estar no ar **antes** de a 1.0 ser publicada (`docs/ponto-de-encontro.md`).
+- **A página só entra numa sala quando o ponto de encontro já repassa a impressão.** Com o ponto antigo no ar, a resposta do sinal vem sem ela: a página tenta a direta, que um app novo não atende mais, e diz que a pessoa está no ar e que não consegue entrar na ligação. Por isso o ponto novo tem de estar no ar **antes** de a 1.0 ser publicada (`docs/ponto-de-encontro.md`).
 - **Um app 0.19.6 e um app 1.0 continuam se falando**: a 0.19.6 tenta a direta, não acha a caixa do app novo, e cai na sala, que já era o recuo dela. No sentido contrário a 1.0 disca a sala, que a 0.19.6 hospeda.
 - **A página 1.0 que liga para um app 0.19.6** acha a sala dele sem a impressão DTLS (a 0.19.6 não a diz) e recua para a conversa direta, que a 0.19.6 ainda atende. Uma página 0.19.6 (uma cópia guardada no aparelho) ligando para um app 1.0 não acha caixa direta nem sabe entrar na sala: não liga.
 - **Entre duas páginas, a conversa direta começa depois de uma pergunta ao ponto** (a sala que não existe): uns dois segundos a mais.
