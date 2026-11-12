@@ -24561,6 +24561,42 @@ confere("a espera apagou o apelido guardado: " + JSON.stringify(e.registros.get(
     );
 }
 
+/// **Toda falha do enlace da página chega à tela com a frase dela.**
+///
+/// O enlace WebRTC da página falha com `{ FalhaDoEnlace: { motivo, detalhe } }`
+/// (`rtc-web.js`, pela `motivoDaFalhaDoEnlace` da `sessao-web.js`), e cada
+/// motivo tem frase no bloco do transporte de `frases.js`. A casca do celular
+/// passa pelo `desfecho` da identidade; a casca larga recebe o objeto inteiro
+/// no `catch` do `conectar` e o entrega à `fraseDeErro`, que não tinha ramo
+/// para ele: «AS DUAS REDES NÃO SE ALCANÇARAM» existia, e o que a pessoa lia
+/// era «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ», com o JSON embaixo
+/// (medido em 12/11/2026).
+///
+/// A lista é lida do `FALHA_DO_ENLACE`, e não repetida aqui: um motivo novo
+/// sem frase acende este teste sozinho. A fonte é a real, no `node`.
+#[test]
+fn toda_falha_do_enlace_da_pagina_chega_a_tela_com_a_frase_dela() {
+    rodar_node(
+        "as falhas do enlace da página",
+        r##"
+const tabela = ler("rtc-web.js").split("const FALHA_DO_ENLACE = Object.freeze({")[1]?.split("\n});")[0] ?? "";
+const motivos = [...tabela.matchAll(/^  \w+: "(\w+)",$/gm)].map((m) => m[1]);
+confere("só " + motivos.length + " motivos lidos de FALHA_DO_ENLACE: o guarda ficou cego (" + motivos.join(", ") + ")",
+  motivos.length >= 10 && motivos.includes("CaminhoNaoAbriu") && motivos.includes("SemWebRtc"));
+const m = mundo({});
+carregar(m, "frases.js");
+const frase = (erro) => vm.runInContext("fraseDeErro(" + JSON.stringify(erro) + ")", m.ctx);
+for (const motivo of motivos) {
+  const dita = frase({ FalhaDoEnlace: { motivo, detalhe: { ice: "failed", conexao: "failed" } } });
+  confere(motivo + " chega à tela como «" + dita.split("\n")[0] + "»", !/ALGO FALHOU/.test(dita) && !dita.includes("FalhaDoEnlace") && dita.length > 20);
+}
+// Um motivo que este arquivo não conhece continua dizendo o que era, em vez de sumir.
+const nova = frase({ FalhaDoEnlace: { motivo: "UmMotivoQueAindaNaoExiste", detalhe: null } });
+confere("um motivo desconhecido ficou sem dizer o que era: " + nova, /ALGO FALHOU/.test(nova) && nova.includes("UmMotivoQueAindaNaoExiste"));
+"##,
+    );
+}
+
 /// **A lista é consumida por todo `compartilhar_tela`** (`seele-ffi`,
 /// `fonte_escolhida`: `swap_remove` da fonte, e com o cache vazio ele REENUMERA
 /// sozinho, com índices novos). A lista que o JS guardou depois de um começo já

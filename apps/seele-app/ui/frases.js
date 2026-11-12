@@ -1056,6 +1056,18 @@ function fraseDeErro(erro, apelido, deOnde) {
     if (erro.ConexaoSeguraNaoVerificada !== undefined) {
       return FRASES_DO_TRANSPORTE.falha.ImpressaoDiferente;
     }
+    // **A falha do enlace da página** (`rtc-web.js`, pela `motivoDaFalhaDoEnlace`
+    // da `sessao-web.js`): cada motivo tem frase no bloco do transporte, e
+    // nenhuma tela larga a lia. O `connect` da casca larga no navegador rejeita
+    // com o objeto inteiro (`entrarPeloEndereco`, na ponte), e ele caía na
+    // `desconhecida`: «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ», com o
+    // JSON embaixo, para uma falha que o produto sabia nomear (medido em
+    // 12/11/2026). Um motivo novo sem frase continua indo à `desconhecida`, que
+    // diz o que era.
+    if (erro.FalhaDoEnlace) {
+      const frase = FRASES_DO_TRANSPORTE.falha[erro.FalhaDoEnlace.motivo];
+      if (typeof frase === "string") return frase;
+    }
     if (erro.PinChanged) {
       return (
         "A CHAVE DO SERVIDOR MUDOU.\n" +
