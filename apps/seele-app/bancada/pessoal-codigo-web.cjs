@@ -5,7 +5,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const engines = require('./playwright.cjs');
-const { registrarRtc, relatarRtc } = require('./diagnostico-rtc.cjs');
+const { registrarRtc, relatarRtc, pulaDuasPaginas } = require('./diagnostico-rtc.cjs');
 const raiz = path.resolve(__dirname, '../../..');
 const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/ui/seele_web.wasm');
 (async () => {
@@ -55,6 +55,9 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
     await a.reload(); assert.equal(await a.evaluate(() => meuCodigoPessoalWeb()), codigoA);
     assert.equal(await a.evaluate(async () => (await servidorConhecido('servidor-antigo')).marcador), 173);
     const amigos = await a.evaluate(() => contatosPessoaisWeb(true)); assert.equal(amigos.length, 2); assert.ok(amigos.every(c => c.nome === 'Nome que eu escolhi')); assert.notEqual(amigos[0].codigo, amigos[1].codigo);
+    // Daqui em diante as duas páginas se ligam por WebRTC, e no WebKit de Linux isso não acontece (`diagnostico-rtc.cjs` conta a
+    // medida). O que veio antes — a identidade durável e a agenda — é de um contexto só, e rodou neste motor.
+    if (pulaDuasPaginas('pessoal-codigo-web.cjs', motor, 'a chamada por código entre as duas páginas (toque, aceite, perfil e retrato, texto, recusa, cancelamento, pino e bloqueio). A identidade durável e a agenda rodaram neste motor.')) continue;
     for (const p of [a, b]) await p.evaluate(async urlDoEncontro => {
      window.estados = []; window.textos = []; window.pares = [];
      window.servico = await criarServicoDeChamadasWeb({ urlDoEncontro, iceServers: [], obterPerfil: async apelido => {

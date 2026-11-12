@@ -6,7 +6,7 @@ const http = require('node:http');
 const {spawn} = require('node:child_process');
 const engines = require('./playwright.cjs');
 const {origemDoProduto} = require('./origem-do-produto.cjs');
-const {registrarRtc,relatarRtc} = require('./diagnostico-rtc.cjs');
+const {registrarRtc,relatarRtc,pulaDuasPaginas} = require('./diagnostico-rtc.cjs');
 const raiz = path.resolve(__dirname, '../../..');
 const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unknown-unknown/release/seele_web.wasm');
 (async()=>{
@@ -122,6 +122,9 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
     console.log(JSON.stringify({motor,origensDoConvite:'PASS'}));
     assert.equal(await b.evaluate(()=>servico.ler().estado),'livre');
     if(process.argv.includes('--so-origem')){await contexto.close();continue;}
+    // Daqui em diante as duas páginas se ligam por WebRTC, e no WebKit de Linux isso não acontece (`diagnostico-rtc.cjs` conta a
+    // medida). O que veio antes — a criptografia e as origens do convite — é de uma página só, e rodou neste motor.
+    if(pulaDuasPaginas('chamada-web.cjs',motor,'a chamada entre as duas páginas (convite, aceite, texto, perda do RTC, revogação, recusa e cancelamento). A criptografia e as origens do convite rodaram neste motor.')){await contexto.close();continue;}
     await b.evaluate(()=>servico.chamar({apelido:'Visitante'}));
     await a.waitForFunction(()=>servico.ler().estado==='tocando',{timeout:12000});
     assert.equal(await b.evaluate(()=>pares.includes(true)),false);

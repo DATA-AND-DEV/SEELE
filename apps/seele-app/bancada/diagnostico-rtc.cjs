@@ -36,6 +36,33 @@
 // - `relatarRtc(rotulo, paginas)`: escreve o relato de cada página no stderr.
 // - `comPrazo(promessa, ms, frase)`: a promessa, ou um erro com a frase quando
 //   o prazo vence — para a espera que não tinha prazo nenhum.
+// - `pulaDuasPaginas(bancada, motor, oQueFicouDeFora)`: se a perna em que duas
+//   páginas se ligam não roda neste motor neste sistema, diz isso na saída e
+//   devolve `true`. Ver abaixo.
+//
+// # O que ele mediu, e o pulo que saiu disso
+//
+// Com o registro no lugar, a segunda execução (43313171939, 12/11/2026) disse o
+// que a primeira não dizia. No WebKit do runner de Linux, nas três bancadas em
+// que **duas páginas** se ligam (`chamada-web.cjs`, `pessoal-web-integrada.cjs`
+// e `pessoal-codigo-web.cjs`):
+//
+// - a sinalização fecha (`signalingState: stable` nas duas);
+// - cada página junta **um** candidato, de host, com nome mDNS
+//   (`871da9ac-….local 41800 typ host`), e recebe o da outra;
+// - `paresDeCandidatos: []`, e o ICE fica em `new` até o prazo.
+//
+// O nome mDNS de uma página não vira endereço na outra. Com os dois enlaces na
+// **mesma** página liga (`compartilhar-pessoal-web.cjs` passou no WebKit na
+// mesma execução). É do WebKit de Linux naquele runner, e não do produto: no
+// macOS as mesmas três passam nos dois motores.
+//
+// Por isso a perna de duas páginas no WebKit **não roda no Linux**, e quem a
+// pula diz que pulou — `PULADO: …` na saída, com o motivo e o que ficou de
+// fora. Pular tem a mesma cor de passar, e pela regra da casa quem precisa
+// saber que a perna rodou liga `SEELE_EXIGE_DUAS_PAGINAS_NO_WEBKIT`: com ela a
+// perna roda no Linux também, e reprova se as páginas não se ligarem — é como
+// se mede de novo, no dia em que o runner ou o WebKit mudarem.
 //
 // Não é bancada: não tem asserção própria. O `check_runtime.rs` o nomeia entre
 // os arquivos da pasta que não são bancada.
@@ -148,4 +175,33 @@ function comPrazo(promessa, ms, frase) {
   return Promise.race([promessa, prazo]).finally(() => clearTimeout(relogio));
 }
 
-module.exports = { registrarRtc, relatoRtc, relatarRtc, comPrazo, registrarNaPagina };
+/**
+ * Por que a perna em que duas páginas se ligam por WebRTC não roda neste
+ * `motor`, neste sistema — ou `null`, quando roda.
+ *
+ * Só o WebKit no Linux, e só sem `SEELE_EXIGE_DUAS_PAGINAS_NO_WEBKIT` (o topo
+ * do arquivo conta a medida). O sistema é lido na hora da pergunta.
+ */
+function porQueNaoDuasPaginas(motor) {
+  if (motor !== "webkit" || process.platform !== "linux") return null;
+  if (process.env.SEELE_EXIGE_DUAS_PAGINAS_NO_WEBKIT) return null;
+  return "a perna de duas páginas no WebKit roda no macOS; no Linux o nome mDNS não atravessa de uma página para a outra";
+}
+
+/**
+ * Se a perna de duas páginas não roda neste `motor` aqui, diz isso **em voz
+ * alta, na saída** — a bancada, o motor, o motivo e `oQueFicouDeFora` — e
+ * devolve `true`; a bancada então segue para o motor seguinte.
+ */
+function pulaDuasPaginas(bancada, motor, oQueFicouDeFora) {
+  const motivo = porQueNaoDuasPaginas(motor);
+  if (!motivo) return false;
+  console.log(
+    `PULADO: ${bancada}, ${motor} em ${process.platform} — ${motivo}.\n` +
+    `  Ficou de fora: ${oQueFicouDeFora}\n` +
+    "  Ligue SEELE_EXIGE_DUAS_PAGINAS_NO_WEBKIT para rodar a perna aqui assim mesmo, e reprovar se as páginas não se ligarem.",
+  );
+  return true;
+}
+
+module.exports = { registrarRtc, relatoRtc, relatarRtc, comPrazo, registrarNaPagina, porQueNaoDuasPaginas, pulaDuasPaginas };

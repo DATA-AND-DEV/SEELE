@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
 const { spawn } = require('node:child_process');
 const engines = require('./playwright.cjs');
-const { registrarRtc, relatarRtc } = require('./diagnostico-rtc.cjs');
+const { registrarRtc, relatarRtc, pulaDuasPaginas } = require('./diagnostico-rtc.cjs');
 const segundosDeEnsaio = Number(process.env.SEELE_SOAK_SECONDS || 0);
 const portaDoSinal = Number(process.env.SEELE_PROVA_SINAL_PORT || 19886);
 assert.ok(Number.isInteger(segundosDeEnsaio) && segundosDeEnsaio >= 0 && segundosDeEnsaio <= 3600);
@@ -74,6 +74,9 @@ function instrumentarPagina() {
     for (let n=0;n<50;n++) { try { const r=await fetch(origem+'/chamada/1'); if(r.ok){pronto=true;break;} } catch {} await new Promise(ok=>setTimeout(ok,100)); }
     assert.ok(pronto, logs);
     for (const engine of (process.env.ENGINE ? [process.env.ENGINE] : ['chromium','webkit'])) {
+      // A prova inteira e o `--so-preparo` esperam «Conversa conectada»: duas páginas ligadas por WebRTC, o que no WebKit de Linux
+      // não acontece (`diagnostico-rtc.cjs` conta a medida). O `--so-formulario` e o `--cancelar-preparo` não ligam ninguém, e rodam.
+      if (!soFormularioInicial && !cancelarPreparoDoConvite && pulaDuasPaginas('pessoal-web-integrada.cjs', engine, 'a conversa inteira pela tela (convite, aceite, texto, voz sintética nos dois sentidos, saída, perda e reentrada pelo mesmo link).')) continue;
       const browser = await engines[engine]().launch({ headless: true });
       // As páginas desta volta, para o diagnóstico do WebRTC de quando ela reprova (`diagnostico-rtc.cjs`).
       let paginas = {};
@@ -354,12 +357,14 @@ function instrumentarPagina() {
         // Chromium passou e o WebKit ficou esperando «Conversa conectada» até o prazo. Antes de fechar o navegador, cada página diz
         // o `iceConnectionState`, o `connectionState` e os candidatos que juntou e recebeu, e o que a tela mostrava.
         for (const [nome, pagina] of Object.entries(paginas)) {
-          console.error(`o que a página ${nome} mostrava (${engine}):`, await pagina.evaluate(() => ({
+          // Em JSON, e não pelo `console.error` de um objeto: ele corta na segunda profundidade, e o que se queria ler — os
+          // candidatos de cada enlace — saía como `candidatosLocais: [Object]` (execução 43313171939, 12/11/2026).
+          console.error(`o que a página ${nome} mostrava (${engine}):\n${JSON.stringify(await pagina.evaluate(() => ({
             fase: document.querySelector('.pessoal-web')?.dataset.fase,
             estado: document.querySelector('.pessoal-web-estado')?.textContent,
             falha: document.querySelector('.pessoal-web-erro')?.textContent,
             enlaces: (globalThis.enlacesDaProva || []).map(enlace => enlace.diagnostico),
-          })).catch(falha => `sem resposta: ${falha}`));
+          })).catch(falha => `sem resposta: ${falha}`), null, 1)}`);
         }
         await relatarRtc(engine, paginas); throw erro;
       } finally { await browser.close(); }

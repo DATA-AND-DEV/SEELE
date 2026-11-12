@@ -917,6 +917,16 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       # Conversas por link e regressões de interface em Chromium/WebKit.
+      #
+      # **Neste runner, a perna em que duas páginas se ligam não roda no WebKit**,
+      # em três bancadas: `chamada-web.cjs`, `pessoal-web-integrada.cjs` e
+      # `pessoal-codigo-web.cjs`. No WebKit de Linux o candidato de host sai com
+      # nome mDNS (`<uuid>.local`), e o nome de uma página não vira endereço na
+      # outra: nenhum par se forma e o ICE fica em `new` (medido na execução
+      # 43313171939; o `diagnostico-rtc.cjs` conta). Cada uma escreve
+      # `PULADO: …` na saída, com o que ficou de fora; a perna roda no macOS, na
+      # bateria do `publicar.sh`. `SEELE_EXIGE_DUAS_PAGINAS_NO_WEBKIT` a traz de
+      # volta aqui, para medir de novo.
       - run: node apps/seele-app/bancada/chamada-web.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
