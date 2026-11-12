@@ -995,10 +995,17 @@ jobs:
   # `62e3f7e` (05/10) já sem `--locked`, dizendo que o lock estava atrás. Não se
   # mediu se o job rodou, nem com que resultado, entre 05/10 e 08/10. Quem
   # aceita `--locked` é o `cargo metadata`, e ele reprova se o lock precisa
-  # mudar. O conserto é local e sem rede: `cargo metadata --offline
-  # --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null`, e comitar o
-  # lock. O teste `o_lock_do_fuzz_lista_o_que_o_seele_proto_declara` diz o mesmo
-  # antes do push.
+  # mudar. O conserto é local e sem rede: `cp Cargo.lock fuzz/Cargo.lock`,
+  # `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1
+  # > /dev/null`, e comitar o lock. A cópia vem antes porque o `metadata`
+  # sozinho resolve o que falta na versão mais nova que achar: em 12/11/2026,
+  # quando este passo reprovou pelo `dimpl` com `aws-lc-rs` do `seele-enlace`,
+  # ele pôs o `aws-lc-sys` 0.47.0, e o produto sai com o 0.46.0. Partindo do lock
+  # do workspace, o cargo mantém as versões do produto e tira o que o fuzz não
+  # usa. Os testes `o_lock_do_fuzz_lista_o_que_os_crates_da_casa_declaram` e
+  # `o_lock_do_fuzz_resolve_como_o_do_workspace` dizem o que dá para dizer
+  # antes do push, só com os arquivos; um recurso novo que só acrescenta uma
+  # dependência a um pacote é este passo que pega.
   #
   # Cada alvo por nome, e cada passo roda mesmo depois de um vermelho, como as
   # bancadas: um alvo que entra em pânico não esconde os outros. O teste

@@ -4500,8 +4500,76 @@ fn dependencias_no_lock(lock: &str, pacote: &str) -> Option<std::collections::BT
     Some(nomes)
 }
 
+/// Os crates deste repositório de que o `fuzz/` depende por caminho, lidos do
+/// `fuzz/Cargo.toml` — e não uma lista escrita aqui: o guarda de baixo lia só o
+/// `seele-proto` quando o `seele-enlace` entrou no manifesto, e foi por ele que
+/// o lock ficou atrás.
+fn crates_da_casa_no_fuzz() -> Vec<String> {
+    let manifesto = std::fs::read_to_string(raiz().join("fuzz/Cargo.toml"))
+        .expect("o fuzz/Cargo.toml é legível");
+    manifesto
+        .lines()
+        .map(str::trim)
+        .filter(|linha| !linha.starts_with('#'))
+        .filter_map(|linha| {
+            let caminho = linha.split("path = \"../crates/").nth(1)?;
+            Some(caminho.split('"').next()?.to_owned())
+        })
+        .collect()
+}
+
+/// O conserto de um `fuzz/Cargo.lock` atrasado, dito pelos dois guardas de
+/// baixo. A cópia vem antes porque o `cargo metadata` sozinho resolve o que
+/// falta na versão mais nova que achar (em 12/11/2026 ele pôs o `aws-lc-sys`
+/// 0.47.0, e o produto sai com o 0.46.0): partindo do lock do workspace, o
+/// cargo mantém as versões do produto e só tira o que o fuzz não usa.
+const CONSERTO_DO_LOCK_DO_FUZZ: &str =
+    "Atualize sem rede, no próprio repositório: `cp Cargo.lock fuzz/Cargo.lock` e \
+     `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null` \
+     (o cargo tira o que o fuzz não usa e mantém as versões do workspace), e comite o lock";
+
+/// Os pacotes de um `Cargo.lock`: de `(nome, versão)` para os nomes das
+/// dependências. Como em [`dependencias_no_lock`], um nome que o lock
+/// desambigua com a versão (`"sha2 0.11.0"`) entra só pelo nome.
+fn pacotes_do_lock(
+    lock: &str,
+) -> std::collections::BTreeMap<(String, String), std::collections::BTreeSet<String>> {
+    let mut pacotes = std::collections::BTreeMap::new();
+    for bloco in lock.split("[[package]]").skip(1) {
+        let campo = |nome: &str| {
+            bloco
+                .lines()
+                .find_map(|linha| linha.trim().strip_prefix(nome))
+                .map(|valor| valor.trim().trim_matches('"').to_owned())
+        };
+        let (Some(nome), Some(versao)) = (campo("name = "), campo("version = ")) else {
+            continue;
+        };
+        let mut dependencias = std::collections::BTreeSet::new();
+        let mut dentro = false;
+        for linha in bloco.lines().map(str::trim) {
+            if linha.starts_with("dependencies = [") {
+                dentro = true;
+                continue;
+            }
+            if !dentro {
+                continue;
+            }
+            if linha == "]" {
+                break;
+            }
+            let item = linha.trim_matches(|c| c == '"' || c == ',');
+            if let Some(dependencia) = item.split_whitespace().next() {
+                dependencias.insert(dependencia.to_owned());
+            }
+        }
+        pacotes.insert((nome, versao), dependencias);
+    }
+    pacotes
+}
+
 #[test]
-fn o_lock_do_fuzz_lista_o_que_o_seele_proto_declara() {
+fn o_lock_do_fuzz_lista_o_que_os_crates_da_casa_declaram() {
     // **O lock do fuzz ficou atrás do `seele-proto`, e o job não tinha como dizer.**
     //
     // O que o histórico mostra: o `serde_json` entrou no
@@ -4513,33 +4581,131 @@ fn o_lock_do_fuzz_lista_o_que_o_seele_proto_declara() {
     // mediu se o job rodou, nem com que resultado, entre 05/10 e 08/10. Agora o
     // job confere o lock com `--locked`, e este teste diz o mesmo sem rede e sem
     // o nightly, na máquina de quem mexeu no manifesto.
-    let manifesto = std::fs::read_to_string(raiz().join("crates/seele-proto/Cargo.toml"))
-        .expect("o manifesto do seele-proto é legível");
+    //
+    // Para todo crate da casa que o `fuzz/Cargo.toml` nomeia, e não só o
+    // `seele-proto`: o fuzz depende também do `seele-enlace`.
     let lock = std::fs::read_to_string(raiz().join("fuzz/Cargo.lock"))
         .expect("o fuzz/Cargo.lock é legível");
-
-    let declaradas = dependencias_declaradas(&manifesto);
-    assert!(
-        declaradas.contains("serde"),
-        "o teste não leu as dependências do `seele-proto` — leu {declaradas:?} —, e sem elas a \
-         comparação abaixo passaria sem conferir nada"
-    );
-    let Some(no_lock) = dependencias_no_lock(&lock, "seele-proto") else {
-        panic!(
-            "o fuzz/Cargo.lock não tem o pacote `seele-proto`: o fuzz compila contra ele, e o \
-             lock não sabe disso"
+    let da_casa = crates_da_casa_no_fuzz();
+    for esperado in ["seele-proto", "seele-enlace"] {
+        assert!(
+            da_casa.iter().any(|nome| nome == esperado),
+            "o teste não achou o `{esperado}` entre os crates de que o fuzz depende por caminho \
+             — leu {da_casa:?} do fuzz/Cargo.toml —, e sem ele a comparação abaixo deixaria de \
+             conferi-lo"
         );
-    };
+    }
 
-    let faltam: Vec<&String> = declaradas.difference(&no_lock).collect();
-    let sobram: Vec<&String> = no_lock.difference(&declaradas).collect();
+    for nome in &da_casa {
+        let manifesto = std::fs::read_to_string(raiz().join(format!("crates/{nome}/Cargo.toml")))
+            .unwrap_or_else(|erro| panic!("o manifesto do `{nome}` é legível: {erro}"));
+        let declaradas = dependencias_declaradas(&manifesto);
+        assert!(
+            !declaradas.is_empty(),
+            "o teste não leu as dependências do `{nome}`, e sem elas a comparação abaixo passaria \
+             sem conferir nada"
+        );
+        let Some(no_lock) = dependencias_no_lock(&lock, nome) else {
+            panic!(
+                "o fuzz/Cargo.lock não tem o pacote `{nome}`: o fuzz compila contra ele, e o \
+                 lock não sabe disso"
+            );
+        };
+
+        let faltam: Vec<&String> = declaradas.difference(&no_lock).collect();
+        let sobram: Vec<&String> = no_lock.difference(&declaradas).collect();
+        assert!(
+            faltam.is_empty() && sobram.is_empty(),
+            "o fuzz/Cargo.lock está atrasado em relação ao `{nome}`: faltam {faltam:?} e \
+             sobram {sobram:?}. O job `fuzz curto` roda `cargo metadata --locked` e reprovaria \
+             antes do primeiro alvo. {CONSERTO_DO_LOCK_DO_FUZZ}"
+        );
+    }
+}
+
+#[test]
+fn o_lock_do_fuzz_resolve_como_o_do_workspace() {
+    // **O lock do fuzz ficou atrás de novo, e o guarda de cima não viu.**
+    //
+    // O `seele-enlace` passou a ligar o `dimpl` com `features = ["aws-lc-rs"]`
+    // (ADR 0063, emenda do RUSTSEC-2026-0387). A lista de dependências do
+    // `seele-enlace` não mudou — o `dimpl` continuou nela —, e o que mudou foi
+    // o que o `dimpl` arrasta: o `fuzz/Cargo.lock` ficou com o `dimpl` sobre o
+    // RustCrypto (`aes-gcm`, `p256`, `x25519-dalek`…) e sem `aws-lc-rs`,
+    // `aws-lc-sys`, `cmake`, `dunce`, `fs_extra` e `pkg-config`. O
+    // `cargo metadata --locked` do job `fuzz curto` reprovou em 12/11/2026
+    // (execução 43264412497), na primeira vez em que alguém o disparou.
+    //
+    // O que este guarda confere, só com os dois arquivos:
+    //
+    // 1. todo pacote do lock do fuzz que o lock do workspace também nomeia
+    //    está **numa versão que o workspace tem** — o fuzz exercita o que o
+    //    produto leva, e não uma versão ao lado;
+    // 2. nessa versão, o pacote **não depende de nada a mais** do que no
+    //    workspace. O fuzz liga os crates da casa sem pedir recurso nenhum, e
+    //    o workspace os liga com tudo o que os outros membros pedem: o que o
+    //    lock do fuzz lista é sempre um pedaço do que o do workspace lista. Um
+    //    pacote com dependência a mais é um lock resolvido para um manifesto
+    //    que já mudou.
+    //
+    // **O que ele não vê**, dito para ninguém ler mais do que há: um recurso
+    // novo que só **acrescenta** uma dependência a um pacote. Do lado do
+    // workspace, «a mais» é também o que os outros membros ligam (o `tokio`
+    // tem `parking_lot` lá e não aqui), e os dois arquivos não distinguem um
+    // caso do outro. Quem pega esse é o `cargo metadata --locked` do job.
+    let fuzz = pacotes_do_lock(
+        &std::fs::read_to_string(raiz().join("fuzz/Cargo.lock"))
+            .expect("o fuzz/Cargo.lock é legível"),
+    );
+    let casa = pacotes_do_lock(
+        &std::fs::read_to_string(raiz().join("Cargo.lock"))
+            .expect("o Cargo.lock do workspace é legível"),
+    );
+    let nomes_da_casa: std::collections::BTreeSet<&str> =
+        casa.keys().map(|(nome, _)| nome.as_str()).collect();
+
+    let mut comparados = 0_usize;
+    let mut outra_versao = Vec::new();
+    let mut a_mais = Vec::new();
+    for ((nome, versao), dependencias) in &fuzz {
+        // O `seele-fuzz`, o `libfuzzer-sys` e o `arbitrary`: só o fuzz os tem.
+        if !nomes_da_casa.contains(nome.as_str()) {
+            continue;
+        }
+        let Some(na_casa) = casa.get(&(nome.clone(), versao.clone())) else {
+            let da_casa: Vec<&str> = casa
+                .keys()
+                .filter(|(outro, _)| outro == nome)
+                .map(|(_, versao)| versao.as_str())
+                .collect();
+            outra_versao.push(format!(
+                "{nome} {versao} (o workspace tem {})",
+                da_casa.join(", ")
+            ));
+            continue;
+        };
+        comparados += 1;
+        let sobram: Vec<&str> = dependencias
+            .difference(na_casa)
+            .map(String::as_str)
+            .collect();
+        if !sobram.is_empty() {
+            a_mais.push(format!("{nome} {versao}: {}", sobram.join(", ")));
+        }
+    }
+
     assert!(
-        faltam.is_empty() && sobram.is_empty(),
-        "o fuzz/Cargo.lock está atrasado em relação ao `seele-proto`: faltam {faltam:?} e \
-         sobram {sobram:?}. O job `fuzz curto` roda `cargo metadata --locked` e reprovaria \
-         antes do primeiro alvo. Atualize sem rede, no próprio repositório: \
-         `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1 > \
-         /dev/null`, e comite o lock"
+        comparados > crates_da_casa_no_fuzz().len(),
+        "o teste comparou {comparados} pacotes entre o fuzz/Cargo.lock e o Cargo.lock, e isso \
+         não é aprovação: ele não leu os arquivos como esperava"
+    );
+    assert!(
+        outra_versao.is_empty() && a_mais.is_empty(),
+        "o fuzz/Cargo.lock não resolve como o Cargo.lock do workspace.\n\
+         Numa versão que o workspace não tem: {outra_versao:#?}\n\
+         Com dependência que o workspace não lista para o mesmo pacote: {a_mais:#?}\n\
+         O job `fuzz curto` roda `cargo metadata --locked` e reprova antes do primeiro alvo \
+         quando o lock precisa mudar. {CONSERTO_DO_LOCK_DO_FUZZ}"
     );
 }
 
