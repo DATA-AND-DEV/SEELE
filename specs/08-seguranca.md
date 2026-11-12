@@ -47,6 +47,9 @@ O que a linha 1 garantia pelo TLS do QUIC continua, assim:
   - A sinalização (ENC/3 e `/sinal/1`) é terceiro não confiável. Ela só leva endereços e a credencial ICE, e uma resposta falsa custa não entrar.
   - Pendente no A: um banco antigo cuja chave guardada não seja P-256 é recusado com erro nomeado, e nunca regerado calado. Regerar troca a chave e dispara «A CHAVE MUDOU».
 - **A sala pessoal (Ed25519).** O DTLS P-256 da sala é efêmero. A identidade vai na apresentação `0x03` do `ctl`: a chave e a assinatura da sala sobre `rótulo ‖ fp_dtls`, conferidas pelo `ConfereCodigo` antes do `Hello`.
+  - **A página confere a mesma coisa** (1.0, ADR 0068), no `.wasm` (`seele_web::ligacao::Ligacao::apresentada`), com os mesmos 96 bytes. O `Hello` não existe até a conferência passar: a fila de saída nasce vazia.
+  - **A impressão DTLS que o ponto de encontro entrega à página é pista, e não prova.** O navegador só fecha o DTLS com a impressão escrita antes, e a da sala não está em convite nenhum: a sala a diz no `ATENDE`, e o ponto a repassa no `AQUI` do sinal. A assinatura da sala é sobre **essa** impressão, que o navegador exigiu: um ponto que a troque consegue «não entra» (a recusa é `CodigoNaoBate`, e a sala nem toca), e nada mais.
+  - **O pino é a chave inteira**, nos dois: depois de uma ligação completa, uma chave diferente com o mesmo código é `SePassouPorCodigo`. Na página ele mora no contato da conversa direta, no IndexedDB da origem.
 - **A prova do cliente.**
   - O rótulo novo é `SEELE/2 prova-de-cliente\0`, e a assinatura cobre `rótulo ‖ fp_servidor ‖ fp_dtls_cliente ‖ nonce`.
   - O servidor confere o `fp_dtls_cliente` contra o certificado DTLS que viu.

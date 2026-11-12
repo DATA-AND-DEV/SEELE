@@ -47,10 +47,12 @@ Um lugar só (`irParaOServidor`, em `camada-servidores.js`), e a regra é a mesm
 - **O app deixa de conseguir ligar para quem só tem a página.** Essa pessoa não hospeda sala, e o app não disca mais a direta. O caminho passa a ser **a pessoa da página ligar para o código de quem tem o app**. A frase de «não localizou» do app diz isso por extenso.
 - **A página só entra numa sala quando o ponto de encontro já repassa a impressão.** Com o ponto antigo no ar, a resposta do sinal vem sem ela, e a página diz que não achou a sala e segue pela direta, que um app novo não atende mais. Por isso o ponto novo tem de estar no ar **antes** de a 1.0 ser publicada (`docs/ponto-de-encontro.md`).
 - **Um app 0.19.6 e um app 1.0 continuam se falando**: a 0.19.6 tenta a direta, não acha a caixa do app novo, e cai na sala, que já era o recuo dela. No sentido contrário a 1.0 disca a sala, que a 0.19.6 hospeda.
-- **A página 1.0 não liga para a caixa direta de um app 0.19.6 antes de tentar a sala dele**; ela acha a sala (com o ponto novo) e entra. Uma página 0.19.6 ligando para um app 1.0 não acha caixa direta nem sabe entrar na sala: lê «não está disponível».
+- **A página 1.0 que liga para um app 0.19.6** acha a sala dele sem a impressão DTLS (a 0.19.6 não a diz) e recua para a conversa direta, que a 0.19.6 ainda atende. Uma página 0.19.6 (uma cópia guardada no aparelho) ligando para um app 1.0 não acha caixa direta nem sabe entrar na sala: não liga.
+- **Entre duas páginas, a conversa direta começa depois de uma pergunta ao ponto** (a sala que não existe): uns dois segundos a mais.
 - **O grupo depende de quem hospeda.** Quando quem atendeu a primeira ligação sai, todos leem o fim da chamada. Não há passagem de sala.
 - **Quem entra pela página numa sala é uma sessão a mais na página**, com o que a página tem: a voz e o texto, a tela pelo canal (0067), e a reconexão pelo mesmo código.
-- **A página não guarda o pino da chave inteira** (0060, «Força»): a cada ligação ela confere os 75 bits do código. Fica como limite conhecido da 1.0.
+- **A página também fixa a chave inteira** (0060, «Força»): depois de uma ligação completa, a chave de quem atendeu fica no contato daquela pessoa (o mesmo da conversa direta, no IndexedDB da origem), e a ligação seguinte confere 256 bits. Quem limpa os dados do navegador volta a conferir pelos 75 do código.
+- **Quem hospeda não é avisado de quem ligou com a ligação cheia**, nem de um bloqueado: a campainha recusa sem tocar, e só o registro fica sabendo.
 - O ponto de encontro ganha dois campos opcionais no fio (a segunda linha do `ATENDE` e o terceiro campo do `AQUI` do sinal) e **nenhum estado novo**.
 
 ## O que não está medido
