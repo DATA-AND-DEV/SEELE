@@ -466,6 +466,21 @@ apresentação que a chave dela assina (`specs/08-seguranca.md`).
    ponto reimplantado.
 3. **Publicar a 1.0** (o app e a página).
 
+**Feito no ponto oficial em 12/11/2026.** O `seele-encontro` do commit
+`d287e2cd` foi compilado na própria VPS (`/root/SEELE`, `cargo build --release
+--locked -p seele-encontro`, Rust 1.97.1), ensaiado numa porta à parte e posto
+no lugar do de 28/10 (que era o do commit `5dfe9c59`, da 0.18). O binário
+anterior ficou ao lado, em `/opt/seele/seele-encontro.2026-11-12.bak`; voltar é
+copiá-lo de volta e `systemctl restart seele-encontro`. O reinício derrubou os
+registros em memória, que os anfitriões refazem sozinhos.
+
+Conferido de fora depois da troca: `sondar --exige-enc2 --exige-enc3` nas duas
+famílias, o sinal com o CORS de `https://seele.sh`, e a conferência prévia do
+`publicar.sh`. **A impressão DTLS no sinal não foi exercitada no ponto
+oficial**: as bancadas recusam o ponto de produção de propósito, e a
+conferência de ponta a ponta de lá é uma ligação de uma página para um app
+1.0, que ainda não foi feita.
+
 **Enquanto o ponto antigo estiver no ar com a 1.0 publicada**: de app para app
 tudo funciona. A página 1.0 que liga para um app 1.0 acha a sala e não recebe
 a impressão: ela diz que a pessoa está no ar e que não consegue entrar na
