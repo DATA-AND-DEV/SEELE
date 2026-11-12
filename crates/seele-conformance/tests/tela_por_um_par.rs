@@ -3451,8 +3451,19 @@ impl Rele {
             let mut balde = vec![0_u8; 64 * 1024];
             let mut cliente: Option<SocketAddr> = None;
             loop {
-                let Ok((quantos, de)) = socket.recv_from(&mut balde).await else {
-                    return;
+                let (quantos, de) = match socket.recv_from(&mut balde).await {
+                    Ok(lido) => lido,
+                    // **No Windows, isto não é o socket que morreu**: o que este
+                    // relé mandou a uma porta já fechada — o socket de uma
+                    // tentativa de reconexão que acabou — volta como erro da
+                    // leitura seguinte (`WSAECONNRESET`, 10054). O relé que
+                    // saía aqui morria na primeira, e quem assiste nunca
+                    // reconectava (medido em 12/11/2026: a prova da queda de
+                    // uma conexão só reprovava sempre no Windows, e passa com
+                    // o relé seguindo). O `Ponta` do produto trata o mesmo
+                    // erro do mesmo jeito.
+                    Err(erro) if erro.kind() == std::io::ErrorKind::ConnectionReset => continue,
+                    Err(_) => return,
                 };
                 let Some(pedaco) = balde.get(..quantos) else {
                     continue;
