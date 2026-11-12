@@ -97,6 +97,7 @@ o ganho é de estética.
 | [0065](0065-o-app-testa-os-comandos-com-dev-dependencies.md) | O app testa os comandos de verdade: dev-dependencies nominais, produção intacta | **aceito** | — (decisão do coordenador da 0.17; emenda o `0002`) |
 | [0066](0066-a-tela-fica-no-canal-confiavel-na-1-0.md) | Na 1.0 a tela fica no canal confiável, e o quadro continua indo à janela em base64 | **aceito por default** | — (medida de 10/11/2026; RTP fica como projeto próprio depois da 1.0) |
 | [0067](0067-o-video-vai-por-rtp-na-1-0.md) | Na 1.0 o vídeo da tela e da câmera vai por RTP, e a sala passa a carregar quadros | **aceito** | substitui o 0066 na parte do canal (medidas de 10/11/2026) |
+| [0068](0068-a-conversa-pessoal-e-a-sala-pessoal.md) | A conversa pessoal é a sala pessoal; a direta sai do app e fica na página, a dois | **aceito** | emenda o 0060 (a página liga pelo código); sobre o 0059 e o 0063 (decisão de 12/11/2026) |
 
 ## O que ainda não tem ADR
 
