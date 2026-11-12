@@ -621,8 +621,25 @@ jobs:
       # Ela é lenta: 561 s num Mac M-series em 15/10/2026, contra uns 74 das
       # outras 18 somadas. O prazo é três vezes isso, para um runner mais lento.
       - run: python3 tools/bancada-do-celular.py "$RUNNER_TEMP/bancada-do-celular"
+        id: bancada-do-celular
         if: ${{ !cancelled() }}
         timeout-minutes: 30
+      # **As fotos de uma bancada do celular vermelha sobem como artefato.** A
+      # pasta fica na temporária do runner, que some no fim do job: em
+      # 12/11/2026 (execução 43264412497) o G3 disse «o desktop mudou em
+      # (1308, 8, 1399, 15)» e as duas fotos que ele comparou não existiam mais
+      # para ninguém olhar. Só quando ela reprova (ou estoura o prazo): verde,
+      # as fotos não dizem nada que o registro já não diga. O caminho é
+      # `runner.temp`, e não `$RUNNER_TEMP`: o `path` de uma ação não passa por
+      # shell. O teste `a_bancada_do_celular_vermelha_sobe_as_fotos`, em
+      # `xtask/tests/empacotamento.rs`, exige este passo e a mesma pasta.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.bancada-do-celular.outcome == 'failure' }}
+        with:
+          name: bancada-do-celular
+          path: ${{ runner.temp }}/bancada-do-celular
+          retention-days: 7
+          if-no-files-found: warn
       # A área útil da 0.17 (`area-util.cjs`): cada tela na superfície inteira, no desktop e no celular de verdade (a largura real
       # de cada tela e não só a da raiz, a rolagem própria, o foco preso das camadas, o teclado simulado sobre campos de texto,
       # o aviso do endereço novo). Com `--webkit`, UMA execução mede os DOIS motores (area-util.cjs, `motores`): o Chromium que o

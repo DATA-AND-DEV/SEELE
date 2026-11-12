@@ -5410,6 +5410,71 @@ fn o_ci_e_o_publicar_escrevem_o_mesmo_manifesto_da_portaria() {
 }
 
 #[test]
+fn a_bancada_do_celular_vermelha_sobe_as_fotos() {
+    // **A bancada do celular grava as fotos na temporária do runner, que some
+    // no fim do job.** Em 12/11/2026 (execução 43264412497) o G3 disse «o
+    // desktop mudou em (1308, 8, 1399, 15)», e as duas fotos que ele comparou
+    // não existiam mais: só o `target/area-util` subia como artefato.
+    let passos = passos_do_job_do_ci("bancadas");
+    let achada = passos.iter().enumerate().find(|(_, passo)| {
+        comando_do_passo(passo)
+            .is_some_and(|comando| comando.starts_with("python3 tools/bancada-do-celular.py "))
+    });
+    let Some((posicao_da_bancada, bancada)) = achada else {
+        panic!("o job `bancadas` do ci.yml não roda mais a `tools/bancada-do-celular.py`");
+    };
+    let comando = comando_do_passo(bancada).unwrap_or_default();
+    // A pasta das fotos, como o passo a escreve: `"$RUNNER_TEMP/<pasta>"`.
+    let Some(pasta) = comando
+        .split_whitespace()
+        .nth(2)
+        .map(|argumento| argumento.trim_matches('"'))
+        .and_then(|argumento| argumento.strip_prefix("$RUNNER_TEMP/"))
+    else {
+        panic!(
+            "a bancada do celular não grava mais numa pasta de `$RUNNER_TEMP` — `{comando}` —, e \
+             este guarda não sabe que pasta o artefato tem de levar"
+        );
+    };
+    let Some(id) = bancada
+        .iter()
+        .find_map(|linha| linha.strip_prefix("id:").map(str::trim))
+    else {
+        panic!(
+            "o passo da bancada do celular não tem `id:`, e o passo do artefato não tem como \
+             perguntar se ela reprovou: {bancada:?}"
+        );
+    };
+
+    let caminho = format!("path: ${{{{ runner.temp }}}}/{pasta}");
+    let achado = passos.iter().enumerate().find(|(_, passo)| {
+        passo
+            .iter()
+            .any(|linha| linha == "uses: actions/upload-artifact@v4")
+            && passo.contains(&caminho)
+    });
+    let Some((posicao_do_upload, upload)) = achado else {
+        panic!(
+            "o job `bancadas` do ci.yml não sobe a pasta das fotos da bancada do celular com \
+             `actions/upload-artifact@v4` e `{caminho}` (o `path` de uma ação não expande \
+             `$RUNNER_TEMP`): uma bancada vermelha fica sem as fotos que a explicam"
+        );
+    };
+    assert!(
+        posicao_do_upload > posicao_da_bancada,
+        "o artefato da bancada do celular sobe antes de ela rodar, e leva uma pasta vazia"
+    );
+    let condicao = condicao_do_passo(upload).unwrap_or_default();
+    assert!(
+        condicao.contains(&format!("steps.{id}.outcome == 'failure'"))
+            && condicao.contains("!cancelled()"),
+        "o artefato da bancada do celular tem de subir quando **ela** reprova, mesmo com outro \
+         passo vermelho antes: `if: ${{{{ !cancelled() && steps.{id}.outcome == 'failure' }}}}`, \
+         e a condição é `{condicao}`. Sem `if:`, um passo vermelho de antes pula o artefato"
+    );
+}
+
+#[test]
 fn os_testes_do_workspace_nao_param_no_primeiro_binario_vermelho() {
     // **O `cargo test --workspace` para no primeiro binário de teste que
     // reprova**, e os que viriam depois não ficam nem verdes nem vermelhos. Na
