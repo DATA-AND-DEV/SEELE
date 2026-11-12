@@ -19,7 +19,7 @@ use seele_web::ligacao::{Ligacao, Passo, Pedido};
 
 fn pedido(apelido: &str) -> Pedido {
     Pedido {
-        sala_pessoal: false,
+        codigo: None,
         apelido: apelido.into(),
         chave_publica: [5; 32],
         impressao: [7; 32],
@@ -249,4 +249,81 @@ fn o_apelido_grande_demais_e_o_do_desktop() {
     assert_eq!(navegador, desktop);
     // E o teto é o mesmo nos dois: um byte a menos passa.
     assert!(Ligacao::abrir(pedido(&"x".repeat(MAX_NICKNAME_LEN))).is_ok());
+}
+
+/// **Quem atendeu uma ligação pelo código não é o dono dele** (ADR 0068): a
+/// página confere a apresentação da sala no `.wasm`, e o desktop no
+/// `ConfereCodigo`. A mesma apresentação tem de dar a mesma recusa nos dois, com
+/// os mesmos campos, porque a frase da casca sai deles.
+#[test]
+fn quem_atendeu_nao_e_o_dono_do_codigo_da_a_mesma_recusa_nos_dois() {
+    use ed25519_dalek::{Signer, SigningKey};
+    use seele_core::confere_codigo::ConfereCodigo;
+    use seele_proto::codigo::Codigo;
+
+    const DTLS: [u8; 32] = [0x5A; 32];
+    let dona = SigningKey::from_bytes(&[42; 32]);
+    let outra = SigningKey::from_bytes(&[7; 32]);
+    let publica = |chave: &SigningKey| chave.verifying_key().to_bytes();
+    let codigo = Codigo::da_chave(&publica(&dona));
+    let apresentacao = |chave: &SigningKey, dtls: &[u8; 32]| {
+        let mut bytes = publica(chave).to_vec();
+        bytes.extend_from_slice(
+            &chave
+                .sign(&seele_proto::assinatura::apresentacao_da_sala(dtls))
+                .to_bytes(),
+        );
+        bytes
+    };
+    /// O caso, a apresentação que quem atendeu mandou, e o pino guardado.
+    type Caso = (&'static str, Vec<u8>, Option<[u8; 32]>);
+    let casos: [Caso; 4] = [
+        ("a chave de outra pessoa", apresentacao(&outra, &DTLS), None),
+        (
+            "a assinatura sobre outro DTLS",
+            apresentacao(&dona, &[0x11; 32]),
+            None,
+        ),
+        ("um servidor, sem apresentação", Vec::new(), None),
+        (
+            "a chave certa contra o pino de outra",
+            apresentacao(&dona, &DTLS),
+            Some(publica(&outra)),
+        ),
+    ];
+    for (caso, apresentacao, pino) in casos {
+        let do_desktop = do_desktop(&ConnectError::CodigoNaoConfere(
+            ConfereCodigo::novo(
+                codigo,
+                pino.map(|chave| seele_proto::transport::key_fingerprint(&chave)),
+            )
+            .confere_apresentacao(&apresentacao, &DTLS)
+            .expect_err("o desktop aceitou quem não é o dono do código"),
+        ));
+        let mut ligacao = Ligacao::abrir(Pedido {
+            codigo: Some(codigo),
+            ..pedido("marcela")
+        })
+        .unwrap();
+        let do_navegador = ligacao
+            .apresentada(&apresentacao, &DTLS, pino.as_ref())
+            .expect_err("a página aceitou quem não é o dono do código");
+        assert_eq!(do_navegador, do_desktop, "{caso}");
+        assert!(
+            ligacao.para_o_fio().is_empty(),
+            "{caso}: a página disse `Hello` a quem não é o dono do código"
+        );
+    }
+
+    // E a sala certa entra nos dois, com a mesma chave provada.
+    let certa = apresentacao(&dona, &DTLS);
+    let no_desktop = ConfereCodigo::novo(codigo, None)
+        .confere_apresentacao(&certa, &DTLS)
+        .expect("o desktop recusou a sala certa");
+    let mut ligacao = Ligacao::abrir(Pedido {
+        codigo: Some(codigo),
+        ..pedido("marcela")
+    })
+    .unwrap();
+    assert_eq!(ligacao.apresentada(&certa, &DTLS, None), Ok(no_desktop));
 }

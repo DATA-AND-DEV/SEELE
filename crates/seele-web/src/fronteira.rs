@@ -23,6 +23,8 @@
 //! |---|---|---|
 //! | `ligacao_abrir(pedido)` | 0 | nada: o `Hello` espera em `ligacao_para_o_fio` |
 //! | | 1 | `{"recusa": ConnectionError}` ou `{"erro": "json", "texto": …}` |
+//! | `ligacao_apresentada(visto)` | 0 | `{"chave": hex64}`: a apresentação da sala conferiu, e o `Hello` espera em `ligacao_para_o_fio` |
+//! | | 1 | `{"recusa": ConnectionError}`: quem atendeu não é o dono do código, e nada sai |
 //! | `ligacao_chegou(bytes)` | 0 | `{"passos": […]}` |
 //! | | 1 | `{"erro": "sem-ligacao"}` |
 //! | `ligacao_assinado(assinatura)` | 0 | `{"passos": […]}` |
@@ -581,6 +583,66 @@ pub unsafe extern "C" fn ligacao_abrir(ptr: *const u8, len: usize) -> u32 {
             1,
         ),
     }
+}
+
+/// **Quem atendeu uma ligação pelo código, conferido antes do `Hello`** (ADR
+/// 0068; [`Ligacao::apresentada`]): `{"apresentacao": hex, "impressao_dtls":
+/// hex64, "pino": hex64 | null}`. A apresentação é a mensagem `0x03` do
+/// anfitrião, a impressão é a que o navegador exigiu do DTLS, e o pino é a
+/// chave de uma ligação completa anterior.
+///
+/// Devolve 0 com `{"chave": hex64}`, ou 1 com `{"recusa": ConnectionError}`
+/// (ou `{"erro": "sem-ligacao"}`). **Tudo o que não se lê é recusa**: um campo
+/// que falta ou um hex torto chega à conferência como uma apresentação que não
+/// prova nada, e a entrada acaba como a de quem não é o dono do código.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_apresentada(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let lido: serde_json::Value = serde_json::from_slice(bytes).unwrap_or_default();
+    let texto = |campo: &str| lido.get(campo).and_then(serde_json::Value::as_str);
+    let apresentacao = texto("apresentacao")
+        .and_then(bytes_de_hex)
+        .unwrap_or_default();
+    let impressao = texto("impressao_dtls").and_then(crate::ligacao::bytes_do_hex);
+    let pino = texto("pino").and_then(crate::ligacao::bytes_do_hex);
+    com_a_ligacao(|ligacao| {
+        // Sem a impressão não há sobre o que conferir a assinatura: a
+        // apresentação vazia leva à mesma recusa, e fecha a entrada.
+        let visto = match impressao {
+            Some(impressao) => ligacao.apresentada(&apresentacao, &impressao, pino.as_ref()),
+            None => ligacao.apresentada(&[], &[0; 32], None),
+        };
+        match visto {
+            Ok(chave) => dizer(
+                serde_json::json!({ "chave": crate::ligacao::hex_de(&chave) })
+                    .to_string()
+                    .into_bytes(),
+                0,
+            ),
+            Err(recusa) => dizer(
+                serde_json::json!({ "recusa": recusa })
+                    .to_string()
+                    .into_bytes(),
+                1,
+            ),
+        }
+    })
+}
+
+/// Bytes em hex, de qualquer comprimento par. `None` para o que não é hex.
+fn bytes_de_hex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.is_ascii() || !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    hex.as_bytes()
+        .chunks(2)
+        .map(|par| u8::from_str_radix(std::str::from_utf8(par).ok()?, 16).ok())
+        .collect()
 }
 
 /// Bytes do fluxo de controle. Devolve 0 com `{"passos": […]}`
@@ -2617,7 +2679,7 @@ mod a_tela_ligada_pelo_servidor {
     /// transmite a tela 9 e a 4 a tela 11; guardada em `LIGACAO`.
     fn dentro() {
         let mut ligacao = Ligacao::abrir(Pedido {
-            sala_pessoal: false,
+            codigo: None,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -2791,7 +2853,7 @@ mod a_tela_ligada_pelo_servidor {
             // A volta: a sessão guardada, readotada.
             let _ = ligacao.retomar(
                 Pedido {
-                    sala_pessoal: false,
+                    codigo: None,
                     apelido: "marcela".into(),
                     chave_publica: [5; 32],
                     impressao: [7; 32],
