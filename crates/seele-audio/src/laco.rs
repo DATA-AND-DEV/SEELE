@@ -487,6 +487,74 @@ mod testes {
         );
     }
 
+    /// Se o erro da pergunta do formato diz que **a máquina não tem saída**, e
+    /// não que a saída que existe se recusou a responder.
+    ///
+    /// Só os dois nomes que o cpal dá à falta: o aparelho que não está lá (no
+    /// ALSA, o `ENOENT` e o `ENODEV` de abrir o PCM) e o sistema de som que não
+    /// está no ar. Todo o resto — formato sem suporte, permissão, aparelho
+    /// ocupado, erro do backend — é uma saída que existe, e ali o teste tem o
+    /// que provar.
+    fn a_maquina_nao_tem_saida(erro: &cpal::Error) -> bool {
+        matches!(
+            erro.kind(),
+            cpal::ErrorKind::DeviceNotAvailable | cpal::ErrorKind::HostUnavailable
+        )
+    }
+
+    /// Pula em voz alta um teste que precisa da saída de som desta máquina — ou
+    /// reprova, onde ela é exigida.
+    ///
+    /// O mesmo desenho do `SEELE_EXIGE_CODEC` dos testes de tela: um teste que
+    /// volta cedo conta como passado, e num relatório verde ninguém distingue
+    /// «rodou» de «pulou». Quem liga `SEELE_EXIGE_SAIDA_DE_SOM` está dizendo
+    /// «nesta máquina a saída tem de existir».
+    fn pular_sem_saida(motivo: &str) {
+        assert!(
+            std::env::var_os("SEELE_EXIGE_SAIDA_DE_SOM").is_none(),
+            "SEELE_EXIGE_SAIDA_DE_SOM está ligado e {motivo}: aqui o teste tinha de \
+             rodar, e não rodou"
+        );
+        eprintln!(
+            "PULADO: {motivo}.\n  O que este teste prova precisa de uma saída de som de \
+             verdade.\n  Ligue SEELE_EXIGE_SAIDA_DE_SOM para que faltar vire falha em vez \
+             de pulo."
+        );
+    }
+
+    /// **Só a falta do aparelho é pulo.** O guarda do pulo de baixo: se
+    /// [`a_maquina_nao_tem_saida`] passar a aceitar qualquer erro, uma saída
+    /// que existe e não responde o próprio formato — o defeito que
+    /// `uma_saida_nao_responde_configuracao_de_entrada` existe para pegar —
+    /// sairia como «PULADO», na cor de quem passou.
+    #[test]
+    fn so_a_falta_do_aparelho_faz_o_teste_da_saida_pular() {
+        for falta in [
+            cpal::ErrorKind::DeviceNotAvailable,
+            cpal::ErrorKind::HostUnavailable,
+        ] {
+            assert!(
+                a_maquina_nao_tem_saida(&cpal::Error::from(falta)),
+                "{falta:?} é a máquina sem saída, e o teste tem de pular em vez de reprovar \
+                 um runner sem placa de som"
+            );
+        }
+        for defeito in [
+            cpal::ErrorKind::UnsupportedConfig,
+            cpal::ErrorKind::UnsupportedOperation,
+            cpal::ErrorKind::BackendError,
+            cpal::ErrorKind::PermissionDenied,
+            cpal::ErrorKind::DeviceBusy,
+            cpal::ErrorKind::InvalidInput,
+        ] {
+            assert!(
+                !a_maquina_nao_tem_saida(&cpal::Error::from(defeito)),
+                "{defeito:?} é uma saída que existe e não respondeu: pular aqui esconderia \
+                 o defeito que o teste da saída procura"
+            );
+        }
+    }
+
     /// A suposição que faltava conferir, e que custou o som da tela inteiro.
     ///
     /// [`CapturaDaSaida::abrir`] pergunta o formato à **saída**. A pergunta era
@@ -503,19 +571,42 @@ mod testes {
     /// Se um dia o cpal passar a responder `default_input_config` numa saída,
     /// este teste falha — e falha dizendo o que mudou, em vez de deixar alguém
     /// reintroduzir a chamada antiga achando que ela sempre serviu.
+    ///
+    /// # O que é pré-condição, e o que é prova
+    ///
+    /// **Ter uma saída é pré-condição**, e faltar é pulo dito em voz alta. Num
+    /// Linux sem placa de som o `default_output_device()` devolve o
+    /// dispositivo `default` do ALSA assim mesmo, e é a pergunta do formato
+    /// que não acha o aparelho («Unknown PCM default»): o teste tratava isso
+    /// como reprovação, e ficou vermelho no runner do `ci.yml` (execução
+    /// 43264412497, 12/11/2026) por uma máquina sem som, que é o estado normal
+    /// de um runner. Só a falta do aparelho pula ([`a_maquina_nao_tem_saida`]):
+    /// uma saída que existe e não descreve o próprio formato continua
+    /// reprovando, com o erro dito.
+    ///
+    /// Pular tem a mesma cor de passar. `SEELE_EXIGE_SAIDA_DE_SOM` faz a falta
+    /// virar reprovação, para quem precisa saber que este teste **rodou**.
     #[test]
     fn uma_saida_nao_responde_configuracao_de_entrada() {
         let host = cpal::default_host();
         let Some(saida) = host.default_output_device() else {
-            eprintln!("PULADO: esta máquina não tem saída padrão.");
+            pular_sem_saida("esta máquina não tem saída padrão");
             return;
         };
 
-        assert!(
-            saida.default_output_config().is_ok(),
-            "a saída padrão não descreve o próprio formato de saída, que é de \
-             onde `CapturaDaSaida::abrir` tira o formato do loopback"
-        );
+        if let Err(erro) = saida.default_output_config() {
+            assert!(
+                a_maquina_nao_tem_saida(&erro),
+                "a saída padrão existe e não descreve o próprio formato de saída, que é \
+                 de onde `CapturaDaSaida::abrir` tira o formato do loopback: {erro} \
+                 ({:?})",
+                erro.kind()
+            );
+            pular_sem_saida(&format!(
+                "a saída padrão desta máquina não tem aparelho por trás ({erro})"
+            ));
+            return;
+        }
         assert!(
             saida.default_input_config().is_err(),
             "uma saída passou a responder `default_input_config`.\n\
