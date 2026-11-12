@@ -132,7 +132,30 @@ const ALCA_DA_TELA = 0xffffffff;
  * O transporte é `{ enviar(pacote) → boolean, ouvir(fn) → parar }`: a sessão
  * pelo WebTransport (Tarefa 2.6), ou um laço de bancada.
  */
-function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
+/**
+ * **Por onde o som da sala sai**: pela tag `<audio>` ou direto pelo contexto.
+ *
+ * A tag é mídia para o sistema, e é isso que a mantém tocando com a tela
+ * bloqueada no iOS. É também o que a põe na disputa pela saída: quando outro
+ * aplicativo toca som (um jogo, um vídeo), o navegador **pausa a tag**, e a
+ * sala fica muda até a pessoa voltar. O Chrome do Android pede a saída ao
+ * sistema para a tag e não para o Web Audio; o som que sai direto do contexto
+ * não entra na disputa e toca junto com o do outro aplicativo.
+ *
+ * `direta` é uma **experiência**, e por isso não é o padrão em sistema nenhum:
+ * ninguém a mediu num aparelho. Liga-se pelo endereço (`?saida=direta`), para
+ * comparar as duas no mesmo celular; `?saida=tag` é o de sempre.
+ */
+function saidaPedidaNoEndereco() {
+  try {
+    const pedida = new URLSearchParams(globalThis.location?.search ?? "").get("saida");
+    return pedida === "direta" || pedida === "tag" ? pedida : null;
+  } catch {
+    return null;
+  }
+}
+
+function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOndeSai = saidaPedidaNoEndereco() ?? "tag" }) {
   const w = wasm;
   const cfg = CONFIGURACAO_DA_VOZ;
 
@@ -561,10 +584,11 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
   // ------------------------------------------------- abrir e fechar
 
   async function trocarSaida(id) {
-    const elemento = vivo.elemento, vez = geracaoDoAudio;
+    // Quem toca é a tag; na saída direta, o próprio contexto.
+    const elemento = vivo.elemento ?? (vivo.saidaDireta ? vivo.ctx : null), vez = geracaoDoAudio;
     if (!elemento || typeof elemento.setSinkId !== "function") throw new Error("Seleção de saída indisponível");
     await elemento.setSinkId(id);
-    if (vez !== geracaoDoAudio || vivo.elemento !== elemento) throw new DOMException("Conversa encerrada", "AbortError");
+    if (vez !== geracaoDoAudio || (vivo.elemento ?? vivo.ctx) !== elemento) throw new DOMException("Conversa encerrada", "AbortError");
   }
 
   /**
@@ -652,11 +676,11 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
    */
   function retomarASaida() {
     const { elemento, ctx } = vivo;
-    if (!elemento || !ctx) return;
+    if (!ctx || (!elemento && !vivo.saidaDireta)) return;
     if (ctx.state !== "running" && typeof ctx.resume === "function") {
       ctx.resume().catch((erro) => falha("saída", erro));
     }
-    if (elemento.paused) {
+    if (elemento?.paused) {
       Promise.resolve(elemento.play()).catch((erro) => falha("saída", erro));
     }
   }
@@ -747,39 +771,63 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     vivo.reproducao = reproducao;
     ouvirAReproducao(reproducao);
 
-    // A saída pela tag `<audio>`: o iOS a trata como mídia, que segue com a
-    // tela bloqueada.
-    const destino = ctx.createMediaStreamDestination();
-    vivo.destino = destino;
-    reproducao.connect(destino);
-    const elemento = document.createElement("audio");
-    elemento.playsInline = true;
-    elemento.srcObject = destino.stream;
-    // **A saída que o sistema pausa volta sozinha quando a página está à
-    // vista.** No celular, outro aplicativo que toca som (um vídeo, uma
-    // ligação) toma o áudio, e o navegador pausa esta tag. Ninguém a retomava:
-    // a pessoa voltava para a sala e não ouvia mais nada, sem aviso, até sair
-    // e entrar de novo. Com a página **escondida** a saída fica pausada de
-    // propósito: retomá-la ali seria tomar o áudio de volta do aplicativo que
-    // a pessoa abriu. Quem a retoma é a volta (`aoMudarAVista`).
-    elemento.onpause = () => {
-      vivo.saidaPausada = true;
-      aoAcontecer({ tipo: "saida", estado: "pausada" });
-      if (!document.hidden) retomarASaida();
-    };
-    elemento.onplay = () => {
+    vivo.saidaDireta = porOndeSai === "direta";
+    if (vivo.saidaDireta) {
+      // **Direto pelo contexto, sem a tag** (ver `saidaPedidaNoEndereco`). O
+      // que diz que o sistema calou a sala passa a ser o estado do contexto:
+      // `suspended` ou `interrupted` é a saída pausada, `running` é tocando.
+      reproducao.connect(ctx.destination);
+      vivo.destino = null;
+      vivo.elemento = null;
       vivo.saidaPausada = false;
-      aoAcontecer({ tipo: "saida", estado: "tocando" });
-    };
-    document.body.append(elemento);
-    vivo.elemento = elemento;
-    vivo.saidaPausada = false;
-    if (aparelhoDeSaida && elemento.setSinkId) {
-      await elemento.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
+      ctx.onstatechange = () => {
+        aoAcontecer({ tipo: "contexto", estado: ctx.state });
+        if (vivo.ctx !== ctx || ctx.state === "closed") return;
+        const pausada = ctx.state !== "running";
+        if (pausada === vivo.saidaPausada) return;
+        vivo.saidaPausada = pausada;
+        aoAcontecer({ tipo: "saida", estado: pausada ? "pausada" : "tocando" });
+        if (pausada && !document.hidden) retomarASaida();
+      };
+      if (aparelhoDeSaida && typeof ctx.setSinkId === "function") {
+        await ctx.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
+        conferir();
+      }
+    } else {
+      // A saída pela tag `<audio>`: o iOS a trata como mídia, que segue com a
+      // tela bloqueada.
+      const destino = ctx.createMediaStreamDestination();
+      vivo.destino = destino;
+      reproducao.connect(destino);
+      const elemento = document.createElement("audio");
+      elemento.playsInline = true;
+      elemento.srcObject = destino.stream;
+      // **A saída que o sistema pausa volta sozinha quando a página está à
+      // vista.** No celular, outro aplicativo que toca som (um vídeo, uma
+      // ligação) toma o áudio, e o navegador pausa esta tag. Ninguém a retomava:
+      // a pessoa voltava para a sala e não ouvia mais nada, sem aviso, até sair
+      // e entrar de novo. Com a página **escondida** a saída fica pausada de
+      // propósito: retomá-la ali seria tomar o áudio de volta do aplicativo que
+      // a pessoa abriu. Quem a retoma é a volta (`aoMudarAVista`).
+      elemento.onpause = () => {
+        vivo.saidaPausada = true;
+        aoAcontecer({ tipo: "saida", estado: "pausada" });
+        if (!document.hidden) retomarASaida();
+      };
+      elemento.onplay = () => {
+        vivo.saidaPausada = false;
+        aoAcontecer({ tipo: "saida", estado: "tocando" });
+      };
+      document.body.append(elemento);
+      vivo.elemento = elemento;
+      vivo.saidaPausada = false;
+      if (aparelhoDeSaida && elemento.setSinkId) {
+        await elemento.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
+        conferir();
+      }
+      await elemento.play();
       conferir();
     }
-    await elemento.play();
-    conferir();
     if (navigator.mediaSession && window.MediaMetadata) {
       if (vivo.sessao && !vivo.sessao.metadataMudou) {
         vivo.sessao.metadata = navigator.mediaSession.metadata;
