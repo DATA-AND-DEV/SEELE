@@ -630,6 +630,9 @@ jobs:
       - run: node apps/seele-app/bancada/apoio-na-ajuda.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/teste-de-conexao.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/instalavel.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
