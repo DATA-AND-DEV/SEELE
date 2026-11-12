@@ -84,6 +84,8 @@ const ABERTURA_DA_VOZ: &str = "abertura_da_voz_dbfs_milesimos";
 const RECEBER_LIGACOES: &str = "receber_ligacoes";
 /// Se a tecla de falar vale com outra janela na frente. `sim` ou `nao`.
 const TECLA_DE_FALAR_GLOBAL: &str = "tecla_de_falar_global";
+/// Se o sistema avisa com a janela fora da frente. `sim` ou `nao`.
+const NOTIFICACOES_DO_SISTEMA: &str = "notificacoes_do_sistema";
 
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
@@ -163,6 +165,11 @@ pub struct Preferences {
     /// escolhido», e quem nunca escolheu não tem atalho no sistema: ver
     /// [`Preferences::tecla_de_falar_global`].
     tecla_de_falar_global: Option<bool>,
+    /// Se o sistema avisa com a janela fora da frente: a menção, a batida na
+    /// porta de quem hospeda, a ligação que chega. `None` é «não escolhido», e
+    /// quem nunca escolheu não é avisado pelo sistema: ver
+    /// [`Preferences::notificacoes_do_sistema`].
+    notificacoes_do_sistema: Option<bool>,
 }
 
 impl Preferences {
@@ -193,6 +200,7 @@ impl Preferences {
             abertura_da_voz_dbfs_milesimos: None,
             receber_ligacoes: None,
             tecla_de_falar_global: None,
+            notificacoes_do_sistema: None,
         };
         if let Some(bytes) = crate::arquivo_local::ler(&settings.path, arquivo_valido)? {
             let text = String::from_utf8(bytes)?;
@@ -262,6 +270,13 @@ impl Preferences {
                     }
                     TECLA_DE_FALAR_GLOBAL => {
                         settings.tecla_de_falar_global = match value.as_deref() {
+                            Some("sim") => Some(true),
+                            Some("nao") => Some(false),
+                            _ => None,
+                        }
+                    }
+                    NOTIFICACOES_DO_SISTEMA => {
+                        settings.notificacoes_do_sistema = match value.as_deref() {
                             Some("sim") => Some(true),
                             Some("nao") => Some(false),
                             _ => None,
@@ -662,6 +677,29 @@ impl Preferences {
         self.write()
     }
 
+    /// Se o sistema avisa com a janela fora da frente.
+    ///
+    /// **Quem nunca escolheu não é avisado.** Uma notificação aparece por cima
+    /// do que a pessoa está fazendo, e na tela bloqueada; e o sistema pergunta
+    /// uma vez só se o programa pode mandá-las. Uma pergunta que chega sem
+    /// ninguém ter pedido ensina a responder não — o mesmo argumento da
+    /// permissão de captura de tela —, então ligar é um gesto, e o padrão é
+    /// desligada.
+    #[must_use]
+    pub fn notificacoes_do_sistema(&self) -> bool {
+        self.notificacoes_do_sistema.unwrap_or(false)
+    }
+
+    /// Escreve a escolha das notificações do sistema.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn set_notificacoes_do_sistema(&mut self, ligadas: bool) -> Result<()> {
+        self.notificacoes_do_sistema = Some(ligadas);
+        self.write()
+    }
+
     fn write(&self) -> Result<()> {
         // Every setting, not only the one that just changed: this rewrites the
         // whole file, so a line left out here is a line deleted from disk. That
@@ -686,6 +724,9 @@ impl Preferences {
         let tecla_global = self
             .tecla_de_falar_global
             .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
+        let notificacoes = self
+            .notificacoes_do_sistema
+            .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
         for (name, value) in [
             (CAPTURE, &self.capture),
             (PLAYBACK, &self.playback),
@@ -700,6 +741,7 @@ impl Preferences {
             (ABERTURA_DA_VOZ, &abertura),
             (RECEBER_LIGACOES, &receber),
             (TECLA_DE_FALAR_GLOBAL, &tecla_global),
+            (NOTIFICACOES_DO_SISTEMA, &notificacoes),
         ] {
             let Some(value) = value else {
                 continue;
@@ -1181,6 +1223,43 @@ mod tests {
         assert!(!Preferences::open(caminho)
             .expect("reabrir")
             .tecla_de_falar_global());
+    }
+
+    /// As notificações do sistema: desligadas em quem nunca escolheu, a
+    /// escolha atravessa o processo, e escrevê-la não apaga outra preferência;
+    /// nem outra a apaga (o arquivo é reescrito inteiro a cada gravação).
+    #[test]
+    fn as_notificacoes_do_sistema_nascem_desligadas_e_atravessam_o_processo() {
+        let caminho = scratch("notificacoes-do-sistema");
+        assert!(
+            !Preferences::open(caminho.clone())
+                .expect("abrir")
+                .notificacoes_do_sistema(),
+            "uma instalação nova nasceu avisando pelo sistema sem ninguém pedir"
+        );
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("abrir");
+            p.set_tecla_de_falar_global(true).expect("tecla");
+            p.set_notificacoes_do_sistema(true).expect("ligar");
+        }
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("reabrir");
+            assert!(p.notificacoes_do_sistema(), "a escolha não atravessou");
+            assert!(
+                p.tecla_de_falar_global(),
+                "ligar as notificações apagou a tecla de fora da janela"
+            );
+            p.set_receber_ligacoes(false).expect("outra preferência");
+        }
+        let mut p = Preferences::open(caminho.clone()).expect("reabrir");
+        assert!(
+            p.notificacoes_do_sistema(),
+            "gravar outra preferência desligou as notificações"
+        );
+        p.set_notificacoes_do_sistema(false).expect("desligar");
+        assert!(!Preferences::open(caminho)
+            .expect("reabrir")
+            .notificacoes_do_sistema());
     }
 
     /// Zero é «ninguém compartilhou tela», e não uma medida de zero.

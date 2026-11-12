@@ -15887,6 +15887,15 @@ fn main() {
         // quem abre um diálogo neste app é um comando desta casca, com o título
         // escrito aqui, e não uma linha de JavaScript.
         .plugin(tauri_plugin_dialog::init())
+        // A notificação do sistema. Registrado para que o comando desta casca
+        // possa chamá-lo daqui de dentro; a página **não** o alcança — a única
+        // permissão dele em `capabilities/janela.json` é
+        // `allow-is-permission-granted`, e ela existe por causa do script que o
+        // plugin injeta em toda página, que faz essa pergunta ao carregar sem
+        // `catch`: recusada, virava uma «promise recusada sem catch» no
+        // registro de toda abertura. `notify` continua fechado
+        // (`tests/permissoes.rs`).
+        .plugin(tauri_plugin_notification::init())
         // A tecla de falar fora da janela. O plugin dela **não** sobe aqui: ver
         // `tecla_global::iniciar`, chamado do `setup`.
         .manage(tecla_global::TeclaGlobal::default())

@@ -70,6 +70,30 @@ tauri-plugin-dialog = "2.7"
 # inteiro do produto (2.11 → 2.12, oitocentas linhas de `Cargo.lock`) por causa
 # de uma tecla. Quando o Tauri subir por decisão própria, este til sai junto.
 tauri-plugin-global-shortcut = "~2.3"
+# A notificação do sistema: o toque no ombro com a janela fora da frente
+# (`src/notificacao.rs`) — a menção, a batida na porta de quem hospeda e a
+# ligação que chega. O plugin oficial, autorizado pelo dono em 12/11/2026; era
+# «o que sobrou da pendência 23, item 1».
+#
+# No desktop ele é uma casca fina sobre o `notify-rust`, que fala com a API de
+# cada sistema: `mac-notification-sys` no macOS (o `NSUserNotificationCenter`),
+# `tauri-winrt-notification` no Windows (o toast do WinRT) e o D-Bus pelo
+# `zbus` no Linux.
+#
+# Usado só daqui de dentro, pelo comando `notificar_no_sistema`: a página não
+# recebe `notification:allow-notify` em `capabilities/janela.json`. Quem decide
+# se sai um aviso é a regra da casca e as duas conferências deste lado (a
+# preferência no disco e a janela na frente), e não uma linha de JavaScript com
+# o título que quiser. A única permissão do plugin na capacidade é
+# `allow-is-permission-granted`, e por um motivo que não é o produto: o script
+# que o plugin injeta em toda página faz essa pergunta ao carregar, sem
+# `catch`, e recusada ela viraria uma «promise recusada sem catch» no registro
+# de toda abertura.
+#
+# **`~2.4`, pelo mesmo motivo do til acima**: a 2.4.0 pede o `tauri` 2.10, que é
+# o que o produto tem, e um minor novo de plugin já trocou o Tauri inteiro uma
+# vez.
+tauri-plugin-notification = "~2.4"
 # Atualização pelo próprio app. ADR 0026.
 #
 # Fixado no minor porque o plugin expõe o `reqwest` dele na API pública

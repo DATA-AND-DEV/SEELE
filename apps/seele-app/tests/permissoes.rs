@@ -60,6 +60,7 @@ mod guardas {
     fn app() -> tauri::App<MockRuntime> {
         mock_builder()
             .plugin(tauri_plugin_dialog::init())
+            .plugin(tauri_plugin_notification::init())
             .build(contexto())
             .expect("the desktop shell must build from its own configuration")
     }
@@ -208,6 +209,76 @@ mod guardas {
                  guard is not measuring the ACL: {erro}"
             );
         }
+    }
+
+    #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "o binário de teste não carrega no Windows; ver a nota no topo"
+    )]
+    fn a_pagina_nao_notifica_o_sistema_por_conta_propria() {
+        // A notificação do sistema sai de um comando desta casca —
+        // `notificar_no_sistema`, em `main.rs` —, que confere a preferência no
+        // disco e a janela na frente antes de chamar o plugin
+        // (`src/notificacao.rs`). O plugin está registrado para esse comando
+        // alcançá-lo; a página não recebe o mesmo alcance, e é a decisão
+        // inteira: uma notificação aparece por cima de tudo e na tela
+        // bloqueada, com o título que quem pede escrever. Aberta à página, a
+        // preferência desligada e a janela na frente deixavam de valer para
+        // qualquer linha de JavaScript que chamasse `new Notification(...)` —
+        // que o script injetado pelo plugin troca por esta mesma chamada.
+        let app = app();
+        let webview = main_webview(&app);
+        for (comando, corpo) in [
+            (
+                "plugin:notification|notify",
+                serde_json::json!({ "options": { "title": "da página" } }),
+            ),
+            (
+                "plugin:notification|request_permission",
+                serde_json::json!({}),
+            ),
+        ] {
+            let Err(erro) = call(&webview, comando, corpo) else {
+                panic!("a página alcançou `{comando}` sem passar pela casca");
+            };
+            // A frase, e não só a falha: um plugin não registrado também
+            // falha, e este guarda não mediria a ACL.
+            assert!(
+                erro.contains("not allowed"),
+                "`{comando}` falhou por outro motivo que não a ACL, e este \
+                 guarda não está medindo a ACL: {erro}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "o binário de teste não carrega no Windows; ver a nota no topo"
+    )]
+    fn a_pergunta_do_script_do_plugin_de_notificacao_nao_e_recusada() {
+        // O `tauri-plugin-notification` injeta um script em toda página
+        // (`init-iife.js`), e no macOS e no Linux ele chama
+        // `plugin:notification|is_permission_granted` ao carregar, sem `catch`.
+        // Recusada pela ACL, a chamada vira uma «promise recusada sem catch», que
+        // o `base.js` grava no registro (`unhandledrejection`): uma linha de erro
+        // por abertura do app, de um defeito que não é do produto. A resposta no
+        // desktop é sempre «sim» e não diz nada do sistema; a permissão existe
+        // para o registro ficar limpo, e é a única do plugin na capacidade.
+        let app = app();
+        let webview = main_webview(&app);
+        let erro = call(
+            &webview,
+            "plugin:notification|is_permission_granted",
+            serde_json::json!({}),
+        );
+        assert!(
+            erro.is_ok(),
+            "a pergunta que o script do plugin faz ao carregar a página é \
+             recusada, e cada abertura deixa uma promise recusada no registro: \
+             {erro:?}"
+        );
     }
 
     #[test]
