@@ -5321,6 +5321,89 @@ fn o_build_falho_da_portaria_reprova_a_bateria_nomeando_a_portaria() {
     );
 }
 
+/// O `printf '<formato>' "<raiz>" > "<destino>"` que escreve o `Cargo.toml`
+/// da `portaria-da-bancada`: o formato e a variável da raiz, da primeira linha
+/// de `linhas` que termina escrevendo em `destino`.
+fn printf_do_manifesto_da_portaria<'a>(
+    linhas: impl IntoIterator<Item = &'a str>,
+    destino: &str,
+) -> Option<(String, String)> {
+    let linha = linhas.into_iter().map(str::trim).find(|linha| {
+        linha
+            .trim_end_matches("&&")
+            .trim_end()
+            .ends_with(&format!("> \"{destino}\""))
+    })?;
+    let resto = linha.strip_prefix("printf '")?;
+    let (formato, resto) = resto.split_once('\'')?;
+    let raiz = resto.trim().strip_prefix('"')?.split('"').next()?;
+    Some((formato.to_owned(), raiz.to_owned()))
+}
+
+#[test]
+fn o_ci_e_o_publicar_escrevem_o_mesmo_manifesto_da_portaria() {
+    // **O passo do `ci.yml` escrevia a palavra `PLACEHOLDER` no `Cargo.toml`**
+    // da `portaria-da-bancada` (desde `fec5e0c4`), e ninguém viu até o workflow
+    // rodar, em 12/11/2026 (execução 43264412497): o cargo recusou o manifesto
+    // e a `portaria-no-navegador.cjs` ficou sem binário. O manifesto de verdade
+    // estava no `empacotar/publicar.sh`, que monta a mesma ferramenta do mesmo
+    // fonte. Os dois escrevem o mesmo arquivo, cada um com a raiz dele.
+    let passos = passos_do_job_do_ci("bancadas-de-mod");
+    let Some(passo) = passos
+        .iter()
+        .find(|passo| passo.first().map(String::as_str) == Some("name: a portaria-da-bancada"))
+    else {
+        panic!(
+            "o job `bancadas-de-mod` do ci.yml não tem mais o passo `a portaria-da-bancada`, \
+             e a `portaria-no-navegador.cjs` roda sem a ferramenta que decide por ela"
+        );
+    };
+    let Some((do_ci, raiz_do_ci)) =
+        printf_do_manifesto_da_portaria(passo.iter().map(String::as_str), "$pasta/Cargo.toml")
+    else {
+        panic!(
+            "não achei, no passo `a portaria-da-bancada` do ci.yml, o `printf` que escreve o \
+             `$pasta/Cargo.toml`: {passo:#?}"
+        );
+    };
+
+    let publicar = std::fs::read_to_string(raiz().join("empacotar/publicar.sh"))
+        .expect("o publicar.sh é legível");
+    let Some((do_publicar, raiz_do_publicar)) =
+        printf_do_manifesto_da_portaria(publicar.lines(), "$pasta_portaria/Cargo.toml")
+    else {
+        panic!(
+            "não achei, no empacotar/publicar.sh, o `printf` que escreve o \
+             `$pasta_portaria/Cargo.toml`"
+        );
+    };
+
+    // O que o manifesto tem de ter para ser o desta ferramenta: sem isto, dois
+    // formatos iguais e vazios passariam pela comparação.
+    for trecho in [
+        "name = \"portaria-da-bancada\"",
+        "[workspace]",
+        "seele-server = { path = \"%s/crates/seele-server\" }",
+    ] {
+        assert!(
+            do_publicar.contains(trecho),
+            "o manifesto da portaria no publicar.sh não tem `{trecho}`: {do_publicar}"
+        );
+    }
+    assert_eq!(
+        do_ci, do_publicar,
+        "o ci.yml e o publicar.sh escrevem manifestos diferentes para a `portaria-da-bancada` \
+         (à esquerda o do ci.yml, à direita o do publicar.sh): os dois compilam o mesmo fonte, \
+         e o que um monta o outro tem de montar"
+    );
+    assert_eq!(
+        (raiz_do_ci.as_str(), raiz_do_publicar.as_str()),
+        ("$GITHUB_WORKSPACE", "$RAIZ"),
+        "o `%s` do manifesto da portaria é a raiz do repositório: `$GITHUB_WORKSPACE` no \
+         ci.yml e `$RAIZ` no publicar.sh"
+    );
+}
+
 #[test]
 fn uma_bancada_que_trava_e_nomeada_quando_o_prazo_da_etapa_vence() {
     // Como a dos roteiros: a frase de sempre do prazo fala do `seele-video`, e

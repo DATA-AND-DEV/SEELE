@@ -816,6 +816,14 @@ jobs:
       # temporária, com o `seele-server` por caminho, e o compila no `target/`
       # daqui, de onde sai `target/debug/portaria-da-bancada`. Esse crate tem
       # o próprio `Cargo.lock` (o `serde_json` não é fixado pelo do workspace).
+      #
+      # **O manifesto é o do `empacotar/publicar.sh`, letra por letra**, com a
+      # raiz daqui (`$GITHUB_WORKSPACE`) no lugar da de lá (`$RAIZ`). Até
+      # 12/11/2026 este passo escrevia a palavra `PLACEHOLDER` no `Cargo.toml`,
+      # o cargo recusava o arquivo, e a `portaria-no-navegador.cjs` ia junto,
+      # sem binário (execução 43264412497). O teste
+      # `o_ci_e_o_publicar_escrevem_o_mesmo_manifesto_da_portaria`, em
+      # `xtask/tests/empacotamento.rs`, compara os dois.
       - name: a portaria-da-bancada
         if: ${{ !cancelled() }}
         timeout-minutes: 15
@@ -823,7 +831,7 @@ jobs:
           pasta="$RUNNER_TEMP/portaria-da-bancada"
           mkdir -p "$pasta/src"
           cp apps/seele-app/bancada/medidas/portaria-2026-10-24/portaria-da-bancada.main.rs.txt "$pasta/src/main.rs"
-          printf 'PLACEHOLDER' "$GITHUB_WORKSPACE" > "$pasta/Cargo.toml"
+          printf '[package]\nname = "portaria-da-bancada"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[workspace]\n\n[dependencies]\nseele-server = { path = "%s/crates/seele-server" }\nserde_json = "1"\n' "$GITHUB_WORKSPACE" > "$pasta/Cargo.toml"
           cargo build --quiet --manifest-path "$pasta/Cargo.toml" --target-dir target
       - run: node apps/seele-app/bancada/portaria-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm target/debug/portaria-da-bancada chromium playwright
         if: ${{ !cancelled() }}
