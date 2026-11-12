@@ -568,6 +568,10 @@ cabo, o `seeled` no Mac, 60 s assistidos em cada sentido:
 Nenhuma pausa, um pedido de quadro-chave por rodada (o do começo), a mídia RTP
 ligada nas quatro sessões.
 
+Repetida no commit `6af9a691`, depois do relato de recepção do protocolo 13: 2280 kbps
+com o Windows transmitindo e 2372 com o Mac, 0,0% congelado nos dois sentidos, a
+voz do outro tocada em 99,9%.
+
 **O que esta conferência achou antes de dar isso**: no Windows o vídeo rodava a
 um terço da taxa (orçamento de 640 a 1723 kbps, numa rede local e até com tudo
 na mesma máquina). O laço do transporte acordava no tique de 15,6 ms do relógio
