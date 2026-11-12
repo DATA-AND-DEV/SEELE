@@ -58,6 +58,36 @@ ignore = [
     { id = "RUSTSEC-2025-0081", reason = "unic-char-property, unicode tables via tauri" },
     { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version, unicode tables via tauri" },
     { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident, unicode tables via tauri" },
+    # **As três do D-Bus, que entraram com a notificação do sistema (12/11/2026).**
+    # `zvariant`, `zbus_names` e `zvariant_derive` não foram abandonados: foram
+    # **fundidos no `zbus` 6** (os módulos `wire` e `names`, e as derivações), e o
+    # RustSec marca os três crates avulsos como `unmaintained` para dizer «migre
+    # para o `zbus` 6». **Não é vulnerabilidade**, e os três avisos dizem isso com
+    # as próprias palavras: «no longer maintained as a standalone crate».
+    #
+    # O caminho é um só — `zbus 5.19.0 ← notify-rust 4.18.0 ←
+    # tauri-plugin-notification 2.4.0 ← seele-app` — e só existe no Linux: é o
+    # D-Bus por onde o aviso de «alguém chamou você» chega à bandeja do sistema.
+    # No macOS e no Windows o `notify-rust` fala com o sistema por outro caminho
+    # e nenhum dos três é compilado. Nenhum crate desta casa os nomeia.
+    #
+    # Não há o que subir: nenhum `notify-rust` publicado pede `zbus 6` (o 4.18.0,
+    # que é o mais novo, pede `zbus 5`), e quem escolhe o `notify-rust` é o plugin
+    # do Tauri, não esta casa.
+    #
+    # **O que faz as três caírem:** um `notify-rust` sobre `zbus 6` (e o
+    # `tauri-plugin-notification` que o adote). Nesse dia `cargo update -p
+    # notify-rust` tira os três do `Cargo.lock`, o `cargo deny` passa a acusar
+    # estas linhas como `advisory-not-detected`, e elas saem — pela mesma regra
+    # das dez de GTK3 ali em cima: aviso que ninguém pode resolver ensina a não
+    # ler a saída.
+    #
+    # Pela regra desta lista: `unmaintained` é exceção com razão escrita;
+    # vulnerabilidade não entra nunca. Se um dos três virar vulnerabilidade, o
+    # aviso novo tem outro número, não casa com estas linhas e reprova a bateria.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant fundido no zbus 6; D-Bus do Linux, só pela notificação do sistema (zbus 5 <- notify-rust <- tauri-plugin-notification); cai com um notify-rust sobre zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names fundido no zbus 6; D-Bus do Linux, só pela notificação do sistema (zbus 5 <- notify-rust <- tauri-plugin-notification); cai com um notify-rust sobre zbus 6" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive fundido no zbus 6; macro de compilação do mesmo D-Bus do Linux (zbus 5 <- notify-rust <- tauri-plugin-notification); cai com um notify-rust sobre zbus 6" },
 ]
 
 [licenses]
