@@ -5321,6 +5321,86 @@ fn abrir_no_navegador(url: String) -> Result<(), String> {
         .map_err(|erro| format!("não consegui abrir o navegador: {erro}"))
 }
 
+/// O arquivo do teste de rede, na origem do web app (`ui/diagnostico-rede.html`,
+/// servido com a política própria dele em `web/_headers`).
+const PAGINA_DO_TESTE_DE_REDE: &str = "diagnostico-rede.html";
+
+/// Quantas letras o nome de uma falha pode ter para viajar no endereço. O mais
+/// longo de hoje (`VerificacaoDaConexaoSegura`) tem 26.
+const TETO_DO_NOME_DA_FALHA: usize = 40;
+
+/// **O endereço do teste de rede publicado**, com o nome da falha que a pessoa
+/// viu, quando ele é um nome.
+///
+/// A origem é a [`seele_ffi::ORIGEM_DO_NAVEGADOR`], e não um texto daqui: o
+/// guarda `a_origem_do_web_app_e_escrita_num_lugar_so` reprova a cópia.
+///
+/// **Só o nome da falha vai junto**, e só se for letras e números: é um
+/// identificador de enum (`NatNaoAbriu`, `SemResposta`), que a página põe no
+/// texto copiado para quem relata não ter de redigitar o que leu. O que não
+/// for isso — um endereço, um apelido, um convite que alguém passasse aqui por
+/// engano — não entra no endereço: a consulta de uma URL chega ao registro de
+/// acesso de quem serve a página, e ali só cabe o que não identifica ninguém.
+fn endereco_do_teste_de_rede(falha: Option<&str>) -> String {
+    let pagina = format!(
+        "https://{}/{PAGINA_DO_TESTE_DE_REDE}",
+        seele_ffi::ORIGEM_DO_NAVEGADOR
+    );
+    match falha.map(str::trim) {
+        Some(nome)
+            if !nome.is_empty()
+                && nome.len() <= TETO_DO_NOME_DA_FALHA
+                && nome.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            format!("{pagina}?erro={nome}")
+        }
+        _ => pagina,
+    }
+}
+
+/// Por que o teste de rede não abriu.
+///
+/// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
+/// Carrega o endereço porque a tela não o conhece (a origem mora no Rust), e
+/// «não abriu» sem ele é um botão que falha sem deixar caminho.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+enum TesteDeRedeNaoAbriu {
+    /// O sistema não iniciou o navegador.
+    NavegadorNaoAbriu {
+        /// O endereço que se tentou abrir, para a tela dizê-lo.
+        endereco: String,
+    },
+}
+
+/// **Abre o teste de rede no navegador do sistema**, na página publicada.
+///
+/// É o caminho de quem leu que não conectou por causa de rede (a lacuna 8 da
+/// análise para a 1.0: a página existia e nada levava a ela).
+///
+/// **No navegador, e não nesta janela**, por três razões medidas:
+///
+///   - navegar esta janela para a página levaria as sessões e a voz embora, e
+///     a casca tem uma janela só (`capabilities/janela.json` não deixa criar
+///     outra);
+///   - a página trata um convite **colado**, e na origem publicada ela roda com
+///     a política mais estreita do produto (`connect-src` só para a própria
+///     origem e o ponto de encontro oficial), sem `ipc:` nenhum ao alcance;
+///     dentro desta janela ela rodaria na origem que fala com o Rust;
+///   - o que ela mede é o caminho de um navegador até o servidor, e o botão
+///     «Entrar no servidor» dela, quando o caminho abre, entra pelo navegador:
+///     é a saída de quem o app não deixou entrar.
+///
+/// `erro` é o nome da falha que a tela mostrou (ver
+/// [`endereco_do_teste_de_rede`]).
+#[tauri::command]
+fn abrir_o_teste_de_rede(erro: Option<String>) -> Result<(), TesteDeRedeNaoAbriu> {
+    let endereco = endereco_do_teste_de_rede(erro.as_deref());
+    abrir_no_navegador(endereco.clone()).map_err(|motivo| {
+        tracing::warn!(%motivo, "o teste de rede não abriu no navegador");
+        TesteDeRedeNaoAbriu::NavegadorNaoAbriu { endereco }
+    })
+}
+
 /// Se o firewall do Windows **não** deixa chegar conexão a este SEELE, e por
 /// quê: a frase que a linha da sala e a tela de hospedar mostram.
 ///
@@ -16002,6 +16082,7 @@ fn main() {
             pessoal_conferir_par,
             pessoal_reservar,
             abrir_no_navegador,
+            abrir_o_teste_de_rede,
             previa_de_link,
             dominios_de_gif,
             apis_de_mod_aceitas,
@@ -17374,9 +17455,53 @@ mod a_tela_le_os_limites_que_o_rust_manda {
 #[cfg(test)]
 mod o_que_sai_desta_janela_por_um_link {
     use super::{
-        e_de_um_dominio_de_gif, endereco_de_previa, endereco_que_pode_sair,
-        midia_declarada_pela_pagina, FalhaNaPrevia, DOMINIOS_DE_GIF,
+        e_de_um_dominio_de_gif, endereco_de_previa, endereco_do_teste_de_rede,
+        endereco_que_pode_sair, midia_declarada_pela_pagina, FalhaNaPrevia, DOMINIOS_DE_GIF,
     };
+
+    /// **O teste de rede abre na origem do produto, e leva só o nome da falha.**
+    ///
+    /// O endereço passa pelo mesmo filtro de todo link que sai desta janela, e
+    /// o que não é um identificador (um endereço, um apelido, um convite) não
+    /// entra na consulta: ela chega ao registro de acesso de quem serve a
+    /// página.
+    #[test]
+    fn o_teste_de_rede_abre_na_origem_do_produto_e_leva_so_o_nome_da_falha() {
+        let origem = seele_ffi::ORIGEM_DO_NAVEGADOR;
+        let pagina = format!("https://{origem}/diagnostico-rede.html");
+        assert_eq!(endereco_do_teste_de_rede(None), pagina);
+        assert_eq!(
+            endereco_do_teste_de_rede(Some("NatNaoAbriu")),
+            format!("{pagina}?erro=NatNaoAbriu")
+        );
+        for fora in [
+            "",
+            "   ",
+            "203.0.113.7:8383",
+            "casa.exemplo.br",
+            "ana maria",
+            "seele://casa.exemplo:8383/?fp=ab",
+            "a&convite=7K4M",
+            "NatNaoAbriu#x",
+            "UmNomeDeFalhaQueNaoExisteEPassaDoTetoDeQuarentaLetras",
+        ] {
+            assert_eq!(
+                endereco_do_teste_de_rede(Some(fora)),
+                pagina,
+                "`{fora}` entrou no endereço do teste de rede"
+            );
+        }
+        for endereco in [
+            endereco_do_teste_de_rede(None),
+            endereco_do_teste_de_rede(Some("SemResposta")),
+        ] {
+            assert_eq!(
+                endereco_que_pode_sair(&endereco),
+                Ok(endereco.as_str()),
+                "o filtro de saída recusou o endereço do teste de rede"
+            );
+        }
+    }
 
     /// **A lista de domínios é fechada, e o sufixo é conferido com o ponto.**
     ///

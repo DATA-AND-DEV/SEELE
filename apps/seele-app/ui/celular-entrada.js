@@ -131,7 +131,7 @@
       : h("p", { class: "cel-entrada-nota", text: f.vazio });
     mostrar([
       titulo(f.titulo),
-      desfecho?.erro && aviso(fraseDoDesfecho(desfecho), { erro: true }),
+      desfecho?.erro && aviso(fraseDoDesfecho(desfecho), { erro: true, extra: testeDeConexaoPara(desfecho) }),
       avisoDaOrigemNova(),
       linhas,
       h("p", { class: "cel-entrada-fora" }, rotulo(f.hospedarRotulo), f.hospedar,
@@ -292,8 +292,9 @@
       h("p", { class: "cel-entrada-espera-nota", text: FRASES_DA_ESPERA.naoEErroCelular }));
     const avisoDoDesfecho = !naPortaria && desfecho && desfecho.erro && aviso(fraseDoDesfecho(desfecho), {
       erro: !naPortaria,
-      extra: desfecho.erro === "recusado" && desfecho.razao !== AINDA_NAO_NO_NAVEGADOR && desfecho.razao
-        && h("p", { class: "cel-entrada-razao", text: MOTIVOS[desfecho.razao] ?? desfecho.razao }),
+      extra: (desfecho.erro === "recusado" && desfecho.razao !== AINDA_NAO_NO_NAVEGADOR && desfecho.razao
+        && h("p", { class: "cel-entrada-razao", text: MOTIVOS[desfecho.razao] ?? desfecho.razao }))
+        || testeDeConexaoPara(desfecho),
     });
 
     const acoes = [];
@@ -349,6 +350,17 @@
    * pelo navegador ainda não está pronta, e não um motivo cru.
    */
   const AINDA_NAO_NO_NAVEGADOR = "AindaNaoNoNavegador";
+
+  /**
+   * O caminho de quem não entrou por causa de rede: a oferta do teste de
+   * conexão (`ofertaDoTesteDeConexao`, de `base.js`, a mesma do desktop), ou
+   * `null`. Só no `sem-rede`, e pelo motivo que a identidade devolveu: a
+   * oferta decide pelo nome da falha, e nem toda falta de rede a tem (ver
+   * `FALHAS_QUE_OFERECEM_O_TESTE_DE_CONEXAO`, em `frases.js`).
+   */
+  function testeDeConexaoPara(desfecho) {
+    return desfecho?.erro === "sem-rede" ? ofertaDoTesteDeConexao(desfecho.motivo) : null;
+  }
 
   function fraseDoDesfecho(desfecho) {
     if (desfecho.erro === "recusado" && desfecho.razao === AINDA_NAO_NO_NAVEGADOR) return PALAVRAS.desfechos["sem-identidade"];

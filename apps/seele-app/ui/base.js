@@ -132,6 +132,10 @@ function servidorTemAMesaDeTexto(snapshot) {
 // de um servidor que não está na vista também precisa ser respondido.
 const SEM_CARIMBO_DA_VISTA = new Set([
   "connect", "sessoes", "foco_de_voz",
+  // O teste de conexão é da máquina, e não de uma sessão: ele é oferecido na
+  // entrada e na tela de fim, onde a sessão da vista pode já ter acabado, e o
+  // carimbo dela faria a ponte recusar o aperto como `NotConnected`.
+  "abrir_o_teste_de_rede",
   "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas", "maquinas_sobras",
 ]);
 
@@ -493,6 +497,75 @@ function elemento(tag, classe, texto) {
   if (classe) nodo.className = classe;
   if (texto !== undefined) nodo.textContent = texto;
   return nodo;
+}
+
+// ------------------------------------------------------ o teste de conexão
+//
+// A lacuna 8 da análise para a 1.0: a página de diagnóstico existia e nada
+// levava a ela. Quem não conectava por causa de rede lia uma frase e ficava
+// sem caminho. As frases e a lista das falhas que a oferecem moram em
+// `frases.js` (`FRASES_DO_TESTE_DE_CONEXAO`, `falhaDeRede`).
+
+/**
+ * **A oferta do teste de conexão para `erro`**, ou `null` quando `erro` não é
+ * uma falha de rede: um botão, a nota que diz o que ele faz, e o lugar onde a
+ * tela diz o que aconteceu com o aperto.
+ *
+ * O aperto pede `abrir_o_teste_de_rede` com o **nome** da falha, e mais nada:
+ * nem o endereço, nem o convite, nem o apelido saem daqui. No app o Rust monta
+ * o endereço da página publicada e abre o navegador do sistema; na página a
+ * ponte abre uma aba da mesma origem. Nos dois, se não abrir, a recusa traz o
+ * endereço, e a tela o diz: um botão que falha calado é o defeito que este
+ * repositório mais pagou.
+ *
+ * Sem `href`: nesta janela um clique do meio navegaria o SEELE para a página,
+ * sem caminho de volta (o mesmo motivo do link de uma mensagem).
+ */
+function ofertaDoTesteDeConexao(erro) {
+  const falha = falhaDeRede(erro);
+  if (falha === null) return null;
+  const frases = FRASES_DO_TESTE_DE_CONEXAO;
+  const onde = typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined" && PONTE_NO_LUGAR_DO_TAURI ? "naPagina" : "noApp";
+  const oferta = elemento("div", "teste-de-conexao");
+  oferta.dataset.falha = falha;
+  const botao = elemento("button", "botao-fantasma teste-de-conexao-abrir", frases.abrir);
+  botao.type = "button";
+  const nota = elemento("p", "teste-de-conexao-nota", frases.nota[onde]);
+  // Vazia e à vista: uma região viva anuncia o que entra nela, e não o que
+  // já estava escrito quando ela apareceu.
+  const estado = elemento("p", "teste-de-conexao-estado");
+  estado.setAttribute("role", "status");
+  botao.addEventListener("click", () => {
+    estado.textContent = "";
+    delete estado.dataset.tipo;
+    // Sem `await` antes do `invoke`: na página a aba só abre dentro do gesto.
+    invoke("abrir_o_teste_de_rede", { erro: falha }).then(
+      () => {
+        estado.textContent = frases.abriu[onde];
+      },
+      (recusa) => {
+        const endereco = recusa?.NavegadorNaoAbriu?.endereco;
+        estado.dataset.tipo = "erro";
+        estado.textContent = typeof endereco === "string" && endereco !== ""
+          ? frases.naoAbriu[onde](endereco)
+          : frases.naoAbriu.semEndereco;
+        if (!endereco) console.warn("o teste de conexão não abriu:", recusa);
+      },
+    );
+  });
+  oferta.append(botao, nota, estado);
+  return oferta;
+}
+
+/**
+ * Põe em `caixa` a oferta para `erro`, ou a esvazia e esconde quando `erro`
+ * não é uma falha de rede. Devolve se ofereceu.
+ */
+function oferecerOTesteDeConexao(caixa, erro) {
+  const oferta = ofertaDoTesteDeConexao(erro);
+  caixa.replaceChildren(...(oferta ? [oferta] : []));
+  caixa.hidden = oferta === null;
+  return oferta !== null;
 }
 
 // ----------------------------------------------- os tetos dos campos do fio

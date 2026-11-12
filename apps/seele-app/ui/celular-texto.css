@@ -10,6 +10,8 @@
 :where(:root[data-casca="celular"]) .coordenada { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .legenda-ausente { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) input { font-size: inherit; }
+:where(:root[data-casca="celular"]) .teste-de-conexao-nota { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .teste-de-conexao-estado { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .barra-marca { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .barra-servidor-nome { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .barra-servidor-sub { font-size: calc(9px * var(--cel-escala)); }

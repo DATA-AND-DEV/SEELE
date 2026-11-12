@@ -234,7 +234,7 @@ const COMANDOS_DA_PONTE = new Set([
   "meu_codigo", "amigos", "contatos_da_agenda", "adicionar_amigo", "tirar_dos_amigos",
   "dar_nome_na_agenda", "bloquear", "estado_da_sala", "receber_ligacoes", "atender", "recusar", "encerrar_a_ligacao",
   "tela_cheia",
-  "abertura", "abrir_no_navegador", "aceitar_mods", "aceite_de_mods",
+  "abertura", "abrir_no_navegador", "abrir_o_teste_de_rede", "aceitar_mods", "aceite_de_mods",
   "aceites_de_mods", "ajustar_sensibilidade_da_voz", "ajustar_volume_da_tela",
   "analisar_convite", "apelido_local", "apis_de_mod_aceitas", "assistir",
   "atualizacao_que_nao_pegou", "busca_andar", "busca_limpar", "buscar",
@@ -1910,6 +1910,25 @@ function enderecoQuePodeSair(bruto) {
   return { alvo: url };
 }
 
+/** O arquivo do teste de conexão, ao lado desta página, na mesma origem. */
+const PAGINA_DO_TESTE_DE_REDE = "diagnostico-rede.html";
+
+/**
+ * **O endereço do teste de conexão desta origem**, com o nome da falha que a
+ * tela mostrou, quando ele é um nome: o `endereco_do_teste_de_rede` do desktop.
+ *
+ * Relativo à página, e sem escrever origem nenhuma: a página fala com a origem
+ * dela pelo caminho. Só letras e números entram na consulta, que chega ao
+ * registro de acesso de quem serve a página: um identificador de falha cabe
+ * ali, e um endereço, um apelido ou um link, não.
+ */
+function enderecoDoTesteDeRede(falha) {
+  const endereco = new URL(PAGINA_DO_TESTE_DE_REDE, location.href);
+  const nome = typeof falha === "string" ? falha.trim() : "";
+  if (/^[A-Za-z0-9]{1,40}$/.test(nome)) endereco.searchParams.set("erro", nome);
+  return endereco.href;
+}
+
 // ------------------------------------------------------------ os MODs da sessão
 
 /**
@@ -3537,6 +3556,26 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     const { alvo, recusa } = enderecoQuePodeSair(String(url ?? ""));
     if (recusa) return Promise.reject(recusa);
     window.open(alvo, "_blank", "noopener,noreferrer");
+    return null;
+  },
+  // **O teste de conexão, numa aba nova da mesma origem**, que não leva esta
+  // página junto: a tentativa aberta e as sessões continuam aqui. Sem `await`
+  // antes do `open`, pela razão de cima.
+  //
+  // **Sem `noopener` na abertura, e com ele logo depois.** Com `noopener` o
+  // `open` devolve `null` sempre, e a aba que o navegador bloqueou seria igual
+  // à que abriu: o botão falharia calado. Sem ele, `null` é a recusa do
+  // navegador, e a tela diz o endereço. A aba que abriu perde o `opener` na
+  // linha seguinte, antes de a página dela carregar.
+  abrir_o_teste_de_rede: ({ erro } = {}) => {
+    const endereco = enderecoDoTesteDeRede(erro);
+    const aba = window.open(endereco, "_blank");
+    if (!aba) return Promise.reject({ NavegadorNaoAbriu: { endereco } });
+    try {
+      aba.opener = null;
+    } catch {
+      // Um navegador que já a pôs noutro grupo não deixa escrever: já está solta.
+    }
     return null;
   },
 });

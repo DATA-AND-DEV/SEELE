@@ -538,6 +538,12 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
         erro.textContent =
           fraseDaLigacao(motivo, ligacao.nome, falha?.trail) ?? erro.textContent;
       }
+      // **O caminho de quem não conectou por causa de rede** (lacuna 8 da
+      // análise para a 1.0): debaixo da frase, o TESTAR A CONEXÃO. Depois de a
+      // frase estar escrita, porque a oferta guarda a frase com que nasceu.
+      // Numa ligação pelo código não há oferta: o teste mede pelo convite de
+      // um servidor, e quem liga por código não tem um para colar lá.
+      oferecerOTesteNaEntrada(ligacao ? null : motivo);
       // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
       // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
       // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
@@ -786,6 +792,39 @@ function mostrarAlcance(
  * não some calado: vai ao `seele.log`.
  */
 let hospedandoAgora = false;
+
+/**
+ * A frase de `#boot-erro` com que a oferta do teste de conexão nasceu, ou
+ * `null` sem oferta na tela.
+ */
+let fraseDaOfertaNaEntrada = null;
+
+/**
+ * **O TESTAR A CONEXÃO debaixo da frase vermelha da entrada**, para `erro`; com
+ * `null`, ou com uma falha que não é de rede, a oferta sai.
+ */
+function oferecerOTesteNaEntrada(erro) {
+  const ofereceu = oferecerOTesteDeConexao($("boot-teste-de-conexao"), erro);
+  fraseDaOfertaNaEntrada = ofereceu ? $("boot-erro").textContent : null;
+}
+
+// **A oferta some quando a frase dela some.** `#boot-erro` tem meia dúzia de
+// escritores — esta tela, o HOSPEDAR, as camadas de MODs, de servidores e de
+// versões, a configuração do servidor —, e só o `conectar` sabe de rede. Um
+// TESTAR A CONEXÃO que sobrasse debaixo de «ESTE SERVIDOR EXIGE MODS» mandaria
+// medir a rede de quem tem outra coisa a resolver. Vigiado aqui, e não por uma
+// chamada em cada escritor, que o próximo a escrever na linha esqueceria.
+new MutationObserver(() => {
+  if (fraseDaOfertaNaEntrada === null) return;
+  const linha = $("boot-erro");
+  if (linha.hidden || linha.textContent !== fraseDaOfertaNaEntrada) oferecerOTesteNaEntrada(null);
+}).observe($("boot-erro"), {
+  attributes: true,
+  attributeFilter: ["hidden"],
+  childList: true,
+  characterData: true,
+  subtree: true,
+});
 
 async function hospedar() {
   if (hospedandoAgora) {

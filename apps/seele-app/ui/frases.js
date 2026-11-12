@@ -3493,6 +3493,106 @@ const FRASES_DO_TRANSPORTE = Object.freeze({
     "A VOZ ESTÁ EM OUTRO SERVIDOR.\n" + "Entre numa sala de voz aqui para trazer o microfone para cá.",
 });
 
+// --- o teste de conexão (lacuna 8 da análise para a 1.0) ---
+//
+// A página `diagnostico-rede.html` mede o caminho de um navegador até um
+// servidor, pelo convite dele, e dá um texto para copiar. Ela existia desde a
+// 0.18 e **nada na interface levava a ela**: quem não conectava lia uma frase
+// e ficava sem caminho. Este bloco é a ligação: quais falhas a oferecem, o
+// nome do botão e o que a tela diz quando ele abre e quando não abre.
+
+/**
+ * **As falhas de conexão que são da rede, e que o teste sabe medir.**
+ *
+ * Lista fechada, e do que **oferece**: uma falha nova nasce sem o botão até
+ * alguém decidir que ele serve a ela. O que está aqui:
+ *
+ *  - do app (`ConnectionError`): nada respondeu (`Unreachable`), os pacotes
+ *    saíram e nada voltou (`SemResposta`), o caminho direto não abriu
+ *    (`NatNaoAbriu`);
+ *  - do fim de uma sessão (`EndReason`, em `MOTIVOS`): o enlace que caiu e não
+ *    voltou (`LinkLost`, `Timeout`);
+ *  - do enlace da página (`FALHA_DO_ENLACE`, em `rtc-web.js`): a rede que
+ *    bloqueia UDP (`SemRefletido`), o ponto de encontro que não respondeu
+ *    (`SinalMudo`), as duas redes que não se alcançaram (`CaminhoNaoAbriu`).
+ *
+ * E o que fica de fora, de propósito:
+ *
+ *  - senha, convite, banimento, portaria e versão: não são da rede;
+ *  - `UnresolvableHost`: o que se conserta é o endereço digitado;
+ *  - `HandshakeTimeout`: o servidor recebeu e demorou, então o caminho abriu;
+ *  - `SemCaminho` e `NomeSemResposta`: o link não tem ponto de encontro, e o
+ *    teste só mede por ele (`diagnostico-rede.js` recusa os outros);
+ *  - `NinguemNoPonto`, `AnfitriaoCalado`: é o lado de quem hospeda;
+ *  - `PontoRecusou`: o ponto recusou por excesso, e testar é pedir de novo;
+ *  - `NaoLocalizou` (a ligação pelo código): não há convite para colar lá.
+ *
+ * A página tem a mesma lista (`ERROS_QUE_A_PAGINA_ANOTA`, em
+ * `diagnostico-rede.js`): o que ela não conhece, ela não escreve no texto
+ * copiado. A bancada `teste-de-conexao.cjs` confere as duas.
+ */
+const FALHAS_QUE_OFERECEM_O_TESTE_DE_CONEXAO = Object.freeze([
+  "Unreachable",
+  "SemResposta",
+  "NatNaoAbriu",
+  "LinkLost",
+  "Timeout",
+  "SemRefletido",
+  "SinalMudo",
+  "CaminhoNaoAbriu",
+]);
+
+/**
+ * O nome da falha de rede que `erro` é, ou `null` quando ele não é uma: o
+ * nome cru de uma variante unitária, ou o motivo de uma falha do enlace da
+ * página.
+ */
+function falhaDeRede(erro) {
+  const nome = typeof erro === "string" ? erro : (erro?.FalhaDoEnlace?.motivo ?? null);
+  return FALHAS_QUE_OFERECEM_O_TESTE_DE_CONEXAO.includes(nome) ? nome : null;
+}
+
+/**
+ * As frases da oferta. «TESTAR A CONEXÃO» e não «a rede»: é o nome que a
+ * página tem («Testar a conexão com um servidor»), e quem aperta um nome tem
+ * de chegar numa tela com o mesmo.
+ *
+ * `noApp` e `naPagina` porque o mesmo aperto faz duas coisas: no app abre o
+ * navegador do sistema, na página abre uma aba. A nota diz qual **antes** do
+ * aperto, e diz o que levar: a página pede o convite, e não o recebe daqui (o
+ * convite carrega um token, e token não viaja em endereço).
+ */
+const FRASES_DO_TESTE_DE_CONEXAO = Object.freeze({
+  abrir: "TESTAR A CONEXÃO",
+  nota: Object.freeze({
+    noApp:
+      "Abre no navegador um teste do caminho até o servidor. Leve o convite: ele pede para colar. " +
+      "O resultado sai num texto para copiar e mandar a quem hospeda.",
+    naPagina:
+      "Abre numa aba nova um teste do caminho até o servidor. Leve o link do servidor: ele pede para colar. " +
+      "O resultado sai num texto para copiar e mandar a quem hospeda.",
+  }),
+  abriu: Object.freeze({
+    noApp: "O teste abriu no navegador.",
+    naPagina: "O teste abriu numa aba nova.",
+  }),
+  /** Não abriu, e a tela diz onde ele fica: um botão que falha calado não deixa caminho. */
+  naoAbriu: Object.freeze({
+    noApp: (endereco) =>
+      "NÃO DEU PARA ABRIR O NAVEGADOR.\n" + `Abra à mão: ${enderecoSemEsquema(endereco)}`,
+    naPagina: (endereco) =>
+      "O NAVEGADOR NÃO DEIXOU ABRIR A ABA.\n" +
+      `Permita que esta página abra janelas, ou abra à mão: ${enderecoSemEsquema(endereco)}`,
+    // A falha veio sem o endereço: o comando não respondeu como combinado.
+    semEndereco: "NÃO DEU PARA ABRIR O TESTE DE CONEXÃO.",
+  }),
+});
+
+/** Um endereço como se dita: sem o `https://` na frente. */
+function enderecoSemEsquema(endereco) {
+  return String(endereco ?? "").replace(/^https?:\/\//i, "");
+}
+
 // --- cargos 0.17 (cargos-ui) ---
 //
 // As frases da gestão de cargos e permissões (`cargos.js`; contrato da 0.17,

@@ -84,6 +84,11 @@
 #tela-fim .boot > .botao,
 #tela-fim .boot > .fim-sair { flex: 0 1 auto; }
 #tela-fim .boot { row-gap: 22px; column-gap: 10px; }
+/* O TESTAR A CONEXÃO, numa fileira só dele, debaixo das saídas. A margem de
+   cima é do `row-gap` da coluna, e o botão dele não cresce como as saídas. */
+#tela-fim .boot > #fim-teste-de-conexao { flex: 1 0 100%; }
+#tela-fim .teste-de-conexao { margin: 0; }
+#tela-fim .teste-de-conexao-abrir { display: inline-flex; }
 @media (max-width: 700px) {
   #tela-fim .boot { padding: 0 4px; }
   .fim-titulo { font-size: 44px; }

@@ -156,6 +156,13 @@ pub use seele_core::{agenda, arquivo_local, entrada, Codigo};
 /// direto do `seele-proto`: o ADR 0002 deixa este crate ver só o núcleo.
 pub use seele_core::{linha_do_protocolo, PROTOCOL_VERSION, VERSAO_DO_SERVIDOR};
 
+/// A origem do web app (a D-web-2), para a casca montar o endereço de uma
+/// página publicada nela — o teste de rede que a tela de «não conectou»
+/// oferece (`abrir_o_teste_de_rede`, no app). Pelo `seele-core`, pela mesma
+/// razão das de cima, e daqui e não copiada: o nome mora num lugar só
+/// (`a_origem_do_web_app_e_escrita_num_lugar_so`).
+pub use seele_core::uri::ORIGEM_DO_NAVEGADOR;
+
 /// Every microphone this machine is offering, right now.
 ///
 /// A free function and not a method on [`Connection`]: picking a microphone is a thing

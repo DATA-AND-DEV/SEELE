@@ -24116,6 +24116,14 @@ Object.assign(ctx, {
   CASCA: {},
   PAGINA_DO_APP: "https://exemplo.invalido/app",
 });
+// A oferta do teste de conexão é do `base.js`, que este mundo não carrega
+// inteiro: a entrada do celular a chama no `sem-rede`, e aqui ela é a FONTE
+// REAL (com o `elemento` de que precisa), sobre o `No` deste DOM. O `invoke`
+// grava o que ela pede.
+const pedidosDaOferta = [];
+ctx.document.createElement = (tag) => new No(tag);
+ctx.invoke = async (cmd, args) => { pedidosDaOferta.push({ cmd, args }); return null; };
+vm.runInContext(funcao("base.js", "elemento") + funcao("base.js", "ofertaDoTesteDeConexao"), ctx, { filename: "base.js" });
 try {
   carregar({ ctx }, "frases.js", "celular-entrada.js");
 } catch (e) { confere("a tela de entrada não carregou: " + String(e.message).split("\n")[0], false); }

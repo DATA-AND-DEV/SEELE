@@ -495,6 +495,13 @@
     <button id="boot-cancelar-ligacao" type="button" class="botao" hidden>CANCELAR</button>
     <p id="boot-erro" class="erro" role="alert" hidden></p>
     <!--
+      O caminho de quem não conectou por causa de rede (lacuna 8 da análise
+      para a 1.0): o TESTAR A CONEXÃO, que abre a página de diagnóstico. Vazia e
+      escondida até a frase de cima ser a de uma falha de rede, e esvaziada
+      quando a frase muda: ver `ofertaDoTesteDeConexao`, em `base.js`.
+    -->
+    <div id="boot-teste-de-conexao" hidden></div>
+    <!--
       As saídas de quem hospeda com um MOD de API antiga moravam aqui, debaixo
       da frase vermelha. Foram para a tela ANTES DE HOSPEDAR (E2 da 0.17), no
       bloco dos MODs: a entrada não é lugar de decidir MOD de servidor.
@@ -4464,6 +4471,12 @@
     <h1 class="fim-titulo">ENLACE ENCERRADO</h1>
     <p id="fim-motivo" class="fim-motivo"></p>
     <button id="botao-voltar" class="botao" type="button">VOLTAR À ENTRADA</button>
+    <!--
+      O TESTAR A CONEXÃO, para o enlace que caiu e não voltou (`mostrarFim`).
+      Depois das saídas: voltar é o caminho principal, e o SAIR entra logo
+      depois do botão de cima (`desenharSaidas`), antes desta caixa.
+    -->
+    <div id="fim-teste-de-conexao" hidden></div>
   </div>
 </section>
 

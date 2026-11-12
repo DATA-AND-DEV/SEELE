@@ -56,6 +56,8 @@ function pagina({
   temSetSinkId = true,
   telaCheiaFalha = false,
   permissao = "prompt",
+  // O navegador que bloqueia a aba pedida: `window.open` devolve `null`.
+  abaBloqueada = false,
 } = {}) {
   const telaCheia = { pedidos: 0, saidas: 0, elemento: null };
   const ouvidos = [];
@@ -69,12 +71,14 @@ function pagina({
   const avisos = [];
   const linhas = [];
   const abertos = [];
+  const abas = [];
   // O resto da origem, que o lote B grava. O `seele.casca` continua vindo de
   // `guardado`.
   const origem = new Map();
   const janela = {
     structuredClone,
     TextEncoder,
+    URL,
     Blob,
     File,
     atob,
@@ -159,8 +163,12 @@ function pagina({
       },
     },
     open: (...argumentos) => {
+      if (abaBloqueada) return null;
       abertos.push(argumentos);
-      return null;
+      // A aba aberta, com o `opener` que ela teria: quem abre decide soltá-lo.
+      const aba = { opener: janela };
+      abas.push(aba);
+      return aba;
     },
     matchMedia(consulta) {
       return {
@@ -198,6 +206,7 @@ function pagina({
     avisos,
     linhas,
     abertos,
+    abas,
     origem,
     doDocumento,
     seletores,
@@ -570,6 +579,33 @@ async function abrirNoNavegador() {
   }
 }
 
+/// **O teste de conexão abre numa aba da mesma origem, e uma aba bloqueada é
+/// dita** (lacuna 8 da análise para a 1.0). O endereço é o da página ao lado
+/// desta, sem origem escrita; só o nome da falha vai na consulta; a aba aberta
+/// não fica com o `opener`; e o navegador que bloqueia a aba vira uma recusa
+/// com o endereço, e não um botão que não faz nada.
+async function oTesteDeConexao() {
+  const caso = "o teste de conexão";
+  const p = pagina({ hash: "#198.51.100.7:8383?fp=ab&convite=7K4M" });
+  const r = await desfecho(p.invoke("abrir_o_teste_de_rede", { erro: "NatNaoAbriu" }));
+  confere(caso, r.ok === null, `com a aba aberta, voltou ${util.inspect(r)}`);
+  confere(caso, igual(p.abertos, [["https://seele.invalid/diagnostico-rede.html?erro=NatNaoAbriu", "_blank"]]),
+    `a aba aberta foi ${util.inspect(p.abertos)}`);
+  confere(caso, p.abas.length === 1 && p.abas[0].opener === null, "a aba do teste ficou com o `opener` desta página");
+  // O que não é um nome de falha não entra no endereço: nem o fragmento da
+  // página (que é o convite), nem um endereço, nem um apelido.
+  for (const fora of [undefined, null, "", "203.0.113.7:8383", "ana maria", "a&convite=7K4M", "x".repeat(41), { erro: "x" }]) {
+    const q = pagina({ hash: "#198.51.100.7:8383?fp=ab&convite=7K4M" });
+    await desfecho(q.invoke("abrir_o_teste_de_rede", { erro: fora }));
+    confere(caso, igual(q.abertos, [["https://seele.invalid/diagnostico-rede.html", "_blank"]]),
+      `com ${util.inspect(fora)}, a aba aberta foi ${util.inspect(q.abertos)}`);
+  }
+  const bloqueada = pagina({ abaBloqueada: true });
+  const s = await desfecho(bloqueada.invoke("abrir_o_teste_de_rede", { erro: "SinalMudo" }));
+  confere(caso, igual(s.erro, { NavegadorNaoAbriu: { endereco: "https://seele.invalid/diagnostico-rede.html?erro=SinalMudo" } }),
+    `com a aba bloqueada, voltou ${util.inspect(s)}`);
+}
+
 /// **O arquivo por alça** (`F4/ponte-no-pc.md`, as quatro condições):
 /// 1. o mapa tem teto e solta o que guarda (no teto e no fim da sessão);
 /// 2. uma alça desconhecida, ou já solta, é recusada;
@@ -833,6 +869,7 @@ async function aPermissaoDoMicrofone() {
     oApelidoLocal,
     asPreviasConsentidas,
     abrirNoNavegador,
+    oTesteDeConexao,
     oArquivoPorAlca,
     aImagemColada,
     oArraste,

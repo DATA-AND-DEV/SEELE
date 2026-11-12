@@ -104,6 +104,11 @@ function mostrarFim(motivo) {
 
   const frase = MOTIVOS[motivo] ?? null;
   $("fim-motivo").textContent = frase ?? "ENLACE ENCERRADO";
+  // **O enlace que caiu e não voltou tem um caminho além de RECONECTAR**
+  // (lacuna 8 da análise para a 1.0): o TESTAR A CONEXÃO, só para os motivos
+  // que são da rede (`falhaDeRede`). Uma expulsão, um banimento ou uma
+  // manutenção esvaziam a caixa: não há rede a medir ali.
+  oferecerOTesteDeConexao($("fim-teste-de-conexao"), motivo);
   // A única troca de tela que ninguém pediu, e a única cujo anúncio carrega o
   // motivo: quem não vê a tela precisa do porquê junto, ou fica com um botão
   // RECONECTAR focado e nenhuma explicação de por que ele apareceu. Sem motivo
