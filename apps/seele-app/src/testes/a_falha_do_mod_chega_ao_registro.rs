@@ -465,14 +465,37 @@ fn uma_excecao_em_cada_resposta_nao_passa_do_balde_do_console() {
 /// **E com a pilha**, que diz onde no MOD: o `emTexto` do prelúdio a põe
 /// numa linha abaixo de `nome: mensagem`, e no `seele.log` a quebra sai
 /// escapada (`\n    at …`).
+///
+/// # Quem seca o balde é a conta dos temporizadores, e não o relógio
+///
+/// São `2 × RAJADA_DO_CONSOLE` laços de 4 ms, e não um. Com um só, secar o
+/// balde dependia de o relógio da máquina dispará-lo mais de 32 vezes num
+/// segundo: no macOS do runner do `ci.yml` ele disparou perto de 30
+/// (12/11/2026), as 30 linhas couberam na rajada, e o teste reprovou o balde
+/// por «não segurar nada» — de linhas que ninguém tinha escrito. Com o dobro
+/// da rajada de pé, **a primeira volta** em que eles vencem já lança o dobro
+/// do que o balde deixa passar, dispare o relógio quantas vezes disparar
+/// depois.
 #[test]
 fn um_temporizador_que_lanca_deixa_linhas_limitadas_pelo_balde() {
+    let lacos = 2 * RAJADA_DO_CONSOLE;
     let deixou = deixou(
-        "setInterval(() => { const a = null; a.b; }, 4);",
+        &format!(
+            "for (let i = 0; i < {lacos}; i++) setInterval(() => {{ const a = null; a.b; }}, 4);"
+        ),
         |_| {},
         |_, _| false,
         Duration::from_secs(1),
     );
+    // Cada disparo que lança manda um `erro-no-relogio` à janela, e a janela
+    // não passa pelo balde: é a conta do que o MOD de fato tentou escrever.
+    let disparos = deixou
+        .falas
+        .iter()
+        .filter(
+            |fala| matches!(fala, ParaOFora::Mensagem(json) if json.contains("erro-no-relogio")),
+        )
+        .count();
     let linha = linha_de_erro(&deixou.rastro, &["erro num temporizador", "TypeError"])
         .unwrap_or_else(|| {
             panic!(
@@ -493,14 +516,29 @@ fn um_temporizador_que_lanca_deixa_linhas_limitadas_pelo_balde() {
     let teto = teto_do_balde(deixou.levou);
     assert!(
         deixou.linhas <= teto,
-        "{} linhas de console em {:?}, e o balde deixa {teto}: o laço do temporizador passou \
-             por fora dele",
+        "{} linhas de console em {:?} ({disparos} disparos), e o balde deixa {teto}: o laço \
+             do temporizador passou por fora dele",
         deixou.linhas,
         deixou.levou
     );
+    // **Primeiro o arranjo, e só depois o balde.** Sem mais disparos do que a
+    // rajada não havia o que segurar, e a frase «o balde não segurou nada»
+    // acusaria o produto de uma coisa que o teste não chegou a pedir.
+    assert!(
+        disparos > RAJADA_DO_CONSOLE as usize,
+        "o arranjo do teste não secou o balde: {lacos} laços de 4 ms lançaram só {disparos} \
+             vez(es) em {:?}, e a rajada é de {RAJADA_DO_CONSOLE} — nesta máquina os \
+             temporizadores do MOD quase não dispararam. {} linhas de console: {}",
+        deixou.levou,
+        deixou.linhas,
+        deixou.rastro
+    );
     assert!(
         deixou.rastro.contains("suprimidas="),
-        "o balde não segurou nada, e o teste não mediu o teto: {}",
+        "o balde não segurou nada em {disparos} disparos (a rajada é de {RAJADA_DO_CONSOLE}), \
+             e o teste não mediu o teto: {} linhas de console em {:?}: {}",
+        deixou.linhas,
+        deixou.levou,
         deixou.rastro
     );
 }
