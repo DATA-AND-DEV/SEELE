@@ -237,6 +237,35 @@ Libere a porta no firewall da máquina:
 sudo ufw allow 8384/udp
 ```
 
+#### Testar a prévia de uma branch, sem publicar
+
+A página de produção sai da `main`; cada outra branch enviada ganha uma prévia
+no Cloudflare Pages (a da `entrega/1.0` é
+`https://entrega-1-0.seele-web-git.pages.dev`). A prévia abre, mas não conecta a
+servidor nenhum enquanto o ponto só aceitar a origem do produto: o navegador
+recusa a resposta do `/sinal/1` e do `/chamada/1`. Para testar uma prévia num
+celular, o serviço passa a nomear as duas origens — **as duas**, porque com um
+`--origem` na linha o padrão deixa de valer sozinho:
+
+```ini
+ExecStart=/opt/seele/seele-encontro --sinal 127.0.0.1:8385 --origem https://seele.sh --origem https://entrega-1-0.seele-web-git.pages.dev
+```
+
+Depois de `systemctl daemon-reload` e `systemctl restart`, a conferência é uma
+pergunta prévia de cada origem; a resposta traz o `access-control-allow-origin`
+da origem que perguntou, e nada para as outras:
+
+```sh
+curl -sS -X OPTIONS -D - -o /dev/null \
+  -H 'Origin: https://entrega-1-0.seele-web-git.pages.dev' \
+  -H 'Access-Control-Request-Method: POST' https://rendzvous.seele.sh/sinal/1
+```
+
+A origem da prévia sai da linha quando o teste acabar: ela é a de uma branch,
+e o que essa branch publicar passa a poder perguntar ao ponto. O CORS não
+protege o ponto (qualquer programa fala com ele); protege quem usa o navegador
+de uma página alheia lendo a resposta em nome dela.
+
 E, para ele subir junto com a máquina, um serviço de systemd de nove linhas:
 
 ```ini
