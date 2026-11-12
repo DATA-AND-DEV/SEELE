@@ -6,28 +6,18 @@
 //! stream they land *before* the handshake has finished.
 //!
 //! Run with: cargo +nightly fuzz run control_frame
+//!
+//! A propriedade mora em `fuzz/propriedades/control_frame.rs`, e não aqui: o
+//! `cargo test -p seele-proto --test sementes_do_fuzz` passa as sementes pelo
+//! mesmo código, sem o nightly. Ver lá por que ela compara os bytes.
 
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use seele_proto::control::{decode, encode, ClientMessage, ServerMessage, MAX_FRAME_LEN};
+
+#[path = "../propriedades/control_frame.rs"]
+mod propriedade;
 
 fuzz_target!(|data: &[u8]| {
-    // Both directions: a client parses server frames and a server parses client
-    // frames, and only one of those is behind authentication.
-    if let Ok(message) = decode::<ClientMessage>(data) {
-        assert!(data.len() <= MAX_FRAME_LEN);
-        // Anything accepted must re-encode and re-decode to itself. A mismatch
-        // means two peers can read the same bytes as different messages.
-        let frame = encode(&message).expect("an accepted message must re-encode");
-        let again = decode::<ClientMessage>(&frame).expect("a re-encoded frame must decode");
-        assert_eq!(again, message);
-    }
-
-    if let Ok(message) = decode::<ServerMessage>(data) {
-        assert!(data.len() <= MAX_FRAME_LEN);
-        let frame = encode(&message).expect("an accepted message must re-encode");
-        let again = decode::<ServerMessage>(&frame).expect("a re-encoded frame must decode");
-        assert_eq!(again, message);
-    }
+    propriedade::conferir(data);
 });
