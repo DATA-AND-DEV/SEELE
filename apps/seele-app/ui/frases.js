@@ -847,6 +847,25 @@ function fraseDaLigacao(erro, nome, trilha) {
       "ou não está recebendo ligações"
     );
   }
+  // O ponto achou a sala, e ela não respondeu ao chamado dele a tempo.
+  if (localizar === "AnfitriaoCalado" || localizar === "SoAEscuta") {
+    return `${quem} ESTÁ NO AR, MAS NÃO RESPONDEU AO PONTO DE ENCONTRO: tente de novo em alguns segundos`;
+  }
+  if (localizar === "PontoRecusou") {
+    return "O PONTO DE ENCONTRO RECUSOU A CHAMADA POR EXCESSO: espere um pouco e ligue de novo";
+  }
+  if (localizar === "SemPonto") {
+    return "O PONTO DE ENCONTRO ESTÁ DESLIGADO NESTE COMPUTADOR: sem ele, código não funciona";
+  }
+  // Só na página (ADR 0068): o ponto achou a sala e não disse com que
+  // certificado ela atende, e sem isso o navegador não fecha a conexão segura.
+  if (localizar === "SemImpressao") {
+    return (
+      `${quem} ESTÁ NO AR, MAS ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO: ` +
+      "o SEELE do outro lado, ou o ponto de encontro, é de uma versão anterior. " +
+      "Peça para a pessoa atualizar o SEELE, ou ligue pelo app"
+    );
+  }
   if (erro?.CodigoNaoBate) return "QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO. Nada foi enviado.";
   if (erro?.SePassouPorCodigo) return `ALGUÉM TENTOU SE PASSAR POR ${quem}`;
   if (erro?.OutraLinha) return `${quem} USA UMA VERSÃO QUE NÃO CONVERSA COM A SUA`;
@@ -3482,6 +3501,13 @@ const FRASES_DO_TRANSPORTE = Object.freeze({
     SinalMudo:
       "O PONTO DE ENCONTRO NÃO RESPONDEU À PÁGINA.\n" +
       "Ele pode estar fora do ar. O caminho direto do link também não abriu.",
+    // A sala pessoal de um código (ADR 0068): o ponto a achou e não disse a
+    // impressão DTLS dela. A casca troca este motivo pelo `NaoLocalizou` de
+    // quem liga (`motivoDaLigacaoPeloCodigoWeb`); a frase fica para quem o ler
+    // cru.
+    SalaSemImpressao:
+      "ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO DESTA PESSOA.\n" +
+      "O SEELE do outro lado, ou o ponto de encontro, é de uma versão anterior.",
     CaminhoNaoAbriu:
       "AS DUAS REDES NÃO SE ALCANÇARAM.\n" +
       "Quem hospeda pode abrir a porta no roteador.",

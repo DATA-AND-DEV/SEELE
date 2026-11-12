@@ -23,7 +23,7 @@
 //! |---|---|---|
 //! | `ligacao_abrir(pedido)` | 0 | nada: o `Hello` espera em `ligacao_para_o_fio` |
 //! | | 1 | `{"recusa": ConnectionError}` ou `{"erro": "json", "texto": …}` |
-//! | `ligacao_apresentada(visto)` | 0 | `{"chave": hex64}`: a apresentação da sala conferiu, e o `Hello` espera em `ligacao_para_o_fio` |
+//! | `ligacao_apresentada(visto)` | 0 | `{"chave": hex64, "impressao": hex64}`: a apresentação da sala conferiu, e o `Hello` espera em `ligacao_para_o_fio` |
 //! | | 1 | `{"recusa": ConnectionError}`: quem atendeu não é o dono do código, e nada sai |
 //! | `ligacao_chegou(bytes)` | 0 | `{"passos": […]}` |
 //! | | 1 | `{"erro": "sem-ligacao"}` |
@@ -591,8 +591,9 @@ pub unsafe extern "C" fn ligacao_abrir(ptr: *const u8, len: usize) -> u32 {
 /// anfitrião, a impressão é a que o navegador exigiu do DTLS, e o pino é a
 /// chave de uma ligação completa anterior.
 ///
-/// Devolve 0 com `{"chave": hex64}`, ou 1 com `{"recusa": ConnectionError}`
-/// (ou `{"erro": "sem-ligacao"}`). **Tudo o que não se lê é recusa**: um campo
+/// Devolve 0 com `{"chave": hex64, "impressao": hex64}` (a chave provada, e a
+/// impressão dela: a do veredito da casca, a mesma que o desktop mostra), ou 1
+/// com `{"recusa": ConnectionError}` (ou `{"erro": "sem-ligacao"}`). **Tudo o que não se lê é recusa**: um campo
 /// que falta ou um hex torto chega à conferência como uma apresentação que não
 /// prova nada, e a entrada acaba como a de quem não é o dono do código.
 ///
@@ -619,9 +620,14 @@ pub unsafe extern "C" fn ligacao_apresentada(ptr: *const u8, len: usize) -> u32 
         };
         match visto {
             Ok(chave) => dizer(
-                serde_json::json!({ "chave": crate::ligacao::hex_de(&chave) })
-                    .to_string()
-                    .into_bytes(),
+                serde_json::json!({
+                    "chave": crate::ligacao::hex_de(&chave),
+                    "impressao": crate::ligacao::hex_de(
+                        &seele_proto::transport::certificate_digest(&chave),
+                    ),
+                })
+                .to_string()
+                .into_bytes(),
                 0,
             ),
             Err(recusa) => dizer(

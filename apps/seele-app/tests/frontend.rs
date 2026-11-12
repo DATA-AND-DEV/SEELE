@@ -23756,7 +23756,8 @@ confere("quem toca não tomou o lugar da faixa de quem não coube: " + c.m.$("to
 ///
 /// A ordem era a contrária: a direta primeiro, e a sala só quando a direta
 /// respondia «ausente». Entre dois apps a direta sempre respondia, e a sala (o
-/// motor nativo, até seis pessoas) nunca era usada. O `node` roda a fonte real
+/// motor nativo, até seis pessoas) nunca era usada. A regra é a mesma na página,
+/// que entra na sala de quem tem o app como convidada. O `node` roda a fonte real
 /// de `irParaOServidor` e do recuo; o `conectar` é o duble de sempre, que chama o
 /// `connect` e, na falha, chama o recuo como o `catch` real faz (conferido na
 /// fonte logo abaixo).
@@ -23840,10 +23841,22 @@ c.m.ctx.irParaOServidor("10.0.0.2:8383", null, null, undefined, null, false);
 await tick(); await tick();
 confere("um endereço recuou para a conversa direta: " + c.ordem, c.ordem.join() === "sala:10.0.0.2:8383");
 
-// A página ainda não entra numa sala: nela o código segue pela direta.
+// Na página a regra é a mesma: a sala de quem tem o app primeiro, e a conversa
+// direta só quando o código não tem sala (a outra pessoa só tem a página).
 c = cenario({ direta: async () => ({}), pagina: true });
 await ligar(c);
-confere("na página, o código não foi pela conversa direta: " + c.ordem, c.ordem.join() === "direta:" + CODIGO);
+confere("na página, com a sala no ar, a direta foi tentada: " + c.ordem, c.ordem.join() === "sala:" + CODIGO);
+c = cenario({ connect: SEM_SALA, direta: async () => ({}), pagina: true });
+await ligar(c);
+confere("na página, sem sala, a ordem não foi sala e depois direta: " + c.ordem, c.ordem.join() === "sala:" + CODIGO + ",direta:" + CODIGO);
+// A sala existe e a página não consegue fechar a conexão com ela (o ponto, ou o
+// SEELE de quem hospeda, é de antes da 1.0): a direta é tentada, e sem ela a
+// frase diz o porquê e o que fazer.
+c = cenario({ connect: () => Promise.reject({ NaoLocalizou: { motivo: "SemImpressao" } }), direta: async () => ({ ausente: true }), pagina: true });
+await ligar(c);
+confere("sem a impressão da sala, a direta não foi tentada: " + c.ordem, c.ordem.join() === "sala:" + CODIGO + ",direta:" + CODIGO);
+confere("sem a impressão da sala, a frase não orienta: " + c.m.$("boot-erro").textContent,
+  /ANA ESTÁ NO AR, MAS ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO/.test(c.m.$("boot-erro").textContent));
 "##,
     );
 }

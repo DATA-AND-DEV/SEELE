@@ -372,18 +372,13 @@ window.addEventListener(
  * troca pergunta antes, e volta pelo alvo.
  */
 function irParaOServidor(alvo, apelido, token, nome, linkColado = null, ligar = false) {
-  // **`@CÓDIGO` disca a sala pessoal primeiro** (ADR 0068). A conversa direta
-  // vinha antes, e entre dois apps ela sempre respondia: a sala, que é o
-  // caminho com o motor nativo e com até seis pessoas, nunca era usada. A
-  // direta ficou como recuo de um código sem sala (`recuarParaAConversaDireta`),
-  // e quem a chama é o `catch` do `conectar`, com o motivo na mão.
-  //
-  // **A página ainda não entra numa sala**: até lá, um código nela segue pela
-  // conversa direta, como sempre.
-  const pessoal = window.seelePessoalWeb;
-  if (PONTE_NO_LUGAR_DO_TAURI && typeof alvo === "string" && alvo.startsWith("@") && pessoal?.chamarCodigo) {
-    return Promise.resolve(pessoal.chamarCodigo({ codigo: alvo, apelido })).catch(dizerQueALigacaoNaoComecou);
-  }
+  // **`@CÓDIGO` disca a sala pessoal primeiro, nas duas cascas** (ADR 0068). A
+  // conversa direta vinha antes, e entre dois apps ela sempre respondia: a sala,
+  // que é o caminho com o motor nativo e com até seis pessoas, nunca era usada.
+  // No app e na página o código passa pelo `conectar` de sempre: o app disca a
+  // sala, e a página entra nela como convidada (`ponte-web.js`). A direta ficou
+  // como recuo de um código sem sala (`recuarParaAConversaDireta`), e quem a
+  // chama é o `catch` do `conectar`, com o motivo na mão.
   return irParaOServidorNativo(alvo, apelido, token, nome, linkColado, ligar);
 }
 
