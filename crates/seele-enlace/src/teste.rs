@@ -319,7 +319,35 @@ pub struct Cano {
     endereco: SocketAddr,
     ida: Arc<ContadoresDoSentido>,
     volta: Arc<ContadoresDoSentido>,
+    /// O menor buffer de recepção que o sistema deu aos dois sockets.
+    recepcao: Option<usize>,
     tarefas: Vec<tokio::task::JoinHandle<()>>,
+}
+
+/// Abre um socket do cano em loopback e pede a ele o buffer de recepção da
+/// ponta ([`crate::BUFFER_DE_RECEPCAO`]). Devolve o socket e o que o sistema
+/// concedeu, lido de volta.
+///
+/// **O cano só pode perder o que a [`ConfigDoCano`] manda perder.** Com o buffer
+/// padrão do sistema ele perdia antes de contar: no Windows o padrão é de
+/// 64 KiB, uma rajada de 2000 datagramas de 200 bytes são 400 KB, e o que
+/// transbordava o socket de entrada sumia sem passar pelo sorteio nem pela fila
+/// — `repassados` batia com o que chegou ao destino, e o que faltava não estava
+/// em contador nenhum (medido no Windows em 12/11/2026: direto, sem o cano,
+/// chegavam 2000 de 2000). Um emulador que perde por conta própria mede a
+/// máquina do teste, e não o caminho que o teste pediu.
+///
+/// O sistema pode dar menos que o pedido (o teto é dele: `net.core.rmem_max` no
+/// Linux), e o cano anda assim mesmo; [`Cano::buffer_de_recepcao`] diz o que
+/// veio.
+async fn socket_do_cano() -> std::io::Result<(UdpSocket, Option<usize>)> {
+    let socket = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await?;
+    let referencia = socket2::SockRef::from(&socket);
+    if let Err(erro) = referencia.set_recv_buffer_size(crate::BUFFER_DE_RECEPCAO) {
+        tracing::warn!(%erro, "o sistema recusou o buffer de recepção pedido para o cano");
+    }
+    let concedido = referencia.recv_buffer_size().ok();
+    Ok((socket, concedido))
 }
 
 impl Cano {
@@ -329,9 +357,11 @@ impl Cano {
     ///
     /// Se um dos dois sockets em 127.0.0.1 não abrir.
     pub async fn abrir(anfitriao: SocketAddr, config: ConfigDoCano) -> std::io::Result<Self> {
-        let loopback = SocketAddr::from(([127, 0, 0, 1], 0));
-        let para_quem_liga = Arc::new(UdpSocket::bind(loopback).await?);
-        let para_o_anfitriao = Arc::new(UdpSocket::bind(loopback).await?);
+        let (para_quem_liga, recepcao_da_ida) = socket_do_cano().await?;
+        let (para_o_anfitriao, recepcao_da_volta) = socket_do_cano().await?;
+        let recepcao = recepcao_da_ida.min(recepcao_da_volta);
+        let para_quem_liga = Arc::new(para_quem_liga);
+        let para_o_anfitriao = Arc::new(para_o_anfitriao);
         let endereco = para_quem_liga.local_addr()?;
         let quem_liga: Arc<Mutex<Option<SocketAddr>>> = Arc::default();
         let ida: Arc<ContadoresDoSentido> = Arc::default();
@@ -362,8 +392,16 @@ impl Cano {
             endereco,
             ida,
             volta,
+            recepcao,
             tarefas,
         })
+    }
+
+    /// O buffer de recepção que o sistema deu aos sockets do cano, em bytes: o
+    /// menor dos dois. `None` se o sistema não soube dizer.
+    #[must_use]
+    pub const fn buffer_de_recepcao(&self) -> Option<usize> {
+        self.recepcao
     }
 
     /// O endereço que quem liga disca.

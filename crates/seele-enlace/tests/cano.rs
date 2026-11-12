@@ -24,10 +24,20 @@ use tokio::net::UdpSocket;
 /// do INIT do SCTP (RTO inicial de 3 s, dobrando).
 const PRAZO: Duration = Duration::from_secs(60);
 
+/// Um socket das pontas do teste, com o mesmo buffer de recepção que o cano
+/// pede para os dele.
+///
+/// O destino é quem recebe a rajada que o cano repassa, e com o buffer padrão
+/// (64 KiB no Windows) ele perderia depois do cano o que o cano deixou de
+/// perder antes: o teste contaria como perda do caminho um transbordo da
+/// própria ponta.
 async fn socket() -> UdpSocket {
-    UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+    let socket = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
         .await
-        .unwrap()
+        .unwrap();
+    // O sistema pode dar menos (o teto é dele), e o teste roda assim mesmo.
+    let _ = socket2::SockRef::from(&socket).set_recv_buffer_size(seele_enlace::BUFFER_DE_RECEPCAO);
+    socket
 }
 
 /// Manda `quantos` datagramas numerados de `tamanho` bytes pela ida de um cano
@@ -39,6 +49,32 @@ async fn pela_ida(
     tamanho: usize,
     intervalo: Duration,
 ) -> (Vec<(u32, Duration)>, Cano) {
+    let (demoras, cano, _emissao) =
+        pela_ida_cronometrada(config, quantos, tamanho, intervalo).await;
+    (demoras, cano)
+}
+
+/// [`pela_ida`], e mais **quanto o emissor levou** para mandar tudo: é o que
+/// diz a um teste o que foi de fato oferecido ao cano, antes de ele julgar o
+/// que o cano fez com isso.
+///
+/// # O emissor anda por prazo, e não por espera
+///
+/// O n-ésimo datagrama sai em `comeco + intervalo × n`, e não «`intervalo`
+/// depois do anterior». Com `sleep(intervalo)` o atraso de cada despertar se
+/// **soma**: um relógio que acorda 10–20 ms depois do pedido (o macOS do runner)
+/// ou só a cada 15,6 ms (o tique do Windows) fazia um emissor de «1000 bytes a
+/// cada 4 ms» oferecer um quarto dos 2 Mbps que o teste supunha, e o gargalo de
+/// 1 Mbps nunca enchia — o teste da banda reprovava o cano por um emissor que
+/// não emitia (CI de 12/11/2026: 53 descartes onde se esperavam mais de 100 no
+/// macOS, 622 kbps «passando» por 1 Mbps no Windows). Por prazo, quem acorda
+/// tarde manda de uma vez o que já venceu, e a média oferecida é a pedida.
+async fn pela_ida_cronometrada(
+    config: ConfigDoCano,
+    quantos: u32,
+    tamanho: usize,
+    intervalo: Duration,
+) -> (Vec<(u32, Duration)>, Cano, Duration) {
     let destino = socket().await;
     let origem = socket().await;
     let cano = Cano::abrir(destino.local_addr().unwrap(), config)
@@ -59,10 +95,12 @@ async fn pela_ida(
                     tokio::task::yield_now().await;
                 }
             } else {
-                tokio::time::sleep(intervalo).await;
+                // O prazo do próximo, contado do começo: ver o comentário da função.
+                let proximo = tokio::time::Instant::from_std(comeco) + intervalo * (n + 1);
+                tokio::time::sleep_until(proximo).await;
             }
         }
-        (saidas, origem)
+        (saidas, origem, comeco.elapsed())
     });
     let mut chegadas = Vec::new();
     let mut buffer = vec![0_u8; 2048];
@@ -81,12 +119,12 @@ async fn pela_ida(
             Err(_) => {}
         }
     }
-    let (saidas, _origem) = emissor.await.unwrap();
+    let (saidas, _origem, emissao) = emissor.await.unwrap();
     let demoras = chegadas
         .into_iter()
         .map(|(n, chegou)| (n, chegou.saturating_sub(saidas[n as usize])))
         .collect();
-    (demoras, cano)
+    (demoras, cano, emissao)
 }
 
 fn com_perda(perda: f64) -> Sentido {
@@ -254,28 +292,83 @@ async fn cru_a_banda_segura_a_vazao() {
         ..Sentido::limpo()
     };
     let comeco = Instant::now();
-    let (chegou, cano) = pela_ida(
+    let (chegou, cano, emissao) = pela_ida_cronometrada(
         ConfigDoCano::simetrico(estreito, 1),
         500,
         1000,
         Duration::from_millis(4),
     )
     .await;
-    // O emissor leva pelo menos 2 s (500 × 4 ms), e o temporizador do tokio
-    // arredonda para cima: a vazão se mede contra o tempo que de fato passou.
+    // **Primeiro o arranjo, e só depois o cano.** Tudo o que vem abaixo supõe
+    // um gargalo cheio, e um gargalo só enche se o emissor oferecer mais do que
+    // ele escoa. O emissor anda por prazo e leva 2 s nos 500 datagramas; se a
+    // máquina o segurou a ponto de a oferta média cair para perto da banda, o
+    // que reprova aqui é o arranjo, com esse nome — e não «o cano deixou passar
+    // de menos», que foi a frase errada que o CI leu em 12/11/2026.
+    let oferecido_bps = 500.0 * 1000.0 * 8.0 / emissao.as_secs_f64();
+    assert!(
+        oferecido_bps >= 1_500_000.0,
+        "o arranjo do teste não encheu o gargalo: o emissor levou {emissao:?} para mandar o que \
+         devia sair em 2 s, e ofereceu {oferecido_bps:.0} bps a um gargalo de 1 Mbps (o pedido \
+         eram 2 Mbps). Com isso o que vem abaixo não mede o cano: {:?}",
+        cano.ida()
+    );
+    // A vazão se mede contra o tempo que de fato passou: o do emissor, mais o
+    // que a fila levou para escoar depois dele (os 500 ms de silêncio com que
+    // `pela_ida` encerra saem da conta).
     let ultima = chegou.iter().map(|(_, d)| *d).max().unwrap();
     let durou = comeco.elapsed().saturating_sub(Duration::from_millis(500));
     let bps = cano.ida().bytes_repassados as f64 * 8.0 / durou.as_secs_f64();
     assert!(
         (850_000.0..=1_100_000.0).contains(&bps),
-        "passaram {bps:.0} bps por um gargalo de 1 Mbps"
+        "passaram {bps:.0} bps por um gargalo de 1 Mbps (oferecidos {oferecido_bps:.0} bps em \
+         {emissao:?}; a conta foi sobre {durou:?}): {:?}",
+        cano.ida()
     );
-    assert!(cano.ida().descartados_na_fila > 100, "{:?}", cano.ida());
-    // Fila de 20 000 bytes a 1 Mbps: ninguém espera mais que 160 ms (mais folga).
     assert!(
-        ultima < Duration::from_millis(200),
+        cano.ida().descartados_na_fila > 100,
+        "com {oferecido_bps:.0} bps oferecidos a 1 Mbps, a fila descartou pouco: {:?}",
+        cano.ida()
+    );
+    // Fila de 20 000 bytes a 1 Mbps: ninguém espera mais que 160 ms, mais a
+    // folga do temporizador do próprio cano, que solta o datagrama no despertar
+    // seguinte ao prazo. Com um relógio que só acorda a cada 15,6 ms (simulado
+    // aqui, no emissor e no cano, em 12/11/2026) a maior demora foi de 174 ms, e
+    // os 200 ms de antes deixavam 26 ms para um runner que acorda 10–20 ms
+    // tarde. O teto continua pegando o que importa: uma fila que não respeita o
+    // `fila_max` — o dobro dela já são 320 ms.
+    assert!(
+        ultima < Duration::from_millis(250),
         "um datagrama ficou {ultima:?} numa fila de 160 ms"
     );
+}
+
+/// O cano pede aos seus sockets o buffer de recepção da ponta. Sem ele, uma
+/// rajada transbordava o socket de entrada e o cano perdia o que ninguém
+/// mandou perder, fora de todo contador (ver `socket_do_cano`, em
+/// `seele_enlace::teste`). O teto é do sistema, então o teste compara com o que
+/// o mesmo sistema dá a um socket cru que pede o mesmo número — a mesma régua
+/// de `pilha_dupla::a_ponta_pede_o_buffer_de_recepcao_grande`.
+#[tokio::test]
+async fn o_cano_pede_o_buffer_de_recepcao_grande() {
+    let cru = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None).unwrap();
+    let padrao = cru.recv_buffer_size().unwrap();
+    cru.set_recv_buffer_size(seele_enlace::BUFFER_DE_RECEPCAO)
+        .unwrap();
+    let possivel = cru.recv_buffer_size().unwrap();
+    let destino = socket().await;
+    let cano = Cano::abrir(
+        destino.local_addr().unwrap(),
+        ConfigDoCano::simetrico(Sentido::limpo(), 1),
+    )
+    .await
+    .unwrap();
+    let dado = cano.buffer_de_recepcao().unwrap();
+    assert_eq!(
+        dado, possivel,
+        "o cano não pediu o buffer de recepção (padrão do sistema: {padrao})"
+    );
+    eprintln!("buffer de recepção: padrão {padrao}, do cano {dado}");
 }
 
 // ---- com o enlace de verdade por cima --------------------------------------
