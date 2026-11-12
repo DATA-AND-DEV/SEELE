@@ -45,6 +45,54 @@ fn read(relative: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+/// Os módulos de teste do `main.rs`, que moram em `src/testes/`, um arquivo
+/// por módulo, na ordem dos nomes.
+///
+/// A pasta inteira, lida do disco: um módulo novo entra sem ser listado. E com
+/// pelo menos um arquivo, para que a pasta que mudou de lugar reprove em vez de
+/// deixar cego quem a lê.
+fn testes_do_main() -> String {
+    let pasta = app_dir().join("src/testes");
+    let mut nomes: Vec<String> = std::fs::read_dir(&pasta)
+        .unwrap_or_else(|erro| panic!("{}: {erro}", pasta.display()))
+        .map(|entrada| entrada.expect("uma entrada de src/testes").path())
+        .filter(|caminho| caminho.extension().is_some_and(|extensao| extensao == "rs"))
+        .map(|caminho| {
+            caminho
+                .file_name()
+                .and_then(|nome| nome.to_str())
+                .expect("um nome de arquivo")
+                .to_owned()
+        })
+        .collect();
+    nomes.sort();
+    assert!(
+        !nomes.is_empty(),
+        "`src/testes/` não tem mais os módulos de teste do `main.rs`: o guarda que os lê \
+         ficou cego"
+    );
+    nomes
+        .iter()
+        .map(|nome| read(&format!("src/testes/{nome}")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// O `main.rs` e os módulos de teste dele juntos, que é o texto que o
+/// `main.rs` tinha antes de eles saírem para `src/testes/`.
+///
+/// Para o guarda que **proíbe** um texto no arquivo inteiro, ou conta quantas
+/// vezes ele aparece: lendo só o `main.rs`, ele deixaria de ver o que um teste
+/// escreve, que antes via, e passaria calado. O `main.rs` vem primeiro, e quem
+/// corta o corpo de uma função pela primeira ocorrência continua achando a de
+/// produção.
+fn main_com_os_testes() -> String {
+    let mut fonte = read("src/main.rs");
+    fonte.push('\n');
+    fonte.push_str(&testes_do_main());
+    fonte
+}
+
 /// Os tipos que atravessam a ponte, nos dois arquivos em que moram.
 ///
 /// O `Snapshot` e o resto ficam em `seele-ffi/src/types.rs`. Os tipos de vista
@@ -1084,7 +1132,7 @@ fn neither_side_of_the_bridge_collapses_whitespace() {
     // The test above proves the arithmetic on raw bodies. This is what keeps
     // both callers on raw bodies — the failure it guards is a silent one-per-run
     // offset drift, invisible until somebody pastes a message with two channels.
-    let source = read("src/main.rs");
+    let source = main_com_os_testes();
     let script = scripts();
 
     assert!(
@@ -8494,7 +8542,7 @@ fn there_is_no_blocklist_of_extensions_anywhere_in_the_frontend() {
     for name in ui_files(".js") {
         fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
     }
-    fonte.push_str(&without_comments(&read("src/main.rs")));
+    fonte.push_str(&without_comments(&main_com_os_testes()));
 
     // **Uma lista, e não um nome.**
     //
@@ -12521,12 +12569,13 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          com `code: None` ainda sai do `Destroyed` da última janela, com ela já fora da \
          lista, e então troque `RUNTIME_MEDIDO`"
     );
-    let main = without_comments(&read("src/main.rs"));
+    let main = without_comments(&main_com_os_testes());
     // **Em qualquer arquivo de `src/`, e não só no `main.rs`.** Medido na
     // reversão (lote 58-4): um `prevent_close` ou um `prevent_exit` em outro
     // módulo do app (`sala.rs`, na reversão) passava calado, porque o guarda só
-    // lia o `main.rs`.
-    let mut fontes = String::new();
+    // lia o `main.rs`. E os módulos de teste do `main.rs`, que eram texto dele
+    // e moram em `src/testes/`: a leitura de `src/` não desce em pasta.
+    let mut fontes = without_comments(&testes_do_main());
     for entrada in std::fs::read_dir(app_dir().join("src")).expect("a pasta src") {
         let caminho = entrada.expect("uma entrada de src").path();
         if caminho.extension().is_some_and(|extensao| extensao == "rs") {
@@ -15619,7 +15668,7 @@ fn the_mod_commands_the_page_invokes_exist_in_rust() {
 /// command».
 #[test]
 fn the_shell_reaches_mods_through_the_ffi_and_not_past_it() {
-    let rust = read("src/main.rs");
+    let rust = main_com_os_testes();
     assert!(
         !rust.contains("seele_core::mods"),
         "a casca alcançou `seele_core::mods` por cima do `seele-ffi`"
@@ -17569,7 +17618,7 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
 /// dia em que alguém puser a diretiva de volta «para destravar um MOD».
 #[test]
 fn o_esquema_dos_mods_nao_ficou_registrado_sem_ninguem_para_usa_lo() {
-    let rust = read("src/main.rs");
+    let rust = main_com_os_testes();
     assert!(
         !rust.contains("register_uri_scheme_protocol(\"mod\""),
         "o esquema `mod://` continua registrado, e desde o ADR 0049 não há \
@@ -18132,7 +18181,7 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
 /// portaria, a linha de ESTE SERVIDOR) e continua no `estado_do_servidor`.
 #[test]
 fn estou_no_meu_servidor_tem_uma_resposta_so() {
-    let app = without_comments(&read("src/main.rs"));
+    let app = without_comments(&main_com_os_testes());
     assert!(
         !app.contains("hospedado_aqui"),
         "o `hospedado_aqui` voltou ao `main.rs`: é a segunda resposta a «estou no \
@@ -23932,7 +23981,7 @@ confere("o app recuou para a conversa direta", recuou === false && so(m, "chamar
     );
 
     // 2. Os comandos, o módulo e os eventos saíram do app.
-    let main = without_comments(&read("src/main.rs"));
+    let main = without_comments(&main_com_os_testes());
     let toque = without_comments(&read("src/toque.rs"));
     for sobra in [
         "fn pessoal_",
@@ -28605,8 +28654,12 @@ fn o_app_diz_que_tem_tela_no_main_antes_de_qualquer_conexao() {
         "`este_processo_tem_tela(true)` vem depois do `tauri::Builder`: a conexão do arranque pode \
          chegar antes"
     );
+    // A conta é a do arquivo inteiro, com os módulos de teste dele, que moram
+    // em `src/testes/`: um teste também não pode dizer que o processo tem tela.
     assert_eq!(
-        fonte.matches("este_processo_tem_tela(").count(),
+        main_com_os_testes()
+            .matches("este_processo_tem_tela(")
+            .count(),
         1,
         "`este_processo_tem_tela` é chamado em mais de um lugar de main.rs; só o `main` pode"
     );
@@ -30168,7 +30221,7 @@ fn a_tecla_global_nasce_desligada_escondida_e_fora_do_alcance_da_pagina() {
 
     // **O plugin sobe pelo `iniciar`, e não pelo `Builder`**: no `Builder`, o
     // serviço de atalhos que não sobe derruba a abertura do app.
-    let main = without_comments(&read("src/main.rs"));
+    let main = without_comments(&main_com_os_testes());
     assert!(
         !main.contains(".plugin(tauri_plugin_global_shortcut"),
         "o plugin de atalhos voltou ao `Builder`: se ele não subir, o app não abre"
@@ -31027,7 +31080,7 @@ fn os_motivos_e_as_permissoes_da_notificacao_sao_os_do_rust() {
 /// outro lado, que a página não alcança o plugin sem passar por aqui.
 #[test]
 fn o_comando_de_notificar_confere_a_preferencia_e_a_janela_antes_do_plugin() {
-    let main = without_comments(&read("src/main.rs"));
+    let main = without_comments(&main_com_os_testes());
     let comando = main
         .split("fn notificar_no_sistema(")
         .nth(1)

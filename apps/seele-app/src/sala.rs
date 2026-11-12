@@ -1572,7 +1572,15 @@ mod a_sala_pessoal {
             "a janela não sobe a sala na 8385 com o ponto de quem liga: quem liga pelo código \
              pergunta num ponto em que esta sala não se registrou"
         );
-        let main = compacto(include_str!("main.rs"));
+        // Com os módulos de teste do `main.rs`, que moram em `testes/`: a
+        // conta é a do arquivo inteiro, como era quando eles eram texto dele.
+        let main = compacto(
+            &[
+                include_str!("main.rs"),
+                &crate::fonte_dos_modulos_de_teste(),
+            ]
+            .concat(),
+        );
         let subidas =
             main.matches("sala::subir(").count() + main.matches("sala::subir_agora(").count();
         assert!(
