@@ -243,17 +243,41 @@ A página de produção sai da `main`; cada outra branch enviada ganha uma prév
 no Cloudflare Pages (a da `entrega/1.0` é
 `https://entrega-1-0.seele-web-git.pages.dev`). A prévia abre, mas não conecta a
 servidor nenhum enquanto o ponto só aceitar a origem do produto: o navegador
-recusa a resposta do `/sinal/1` e do `/chamada/1`. Para testar uma prévia num
-celular, o serviço passa a nomear as duas origens — **as duas**, porque com um
-`--origem` na linha o padrão deixa de valer sozinho:
+recusa a resposta do `/sinal/1` e do `/chamada/1`.
+
+**No ponto oficial, quem libera uma prévia é o proxy, e não o serviço.** O
+Caddy que termina o TLS (`/opt/seele-017-homologacao/Caddyfile`) ganha um
+bloco por origem de prévia, antes do bloco geral, que repassa ao ponto e põe o
+cabeçalho na resposta. O ponto não é reiniciado, e os registros dos anfitriões,
+que ele guarda só em memória, ficam:
+
+```
+ @previa_entrega {
+  path /sinal/1 /chamada/1
+  header Origin https://entrega-1-0.seele-web-git.pages.dev
+ }
+ handle @previa_entrega {
+  reverse_proxy 127.0.0.1:8385 {
+   header_down Access-Control-Allow-Origin https://entrega-1-0.seele-web-git.pages.dev
+  }
+ }
+```
+
+Valida-se antes de aplicar (`caddy validate --config <arquivo> --adapter
+caddyfile`), e o proxy é reiniciado (`systemctl restart seele-017-caddy`; o
+`admin off` do arquivo não deixa recarregar). Aplicado em 12/11/2026, com a
+cópia de antes ao lado (`Caddyfile.2026-11-12.antes-da-previa-entrega.bak`).
+
+Num ponto sem proxy que faça isso, o mesmo se consegue no próprio serviço,
+nomeando **as duas** origens (com um `--origem` na linha, o padrão deixa de
+valer sozinho), ao custo de reiniciá-lo:
 
 ```ini
 ExecStart=/opt/seele/seele-encontro --sinal 127.0.0.1:8385 --origem https://seele.sh --origem https://entrega-1-0.seele-web-git.pages.dev
 ```
 
-Depois de `systemctl daemon-reload` e `systemctl restart`, a conferência é uma
-pergunta prévia de cada origem; a resposta traz o `access-control-allow-origin`
-da origem que perguntou, e nada para as outras:
+A conferência é uma pergunta de cada origem; a resposta traz o
+`access-control-allow-origin` da origem que perguntou, e nada para as outras:
 
 ```sh
 curl -sS -X OPTIONS -D - -o /dev/null \
@@ -261,10 +285,12 @@ curl -sS -X OPTIONS -D - -o /dev/null \
   -H 'Access-Control-Request-Method: POST' https://rendzvous.seele.sh/sinal/1
 ```
 
-A origem da prévia sai da linha quando o teste acabar: ela é a de uma branch,
-e o que essa branch publicar passa a poder perguntar ao ponto. O CORS não
-protege o ponto (qualquer programa fala com ele); protege quem usa o navegador
-de uma página alheia lendo a resposta em nome dela.
+**A origem da prévia sai quando o teste acabar**: ela é a de uma branch, e o
+que essa branch publicar passa a poder perguntar ao ponto. O CORS não protege
+o ponto (qualquer programa fala com ele); protege quem usa o navegador de uma
+página alheia lendo a resposta em nome dela. O arquivo do proxy ainda guarda
+três origens de prévias antigas (`21d72547`, `43f546e9`, `0fcd23f1`), das
+homologações da 0.17, que ninguém tirou.
 
 E, para ele subir junto com a máquina, um serviço de systemd de nove linhas:
 
