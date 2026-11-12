@@ -15134,7 +15134,8 @@ fn compartilhar_a_tela_tem_uma_porta_so_e_ela_e_a_barra_da_chamada() {
         .and_then(|resto| resto.split("const comGlifo").next())
         .unwrap_or_default();
     assert!(
-        espelhar.contains("aria-disabled") && espelhar.contains("porOTitulo(botao, original.title)"),
+        espelhar.contains("aria-disabled")
+            && espelhar.contains("porOTitulo(botao, original.title)"),
         "a barra não repassa o `aria-disabled` e o `title` do operador: o COMPARTILHAR \
          indisponível ficaria mudo, sem dizer por quê:\n{espelhar}"
     );
