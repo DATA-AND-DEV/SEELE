@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
 const { spawn } = require('node:child_process');
 const engines = require('./playwright.cjs');
+const { registrarRtc, relatarRtc } = require('./diagnostico-rtc.cjs');
 const segundosDeEnsaio = Number(process.env.SEELE_SOAK_SECONDS || 0);
 const portaDoSinal = Number(process.env.SEELE_PROVA_SINAL_PORT || 19886);
 assert.ok(Number.isInteger(segundosDeEnsaio) && segundosDeEnsaio >= 0 && segundosDeEnsaio <= 3600);
@@ -74,6 +75,8 @@ function instrumentarPagina() {
     assert.ok(pronto, logs);
     for (const engine of (process.env.ENGINE ? [process.env.ENGINE] : ['chromium','webkit'])) {
       const browser = await engines[engine]().launch({ headless: true });
+      // As páginas desta volta, para o diagnóstico do WebRTC de quando ela reprova (`diagnostico-rtc.cjs`).
+      let paginas = {};
       try {
         if (soFormularioInicial) {
           for (let tentativa=1;tentativa<=10;tentativa++) {
@@ -159,7 +162,9 @@ function instrumentarPagina() {
         });
         const contextoB = await browser.newContext({ viewport: { width: 390, height: 800 } });
         await Promise.all([prepararContexto(contexto), prepararContexto(contextoB)]);
+        for (const umContexto of [contexto, contextoB]) await registrarRtc(umContexto);
         const a = await contexto.newPage(), b = await contextoB.newPage();
+        paginas = { a, b };
         const erros = [];
         for (const p of [a,b]) p.on('pageerror', e=>erros.push(e.message));
         await a.goto(origem);
@@ -344,6 +349,19 @@ function instrumentarPagina() {
         console.log(JSON.stringify({engine,audio:await Promise.all([a,b].map(p=>p.evaluate(()=>contasIntegradasDaProva))),cspReal:true,gestosAtivos:true,permissaoTardiaLiberada:true}));
         assert.deepEqual(erros,[]);
         console.log(`${engine}: UI real, convite limpo, aceite, chat bidirecional, voz sintética enviada/decodificada nos dois sentidos permissão tardia, saída/perda/reentrada pelo mesmo link e novo convite limpo PASS`);
+      } catch (erro) {
+        // **O prazo sozinho não diz por que duas páginas não se ligaram.** No runner de Linux de 12/11/2026 (execução 43264412497) o
+        // Chromium passou e o WebKit ficou esperando «Conversa conectada» até o prazo. Antes de fechar o navegador, cada página diz
+        // o `iceConnectionState`, o `connectionState` e os candidatos que juntou e recebeu, e o que a tela mostrava.
+        for (const [nome, pagina] of Object.entries(paginas)) {
+          console.error(`o que a página ${nome} mostrava (${engine}):`, await pagina.evaluate(() => ({
+            fase: document.querySelector('.pessoal-web')?.dataset.fase,
+            estado: document.querySelector('.pessoal-web-estado')?.textContent,
+            falha: document.querySelector('.pessoal-web-erro')?.textContent,
+            enlaces: (globalThis.enlacesDaProva || []).map(enlace => enlace.diagnostico),
+          })).catch(falha => `sem resposta: ${falha}`));
+        }
+        await relatarRtc(engine, paginas); throw erro;
       } finally { await browser.close(); }
     }
     if (process.env.SEELE_PROVA_RELATORIO) fs.writeFileSync(process.env.SEELE_PROVA_RELATORIO, JSON.stringify({concluido:true,segundosDeEnsaio,amostras:amostrasDoEnsaio},null,2));

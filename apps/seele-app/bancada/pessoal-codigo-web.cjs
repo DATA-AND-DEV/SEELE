@@ -5,6 +5,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const engines = require('./playwright.cjs');
+const { registrarRtc, relatarRtc } = require('./diagnostico-rtc.cjs');
 const raiz = path.resolve(__dirname, '../../..');
 const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/ui/seele_web.wasm');
 (async () => {
@@ -29,9 +30,13 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
   assert.ok(pronto, logs);
   for (const [motor, tipo] of Object.entries({ chromium: engines.chromium(), webkit: engines.webkit() })) {
    const navegador = await tipo.launch({ headless: true });
+   // As páginas desta volta, para o diagnóstico do WebRTC de quando ela reprova (`diagnostico-rtc.cjs`).
+   let paginas = {};
    try {
     const contextoA = await navegador.newContext(), contextoB = await navegador.newContext();
+    for (const contexto of [contextoA, contextoB]) await registrarRtc(contexto);
     const a = await contextoA.newPage(), concorrente = await contextoA.newPage(), b = await contextoB.newPage();
+    paginas = { a, b };
     await Promise.all([a, concorrente, b].map(p => p.goto(origem)));
     // Duas primeiras abas disputam a criação: a transação escolhe uma só chave.
     const codigos = await Promise.all([a, concorrente].map(p => p.evaluate(() => meuCodigoPessoalWeb())));
@@ -127,6 +132,11 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
     await a.evaluate(async ({codigo,publica})=>guardarPerfilPessoalWeb({codigo,publica,apelido:'Mesmo nome',retrato:null}),{codigo:codigoB,publica:publicaB});
     assert.equal(await a.evaluate(codigo=>lerPerfilPessoalWeb(codigo).then(p=>p.retrato),codigoB),null,'remover foto substitui a cópia anterior');
     console.log(JSON.stringify({ motor, identidadePersistente: true, primeirasAbasConvergem: true, servidorAntigoPreservado: true, nomesIguaisNaoColidem: true, codigoNosDoisSentidos: true, aceiteRecusaCancelamento: true, pinoIncorretoRecusado: true, bloqueadoNaoToca: true, perfilPngCacheOffline: true, recusasDoPerfil }));
+   } catch (erro) {
+    // **O prazo sozinho não diz por que duas páginas não se ligaram.** No runner de Linux de 12/11/2026 (execução 43264412497) o
+    // Chromium passou e o WebKit parou no «dentro» com «Timeout 20000ms exceeded». Antes de fechar o navegador, cada página diz o
+    // `iceConnectionState`, o `connectionState` e os candidatos que juntou e recebeu.
+    await relatarRtc(motor, paginas); throw erro;
    } finally { await navegador.close(); }
   }
  } finally { encontro.kill('SIGTERM'); await new Promise(r => servidor.close(r)); }

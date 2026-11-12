@@ -3,7 +3,16 @@
 // vídeo por requestVideoFrameCallback com o mesmo encoder e protocolo.
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 const engines=require('./playwright.cjs');
+const {registrarRtc,relatarRtc,comPrazo}=require('./diagnostico-rtc.cjs');
 const wasmPath=process.argv[2];if(!wasmPath)throw new Error('uso: compartilhar-pessoal-web.cjs caminho/seele_web.wasm');
+// **Os prazos desta bancada, que não tinha nenhum.** No runner de Linux de 12/11/2026 (execução 43264412497) o Chromium passou e, no
+// WebKit, os dois enlaces não se ligaram: o `await Promise.all([pa.pronto,pb.pronto])` ficou esperando para sempre e o passo
+// pendurou até o teto dele, cinco minutos, sem uma frase. Agora os enlaces têm 30 s para se ligar, e cada motor tem 90 s para a
+// prova inteira (as duas levam 14 s juntas num Mac, medido em 12/11/2026); quando um prazo vence, a página diz o
+// `iceConnectionState`, o `connectionState` e os candidatos que juntou e recebeu (`diagnostico-rtc.cjs`). A variável é para ver o
+// prazo vencer numa máquina em que os enlaces se ligam: `SEELE_PRAZO_DOS_ENLACES_MS=1` reprova com a frase e o diagnóstico.
+const PRAZO_DOS_ENLACES_MS=Number(process.env.SEELE_PRAZO_DOS_ENLACES_MS||30000);
+const PRAZO_DO_MOTOR_MS=90000;
 const ui=path.join(__dirname,'../ui');
 const originalSps=fs.readFileSync(path.join(ui,'palco-imagem.js'),'utf8');
 const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice(at,originalSps.indexOf('\n}\n',at)+3);
@@ -18,13 +27,15 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
  let sample=null;
  try{for(const engine of ['chromium','webkit']){
   const browser=await engines[engine]().launch({headless:true});
+  let page;
   try{
-   const page=await browser.newPage({viewport:{width:1000,height:700}});
+   page=await browser.newPage({viewport:{width:1000,height:700}});
+   await registrarRtc(page);
    await page.exposeFunction('abrirTelaCheiaRecebida',()=>page.locator('#b > button').click());
    if(engine==='webkit') await page.addInitScript(()=>{delete globalThis.MediaStreamTrackProcessor;});
    if(process.env.SEELE_PREVIEW_DIR){fs.mkdirSync(process.env.SEELE_PREVIEW_DIR,{recursive:true});await page.exposeFunction('preview',()=>page.screenshot({path:path.join(process.env.SEELE_PREVIEW_DIR,`${engine}-tela-pessoal-h264.png`)}));}
    await page.goto(`http://127.0.0.1:${server.address().port}`);
-   const result=await page.evaluate(async sample=>{
+   const result=await comPrazo(page.evaluate(async ({sample,prazoDosEnlaces})=>{
     const check=(v,m)=>{if(!v)throw new Error(m);};const tick=()=>new Promise(ok=>setTimeout(ok,20));
     const until=async f=>{const start=performance.now();while(!f()){if(performance.now()-start>10000)throw new Error('prazo mídia: '+JSON.stringify(window.events));await tick();}};
     const wasmBytes=await(await fetch('/seele_web.wasm')).arrayBuffer();
@@ -32,7 +43,12 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     const sa=await service(),sb=await service();let pa,pb;
     pa=criarEnlaceDaChamadaWeb({papel:'quem-liga',enviarSinal:s=>pb.receberSinalAutenticado(s)});
     pb=criarEnlaceDaChamadaWeb({papel:'quem-recebe',enviarSinal:s=>pa.receberSinalAutenticado(s)});
-    await pb.iniciar();await pa.iniciar();await Promise.all([pa.pronto,pb.pronto]);
+    await pb.iniciar();await pa.iniciar();
+    // Com prazo e com frase: o que cada enlace sabe de si (`diagnostico`: os dois estados e os candidatos por tipo) vai no erro.
+    let relogioDosEnlaces;
+    try{await Promise.race([Promise.all([pa.pronto,pb.pronto]),new Promise((_,nao)=>{relogioDosEnlaces=setTimeout(()=>nao(new Error(
+     `os dois enlaces não se ligaram em ${prazoDosEnlaces/1000} s: quem liga ${JSON.stringify(pa.diagnostico)}, quem recebe ${JSON.stringify(pb.diagnostico)}`)),prazoDosEnlaces);})]);}
+    finally{clearTimeout(relogioDosEnlaces);}
     window.events=[];const packets=[];let a,b;
     let omitirProximoFechar=false;
     const transport={ouvir:fn=>pa.tela.ouvir(fn),enviar:bytes=>{
@@ -189,11 +205,18 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     const decoded=frames();b.fechar();b.fechar();pa.abortar();pb.abortar();
     check(!document.querySelector('#a canvas')&&!document.querySelector('#b canvas'),'canvas removidos');
     return {captured,decoded,errors,oldPackets,newPackets,leitor:typeof MediaStreamTrackProcessor==='function'?'TrackProcessor':'requestVideoFrameCallback',quadrosServidor};
-   },sample);
+   },{sample,prazoDosEnlaces:PRAZO_DOS_ENLACES_MS}),PRAZO_DO_MOTOR_MS,`${engine}: a prova na página não terminou`);
    if(result.captured)sample={oldPackets:result.oldPackets,newPackets:result.newPackets};
    console.log(JSON.stringify({engine,version:browser.version(),captura:result.captured?'canvas real':'indisponível: receptor com amostra real',leitor:result.leitor,quadrosDecodificados:result.decoded,quadrosServidor:result.quadrosServidor,erros:result.errors}));
    assert.ok(result.decoded>0);
    if(engine==='webkit'){assert.equal(result.captured,true);assert.equal(result.leitor,'requestVideoFrameCallback');}
+  }catch(erro){
+   // Antes de fechar o navegador: o que a página sabe do WebRTC dela, e os eventos da prova até ali.
+   if(page){
+    console.error(`${engine}: os eventos da prova até a falha:`,await page.evaluate(()=>JSON.stringify(window.events??null)).catch(falha=>`sem resposta: ${falha}`));
+    await relatarRtc(engine,{pagina:page});
+   }
+   throw erro;
   }finally{await browser.close();}
  }}finally{server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

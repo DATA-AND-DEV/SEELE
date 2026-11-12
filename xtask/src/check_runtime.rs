@@ -299,9 +299,14 @@ mod tests {
     /// E o `identidade-da-bancada.cjs`, que fixa a identidade da página nas
     /// bancadas de navegador com `.wasm` (`cargos-no-navegador.cjs` e
     /// `cargos-pela-tela.cjs` o importam) e não tem asserção própria.
+    ///
+    /// E o `diagnostico-rtc.cjs`, que as bancadas de duas páginas ligadas por
+    /// WebRTC importam para dizer, quando reprovam, em que estado o ICE ficou
+    /// e que candidatos cada página juntou e recebeu. Não tem asserção.
     // Lê a origem canônica para outras bancadas, sem prova independente.
-    const NAO_SAO_BANCADA: [&str; 5] = [
+    const NAO_SAO_BANCADA: [&str; 6] = [
         "origem-do-produto.cjs",
+        "diagnostico-rtc.cjs",
         "cabecalhos-da-origem.cjs",
         "identidade-da-bancada.cjs",
         "playwright.cjs",
