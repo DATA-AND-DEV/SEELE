@@ -21313,11 +21313,23 @@ fn quem_hospeda_ve_as_mensagens_de_apps_mais_novos_e_o_zero_tambem() {
 /// módulos `#[cfg(test)]`, que no `main.rs` ficam espalhados entre funções de
 /// produção. Cada módulo de teste é de primeiro nível e fecha numa linha `}`
 /// sozinha, que é onde a produção recomeça.
+///
+/// **Um módulo de teste sem corpo não leva a produção junto.** Os do `main.rs`
+/// moram em `src/testes/`, e o que fica nele é `#[cfg(test)]` e, na linha de
+/// baixo, `mod x;`: não há `}` dele para achar, e o corte ia até a `}` da
+/// próxima função de produção, que saía da leitura sem ninguém ver. Só a linha
+/// do `mod` sai.
 fn producao_rust(fonte: &str) -> String {
     let marca = "\n#[cfg(test)]\n";
     let mut pedacos = fonte.split(marca);
     let mut producao = pedacos.next().unwrap_or_default().to_owned();
     for pedaco in pedacos {
+        let (primeira, resto) = pedaco.split_once('\n').unwrap_or((pedaco, ""));
+        if primeira.starts_with("mod ") && primeira.trim_end().ends_with(';') {
+            producao.push('\n');
+            producao.push_str(resto);
+            continue;
+        }
         if let Some(fim) = pedaco.find("\n}\n") {
             producao.push_str(&pedaco[fim + 3..]);
         }
