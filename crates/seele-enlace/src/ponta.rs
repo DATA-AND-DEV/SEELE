@@ -315,9 +315,11 @@ struct ContadoresDaPontaVivos {
 struct Interno {
     cmd: mpsc::UnboundedSender<Comando>,
     local: SocketAddr,
-    /// O descritor de envio. `fechar()` o solta, para o socket voltar ao sistema
-    /// sem esperar a última cópia da `Ponta` cair (pedido do E).
-    socket: Mutex<Option<Arc<std::net::UdpSocket>>>,
+    /// O socket, para mandar por fora da tarefa (`mandar`). `fechar()` o
+    /// solta, para ele voltar ao sistema sem esperar a última cópia da `Ponta`
+    /// cair (pedido do E). É **o mesmo** da tarefa, e não uma cópia do
+    /// descritor: ver `Ponta::de_socket_pedindo`.
+    socket: Mutex<Option<Arc<UdpSocket>>>,
     /// Vira `true` quando a tarefa da ponta saiu e soltou os descritores dela.
     parada: watch::Receiver<bool>,
     chegadas: tokio::sync::Mutex<mpsc::Receiver<Conexao>>,
@@ -420,22 +422,25 @@ impl Ponta {
     ) -> io::Result<Self> {
         socket.set_nonblocking(true)?;
         ajustar_buffers(&socket, recepcao);
-        // Um segundo descritor do mesmo socket, só para mandar. O `try_send_to`
-        // do Tokio depende da prontidão registrada, e o primeiro envio de um
-        // socket recém-registrado voltava `WouldBlock` (medido: a primeira
-        // Indication de um furo se perdia). O `send_to` do descritor não
-        // bloqueante só falha com o buffer do sistema cheio.
-        let saida = Arc::new(socket.try_clone()?);
-        Self::com_socket(UdpSocket::from_std(socket)?, saida, anfitriao)
+        // **Um descritor só.** Havia um segundo, do `try_clone`, só para
+        // mandar — e **no Windows um processo filho herda a cópia que o
+        // `try_clone` devolve** (medido em 12/11/2026: com o filho vivo, a
+        // porta de um socket da `std` volta ao sistema quando ele é solto, e a
+        // de um socket com `try_clone` não volta, `os error 10048`, até o
+        // filho morrer). Todo processo que subia com a ponta aberta — o
+        // servidor de jogo do `programa.rodar` — levava a cópia, e a porta
+        // ficava presa enquanto ele vivesse: `fechar()` não a devolvia, e quem
+        // hospeda não subia de novo na mesma porta com o jogo aberto. Agora
+        // quem manda usa o socket da tarefa ([`mandar`]), e não há cópia a
+        // herdar. A prova é
+        // `fechar_solta_a_porta_mesmo_com_um_processo_filho_vivo`.
+        Self::com_socket(UdpSocket::from_std(socket)?, anfitriao)
     }
 
-    fn com_socket(
-        socket: UdpSocket,
-        saida: Arc<std::net::UdpSocket>,
-        anfitriao: Option<ConfigDoAnfitriao>,
-    ) -> io::Result<Self> {
+    fn com_socket(socket: UdpSocket, anfitriao: Option<ConfigDoAnfitriao>) -> io::Result<Self> {
         let local = socket.local_addr()?;
         let socket = Arc::new(socket);
+        let saida = Arc::clone(&socket);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (chegadas_tx, chegadas_rx) = mpsc::channel(16);
         let (enc_tx, enc_rx) = mpsc::channel(64);
@@ -444,7 +449,6 @@ impl Ponta {
         let (parada_tx, parada_rx) = watch::channel(false);
         let motor = Motor {
             socket,
-            saida: Arc::clone(&saida),
             local,
             anfitriao,
             pares: HashMap::new(),
@@ -462,7 +466,7 @@ impl Ponta {
         };
         tokio::spawn(async move {
             motor.rodar(cmd_rx).await;
-            // O `motor` (com o socket de leitura e o de envio) já caiu aqui.
+            // O `motor` (com o socket) já caiu aqui.
             let _ = parada_tx.send(true);
         });
         Ok(Self {
@@ -532,10 +536,10 @@ impl Ponta {
     /// O socket que não aceitou.
     pub fn enviar_bruto(&self, destino: SocketAddr, bytes: &[u8]) -> io::Result<()> {
         let destino = para_o_socket(destino, self.interno.local);
-        self.saida()?.send_to(bytes, destino).map(|_| ())
+        mandar(&*self.saida()?, bytes, destino).map(|_| ())
     }
 
-    fn saida(&self) -> io::Result<Arc<std::net::UdpSocket>> {
+    fn saida(&self) -> io::Result<Arc<UdpSocket>> {
         self.interno
             .socket
             .lock()
@@ -602,7 +606,7 @@ impl Ponta {
                     return;
                 };
                 for destino in &validos {
-                    let _ = socket.send_to(&indicacao(), para_o_socket(*destino, local));
+                    let _ = mandar(&socket, &indicacao(), para_o_socket(*destino, local));
                 }
                 drop(socket);
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -813,6 +817,19 @@ fn para_o_socket(endereco: SocketAddr, local: SocketAddr) -> SocketAddr {
     }
 }
 
+/// Manda um datagrama pelo socket da ponta, **na hora e sem esperar
+/// prontidão**: a chamada do sistema direto no descritor não bloqueante.
+///
+/// O `try_send_to` do Tokio depende da prontidão registrada, e o primeiro
+/// envio de um socket recém-registrado voltava `WouldBlock` (medido: a primeira
+/// Indication de um furo se perdia). Este só falha com o buffer do sistema
+/// cheio. É o que o segundo descritor fazia até 12/11/2026 — pelo mesmo socket,
+/// e sem a cópia que um processo filho herdava no Windows
+/// (`Ponta::de_socket_pedindo`).
+fn mandar(socket: &UdpSocket, bytes: &[u8], destino: SocketAddr) -> io::Result<usize> {
+    socket2::SockRef::from(socket).send_to(bytes, &destino.into())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Papel {
     Anfitriao,
@@ -999,7 +1016,6 @@ struct Par {
 
 struct Motor {
     socket: Arc<UdpSocket>,
-    saida: Arc<std::net::UdpSocket>,
     local: SocketAddr,
     anfitriao: Option<ConfigDoAnfitriao>,
     pares: HashMap<usize, Par>,
@@ -2420,7 +2436,7 @@ impl Motor {
                 }
                 Ok(Output::Transmit(t)) => {
                     let destino = para_o_socket(t.destination, self.local);
-                    if self.saida.send_to(&t.contents, destino).is_err() {
+                    if mandar(&self.socket, &t.contents, destino).is_err() {
                         self.contadores
                             .datagramas_perdidos_na_saida
                             .fetch_add(1, Ordering::Relaxed);
@@ -3245,9 +3261,11 @@ impl Motor {
             for _ in 0..256 {
                 match blindar(&self.contadores.panicos_contidos, || par.rtc.poll_output()) {
                     Ok(Output::Transmit(t)) => {
-                        let _ = self
-                            .saida
-                            .send_to(&t.contents, para_o_socket(t.destination, self.local));
+                        let _ = mandar(
+                            &self.socket,
+                            &t.contents,
+                            para_o_socket(t.destination, self.local),
+                        );
                     }
                     Ok(Output::Event(_)) => {}
                     Ok(Output::Timeout(_)) | Err(_) => break,

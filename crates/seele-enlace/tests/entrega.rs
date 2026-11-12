@@ -175,6 +175,126 @@ async fn fechar_solta_a_porta_mesmo_com_copias_vivas() {
     drop(par.anfitriao);
 }
 
+/// Abre de novo a porta de uma ponta, **do jeito que a ponta a abriu**: a de
+/// [`Ponta::abrir_cliente`] é `[::]` em pilha dupla, e as outras são o `bind`
+/// da `std`.
+///
+/// Do mesmo jeito porque, no Windows, só o mesmo jeito é recusado: com um
+/// socket de pilha dupla aberto em `[::]:porta`, o `bind` só-IPv6 da `std` na
+/// mesma porta **abre** (medido em 12/11/2026). Uma sonda da `std` não veria a
+/// porta de quem liga presa, e a prova passaria sem o conserto.
+fn abrir_de_novo(local: SocketAddr) -> std::io::Result<std::net::UdpSocket> {
+    if local.is_ipv6() && local.ip().is_unspecified() {
+        let socket = socket2::Socket::new(
+            socket2::Domain::IPV6,
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )?;
+        socket.set_only_v6(false)?;
+        socket.bind(&local.into())?;
+        return Ok(socket.into());
+    }
+    std::net::UdpSocket::bind(local)
+}
+
+/// A variável que faz [`o_filho_que_fica_vivo_ate_a_entrada_fechar`] esperar.
+const FILHO_DA_PORTA: &str = "SEELE_ENLACE_FILHO_DA_PORTA";
+
+/// **O processo filho da prova abaixo**; sozinho, não prova nada. Chamado por
+/// ela (com [`FILHO_DA_PORTA`]), fica vivo até a entrada fechar.
+#[test]
+fn o_filho_que_fica_vivo_ate_a_entrada_fechar() {
+    if std::env::var_os(FILHO_DA_PORTA).is_none() {
+        return;
+    }
+    let mut resto = String::new();
+    let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut resto);
+}
+
+/// **A porta de uma ponta fechada volta ao sistema mesmo com um processo filho
+/// vivo** — o servidor de jogo que o `programa.rodar` subiu com a ponta aberta.
+///
+/// O defeito (12/11/2026, `reserva.rs` do conformance no Windows): a `Ponta`
+/// guardava um segundo descritor do socket (`try_clone`), e no Windows o
+/// processo filho herdava essa cópia. `fechar()` soltava os descritores deste
+/// processo e a porta seguia presa no filho: quem hospeda não subia de novo na
+/// mesma porta com o jogo aberto (`os error 10048`, pelos 30 s inteiros da
+/// espera). No Unix o `CLOEXEC` fecha a cópia no `exec`, e por isso o defeito
+/// só aparecia no Windows.
+///
+/// As duas maneiras de abrir: [`Ponta::abrir`] (o socket da `std`, o de quem
+/// hospeda) e [`Ponta::abrir_cliente`] (o de pilha dupla, o de quem liga). A
+/// sonda é [`abrir_de_novo`], e a prova confere **que ela vê**: com a ponta
+/// ainda aberta, ela tem de ser recusada.
+///
+/// O filho é este mesmo binário, rodando só
+/// [`o_filho_que_fica_vivo_ate_a_entrada_fechar`], com a entrada num cano, como
+/// o `programa.rodar` sobe o jogo. A prova confere que ele **estava vivo**
+/// quando a porta foi aberta de novo, e que era mesmo o filho da prova
+/// (`1 passed`): um filho que saiu antes soltou o que herdou, e a porta
+/// voltaria sem o conserto.
+#[tokio::test]
+async fn fechar_solta_a_porta_mesmo_com_um_processo_filho_vivo() {
+    // As duas são tentadas antes de reprovar: a prova diz qual das duas
+    // maneiras de abrir deixou a porta presa, e não só a primeira.
+    let mut presas = Vec::new();
+    for de_quem_liga in [false, true] {
+        let ponta = if de_quem_liga {
+            Ponta::abrir_cliente().await.unwrap()
+        } else {
+            Ponta::abrir(SocketAddr::from(([127, 0, 0, 1], 0)), None)
+                .await
+                .unwrap()
+        };
+        let porta = ponta.local_addr();
+        assert!(
+            abrir_de_novo(porta).is_err(),
+            "a sonda abriu {porta} com a ponta ainda aberta: ela não vê uma porta presa, \
+             e a prova passaria sem o conserto"
+        );
+        let mut filho = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "o_filho_que_fica_vivo_ate_a_entrada_fechar",
+                "--test-threads=1",
+            ])
+            .env(FILHO_DA_PORTA, "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("o processo filho da prova não subiu");
+        ponta.fechar();
+        let saiu = tokio::time::timeout(Duration::from_secs(3), ponta.fechada()).await;
+        let de_novo = abrir_de_novo(porta);
+        let vivo = matches!(filho.try_wait(), Ok(None));
+        // A entrada fecha, e o filho sai — antes de qualquer `assert`, para
+        // não sobrar processo de uma prova que reprova.
+        drop(filho.stdin.take());
+        let fim = filho.wait_with_output().expect("o filho não terminou");
+        let fala = String::from_utf8_lossy(&fim.stdout);
+        saiu.expect("a tarefa da ponta não saiu");
+        assert!(
+            vivo && fim.status.success() && fala.contains("ok. 1 passed;"),
+            "o filho da prova não estava vivo quando a porta foi aberta de novo \
+             (vivo: {vivo}), ou o filtro não o achou e ele não rodou: {fala}"
+        );
+        if let Err(erro) = de_novo {
+            let como = if de_quem_liga {
+                "abrir_cliente"
+            } else {
+                "abrir"
+            };
+            presas.push(format!("{porta} (`Ponta::{como}`): {erro}"));
+        }
+    }
+    assert!(
+        presas.is_empty(),
+        "a porta não voltou ao sistema com um processo filho vivo — ele herdou um descritor \
+         do socket da ponta: {presas:?}"
+    );
+}
+
 /// Defeito 1 do conformance (`quem_hospeda_fecha`): o anfitrião termina o `ctl`
 /// (`0x01`) e depois fecha com um código. O corte ainda sai no `ctl`, e o par
 /// vê `Fechada { codigo }`, e não uma queda sem código.
