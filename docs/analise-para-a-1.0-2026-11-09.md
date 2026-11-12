@@ -212,7 +212,7 @@ Lacunas, em ordem de ganho:
 |---|---|---|---|
 | 1 | `NatNaoAbriu` e `NaoLocalizou` sem frase [C] | escrever, com guarda de todas as variantes, provado revertendo | P |
 | 2 | Sala pessoal diz «ponto desligado neste computador» quando o registro não vem (`sala.rs:285`) [C a frase; R a causa] | tentar de novo com recuo e dizer «não respondeu» | P |
-| 3 | Furo IPv6 ausente: o nativo manda zero candidatos (`core/encontro.rs:252`) [C] | candidato IPv6 global no `CHAMA` e no `ATENDE` | M |
+| 3 | Furo IPv6 ausente: o nativo manda zero candidatos (`core/encontro.rs:252`) [C]. **Em 12/11: feito do lado de quem chama** (quando o IPv4 não abre, uma segunda chamada com o IPv6 global, e o anfitrião fura por ele sem mudar); **o `ATENDE` não tem onde levar um IPv6 global sem mudar o ponto e o fio**, e fica como decisão de implantação | candidato IPv6 global no `CHAMA` e no `ATENDE` | M |
 | 4 | Alcance é suposto, não testado de fora | o ponto sonda a porta mapeada e classifica o NAT | M |
 | 5 | A volta só disca o endereço vencedor: quem entrou pela LAN e saiu de casa falha por 5 min [R] | refazer a corrida inteira após duas ou três falhas | P/M |
 | 6 | Anfitrião não reage a troca de rede nem resolve o DNS do ponto de novo [R] | vigiar interfaces e resubir a escada | M |

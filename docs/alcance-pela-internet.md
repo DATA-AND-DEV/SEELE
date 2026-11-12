@@ -179,7 +179,13 @@ precisar de uma das saídas da seção seguinte.
 Duas coisas podem atrapalhar mesmo com IPv6 dos dois lados:
 
 - **O firewall do seu roteador.** IPv6 não tem NAT, mas tem firewall, e muitos
-  roteadores bloqueiam conexões de entrada por padrão. Procure por "IPv6
+  roteadores bloqueiam conexões de entrada por padrão. Quando o link leva
+  também o ponto de encontro, o seu SEELE abre esse firewall por dentro para
+  quem liga pelo app e tem IPv6: se o caminho IPv4 não abrir, quem liga chama
+  de novo dizendo o IPv6 dele pelo ponto, o seu computador manda um pacote para
+  lá, e o roteador passa a deixar a resposta entrar. Custa uns segundos a mais
+  que o caminho IPv4. *Deve funcionar*, e ainda não foi medido entre duas casas
+  de verdade. Sem ponto de encontro, ou se não entrar, procure por "IPv6
   firewall" ou "filtro de entrada IPv6" nas configurações e libere a porta
   **8383/UDP**.
 - **Endereços que mudam.** Muitos provedores trocam o prefixo IPv6 de tempos em

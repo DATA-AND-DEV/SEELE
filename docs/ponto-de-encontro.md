@@ -36,6 +36,20 @@ custo que o ADR 0022 nomeia em voz alta, e não há como ter o degrau 4 sem ele.
 eles se visse, porque o que passa por ali são linhas curtas de texto com marcas
 e endereços.
 
+**O IPv6 de quem liga, quando o IPv4 não abre** (desde 12/11/2026). O ponto
+sempre viu o endereço de onde o `CHAMA` chega, e é um endereço só, da família do
+caminho até ele: IPv4, quando o anfitrião se registrou por IPv4. Quando o
+anfitrião atende e o caminho IPv4 não abre (duas casas atrás de CGNAT), quem
+liga pelo app e tem IPv6 global **chama de novo**, e esse segundo `CHAMA` leva o
+IPv6 dele e a porta da sessão, para o anfitrião furar também o firewall IPv6 do
+roteador dele. O ponto lê esse endereço e o repassa à escuta do anfitrião, e a
+mais ninguém; não o guarda, como não guarda o outro. É o endereço de saída que o
+sistema escolhe: com endereços temporários de privacidade ligados, o temporário,
+e nunca o estável. Quem entra pelo IPv4 não manda o segundo `CHAMA`, e o ponto
+não fica sabendo do IPv6 dele. A página já mandava os candidatos dela pelo
+`/sinal/1`. Quem não quer que o ponto saiba nem isso usa `SEELE_ENCONTRO=nao`,
+como sempre.
+
 **Quase nada guardado.** Não há banco nem arquivo. A resposta a `ONDE` e a `LEVE`
 continua sendo uma função que recebe um datagrama e devolve outro
 (`seele_proto::encontro::responder`, sem `self` e sem estado). `MORO` e `QUEM`
