@@ -394,6 +394,33 @@ const CONSTANTES_DO_DESKTOP = Object.freeze({
   }
 });
 
+// ------------------------------------------------------- a página instalada
+
+/**
+ * Se este navegador é o de um iPhone ou iPad. O iPad se apresenta como Mac, e
+ * o que o separa de um é a tela de toque.
+ */
+function eDoIos() {
+  const agente = navigator.userAgent ?? "";
+  return /iPhone|iPad|iPod/.test(agente) || (/Macintosh/.test(agente) && navigator.maxTouchPoints > 1);
+}
+
+/** Se a página já roda instalada, na janela própria. */
+function jaEstaInstalada() {
+  return navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+}
+
+/**
+ * **No iOS, o ícone da tela inicial abre a aba do Safari, e não uma janela
+ * própria.** Na janela própria o WebKit encerra a captura do microfone quando
+ * a página sai da frente (relatado desde o iOS 15.4, sem conserto); na aba ele
+ * segue com a tela bloqueada. Ninguém mediu isto num iPhone com esta página:
+ * é a escolha que não piora o que já funciona. No Android a janela própria é
+ * o Chrome por baixo, e fica como o manifesto diz.
+ */
+const MANIFESTO_NA_ABA = "seele-na-aba.webmanifest";
+if (eDoIos()) document.querySelector('link[rel="manifest"]')?.setAttribute("href", MANIFESTO_NA_ABA);
+
 // ------------------------------------------------------------------- a casca
 
 /**

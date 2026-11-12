@@ -11,6 +11,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SEELE</title>
 <!--
+  **A página instalável** (o celular da 1.0 é web, sem loja). O manifesto dá o
+  nome, o ícone e a janela própria a quem a põe na tela inicial; a ponte, logo
+  abaixo, troca-o pelo `seele-na-aba.webmanifest` no iOS, onde a janela própria
+  perde o microfone ao sair da frente e a aba do Safari não. Antes da ponte de
+  propósito: ela precisa achar esta linha. No app do computador é inerte.
+-->
+<link rel="manifest" href="seele.webmanifest">
+<link rel="apple-touch-icon" href="icone-180.png">
+<!--
   A ponte do navegador, antes de tudo e síncrona (ADR 0057, F4). No app ela só
   declara; no navegador ela põe a marca da casca (`data-casca`) antes da
   primeira pintura e o `window.__TAURI__` que o `base.js` lê.

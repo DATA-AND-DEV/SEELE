@@ -2760,7 +2760,8 @@ def ajustes_medida(pg: Page) -> list[str]:
 # CONEXÃO saiu na 0.18 (`5dfe9c59`, com a telemetria da CHAMADA), e CARGOS E
 # PERMISSÕES entrou (a camada da 0.17, E6, que a 0.18 pôs na lista).
 ORDEM_DE_AJUSTES = ["ÁUDIO", "APARÊNCIA", "ESTE SERVIDOR", "MODS DESTE SERVIDOR", "IDENTIDADE",
-                    "O QUE O CELULAR NÃO FAZ", "COMO ESTA PÁGINA ABRE", "CARGOS E PERMISSÕES", "SOBRE", "SAIR DO SERVIDOR"]
+                    "O QUE O CELULAR NÃO FAZ", "PÔR NA TELA INICIAL", "COMO ESTA PÁGINA ABRE", "CARGOS E PERMISSÕES",
+                    "SOBRE", "SAIR DO SERVIDOR"]
 
 
 def aba_ajustes(pg: Page) -> list[str]:

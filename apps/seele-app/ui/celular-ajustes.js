@@ -219,6 +219,58 @@
       pelaTela),
     estadoDaEscolha);
 
+  // ------------------------------------------------ pôr na tela inicial
+  //
+  // O celular da 1.0 é esta página, instalada pelo navegador. Onde o navegador
+  // oferece o convite (Chromium), o botão o abre; onde não oferece (o Safari
+  // do iOS, que só instala pelo menu de compartilhar), a seção diz o caminho.
+  // O que aconteceu fica escrito: instalar em silêncio e não instalar em
+  // silêncio têm a mesma cara.
+  //
+  // A oferta de instalação do navegador é guardada **aqui**, e não na ponte: a
+  // ponte não ouve evento nenhum da janela (`bancada/ponte-web.cjs`, «a
+  // marca»). O navegador só a faz depois de a página carregar e de ler o
+  // manifesto, e este arquivo já rodou a essa altura.
+  const instalacaoDaPagina = { oferta: null, instalada: jaEstaInstalada() };
+  window.addEventListener("beforeinstallprompt", (evento) => {
+    evento.preventDefault();
+    instalacaoDaPagina.oferta = evento;
+    desenharAInstalacao();
+  });
+  window.addEventListener("appinstalled", () => {
+    instalacaoDaPagina.oferta = null;
+    instalacaoDaPagina.instalada = true;
+    desenharAInstalacao();
+  });
+  const estadoDaInstalacao = h("p", { class: "casca-estado", role: "status" });
+  const botaoDeInstalar = h("button", {
+    class: "botao",
+    type: "button",
+    onclick: async () => {
+      const oferta = instalacaoDaPagina.oferta;
+      if (!oferta) return;
+      instalacaoDaPagina.oferta = null;
+      botaoDeInstalar.hidden = true;
+      try {
+        await oferta.prompt();
+        const { outcome } = await oferta.userChoice;
+        estadoDaInstalacao.textContent = outcome === "accepted" ? PALAVRAS.instalarFeito : PALAVRAS.instalarDesistiu;
+      } catch {
+        estadoDaInstalacao.textContent = PALAVRAS.instalarPeloMenu;
+      }
+    },
+  }, PALAVRAS.instalarAgora);
+  function desenharAInstalacao() {
+    botaoDeInstalar.hidden = instalacaoDaPagina.instalada || !instalacaoDaPagina.oferta;
+    if (instalacaoDaPagina.instalada) estadoDaInstalacao.textContent = PALAVRAS.instalarJaEsta;
+    else if (instalacaoDaPagina.oferta) estadoDaInstalacao.textContent = "";
+    else if (!estadoDaInstalacao.textContent) estadoDaInstalacao.textContent = eDoIos() ? PALAVRAS.instalarNoIos : PALAVRAS.instalarPeloMenu;
+  }
+  desenharAInstalacao();
+  const instalar = secaoNova("cel-secao-instalar", PALAVRAS.instalar, PALAVRAS.instalarSub, "peca",
+    h("div", { class: "cel-folha-acoes" }, botaoDeInstalar),
+    estadoDaInstalacao);
+
   // --------------------------------------------------- a lista do celular
   //
   // As seções do desktop que o celular tem, na ordem do spec, com os nomes do
@@ -246,6 +298,7 @@
     doDesktop("secao-identidade")),
   h("ul", { class: "cel-ajustes-lista" },
     fora,
+    instalar,
     comoAbre,
     // Ações, e não seções: o `abrirSecao` do desktop passa por toda
     // `.server-secao` escondendo o painel dela, e estas não têm painel.
