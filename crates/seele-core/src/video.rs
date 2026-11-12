@@ -681,6 +681,19 @@ pub struct PreviaEmCurso(EstadoDaPrevia);
 enum EstadoDaPrevia {
     #[cfg(target_os = "macos")]
     Pronta(Option<PreviaDeTela>),
+    // Fora do macOS e do Windows ninguém a constrói: [`FonteDoSistema`] é
+    // `Infallible` e [`FonteDeTela::comecar_previa`] não tem de onde tirar uma
+    // captura. O clippy do Linux reprovava aqui («variant `Capturando` is never
+    // constructed», 12/11/2026) e parava no `seele-core`, sem olhar os crates
+    // que dependem dele. `expect` e não `allow`: no dia em que o Linux tiver
+    // captura, é esta linha que avisa que sobrou.
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows")),
+        expect(
+            dead_code,
+            reason = "sem captura de tela neste sistema, a prévia não tem o que abrir"
+        )
+    )]
     Capturando(FonteDoSistema),
 }
 
