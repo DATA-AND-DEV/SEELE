@@ -14,7 +14,9 @@
 //!   dito: o `CHAMA` de [`seele_proto::encontro::pedido_do_sinal`]. A resposta é
 //!   `200` com uma das quatro linhas de
 //!   [`seele_proto::encontro::RespostaDoSinal`], que chega depois do `ATENDE`
-//!   ou no fim de [`crate::enc3::PRAZO_DA_CHAMADA`];
+//!   ou no fim de [`crate::enc3::PRAZO_DA_CHAMADA`]. **O `AQUI` de uma sala
+//!   pessoal leva a impressão DTLS que ela disse no `ATENDE`** (ADR 0068), como
+//!   um terceiro campo: o navegador precisa dela antes de fechar o DTLS;
 //! - `OPTIONS /sinal/1`, a pergunta prévia do CORS, que o navegador só faz se
 //!   a página mandar um cabeçalho que não é «simples» (ela não manda);
 //! - o resto ouve `404`, `405`, `400` ou `413`, sem corpo útil.
@@ -37,8 +39,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use seele_proto::encontro::{
-    ler_pedido_do_sinal, resposta_do_sinal, sinal_de, Motivo, Resposta3, RespostaDoSinal,
-    Vizinhanca, LIMITE_DO_SINAL,
+    ler_pedido_do_sinal, resposta_do_sinal, sinal_de, Motivo, RespostaDoSinal, Vizinhanca,
+    LIMITE_DO_SINAL,
 };
 
 use crate::enc3::{chamar, QuemLiga, PRAZO_DA_CHAMADA};
@@ -455,7 +457,7 @@ fn responder(
             agora,
         };
     }
-    let (manda, espera) = mpsc::sync_channel::<Resposta3>(1);
+    let (manda, espera) = mpsc::sync_channel::<crate::enc3::DoSinal>(1);
     match chamar(
         quarto,
         chama,
@@ -470,7 +472,9 @@ fn responder(
             quarto.chamadas.esquecer(&id);
             resposta
                 .ok()
-                .and_then(|resposta| sinal_de(&resposta))
+                .and_then(|(resposta, impressao)| {
+                    Some(sinal_de(&resposta)?.com_a_impressao(impressao))
+                })
                 .unwrap_or(RespostaDoSinal::Calado)
         }
     }

@@ -10,6 +10,8 @@
 //!   antes de aceitar, o primeiro atendido viraria a Comandante (o achado A2);
 //! - a sala não manda a lista de membros (D-fio-4);
 //! - a sala se registra assinada no ponto, e quem liga a acha pelo código;
+//! - **a página acha a sala pelo sinal, com a impressão DTLS que ela apresenta**
+//!   (ADR 0068): o que o ponto devolve é o certificado com que a sala atende;
 //! - **três pessoas na mesma ligação** (ADR 0068): a terceira liga para o código
 //!   de quem hospeda, é atendida com a conversa em curso, os três se ouvem, e
 //!   todos leem o fim da chamada quando quem hospeda sai.
@@ -507,5 +509,116 @@ async fn tres_na_mesma_ligacao_se_ouvem_e_leem_o_fim_quando_quem_hospeda_sai() {
             "quem hospeda saiu, e {quem} não leu o fim da chamada"
         );
     }
+    sala.encerrar().await;
+}
+
+// ---------------------------------------------------------------------------
+// A página acha a sala pelo sinal (ADR 0068)
+// ---------------------------------------------------------------------------
+
+/// O ponto de encontro com o sinal HTTP do navegador, sobre o mesmo quarto.
+fn subir_o_ponto_com_o_sinal() -> (SocketAddr, SocketAddr) {
+    let quarto = Arc::new(seele_encontro::Quarto::novo());
+    let ponto = seele_encontro::Ponto::abrir_com_quarto(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        Vizinhanca::TambemAqui,
+        Arc::clone(&quarto),
+    )
+    .expect("a escuta tem que abrir");
+    let onde = ponto.endereco().expect("o socket sabe onde ligou");
+    std::thread::spawn(move || {
+        let _ = ponto.servir();
+    });
+    let sinal = seele_encontro::sinal::Sinal::abrir(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        quarto,
+        Vizinhanca::TambemAqui,
+        vec!["*".to_owned()],
+    )
+    .expect("o sinal tem que abrir");
+    let do_sinal = sinal.endereco().expect("o sinal sabe onde ligou");
+    std::thread::spawn(move || {
+        let _ = sinal.servir();
+    });
+    (onde, do_sinal)
+}
+
+/// O `POST /sinal/1` de uma página, e o corpo da resposta.
+fn chamar_pelo_sinal(sinal: SocketAddr, corpo: &str) -> String {
+    use std::io::{Read as _, Write as _};
+    let mut conexao = std::net::TcpStream::connect(sinal).expect("o sinal não aceitou");
+    conexao
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(
+        conexao,
+        "POST /sinal/1 HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{corpo}",
+        corpo.len()
+    )
+    .unwrap();
+    let mut texto = String::new();
+    conexao.read_to_string(&mut texto).unwrap();
+    texto
+        .split_once("\r\n\r\n")
+        .map(|(_, corpo)| corpo.to_owned())
+        .unwrap_or_default()
+}
+
+/// **O que o sinal devolve para o código de uma pessoa é o certificado DTLS com
+/// que a sala dela atende** (ADR 0068), de ponta a ponta: a sala de verdade se
+/// registra, a página chama pelo sinal com as marcas do código, e a impressão
+/// que volta é a do certificado que a sala apresenta a quem disca.
+///
+/// É essa impressão que o navegador escreve como `a=fingerprint` antes de
+/// fechar o DTLS. Uma que não fosse a do certificado de verdade daria «a
+/// conexão segura não se verificou» em toda ligação da página.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_sinal_devolve_a_impressao_do_certificado_dtls_com_que_a_sala_atende() {
+    let _vaga = vaga::minha();
+    let (ponto, sinal) = subir_o_ponto_com_o_sinal();
+    let sala = subir_a_sala(Some(ponto.to_string())).await;
+    let mut registro = sala
+        .registro_no_quarto()
+        .expect("a sala subiu sem registro no ponto");
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        registro.wait_for(|estado| *estado == EstadoDoRegistro::Registrado),
+    )
+    .await
+    .expect("a sala não se registrou no ponto em 10 s")
+    .unwrap();
+
+    let marcas = Marcas::da_sala(&codigo_de(DONO));
+    let pedido = seele_proto::encontro::pedido_do_sinal(&seele_proto::encontro::Chama {
+        servidor: marcas.servidor().clone(),
+        escuta: marcas.escuta().clone(),
+        credencial: seele_proto::encontro::Credencial::nova(&"a".repeat(32)).unwrap(),
+        candidatos: vec![SocketAddr::from(([127, 0, 0, 1], 51_000))],
+    });
+    let corpo = tokio::task::spawn_blocking(move || chamar_pelo_sinal(sinal, &pedido))
+        .await
+        .unwrap();
+    let Some(seele_proto::encontro::RespostaDoSinal::Aqui {
+        endereco,
+        impressao,
+        ..
+    }) = seele_proto::encontro::ler_resposta_do_sinal(&corpo)
+    else {
+        panic!("a página não achou a sala pelo sinal: {corpo:?}");
+    };
+    assert_eq!(
+        endereco.port(),
+        sala.endereco().port(),
+        "o sinal deu outro endereço que o do servidor da sala"
+    );
+    let dita = impressao.expect("o sinal achou a sala e não devolveu a impressão DTLS dela");
+
+    // O certificado que a sala apresenta a quem disca, lido do próprio enlace.
+    let (_ponta, conexao) = par_cru::discar(local(&sala)).await;
+    assert_eq!(
+        dita,
+        conexao.impressao_dtls_do_par(),
+        "a impressão que o sinal devolve não é a do certificado DTLS com que a sala atende"
+    );
     sala.encerrar().await;
 }

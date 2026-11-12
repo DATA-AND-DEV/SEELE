@@ -613,8 +613,10 @@ impl Ponto {
             }
             Pedido3::Atende(atende) => {
                 // O `ATENDE` não ouve resposta: quem a ouve é quem ligou.
-                if let Some((quem, resposta)) = self.quarto.chamadas.atendida(&atende, de) {
-                    quem.entregar(resposta);
+                if let Some((quem, resposta, impressao)) =
+                    self.quarto.chamadas.atendida(&atende, de)
+                {
+                    quem.entregar_com_a_impressao(resposta, impressao);
                 }
                 return None;
             }

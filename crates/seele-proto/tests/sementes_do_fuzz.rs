@@ -433,6 +433,19 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             id,
             endereco: publico,
             dicas: vec![dica],
+            impressao: None,
+        }),
+    );
+    // O `ATENDE` da sala pessoal da 1.0, com a impressão DTLS na segunda linha
+    // (ADR 0068).
+    do_encontro.insert(
+        "atende-com-impressao".to_owned(),
+        encontro::atende(&encontro::Atende {
+            escuta: livres.escuta().clone(),
+            id,
+            endereco: publico,
+            dicas: vec![dica],
+            impressao: Some([0x5A; 32]),
         }),
     );
     for (nome, resposta) in [
@@ -506,6 +519,15 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             encontro::RespostaDoSinal::Aqui {
                 endereco: publico,
                 dicas: vec![dica],
+                impressao: None,
+            },
+        ),
+        (
+            "aqui-com-impressao",
+            encontro::RespostaDoSinal::Aqui {
+                endereco: publico,
+                dicas: vec![dica],
+                impressao: Some([0x5A; 32]),
             },
         ),
         ("ninguem", encontro::RespostaDoSinal::Ninguem),

@@ -202,7 +202,9 @@ pub fn sinal_chama(pedido: &str) -> serde_json::Value {
 pub fn sinal_resposta(corpo: &str) -> serde_json::Value {
     use seele_proto::encontro::{ler_resposta_do_sinal, RespostaDoSinal};
     match ler_resposta_do_sinal(corpo) {
-        Some(RespostaDoSinal::Aqui { endereco, dicas }) => serde_json::json!({
+        Some(RespostaDoSinal::Aqui {
+            endereco, dicas, ..
+        }) => serde_json::json!({
             "aqui": {
                 "endereco": endereco.to_string(),
                 "dicas": dicas.iter().map(ToString::to_string).collect::<Vec<_>>(),

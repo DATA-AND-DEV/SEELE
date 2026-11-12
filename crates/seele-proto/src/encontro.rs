@@ -1279,6 +1279,25 @@ fn ler_dicas(texto: &str) -> Option<Vec<SocketAddr>> {
 // Nada disto é autenticação de quem atende. Quem liga escreve a impressão do
 // convite como o `a=fingerprint` da descrição remota, e o DTLS recusa outro
 // certificado (D3): o ponto, hostil, consegue no máximo «não entra».
+//
+// # A impressão DTLS da sala (ADR 0068, 1.0)
+//
+// A sala pessoal fecha o DTLS com um certificado efêmero (ADR 0063), que
+// nenhum código nem link carrega. O nativo não precisa dele antes: vê o
+// certificado e confere a apresentação depois. O navegador precisa, porque só
+// fecha o DTLS com a impressão escrita antes. Por isso:
+//
+// - a sala diz a impressão no `ATENDE`, numa **segunda linha** do mesmo
+//   datagrama ([`ROTULO_DA_IMPRESSAO`]). Toda leitura deste fio, desde o ENC/1,
+//   pára na primeira quebra de linha: um ponto de antes da 1.0 lê o `ATENDE` de
+//   sempre e ignora o resto, e um ponto novo aceita o `ATENDE` sem a segunda
+//   linha (um anfitrião de antes da 1.0, ou um servidor guardado);
+// - o ponto a repassa **só** no `AQUI` do sinal, como um terceiro campo, e só
+//   para uma marca de sala. O `AQUI` do ENC/3 não muda.
+//
+// **É pista, e não prova.** Quem autentica a sala é a apresentação `0x03`: a
+// chave Ed25519 dela assina a impressão do DTLS daquela conexão, e quem liga
+// confere a assinatura e o código antes do `Hello`.
 
 /// O que todo datagrama do ENC/3 começa dizendo.
 pub const MAGIA3: &str = "SEELE-ENC/3";
@@ -1300,6 +1319,10 @@ pub const BYTES_DO_ID: usize = 16;
 pub const CREDENCIAL_MINIMA: usize = 32;
 /// Ver [`CREDENCIAL_MINIMA`].
 pub const CREDENCIAL_MAXIMA: usize = 96;
+
+/// O que começa a segunda linha de um `ATENDE` que diz a impressão DTLS de quem
+/// atende: `DTLS <impressão>`, o SHA-256 do DER em base64url (ADR 0068).
+pub const ROTULO_DA_IMPRESSAO: &str = "DTLS";
 
 /// O rótulo do que a chave da sala assina num `MORO3`: distinto do `MORO2`,
 /// para um `MORO2` da 0.16 copiado no caminho não registrar a sala no ENC/3.
@@ -1397,6 +1420,12 @@ pub struct Atende {
     pub endereco: SocketAddr,
     /// As dicas de rede local do anfitrião ([`serve_de_dica`]).
     pub dicas: Vec<SocketAddr>,
+    /// A impressão (SHA-256 do DER) do certificado DTLS com que este anfitrião
+    /// atende, quando ele a diz: a sala pessoal, cujo DTLS é efêmero. Vai numa
+    /// segunda linha do datagrama ([`ROTULO_DA_IMPRESSAO`]), que um ponto de
+    /// antes da 1.0 não lê. `None` num servidor guardado (a impressão dele é a
+    /// do convite) e num anfitrião de antes da 1.0.
+    pub impressao: Option<[u8; 32]>,
 }
 
 /// O que se pede a um ponto na versão 3.
@@ -1530,17 +1559,38 @@ pub fn chama(pedido: &Chama) -> Vec<u8> {
     encher2(format!("{MAGIA3} {}", linha_do_chama(pedido)))
 }
 
-/// Monta um `ATENDE`.
+/// Monta um `ATENDE`. Com [`Atende::impressao`], ela vai numa segunda linha:
+/// a primeira é a de sempre, byte a byte, e é a única que um ponto de antes da
+/// 1.0 lê.
 #[must_use]
 pub fn atende(resposta: &Atende) -> Vec<u8> {
     use base64::Engine as _;
-    encher2(format!(
+    let mut linha = format!(
         "{MAGIA3} ATENDE {} {} {} {}",
         resposta.escuta,
         BASE64.encode(resposta.id),
         resposta.endereco,
         escrever_dicas(&resposta.dicas),
-    ))
+    );
+    if let Some(impressao) = &resposta.impressao {
+        linha.push('\n');
+        linha.push_str(ROTULO_DA_IMPRESSAO);
+        linha.push(' ');
+        linha.push_str(&BASE64.encode(impressao));
+    }
+    encher2(linha)
+}
+
+/// A impressão DTLS da segunda linha de um datagrama do ENC/3, se ele a traz
+/// na escrita canônica. Uma segunda linha que não é essa (o enchimento de
+/// sempre, ou lixo) é «não disse»: o `ATENDE` vale sem ela.
+fn impressao_na_segunda_linha(datagrama: &[u8]) -> Option<[u8; 32]> {
+    let texto = std::str::from_utf8(datagrama).ok()?;
+    let segunda = texto.split('\n').nth(1)?;
+    let valor = segunda
+        .strip_prefix(ROTULO_DA_IMPRESSAO)?
+        .strip_prefix(' ')?;
+    ler_base64(valor)
 }
 
 /// Monta uma resposta da versão 3.
@@ -1623,6 +1673,7 @@ pub fn analisar3(datagrama: &[u8]) -> Option<Pedido3> {
                 id: ler_base64(id)?,
                 endereco: ler_endereco(endereco)?,
                 dicas: ler_dicas(dicas)?,
+                impressao: impressao_na_segunda_linha(datagrama),
             }))
         }
         _ => None,
@@ -1717,6 +1768,11 @@ pub enum RespostaDoSinal {
         endereco: SocketAddr,
         /// As dicas de rede local.
         dicas: Vec<SocketAddr>,
+        /// A impressão DTLS que a sala pessoal disse no `ATENDE`
+        /// ([`Atende::impressao`]): um terceiro campo da linha, que só existe
+        /// para uma marca de sala. **Pista, e não prova** (ADR 0068): quem
+        /// autentica é a apresentação `0x03`.
+        impressao: Option<[u8; 32]>,
     },
     /// Ninguém mora nas marcas do convite neste ponto.
     Ninguem,
@@ -1755,8 +1811,18 @@ pub fn ler_pedido_do_sinal(corpo: &str) -> Option<Chama> {
 #[must_use]
 pub fn resposta_do_sinal(resposta: &RespostaDoSinal) -> String {
     match resposta {
-        RespostaDoSinal::Aqui { endereco, dicas } => {
-            format!("{MAGIA_DO_SINAL} AQUI {endereco} {}", escrever_dicas(dicas))
+        RespostaDoSinal::Aqui {
+            endereco,
+            dicas,
+            impressao,
+        } => {
+            use base64::Engine as _;
+            let mut linha = format!("{MAGIA_DO_SINAL} AQUI {endereco} {}", escrever_dicas(dicas));
+            if let Some(impressao) = impressao {
+                linha.push(' ');
+                linha.push_str(&BASE64.encode(impressao));
+            }
+            linha
         }
         RespostaDoSinal::Ninguem => format!("{MAGIA_DO_SINAL} NINGUEM"),
         RespostaDoSinal::Recusa { motivo, agora } => {
@@ -1782,10 +1848,20 @@ pub fn ler_resposta_do_sinal(corpo: &str) -> Option<RespostaDoSinal> {
     };
     match verbo {
         "AQUI" => {
-            let [endereco, dicas] = campos(resto)?;
-            Some(RespostaDoSinal::Aqui {
-                endereco: ler_endereco(endereco)?,
-                dicas: ler_dicas(dicas)?,
+            // Dois campos, ou três: o terceiro é a impressão DTLS da sala
+            // (ADR 0068). Um terceiro que não é uma impressão canônica recusa a
+            // linha inteira, como todo campo deste fio.
+            let mut partes = resto.split(' ');
+            let endereco = ler_endereco(partes.next()?)?;
+            let dicas = ler_dicas(partes.next()?)?;
+            let impressao = match partes.next() {
+                None => None,
+                Some(texto) => Some(ler_base64(texto)?),
+            };
+            partes.next().is_none().then_some(RespostaDoSinal::Aqui {
+                endereco,
+                dicas,
+                impressao,
             })
         }
         "RECUSA" => {
@@ -1799,8 +1875,28 @@ pub fn ler_resposta_do_sinal(corpo: &str) -> Option<RespostaDoSinal> {
     }
 }
 
+impl RespostaDoSinal {
+    /// A mesma resposta, com a impressão DTLS que o `ATENDE` trouxe: só o
+    /// `AQUI` a leva, e as outras linhas ficam como estão.
+    #[must_use]
+    pub fn com_a_impressao(self, dita: Option<[u8; 32]>) -> Self {
+        match self {
+            Self::Aqui {
+                endereco, dicas, ..
+            } => Self::Aqui {
+                endereco,
+                dicas,
+                impressao: dita,
+            },
+            outra => outra,
+        }
+    }
+}
+
 /// A resposta do sinal que corresponde a uma do ENC/3, para o ponto dizer a
 /// mesma coisa pelos dois caminhos. `None` para o que não responde a `CHAMA`.
+/// O `AQUI` sai sem impressão: quem a tem é o `ATENDE`
+/// ([`RespostaDoSinal::com_a_impressao`]).
 #[must_use]
 pub fn sinal_de(resposta: &Resposta3) -> Option<RespostaDoSinal> {
     match resposta {
@@ -1809,6 +1905,7 @@ pub fn sinal_de(resposta: &Resposta3) -> Option<RespostaDoSinal> {
         } => Some(RespostaDoSinal::Aqui {
             endereco: *endereco,
             dicas: dicas.clone(),
+            impressao: None,
         }),
         Resposta3::Ninguem { .. } => Some(RespostaDoSinal::Ninguem),
         Resposta3::Recusa { motivo, agora, .. } => Some(RespostaDoSinal::Recusa {
@@ -2800,12 +2897,14 @@ mod enc3 {
                     id: [0xAB; BYTES_DO_ID],
                     endereco: de("203.0.113.7:8383"),
                     dicas: vec![de("10.0.0.2:8383")],
+                    impressao: None,
                 }),
                 Pedido3::Atende(Atende {
                     escuta: marca("3cbcfb0212da738fe"),
                     id: [0xAB; BYTES_DO_ID],
                     endereco: de("203.0.113.7:8383"),
                     dicas: vec![de("10.0.0.2:8383")],
+                    impressao: None,
                 }),
             ),
         ];
@@ -2947,10 +3046,17 @@ mod enc3 {
             RespostaDoSinal::Aqui {
                 endereco: de("203.0.113.7:8383"),
                 dicas: vec![de("192.168.0.4:8383")],
+                impressao: None,
             },
             RespostaDoSinal::Aqui {
                 endereco: de("[2001:4860::1]:8383"),
                 dicas: Vec::new(),
+                impressao: None,
+            },
+            RespostaDoSinal::Aqui {
+                endereco: de("203.0.113.7:8383"),
+                dicas: Vec::new(),
+                impressao: Some([0x5A; 32]),
             },
             RespostaDoSinal::Ninguem,
             RespostaDoSinal::Recusa {
@@ -2968,6 +3074,11 @@ mod enc3 {
             "SEELE-SINAL/1 NINGUEM a",
             "SEELE-SINAL/1 CALADO ",
             "SEELE-SINAL/1 AQUI 203.0.113.7:08383 -",
+            // O terceiro campo é a impressão canônica, ou a linha não vale.
+            "SEELE-SINAL/1 AQUI 203.0.113.7:8383 - ",
+            "SEELE-SINAL/1 AQUI 203.0.113.7:8383 - curta",
+            "SEELE-SINAL/1 AQUI 203.0.113.7:8383 - WlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlo=",
+            "SEELE-SINAL/1 AQUI 203.0.113.7:8383 - WlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlo mais",
             "SEELE-SINAL/2 NINGUEM",
             "SEELE-SINAL/1 RECUSA outro 1",
         ] {
@@ -2977,6 +3088,119 @@ mod enc3 {
         assert!(ler_pedido_do_sinal(&format!("{corpo}\r\n")).is_none());
         assert!(ler_pedido_do_sinal(&format!("{corpo}\nmais")).is_none());
         assert!(ler_pedido_do_sinal(&corpo.replace("SINAL/1", "SINAL/2")).is_none());
+    }
+
+    /// **A impressão DTLS da sala vai numa segunda linha do `ATENDE`** (ADR
+    /// 0068), e a primeira linha é a de sempre, byte a byte: é ela, e só ela,
+    /// que um ponto de antes da 1.0 lê (`verbo3`, que pára na primeira quebra
+    /// de linha desde a 0.17).
+    #[test]
+    fn a_impressao_do_atende_vai_na_segunda_linha_e_a_primeira_nao_muda() {
+        let sem = Atende {
+            escuta: marca("pCSM7NBFRCAYQEV4e"),
+            id: [0xAB; BYTES_DO_ID],
+            endereco: de("203.0.113.7:8385"),
+            dicas: vec![de("10.0.0.2:8385")],
+            impressao: None,
+        };
+        let com = Atende {
+            impressao: Some([0x5A; 32]),
+            ..sem.clone()
+        };
+        let antigo = atende(&sem);
+        let novo = atende(&com);
+        assert_eq!(
+            novo.len(),
+            TAMANHO3,
+            "o datagrama novo tem o tamanho de sempre"
+        );
+        let linha = |datagrama: &[u8]| {
+            std::str::from_utf8(datagrama)
+                .expect("texto")
+                .split('\n')
+                .next()
+                .expect("tem linha")
+                .to_owned()
+        };
+        assert_eq!(
+            linha(&novo),
+            linha(&antigo),
+            "a primeira linha mudou: um ponto de antes da 1.0 deixaria de ler o ATENDE da sala"
+        );
+        assert_eq!(analisar3(&novo), Some(Pedido3::Atende(com.clone())));
+        assert_eq!(
+            analisar3(&antigo),
+            Some(Pedido3::Atende(sem.clone())),
+            "o ATENDE de antes da 1.0 deixou de ser aceito"
+        );
+        // Uma segunda linha que não é a impressão canônica é «não disse», e o
+        // ATENDE vale: o que a sala atende não depende de um campo opcional.
+        for lixo in [
+            "DTLS curta",
+            "DTLS",
+            "OUTRA WlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlo",
+            "",
+        ] {
+            let datagrama = encher2(format!("{}\n{lixo}", linha(&antigo)));
+            assert_eq!(
+                analisar3(&datagrama),
+                Some(Pedido3::Atende(sem.clone())),
+                "{lixo:?}"
+            );
+        }
+    }
+
+    /// O maior `ATENDE` possível, com a impressão, cabe no datagrama: se não
+    /// coubesse, o `encher2` cortaria a segunda linha calado.
+    #[test]
+    fn o_maior_atende_com_a_impressao_cabe() {
+        let maior = Atende {
+            escuta: marca(&"p".repeat(LIMITE_DA_MARCA)),
+            id: [0xFF; BYTES_DO_ID],
+            endereco: de("[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"),
+            dicas: vec![
+                de("[fdff:ffff:ffff:ffff:ffff:ffff:ffff:fffe]:65535"),
+                de("[fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"),
+            ],
+            impressao: Some([0xFF; 32]),
+        };
+        let datagrama = atende(&maior);
+        assert_eq!(datagrama.len(), TAMANHO3);
+        assert_eq!(
+            analisar3(&datagrama),
+            Some(Pedido3::Atende(maior)),
+            "o maior ATENDE com a impressão não coube inteiro no datagrama"
+        );
+    }
+
+    /// O `AQUI` do sinal com a impressão é a linha de sempre e mais um campo; e
+    /// só o `AQUI` a leva.
+    #[test]
+    fn a_impressao_do_sinal_e_um_terceiro_campo_do_aqui() {
+        let sem = RespostaDoSinal::Aqui {
+            endereco: de("203.0.113.7:8385"),
+            dicas: vec![de("192.168.0.4:8385")],
+            impressao: None,
+        };
+        let com = sem.clone().com_a_impressao(Some([0x5A; 32]));
+        assert_eq!(
+            resposta_do_sinal(&com),
+            format!(
+                "{} WlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlo",
+                resposta_do_sinal(&sem)
+            ),
+            "a impressão não é um campo a mais no fim da linha de sempre"
+        );
+        assert_eq!(ler_resposta_do_sinal(&resposta_do_sinal(&com)), Some(com));
+        assert_eq!(
+            ler_resposta_do_sinal("SEELE-SINAL/1 AQUI 203.0.113.7:8385 192.168.0.4:8385"),
+            Some(sem),
+            "a linha de antes da 1.0 deixou de ser aceita"
+        );
+        assert_eq!(
+            RespostaDoSinal::Calado.com_a_impressao(Some([1; 32])),
+            RespostaDoSinal::Calado
+        );
     }
 
     #[test]
@@ -3005,7 +3229,8 @@ mod enc3 {
             sinal_de(&aqui),
             Some(RespostaDoSinal::Aqui {
                 endereco: de("203.0.113.7:8383"),
-                dicas: Vec::new()
+                dicas: Vec::new(),
+                impressao: None,
             })
         );
         assert_eq!(
