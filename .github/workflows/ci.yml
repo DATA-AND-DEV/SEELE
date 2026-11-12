@@ -98,7 +98,20 @@ jobs:
           # alguém já havia decidido lançar, no `release.yml`, onde nada
           # reprovava. Todo o `captura/macos.rs` e o caminho de
           # `SCStream` nunca foram vistos por nada automático.
-          - os: macos-15
+          #
+          # **`macos-26`, e não `macos-15`: é o SDK que decide.** O
+          # `apple-metal` 0.8.8, que o `screencapturekit` arrasta, compila
+          # Swift no `build.rs` e usa símbolos do macOS 26 dentro de
+          # `if #available(macOS 26.0, *)`. O `#available` é conferido quando
+          # roda, e o símbolo tem de existir quando compila: com o SDK do
+          # macOS 15 o build script reprovava, e **nenhum** lint e nenhum
+          # teste rodava no Mac (execução 43264412497, 12/11/2026). O rótulo
+          # `macos-26` é a imagem arm64 do macOS 26, lido do README do
+          # `actions/runner-images` nesse mesmo dia; o que **não** foi medido
+          # é este workflow nela — a primeira execução é a prova. Os dois
+          # jobs do `release.yml` (`validar` e `empacotar`) usam o mesmo
+          # rótulo, pelo mesmo motivo.
+          - os: macos-26
             name: macos
     runs-on: ${{ matrix.os }}
     steps:
@@ -138,8 +151,9 @@ jobs:
           - os: windows-2022
             name: windows
           # Pelo mesmo motivo da matriz de clippy acima: três sistemas
-          # anunciados, três sistemas testados.
-          - os: macos-15
+          # anunciados, três sistemas testados. E no mesmo runner dela, pelo
+          # SDK (ver lá).
+          - os: macos-26
             name: macos
     runs-on: ${{ matrix.os }}
     steps:

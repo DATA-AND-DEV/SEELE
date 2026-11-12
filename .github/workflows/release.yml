@@ -147,7 +147,10 @@ jobs:
           # tinha dois sistemas e o produto anuncia três; o Mac só era compilado
           # quando alguém já havia decidido lançar, no job de empacotar, onde um
           # teste reprovado não impedia nada.
-          - os: macos-15
+          #
+          # `macos-26` pelo SDK: o `apple-metal` 0.8.8 não compila com o do
+          # macOS 15. O porquê está na matriz de clippy do `ci.yml`.
+          - os: macos-26
             nome: macos
     runs-on: ${{ matrix.os }}
     steps:
@@ -294,7 +297,11 @@ jobs:
           # targets were built» e o macOS fica sendo o único sistema que não
           # atualiza sozinho. O `.app` solto não vai para o release: o passo de
           # reunir escolhe por extensão, e diretório não é arquivo.
-          - os: macos-15
+          #
+          # `macos-26` pelo SDK, como no `validar` (o porquê está na matriz de
+          # clippy do `ci.yml`). O SDK é o de compilar: o macOS mínimo do
+          # pacote continua sendo o que o `tauri.conf.json` declara.
+          - os: macos-26
             nome: macos
             bundles: app,dmg
 
