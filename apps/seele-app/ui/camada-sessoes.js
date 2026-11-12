@@ -80,6 +80,9 @@ function desenharAVistaPessoal() {
     // O chat é da abertura: trocar de sessão (ou voltar) o fecha, e a volta não
     // o reabre sozinha.
     fecharOChat(false);
+    // E o que o CONVIDAR disse também: o link copiado é o de outra ligação.
+    $("ligacao-convidar-dito").hidden = true;
+    $("ligacao-convidar-link").hidden = true;
     if (quem !== null && typeof abrirChamada === "function") {
       abrirAVistaPessoal(aberturasDaVistaPessoal).catch((falha) => console.warn("a chamada da ligação:", falha));
     } else if (tinha && typeof fecharChamada === "function") {
@@ -335,6 +338,81 @@ async function desligarALigacao() {
 // O painel de fora e a barra chamam o MESMO gesto: sai só desta sessão.
 $("ligacao-encerrar").addEventListener("click", desligarALigacao);
 $("ligacao-desligar").addEventListener("click", desligarALigacao);
+
+/**
+ * O código de quem hospeda a ligação que está na tela (ADR 0068): o de quem
+ * foi chamado, quando a ligação saiu daqui (`ligacao`, o metadado do Rust), ou
+ * o desta máquina, quando ela foi atendida na própria sala (`onde: "Pessoal"`).
+ * `null` quando a sessão não é ligação, ou o código não se lê.
+ */
+async function codigoDeQuemHospeda(naVista) {
+  if (naVista?.ligacao != null) return { codigo: String(naVista.ligacao), meu: false };
+  if (naVista?.onde !== "Pessoal") return null;
+  const meu = await invoke("meu_codigo").catch((falha) => {
+    console.warn("meu_codigo:", falha);
+    return null;
+  });
+  return meu ? { codigo: String(meu), meu: true } : null;
+}
+
+/**
+ * **CONVIDAR** (ADR 0068): copia o link do código de quem hospeda esta ligação,
+ * e diz o que copiou. A terceira pessoa entra ligando para esse código, e quem
+ * hospeda atende: o botão não põe ninguém dentro sozinho.
+ *
+ * Três caminhos de cópia, os do `copiarLink` da portaria: a área de
+ * transferência, o `execCommand` (que a WebView do macOS aceita quando a
+ * primeira é negada) e, sem nenhum dos dois, o link selecionado num campo à
+ * vista, com a tecla do sistema dita. **A falha é dita, e não some.**
+ */
+async function convidarParaALigacao() {
+  const dito = $("ligacao-convidar-dito");
+  const campo = $("ligacao-convidar-link");
+  const dizer = (frase, comOCampo) => {
+    dito.hidden = false;
+    dito.textContent = frase;
+    campo.hidden = !comOCampo;
+  };
+  const naVista = variasSessoes() ? sessoesNaTela.find((s) => s.na_vista) : null;
+  const dono = await codigoDeQuemHospeda(naVista);
+  if (!dono) {
+    dizer(FRASES_DAS_SESSOES.convidarSemCodigo, false);
+    return;
+  }
+  const link = `seele://@${dono.codigo}`;
+  campo.value = link;
+  // À vista antes de selecionar: o `execCommand` copia a seleção de um campo
+  // que existe na tela.
+  campo.hidden = false;
+  campo.select();
+  let copiou = false;
+  if (navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(link);
+      copiou = true;
+    } catch (falha) {
+      console.warn("copiar o link da ligação pela área de transferência:", falha);
+    }
+  }
+  if (!copiou) {
+    try {
+      copiou = document.execCommand("copy");
+    } catch (falha) {
+      console.warn("copiar o link da ligação pelo comando antigo:", falha);
+    }
+  }
+  if (copiou) {
+    dizer(FRASES_DAS_SESSOES.convidarCopiou(link, dono.meu), false);
+    return;
+  }
+  const mac = navigator.platform.toUpperCase().includes("MAC");
+  dizer(FRASES_DAS_SESSOES.convidarNaoCopiou(mac ? "Cmd+C" : "Ctrl+C"), true);
+  campo.select();
+}
+
+$("ligacao-convidar").addEventListener("click", () => {
+  convidarParaALigacao().catch((falha) => console.warn("CONVIDAR:", falha));
+});
 
 $("ligacao-voltar").addEventListener("click", () => {
   // Às outras sessões, que a entrada lista com a volta para cada uma.

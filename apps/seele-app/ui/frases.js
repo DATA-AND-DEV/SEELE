@@ -2192,6 +2192,17 @@ const FRASES_DAS_SESSOES = Object.freeze({
   // O que cada botão da barra faz, em duas frases (a barra da ligação pessoal).
   dicaDaBarra:
     "SAIR DA SALA para a sua voz e a ligação continua aberta. DESLIGAR encerra a ligação e sai só desta sessão.",
+  // CONVIDAR (ADR 0068): o grupo cresce com mais alguém ligando para o código
+  // de quem hospeda a ligação. A frase diz o que foi copiado, de quem é o
+  // código e quem atende, porque é essa pessoa que decide quem entra.
+  convidar: "CONVIDAR",
+  convidarCopiou: (link, meu) =>
+    meu
+      ? `COPIADO: ${link}. É o seu código: quem ligar para ele toca aqui, e entra nesta ligação quando você atender.`
+      : `COPIADO: ${link}. É o código de quem hospeda esta ligação: quem ligar para ele entra quando essa pessoa atender.`,
+  convidarNaoCopiou: (tecla) =>
+    `NÃO DEU PARA COPIAR SOZINHO: o link desta ligação está selecionado aqui embaixo. Copie com ${tecla}.`,
+  convidarSemCodigo: "NÃO DEU PARA LER O CÓDIGO DESTA LIGAÇÃO, e nada foi copiado.",
   estadoDaLigacao: Object.freeze({
     naSala: "NA SALA DE VOZ",
     fora: "FORA DA SALA DE VOZ",

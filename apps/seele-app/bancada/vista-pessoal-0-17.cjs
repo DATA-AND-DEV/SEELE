@@ -135,6 +135,7 @@ const MEDIDOR = `
     await page.waitForTimeout(600);
 
     const medir = (seletor) => page.evaluate((s) => window.__medir(s), seletor);
+    const comandosDesde0 = () => page.evaluate(() => passou.slice());
     const visivel = (seletor) => page.evaluate((s) => window.__visivel(s), seletor);
 
     // 2. A vista pessoal.
@@ -199,6 +200,81 @@ const MEDIDOR = `
     assert.ok(cartoes >= 2, `a grade não mostra os participantes da ligação: ${cartoes}`);
     assert.equal(await page.evaluate(() => $("trilha-sessoes").children.length), 2, "a trilha não lista as duas sessões");
     await page.screenshot({ path: path.join(capturas, `vista-pessoal-${navegador}-${tam}.png`) });
+
+    // 2a. CONVIDAR (ADR 0068): o grupo cresce com mais alguém ligando para o
+    //     código de quem hospeda. O botão copia o link desse código e DIZ o que
+    //     copiou; quando a cópia falha, diz a falha e deixa o link selecionado.
+    assert.ok(await visivel("#ligacao-convidar"), "na vista pessoal o CONVIDAR não está visível dentro da janela");
+    assert.ok(!(await visivel("#ligacao-convidar-dito")) && !(await visivel("#ligacao-convidar-link")),
+      "o CONVIDAR diz alguma coisa antes de alguém clicar nele");
+    await page.evaluate(() => {
+      window.__copiado = [];
+      window.__negar = false;
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: async (texto) => { if (window.__negar) throw new Error("negada"); window.__copiado.push(texto); },
+      } });
+    });
+    const LINK = "seele://@K9P2-CSM7-NBFR-AYQ3";
+    await page.click("#ligacao-convidar");
+    await page.waitForFunction(() => !$("ligacao-convidar-dito").hidden);
+    assert.deepEqual(await page.evaluate(() => window.__copiado), [LINK],
+      "o CONVIDAR não copiou o link do código de quem hospeda a ligação");
+    const copiou = await page.textContent("#ligacao-convidar-dito");
+    assert.ok(copiou.startsWith(`COPIADO: ${LINK}. É o código de quem hospeda esta ligação`),
+      `o CONVIDAR não diz o que copiou nem de quem é o código: ${copiou}`);
+    assert.match(copiou, /entra quando essa pessoa atender/, `o CONVIDAR não diz quem atende: ${copiou}`);
+    assert.ok(await visivel("#ligacao-convidar-dito"), "o que o CONVIDAR copiou não está à vista");
+    assert.ok(!(await visivel("#ligacao-convidar-link")), "com a cópia feita, o campo do link ficou à vista");
+    assert.ok(!(await comandosDesde0()).some((c) => ["focar_voz", "leave_voice_room", "encerrar_sessao", "disconnect"].includes(c)),
+      "o CONVIDAR mexeu na voz ou na sessão");
+    // A cópia que falha pelos dois caminhos: a falha é dita, e o link fica
+    // selecionado num campo à vista, para o teclado.
+    await page.evaluate(() => { window.__negar = true; document.execCommand = () => false; });
+    await page.click("#ligacao-convidar");
+    await page.waitForFunction(() => /NÃO DEU PARA COPIAR/.test($("ligacao-convidar-dito").textContent));
+    const naoCopiou = await page.textContent("#ligacao-convidar-dito");
+    assert.match(naoCopiou, /^NÃO DEU PARA COPIAR SOZINHO: o link desta ligação está selecionado aqui embaixo\. Copie com (Cmd|Ctrl)\+C\.$/,
+      `a cópia que falhou não diz a falha nem o que fazer: ${naoCopiou}`);
+    assert.ok(await visivel("#ligacao-convidar-link"), "a cópia falhou e o link não ficou à vista para copiar");
+    const selecao = await page.evaluate(() => { const c = $("ligacao-convidar-link"); return [c.value, c.selectionStart, c.selectionEnd, c.readOnly]; });
+    assert.deepEqual(selecao, [LINK, 0, LINK.length, true], `o link da ligação não ficou inteiro e selecionado: ${JSON.stringify(selecao)}`);
+    assert.deepEqual(await page.evaluate(() => window.__copiado), [LINK], "a cópia negada foi contada como feita");
+    const caixaDoConvite = await page.evaluate(() => ["#ligacao-convidar", "#ligacao-convidar-dito", "#ligacao-convidar-link"].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return [s, r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight]; }));
+    assert.ok(caixaDoConvite.every(([, cabe]) => cabe), `o CONVIDAR sai da janela: ${JSON.stringify(caixaDoConvite)}`);
+    await page.screenshot({ path: path.join(capturas, `convidar-nao-copiou-${navegador}-${tam}.png`) });
+    // Quem hospeda sou eu (atendi na minha sala): o código copiado é o meu, e a
+    // frase diz que quem atende sou eu.
+    await page.evaluate(() => {
+      window.__negar = false;
+      const sessao = [...sessoesDaPonte.values()].find((s) => s.ligacao);
+      window.__ligacaoDeAntes = sessao.ligacao;
+      sessao.ligacao = null;
+      sessao.onde = "Pessoal";
+      const de = window.invoke;
+      window.invoke = async (comando, args) => (comando === "meu_codigo" ? "CSM7-NBFR-CAYQ-EV4Y" : de(comando, args));
+      window.__invokeDeAntes = de;
+    });
+    await page.evaluate(() => recarregarSessoes());
+    await page.click("#ligacao-convidar");
+    await page.waitForFunction(() => /É o seu código/.test($("ligacao-convidar-dito").textContent));
+    assert.equal((await page.evaluate(() => window.__copiado)).at(-1), "seele://@CSM7-NBFR-CAYQ-EV4Y",
+      "na minha sala, o CONVIDAR não copiou o meu código");
+    assert.match(await page.textContent("#ligacao-convidar-dito"), /quem ligar para ele toca aqui, e entra nesta ligação quando você atender/,
+      "na minha sala, o CONVIDAR não diz que quem atende sou eu");
+    // E sem código nenhum à mão, ele diz que nada foi copiado.
+    await page.evaluate(() => { const de = window.__invokeDeAntes; window.invoke = async (comando, args) => { if (comando === "meu_codigo") throw "sem-codigo"; return de(comando, args); }; });
+    const antes = (await page.evaluate(() => window.__copiado)).length;
+    await page.click("#ligacao-convidar");
+    await page.waitForFunction(() => /NÃO DEU PARA LER O CÓDIGO/.test($("ligacao-convidar-dito").textContent));
+    assert.equal((await page.evaluate(() => window.__copiado)).length, antes, "sem código, o CONVIDAR copiou alguma coisa");
+    await page.evaluate(() => {
+      const sessao = [...sessoesDaPonte.values()].find((s) => s.onde === "Pessoal");
+      sessao.ligacao = window.__ligacaoDeAntes;
+      delete sessao.onde;
+      window.invoke = window.__invokeDeAntes;
+    });
+    await page.evaluate(() => recarregarSessoes());
+    await page.waitForTimeout(300);
 
     // 2b. O miolo nunca fica vazio, e «fora da sala» só depois de uma saída
     //     CONFIRMADA. Teclado e cliques reais; visibilidade computada.
@@ -545,7 +621,7 @@ const MEDIDOR = `
       "criar sala de voz": "#nova-voice_room", "o perfil do operador": "#operador-quem",
       "a lista de salas": "#lista-voice_rooms", "a conversa": "#vista-conversa", "o campo de mensagem": "#campo-mensagem",
     })) assert.ok(await visivel(seletor), `(10) no servidor ${quem} (${seletor}) não está visível`);
-    for (const seletor of ["#ligacao-chat", "#ligacao-desligar", "#ligacao-cabeca"]) {
+    for (const seletor of ["#ligacao-chat", "#ligacao-convidar", "#ligacao-convidar-dito", "#ligacao-convidar-link", "#ligacao-desligar", "#ligacao-cabeca"]) {
       assert.ok(!(await visivel(seletor)), `(10) no servidor apareceu ${seletor}`);
     }
     const dialogoNoServidor = await page.evaluate(() => ({ papel: $("vista-conversa").getAttribute("role"), chat: $("tela-sessao").dataset.chat ?? null }));
@@ -568,7 +644,7 @@ const MEDIDOR = `
       "o cabeçalho": "#ligacao-cabeca", "o nome": "#sessao-ligacao", "o estado": "#ligacao-cabeca-estado",
       "a grade": "#chamada-grade", "o microfone": "#botao-mudo", "a surdez": "#botao-surdo",
       "AJUSTES": "#botao-server-sessao", "COMPARTILHAR": "#operador-vista", "CHAT": "#ligacao-chat",
-      "DESLIGAR": "#ligacao-desligar", "a trilha": "#trilha-sessoes",
+      "CONVIDAR": "#ligacao-convidar", "DESLIGAR": "#ligacao-desligar", "a trilha": "#trilha-sessoes",
     })) assert.ok(await visivel(seletor), `(10) na ligação ${quem} (${seletor}) não está visível`);
     for (const [quem, seletor] of Object.entries({
       "criar sala de voz": "#nova-voice_room", "o perfil do operador": "#operador-quem", "a lista de salas": "#lista-voice_rooms",
