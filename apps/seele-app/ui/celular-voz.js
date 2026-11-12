@@ -212,11 +212,12 @@
     const segurarAgora = snapshot.voice_mode === "PushToTalk";
     if (!aqui || snapshot.link !== "Online" || !segurarAgora) soltar();
     modoSegurar = segurarAgora;
-    faixa.hidden = !aqui;
+    // Só o que mudou (`base.js`): a faixa é redesenhada depois de cada quadro.
+    porOEscondido(faixa, !aqui);
     if (!aqui) return;
-    faixa.setAttribute("aria-label", PALAVRAS.salaDeVoz(aqui.name));
-    nome.textContent = aqui.name;
-    conta.textContent = `${aqui.people.length}/${aqui.limit}`;
+    porOAtributo(faixa, "aria-label", PALAVRAS.salaDeVoz(aqui.name));
+    porOTexto(nome, aqui.name);
+    porOTexto(conta, `${aqui.people.length}/${aqui.limit}`);
 
     // Enquanto o áudio abre, ou quando ele não abriu, a faixa diz isso no lugar
     // de quem fala, com a palavra do rodapé do desktop (matriz, B-F08c).
@@ -226,9 +227,9 @@
     // Com o enlace caído, antes de tudo: não há som, e a conexão está voltando
     // (spec §2.5). Quem fala e o sinal seriam do instante antes da queda.
     const caido = Boolean(snapshot.link) && snapshot.link !== "Online";
-    faixa.toggleAttribute("data-caido", caido);
-    quem.textContent = caido ? PALAVRAS.reconectando : abertura?.rodape
-      ?? (falando ? `${PALAVRAS.fala(apelidoApresentado(falando.id, falando.nickname))} · ${sinal}` : `${PALAVRAS.naSala(aqui.people.length)} · ${sinal}`);
+    if (faixa.hasAttribute("data-caido") !== caido) faixa.toggleAttribute("data-caido", caido);
+    porOTexto(quem, caido ? PALAVRAS.reconectando : abertura?.rodape
+      ?? (falando ? `${PALAVRAS.fala(apelidoApresentado(falando.id, falando.nickname))} · ${sinal}` : `${PALAVRAS.naSala(aqui.people.length)} · ${sinal}`));
 
     mutado = !!snapshot.muted;
     desenharMudo();
@@ -250,10 +251,10 @@
   let nomeDaSala = "";
   function desenharChamada() {
     const aberta = vistaAberta();
-    sessao.toggleAttribute("data-chamada", aberta);
-    dentroDaSala.hidden = aberta;
-    recolher.hidden = !aberta;
-    sala.setAttribute("aria-label", aberta ? PALAVRAS.recolherChamada : PALAVRAS.abrirChamada(nomeDaSala));
+    if (sessao.hasAttribute("data-chamada") !== aberta) sessao.toggleAttribute("data-chamada", aberta);
+    porOEscondido(dentroDaSala, aberta);
+    porOEscondido(recolher, !aberta);
+    porOAtributo(sala, "aria-label", aberta ? PALAVRAS.recolherChamada : PALAVRAS.abrirChamada(nomeDaSala));
   }
   // A CHAMADA aberta é uma entrada no voltar do aparelho: o voltar a recolhe.
   let sairDoVoltar = null;

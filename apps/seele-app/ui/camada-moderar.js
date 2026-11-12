@@ -278,9 +278,9 @@ function atualizarPortaDoAlerta(snapshot) {
   const porta = $("alerta-ejetar");
   const pode = podeModerarPersonos(snapshot);
   porta.disabled = !pode;
-  porta.title = pode
+  porOTitulo(porta, pode
     ? "escolher quem, e o que fazer: expulsar, banir ou mover"
-    : "este servidor não deu a você nenhuma permissão de moderação";
+    : "este servidor não deu a você nenhuma permissão de moderação");
   // A outra porta desta camada anda com o mesmo retrato.
   atualizarPortaDosBanidos(snapshot);
 }
@@ -301,7 +301,7 @@ function podeVerBanidos(snapshot) {
 /** Mostra ou esconde a porta da lista de banidos, pelo retrato de agora. */
 function atualizarPortaDosBanidos(snapshot) {
   const porta = $("abrir-banidos");
-  porta.hidden = !podeVerBanidos(snapshot);
+  porOEscondido(porta, !podeVerBanidos(snapshot));
   // Escrito uma vez: isto roda a cada retrato, e reescrever o mesmo texto
   // troca o nó de texto debaixo de quem o está lendo (pendência 63).
   if (porta.textContent !== FRASES_DOS_BANIDOS.abrir) {

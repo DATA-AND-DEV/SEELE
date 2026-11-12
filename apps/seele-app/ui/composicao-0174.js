@@ -137,11 +137,13 @@
       const botao = document.createElement("button"); botao.type = "button"; botao.className = "botao-fantasma";
       botao.textContent = nome;
       botao.addEventListener("click", () => original.click());
+      // O espelho escreve só o que mudou no original (`base.js`): este
+      // observador acorda a cada atributo escrito nele, mude ou não.
       const atualizar = () => {
-        botao.disabled = original.disabled;
-        botao.setAttribute("aria-label", original.getAttribute("aria-label") || original.title || nome);
+        if (botao.disabled !== original.disabled) botao.disabled = original.disabled;
+        porOAtributo(botao, "aria-label", original.getAttribute("aria-label") || original.title || nome);
         const pressionado = original.getAttribute("aria-pressed");
-        if (pressionado !== null) botao.setAttribute("aria-pressed", pressionado);
+        if (pressionado !== null) porOAtributo(botao, "aria-pressed", pressionado);
       };
       atualizar(); new MutationObserver(atualizar).observe(original, { attributes: true });
       acoes.append(botao);
@@ -182,13 +184,14 @@
     controles.setAttribute("aria-label", "Controles da chamada");
     const espelhar = (botao, original, { icone = false, rotulo = null, mostrar = () => !original.hidden } = {}) => {
       const atualizar = () => {
-        botao.hidden = !mostrar();
-        botao.disabled = original.disabled;
+        // Só o que mudou, como a fileira estreita de cima.
+        porOEscondido(botao, !mostrar());
+        if (botao.disabled !== original.disabled) botao.disabled = original.disabled;
         const desligado = original.getAttribute("aria-disabled");
-        if (desligado !== null) botao.setAttribute("aria-disabled", desligado);
+        if (desligado !== null) porOAtributo(botao, "aria-disabled", desligado);
         const pressionado = original.getAttribute("aria-pressed");
-        if (pressionado !== null) botao.setAttribute("aria-pressed", pressionado);
-        if (original.title) botao.title = original.title;
+        if (pressionado !== null) porOAtributo(botao, "aria-pressed", pressionado);
+        if (original.title) porOTitulo(botao, original.title);
         if (icone) {
           // O desenho do original (o glifo com ou sem o corte) e o nome dele.
           // Snapshots chegam durante pointerdown/up: preservar o alvo mantém o clique no WebKit.
@@ -196,11 +199,12 @@
               [...botao.childNodes].some((no, i) => !no.isEqualNode(original.childNodes[i]))) {
             botao.replaceChildren(...[...original.childNodes].map((no) => no.cloneNode(true)));
           }
-          botao.setAttribute("aria-label", original.getAttribute("aria-label") || original.title || "");
+          porOAtributo(botao, "aria-label", original.getAttribute("aria-label") || original.title || "");
         } else if (rotulo) {
           const texto = rotulo();
-          if (botao.lastChild?.nodeType === Node.TEXT_NODE) botao.lastChild.textContent = texto;
-          else botao.append(texto);
+          if (botao.lastChild?.nodeType === Node.TEXT_NODE) {
+            if (botao.lastChild.nodeValue !== texto) botao.lastChild.nodeValue = texto;
+          } else botao.append(texto);
         }
       };
       atualizar();

@@ -421,9 +421,71 @@ function marcaSync(faixa) {
   return { Nominal: "█", Degraded: "▒", Critical: "░" }[faixa] ?? "░";
 }
 
-/** Substitui os filhos de um elemento por uma lista nova. */
+/**
+ * Substitui os filhos de um elemento por uma lista nova.
+ *
+ * **Os mesmos nós na mesma ordem não são trocados** — nem a lista vazia num pai
+ * vazio: o `replaceChildren` registra a troca do mesmo jeito, e o tique de
+ * 500 ms repovoa as regiões de MOD (quase sempre vazias) a cada quadro.
+ */
 function repovoar(pai, filhos) {
-  pai.replaceChildren(...filhos);
+  const lista = Array.isArray(filhos) ? filhos : [...filhos];
+  const atuais = pai.childNodes;
+  if (atuais.length === lista.length && lista.every((filho, i) => atuais[i] === filho)) return;
+  pai.replaceChildren(...lista);
+}
+
+// ------------------------------------------------- escrever só o que mudou
+//
+// **A tela parada não muda o DOM.** O retrato é redesenhado inteiro duas vezes
+// por segundo (`atualizar`, no tique de 500 ms do `tela-sessao.js`), e cada
+// `x.hidden = …`, `x.textContent = …`, `x.title = …`, `x.dataset.y = …`,
+// `setAttribute` e `classList.toggle` REGISTRA uma mutação mesmo quando o
+// valor é o que já estava lá (medido no Chromium e no WebKit em 11/11/2026: 67 a 75 mutações
+// por tique com o retrato igual, ~150 por segundo, numa sessão em que nada
+// acontecia; a `area-util.cjs` reprovava quando três tiques caíam na janela
+// de 1 s dela). Cada uma acorda os observadores da tela — a fileira estreita
+// e a bandeja da chamada (`composicao-0174.js`), os avisos do celular
+// (`celular-ajustes.js`) —, que reescreviam o que espelham, e assim por diante.
+// É a mesma família do roster refeito a cada meio segundo (`vestirComo`,
+// `pintarOFundo`): comparar antes de escrever.
+//
+// Estas seis são o `=` de sempre com a comparação na frente. Comparam pela
+// propriedade, como quem as chama escrevia, e por isso servem também aos
+// dublês de elemento dos guardas (`tests/frontend.rs`). Onde o nó de texto tem
+// de ser o MESMO de um quadro ao outro (a seleção, o leitor de tela), o texto
+// vai por `escreverOTexto` (`tela-sessao.js`), que muda o `nodeValue`.
+
+/** `nodo.hidden = escondido`, só quando muda. */
+function porOEscondido(nodo, escondido) {
+  if (nodo.hidden !== escondido) nodo.hidden = escondido;
+}
+
+/** `nodo.textContent = texto`, só quando muda. */
+function porOTexto(nodo, texto) {
+  if (nodo.textContent !== texto) nodo.textContent = texto;
+}
+
+/** `nodo.title = titulo`, só quando muda. */
+function porOTitulo(nodo, titulo) {
+  if (nodo.title !== titulo) nodo.title = titulo;
+}
+
+/** `nodo.setAttribute(nome, valor)`, só quando muda. */
+function porOAtributo(nodo, nome, valor) {
+  const texto = String(valor);
+  if (nodo.getAttribute(nome) !== texto) nodo.setAttribute(nome, texto);
+}
+
+/** `nodo.dataset[chave] = valor`, só quando muda. */
+function porODado(nodo, chave, valor) {
+  const texto = String(valor);
+  if (nodo.dataset[chave] !== texto) nodo.dataset[chave] = texto;
+}
+
+/** `nodo.classList.toggle(classe, presente)`, só quando muda. */
+function porAClasse(nodo, classe, presente) {
+  if (nodo.classList.contains(classe) !== presente) nodo.classList.toggle(classe, presente);
 }
 
 function elemento(tag, classe, texto) {

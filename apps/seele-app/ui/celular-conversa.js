@@ -88,6 +88,7 @@
   CASCA.depoisDeDesenhar.push(() => {
     if (campo.placeholder !== EXEMPLO_DO_DESKTOP && campo.placeholder !== exemploDoCelular) return;
     exemploDoCelular = PALAVRAS.escrever(doDesktop("linha-nome").textContent);
-    campo.placeholder = exemploDoCelular;
+    // Depois de cada quadro, e o canal quase nunca mudou: só o que mudou.
+    if (campo.placeholder !== exemploDoCelular) campo.placeholder = exemploDoCelular;
   });
 })();

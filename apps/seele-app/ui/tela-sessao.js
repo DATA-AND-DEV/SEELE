@@ -434,7 +434,7 @@ let geracaoDoAvisoDeFone = 0;
  * no instante em que o texto muda não é anunciado.
  */
 function desenharAvisoDeFone(snapshot) {
-  if (!CASCA.avisoDeFone()) { $("aviso-fone").hidden = true; return; }
+  if (!CASCA.avisoDeFone()) { porOEscondido($("aviso-fone"), true); return; }
   if (!$("aviso-fone").hidden && geracaoDoAvisoDeFone !== geracaoDaSessao) {
     $("aviso-fone").hidden = true;
   }
@@ -464,7 +464,7 @@ function desenharAberturaDoAudio(snapshot) {
   // Com ela de pé, a faixa fala do microfone calado pelo sistema, se for o caso.
   const frase =
     ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.frase ?? fraseDoMicrofoneCalado(snapshot);
-  $("aviso-audio").hidden = frase === null;
+  porOEscondido($("aviso-audio"), frase === null);
   if (frase !== null && $("aviso-audio-texto").textContent !== frase) {
     $("aviso-audio-texto").textContent = frase;
   }
@@ -710,10 +710,10 @@ function desenharCabecaDoServidor(snapshot) {
   if (!nome) return;
   const escrever = (no, texto) => { if (no.textContent !== texto) no.textContent = texto; };
   escrever(nome, snapshot.server || "");
-  nome.title = snapshot.server || "";
+  porOTitulo(nome, snapshot.server || "");
   const chip = $("canais-servidor-chip");
-  chip.dataset.padrao = snapshot.link_state;
-  chip.hidden = !snapshot.link_state || snapshot.link_state === "Verified";
+  porODado(chip, "padrao", snapshot.link_state);
+  porOEscondido(chip, !snapshot.link_state || snapshot.link_state === "Verified");
   escrever($("canais-servidor-chip-texto"), {
     Offline: "SEM CONEXÃO",
     Unverified: "NÃO VERIFICADA",
@@ -1343,8 +1343,8 @@ function desenharCanais(snapshot) {
   // não ia funcionar.
   const pode = snapshot.may_manage_voice_rooms === true;
   // Os dois `+` dos cabeçalhos, no lugar dos formulários que a comp tirou.
-  $("nova-voice_room").hidden = !pode;
-  $("nova-linha").hidden = !pode;
+  porOEscondido($("nova-voice_room"), !pode);
+  porOEscondido($("nova-linha"), !pode);
 
   // O tamanho padrão da sala nova vem de uma sala que já existe, e não de um
   // número escrito no JavaScript: quem hospeda já disse que tamanho quer
@@ -1417,16 +1417,39 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
   return item;
 }
 
+/**
+ * O glifo de um botão do operador (microfone, fone), **trocado só quando o
+ * desenho muda**. O tique refazia o `<svg>` e o punha no lugar do anterior
+ * duas vezes por segundo: uma troca de nó debaixo do ponteiro (no WebKit, o
+ * clique que começa num nó e termina noutro se perde), e um registro que
+ * acordava os espelhos do botão (`composicao-0174.js`).
+ *
+ * O que foi posto fica anotado no próprio botão (`glifoPosto`), e não num
+ * mapa deste arquivo: não é estado de sessão nenhuma. Se outro código trocou
+ * os filhos do botão, a anotação não casa e o glifo é posto de novo.
+ */
+function porOGlifoComEstado(botao, nome, cortado, rotulo) {
+  const posto = botao.glifoPosto;
+  const chave = `${nome}\n${cortado ? "cortado" : "inteiro"}\n${rotulo}`;
+  if (posto && posto.chave === chave && botao.firstChild === posto.no && botao.lastChild === posto.no) return;
+  const no = glifoComEstado(nome, cortado, rotulo);
+  botao.replaceChildren(no);
+  botao.glifoPosto = { chave, no };
+}
+
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
   aplicarARegiao("operador.barra", $("operador-mods"));
   // Um nome só (0.19): o exibido do perfil oficial, ou o apelido.
   const exibidoDoOperador = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
-  $("operador-nome").textContent = exibidoDoOperador || apelidoApresentado(snapshot.me, snapshot.nickname);
+  // Tudo daqui para baixo escreve só o que mudou (`porOTexto` e as irmãs, em
+  // `base.js`): este desenho roda a cada tique, com o retrato quase sempre
+  // igual ao de antes.
+  porOTexto($("operador-nome"), exibidoDoOperador || apelidoApresentado(snapshot.me, snapshot.nickname));
   // **Embaixo do nome, nada** (0.19, pedido do dono): nem «operador» nem «a voz
   // está aqui · sala». A sala em que se está já vem marcada na lista de salas
   // (VOCÊ ESTÁ AQUI) e no rodapé (sala …); o cartão é só quem você é.
-  document.querySelector("#tela-sessao .operador-rotulo").hidden = true;
+  porOEscondido(document.querySelector("#tela-sessao .operador-rotulo"), true);
   // O apelido também abre a linha de escrever, como no canvas: `alex ❯`.
   const prompt = document.querySelector("#form-mensagem .prompt");
   const fraseDoPrompt = `${apelidoApresentado(snapshot.me, snapshot.nickname)} \u276f`;
@@ -1436,8 +1459,9 @@ function desenharOperador(snapshot) {
   // A inicial ao lado do nome, como a comp a desenha — e é a mesma que a prévia
   // do perfil mostra para quem não pôs imagem, para que as duas contem a mesma
   // coisa sobre a mesma pessoa.
-  $("operador-inicial").textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
-  vestirAvatar($("operador-inicial"), snapshot.me);
+  // A inicial vai a `vestirAvatar` como argumento, e não escrita antes: com
+  // retrato, escrevê-la e apagá-la em seguida eram duas trocas por tique.
+  vestirAvatar($("operador-inicial"), snapshot.me, (snapshot.nickname || "?").trim().charAt(0).toUpperCase());
   // E a capa de quem usa, **no fundo da barra do operador inteira** (rascunho
   // §4; o pedido do dono, reafirmado em 08/10). O microfone, o fone e o SAIR
   // são do núcleo (§10): ficam sobre placas opacas da cor do fundo nativo, com
@@ -1479,15 +1503,18 @@ function desenharOperador(snapshot) {
   }[snapshot.voice_mode] ?? "microfone disponível";
   const estadoDoMicrofone = snapshot.muted ? "microfone mudo" : comoAbre;
   const mudoRotulo = (estadoDoMicrofone + (!snapshot.muted && snapshot.speaking ? " · no ar" : "")).toUpperCase();
-  mudo.replaceChildren(glifoComEstado("microfone", snapshot.muted, mudoRotulo));
-  mudo.setAttribute("aria-label", mudoRotulo);
-  mudo.title = `${estadoDoMicrofone} · ${snapshot.muted ? "reativar" : "silenciar"}`;
-  mudo.dataset.ativo = snapshot.muted ? "sim" : "nao";
+  // **Com a voz noutra sessão** (E3 da 0.17), o `title` diz de qual: lido
+  // aqui, antes de escrevê-lo, para ele ser escrito uma vez só por quadro.
+  const vozNoutra = typeof vozNoutraSessao === "function" ? vozNoutraSessao() : null;
+  porOGlifoComEstado(mudo, "microfone", snapshot.muted, mudoRotulo);
+  porOAtributo(mudo, "aria-label", mudoRotulo);
+  porOTitulo(mudo, `${estadoDoMicrofone}${vozNoutra ? ` em ${vozNoutra}` : ""} · ${snapshot.muted ? "reativar" : "silenciar"}`);
+  porODado(mudo, "ativo", snapshot.muted ? "sim" : "nao");
 
   const surdo = $("botao-surdo");
   const surdoRotulo = snapshot.total_isolation ? "ISOLAMENTO TOTAL" : "OUVINDO";
-  surdo.replaceChildren(glifoComEstado("fone", snapshot.total_isolation, surdoRotulo));
-  surdo.setAttribute("aria-label", surdoRotulo);
+  porOGlifoComEstado(surdo, "fone", snapshot.total_isolation, surdoRotulo);
+  porOAtributo(surdo, "aria-label", surdoRotulo);
   // **«ninguém» dizia gente, e ele cala a tela também.**
   //
   // O isolamento total silencia todas as fontes de uma vez — é o `set_master` do
@@ -1498,10 +1525,10 @@ function desenharOperador(snapshot) {
   // dois logs, medir cadeia por cadeia e provar que o som saía, chegava e era
   // misturado — para no fim ser «tava com o áudio mutado, não sabia que mutava a
   // live também».
-  surdo.title = snapshot.total_isolation
+  porOTitulo(surdo, snapshot.total_isolation
     ? "voltar a ouvir"
-    : "não ouvir ninguém, nem o som de uma tela compartilhada";
-  surdo.dataset.ativo = snapshot.total_isolation ? "sim" : "nao";
+    : "não ouvir ninguém, nem o som de uma tela compartilhada");
+  porODado(surdo, "ativo", snapshot.total_isolation ? "sim" : "nao");
 
   // A linha que substituiu o botão de falar: o que o microfone e o som estão
   // fazendo, nas palavras da comp — «microfone aberto · ouvindo».
@@ -1528,7 +1555,6 @@ function desenharOperador(snapshot) {
   // ouve. Dizer «microfone abre enquanto segura ESPAÇO · ouvindo» nesta vista
   // afirmaria sobre esta conversa o que é da outra. A tecla nunca traz a voz
   // para cá: só o TRAZER A VOZ PARA CÁ, ou entrar numa sala daqui.
-  const vozNoutra = typeof vozNoutraSessao === "function" ? vozNoutraSessao() : null;
   if (vozNoutra) {
     escreverOTexto($("voz-estado"), [
       snapshot.voice_mode === "PushToTalk"
@@ -1536,7 +1562,6 @@ function desenharOperador(snapshot) {
         : FRASES_DAS_SESSOES.microfoneDe(vozNoutra),
       FRASES_DAS_SESSOES.aquiSemVoz,
     ].join(" · "));
-    mudo.title = `${estadoDoMicrofone} em ${vozNoutra} · ${snapshot.muted ? "reativar" : "silenciar"}`;
     return;
   }
   escreverOTexto($("voz-estado"), [
@@ -1583,14 +1608,16 @@ function desenharLinha(snapshot) {
   const pode = aberta !== undefined && snapshot.may_manage_voice_rooms === true;
   const nome = trocarONomeDaLinha(pode);
 
-  nome.textContent = aberta ? aberta.name : "nenhum canal aberto";
-  nome.classList.toggle("linha-nome-vazio", !aberta);
+  // Só o que mudou, como o resto do quadro (`base.js`): o nome do canal é um
+  // botão, e o texto dele trocado a cada tique trocava o nó debaixo do ponteiro.
+  porOTexto(nome, aberta ? aberta.name : "nenhum canal aberto");
+  porAClasse(nome, "linha-nome-vazio", !aberta);
   // O rótulo da caixa de escrever diz em que canal a mensagem vai.
   const rotuloDoCanal = $("compor-rotulo-canal");
-  if (rotuloDoCanal) rotuloDoCanal.textContent = aberta ? `#${aberta.name}` : "";
+  if (rotuloDoCanal) porOTexto(rotuloDoCanal, aberta ? `#${aberta.name}` : "");
   if (pode) {
-    nome.title = `renomear #${aberta.name}`;
-    nome.setAttribute("aria-label", `Renomear o canal ${aberta.name}`);
+    porOTitulo(nome, `renomear #${aberta.name}`);
+    porOAtributo(nome, "aria-label", `Renomear o canal ${aberta.name}`);
   }
 
   // **`canal.cabecalho`** — o que um MOD acrescenta à barra do canal aberto.
@@ -1614,7 +1641,7 @@ function desenharLinha(snapshot) {
       : null;
     const desenho = escolhida ? montarContribuicao(escolhida, String(aberta.id)) : null;
     repovoar(miolo, desenho ? [desenho] : []);
-    miolo.hidden = !desenho;
+    porOEscondido(miolo, !desenho);
   }
 
   const noCabecalho = $("canal-cabecalho-mods");
@@ -4230,7 +4257,7 @@ function desenharAviso(snapshot) {
   // «@ N» ao lado do canal (`marcaDeNaoLidas`). A caixa só dizia «VOCÊ FOI
   // CHAMADO», sem o canal, e pedia um clique para sair da frente.
   if (!snapshot.notice || snapshot.notice.reason === "Mentioned") {
-    banner.hidden = true;
+    porOEscondido(banner, true);
     return;
   }
   const aviso = snapshot.notice;
@@ -4304,8 +4331,8 @@ function fraseDoAviso(motivo) {
 function desenharEnlace(link) {
   const faixa = $("bateria");
   if (!link || link === "Online") {
-    faixa.hidden = true;
-    document.body.classList.remove("na-bateria");
+    porOEscondido(faixa, true);
+    porAClasse(document.body, "na-bateria", false);
     return;
   }
 
@@ -7206,9 +7233,12 @@ async function sincronizarRetratos(snapshot) {
  * de conviver com elas — texto por cima de foto é o que nenhuma das duas coisas
  * queria ser.
  */
-function vestirAvatar(quadrado, pessoaId) {
-  quadrado.dataset.pessoaDoAvatar = pessoaId == null ? "" : String(pessoaId);
-  quadrado.dataset.iniciaisDoAvatar = quadrado.textContent;
+function vestirAvatar(quadrado, pessoaId, iniciais = quadrado.textContent) {
+  // As iniciais são o texto que o quadrado traz, ou as que quem chama diz: um
+  // quadrado que fica na tela de um quadro ao outro (o do operador) já pode
+  // estar com o retrato, e sem texto nenhum.
+  porODado(quadrado, "pessoaDoAvatar", pessoaId == null ? "" : String(pessoaId));
+  porODado(quadrado, "iniciaisDoAvatar", iniciais);
   return aplicarAvatar(quadrado);
 }
 
@@ -7220,7 +7250,7 @@ function vestirAvatar(quadrado, pessoaId) {
  * todo o conteúdo: o halo de quem fala, as pastilhas e o texto ficam por cima.
  */
 function vestirCapa(quadro, pessoaId) {
-  quadro.dataset.pessoaDaCapa = pessoaId == null ? "" : String(pessoaId);
+  porODado(quadro, "pessoaDaCapa", pessoaId == null ? "" : String(pessoaId));
   agendarAsCapas();
   return aplicarCapa(quadro);
 }
@@ -7260,7 +7290,7 @@ function escolherAsCapasAnimadas() {
   const falou = (quadro) => falouPorUltimo.get(quadro.dataset.pessoaDaCapa) ?? 0;
   // `sort` é estável: no empate, fica a ordem da tela.
   const escolhidos = new Set(naVista.sort((a, b) => falou(b) - falou(a)).slice(0, TETO_DE_CAPAS_ANIMADAS));
-  for (const quadro of quadros) quadro.dataset.capaAnimada = escolhidos.has(quadro) ? "sim" : "nao";
+  for (const quadro of quadros) porODado(quadro, "capaAnimada", escolhidos.has(quadro) ? "sim" : "nao");
 }
 
 /** Uma escolha por quadro de animação, por mais capas que se vistam nele. */
@@ -7485,12 +7515,12 @@ function aplicarAvatar(quadrado) {
       || retratos.get(Number(id)) || retratos.get(id);
   if (uri) {
     pintarOFundo(quadrado, uri);
-    quadrado.dataset.comRetrato = "sim";
-    quadrado.textContent = "";
+    porODado(quadrado, "comRetrato", "sim");
+    porOTexto(quadrado, "");
   } else {
     pintarOFundo(quadrado, null);
     delete quadrado.dataset.comRetrato;
-    quadrado.textContent = quadrado.dataset.iniciaisDoAvatar ?? "";
+    porOTexto(quadrado, quadrado.dataset.iniciaisDoAvatar ?? "");
   }
   return quadrado;
 }

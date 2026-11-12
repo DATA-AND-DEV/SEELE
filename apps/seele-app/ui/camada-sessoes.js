@@ -65,7 +65,7 @@ function vistaDaSessao(s) {
 function desenharAVistaPessoal() {
   const naVista = variasSessoes() ? sessoesNaTela.find((s) => s.na_vista) : null;
   const vista = naVista ? vistaDaSessao(naVista) : "servidor";
-  $("tela-sessao").dataset.vista = vista;
+  porODado($("tela-sessao"), "vista", vista);
   // **A vista é a da chamada que já existe**, e não uma cópia: a grade de quem
   // está na ligação, o palco da tela compartilhada e o operador (microfone,
   // dispositivos, SAIR DA SALA) são os de sempre. O CSS tira o que é de
@@ -96,14 +96,16 @@ function desenharAVistaPessoal() {
  */
 function desenharACabecaDaLigacao(naVista, vista) {
   const pessoal = vista === "ligacao";
-  $("ligacao-cabeca").hidden = !pessoal;
+  // Só o que mudou (`base.js`): a lista das sessões é relida a cada aviso de
+  // outra sessão, e esta cabeça quase nunca muda.
+  porOEscondido($("ligacao-cabeca"), !pessoal);
   const frase = $("sessao-ligacao");
-  frase.hidden = !pessoal;
-  frase.textContent = pessoal
+  porOEscondido(frase, !pessoal);
+  porOTexto(frase, pessoal
     ? FRASES_DAS_SESSOES.ligacaoPessoal((naVista.nome ?? "").trim() || naVista.ligacao || nomeDaSessao(naVista))
-    : "";
+    : "");
   const estados = FRASES_DAS_SESSOES.estadoDaLigacao;
-  $("ligacao-cabeca-estado").textContent = !pessoal
+  porOTexto($("ligacao-cabeca-estado"), !pessoal
     ? ""
     : naVista.enlace === "encerrada"
       ? estados.encerrada
@@ -111,12 +113,12 @@ function desenharACabecaDaLigacao(naVista, vista) {
         ? estados.reconectando
         : naVista.na_sala_de_voz
           ? estados.naSala
-          : estados.fora;
+          : estados.fora);
   // Feita daqui, desliga; recebida na minha sala, sai desta ligação (o mesmo
   // comando, só desta sessão, nos dois casos).
   const rotulo = naVista?.ligacao != null ? FRASES_DAS_SESSOES.desligar : FRASES_DAS_SESSOES.sairDestaLigacao;
-  $("ligacao-desligar").textContent = rotulo;
-  $("ligacao-barra-dica").textContent = pessoal ? FRASES_DAS_SESSOES.dicaDaBarra : "";
+  porOTexto($("ligacao-desligar"), rotulo);
+  porOTexto($("ligacao-barra-dica"), pessoal ? FRASES_DAS_SESSOES.dicaDaBarra : "");
 }
 
 // ---------------------------------------------------------------------- o chat
@@ -514,12 +516,12 @@ function placaDoHospedado(meu) {
 function desenharSessoes() {
   const varias = variasSessoes();
   const grupos = ["trilha-sessoes-titulo", "trilha-sessoes", "trilha-recentes-titulo"];
-  for (const id of grupos) $(id).hidden = !varias;
-  $("trilha-server").hidden = varias;
+  for (const id of grupos) porOEscondido($(id), !varias);
+  porOEscondido($("trilha-server"), varias);
   // O `+` diz o que custa: com várias sessões, nada (ele soma); sem, sair.
-  $("trilha-adicionar").title = varias
+  porOTitulo($("trilha-adicionar"), varias
     ? "abre mais uma conversa pela entrada, sem fechar as abertas"
-    : "sai deste servidor e volta à entrada para você digitar outro endereço";
+    : "sai deste servidor e volta à entrada para você digitar outro endereço");
   // **Um servidor, uma placa** (0.19: o dono viu o mesmo servidor em ABERTAS,
   // com o ícone, e de novo em NO AR, só com a sigla). Com uma conversa aberta
   // no servidor que esta máquina hospeda (achada como em
@@ -529,8 +531,8 @@ function desenharSessoes() {
     ? sessoesNaTela.find((s) => s.onde === "Guardado" && !s.encerrada) ?? null
     : null;
   const noAr = varias && hospedadoNaTela && !conversaDoHospedado;
-  $("trilha-hospedando-titulo").hidden = !noAr;
-  $("trilha-hospedando").hidden = !noAr;
+  porOEscondido($("trilha-hospedando-titulo"), !noAr);
+  porOEscondido($("trilha-hospedando"), !noAr);
   if (!varias) return;
   repovoar($("trilha-sessoes"), sessoesNaTela.map(placaDaSessao));
   repovoar($("trilha-hospedando"), noAr ? [placaDoHospedado(hospedadoNaTela)] : []);
@@ -754,11 +756,11 @@ function irParaAEntradaSemSair() {
 /** A linha do operador: onde está a voz, e o TRAZER A VOZ PARA CÁ. */
 function desenharAVozDasSessoes() {
   // Com a voz aberta em alguma sessão, nada se anima na entrada (`camada-sala.css`).
-  document.documentElement.dataset.vozAberta =
-    variasSessoes() && sessoesNaTela.some((s) => s.foco_de_voz && s.na_sala_de_voz) ? "sim" : "nao";
+  porODado(document.documentElement, "vozAberta",
+    variasSessoes() && sessoesNaTela.some((s) => s.foco_de_voz && s.na_sala_de_voz) ? "sim" : "nao");
   const bloco = $("voz-foco");
   const varias = variasSessoes() && sessoesNaTela.length > 1;
-  bloco.hidden = !varias;
+  porOEscondido(bloco, !varias);
   // Quem mais desenha a partir das sessões (a casca do celular põe esta linha
   // debaixo do topo dela, e diz em toda aba qual servidor se vê): avisado
   // aqui, sem este arquivo saber de casca nenhuma.
@@ -817,10 +819,11 @@ const caidas = new Map();
 function desenharALinhaDaQueda() {
   const linha = $("sessao-ficou-para-tras");
   const queda = caidas.get(vistaDaJanela.sessao);
-  linha.hidden = !queda;
-  linha.textContent = queda
+  // A cada retrato da vista, e quase sempre sem queda nenhuma: só o que mudou.
+  porOEscondido(linha, !queda);
+  porOTexto(linha, queda
     ? FRASES_DAS_SESSOES.ficouParaTras[queda.motivo] ?? FRASES_DAS_SESSOES.ficouParaTras.outro
-    : "";
+    : "");
 }
 
 /** O retrato da vista: a geração nova no ar apaga a linha da que caiu. */

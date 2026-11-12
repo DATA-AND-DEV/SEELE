@@ -3230,7 +3230,7 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
          moderate anybody, so it offers what the Server will refuse:\n{porta}"
     );
     assert!(
-        porta.contains("title"),
+        porta.contains("porOTitulo(porta, "),
         "`alerta-ejetar` can be left disabled without the reason being rewritten, \
          so the `title` in the markup outlives the state it explains:\n{porta}"
     );
@@ -7230,7 +7230,7 @@ fn a_lista_de_banidos_e_de_quem_pode_banir_e_nunca_fica_muda() {
     );
     let porta = body_of(&script, "function atualizarPortaDosBanidos(snapshot)");
     assert!(
-        porta.contains("porta.hidden = !podeVerBanidos(snapshot);"),
+        porta.contains("porOEscondido(porta, !podeVerBanidos(snapshot));"),
         "a porta dos banidos não segue o retrato: {porta}"
     );
     assert!(
@@ -15080,7 +15080,7 @@ fn o_rodape_do_operador_muda_de_oficio_com_a_sala() {
         );
     }
     assert!(
-        desenho.contains("hidden"),
+        desenho.contains("porOEscondido(outro, !dentro);"),
         "o botão de compartilhar deixou de sumir fora de sala, e compartilhar \
          fora de sala é uma promessa que o produto não cumpre:\n{desenho}"
     );
@@ -15134,7 +15134,7 @@ fn compartilhar_a_tela_tem_uma_porta_so_e_ela_e_a_barra_da_chamada() {
         .and_then(|resto| resto.split("const comGlifo").next())
         .unwrap_or_default();
     assert!(
-        espelhar.contains("aria-disabled") && espelhar.contains("botao.title"),
+        espelhar.contains("aria-disabled") && espelhar.contains("porOTitulo(botao, original.title)"),
         "a barra não repassa o `aria-disabled` e o `title` do operador: o COMPARTILHAR \
          indisponível ficaria mudo, sem dizer por quê:\n{espelhar}"
     );
@@ -23177,6 +23177,10 @@ const funcao = (arquivo, nome) => {
   if (!m) { console.log("sumiu " + nome + " de " + arquivo); process.exit(1); }
   return m[0];
 };
+// Os «só o que mudou» de `base.js` (`porOEscondido` e as irmãs), da fonte real:
+// as funções extraídas de `ui/` os chamam, e o mundo tem de trazê-los.
+const SO_O_QUE_MUDOU = ["porOEscondido", "porOTexto", "porOTitulo", "porOAtributo", "porODado", "porAClasse"]
+  .map((nome) => funcao("base.js", nome)).join("\n");
 class El {
   constructor(id) { this.id = id; this.children = []; this.dataset = {}; this.handlers = {}; this.attrs = {};
     this.hidden = false; this.textContent = ""; this.value = ""; this.checked = true; this.disabled = false;
@@ -23213,6 +23217,7 @@ function mundo(comandos) {
     copiarLink: async (campo, botao) => { chamadas.push({ cmd: "copiarLink", args: { campo: campo.id, botao: botao.id } }); },
     irParaOServidor: (...a) => chamadas.push({ cmd: "irParaOServidor", args: a }),
   });
+  vm.runInContext(SO_O_QUE_MUDOU, ctx, { filename: "base.js" });
   return { els, chamadas, ouvintes, ctx, $, invoke };
 }
 const carregar = (m, ...arquivos) => { for (const a of arquivos) vm.runInContext(ler(a), m.ctx, { filename: a }); };
@@ -26200,7 +26205,7 @@ async function cenario(codigo) {
       super("");
       this.classes = new Set();
       this.tagName = "DIV";
-      this.classList = { toggle: (c, on) => { if (on) this.classes.add(c); else this.classes.delete(c); }, remove: c => this.classes.delete(c) };
+      this.classList = { toggle: (c, on) => { if (on) this.classes.add(c); else this.classes.delete(c); }, remove: c => this.classes.delete(c), contains: c => this.classes.has(c) };
     }
     set id(v) { this._id = v; if (v) reg[v] = this; }
     get id() { return this._id; }
@@ -28540,7 +28545,7 @@ const montar = (sessoes) => {
     desenhado: null,
     trilhaDesenhada: null,
   });
-  vm.runInContext(codigo + "\ndesenharSessoes();", ctx);
+  vm.runInContext(SO_O_QUE_MUDOU + codigo + "\ndesenharSessoes();", ctx);
   return nos;
 };
 const sozinho = montar([{ onde: "Outro", carimbo: { sessao: 1 } }]);

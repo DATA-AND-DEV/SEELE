@@ -298,10 +298,11 @@
   CASCA.depoisDeDesenhar.push((snapshot) => {
     // O nome exibido do perfil oficial, quando há; o apelido segue o do operador.
     const exibido = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
-    apelido.textContent = exibido || document.getElementById("operador-nome").textContent;
-    iniciais.textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
-    // A foto e a capa pela mesma precedência da tela inteira (§5.2).
-    vestirAvatar(iniciais, snapshot.me);
+    porOTexto(apelido, exibido || document.getElementById("operador-nome").textContent);
+    // A foto e a capa pela mesma precedência da tela inteira (§5.2). A inicial
+    // vai como argumento: escrita antes, ela era apagada em seguida por quem
+    // tem foto, duas trocas a cada quadro.
+    vestirAvatar(iniciais, snapshot.me, (snapshot.nickname || "?").trim().charAt(0).toUpperCase());
     vestirCapa(placa, snapshot.me);
     const entrada = coluna.querySelector(".cel-perfis-item");
     if (entrada) entrada.hidden = !(typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis());
@@ -402,7 +403,9 @@
       const e = document.getElementById(id);
       if (!e) continue;
       if (id === "cel-aviso-persistencia" && e.dataset.resposta === "concedida" && !e.hidden) e.hidden = true;
-      e.classList.remove("cel-aviso-recolhido");
+      // `classList.remove` de uma classe que não está reescreve o `class` do
+      // mesmo jeito: uma mutação por aviso a cada `hidden` escrito na sessão.
+      if (e.classList.contains("cel-aviso-recolhido")) e.classList.remove("cel-aviso-recolhido");
     }
 
   }

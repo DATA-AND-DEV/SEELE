@@ -638,9 +638,10 @@ function desenharACamera(voice_room = undefined, minha = undefined) {
   }
 
   const ligada = cameraLigada();
-  botao.hidden = !dentro || cameraSoNoPc();
-  botao.dataset.estado = cameraDaJanela.estado;
-  botao.setAttribute("aria-pressed", ligada ? "true" : "false");
+  // Só o que mudou (`base.js`): este desenho roda a cada retrato.
+  porOEscondido(botao, !dentro || cameraSoNoPc());
+  porODado(botao, "estado", cameraDaJanela.estado);
+  porOAtributo(botao, "aria-pressed", ligada ? "true" : "false");
   const rotulo = ligada ? FRASES_DA_CAMERA.desligar : FRASES_DA_CAMERA.ligar;
   if (botao.getAttribute("aria-label") !== rotulo || !botao.firstElementChild) {
     botao.setAttribute("aria-label", rotulo);
@@ -648,21 +649,21 @@ function desenharACamera(voice_room = undefined, minha = undefined) {
   }
   const antigo = dentro && !ligada && !servidorTemACamera(retrato);
   const semJanela = dentro && !ligada && !antigo && !temCameraParaCodificar();
-  botao.setAttribute("aria-disabled", antigo || semJanela ? "true" : "false");
-  botao.title = !dentro ? ""
+  porOAtributo(botao, "aria-disabled", antigo || semJanela ? "true" : "false");
+  porOTitulo(botao, !dentro ? ""
     : ligada ? FRASES_DA_CAMERA.dicaDeDesligar
     : antigo ? FRASES_DA_CAMERA.dicaDoServidorAntigo
     : semJanela ? FRASES_DA_CAMERA.semCodificador.split("\n")[0].toLowerCase()
     : minha ? FRASES_DA_CAMERA.dicaDeLigarNoLugarDaTela
-    : FRASES_DA_CAMERA.dicaDeLigar(voice_room.name);
+    : FRASES_DA_CAMERA.dicaDeLigar(voice_room.name));
 
   // Nos dois lugares em que o controle aparece: ao lado do operador, e na
   // bandeja da chamada, onde a coluna do operador sai de cena.
   for (const onde of [estado, $("chamada-camera-estado")]) {
     if (!onde) continue;
-    onde.hidden = !dentro || !cameraDaJanela.frase;
-    onde.dataset.estado = cameraDaJanela.estado;
-    onde.textContent = onde.hidden ? "" : cameraDaJanela.frase;
+    porOEscondido(onde, !dentro || !cameraDaJanela.frase);
+    porODado(onde, "estado", cameraDaJanela.estado);
+    porOTexto(onde, onde.hidden ? "" : cameraDaJanela.frase);
   }
 
   desenharAPreviaDaCamera();
@@ -681,8 +682,8 @@ function desenharAPreviaDaCamera() {
     previa.pause();
     previa.srcObject = null;
   }
-  previa.hidden = !mostrar;
-  $("palco")?.setAttribute("data-camera", mostrar ? "sim" : "nao");
+  porOEscondido(previa, !mostrar);
+  if ($("palco")) porOAtributo($("palco"), "data-camera", mostrar ? "sim" : "nao");
 }
 
 $("operador-camera")?.addEventListener("click", () => {

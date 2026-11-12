@@ -1094,9 +1094,9 @@ function desenharTransmissoes(snapshot) {
   // Quem transmite não assiste a si mesmo pelo servidor — o espelho dele é
   // local —, então a própria transmissão não entra na escolha.
   const alheias = lista.filter((transmissao) => !transmissao.e_minha);
-  onde.hidden = alheias.length === 0;
+  porOEscondido(onde, alheias.length === 0);
   if (onde.hidden) {
-    onde.replaceChildren();
+    if (onde.firstChild) onde.replaceChildren();
     return;
   }
 

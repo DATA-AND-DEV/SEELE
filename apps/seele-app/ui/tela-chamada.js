@@ -140,7 +140,7 @@ function desenharOPalcoDosMods(snapshot) {
   const acrescimos = naCasca ? conteudoDasContribuicoes("chamada.palco") : [];
   repovoar($("palco-de-mods-miolo"), desenho ? [desenho] : []);
   repovoar($("palco-de-mods-acrescimos"), acrescimos);
-  $("palco-de-mods-acrescimos").hidden = acrescimos.length === 0;
+  porOEscondido($("palco-de-mods-acrescimos"), acrescimos.length === 0);
 
   const tem = Boolean(desenho) || acrescimos.length > 0;
   if (!tem) palcoDosModsEscondido = true;
@@ -149,11 +149,11 @@ function desenharOPalcoDosMods(snapshot) {
     ...(desenho ? [escolhida.mod] : []),
     ...acrescimos.map((no) => no.dataset.mod),
   ])];
-  $("palco-de-mods-quem").textContent = tem ? `PALCO DE ${quem.join(" E ")}` : "";
+  porOTexto($("palco-de-mods-quem"), tem ? `PALCO DE ${quem.join(" E ")}` : "");
   const aFrente = tem && !palcoDosModsEscondido;
-  palco.hidden = !aFrente;
-  $("vista-chamada").toggleAttribute("data-palco-de-mods", aFrente);
-  $("palco-de-mods-ver-o-palco").hidden = !(tem && palcoDosModsEscondido);
+  porOEscondido(palco, !aFrente);
+  if ($("vista-chamada").hasAttribute("data-palco-de-mods") !== aFrente) $("vista-chamada").toggleAttribute("data-palco-de-mods", aFrente);
+  porOEscondido($("palco-de-mods-ver-o-palco"), !(tem && palcoDosModsEscondido));
 
   // Quem está no palco, e onde: a substituição no miolo, os acréscimos na
   // faixa. Um MOD que faz os dois mede pelo miolo.
@@ -802,7 +802,7 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
   const dentro = voice_room != null;
 
   const sair = $("operador-sair");
-  sair.dataset.alvo = dentro ? "sala" : "servidor";
+  porODado(sair, "alvo", dentro ? "sala" : "servidor");
   const rotuloDaSaida = dentro ? "SAIR DA SALA" : "SAIR DO SERVIDOR";
   // **Ícone, e o rótulo em palavras para quem não vê** (0.19, pedido do dono):
   // por extenso, os dois botões ficavam fora de proporção ao lado do microfone
@@ -813,9 +813,9 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
     sair.setAttribute("aria-label", rotuloDaSaida);
     sair.replaceChildren(glifo(dentro ? "xis" : "porta"));
   }
-  sair.title = dentro
+  porOTitulo(sair, dentro
     ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
-    : "sair deste servidor e voltar à tela de entrada";
+    : "sair deste servidor e voltar à tela de entrada");
 
   // **A câmera é uma transmissão, e não é a tela.** O que está no ar pela
   // câmera desta janela não acende o COMPARTILHAR nem o TROCAR TELA: quem a
@@ -824,13 +824,13 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
   desenharACamera(voice_room, transmissao);
   if (cameraLigada()) transmissao = null;
   const trocar = $("operador-trocar-tela");
-  trocar.hidden = !dentro || !transmissao;
+  porOEscondido(trocar, !dentro || !transmissao);
   const outro = $("operador-vista");
-  outro.dataset.modo = transmissao ? "parar" : "compartilhar";
-  outro.setAttribute("aria-pressed", transmissao ? "true" : "false");
+  porODado(outro, "modo", transmissao ? "parar" : "compartilhar");
+  porOAtributo(outro, "aria-pressed", transmissao ? "true" : "false");
   // `hidden`, e não um estilo: fora de sala este botão não tem ofício nenhum, e
   // um botão desabilitado prometeria que existe um jeito de habilitá-lo aqui.
-  outro.hidden = !dentro;
+  porOEscondido(outro, !dentro);
   if (dentro) {
     // **Ícone também** (0.19, pedido do dono): a fileira do operador é uma
     // linha só de ícones iguais, e «COMPARTILHAR» por extenso a quebrava. A
@@ -844,9 +844,9 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
     // a tem), o botão fica à vista, apagado, com o porquê; o clique abre a
     // caixa, que diz o mesmo — nada começa e quebra no meio.
     const semTela = transmissao ? null : porQueNaoHaTela();
-    outro.setAttribute("aria-disabled", semTela ? "true" : "false");
-    outro.dataset.indisponivel = semTela ? "sim" : "nao";
-    outro.title = transmissao ? "parar de compartilhar a tela" : semTela ?? `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`;
+    porOAtributo(outro, "aria-disabled", semTela ? "true" : "false");
+    porODado(outro, "indisponivel", semTela ? "sim" : "nao");
+    porOTitulo(outro, transmissao ? "parar de compartilhar a tela" : semTela ?? `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`);
   }
 }
 
