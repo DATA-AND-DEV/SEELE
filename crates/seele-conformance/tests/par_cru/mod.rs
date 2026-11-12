@@ -83,6 +83,7 @@ pub(crate) async fn discar(endereco: SocketAddr) -> (Ponta, Conexao) {
             credencial: None,
             prazo: PRAZO,
             certificado: None,
+            espera_checagem_ipv6: false,
         })
         .await
         .unwrap_or_else(|falha| panic!("a discagem para {endereco} falhou: {falha:?}"));

@@ -163,6 +163,7 @@ async fn ligar_pelo_nat(
         credencial: Some(u.clone()),
         prazo,
         certificado: None,
+        espera_checagem_ipv6: false,
     };
     let discando = {
         let quem_liga = quem_liga.clone();
@@ -267,6 +268,7 @@ async fn o_chamado_depois_do_binding_direto_reaproveita_o_par_pelo_u() {
         credencial: Some(u.clone()),
         prazo: Duration::from_secs(6),
         certificado: None,
+        espera_checagem_ipv6: false,
     };
     let discando = {
         let quem_liga = quem_liga.clone();
@@ -281,6 +283,61 @@ async fn o_chamado_depois_do_binding_direto_reaproveita_o_par_pelo_u() {
     let contadores = host.contadores();
     assert_eq!(contadores.pares_criados, 1, "{contadores:?}");
     assert_eq!(contadores.pares_do_chamado, 0, "{contadores:?}");
+}
+
+/// **O `CHAMADO` com o candidato IPv6 de quem liga abre o caminho IPv6, mesmo quando
+/// quem liga não conhece IPv6 nenhum do anfitrião.** É o caso de duas casas atrás de
+/// CGNAT: o `AQUI` só diz o IPv4 público do anfitrião, que não abre, e o `ATENDE` não
+/// tem onde dizer o IPv6 dele. O anfitrião checa o IPv6 de quem liga (ICE completo), e
+/// quem liga aprende dali o peer-reflexive — desde que o agente dele tenha um candidato
+/// local IPv6, que é o que `Discagem::espera_checagem_ipv6` lhe dá.
+///
+/// Em `[::1]`: o filtro de produção recusa loopback, e o teste passa um que o aceita. O
+/// IPv4 que o `AQUI` daria é um socket que nunca responde. Pulado numa máquina sem IPv6.
+#[tokio::test]
+async fn o_candidato_ipv6_do_chamado_abre_o_caminho_mesmo_sem_alvo_ipv6_na_discagem() {
+    let certificado = CertificadoDtls::efemero().unwrap();
+    let host = Ponta::abrir_cliente().await.unwrap();
+    let quem_liga = Ponta::abrir_cliente().await.unwrap();
+    if !host.local_addr().is_ipv6() || UdpSocket::bind("[::1]:0").await.is_err() {
+        eprintln!("pulado: esta máquina não tem IPv6 nem em loopback");
+        return;
+    }
+    host.passar_a_atender(Some(ConfigDoAnfitriao::novo(certificado.clone())));
+    // O IPv4 público do anfitrião atrás do CGNAT: existe, e nada volta dele.
+    let mudo = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let u = sortear_credencial();
+    let discagem = Discagem {
+        alvos: vec![mudo.local_addr().unwrap()],
+        pino: Pino::Impressao(certificado.impressao()),
+        credencial: Some(u.clone()),
+        prazo: Duration::from_secs(8),
+        certificado: None,
+        // O que este teste mede: sem isto, quem liga larga a checagem.
+        espera_checagem_ipv6: true,
+    };
+    let discando = {
+        let quem_liga = quem_liga.clone();
+        tokio::spawn(async move { quem_liga.discar(discagem).await })
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // O `CHAMADO`: o candidato IPv6 que quem liga pôs no `CHAMA`, na porta da sessão.
+    let ipv6_de_quem_liga = SocketAddr::from((Ipv6Addr::LOCALHOST, quem_liga.local_addr().port()));
+    assert!(atender(&host, &u, &[ipv6_de_quem_liga]) > 0);
+
+    let conexao = discando.await.unwrap().unwrap_or_else(|erro| {
+        panic!(
+            "o anfitrião checou o IPv6 de quem liga e quem liga não entrou por ele: {erro}; \
+             contadores do anfitrião {:?}",
+            host.contadores()
+        )
+    });
+    assert_eq!(
+        conexao.remote_address(),
+        SocketAddr::from((Ipv6Addr::LOCALHOST, host.local_addr().port())),
+        "a conexão não saiu pelo IPv6 do anfitrião, aprendido da checagem dele"
+    );
+    assert_eq!(host.contadores().pares_do_chamado, 1);
 }
 
 /// Os portões de antes valem para o `CHAMADO`: quem hospeda que não admite o endereço

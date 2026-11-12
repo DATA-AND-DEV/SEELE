@@ -182,6 +182,20 @@ pub struct Discagem {
     pub prazo: Duration,
     /// O certificado DTLS deste lado; `None` gera um efêmero.
     pub certificado: Option<CertificadoDtls>,
+    /// Aceitar a checagem ICE do anfitrião em IPv6 mesmo sem alvo IPv6.
+    ///
+    /// O candidato local de uma família só existe quando há alvo nela, e sem
+    /// candidato local o agente larga a checagem que chega («unknown
+    /// interface»). Com isto, numa ponta que fala IPv6, o candidato local IPv6
+    /// entra de qualquer jeito: é para a discagem que segue um `CHAMA` que
+    /// levou o IPv6 deste lado. O anfitrião o checa do IPv6 dele, que o `AQUI`
+    /// não diz, e é dessa checagem que este lado aprende o endereço (o
+    /// peer-reflexive, RFC 8445 7.3.1.3).
+    ///
+    /// **Só quando nenhuma outra discagem desta ponta fala com esse
+    /// anfitrião**: duas (dois `U`) da mesma porta no mesmo endereço dele
+    /// disputam o DTLS uma da outra, e quem sabe se há outra é quem chama.
+    pub espera_checagem_ipv6: bool,
 }
 
 impl Discagem {
@@ -194,6 +208,7 @@ impl Discagem {
             credencial: None,
             prazo: crate::APERTO,
             certificado: None,
+            espera_checagem_ipv6: false,
         }
     }
 }
@@ -490,10 +505,24 @@ impl Ponta {
         espera.await.map_err(|_| FalhaAoDiscar::PontaFechada)?
     }
 
-    /// Os datagramas que não são STUN nem DTLS (o ENC/3). Entregue uma vez.
+    /// Os datagramas que não são STUN nem DTLS (o ENC/3). Entregue a um leitor
+    /// só, até ele devolver ([`Ponta::devolver_mensagens_enc`]).
     #[must_use]
     pub fn mensagens_enc(&self) -> Option<mpsc::Receiver<(SocketAddr, Vec<u8>)>> {
         self.interno.enc.lock().ok().and_then(|mut enc| enc.take())
+    }
+
+    /// Devolve a fila de [`Ponta::mensagens_enc`], para ser tomada de novo:
+    /// quem liga chama o ponto, disca, e pode chamar outra vez pela mesma
+    /// ponta. O que chegou enquanto ninguém lia continua na fila, até o teto
+    /// dela; quem a toma decide o que é dele. Com outra já devolvida, esta é
+    /// largada.
+    pub fn devolver_mensagens_enc(&self, fila: mpsc::Receiver<(SocketAddr, Vec<u8>)>) {
+        if let Ok(mut enc) = self.interno.enc.lock() {
+            if enc.is_none() {
+                *enc = Some(fila);
+            }
+        }
     }
 
     /// Manda um datagrama cru por este socket (o ENC/3).
@@ -2155,7 +2184,11 @@ impl Motor {
         }
         let (ctl, voz) = configurar_canais(&mut rtc);
         for ipv4 in [true, false] {
-            if alvos.iter().any(|a| a.is_ipv4() == ipv4) {
+            // O candidato local de uma família entra quando há alvo nela. O
+            // IPv6 entra também quando quem chama espera a checagem do
+            // anfitrião por ele (`Discagem::espera_checagem_ipv6`).
+            let espera_a_checagem = !ipv4 && discagem.espera_checagem_ipv6 && self.local.is_ipv6();
+            if espera_a_checagem || alvos.iter().any(|a| a.is_ipv4() == ipv4) {
                 if let Ok(candidato) = Candidate::host(self.virtual_local(ipv4), "udp") {
                     rtc.add_local_candidate(candidato);
                 }
