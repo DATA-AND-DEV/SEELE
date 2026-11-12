@@ -28558,6 +28558,45 @@ confere("uma conversa encerrada no hospedado escondeu o caminho até ele", encer
     );
 }
 
+/// **A placa da trilha decide pela vista da janela, e não pelo desenho dela.**
+/// A trilha é um desenho da última leitura de `sessoes()`, e a leitura chega
+/// depois da troca de vista: depois de entrar num segundo servidor, a placa
+/// marcada como atual (`aria-current`) ainda era a do primeiro por 72 a 151 ms
+/// (medido em 11/11/2026). O clique nela era engolido como «já é a vista», com
+/// a vista noutra sessão — a `cargos-pela-tela.cjs` reprovava 8 de 24 rodadas.
+///
+/// O ouvinte REAL de `camada-sessoes.js`, com a vista em 2 e a placa de 1
+/// desenhada como a atual: o clique troca para 1. (A mesma cena, pela tela e
+/// contra o servidor de verdade, é o caso 9 da `cargos-pela-tela.cjs`.)
+#[test]
+fn a_placa_da_trilha_troca_a_vista_mesmo_com_o_desenho_de_antes() {
+    rodar_node(
+        "a placa da trilha decide pela vista",
+        r##"
+const fonte = ler("camada-sessoes.js");
+const inicio = fonte.indexOf('$("trilha-sessoes").addEventListener("click"');
+if (inicio < 0) { console.log("sumiu o clique da trilha de camada-sessoes.js"); process.exit(1); }
+const ouvinte = fonte.slice(inicio, fonte.indexOf("\n});\n", inicio) + 5);
+const m = mundo({});
+const trocas = [];
+Object.assign(m.ctx, { vistaDaJanela: { sessao: 2, geracao: 1 }, verSessao: async (sessao) => { trocas.push(sessao); } });
+vm.runInContext(ouvinte, m.ctx, { filename: "camada-sessoes.js" });
+const placa = (sessao, atual) => ({ dataset: { sessao: String(sessao) }, getAttribute: (nome) => (nome === "aria-current" && atual ? "true" : null) });
+const clicar = (botao) => m.$("trilha-sessoes").emitir("click", { target: { closest: () => botao } });
+// A vista é 2, e a trilha ainda é a de antes da troca: marca 1 como a atual.
+await clicar(placa(1, true));
+confere("com a vista em 2, o clique na placa de 1 (ainda desenhada como a atual) foi engolido: " + JSON.stringify(trocas), trocas.length === 1 && trocas[0] === 1);
+// A placa da sessão que já é a vista não faz nada, marcada ou não.
+await clicar(placa(2, false));
+await clicar(placa(2, true));
+confere("a placa da própria vista pediu uma troca: " + JSON.stringify(trocas), trocas.length === 1);
+// Fora de uma placa, nada.
+await clicar(null);
+confere("um clique fora de placa pediu uma troca: " + JSON.stringify(trocas), trocas.length === 1);
+"##,
+    );
+}
+
 /// **O mundo do perfil padrão** (0.19, «Padrão + ajuste por servidor»): um
 /// servidor 12 simulado — a lista `Perfis`, o `GravarPerfil` com a revisão
 /// conferida como o servidor confere (`RevisaoVelha` quando não bate, zero para

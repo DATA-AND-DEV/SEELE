@@ -542,10 +542,21 @@ function desenharSessoes() {
   $("trilha-recentes-titulo").hidden = $("trilha-outros").childElementCount === 0;
 }
 
+// **A placa da sessão que já está na vista não faz nada — e quem diz qual é a
+// vista é a janela (`vistaDaJanela`), e não a placa.** A trilha é um DESENHO
+// da última leitura de `sessoes()`, e a leitura chega depois da troca de
+// vista: depois de entrar num segundo servidor, a placa marcada como atual
+// (`aria-current`) ainda era a do primeiro por 72 a 151 ms (medido em
+// 11/11/2026; é a espera de 150 ms do `aoMudarUmaSessao`). O clique nela era
+// engolido como «já é a vista», calado, com a vista noutra sessão — a
+// `cargos-pela-tela.cjs` reprovava 8 de 24 rodadas, as em que o clique caía
+// nesse intervalo.
 $("trilha-sessoes").addEventListener("click", (evento) => {
   const botao = evento.target.closest("button[data-sessao]");
-  if (!botao || botao.getAttribute("aria-current") === "true") return;
-  verSessao(Number(botao.dataset.sessao)).catch((falha) => console.warn("ver sessão:", falha));
+  if (!botao) return;
+  const sessao = Number(botao.dataset.sessao);
+  if (sessao === vistaDaJanela.sessao) return;
+  verSessao(sessao).catch((falha) => console.warn("ver sessão:", falha));
 });
 
 // --------------------------------------- o estado transitório, por sessão

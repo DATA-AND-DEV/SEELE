@@ -41,7 +41,10 @@
 //     destacado; REFAZER e SALVAR gravam as duas mudanças;
 //  8. o isolamento entre sessões: a dona entra também em T; os cargos de S somem
 //     na vista de T, os de T são os de T (sem dono declarado, ela não gere), e de
-//     volta a S a camada de S volta como estava.
+//     volta a S a camada de S volta como estava;
+//  9. a placa decide pela vista: com a leitura de `sessoes` presa (a trilha
+//     ainda desenhando a sessão de antes como a atual), o clique na placa da
+//     outra sessão troca a vista — o clique não é engolido pelo desenho velho.
 //
 // `--reverter`: aplica, ao `cargos.js` servido, reversões da `cargos.cjs`
 // (o conserto desfeito em memória; a árvore não muda), e a bancada sai com 0 só
@@ -653,6 +656,55 @@ async function encerrarOServidor(s) {
     await dona.aba.waitForTimeout(500);
     if (await dona.aba.evaluate(() => !$("cargos").hidden)) throw new Error("a camada reapareceu em T, que estava fechada");
     passou(caso, { sessoes: [sessaoDaDonaEmS, sessaoDaDonaEmT], listaEmT: emT, abaQueVoltou });
+
+    // ------------------- 9. a placa decide pela vista, e não pelo desenho
+    // A trilha é um DESENHO da última leitura de `sessoes()`, e a leitura chega
+    // depois da troca de vista. Medido em 11/11/2026: depois de a dona entrar
+    // em T, a trilha ainda marcava S como a atual por 72 a 151 ms (a espera de
+    // 150 ms do `aoMudarUmaSessao`). O clique na placa de S dentro desse
+    // intervalo era engolido («já é a vista»), e o caso 8 reprovava 8 de 24
+    // rodadas. Em 19 rodadas com a página instrumentada: reprovaram as 3 em
+    // que o clique chegou aos 122, 129 e 150 ms, e passaram as 16 em que ele
+    // chegou depois (173 a 486 ms).
+    //
+    // Aqui o intervalo é montado de propósito, e não depende da sorte: a
+    // resposta de `sessoes` fica presa, a dona vai de T para S (a trilha não
+    // é relida, e continua marcando T) e clica na placa de T. Com o clique
+    // decidido pelo desenho, a vista fica em S, sempre.
+    caso = "9-a-placa-decide-pela-vista";
+    await dona.aba.evaluate(() => {
+      const anterior = window.invoke;
+      let soltar = null;
+      const presa = new Promise((ok) => { soltar = ok; });
+      window.invoke = function (comando) {
+        const resposta = anterior.apply(this, arguments);
+        return comando === "sessoes" ? resposta.then(async (valor) => { await presa; return valor; }) : resposta;
+      };
+      window.__soltarAsSessoes = () => { window.invoke = anterior; soltar(); };
+    });
+    let desenhoNaHoraDoClique = null;
+    try {
+      await clicarOuDizer(dona.aba, `#trilha-sessoes button[data-sessao="${sessaoDaDonaEmS}"]`);
+      await dona.aba.waitForFunction((s) => vistaDaJanela.sessao === s, sessaoDaDonaEmS);
+      // A cena: a vista é S, e a trilha ainda desenha T como a atual.
+      desenhoNaHoraDoClique = await dona.aba.evaluate(() => [...document.querySelectorAll("#trilha-sessoes button")].map((b) => `${b.dataset.sessao}:${b.getAttribute("aria-current")}`));
+      if (!desenhoNaHoraDoClique.includes(`${sessaoDaDonaEmT}:true`)) throw new Error(`o caso não montou a trilha de antes da troca: ${desenhoNaHoraDoClique}`);
+      await clicarOuDizer(dona.aba, `#trilha-sessoes button[data-sessao="${sessaoDaDonaEmT}"]`);
+      try {
+        await dona.aba.waitForFunction((t) => vistaDaJanela.sessao === t, sessaoDaDonaEmT, { timeout: 5000 });
+      } catch {
+        const vista = await dona.aba.evaluate(() => vistaDaJanela.sessao);
+        throw new Error(`com a vista em S e a trilha ainda marcando T como a atual (${desenhoNaHoraDoClique}), o clique na placa de T foi engolido: a vista continua ${vista}`);
+      }
+    } finally {
+      await dona.aba.evaluate(() => window.__soltarAsSessoes()).catch(() => {});
+    }
+    // Com a leitura solta, a trilha volta a desenhar a vista de agora.
+    await dona.aba.waitForFunction(
+      (t) => document.querySelector(`#trilha-sessoes button[data-sessao="${t}"]`)?.getAttribute("aria-current") === "true",
+      sessaoDaDonaEmT,
+    );
+    passou(caso, { desenhoNaHoraDoClique });
 
     for (const p of pessoas) {
       const deCargos = p.erros.filter((e) => /cargo/i.test(e));
