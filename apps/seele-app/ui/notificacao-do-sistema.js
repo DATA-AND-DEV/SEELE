@@ -328,6 +328,8 @@ const notificacaoDoSistema = (() => {
 
   /** A frase do estado, para CONFIGURAÇÕES: uma por permissão, e a de desligadas. */
   function fraseDoEstado(retrato, plataforma) {
+    // Onde não há, é isso que a tela diz, com a opção desligada e parada.
+    if (retrato?.permissao === "NaoHa") return FRASES_DA_NOTIFICACAO.estado.NaoHa();
     if (!retrato?.ligadas) return FRASES_DA_NOTIFICACAO.estado.desligadas();
     const frase = FRASES_DA_NOTIFICACAO.estado[retrato.permissao];
     if (typeof frase !== "function") return FRASES_DA_NOTIFICACAO.desconhecido;

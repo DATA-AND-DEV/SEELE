@@ -278,6 +278,8 @@ function instalarConversasPessoaisWeb() {
         if (vez !== geracao || (estado.estado === "recebendo" && !criandoLink)) return;
         if (fase === "encerrada" && ["tocando", "chamando"].includes(estado.estado)) vista.limpar();
         globalThis.alertasSonoros?.notarFase(fase, estado.estado);
+        // A notificação do sistema da ligação que chega: o único ponto da conversa por link que a chama.
+        globalThis.notificacaoDoSistema?.notarFase(fase, estado);
         fase = estado.estado; vista.estado(estado);
         if (fase === "tocando") vista.abrir({ apelido: nomeLocal() });
         entrada.textContent = viva() ? "VOLTAR À CONVERSA" : "CONVERSAR POR LINK";

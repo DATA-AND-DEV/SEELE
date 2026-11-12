@@ -246,6 +246,9 @@ $("toque-recusar").addEventListener("click", () => {
 });
 
 listen("seele://toque", ({ payload }) => {
+  // O toque no ombro com a janela fora da frente: a regra é de lá, e este é o
+  // único ponto do toque da sala que a chama.
+  globalThis.notificacaoDoSistema?.notarToque(payload);
   if (payload?.evento === "Tocou") {
     tocandoNaFaixa.set(payload.quem, payload);
     ligacaoEncerrada = false;

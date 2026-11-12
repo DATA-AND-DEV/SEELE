@@ -3510,6 +3510,41 @@
             </div>
           </div>
 
+          <!--
+            **NOTIFICAÇÕES DO SISTEMA** (1.0). O toque no ombro com a janela fora
+            da frente: a do sistema operacional no app, a do navegador na página.
+            Ao lado dos alertas sonoros, e não numa seção própria: são as duas
+            respostas à mesma pergunta («e se eu não estiver olhando?»), e no
+            celular as duas ficam em ÁUDIO sem uma linha a mais no índice.
+
+            Sem `checked`: desligadas é o padrão, e é o que se lê se o script não
+            chegar a escrever. Ligar é um gesto porque o sistema (o navegador, na
+            página) pergunta uma vez se o programa pode notificar, e uma
+            pergunta que ninguém pediu ensina a responder não.
+
+            A frase do estado não está aqui: ela vem de `FRASES_DA_NOTIFICACAO`
+            (`notificacao-do-sistema.js`, `fraseDoEstado`), uma por permissão. No
+            app ela diz onde olhar nos ajustes do sistema, e **não** afirma que o
+            sistema deixa: o plugin não deixa ler isso (`src/notificacao.rs`). Na
+            página a permissão é legível, e a recusa do navegador fica dita.
+          -->
+          <div class="server-bloco" id="notificacoes-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">NOTIFICAÇÕES DO SISTEMA</h3>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <h4 class="rotulo">NOTIFICAÇÕES</h4>
+                <label class="server-marcar alertas-chave" for="notificacoes-ligadas">
+                  <input id="notificacoes-ligadas" type="checkbox" role="switch">
+                  <span>avisar pelo sistema com a janela fora da frente</span>
+                </label>
+                <p class="nota">Quando alguém chama você, bate à porta do servidor que você hospeda ou liga para você. A notificação diz o que foi e onde, e nunca o texto de uma mensagem: ela aparece também na tela bloqueada. Vale só neste aparelho.</p>
+                <p class="nota" id="notificacoes-estado" role="status"></p>
+              </div>
+            </div>
+          </div>
+
         </section>
 
         <!-- ------------------------------------------------------- ATALHOS -->

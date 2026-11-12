@@ -30716,3 +30716,381 @@ fn o_comando_de_notificar_confere_a_preferencia_e_a_janela_antes_do_plugin() {
         "`janela_na_frente` deixou de perguntar o foco ao sistema"
     );
 }
+
+/// **Os ganchos alcançam a regra, e a regra carrega antes deles.** Um gancho
+/// escrito numa camada que carrega antes do módulo, ou escrito depois de a fase
+/// já ter sido trocada, existe na fonte e não avisa ninguém.
+#[test]
+fn os_ganchos_da_notificacao_do_sistema_estao_onde_o_acontecimento_chega() {
+    let page = read("ui/index.html");
+    let loaded = linked_assets(&page, "src");
+    let posicao = |nome: &str| {
+        loaded
+            .iter()
+            .position(|f| f == nome)
+            .unwrap_or_else(|| panic!("index.html não carrega {nome}"))
+    };
+    let regra = posicao("notificacao-do-sistema.js");
+    assert!(
+        posicao("base.js") < regra,
+        "notificacao-do-sistema.js carrega antes do base.js, de quem é o `ouvirNaJanela` e o `invoke`"
+    );
+    for quem in [
+        "camada-portaria.js",
+        "camada-toque.js",
+        "pessoal-web-entrada.js",
+        "tela-server.js",
+    ] {
+        assert!(
+            regra < posicao(quem),
+            "notificacao-do-sistema.js carrega depois de {quem}, que a chama"
+        );
+    }
+
+    // A porta: a mesma leitura que acende a faixa, com as mesmas chaves.
+    let portaria = without_comments(&read("ui/camada-portaria.js"));
+    let porta = body_of(&portaria, "async function atualizarPorta(");
+    let faixa = porta.find("avisarQueBatem(esperando)");
+    let gancho = porta.find(
+        "globalThis.notificacaoDoSistema?.notarPorta(esperando, hospedagemDaPorta(estado).nome)",
+    );
+    assert!(
+        matches!((faixa, gancho), (Some(f), Some(g)) if f < g),
+        "a leitura da porta não entrega à notificação as chaves que entregou à faixa, depois dela:\n{porta}"
+    );
+
+    // O toque: a primeira coisa do ouvinte, antes de qualquer ramo.
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    let ouvinte = toque
+        .split("listen(\"seele://toque\", ({ payload }) => {")
+        .nth(1)
+        .unwrap_or_else(|| panic!("o ouvinte do toque saiu de camada-toque.js"));
+    assert!(
+        ouvinte
+            .trim_start()
+            .starts_with("globalThis.notificacaoDoSistema?.notarToque(payload);"),
+        "o ouvinte do toque não entrega o aviso à notificação antes de mais nada"
+    );
+    assert_eq!(
+        toque.matches("notificacaoDoSistema").count(),
+        1,
+        "o toque da sala chama a notificação em mais de um ponto"
+    );
+
+    // A conversa por link: com a fase de ANTES, isto é, antes de ela ser trocada.
+    let link = without_comments(&read("ui/pessoal-web-entrada.js"));
+    let estado = link
+        .split("aoEstado(estado) {")
+        .nth(1)
+        .and_then(|resto| resto.split("aoTexto(texto) {").next())
+        .unwrap_or_else(|| panic!("o `aoEstado` saiu de pessoal-web-entrada.js"));
+    let gancho = estado.find("globalThis.notificacaoDoSistema?.notarFase(fase, estado);");
+    let troca = estado.find("fase = estado.estado;");
+    assert!(
+        matches!((gancho, troca), (Some(g), Some(t)) if g < t),
+        "a conversa por link não avisa a notificação com a fase anterior: depois da troca, \
+         toda fase é «a mesma» e nenhuma ligação notifica"
+    );
+    assert_eq!(
+        link.matches("notificacaoDoSistema").count(),
+        1,
+        "a conversa por link chama a notificação em mais de um ponto"
+    );
+}
+
+/// A porta, do `estado_da_porta` até o pedido ao sistema: a função de verdade
+/// de `camada-portaria.js`, a regra de verdade, e um `invoke` que anota.
+#[test]
+fn quem_bate_a_porta_com_a_janela_atras_vira_um_pedido_ao_sistema() {
+    rodar_node(
+        "a porta até a notificação",
+        r##"
+const montar = ({ foco, estado, pedidos, retrato = { ligadas: true, permissao: "NaoSeSabe" } }) => {
+  const m = mundo({
+    estado_da_porta: () => estado.atual,
+    pedidos_da_portaria: () => pedidos.atual,
+    estado_das_notificacoes: () => retrato,
+    notificar_no_sistema: () => null,
+    sessoes: [],
+  });
+  m.ctx.document.visibilityState = "visible";
+  m.ctx.document.hasFocus = () => foco.atual;
+  m.ctx.ouvirNaJanela = async () => {};
+  m.ctx.rotuloDaPorta = () => "PORTA";
+  m.ctx.avisarQueBatem = (chaves) => { m.faixa = chaves; };
+  m.ctx.desenharMeuServidor = async () => {};
+  m.ctx.meuServidorNoAr = true;
+  carregar(m, "frases.js", "notificacao-do-sistema.js");
+  vm.runInContext("let geracaoDaHospedagemNaJanela = 0;\n" + ["hospedagemDaPorta", "chaveDoPedido", "chavesDosEsperando", "atualizarPorta"].map((f) => funcao("camada-portaria.js", f)).join("\n"), m.ctx);
+  m.ler = () => vm.runInContext("atualizarPorta()", m.ctx).then(tick);
+  return m;
+};
+const hospedando = (pendentes) => ({ hospedando: true, aberto: false, tem_senha: false, pendentes, hospedagem: { servidor: "s1", geracao: 3, nome: "Casa do Rafa" } });
+const ana = { impressao: "aa11", apelido: "ana", bateu_em: 1700, decidido_em: null };
+const bia = { impressao: "bb22", apelido: "bia", bateu_em: 1705, decidido_em: null };
+const decidida = { impressao: "cc33", apelido: "caio", bateu_em: 1600, decidido_em: 1650 };
+
+// Com a janela atrás: uma batida, um pedido, com o servidor e sem o apelido de quem bate.
+const foco = { atual: false }, estado = { atual: hospedando(1) }, pedidos = { atual: [ana, decidida] };
+const m = montar({ foco, estado, pedidos });
+await m.ler();
+let saidas = so(m, "notificar_no_sistema");
+confere("a batida com a janela atrás não virou pedido: " + JSON.stringify(m.chamadas.map((c) => c.cmd)), saidas.length === 1);
+confere("o pedido da porta: " + JSON.stringify(saidas[0]?.args), saidas[0]?.args.motivo === "Porta" && saidas[0].args.titulo === "Alguém está batendo à porta" && saidas[0].args.corpo === "do servidor Casa do Rafa");
+confere("o apelido de quem bate foi à notificação", !JSON.stringify(saidas[0]?.args).includes("ana"));
+confere("a faixa não recebeu as mesmas chaves: " + JSON.stringify(m.faixa), Array.isArray(m.faixa) && m.faixa.length === 1 && m.faixa[0] === "s1#3#aa11#1700");
+// A leitura seguinte, com a mesma batida: nada de novo.
+await m.ler(); await m.ler();
+confere("a mesma batida em três leituras deu " + so(m, "notificar_no_sistema").length + " pedidos", so(m, "notificar_no_sistema").length === 1);
+// Outra pessoa bate: outro pedido, e a conta é de quem espera.
+estado.atual = hospedando(2); pedidos.atual = [ana, bia, decidida];
+await m.ler();
+saidas = so(m, "notificar_no_sistema");
+confere("a segunda batida: " + JSON.stringify(saidas.map((s) => s.args.titulo)), saidas.length === 2 && saidas[1].args.titulo === "2 pessoas estão batendo à porta");
+// O servidor parou e subiu de novo (outra geração): a batida de lá é outra.
+estado.atual = { ...hospedando(1), hospedagem: { servidor: "s1", geracao: 4, nome: "Casa do Rafa" } }; pedidos.atual = [ana];
+await m.ler();
+confere("a batida de outra hospedagem ficou calada pela da anterior", so(m, "notificar_no_sistema").length === 3);
+
+// Com a janela na frente: a faixa acende, e nada vai ao sistema.
+const naFrente = montar({ foco: { atual: true }, estado: { atual: hospedando(1) }, pedidos: { atual: [ana] } });
+await naFrente.ler();
+confere("com a janela na frente a batida foi ao sistema", so(naFrente, "notificar_no_sistema").length === 0 && so(naFrente, "estado_das_notificacoes").length === 0);
+confere("com a janela na frente a faixa não acendeu", naFrente.faixa?.length === 1);
+
+// Sem hospedar, ou sem ninguém esperando: nem a pergunta pelo estado.
+for (const [rotulo, atual] of [["sem hospedar", { hospedando: false, pendentes: 0 }], ["sem pendentes", hospedando(0)]]) {
+  const vazio = montar({ foco: { atual: false }, estado: { atual }, pedidos: { atual: [] } });
+  await vazio.ler();
+  confere(rotulo + ": a notificação foi consultada: " + JSON.stringify(vazio.chamadas.map((c) => c.cmd)), so(vazio, "estado_das_notificacoes").length === 0 && so(vazio, "notificar_no_sistema").length === 0);
+}
+
+// Com a preferência desligada: a faixa acende, e nada vai ao sistema.
+const desligada = montar({ foco: { atual: false }, estado: { atual: hospedando(1) }, pedidos: { atual: [ana] }, retrato: { ligadas: false, permissao: "NaoSeSabe" } });
+await desligada.ler();
+confere("desligada, a batida foi ao sistema", so(desligada, "notificar_no_sistema").length === 0 && desligada.faixa?.length === 1);
+"##,
+    );
+}
+
+/// O toque da sala, do evento ao pedido: o ouvinte de verdade de
+/// `camada-toque.js` entrega o aviso à regra antes de desenhar a faixa.
+#[test]
+fn o_toque_da_sala_com_a_janela_atras_vira_um_pedido_ao_sistema() {
+    rodar_node(
+        "o toque até a notificação",
+        r##"
+const m = mundo({ estado_das_notificacoes: { ligadas: true, permissao: "NaoSeSabe" }, notificar_no_sistema: () => null, sessoes: [] });
+m.ctx.document.visibilityState = "hidden";
+m.ctx.document.hasFocus = () => false;
+m.ctx.ouvirNaJanela = async () => {};
+carregar(m, "frases.js", "notificacao-do-sistema.js");
+const fonte = ler("camada-toque.js");
+const ouvinte = fonte.match(/listen\("seele:\/\/toque", \(\{ payload \}\) => \{[\s\S]*?\n\}\)\.catch\([^\n]*\n/);
+if (!ouvinte) { console.log("o ouvinte do toque sumiu de camada-toque.js"); process.exit(1); }
+const desenhos = [];
+Object.assign(m.ctx, { tocandoNaFaixa: new Map(), anunciar() {}, desenharToque: async () => { desenhos.push(1); } });
+vm.runInContext("let ligacaoEncerrada = false; let atendimentoFalho = null;\n" + ouvinte[0], m.ctx);
+const tocar = (payload) => { m.ouvintes["seele://toque"]({ payload }); return tick(); };
+
+await tocar({ evento: "Tocou", quem: "ff00", codigo: "K9P2-CSM7", apelido: "rafa", nome_na_agenda: "Rafael", com_som: true });
+let saidas = so(m, "notificar_no_sistema");
+confere("o toque com a janela escondida não virou pedido: " + JSON.stringify(m.chamadas.map((c) => c.cmd)), saidas.length === 1);
+confere("o pedido do toque: " + JSON.stringify(saidas[0]?.args), saidas[0]?.args.motivo === "Ligacao" && saidas[0].args.titulo === "Ligação chegando" && saidas[0].args.corpo === "Rafael está ligando");
+confere("a faixa não foi desenhada", desenhos.length === 1);
+// O outro candidato da mesma ligação: a faixa troca, o sistema não é avisado de novo.
+await tocar({ evento: "Tocou", quem: "ff00", codigo: "K9P2-CSM7", apelido: "rafa", nome_na_agenda: "Rafael", com_som: true });
+confere("o mesmo toque virou dois pedidos", so(m, "notificar_no_sistema").length === 1);
+// Parou, e ligou de novo.
+await tocar({ evento: "Parou", quem: "ff00", desfecho: "ninguem_atendeu" });
+await tocar({ evento: "Tocou", quem: "ff00", codigo: "K9P2-CSM7", apelido: "rafa", nome_na_agenda: null, com_som: true });
+saidas = so(m, "notificar_no_sistema");
+confere("a ligação seguinte: " + JSON.stringify(saidas.map((s) => s.args.corpo)), saidas.length === 2 && saidas[1].args.corpo === "«rafa» está ligando");
+"##,
+    );
+}
+
+/// O mundo da opção em CONFIGURAÇÕES: as funções de verdade de
+/// `tela-server.js`, a regra de verdade e as frases de verdade.
+const OPCAO_DA_NOTIFICACAO_NODE: &str = r##"
+function mundoDaOpcao(comandos) {
+  const m = mundo(comandos);
+  m.ctx.escreverOTexto = (nodo, texto) => { nodo.textContent = texto; };
+  m.ctx.document.visibilityState = "visible";
+  m.ctx.document.hasFocus = () => true;
+  m.ctx.ouvirNaJanela = async () => {};
+  carregar(m, "frases.js", "notificacao-do-sistema.js");
+  const server = ler("tela-server.js");
+  const ouvinte = server.match(/\$\("notificacoes-ligadas"\)\?\.addEventListener\("change", \(evento\) => \{[\s\S]*?\n\}\);\n/);
+  if (!ouvinte) { console.log("o ouvinte da opção das notificações sumiu de tela-server.js"); process.exit(1); }
+  vm.runInContext(
+    "const NOTIFICACOES_A_CADA_MS = 5000; let notificacoesLidasEm = 0; let plataformaDasNotificacoes = null;\n" +
+      ["desenharNotificacoesDoSistema", "relerNotificacoesDoSistema", "atualizarNotificacoesDoSistema"].map((f) => funcao("tela-server.js", f)).join("\n") + ouvinte[0],
+    m.ctx,
+  );
+  m.js = (codigo) => vm.runInContext(codigo, m.ctx);
+  m.chave = m.$("notificacoes-ligadas");
+  m.estado = m.$("notificacoes-estado");
+  m.chave.checked = false;
+  /** O clique: marca, dispara, e devolve o que já tinha sido pedido ANTES de qualquer espera. */
+  m.clicar = (ligadas) => {
+    m.chave.checked = ligadas;
+    for (const f of m.chave.handlers.change ?? []) f({ target: m.chave });
+    const noGesto = so(m, "ligar_notificacoes").length;
+    return tick().then(() => noGesto);
+  };
+  return m;
+}
+"##;
+
+/// A opção em CONFIGURAÇÕES no app: nasce desligada, liga num gesto, e a frase
+/// diz onde olhar no sistema sem afirmar o que o app não consegue ler.
+#[test]
+fn a_opcao_das_notificacoes_liga_no_gesto_e_diz_o_caminho_do_sistema() {
+    rodar_node(
+        "a opção das notificações no app",
+        &format!(
+            "{OPCAO_DA_NOTIFICACAO_NODE}\n{}",
+            r##"
+for (const [plataforma, caminho] of [["macos", "Ajustes do Sistema › Notificações › SEELE"], ["windows", "Configurações › Sistema › Notificações › SEELE"], ["outro", "os ajustes de notificação do sistema"]]) {
+  let guardado = false;
+  const m = mundoDaOpcao({
+    plataforma,
+    estado_das_notificacoes: () => ({ ligadas: guardado, permissao: "NaoSeSabe" }),
+    ligar_notificacoes: ({ ligadas }) => { guardado = ligadas; return { ligadas, permissao: "NaoSeSabe" }; },
+  });
+  // Quem nunca escolheu: desligada, e a frase diz o que isso quer dizer.
+  await m.js("atualizarNotificacoesDoSistema()");
+  confere(plataforma + ": nasceu ligada", m.chave.checked === false && m.chave.disabled === false);
+  confere(plataforma + ": desligada, a frase: " + m.estado.textContent, m.estado.textContent === "Desligadas: o SEELE só avisa dentro da janela.");
+  confere(plataforma + ": abrir a tela pediu para ligar", so(m, "ligar_notificacoes").length === 0);
+
+  // Ligar: o pedido sai DENTRO do gesto, com `ligadas: true`.
+  const noGesto = await m.clicar(true);
+  const pedidos = so(m, "ligar_notificacoes");
+  confere(plataforma + ": o pedido não saiu dentro do gesto (" + noGesto + ")", noGesto === 1);
+  confere(plataforma + ": o pedido de ligar: " + JSON.stringify(pedidos[0]?.args), pedidos.length === 1 && pedidos[0].args.ligadas === true);
+  const dito = m.estado.textContent;
+  confere(plataforma + ": ligada, a frase não diz o caminho do sistema: " + dito, dito.startsWith("Ligadas.") && dito.includes(caminho));
+  confere(plataforma + ": a frase afirma o que o app não lê: " + dito, dito.includes("não consegue ler") && !/permitid|concedid|notificação (foi|saiu|enviada)/i.test(dito));
+  confere(plataforma + ": a permissão não ficou no nó", m.estado.dataset.permissao === "NaoSeSabe");
+  confere(plataforma + ": o interruptor não ficou ligado", m.chave.checked === true);
+
+  // Desligar.
+  await m.clicar(false);
+  confere(plataforma + ": desligar não desligou", guardado === false && m.chave.checked === false && m.estado.textContent.startsWith("Desligadas"));
+}
+
+// Não gravou: o interruptor volta ao que vale, e a tela diz.
+const m = mundoDaOpcao({
+  plataforma: "macos",
+  estado_das_notificacoes: { ligadas: false, permissao: "NaoSeSabe" },
+  ligar_notificacoes: () => { throw "NaoGravei"; },
+});
+await m.clicar(true);
+confere("a gravação falhou e o interruptor ficou ligado", m.chave.checked === false);
+confere("a gravação falhou e a tela não disse: " + m.estado.textContent, m.estado.textContent.startsWith(m.js("FRASES_DA_NOTIFICACAO.naoGravou")));
+
+// Ninguém respondeu o estado: o interruptor para, e a tela diz que não sabe.
+const mudo = mundoDaOpcao({ plataforma: "macos" });
+await mudo.js("relerNotificacoesDoSistema()");
+confere("sem estado, o interruptor não parou", mudo.chave.disabled === true && mudo.chave.checked === false);
+confere("sem estado, a tela não disse: " + mudo.estado.textContent, mudo.estado.textContent === mudo.js("FRASES_DA_NOTIFICACAO.desconhecido"));
+
+// A tela aberta relê de tempos em tempos, e não a cada meio segundo.
+const lento = mundoDaOpcao({ plataforma: "macos", estado_das_notificacoes: { ligadas: false, permissao: "NaoSeSabe" } });
+for (let i = 0; i < 6; i += 1) await lento.js("atualizarNotificacoesDoSistema()");
+confere("seis voltas da tela deram " + so(lento, "estado_das_notificacoes").length + " leituras", so(lento, "estado_das_notificacoes").length === 1);
+"##
+        ),
+    );
+}
+
+/// A opção na página de navegador: a recusa do navegador fica **dita**, com o
+/// caminho para mudar; onde não há notificação, a opção diz que não há.
+#[test]
+fn a_permissao_negada_e_a_falta_de_notificacao_ficam_ditas_na_tela() {
+    rodar_node(
+        "a opção das notificações na página",
+        &format!(
+            "{OPCAO_DA_NOTIFICACAO_NODE}\n{}",
+            r##"
+// O navegador recusou: a escolha fica, e a tela diz que nada vai aparecer e onde mudar.
+const negada = mundoDaOpcao({
+  plataforma: "web",
+  estado_das_notificacoes: { ligadas: false, permissao: "PorPedir" },
+  ligar_notificacoes: ({ ligadas }) => ({ ligadas, permissao: "Negada" }),
+});
+await negada.clicar(true);
+const dito = negada.estado.textContent;
+confere("negada, a tela não disse: " + dito, dito.startsWith("O NAVEGADOR NÃO DEIXA ESTA PÁGINA NOTIFICAR") && dito.includes("nada vai aparecer"));
+confere("negada, a tela não disse o caminho: " + dito, dito.includes("permissões do navegador"));
+confere("negada, a tela disse «ligadas»: " + dito, !/^Ligadas/.test(dito));
+confere("negada, a permissão não ficou no nó", negada.estado.dataset.permissao === "Negada");
+confere("a confirmação não foi junto do pedido: " + JSON.stringify(so(negada, "ligar_notificacoes")[0]?.args), so(negada, "ligar_notificacoes")[0]?.args.confirmacao?.titulo === negada.js("FRASES_DA_NOTIFICACAO.ligadasNaPagina.titulo"));
+
+// Concedida.
+const concedida = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: false, permissao: "PorPedir" }, ligar_notificacoes: ({ ligadas }) => ({ ligadas, permissao: "Concedida" }) });
+await concedida.clicar(true);
+confere("concedida: " + concedida.estado.textContent, concedida.estado.textContent === "Ligadas. O navegador deixa esta página notificar." && concedida.chave.checked === true);
+
+// A pergunta fechada sem resposta.
+const porPedir = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: false, permissao: "PorPedir" }, ligar_notificacoes: ({ ligadas }) => ({ ligadas, permissao: "PorPedir" }) });
+await porPedir.clicar(true);
+confere("por pedir: " + porPedir.estado.textContent, porPedir.estado.textContent.includes("ainda não respondeu") && porPedir.estado.textContent.includes("nada vai aparecer"));
+
+// Onde não há (o iPhone fora de página instalada): a opção para, desligada, e diz que não há.
+const semApi = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: false, permissao: "NaoHa" } });
+await semApi.js("atualizarNotificacoesDoSistema()");
+confere("sem a API, a opção não parou", semApi.chave.disabled === true && semApi.chave.checked === false);
+confere("sem a API, a tela não disse: " + semApi.estado.textContent, semApi.estado.textContent.startsWith("Este navegador não tem notificações para esta página"));
+
+// Uma permissão que a lista não conhece: dita, e não calada.
+const estranha = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: true, permissao: "Provisoria" } });
+await estranha.js("atualizarNotificacoesDoSistema()");
+confere("a permissão desconhecida ficou calada: " + estranha.estado.textContent, estranha.estado.textContent === estranha.js("FRASES_DA_NOTIFICACAO.desconhecido"));
+"##
+        ),
+    );
+}
+
+/// A marcação da opção: em MICROFONE E SOM, depois dos alertas sonoros, um
+/// interruptor que nasce desligado, e a frase do estado vazia na marcação.
+#[test]
+fn a_opcao_das_notificacoes_nasce_desligada_ao_lado_dos_alertas() {
+    let pagina = read("ui/index.html");
+    let audio = pagina
+        .split("<section id=\"painel-audio\"")
+        .nth(1)
+        .and_then(|resto| resto.split("</section>").next())
+        .unwrap_or_else(|| panic!("o painel de áudio saiu do index.html"));
+    let alertas = audio.find("id=\"alertas-bloco\"");
+    let notificacoes = audio.find("id=\"notificacoes-bloco\"");
+    assert!(
+        matches!((alertas, notificacoes), (Some(a), Some(n)) if a < n),
+        "a opção das notificações não está em MICROFONE E SOM, depois dos alertas sonoros: no \
+         celular ela sumiria de ÁUDIO"
+    );
+    assert!(
+        pagina.contains("<input id=\"notificacoes-ligadas\" type=\"checkbox\" role=\"switch\">"),
+        "o interruptor das notificações não nasce desligado (sem `checked`): quem nunca escolheu \
+         leria «ligadas» se o script não chegasse a escrever"
+    );
+    assert!(
+        pagina.contains("<p class=\"nota\" id=\"notificacoes-estado\" role=\"status\"></p>"),
+        "a frase do estado das notificações está escrita na marcação: seria uma afirmação que \
+         ninguém conferiu"
+    );
+    // O ouvinte não espera nada antes de pedir: é o gesto que pede a permissão.
+    let server = without_comments(&read("ui/tela-server.js"));
+    let ouvinte = server
+        .split("$(\"notificacoes-ligadas\")?.addEventListener(\"change\", ")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .unwrap_or_else(|| panic!("o ouvinte da opção das notificações saiu de tela-server.js"));
+    assert!(
+        !ouvinte.trim_start().starts_with("async") && !ouvinte.contains("await "),
+        "o ouvinte da opção espera antes de `definir`: na página de navegador a permissão \
+         sairia do gesto, e o navegador não a pergunta:\n{ouvinte}"
+    );
+}

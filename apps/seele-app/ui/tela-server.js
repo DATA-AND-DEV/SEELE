@@ -1086,6 +1086,7 @@ async function atualizarServer() {
   marcarLinhas(snapshot);
   desenharModos(snapshot, gravado);
   await atualizarTeclaGlobal();
+  await atualizarNotificacoesDoSistema();
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
   await desenharEstadoDoServidor();
@@ -2194,6 +2195,74 @@ function ligarOsAlertasSonoros() {
   desenhar();
 }
 ligarOsAlertasSonoros();
+
+// ------------------------------------------------ as notificações do sistema
+//
+// O interruptor e a frase do estado. A escolha e a permissão são de quem as
+// guarda (o Rust no app, a ponte na página) e a frase é de `fraseDoEstado`
+// (`notificacao-do-sistema.js`): esta tela não decide nada, e não diz
+// «ligadas» antes de quem grava dizer que gravou.
+
+/** De quanto em quanto a tela aberta relê o estado: a permissão muda fora dela (nos ajustes do sistema, nas permissões do navegador). */
+const NOTIFICACOES_A_CADA_MS = 5000;
+
+/** Quando o estado foi lido por último, e o sistema desta máquina (`plataforma`), para a frase do caminho. */
+let notificacoesLidasEm = 0;
+let plataformaDasNotificacoes = null;
+
+/**
+ * Desenha o interruptor e a frase a partir de um retrato `{ ligadas,
+ * permissao }`, ou diz que não se sabe.
+ *
+ * `aviso` é uma frase a mais, quando gravar a escolha falhou: o interruptor
+ * volta ao que está valendo e a frase diz por quê. Onde o navegador não tem
+ * notificação (`NaoHa`), o interruptor fica desligado e parado, e a frase diz
+ * que não há.
+ */
+function desenharNotificacoesDoSistema(retrato, aviso = null) {
+  const chave = $("notificacoes-ligadas");
+  const estado = $("notificacoes-estado");
+  if (!chave || !estado) return;
+  chave.checked = Boolean(retrato?.ligadas);
+  chave.disabled = !retrato || retrato.permissao === "NaoHa";
+  estado.dataset.permissao = retrato?.permissao ?? "";
+  const frase = retrato
+    ? notificacaoDoSistema.fraseDoEstado(retrato, plataformaDasNotificacoes)
+    : FRASES_DA_NOTIFICACAO.desconhecido;
+  escreverOTexto(estado, [aviso, frase].filter(Boolean).join(" "));
+}
+
+/** Relê o estado e redesenha. */
+async function relerNotificacoesDoSistema(aviso = null) {
+  notificacoesLidasEm = Date.now();
+  plataformaDasNotificacoes ??= await invoke("plataforma").catch(() => null);
+  desenharNotificacoesDoSistema(await notificacaoDoSistema.estado(), aviso);
+}
+
+/** Chamada por `atualizarServer`, com a tela aberta: relê de tempos em tempos, e não a cada meio segundo. */
+async function atualizarNotificacoesDoSistema() {
+  if (Date.now() - notificacoesLidasEm < NOTIFICACOES_A_CADA_MS) return;
+  await relerNotificacoesDoSistema();
+}
+
+// **Nada é esperado antes de `definir`**: na página de navegador é dentro
+// deste gesto que a permissão é pedida, e um `await` antes dele a tiraria do
+// gesto — o navegador não mostra a pergunta, ou a mostra de um jeito que
+// ensina a recusar. Por isso o ouvinte não é `async`.
+$("notificacoes-ligadas")?.addEventListener("change", (evento) => {
+  notificacaoDoSistema.definir(evento.target.checked).then(
+    (retrato) => {
+      notificacoesLidasEm = Date.now();
+      desenharNotificacoesDoSistema(retrato);
+    },
+    (falha) => {
+      // Não gravou: nada mudou, e a tela diz isso em vez de deixar o
+      // interruptor numa posição que não é a que vale.
+      console.warn("notificações do sistema:", falha);
+      return relerNotificacoesDoSistema(FRASES_DA_NOTIFICACAO.naoGravou);
+    },
+  );
+});
 
 // O botão SEÇÕES (só no celular, dentro de uma seção): volta ao índice e põe o foco na seção que estava aberta.
 $("server-ao-indice").addEventListener("click", () => {
