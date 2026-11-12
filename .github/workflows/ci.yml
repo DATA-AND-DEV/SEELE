@@ -636,6 +636,13 @@ jobs:
       - run: node apps/seele-app/bancada/instalavel.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # A notificação do sistema na página de navegador, com a ponte de verdade e
+      # um `Notification` de mentira: a opção nasce desligada, a permissão é
+      # pedida dentro do clique, a recusa do navegador fica dita, e a menção e o
+      # toque notificam só com a página fora da frente.
+      - run: node apps/seele-app/bancada/notificacao-do-sistema.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/hotfix-0195.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

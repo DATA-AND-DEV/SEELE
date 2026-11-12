@@ -1457,6 +1457,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/apoio-na-ajuda.cjs
     uma_bancada node apps/seele-app/bancada/teste-de-conexao.cjs
     uma_bancada node apps/seele-app/bancada/instalavel.cjs
+    uma_bancada node apps/seele-app/bancada/notificacao-do-sistema.cjs
     uma_bancada node apps/seele-app/bancada/hotfix-0195.cjs
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
     uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
