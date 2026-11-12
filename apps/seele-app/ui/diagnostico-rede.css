@@ -9,6 +9,13 @@ body {
   min-height: 100vh;
   display: grid;
   place-items: center;
+  /* **A coluna tem a largura do painel, e encolhe com a tela.** O painel tinha
+     `width: 720px; max-width: 100%`, e o `100%` era de uma trilha `auto`, que
+     cresce até caber o que tem dentro: num celular de 390 px a página saía com
+     736 px e rolava de lado (medido em 12/11/2026, antes de o TESTAR A CONEXÃO
+     da entrada do celular trazer gente até aqui). */
+  grid-template-columns: minmax(0, 720px);
+  justify-content: center;
   padding: 16px;
   box-sizing: border-box;
   background-color: var(--seele-negro-absoluto);
@@ -18,8 +25,8 @@ body {
 * { scrollbar-width: thin; scrollbar-color: var(--seele-linha-forte) transparent; }
 main {
   box-sizing: border-box;
-  width: 720px;
-  max-width: 100%;
+  width: 100%;
+  min-width: 0;
   padding: 40px;
   display: flex;
   flex-direction: column;
@@ -43,6 +50,13 @@ main {
 .diag-etapas li[data-estado="falha"] > span:first-child { color: var(--seele-vermelho-alerta); }
 .diag-etapas li > span:nth-child(2) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .diag-etapas li > span:nth-child(3) { flex: 0 0 auto; color: var(--seele-rotulo-painel); }
+/* A falha que trouxe a pessoa aqui, dita antes do teste: ela vai no texto copiado. */
+.diag-visto { margin: 0; font-family: var(--seele-ui); font-size: 13px; color: var(--seele-osso-apagado); }
+/* O resumo: o quadro cujo texto o botão copia, à vista e selecionável. */
+.diag-resumo { display: flex; flex-direction: column; gap: 8px; }
+.diag-resumo:has(pre:empty) { display: none; }
+.diag-resumo > pre:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+textarea[aria-invalid="true"] { border-color: var(--seele-vermelho-alerta); }
 .diag-bruto { font-size: 12px; color: var(--seele-osso-apagado); }
 .diag-bruto:has(pre:empty) { display: none; }
 .diag-bruto > summary { cursor: pointer; min-height: 24px; letter-spacing: var(--seele-tracking-rotulo); text-transform: uppercase; }
@@ -107,6 +121,10 @@ button.diag-primario:hover:not(:disabled), a.diag-primario:hover { background: v
 button:disabled { opacity: .5; cursor: default; }
 button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
 #estado { margin: 0 0 0 auto; font-family: var(--seele-ui); font-size: 12px; color: var(--seele-osso-apagado); text-align: right; }
+/* O que a cópia fez: numa linha própria, debaixo dos botões, e em vermelho quando não copiou. */
+#copia { flex: 1 0 100%; margin: 0; font-family: var(--seele-ui); font-size: 13px; color: var(--seele-osso-apagado); }
+#copia:empty { display: none; }
+#copia[data-tipo="erro"] { color: var(--seele-vermelho-alerta); }
 /* O resultado é a caixa escura do canvas: borda a 7%, canto de 18px. */
 pre {
   margin: 0;

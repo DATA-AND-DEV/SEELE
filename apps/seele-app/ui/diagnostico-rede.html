@@ -12,10 +12,11 @@
     <p class="diag-marca-rotulo">SEELE · CONEXÃO</p>
   </header>
   <h1>Testar a conexão com um servidor</h1>
+  <p id="visto" class="diag-visto" hidden></p>
   <div class="diag-campo">
     <label for="convite">Convite do servidor</label>
     <textarea id="convite" rows="1" autocomplete="off" spellcheck="false" aria-describedby="convite-dica"></textarea>
-    <p id="convite-dica" class="diag-dica">Cole o convite HTTPS do SEELE.</p>
+    <p id="convite-dica" class="diag-dica">Cole o convite do servidor: o link do navegador (https) ou o do app (seele://). Ele não sai desta página.</p>
   </div>
   <div class="diag-acoes">
     <button id="testar" class="diag-primario">Testar conexão</button>
@@ -23,11 +24,16 @@
     <p id="estado" role="status">Não usa microfone, câmera nem lê conversas.</p>
   </div>
   <ul id="etapas" class="diag-etapas" aria-label="Etapas do teste" hidden></ul>
-  <details class="diag-bruto"><summary>resultado completo</summary><pre id="resultado"></pre></details>
+  <section class="diag-resumo" aria-labelledby="resumo-rotulo">
+    <p id="resumo-rotulo" class="diag-marca-rotulo">O que o botão copia</p>
+    <pre id="resumo" tabindex="0"></pre>
+  </section>
   <div class="diag-acoes">
     <button id="copiar" disabled>Copiar diagnóstico</button>
     <a id="entrar" class="diag-primario" hidden>Entrar no servidor</a>
+    <p id="copia" role="status"></p>
   </div>
+  <details class="diag-bruto"><summary>resultado completo</summary><pre id="resultado"></pre></details>
 </main>
 
 <script src="rtc-web.js"></script>
