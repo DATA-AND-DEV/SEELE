@@ -258,7 +258,15 @@ jobs:
         # teste que precise de hardware terá de ser nomeado aqui — que é a
         # conversa certa a ter, em vez de um filtro largo engolindo os seguintes
         # em silêncio.
-        run: cargo test --workspace -- --skip a_saida_desta_maquina_abre_como_entrada
+        #
+        # **Com `--no-fail-fast`.** Sem ele o cargo para no primeiro binário de
+        # teste vermelho, e os que viriam depois não ficam nem verdes nem
+        # vermelhos: em 12/11/2026 (execução 43264412497) o Linux parou no
+        # `seele-audio`, por um runner sem placa de som, e o Windows no
+        # `reserva` do `seele-conformance` — de tudo o que vinha depois, nos
+        # dois, não se soube nada. O passo continua vermelho com um vermelho
+        # só; o que muda é que ele diz todos.
+        run: cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada
 
   # As bancadas de navegador, que nada automático rodava.
   #

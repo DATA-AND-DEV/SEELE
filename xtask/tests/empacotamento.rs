@@ -4341,8 +4341,13 @@ fn a_bateria_confere_aviso_de_seguranca_e_nao_so_licenca() {
 /// guarda são todos de uma linha só: é o que deixa o guarda ler o comando, e
 /// não a prosa que o explica.
 fn comandos_do_ci() -> Vec<String> {
-    let ci = std::fs::read_to_string(raiz().join(".github/workflows/ci.yml"))
-        .expect("o ci.yml é legível");
+    comandos_do_workflow(".github/workflows/ci.yml")
+}
+
+/// Como [`comandos_do_ci`], para qualquer workflow.
+fn comandos_do_workflow(arquivo: &str) -> Vec<String> {
+    let ci = std::fs::read_to_string(raiz().join(arquivo))
+        .unwrap_or_else(|erro| panic!("{arquivo} é legível: {erro}"));
     sem_comentario(&ci)
         .lines()
         .filter_map(|linha| {
@@ -5401,6 +5406,43 @@ fn o_ci_e_o_publicar_escrevem_o_mesmo_manifesto_da_portaria() {
         ("$GITHUB_WORKSPACE", "$RAIZ"),
         "o `%s` do manifesto da portaria é a raiz do repositório: `$GITHUB_WORKSPACE` no \
          ci.yml e `$RAIZ` no publicar.sh"
+    );
+}
+
+#[test]
+fn os_testes_do_workspace_nao_param_no_primeiro_binario_vermelho() {
+    // **O `cargo test --workspace` para no primeiro binário de teste que
+    // reprova**, e os que viriam depois não ficam nem verdes nem vermelhos. Na
+    // primeira execução do `ci.yml` em meses (43264412497, 12/11/2026) o Linux
+    // parou no `seele-audio` e o Windows no `reserva` do `seele-conformance`:
+    // de tudo o que vinha depois, nos dois, não se soube nada, e cada conserto
+    // custaria uma execução inteira para mostrar o vermelho seguinte.
+    let mut conferidos = 0_usize;
+    for arquivo in [".github/workflows/ci.yml", ".github/workflows/release.yml"] {
+        for comando in comandos_do_workflow(arquivo) {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            if !partes.starts_with(&["cargo", "test", "--workspace"]) {
+                continue;
+            }
+            conferidos += 1;
+            // Antes do `--`: depois dele o argumento é do binário de teste, e
+            // não do cargo.
+            let do_cargo: Vec<&str> = partes
+                .iter()
+                .copied()
+                .take_while(|parte| *parte != "--")
+                .collect();
+            assert!(
+                do_cargo.contains(&"--no-fail-fast"),
+                "{arquivo}: `{comando}` para no primeiro binário de teste vermelho e esconde \
+                 os seguintes; falta o `--no-fail-fast`, antes do `--`"
+            );
+        }
+    }
+    assert_eq!(
+        conferidos, 2,
+        "esperava um `cargo test --workspace` no ci.yml e um no release.yml, e achei \
+         {conferidos}: o guarda não leu os passos que devia"
     );
 }
 
