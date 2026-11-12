@@ -2179,6 +2179,59 @@ fn a_playback_device_crosses_with_both_halves_of_its_identity() {
     );
 }
 
+/// O pseudoaparelho que o ALSA lista em toda máquina, **nos dois sentidos**: o
+/// `null`, que joga fora o que se toca nele e devolve silêncio a quem grava.
+///
+/// Não é microfone nem saída de ninguém, e num Linux sem placa de som é a
+/// lista inteira das duas perguntas — foi o que o runner do `ci.yml` devolveu
+/// em 12/11/2026: `["alsa:null"]` de um lado e do outro.
+const NULO_DO_ALSA: &str = "alsa:null";
+
+/// O que a comparação das duas listas de aparelhos concluiu.
+#[derive(Debug, PartialEq, Eq)]
+enum DuasListas {
+    /// Falta aparelho de verdade de um dos lados, e não há o que comparar. A
+    /// frase diz o que faltou; `sem_saida` diz se foi a saída.
+    SemAparelho { motivo: String, sem_saida: bool },
+    /// Há uma saída que não é microfone: são duas listas.
+    Distintas,
+    /// Toda saída listada é também um microfone listado: uma lista é a outra.
+    AMesma,
+}
+
+/// Compara os ids das duas listas, **sem o pseudoaparelho do ALSA**.
+///
+/// O `alsa:null` sai antes da conferência de vazio, e não depois: com ele
+/// dentro, uma máquina sem placa tem «um microfone e uma saída», os dois com o
+/// mesmo id, e a comparação acusa o produto de devolver a mesma lista duas
+/// vezes — quando o que a máquina não tem é aparelho.
+fn comparar_as_duas_listas(microfones: &[&str], saidas: &[&str]) -> DuasListas {
+    let de_verdade = |lista: &[&str]| -> Vec<String> {
+        lista
+            .iter()
+            .filter(|id| **id != NULO_DO_ALSA)
+            .map(|id| (*id).to_owned())
+            .collect()
+    };
+    let (microfones, saidas) = (de_verdade(microfones), de_verdade(saidas));
+    if microfones.is_empty() || saidas.is_empty() {
+        return DuasListas::SemAparelho {
+            motivo: format!(
+                "esta máquina lista {} microfone(s) e {} saída(s) de verdade (fora o \
+                 `{NULO_DO_ALSA}`), e distinguir as duas listas pede um de cada",
+                microfones.len(),
+                saidas.len()
+            ),
+            sem_saida: saidas.is_empty(),
+        };
+    }
+    if saidas.iter().any(|id| !microfones.contains(id)) {
+        DuasListas::Distintas
+    } else {
+        DuasListas::AMesma
+    }
+}
+
 #[test]
 fn the_two_device_lists_are_not_the_same_list() {
     // Both are `Vec<_>` of three strings, and the two functions differ by one
@@ -2187,26 +2240,89 @@ fn the_two_device_lists_are_not_the_same_list() {
     // — and every pick from it would be refused by a machine that has no
     // such output.
     let (microphones, speakers) = (capture_devices(), playback_devices());
-    if microphones.is_empty() || speakers.is_empty() {
-        eprintln!(
-            "skipped: this machine lists {} microphones and {} outputs, and telling the \
-                 two lists apart needs one of each",
-            microphones.len(),
-            speakers.len()
-        );
-        return;
-    }
+    let ids_dos_microfones: Vec<&str> = microphones.iter().map(|d| d.id.as_str()).collect();
+    let ids_das_saidas: Vec<&str> = speakers.iter().map(|d| d.id.as_str()).collect();
 
-    let ids: Vec<&str> = microphones
-        .iter()
-        .map(|device| device.id.as_str())
-        .collect();
+    match comparar_as_duas_listas(&ids_dos_microfones, &ids_das_saidas) {
+        DuasListas::Distintas => {}
+        DuasListas::AMesma => panic!(
+            "every listed output is also a listed microphone, so one list is the other: \
+             microphones {ids_dos_microfones:?}, outputs {ids_das_saidas:?}"
+        ),
+        DuasListas::SemAparelho { motivo, sem_saida } => {
+            // A mesma regra de `seele-audio/src/laco.rs`: pular tem a cor de
+            // passar, e quem liga `SEELE_EXIGE_SAIDA_DE_SOM` está dizendo que
+            // nesta máquina a saída tem de existir.
+            assert!(
+                !sem_saida || std::env::var_os("SEELE_EXIGE_SAIDA_DE_SOM").is_none(),
+                "SEELE_EXIGE_SAIDA_DE_SOM está ligado e {motivo}: aqui o teste tinha de \
+                 rodar, e não rodou"
+            );
+            eprintln!(
+                "PULADO: {motivo}.\n  O que este teste prova precisa de um microfone e de \
+                 uma saída de som de verdade (microfones: {ids_dos_microfones:?}; saídas: \
+                 {ids_das_saidas:?}).\n  Ligue SEELE_EXIGE_SAIDA_DE_SOM para que faltar a \
+                 saída vire falha em vez de pulo."
+            );
+        }
+    }
+}
+
+/// O guarda do pulo de cima, e da comparação que ele não pode desligar.
+///
+/// As listas são as do runner de Linux sem placa de 12/11/2026, e a régua tem
+/// de dizer «sem aparelho» — antes ela dizia «a mesma lista», e o teste
+/// reprovava uma máquina por não ter som. As outras linhas seguram o que o
+/// teste existe para pegar: tirar o `alsa:null` não pode fazer duas listas de
+/// verdade iguais passarem.
+#[test]
+fn o_nulo_do_alsa_nao_conta_como_aparelho_e_a_mesma_lista_continua_reprovando() {
+    assert_eq!(
+        comparar_as_duas_listas(&["alsa:null"], &["alsa:null"]),
+        DuasListas::SemAparelho {
+            motivo: "esta máquina lista 0 microfone(s) e 0 saída(s) de verdade (fora o \
+                     `alsa:null`), e distinguir as duas listas pede um de cada"
+                .to_owned(),
+            sem_saida: true,
+        },
+        "o runner sem placa de som lista só o `alsa:null` dos dois lados: é pulo, e não a \
+         mesma lista"
+    );
     assert!(
-        speakers
-            .iter()
-            .any(|device| !ids.contains(&device.id.as_str())),
-        "every listed output is also a listed microphone, so one list is the other: \
-             {ids:?}"
+        matches!(
+            comparar_as_duas_listas(&["alsa:null", "alsa:hw:0,0"], &["alsa:null"]),
+            DuasListas::SemAparelho {
+                sem_saida: true,
+                ..
+            }
+        ),
+        "com microfone e sem saída de verdade ainda não há o que comparar"
+    );
+    assert!(
+        matches!(
+            comparar_as_duas_listas(&[], &["coreaudio:alto-falantes"]),
+            DuasListas::SemAparelho {
+                sem_saida: false,
+                ..
+            }
+        ),
+        "sem microfone a saída existe, e quem exige a saída não pode reprovar por isso"
+    );
+    assert_eq!(
+        comparar_as_duas_listas(&["alsa:null", "alsa:hw:0,0"], &["alsa:null", "alsa:hw:0,0"]),
+        DuasListas::AMesma,
+        "duas listas de verdade iguais são o defeito que o teste procura, com ou sem o nulo"
+    );
+    assert_eq!(
+        comparar_as_duas_listas(
+            &["alsa:null", "alsa:hw:0,0"],
+            &["alsa:null", "alsa:hw:0,0", "alsa:hdmi:0,3"]
+        ),
+        DuasListas::Distintas
+    );
+    assert_eq!(
+        comparar_as_duas_listas(&["coreaudio:mic"], &["coreaudio:alto-falantes"]),
+        DuasListas::Distintas
     );
 }
 
