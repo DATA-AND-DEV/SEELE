@@ -384,15 +384,35 @@ impl Maquina {
 
     /// O batimento do jogo anda?
     async fn jogo_vivo(&self) -> bool {
-        let ler = || {
-            std::fs::read_to_string(self.raiz().join("batimento"))
-                .ok()
-                .and_then(|t| t.trim().parse::<u64>().ok())
-                .unwrap_or(0)
-        };
-        let antes = ler();
+        let antes = self.batimento().await;
         tokio::time::sleep(Duration::from_millis(300)).await;
-        ler() > antes
+        self.batimento().await > antes
+    }
+
+    /// O contador que o jogo escreveu por último; zero se ele nunca escreveu.
+    ///
+    /// **Vazio não é zero.** O jogo reescreve o arquivo a cada 20 ms (trunca e
+    /// escreve), e a leitura que cai entre as duas coisas vê o arquivo vazio.
+    /// Lida como zero na segunda amostra de [`Self::jogo_vivo`], um jogo vivo
+    /// passava por morto — «o jogo da dona caiu na volta», «a dona parou sem
+    /// quem hospeda» (medido em 12/11/2026 no Windows, 4 rodadas em série em
+    /// 37: na amostra que reprovou, a leitura veio `""`, com o contador em 298
+    /// antes dela e de 317 a 363 nas dez leituras seguintes). Por isso a
+    /// amostra é lida de novo até ser um número, por até 100 ms (cinco
+    /// reescritas do jogo); o arquivo que não existe, ou que não vira número
+    /// nesse tempo, é zero.
+    async fn batimento(&self) -> u64 {
+        let arquivo = self.raiz().join("batimento");
+        for _ in 0..25 {
+            let lido = std::fs::read_to_string(&arquivo)
+                .ok()
+                .and_then(|t| t.trim().parse::<u64>().ok());
+            if let Some(contador) = lido {
+                return contador;
+            }
+            tokio::time::sleep(Duration::from_millis(4)).await;
+        }
+        0
     }
 
     /// Um mundo com arquivos e pastas, e uma marca de quem o escreveu.
