@@ -852,6 +852,199 @@ async function aPermissaoDoMicrofone() {
   }
 }
 
+/**
+ * Um `Notification` de mentira: a permissão que o caso escolhe, o que o
+ * `requestPermission` responde, e as que foram mostradas. `ilegal` é o Chrome
+ * do Android, que tem o nome e recusa o construtor.
+ */
+function notificacaoDeMentira(p, { permissao = "default", resposta = "granted", ilegal = false } = {}) {
+  const mundo = { mostradas: [], pedidos: 0, pedidoNoGesto: null, noGesto: false };
+  class Notificacao {
+    constructor(titulo, opcoes = {}) {
+      if (ilegal) throw new TypeError("Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead.");
+      Object.assign(this, { titulo, corpo: opcoes.body, marca: opcoes.tag, icone: opcoes.icon, fechada: false, onclick: null });
+      mundo.mostradas.push(this);
+    }
+    close() {
+      this.fechada = true;
+    }
+    static requestPermission() {
+      mundo.pedidos += 1;
+      mundo.pedidoNoGesto = mundo.noGesto;
+      Notificacao.permission = resposta;
+      return Promise.resolve(resposta);
+    }
+  }
+  Notificacao.permission = permissao;
+  p.janela.Notification = Notificacao;
+  /** O `invoke` de dentro de um gesto: o que roda antes do primeiro `await` é o gesto. */
+  mundo.noClique = (comando, args) => {
+    mundo.noGesto = true;
+    try {
+      return p.invoke(comando, args);
+    } finally {
+      mundo.noGesto = false;
+    }
+  };
+  /** A página vai para trás (`false`) ou vem à frente (`true`). */
+  mundo.naFrente = (sim) => {
+    p.janela.document.visibilityState = "visible";
+    p.janela.document.hasFocus = () => sim;
+  };
+  mundo.naFrente(false);
+  mundo.focos = 0;
+  p.janela.focus = () => {
+    mundo.focos += 1;
+  };
+  return mundo;
+}
+
+/// **A notificação do navegador** (`notificar_no_sistema` e as duas da
+/// preferência): a escolha guardada na origem, a permissão pedida dentro do
+/// gesto e nunca fora dele, a recusa dita pelo nome, a notificação com o texto
+/// certo e com teto, o clique que devolve o lugar, e «não há» onde não há.
+async function aNotificacaoDoNavegador() {
+  const caso = "a notificação do navegador";
+  const CONFIRMACAO = { titulo: "Notificações do SEELE ligadas", corpo: "É assim que o SEELE avisa." };
+  const pedido = { motivo: "Mencao", titulo: "Você foi chamado", corpo: "em Casa", lugar: { sessao: 4 } };
+
+  // Quem nunca escolheu: desligadas, e perguntar o estado não pede permissão.
+  {
+    const p = pagina();
+    const n = notificacaoDeMentira(p);
+    const estado = await desfecho(p.invoke("estado_das_notificacoes"));
+    confere(caso, igual(estado.ok, { ligadas: false, permissao: "PorPedir" }), `o estado de quem nunca escolheu: ${util.inspect(estado)}`);
+    confere(caso, n.pedidos === 0, "perguntar o estado pediu a permissão ao navegador, sem gesto");
+    const r = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    confere(caso, r.erro === "Desligadas" && n.mostradas.length === 0 && n.pedidos === 0,
+      `desligada, o pedido não voltou «Desligadas» calado: ${util.inspect(r)}, ${n.mostradas.length} mostradas, ${n.pedidos} pedidos`);
+  }
+
+  // Ligar: a permissão é pedida DENTRO do gesto, a escolha fica na origem, e a
+  // confirmação aparece — é ela que prova que o navegador notifica.
+  {
+    const p = pagina();
+    const n = notificacaoDeMentira(p);
+    n.naFrente(true);
+    const ligar = await desfecho(n.noClique("ligar_notificacoes", { ligadas: true, confirmacao: CONFIRMACAO }));
+    confere(caso, igual(ligar.ok, { ligadas: true, permissao: "Concedida" }), `ligar e conceder: ${util.inspect(ligar)}`);
+    confere(caso, n.pedidos === 1 && n.pedidoNoGesto === true,
+      `a permissão foi pedida ${n.pedidos} vez(es), ${n.pedidoNoGesto ? "dentro" : "fora"} do gesto`);
+    confere(caso, p.origem.get("seele.notificacoes") === "sim", `a escolha não ficou na origem: ${p.origem.get("seele.notificacoes")}`);
+    confere(caso, n.mostradas.length === 1 && n.mostradas[0].titulo === CONFIRMACAO.titulo && n.mostradas[0].corpo === CONFIRMACAO.corpo,
+      `a confirmação não apareceu ao ligar: ${util.inspect(n.mostradas)}`);
+
+    // Com a página na frente o aviso de dentro basta.
+    const naFrente = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    confere(caso, naFrente.erro === "JanelaNaFrente" && n.mostradas.length === 1, `com a página na frente: ${util.inspect(naFrente)}`);
+    // Escondida, mesmo com `hasFocus` dizendo que sim, não está na frente.
+    p.janela.document.visibilityState = "hidden";
+    const escondida = await desfecho(p.invoke("notificar_no_sistema", { ...pedido, lugar: { sessao: 9 } }));
+    confere(caso, escondida.ok === null && n.mostradas.length === 2, `escondida, não saiu: ${util.inspect(escondida)}`);
+
+    // Fora da frente: sai, com o texto que a casca mandou, limpo e com teto.
+    n.naFrente(false);
+    const saiu = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    const mostrada = n.mostradas[2];
+    confere(caso, saiu.ok === null && mostrada?.titulo === "Você foi chamado" && mostrada?.corpo === "em Casa",
+      `a notificação não saiu com o texto certo: ${util.inspect(saiu)} ${util.inspect(mostrada)}`);
+    confere(caso, n.pedidos === 1, "notificar pediu a permissão de novo, fora de um gesto");
+    await p.invoke("notificar_no_sistema", { motivo: "Porta", titulo: "Alguém\nbate\u0007  à porta ", corpo: "x".repeat(900) });
+    const longa = n.mostradas[3];
+    confere(caso, longa.titulo === "Alguém bate à porta" && Array.from(longa.corpo).length === 200 && longa.corpo.endsWith("…"),
+      `o texto de fora não foi limpo nem teve teto: ${util.inspect(longa.titulo)}, ${Array.from(longa.corpo).length} caracteres`);
+    const vazia = await desfecho(p.invoke("notificar_no_sistema", { motivo: "Porta", titulo: " \n ", corpo: "y" }));
+    confere(caso, vazia.erro === "SemTexto" && n.mostradas.length === 4, `sem título: ${util.inspect(vazia)}`);
+
+    // Duas menções do mesmo servidor levam a mesma marca: a segunda entra no lugar da primeira.
+    confere(caso, n.mostradas[1].marca !== mostrada.marca && mostrada.marca === "seele:Mencao:4",
+      `a marca não separa os servidores: ${n.mostradas[1].marca} e ${mostrada.marca}`);
+
+    // O clique: a página vem à frente, a notificação fecha, e a casca recebe o lugar.
+    const clicados = [];
+    await p.janela.__TAURI__.event.listen("seele://notificacao-clicada", (evento) => clicados.push(evento.payload));
+    mostrada.onclick();
+    confere(caso, n.focos === 1 && mostrada.fechada && igual(clicados, [{ sessao: 4 }]),
+      `o clique não trouxe a página e o lugar: ${n.focos} foco(s), fechada ${mostrada.fechada}, ${util.inspect(clicados)}`);
+
+    // Desligar: a origem guarda o não, e nada mais sai.
+    const desligar = await desfecho(n.noClique("ligar_notificacoes", { ligadas: false, confirmacao: CONFIRMACAO }));
+    confere(caso, igual(desligar.ok, { ligadas: false, permissao: "Concedida" }) && p.origem.get("seele.notificacoes") === "nao",
+      `desligar: ${util.inspect(desligar)}`);
+    const depois = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    confere(caso, depois.erro === "Desligadas" && n.mostradas.length === 4, `desligada depois de ligada: ${util.inspect(depois)}`);
+  }
+
+  // A pessoa recusa na pergunta: a escolha fica (liberar depois não pede outro
+  // gesto), o estado diz «Negada», nada sai, e a recusa do pedido tem nome.
+  {
+    const p = pagina();
+    const n = notificacaoDeMentira(p, { resposta: "denied" });
+    const ligar = await desfecho(n.noClique("ligar_notificacoes", { ligadas: true, confirmacao: CONFIRMACAO }));
+    confere(caso, igual(ligar.ok, { ligadas: true, permissao: "Negada" }), `ligar e recusar: ${util.inspect(ligar)}`);
+    confere(caso, n.mostradas.length === 0, "negada, a confirmação apareceu");
+    const r = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    confere(caso, r.erro === "SemPermissao" && n.mostradas.length === 0, `negada, o pedido: ${util.inspect(r)}`);
+    // A pessoa libera nas permissões do navegador: sem outro gesto, passa a sair.
+    p.janela.Notification.permission = "granted";
+    const liberada = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    confere(caso, liberada.ok === null && n.mostradas.length === 1 && n.pedidos === 1, `liberada depois: ${util.inspect(liberada)}`);
+  }
+
+  // Já negada de antes: o navegador não pergunta de novo, e a ponte também não.
+  {
+    const p = pagina();
+    const n = notificacaoDeMentira(p, { permissao: "denied" });
+    const ligar = await desfecho(n.noClique("ligar_notificacoes", { ligadas: true, confirmacao: CONFIRMACAO }));
+    confere(caso, igual(ligar.ok, { ligadas: true, permissao: "Negada" }) && n.pedidos === 0, `já negada: ${util.inspect(ligar)}, ${n.pedidos} pedidos`);
+  }
+
+  // A pergunta fechada sem resposta: continua por pedir, e nada sai.
+  {
+    const p = pagina();
+    const n = notificacaoDeMentira(p, { resposta: "default" });
+    const ligar = await desfecho(n.noClique("ligar_notificacoes", { ligadas: true, confirmacao: CONFIRMACAO }));
+    confere(caso, igual(ligar.ok, { ligadas: true, permissao: "PorPedir" }), `pergunta fechada: ${util.inspect(ligar)}`);
+    const r = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    confere(caso, r.erro === "SemPermissao" && n.mostradas.length === 0 && n.pedidos === 1, `por pedir, o pedido: ${util.inspect(r)}`);
+  }
+
+  // Sem a API (o iPhone fora de página instalada): não há, e ligar não liga.
+  {
+    const p = pagina();
+    const estado = await desfecho(p.invoke("estado_das_notificacoes"));
+    confere(caso, igual(estado.ok, { ligadas: false, permissao: "NaoHa" }), `sem a API, o estado: ${util.inspect(estado)}`);
+    const ligar = await desfecho(p.invoke("ligar_notificacoes", { ligadas: true, confirmacao: CONFIRMACAO }));
+    confere(caso, igual(ligar.ok, { ligadas: false, permissao: "NaoHa" }) && p.origem.get("seele.notificacoes") === "nao",
+      `sem a API, ligar: ${util.inspect(ligar)}`);
+    const r = await desfecho(p.invoke("notificar_no_sistema", pedido));
+    confere(caso, r.erro === "Desligadas", `sem a API, o pedido: ${util.inspect(r)}`);
+    // Uma escolha antiga na origem não vira «ligadas» onde não há como notificar.
+    p.origem.set("seele.notificacoes", "sim");
+    confere(caso, igual((await desfecho(p.invoke("estado_das_notificacoes"))).ok, { ligadas: false, permissao: "NaoHa" }),
+      "sem a API, um «sim» guardado apareceu como ligadas");
+  }
+
+  // O Chrome do Android: tem o nome, concede, e recusa o construtor. A
+  // confirmação descobre no gesto, a opção volta a desligada, e a tela lê «não há».
+  {
+    const p = pagina();
+    const n = notificacaoDeMentira(p, { ilegal: true });
+    const ligar = await desfecho(n.noClique("ligar_notificacoes", { ligadas: true, confirmacao: CONFIRMACAO }));
+    confere(caso, igual(ligar.ok, { ligadas: false, permissao: "NaoHa" }) && p.origem.get("seele.notificacoes") === "nao",
+      `construtor recusado, ligar: ${util.inspect(ligar)} (${p.origem.get("seele.notificacoes")})`);
+    confere(caso, p.avisos.some((aviso) => String(aviso[0]).includes("recusa a notificação")), "o construtor recusado não foi dito no console");
+  }
+
+  // A origem que não grava (navegação privada): a recusa tem o nome do Rust.
+  {
+    const p = pagina({ gravacaoFalha: true });
+    const n = notificacaoDeMentira(p);
+    const ligar = await desfecho(n.noClique("ligar_notificacoes", { ligadas: true, confirmacao: CONFIRMACAO }));
+    confere(caso, ligar.erro === "NaoGravei" && n.mostradas.length === 0, `sem gravar, ligar: ${util.inspect(ligar)}`);
+  }
+}
+
 (async () => {
   const provas = [
     oLugar,
@@ -878,6 +1071,7 @@ async function aPermissaoDoMicrofone() {
     asPreferenciasDaVoz,
     osMicrofones,
     aPermissaoDoMicrofone,
+    aNotificacaoDoNavegador,
   ];
   const selecionadas = process.argv.includes('--so-dominio') ? [oDominioDescontinuado] : provas;
   for (const prova of selecionadas) {

@@ -5700,6 +5700,13 @@
 -->
 <script src="alertas-sonoros.js"></script>
 <!--
+  A notificação do sistema: a menção, a batida na porta e a ligação que chega,
+  com a janela fora da frente. Depois do `base.js`, de quem usa o `invoke` e o
+  ouvinte cru dos eventos; antes de quem a chama (a portaria, o toque, a
+  conversa por link, CONFIGURAÇÕES). Na carga ela só declara e passa a ouvir.
+-->
+<script src="notificacao-do-sistema.js"></script>
+<!--
   O enlace WebRTC da página (0.17, D1–D9; do browser-signaling): o
   `RTCPeerConnection` contra o anfitrião ICE-lite, o certificado DTLS efêmero e
   os canais. Antes da sessão, que usa o `criarEnlaceRtc` e o

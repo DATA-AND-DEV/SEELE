@@ -265,6 +265,9 @@ const COMANDOS_DA_PONTE = new Set([
   "send_message", "set_muted", "set_talking", "set_total_isolation",
   "set_voice_mode", "set_volume", "snapshot", "soltar_a_entrada", "soltar_escolhido",
   "som_da_tela", "som_do_mod", "tecla_de_falar", "estado_da_tecla_global", "tirar_minha_imagem",
+  // A notificação do sistema (`notificacao-do-sistema.js`): aqui, a do
+  // navegador, pela API `Notification`, com a permissão pedida no gesto.
+  "estado_das_notificacoes", "ligar_notificacoes", "notificar_no_sistema",
   "versoes_instaladas", "volumes_locais",
   // O túnel de jogo é do aplicativo: aqui a entrada é recusada pelo nome, a
   // saída não tem o que fechar e a lista é vazia.
@@ -1685,6 +1688,8 @@ const CHAVES_DA_ORIGEM = Object.freeze({
   sensibilidade: "seele.sensibilidade-da-voz",
   reducao: "seele.reducao-de-ruido",
   tecla: "seele.tecla-de-falar",
+  // As notificações do navegador (`sim` ou `nao`); sem valor, desligadas.
+  notificacoes: "seele.notificacoes",
 });
 
 /**
@@ -2639,7 +2644,151 @@ function pessoalWebNaPonte() {
   if (!window.seelePessoalWeb) throw new Error("Conversa pessoal ainda está preparando");
   return window.seelePessoalWeb;
 }
+
+// ------------------------------------------------ a notificação do navegador
+//
+// O que `notificar_no_sistema` é no app (`src/notificacao.rs`), aqui é a API
+// `Notification` do navegador. A regra — o que notifica, a repetição, o texto —
+// é da casca (`notificacao-do-sistema.js`), a mesma do app; a ponte guarda a
+// escolha na origem, lê a permissão e confere o que o Rust confere do lado
+// dele: a preferência, a página na frente e o texto com teto.
+//
+// **Onde não há, a ponte diz que não há** (`NaoHa`), em vez de fingir uma
+// opção: o Safari do iPhone e do iPad não tem `Notification` fora de página
+// instalada, e o Chrome do Android tem o nome e recusa o construtor (lá a
+// notificação é só a de um service worker, que esta página não tem). O
+// segundo caso só se descobre tentando, e a tentativa é a confirmação que sai
+// no gesto de ligar.
+
+/** A API do navegador, ou `null` onde ela não existe. */
+function notificacaoDoNavegador() {
+  const api = globalThis.Notification;
+  return typeof api === "function" ? api : null;
+}
+
+/** O construtor já recusou nesta página (o Chrome do Android): não há. */
+let notificacaoSemConstrutor = false;
+
+/** A permissão, pelos nomes que a casca lê (`FRASES_DA_NOTIFICACAO.estado`). */
+function permissaoDeNotificar() {
+  const api = notificacaoDoNavegador();
+  if (!api || notificacaoSemConstrutor) return "NaoHa";
+  if (api.permission === "granted") return "Concedida";
+  return api.permission === "denied" ? "Negada" : "PorPedir";
+}
+
+/** O que a casca desenha em CONFIGURAÇÕES: a escolha guardada e a permissão de agora. */
+function retratoDasNotificacoes() {
+  const permissao = permissaoDeNotificar();
+  return {
+    ligadas: permissao !== "NaoHa" && guardadoNaOrigem(CHAVES_DA_ORIGEM.notificacoes) === "sim",
+    permissao,
+  };
+}
+
+/** Os tetos de `notificacao.rs` (`TETO_DO_TITULO`, `TETO_DO_CORPO`), em caracteres. */
+const TETOS_DA_NOTIFICACAO = Object.freeze({ titulo: 80, corpo: 200 });
+
+/** Uma linha, sem caractere de controle, com teto: o `limpar` do Rust. */
+function limparTextoDaNotificacao(texto, teto) {
+  const limpo = Array.from(String(texto ?? "").replace(/[\p{Cc}\s]+/gu, " ").trim());
+  return limpo.length <= teto ? limpo.join("") : `${limpo.slice(0, teto - 1).join("")}…`;
+}
+
+/** A página está à vista e com o foco: o aviso de dentro basta. */
+function paginaNaFrente() {
+  try {
+    if (document.visibilityState === "hidden") return false;
+    return typeof document.hasFocus === "function" ? document.hasFocus() : false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mostra uma notificação. Lança se o navegador recusar o construtor.
+ *
+ * O clique traz a página à frente e devolve o `lugar` à casca
+ * (`seele://notificacao-clicada`), que decide para onde ir. A `marca` é a
+ * `tag` do navegador: duas com a mesma marca são uma, a segunda no lugar da
+ * primeira.
+ */
+function mostrarNotificacaoDoNavegador(titulo, corpo, { marca, lugar = null } = {}) {
+  const api = notificacaoDoNavegador();
+  const notificacao = new api(titulo, { body: corpo, tag: marca, icon: "icone-192.png" });
+  notificacao.onclick = () => {
+    try {
+      globalThis.focus?.();
+    } catch {
+      /* O navegador decide se a página vem à frente. */
+    }
+    notificacao.close?.();
+    emitirNaPonte("seele://notificacao-clicada", lugar);
+  };
+  return notificacao;
+}
+
 const ATENDIMENTOS_DA_PONTE = Object.freeze({
+  // Chamado sem gesto (CONFIGURAÇÕES aberta, e a cada acontecimento que pode
+  // notificar): só lê.
+  estado_das_notificacoes: () => retratoDasNotificacoes(),
+  // **Dentro do gesto**: o `requestPermission` é a primeira coisa que espera, e
+  // nada espera antes dele. O navegador pergunta uma vez; uma recusa antiga
+  // volta na hora, sem pergunta, e a escolha fica guardada mesmo assim — a
+  // tela diz «o navegador não deixa» e o caminho para mudar, e liberar depois
+  // não pede outro gesto.
+  ligar_notificacoes: async ({ ligadas, confirmacao } = {}) => {
+    const api = notificacaoDoNavegador();
+    if (!ligadas || !api || notificacaoSemConstrutor) {
+      if (!gravarNaOrigem(CHAVES_DA_ORIGEM.notificacoes, "nao")) return Promise.reject("NaoGravei");
+      return retratoDasNotificacoes();
+    }
+    if (api.permission === "default") {
+      try {
+        await api.requestPermission();
+      } catch (falha) {
+        console.warn("ponte: o navegador não perguntou pela notificação:", falha);
+      }
+    }
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.notificacoes, "sim")) return Promise.reject("NaoGravei");
+    // A confirmação: é ela que prova que este navegador notifica. Onde o
+    // construtor é recusado, a opção volta a desligada e a tela diz que não há.
+    if (api.permission === "granted" && confirmacao?.titulo) {
+      try {
+        mostrarNotificacaoDoNavegador(
+          limparTextoDaNotificacao(confirmacao.titulo, TETOS_DA_NOTIFICACAO.titulo),
+          limparTextoDaNotificacao(confirmacao.corpo, TETOS_DA_NOTIFICACAO.corpo),
+          { marca: "seele:ligadas" },
+        );
+      } catch (falha) {
+        console.warn("ponte: este navegador recusa a notificação da página:", falha);
+        notificacaoSemConstrutor = true;
+        gravarNaOrigem(CHAVES_DA_ORIGEM.notificacoes, "nao");
+      }
+    }
+    return retratoDasNotificacoes();
+  },
+  // As recusas levam os nomes das do Rust (`RecusaDeNotificar`), e mais uma que
+  // só a página sabe dar: `SemPermissao`.
+  notificar_no_sistema: ({ motivo, titulo, corpo, lugar } = {}) => {
+    const retrato = retratoDasNotificacoes();
+    if (!retrato.ligadas) return Promise.reject("Desligadas");
+    if (retrato.permissao !== "Concedida") return Promise.reject("SemPermissao");
+    if (paginaNaFrente()) return Promise.reject("JanelaNaFrente");
+    const limpo = limparTextoDaNotificacao(titulo, TETOS_DA_NOTIFICACAO.titulo);
+    if (!limpo) return Promise.reject("SemTexto");
+    try {
+      mostrarNotificacaoDoNavegador(limpo, limparTextoDaNotificacao(corpo, TETOS_DA_NOTIFICACAO.corpo), {
+        marca: `seele:${motivo}:${lugar?.sessao ?? ""}`,
+        lugar: lugar ?? null,
+      });
+    } catch (falha) {
+      console.warn("ponte: a notificação não saiu:", falha);
+      notificacaoSemConstrutor = true;
+      return Promise.reject("NaoSaiu");
+    }
+    return null;
+  },
   meu_codigo: () => meuCodigoPessoalWeb(),
   amigos: () => contatosPessoaisWeb(true),
   contatos_da_agenda: () => contatosPessoaisWeb(),

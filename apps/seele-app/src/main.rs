@@ -52,6 +52,7 @@ mod icone;
 mod ligar;
 mod maquina;
 mod mods;
+mod notificacao;
 mod perfil_padrao;
 // A redução de imagem de MOD mora no `seele-sessao` desde a Tarefa 2.6 da F4.
 use seele_ffi::reducao;
@@ -13496,6 +13497,104 @@ async fn ligar_tecla_global(
     Ok(tecla_global::conferir_fora_da_thread(&app).await)
 }
 
+/// As notificações do sistema: a escolha desta máquina, e o que se sabe da
+/// permissão do sistema — que no desktop é «não se sabe», dito assim. Ver
+/// [`notificacao`].
+///
+/// Sem o arquivo de preferências, desligadas: é o padrão de quem nunca
+/// escolheu, e é o que [`notificar_no_sistema`] vai conferir.
+#[tauri::command]
+fn estado_das_notificacoes(app: AppHandle) -> notificacao::Retrato {
+    notificacao::Retrato::do_desktop(
+        preferencias(&app)
+            .as_ref()
+            .is_some_and(seele_ffi::preferences::Preferences::notificacoes_do_sistema),
+    )
+}
+
+/// Liga ou desliga as notificações do sistema, e devolve o que a tela diz
+/// agora.
+///
+/// **Só grava.** Não sai notificação nenhuma daqui: no macOS o sistema não
+/// mostra a faixa com o app na frente, que é onde a pessoa está ao ligar, e uma
+/// «notificação de teste» que não aparece ensinaria que a opção não funciona.
+/// A pergunta do sistema, onde ele a faz, vem com a primeira notificação de
+/// verdade.
+///
+/// `confirmacao` é o texto da notificação que a **página de navegador** mostra
+/// ao ligar, onde ela é a única prova de que o navegador notifica; a casca o
+/// manda sempre, porque é a mesma nos dois lugares, e este lado o recebe e não
+/// o usa.
+///
+/// # Errors
+///
+/// [`FalhaAoEscolher::NaoGravei`] se o disco recusar. Nada muda.
+#[tauri::command]
+fn ligar_notificacoes(
+    app: AppHandle,
+    ligadas: bool,
+    confirmacao: Option<serde_json::Value>,
+) -> Result<notificacao::Retrato, FalhaAoEscolher> {
+    drop(confirmacao);
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    ajustes
+        .set_notificacoes_do_sistema(ligadas)
+        .map_err(|erro| {
+            tracing::warn!(%erro, "não consegui gravar a escolha das notificações do sistema");
+            FalhaAoEscolher::NaoGravei
+        })?;
+    Ok(notificacao::Retrato::do_desktop(ligadas))
+}
+
+/// Pede uma notificação ao sistema. A única porta do plugin: a página não o
+/// alcança (`capabilities/janela.json`, `tests/permissoes.rs`).
+///
+/// A regra — o que notifica, a repetição, o texto — é da casca
+/// (`ui/notificacao-do-sistema.js`). Aqui se confere o que só este lado sabe:
+/// a preferência no disco e a janela na frente, lida do sistema. Ver
+/// [`notificacao::pedir`].
+///
+/// O `motivo` é lista fechada e vai ao registro; o texto **não** vai, nem na
+/// falha: ele tem o nome de um servidor ou de uma pessoa.
+///
+/// `lugar` é para onde o clique levaria (a sessão da menção, a portaria). O
+/// plugin não devolve o clique no desktop — o sistema só traz o app à frente —,
+/// então este lado o recebe e não tem o que fazer com ele; quem o usa é a
+/// página de navegador, pela ponte.
+///
+/// # Errors
+///
+/// [`notificacao::RecusaDeNotificar`], pelo nome. `Ok` quer dizer que o pedido
+/// foi entregue ao sistema, e não que a notificação apareceu: o plugin não
+/// devolve isso.
+#[tauri::command]
+fn notificar_no_sistema(
+    app: AppHandle,
+    motivo: notificacao::Motivo,
+    titulo: String,
+    corpo: String,
+    lugar: Option<serde_json::Value>,
+) -> Result<(), notificacao::RecusaDeNotificar> {
+    drop(lugar);
+    let ligadas = preferencias(&app)
+        .as_ref()
+        .is_some_and(seele_ffi::preferences::Preferences::notificacoes_do_sistema);
+    let pedido = notificacao::pedir(
+        ligadas,
+        notificacao::janela_na_frente(&app),
+        &titulo,
+        &corpo,
+        |titulo, corpo| notificacao::emitir(&app, titulo, corpo),
+    );
+    match &pedido {
+        Ok(()) => tracing::info!(?motivo, "notificação entregue ao sistema"),
+        Err(recusa) => tracing::info!(?motivo, ?recusa, "notificação não saiu"),
+    }
+    pedido
+}
+
 /// O que a tecla de falar fora da janela precisa saber da voz: se a sessão com
 /// a voz desta máquina está numa sala, e se o microfone abre por tecla.
 ///
@@ -16296,6 +16395,9 @@ fn main() {
             escolher_tecla_de_falar,
             estado_da_tecla_global,
             ligar_tecla_global,
+            estado_das_notificacoes,
+            ligar_notificacoes,
+            notificar_no_sistema,
             escolher_microfone,
             saidas,
             saida_escolhida,

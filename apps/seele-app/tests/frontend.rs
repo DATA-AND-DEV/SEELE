@@ -30283,3 +30283,436 @@ fn a_camera_esta_registrada_chamada_e_ligada_a_tela() {
         "o controle da câmera voltou a aparecer no celular, onde o pedido é recusado"
     );
 }
+
+// ---------------------------------------------------------------------------
+// A notificação do sistema: `ui/notificacao-do-sistema.js`
+// ---------------------------------------------------------------------------
+//
+// O que se confere é a **regra**: quando um pedido chega ao sistema e quando
+// não chega, com um `invoke` de mentira que anota o que foi pedido. Que a
+// notificação apareça na tela não é coisa de teste, e não está aqui: no app o
+// plugin nem devolve isso (`src/notificacao.rs`).
+
+/// O mundo da notificação: um `document` com a visibilidade e o foco que o
+/// teste escolhe, um relógio de mentira, e o `invoke` que anota.
+const NOTIFICACAO_NODE: &str = r##"
+const montarNotificacao = ({ retrato = { ligadas: true, permissao: "NaoSeSabe" }, visivel = "visible", foco = false, sessoes = [], recusa = null } = {}) => {
+  const pedidos = [], infos = [], ouvintes = {};
+  const mundo = { visivel, foco, retrato, recusa, sessoes, agora: 1700000000000 };
+  class Relogio extends Date { static now() { return mundo.agora; } }
+  const sandbox = {
+    console: { info: (...a) => infos.push(a.join(" ")), warn() {}, log: console.log },
+    Date: Relogio, Promise, Object, Map, Set, Array, String, Boolean, Number, JSON, Math, Error,
+    document: { get visibilityState() { return mundo.visivel; }, hasFocus: () => mundo.foco },
+    invoke: async (cmd, args) => {
+      pedidos.push({ cmd, args });
+      if (cmd === "estado_das_notificacoes") return mundo.retrato;
+      if (cmd === "sessoes") return mundo.sessoes;
+      if (cmd === "notificar_no_sistema" && mundo.recusa) throw mundo.recusa;
+      if (cmd === "ligar_notificacoes") return { ligadas: args.ligadas, permissao: mundo.retrato.permissao };
+      return null;
+    },
+    ouvirNaJanela: (nome, f) => { ouvintes[nome] = f; return Promise.resolve(() => {}); },
+  };
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(ler("frases.js"), ctx, { filename: "frases.js" });
+  vm.runInContext(ler("notificacao-do-sistema.js"), ctx, { filename: "notificacao-do-sistema.js" });
+  const n = vm.runInContext("notificacaoDoSistema", ctx);
+  return { n, ctx, mundo, pedidos, infos, ouvintes, saidas: () => pedidos.filter((p) => p.cmd === "notificar_no_sistema") };
+};
+const mencaoEm = (sessao) => ({ sessao, geracao: 1, vista: false, evento: { NoticeRaised: { notice: { severity: "Info", reason: "Mentioned", operator_text: null } } } });
+"##;
+
+fn rodar_notificacao(titulo: &str, corpo: &str) {
+    rodar_node(titulo, &format!("{NOTIFICACAO_NODE}\n{corpo}"));
+}
+
+/// **A regra, pura**: cada motivo de não sair, pelo nome e na ordem escrita no
+/// topo de `notificacao-do-sistema.js`, e o único caso em que sai.
+#[test]
+fn a_regra_da_notificacao_do_sistema_recusa_pelo_nome_e_na_ordem() {
+    rodar_notificacao(
+        "a regra da notificação do sistema",
+        r##"
+const { n } = montarNotificacao();
+const agora = 5000;
+const pode = { ligadas: true, permissao: "NaoSeSabe", naFrente: false, agora, ditas: new Map() };
+const fato = { motivo: "mencao", chaves: ["a"], propria: false };
+const d = (estado, acontecimento) => n.decidir({ ...pode, ...estado }, { ...fato, ...acontecimento });
+
+const sai = d({}, {});
+confere("com tudo a favor não saiu: " + JSON.stringify(sai), sai.notificar === true && sai.novas.length === 1);
+
+// Um por vez: cada porta fecha sozinha, com o nome dela.
+const portas = [
+  [{}, { motivo: "mensagem" }, "motivo-desconhecido"],
+  [{}, { motivo: "toString" }, "motivo-desconhecido"],
+  [{}, { chaves: [] }, "sem-chave"],
+  [{}, { propria: true }, "propria"],
+  [{ ligadas: false }, {}, "desligadas"],
+  [{ ligadas: undefined }, {}, "desligadas"],
+  [{ ligadas: "sim" }, {}, "desligadas"],
+  [{ permissao: "Negada" }, {}, "sem-permissao"],
+  [{ permissao: "PorPedir" }, {}, "sem-permissao"],
+  [{ permissao: "NaoHa" }, {}, "sem-permissao"],
+  [{ permissao: undefined }, {}, "sem-permissao"],
+  [{ naFrente: true }, {}, "janela-na-frente"],
+  [{ naFrente: undefined }, {}, "janela-na-frente"],
+  [{ ditas: new Map([["a", Infinity]]) }, {}, "repetida"],
+  [{ ditas: new Map([["a", agora + 1]]) }, {}, "repetida"],
+];
+for (const [estado, acontecimento, porque] of portas) {
+  const r = d(estado, acontecimento);
+  confere(JSON.stringify([estado, acontecimento]) + " devia dar " + porque + " e deu " + JSON.stringify(r), r.notificar === false && r.porque === porque);
+}
+confere("a permissão concedida do navegador não deixou sair", d({ permissao: "Concedida" }, {}).notificar === true);
+
+// A ordem: o que a própria pessoa fez vem antes de tudo o que é do aparelho, e
+// a preferência desligada antes da permissão e da janela.
+confere("própria + desligada não disse «propria»", d({ ligadas: false }, { propria: true }).porque === "propria");
+confere("desligada + negada + na frente não disse «desligadas»", d({ ligadas: false, permissao: "Negada", naFrente: true }, {}).porque === "desligadas");
+confere("negada + na frente não disse «sem-permissao»", d({ permissao: "Negada", naFrente: true }, {}).porque === "sem-permissao");
+confere("na frente + repetida não disse «janela-na-frente»", d({ naFrente: true, ditas: new Map([["a", Infinity]]) }, {}).porque === "janela-na-frente");
+
+// A validade: vencida, a chave é nova de novo; e quem não deu validade lembra para sempre.
+confere("a chave vencida continuou calando", d({ ditas: new Map([["a", agora]]) }, {}).notificar === true);
+confere("a validade não foi somada ao agora", d({}, { validadeMs: 30000 }).lembrarAte === agora + 30000);
+confere("sem validade não é para sempre", d({}, {}).lembrarAte === Infinity);
+
+// Várias chaves (quem bate à porta): só é repetição se todas já foram ditas.
+const duas = d({ ditas: new Map([["a", Infinity]]) }, { motivo: "porta", chaves: ["a", "b"] });
+confere("uma batida nova entre as velhas não saiu: " + JSON.stringify(duas), duas.notificar === true && duas.novas.length === 1 && duas.novas[0] === "b");
+confere("todas velhas e saiu", d({ ditas: new Map([["a", Infinity], ["b", Infinity]]) }, { motivo: "porta", chaves: ["a", "b"] }).porque === "repetida");
+"##,
+    );
+}
+
+/// Com a janela na frente o aviso de dentro basta: nada chega ao sistema, e nem
+/// uma volta de IPC é gasta. Sem foco, ou escondida, chega.
+#[test]
+fn a_notificacao_so_sai_com_a_janela_sem_foco_ou_escondida() {
+    rodar_notificacao(
+        "a janela na frente",
+        r##"
+// À vista e com o foco: nada, e nenhum comando.
+const frente = montarNotificacao({ visivel: "visible", foco: true, sessoes: [{ carimbo: { sessao: 7 }, nome: "Casa" }] });
+const r0 = await frente.n.aoEventoDeSessao(mencaoEm(7));
+confere("com a janela na frente saiu notificação: " + JSON.stringify(frente.pedidos), frente.saidas().length === 0 && r0.porque === "janela-na-frente");
+confere("com a janela na frente gastou IPC: " + JSON.stringify(frente.pedidos), frente.pedidos.length === 0);
+
+// À vista, sem o foco (outra janela por cima): sai.
+const atras = montarNotificacao({ visivel: "visible", foco: false, sessoes: [{ carimbo: { sessao: 7 }, nome: "Casa" }] });
+const r1 = await atras.n.aoEventoDeSessao(mencaoEm(7));
+confere("sem foco não saiu: " + JSON.stringify(r1), atras.saidas().length === 1 && r1.notificou === true);
+
+// Escondida (minimizada, outra aba), mesmo que `hasFocus` diga que sim: sai.
+const escondida = montarNotificacao({ visivel: "hidden", foco: true });
+await escondida.n.aoEventoDeSessao(mencaoEm(7));
+confere("escondida não saiu", escondida.saidas().length === 1);
+
+// A janela veio à frente enquanto o estado era lido: a segunda leitura segura.
+const veio = montarNotificacao({ visivel: "visible", foco: false });
+const original = veio.ctx.invoke;
+veio.ctx.invoke = async (cmd, args) => { const r = await original(cmd, args); if (cmd === "estado_das_notificacoes") veio.mundo.foco = true; return r; };
+const r2 = await veio.n.aoEventoDeSessao(mencaoEm(7));
+confere("a janela veio à frente no meio e a notificação saiu: " + JSON.stringify(r2), veio.saidas().length === 0 && r2.porque === "janela-na-frente");
+
+// Um `document` que estoura ao ser lido: «está na frente», e nada sai.
+const quebrado = montarNotificacao();
+Object.defineProperty(quebrado.ctx.document, "visibilityState", { get() { throw new Error("sem documento"); } });
+confere("sem conseguir ler a janela, respondeu que não está na frente", quebrado.n.janelaNaFrente() === true);
+"##,
+    );
+}
+
+/// A preferência desligada e a permissão que não deixa: nada chega ao sistema.
+#[test]
+fn a_preferencia_desligada_e_a_permissao_negada_calam_a_notificacao() {
+    rodar_notificacao(
+        "a preferência e a permissão",
+        r##"
+for (const [retrato, porque] of [
+  [{ ligadas: false, permissao: "NaoSeSabe" }, "desligadas"],
+  [{ ligadas: false, permissao: "Concedida" }, "desligadas"],
+  [{ ligadas: true, permissao: "Negada" }, "sem-permissao"],
+  [{ ligadas: true, permissao: "PorPedir" }, "sem-permissao"],
+  [{ ligadas: true, permissao: "NaoHa" }, "sem-permissao"],
+  [null, "desligadas"],
+]) {
+  const m = montarNotificacao({ retrato });
+  const r = await m.n.aoEventoDeSessao(mencaoEm(3));
+  confere(JSON.stringify(retrato) + " deixou sair: " + JSON.stringify(m.saidas()), m.saidas().length === 0);
+  confere(JSON.stringify(retrato) + " devia dizer " + porque + " e disse " + JSON.stringify(r), r.notificou === false && r.porque === porque);
+  confere(JSON.stringify(retrato) + ": não contou o motivo: " + JSON.stringify(m.n.contas), m.n.contas.porque[porque] === 1);
+}
+// Sem permissão não é silêncio de todo dia: fica uma linha no console, uma vez.
+const negada = montarNotificacao({ retrato: { ligadas: true, permissao: "Negada" } });
+await negada.n.aoEventoDeSessao(mencaoEm(3));
+negada.mundo.agora += 60000;
+await negada.n.aoEventoDeSessao(mencaoEm(3));
+confere("a permissão negada não foi dita no console uma vez: " + JSON.stringify(negada.infos), negada.infos.length === 1 && negada.infos[0].includes("sem-permissao"));
+// Desligada é o estado de quase todo mundo: contada, e sem linha no console.
+const desligada = montarNotificacao({ retrato: { ligadas: false, permissao: "NaoSeSabe" } });
+await desligada.n.aoEventoDeSessao(mencaoEm(3));
+confere("a preferência desligada encheu o console: " + JSON.stringify(desligada.infos), desligada.infos.length === 0);
+// O comando do estado que falha: nada sai, e não estoura em quem chamou.
+const semEstado = montarNotificacao();
+semEstado.ctx.invoke = async () => { throw "IpcCaiu"; };
+const r = await semEstado.n.aoEventoDeSessao(mencaoEm(3));
+confere("sem conseguir ler o estado, não disse que falhou: " + JSON.stringify(r), r.notificou === false && r.porque === "falhou");
+"##,
+    );
+}
+
+/// A mesma notícia não sai duas vezes: a menção no mesmo servidor dentro de
+/// meio minuto, a mesma batida a cada leitura da porta, o mesmo toque.
+#[test]
+fn a_mesma_notificacao_nao_se_repete() {
+    rodar_notificacao(
+        "a repetição",
+        r##"
+// A menção: outra no mesmo servidor dentro do silêncio é a mesma notícia.
+const m = montarNotificacao({ sessoes: [{ carimbo: { sessao: 1 }, nome: "Casa" }, { carimbo: { sessao: 2 }, nome: "Trabalho" }] });
+await m.n.aoEventoDeSessao(mencaoEm(1));
+m.mundo.agora += 5000;
+const repetida = await m.n.aoEventoDeSessao(mencaoEm(1));
+confere("duas menções em 5 s deram " + m.saidas().length + " notificações", m.saidas().length === 1 && repetida.porque === "repetida");
+// Em outro servidor é outra notícia.
+await m.n.aoEventoDeSessao(mencaoEm(2));
+confere("a menção de outro servidor foi calada pela do primeiro", m.saidas().length === 2);
+// Passado o silêncio, a do primeiro sai de novo.
+m.mundo.agora += m.n.SILENCIO_DA_MENCAO_MS;
+await m.n.aoEventoDeSessao(mencaoEm(1));
+confere("depois do silêncio a menção não saiu de novo", m.saidas().length === 3);
+// Dois avisos da mesma menção que se cruzam na espera do IPC: uma só.
+const cruzadas = montarNotificacao();
+await Promise.all([cruzadas.n.aoEventoDeSessao(mencaoEm(9)), cruzadas.n.aoEventoDeSessao(mencaoEm(9))]);
+confere("duas menções cruzadas deram " + cruzadas.saidas().length, cruzadas.saidas().length === 1);
+
+// A porta é lida a cada cinco segundos: a mesma batida notifica uma vez.
+const p = montarNotificacao();
+const A = "casa#1#ab12#1700", B = "casa#1#cd34#1705";
+for (let i = 0; i < 4; i += 1) { await p.n.notarPorta([A], "Casa"); p.mundo.agora += 5000; }
+confere("a mesma batida em quatro leituras deu " + p.saidas().length, p.saidas().length === 1);
+// Uma batida nova ao lado da velha: outra notificação, com a conta de quem espera.
+await p.n.notarPorta([A, B], "Casa");
+confere("a batida nova não notificou", p.saidas().length === 2);
+confere("a conta não é de quem espera: " + p.saidas()[1].args.titulo, p.saidas()[1].args.titulo === "2 pessoas estão batendo à porta");
+// Ninguém esperando: nada, e nenhum comando.
+const antes = p.pedidos.length;
+await p.n.notarPorta([], "Casa");
+confere("a porta vazia fez pedido", p.pedidos.length === antes);
+
+// O toque: a mesma pessoa tocando de novo (outro candidato) é o mesmo toque.
+const t = montarNotificacao();
+const toque = { evento: "Tocou", quem: "ff00", apelido: "rafa", codigo: "K9P2", nome_na_agenda: null, com_som: true };
+await t.n.notarToque(toque);
+await t.n.notarToque(toque);
+confere("o mesmo toque duas vezes deu " + t.saidas().length, t.saidas().length === 1);
+// Parou, e ligou de novo: é outra ligação.
+t.n.notarToque({ evento: "Parou", quem: "ff00", desfecho: "ninguem_atendeu" });
+await t.n.notarToque(toque);
+confere("a ligação seguinte da mesma pessoa não notificou", t.saidas().length === 2);
+confere("o Parou notificou", t.saidas().every((s) => s.args.titulo === "Ligação chegando"));
+
+// **O que a janela avisou por dentro está dito**: a batida que chegou com a
+// janela na frente não vira notificação cinco segundos depois de a pessoa sair.
+const visto = montarNotificacao({ visivel: "visible", foco: true });
+await visto.n.notarPorta([A], "Casa");
+visto.mundo.foco = false;
+visto.mundo.agora += 5000;
+const depois = await visto.n.notarPorta([A], "Casa");
+confere("a batida já avisada na janela notificou depois: " + JSON.stringify(depois), visto.saidas().length === 0 && depois.porque === "repetida");
+// E a que chega depois, com a janela fora da frente, notifica.
+await visto.n.notarPorta([A, B], "Casa");
+confere("a batida que chegou com a janela atrás não notificou", visto.saidas().length === 1);
+
+// A notificação que o sistema não aceitou não fica lembrada: a próxima sai.
+const falha = montarNotificacao({ recusa: "NaoSaiu" });
+const f1 = await falha.n.notarPorta([A], "Casa");
+confere("a recusa do comando não voltou com o nome: " + JSON.stringify(f1), f1.notificou === false && f1.porque === "NaoSaiu");
+confere("a recusa do comando não foi dita no console: " + JSON.stringify(falha.infos), falha.infos.length === 1 && falha.infos[0].includes("NaoSaiu"));
+falha.mundo.recusa = null;
+const f2 = await falha.n.notarPorta([A], "Casa");
+confere("depois de uma falha a mesma batida ficou calada", f2.notificou === true);
+"##,
+    );
+}
+
+/// Nunca para o que a própria pessoa fez: a ligação que ela mesma faz passa
+/// pela regra como `propria`, e não chega ao sistema.
+#[test]
+fn a_notificacao_nunca_e_do_que_a_propria_pessoa_fez() {
+    rodar_notificacao(
+        "o que a própria pessoa fez",
+        r##"
+const m = montarNotificacao();
+// Ela liga: a fase é `chamando`.
+const minha = await m.n.notarFase("livre", { estado: "chamando", id: "c1", apelido: "ana", papel: "quem-liga" });
+confere("a ligação que a própria pessoa fez notificou: " + JSON.stringify(m.pedidos), m.saidas().length === 0 && minha.porque === "propria");
+confere("a própria ligação gastou IPC", m.pedidos.length === 0);
+// Alguém liga para ela: a fase é `tocando`.
+const dela = await m.n.notarFase("livre", { estado: "tocando", id: "c2", apelido: "ana", papel: "quem-recebe" });
+confere("a ligação que chega não notificou: " + JSON.stringify(dela), m.saidas().length === 1 && dela.notificou === true);
+// É a transição que avisa: a mesma fase de novo, e as outras fases, não.
+confere("a fase repetida notificou", m.n.notarFase("tocando", { estado: "tocando", id: "c2" }) === null);
+for (const fase of ["procurando", "conectando", "dentro", "encerrada", "livre"]) {
+  confere("a fase " + fase + " notificou", m.n.notarFase("tocando", { estado: fase, id: "c2" }) === null);
+}
+confere("as outras fases fizeram pedido", m.saidas().length === 1);
+// O que não é menção não notifica: mensagem comum de canal, telemetria, outro aviso.
+for (const evento of ["MessagesChanged", "RosterChanged", "TelemetryChanged", { NoticeRaised: { notice: { reason: "RateLimited" } } }, { Ended: { reason: "Kicked" } }, null]) {
+  confere(JSON.stringify(evento) + " notificou", m.n.aoEventoDeSessao({ sessao: 1, geracao: 1, evento }) === null);
+}
+confere("um evento que não é menção fez pedido", m.saidas().length === 1);
+"##,
+    );
+}
+
+/// O texto que vai ao sistema: quem e onde, e nunca o corpo de uma mensagem.
+#[test]
+fn o_texto_da_notificacao_diz_quem_e_onde_e_nunca_o_corpo() {
+    rodar_notificacao(
+        "o texto da notificação",
+        r##"
+const m = montarNotificacao({ sessoes: [{ carimbo: { sessao: 4 }, nome: "Casa do Rafa" }, { carimbo: { sessao: 5 }, nome: null }] });
+// A menção: o servidor, pela trilha. O evento não traz o corpo, e o texto não o inventa.
+await m.n.aoEventoDeSessao(mencaoEm(4));
+const mencao = m.saidas()[0].args;
+confere("a menção: " + JSON.stringify(mencao), mencao.motivo === "Mencao" && mencao.titulo === "Você foi chamado" && mencao.corpo === "em Casa do Rafa" && mencao.lugar.sessao === 4);
+// Sem nome de servidor, a frase não fica pela metade.
+await m.n.aoEventoDeSessao(mencaoEm(5));
+confere("a menção sem nome: " + m.saidas()[1].args.corpo, m.saidas()[1].args.corpo === "numa conversa do SEELE");
+// Uma ponte que não carimba (a de antes da 0.17, ou uma bancada): sem sessão, sem lugar.
+await m.n.aoEventoDeSessao({ NoticeRaised: { notice: { reason: "Mentioned" } } });
+confere("a menção sem carimbo: " + JSON.stringify(m.saidas()[2].args), m.saidas()[2].args.corpo === "numa conversa do SEELE" && m.saidas()[2].args.lugar === null);
+
+// A porta: uma pessoa, e o servidor.
+await m.n.notarPorta(["k1"], "Casa do Rafa");
+const porta = m.saidas()[3].args;
+confere("a porta: " + JSON.stringify(porta), porta.motivo === "Porta" && porta.titulo === "Alguém está batendo à porta" && porta.corpo === "do servidor Casa do Rafa");
+await m.n.notarPorta(["k2"], null);
+confere("a porta sem nome: " + m.saidas()[4].args.corpo, m.saidas()[4].args.corpo === "do servidor que você hospeda");
+
+// A ligação: o nome que EU dei na agenda; sem ele, o apelido entre aspas, que é o que a pessoa diz.
+await m.n.notarToque({ evento: "Tocou", quem: "a1", apelido: "rafa", codigo: "K9P2-CSM7", nome_na_agenda: "Rafael" });
+await m.n.notarToque({ evento: "Tocou", quem: "b2", apelido: "rafa", codigo: "K9P2-CSM7", nome_na_agenda: null });
+await m.n.notarFase("livre", { estado: "tocando", id: "x" });
+const [agenda, apelido, ninguem] = m.saidas().slice(5).map((s) => s.args);
+confere("a ligação da agenda: " + JSON.stringify(agenda), agenda.motivo === "Ligacao" && agenda.titulo === "Ligação chegando" && agenda.corpo === "Rafael está ligando");
+confere("a ligação sem agenda: " + apelido.corpo, apelido.corpo === "«rafa» está ligando");
+confere("a ligação sem nome: " + ninguem.corpo, ninguem.corpo === "Alguém está ligando para você");
+// O código de quem liga é a prova, e fica na janela: não vai à tela bloqueada.
+confere("o código de quem liga foi à notificação", !m.saidas().some((s) => JSON.stringify(s.args).includes("K9P2")));
+// Todo motivo da tabela tem frase, e nenhum outro.
+const comFrase = Object.keys(vm.runInContext("FRASES_DA_NOTIFICACAO.texto", m.ctx)).sort();
+confere("os motivos e as frases discordam: " + comFrase, JSON.stringify(comFrase) === JSON.stringify(Object.keys(m.n.MOTIVOS).sort()));
+"##,
+    );
+}
+
+/// Os motivos da casca são os do Rust, e a permissão que o Rust responde tem
+/// frase: um nome novo de um lado só seria o produto sabendo e não contando.
+#[test]
+fn os_motivos_e_as_permissoes_da_notificacao_sao_os_do_rust() {
+    let rust = read("src/notificacao.rs");
+    let modulo = read("ui/notificacao-do-sistema.js");
+    let frases = read("ui/frases.js");
+    for motivo in variants_of(&rust, "Motivo") {
+        assert!(
+            modulo.contains(&format!(": \"{motivo}\"")),
+            "o motivo `{motivo}` do Rust não está em `MOTIVOS`: a casca nunca o pede"
+        );
+    }
+    let tabela = modulo
+        .split("const MOTIVOS = Object.freeze({")
+        .nth(1)
+        .and_then(|resto| resto.split("});").next())
+        .unwrap_or_default();
+    assert_eq!(
+        tabela.matches(": \"").count(),
+        variants_of(&rust, "Motivo").len(),
+        "`MOTIVOS` tem um motivo que o Rust não desserializa: o comando o recusaria"
+    );
+    let estados = frases
+        .split("const FRASES_DA_NOTIFICACAO")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  estado: Object.freeze({").nth(1))
+        .and_then(|resto| resto.split("\n  }),").next())
+        .unwrap_or_default();
+    for permissao in variants_of(&rust, "Permissao") {
+        assert!(
+            estados.contains(&format!("\n    {permissao}: ")),
+            "a permissão `{permissao}` do Rust não tem frase em `FRASES_DA_NOTIFICACAO.estado`"
+        );
+    }
+    // As que só a página de navegador responde (`ponte-web.js`).
+    let ponte = read("ui/ponte-web.js");
+    for permissao in ["Concedida", "Negada", "PorPedir", "NaoHa"] {
+        assert!(
+            ponte.contains(&format!("\"{permissao}\"")),
+            "a ponte deixou de responder `{permissao}`"
+        );
+        assert!(
+            estados.contains(&format!("\n    {permissao}: ")),
+            "a permissão `{permissao}` da ponte não tem frase"
+        );
+    }
+}
+
+/// **A única porta do plugin é o comando, e ele confere antes de abrir.**
+///
+/// As duas conferências do Rust (`notificacao::conferir`) têm teste de unidade
+/// em `src/notificacao.rs`. O que um teste de unidade não vê é a fiação: se o
+/// comando deixa de ler a preferência do disco, ou passa a responder «a janela
+/// não está na frente» sem perguntar ao sistema, as funções continuam certas e
+/// o produto notifica com a opção desligada. `tests/permissoes.rs` segura o
+/// outro lado, que a página não alcança o plugin sem passar por aqui.
+#[test]
+fn o_comando_de_notificar_confere_a_preferencia_e_a_janela_antes_do_plugin() {
+    let main = without_comments(&read("src/main.rs"));
+    let comando = main
+        .split("fn notificar_no_sistema(")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_else(|| panic!("o comando `notificar_no_sistema` saiu do main.rs"));
+    let compacto: String = comando.split_whitespace().collect();
+    assert!(
+        compacto.contains("Preferences::notificacoes_do_sistema"),
+        "o comando não lê a preferência do disco: com a opção desligada ele notificaria"
+    );
+    assert!(
+        compacto.contains(
+            "notificacao::pedir(ligadas,notificacao::janela_na_frente(&app),&titulo,&corpo,|titulo,corpo|notificacao::emitir(&app,titulo,corpo),)"
+        ),
+        "o comando não passa a preferência e o foco da janela a `notificacao::pedir`, ou emite \
+         por fora dele:\n{comando}"
+    );
+    assert_eq!(
+        main.matches("notificacao::emitir(").count(),
+        1,
+        "`notificacao::emitir` é chamado fora do comando: uma notificação sai sem as conferências"
+    );
+    assert_eq!(
+        main.matches("tauri_plugin_notification").count(),
+        1,
+        "o `main.rs` fala com o plugin de notificação por fora de `notificacao.rs`"
+    );
+    // E o módulo entrega ao plugin num lugar só.
+    let modulo = without_comments(&read("src/notificacao.rs"));
+    assert_eq!(
+        modulo.matches(".show()").count(),
+        1,
+        "`notificacao.rs` mostra notificação em mais de um lugar"
+    );
+    // A janela é perguntada ao sistema, e não à página.
+    let foco = modulo
+        .split("fn janela_na_frente")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default();
+    assert!(
+        foco.contains("is_focused()"),
+        "`janela_na_frente` deixou de perguntar o foco ao sistema"
+    );
+}

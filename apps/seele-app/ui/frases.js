@@ -2317,6 +2317,64 @@ const FRASES_DA_TECLA_GLOBAL = Object.freeze({
   linhaFalhou: "fora da janela não vale: veja ATALHOS",
 });
 
+/**
+ * A notificação do sistema (`notificacao-do-sistema.js`, `src/notificacao.rs`).
+ *
+ * **`texto` é o que aparece fora do SEELE**, inclusive na tela bloqueada, e por
+ * isso diz só **o que foi e onde**: o nome do servidor, ou quem liga. Nunca o
+ * corpo de uma mensagem, que a pessoa não escolheu mostrar a quem estiver
+ * olhando a tela dela. A menção não diz quem chamou nem em que canal porque o
+ * aviso que o core levanta (`Mentioned`) não carrega nenhum dos dois.
+ *
+ * O nome do servidor e o apelido de quem liga são de outra pessoa: entram com
+ * teto e sem quebra de linha no Rust (`notificacao::limpar`) e na ponte.
+ *
+ * **`estado` tem uma frase por permissão** (`Permissao` no Rust, mais as que só
+ * a página de navegador sabe ler). `NaoSeSabe` é a do app, e é a honesta: o
+ * plugin não deixa ler o que o sistema decidiu, então a frase diz onde olhar em
+ * vez de afirmar «permitidas». Nenhuma delas diz que uma notificação saiu.
+ */
+const FRASES_DA_NOTIFICACAO = Object.freeze({
+  texto: Object.freeze({
+    mencao: ({ servidor } = {}) => ({
+      titulo: "Você foi chamado",
+      corpo: servidor ? `em ${servidor}` : "numa conversa do SEELE",
+    }),
+    porta: ({ quantos = 1, servidor } = {}) => ({
+      titulo: quantos > 1 ? `${quantos} pessoas estão batendo à porta` : "Alguém está batendo à porta",
+      corpo: servidor ? `do servidor ${servidor}` : "do servidor que você hospeda",
+    }),
+    ligacao: ({ nome, apelido } = {}) => {
+      const quem = nome || (apelido ? `«${apelido}»` : null);
+      return { titulo: "Ligação chegando", corpo: quem ? `${quem} está ligando` : "Alguém está ligando para você" };
+    },
+  }),
+  /** O caminho nos ajustes do sistema, pelo nome que `plataforma` responde. */
+  caminho: Object.freeze({
+    macos: "Ajustes do Sistema › Notificações › SEELE",
+    windows: "Configurações › Sistema › Notificações › SEELE",
+    outro: "os ajustes de notificação do sistema",
+  }),
+  estado: Object.freeze({
+    desligadas: () => "Desligadas: o SEELE só avisa dentro da janela.",
+    NaoSeSabe: (caminho) =>
+      `Ligadas. O SEELE não consegue ler daqui se o sistema deixa: se nenhuma notificação aparecer, veja em ${caminho}.`,
+    Concedida: () => "Ligadas. O navegador deixa esta página notificar.",
+    Negada: () =>
+      "O NAVEGADOR NÃO DEIXA ESTA PÁGINA NOTIFICAR, e nada vai aparecer. " +
+      "Libere as notificações deste site nas permissões do navegador (o cadeado ao lado do endereço) e ligue de novo.",
+    PorPedir: () =>
+      "O navegador ainda não respondeu se esta página pode notificar, e nada vai aparecer. Desligue e ligue de novo para ele perguntar.",
+    NaoHa: () =>
+      "Este navegador não tem notificações para esta página. No iPhone e no iPad, e no Chrome do Android, o SEELE só avisa com a página aberta.",
+  }),
+  /** A permissão que esta lista não conhecer: dita, e não calada. */
+  desconhecido: "Não sei dizer se o sistema deixa o SEELE notificar.",
+  naoGravou: "Não consegui gravar a escolha neste computador. As notificações continuam como estavam.",
+  /** A confirmação que a página de navegador mostra no gesto de ligar: é ela que prova que o navegador notifica. */
+  ligadasNaPagina: Object.freeze({ titulo: "Notificações do SEELE ligadas", corpo: "É assim que o SEELE avisa com esta página fora da frente." }),
+});
+
 const FRASES_AVISOS_DO_CELULAR = Object.freeze({
   faixa: (n) => `${n} ${n === 1 ? "AVISO" : "AVISOS"}`,
   abrir: "ABRIR",
