@@ -1784,7 +1784,10 @@ print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || csp_or
         aviso "o sinal conferido foi $csp_url, e não o de produção (https://$PONTO_DO_PORTAO/sinal/1)." \
             "O corpo do release vai dizer que o sinal de produção não foi conferido."
     fi
-    csp_dir=$(mktemp -d -t seele-sinal) || morrer "sinal: sem pasta temporária."
+    # O molde vai inteiro e com os `XXXXXX`, como o do TEMPORARIO lá em cima:
+    # `mktemp -d -t nome` é a forma do BSD, e o `mktemp` do GNU (Linux, e o
+    # `sh.exe` do Git no Windows) responde «too few X's in template» e sai com 1.
+    csp_dir=$(mktemp -d "${TMPDIR:-/tmp}/seele-sinal.XXXXXX") || morrer "sinal: sem pasta temporária."
     csp_corpo=$(cargo run --manifest-path "$RAIZ/Cargo.toml" -q -p seele-encontro --example sondar -- --corpo-do-sinal) \
         || { rm -rf "$csp_dir"; morrer "sinal: o sondar não montou o corpo do POST."; }
     # Sem --location: o sinal responde ali mesmo, e um redirecionamento é um proxy errado.
@@ -2601,7 +2604,8 @@ print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || pda_or
     # basta: o Pages devolve o index.html da SPA com 200 para qualquer caminho, um domínio estacionado também responde 200, e um
     # catálogo copiado sem a assinatura certa responde 200. Cada página tem a marca do que ela é; o catálogo e as revogações são
     # conferidos pela assinatura, com o código e a chave do app (crates/seele-sessao/examples/conferir_catalogo.rs).
-    pda_dir=$(mktemp -d -t seele-preflight) || morrer "preflight de ativação: sem pasta temporária."
+    # Molde inteiro e com os `XXXXXX`: `mktemp -d -t nome` só existe assim no BSD (veja em conferir_sinal_do_ponto).
+    pda_dir=$(mktemp -d "${TMPDIR:-/tmp}/seele-preflight.XXXXXX") || morrer "preflight de ativação: sem pasta temporária."
     pda_baixar() { # url arquivo [--sem-redirecionar]
         pda_seguir=--location
         [ "${3:-}" = "--sem-redirecionar" ] && pda_seguir=""

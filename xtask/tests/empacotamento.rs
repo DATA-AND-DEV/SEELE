@@ -339,6 +339,121 @@ fn o_orquestrador_nao_pode_ganhar_bom() {
     );
 }
 
+/// O que há de errado no `mktemp` desta linha, se houver.
+///
+/// Duas formas reprovam, e são as duas que só o `mktemp` do BSD aceita:
+///
+/// - **`-t`**: no BSD é «prefixo, dentro de `$TMPDIR`»; no GNU é «molde, dentro de
+///   `$TMPDIR`», e molde sem `XXXXXX` sai com «too few X's in template»;
+/// - **molde sem `XXXXXX`**: o BSD cria a pasta com o nome literal, o GNU recusa.
+///
+/// Passam o `mktemp` sem molde nenhum (`mktemp -d`) e o molde inteiro com os
+/// seis `X` (`mktemp -d "${TMPDIR:-/tmp}/nome.XXXXXX"`), que os dois entendem
+/// igual.
+fn defeito_do_mktemp(linha: &str) -> Option<&'static str> {
+    let mut palavras = linha.split_whitespace();
+    // `$(mktemp`, `"$(mktemp`, `mktemp`: a palavra termina no nome do comando.
+    palavras.find(|palavra| palavra.ends_with("mktemp"))?;
+    for palavra in palavras {
+        // O comando acabou: o que vem depois é de outro.
+        if matches!(palavra, "||" | "&&" | "|" | ";") {
+            break;
+        }
+        let argumento = palavra.trim_end_matches(')').trim_end_matches(';');
+        if argumento == "-t" {
+            return Some("usa «-t», que no mktemp do GNU pede um molde com XXXXXX");
+        }
+        if argumento.starts_with('-') || argumento.starts_with("2>") {
+            continue;
+        }
+        if !argumento.contains("XXXXXX") {
+            return Some("dá um molde sem «XXXXXX», que o mktemp do GNU recusa");
+        }
+        if palavra.ends_with(')') {
+            break;
+        }
+    }
+    None
+}
+
+#[test]
+fn nenhum_script_usa_o_mktemp_que_so_o_bsd_entende() {
+    // `mktemp -d -t seele-sinal` criava a pasta no macOS e, no Linux e no `sh.exe`
+    // do Git no Windows, saía com «mktemp: too few X's in template» — e com ele
+    // 64 dos testes deste arquivo, que rodam o `publicar.sh` de verdade, em
+    // 12/11/2026. No Mac de quem publica nada acusava: os 147 passavam.
+    //
+    // Primeiro a régua contra as duas formas de verdade, a que quebrou e a que
+    // entrou no lugar: uma régua que não reprova a linha de 12/11 não guarda nada.
+    for (linha, passa) in [
+        (
+            r#"csp_dir=$(mktemp -d -t seele-sinal) || morrer "x""#,
+            false,
+        ),
+        (
+            r#"pda_dir=$(mktemp -d -t seele-preflight) || morrer "x""#,
+            false,
+        ),
+        ("x=$(mktemp -t seele.XXXXXX)", false),
+        ("x=$(mktemp -d /tmp/seele-sinal)", false),
+        (
+            r#"csp_dir=$(mktemp -d "${TMPDIR:-/tmp}/seele-sinal.XXXXXX") || morrer "x""#,
+            true,
+        ),
+        (
+            r#"TEMPORARIO=$(mktemp -d "${TMPDIR:-/tmp}/seele-publicar.XXXXXX" 2>/dev/null)"#,
+            true,
+        ),
+        ("TRABALHO=$(mktemp -d)", true),
+        ("printf 'sem o comando nesta linha'", true),
+    ] {
+        assert_eq!(
+            defeito_do_mktemp(linha).is_none(),
+            passa,
+            "a régua do mktemp errou nesta linha ({:?}):\n  {linha}",
+            defeito_do_mktemp(linha)
+        );
+    }
+
+    // Todo `.sh` de `empacotar/`, achado e não listado, e o instalador que o
+    // usuário de Linux roda. Um script novo entra na conferência por existir.
+    let mut scripts = vec![raiz().join("install.sh")];
+    for entrada in std::fs::read_dir(raiz().join("empacotar")).expect("empacotar/ é legível") {
+        let caminho = entrada.expect("entrada legível").path();
+        if caminho.extension().is_some_and(|e| e == "sh") {
+            scripts.push(caminho);
+        }
+    }
+    scripts.sort();
+
+    let mut vistos = 0;
+    for caminho in &scripts {
+        let corpo = std::fs::read_to_string(caminho).expect("o script tem que ser legível");
+        for (numero, linha) in sem_comentario(&corpo).lines().enumerate() {
+            if !linha.contains("mktemp") {
+                continue;
+            }
+            vistos += 1;
+            if let Some(defeito) = defeito_do_mktemp(linha) {
+                panic!(
+                    "{}:{} {defeito}.\n\
+                     No macOS passa; no Linux e no sh.exe do Git no Windows o script morre ali.\n\
+                     Escreva o molde inteiro: mktemp -d \"${{TMPDIR:-/tmp}}/seele-nome.XXXXXX\"\n  {}",
+                    caminho.display(),
+                    numero + 1,
+                    linha.trim()
+                );
+            }
+        }
+    }
+    // O `publicar.sh` tem três e o `install.sh` tem um. Se a conta cair a zero,
+    // foi a busca que parou de achar, e não os scripts que pararam de usar.
+    assert!(
+        vistos >= 4,
+        "só {vistos} linha(s) com mktemp em {scripts:?}: a busca deixou de ver os scripts"
+    );
+}
+
 #[test]
 fn nenhum_segredo_atravessa_por_argumento() {
     // A chave privada vai para o Windows pela **entrada padrão** do SSH, e é
