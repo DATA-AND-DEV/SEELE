@@ -29,7 +29,9 @@ seele-proto = { path = "../seele-proto" }
 seele-audio = { path = "../seele-audio", features = ["aparelho-de-mentira"] }
 # Com o gêmeo do guarda, do lado de quem liga (`encontro::recusar_a_producao`):
 # um teste que ia perguntar à VPS de produção reprova antes do primeiro pacote.
-seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao"] }
+# E com a costura dos candidatos do `CHAMA` (`encontro::costura_de_teste`), para
+# o furo IPv6 de ponta a ponta em `[::1]` (`tests/furo_ipv6.rs`).
+seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao", "costura-de-teste"] }
 # Com o guarda que faz um teste reprovar quando ia falar com o ponto de
 # encontro de produção (`alcance::encontro::recusar_a_producao`). Só aqui, numa
 # dependência de teste: o binário do produto não a leva.

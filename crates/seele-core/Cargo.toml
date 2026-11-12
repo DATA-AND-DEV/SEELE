@@ -93,6 +93,13 @@ flate2 = "1"
 # dependência de teste não se une ao build normal, e um `compile_error!` no
 # `encontro.rs` recusa um build otimizado com ela.
 recusar-encontro-de-producao = []
+# Os candidatos da segunda chamada ditos por um teste (`encontro::costura_de_teste`):
+# o caminho IPv6 de ponta a ponta se prova em `[::1]`, que nunca é um endereço
+# global, e é o global que o produto anuncia. Os testes deste crate a têm pelo
+# `cfg(test)`; só a `[dev-dependencies]` do `seele-conformance` a liga, o
+# resolvedor 2 não a leva ao build do produto, e um `compile_error!` no
+# `encontro.rs` recusa um build otimizado com ela.
+costura-de-teste = []
 # A redução de imagem do `seele-sessao` (`seele_core::reducao`), para o
 # `seele-ffi` a reexportar à casca do desktop.
 reducao = ["seele-sessao/reducao"]

@@ -39,7 +39,7 @@
 //! de quem chega. Ela só vale no IP do servidor que a mesma resposta deu
 //! ([`OndeMora::escuta_do_anfitriao`], [`bilhete_desta_volta`]).
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use seele_proto::encontro::{self};
@@ -132,6 +132,37 @@ const CHAMADAS: u32 = 3;
 /// ponto devolve `AQUI` com esse endereço e as dicas de rede local, e é para
 /// eles que a discagem vai, com o mesmo `U`.
 ///
+/// # A segunda chamada, com o IPv6 desta máquina
+///
+/// O ponto junta ao `CHAMADO` o endereço que ele viu, numa família só: a do
+/// caminho até ele, que [`escolher_ponto`] faz ser a do anfitrião, quase sempre
+/// IPv4. O anfitrião fura esse endereço, e o IPv6 dos dois nunca é tentado: o
+/// roteador dele não tem NAT em IPv6, mas tem firewall, que só deixa entrar o
+/// que responde a algo que saiu (pendência 26, medido em 24/08/2026). Quando o
+/// ponto diz que o anfitrião atendeu e o IPv4 não abre (duas casas atrás de
+/// CGNAT), quem liga **chama de novo** ([`Chamada::chamar_pelo_ipv6`]): um
+/// `CHAMA` com um `U` novo e os candidatos IPv6 globais desta máquina
+/// ([`candidatos_ipv6`]). O anfitrião fura e checa também por IPv6
+/// (`Ponta::chamado`, ICE completo), e esse pacote de saída é o que abre o
+/// firewall dele para quem chama.
+///
+/// **Depois, e não junto.** O candidato podia ir no primeiro `CHAMA`, e não
+/// vai, por duas razões:
+///
+/// - O ponto escreve os candidatos de quem chama **antes** do endereço que ele
+///   viu, e o anfitrião toma o primeiro como a origem do par
+///   (`Motor::chamado`; a 0.19.6 faz o mesmo, e não muda). É por essa origem
+///   que um aperto novo da mesma porta aposenta o par pendente, em vez de
+///   disputar o DTLS com ele. Com o IPv6 na frente, o par do `CHAMADO` deixaria
+///   de ter a origem de onde a discagem direta também bate, e o caminho IPv4,
+///   que é o de quase todo mundo e funciona, mudaria de comportamento.
+/// - O IPv6 desta máquina é metadado. Quem entra pelo IPv4 não precisa
+///   contá-lo a ninguém, e assim não conta.
+///
+/// O primeiro `CHAMA` é o de sempre, byte a byte, e a discagem que o segue
+/// também. A segunda chamada só existe depois de essa discagem dar em
+/// silêncio, que é quando o produto de antes desistia (`NatNaoAbriu`).
+///
 /// # Por que o socket importa
 ///
 /// O NAT mapeia por porta interna. O `CHAMA` sai **da ponta da sessão**
@@ -219,8 +250,11 @@ impl Chamada {
     ///
     /// Repete o `CHAMA` a cada [`INTERVALO_DA_CHAMADA`], até [`CHAMADAS`]
     /// vezes, enquanto o ponto não responde, e desiste em `prazo`. Lê as
-    /// respostas pelos datagramas ENC da ponta (`Ponta::mensagens_enc`), que
-    /// a ponta entrega **uma vez**: uma chamada por ponta.
+    /// respostas pelos datagramas ENC da ponta (`Ponta::mensagens_enc`), e os
+    /// devolve ao acabar: uma chamada por vez em cada ponta.
+    ///
+    /// **Sem candidato nenhum**: o ponto junta o endereço que ele viu, o desta
+    /// porta depois do NAT, e é ele que tem de ser o primeiro do `CHAMADO`.
     ///
     /// # Errors
     ///
@@ -231,13 +265,61 @@ impl Chamada {
         ponta: &seele_enlace::Ponta,
         prazo: Duration,
     ) -> Result<Atendida, FalhaDaChamada> {
-        let Some(mut chegadas) = ponta.mensagens_enc() else {
+        self.chamar_com(ponta, prazo, Vec::new()).await
+    }
+
+    /// A segunda chamada: de novo pelo ponto, agora dizendo o IPv6 global
+    /// desta máquina, para o anfitrião furar também o firewall IPv6 dele.
+    ///
+    /// Para depois de [`Chamada::chamar`] ter sido atendida e a discagem ao
+    /// endereço que ela deu ter dado em silêncio. Um `U` novo: a discagem de
+    /// antes acabou, e o par dela no anfitrião com ela.
+    ///
+    /// `do_anfitriao` são os endereços IPv6 do anfitrião que quem chama já
+    /// conhece (os do convite): é para eles que o sistema escolhe a origem que
+    /// vira candidato ([`candidatos_ipv6`]). Vazio serve.
+    ///
+    /// `None` quando esta máquina não tem IPv6 global para dizer (ou a ponta é
+    /// só IPv4): **nenhum pacote sai**, e nada muda para quem não tem IPv6.
+    pub(crate) async fn chamar_pelo_ipv6(
+        &self,
+        ponta: &seele_enlace::Ponta,
+        prazo: Duration,
+        do_anfitriao: &[SocketAddr],
+    ) -> Option<Result<Atendida, FalhaDaChamada>> {
+        let candidatos = self.candidatos_proprios(ponta.local_addr(), do_anfitriao);
+        if candidatos.is_empty() {
+            return None;
+        }
+        // Quantos, e nunca quais: o candidato é o endereço IPv6 desta máquina,
+        // e ele não vai ao `seele.log`.
+        tracing::info!(
+            ponto = %self.ponto_escrito,
+            candidatos_ipv6 = candidatos.len(),
+            "degrau 4: o anfitrião atendeu e o caminho que o ponto viu não abriu; chamando de \
+             novo, agora com o IPv6 desta máquina, para ele furar também por IPv6"
+        );
+        Some(self.chamar_com(ponta, prazo, candidatos).await)
+    }
+
+    /// O `CHAMA` e a espera pelo `AQUI`, com os candidatos dados.
+    async fn chamar_com(
+        &self,
+        ponta: &seele_enlace::Ponta,
+        prazo: Duration,
+        candidatos: Vec<SocketAddr>,
+    ) -> Result<Atendida, FalhaDaChamada> {
+        let Some(mut caixa) = CaixaDoPonto::tomar(ponta) else {
             tracing::warn!(
                 ponto = %self.ponto_escrito,
                 "os datagramas do ponto desta ponta já foram tomados: o CHAMA não sai"
             );
             return Err(FalhaDaChamada::Mudo);
         };
+        // O que já estava na fila não é resposta a este `CHAMA`: o `AQUI` não
+        // diz a que chamada responde, e o de uma chamada anterior (o ponto
+        // responde a cada repetição) passaria por resposta a esta.
+        caixa.esvaziar();
         let credencial = seele_enlace::sortear_credencial();
         let Some(u) = encontro::Credencial::nova(&credencial) else {
             tracing::error!("a credencial sorteada pelo enlace não serve ao ENC/3");
@@ -247,9 +329,7 @@ impl Chamada {
             servidor: self.marcas.servidor().clone(),
             escuta: self.marcas.escuta().clone(),
             credencial: u,
-            // O ponto junta o endereço que ele viu, que é o que serve: o desta
-            // porta, depois do NAT. Sem STUN próprio, não há o que somar.
-            candidatos: Vec::new(),
+            candidatos,
         });
         let ate = tokio::time::Instant::now() + prazo;
         let mut enviados = 0_u32;
@@ -279,7 +359,7 @@ impl Chamada {
             } else {
                 ate
             };
-            let chegou = match tokio::time::timeout_at(espera, chegadas.recv()).await {
+            let chegou = match tokio::time::timeout_at(espera, caixa.receber()).await {
                 Ok(Some(chegou)) => chegou,
                 Ok(None) => return Err(FalhaDaChamada::Mudo),
                 Err(_) if tokio::time::Instant::now() >= ate => {
@@ -344,6 +424,276 @@ impl Chamada {
                     return Err(FalhaDaChamada::Recusa);
                 }
                 _ => {}
+            }
+        }
+    }
+
+    /// Os candidatos que a segunda chamada leva: os IPv6 globais desta máquina
+    /// ([`candidatos_ipv6`]), na porta de `local`, que é a ponta da sessão.
+    fn candidatos_proprios(
+        &self,
+        local: SocketAddr,
+        do_anfitriao: &[SocketAddr],
+    ) -> Vec<SocketAddr> {
+        // Nos testes, um ponto pode ter os candidatos ditos: ver a costura.
+        #[cfg(any(test, feature = "costura-de-teste"))]
+        if let Some(ditos) = costura_de_teste::ditos_para(self.ponto) {
+            return caber_no_chama(ditos);
+        }
+        candidatos_ipv6(local, do_anfitriao, origem_ipv6_para)
+    }
+}
+
+/// Os datagramas do ponto que chegam a uma ponta (`Ponta::mensagens_enc`),
+/// tomados por uma chamada e **devolvidos ao cair**.
+///
+/// A ponta os entrega a um leitor só. A chamada os toma enquanto espera o
+/// `AQUI` e os devolve por qualquer saída, para a segunda chamada da mesma
+/// sessão ([`Chamada::chamar_pelo_ipv6`]) poder tomá-los de novo.
+struct CaixaDoPonto<'a> {
+    ponta: &'a seele_enlace::Ponta,
+    fila: Option<tokio::sync::mpsc::Receiver<(SocketAddr, Vec<u8>)>>,
+}
+
+impl<'a> CaixaDoPonto<'a> {
+    /// `None` quando outro leitor está com eles.
+    fn tomar(ponta: &'a seele_enlace::Ponta) -> Option<Self> {
+        let fila = ponta.mensagens_enc()?;
+        Some(Self {
+            ponta,
+            fila: Some(fila),
+        })
+    }
+
+    /// Larga o que já estava na fila.
+    fn esvaziar(&mut self) {
+        if let Some(fila) = self.fila.as_mut() {
+            while fila.try_recv().is_ok() {}
+        }
+    }
+
+    /// O próximo datagrama; `None` quando a ponta fechou.
+    async fn receber(&mut self) -> Option<(SocketAddr, Vec<u8>)> {
+        self.fila.as_mut()?.recv().await
+    }
+}
+
+impl Drop for CaixaDoPonto<'_> {
+    fn drop(&mut self) {
+        if let Some(fila) = self.fila.take() {
+            self.ponta.devolver_mensagens_enc(fila);
+        }
+    }
+}
+
+/// Para onde a sonda de origem aponta quando o convite não trouxe IPv6 do
+/// anfitrião: `2001:db8::/32`, a faixa de documentação (RFC 3849), como o
+/// `endereco_de_saida_v6` de quem hospeda. Nada é mandado a ela.
+fn alvo_da_sonda() -> SocketAddr {
+    SocketAddr::from((Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1), 9))
+}
+
+/// Quantos endereços IPv6 do anfitrião viram sonda de origem. Um convite
+/// leva poucos; o teto só impede uma lista comprida de abrir um socket por
+/// linha.
+const SONDAS_DE_ORIGEM: usize = 4;
+
+/// Se este IPv6 é **global**: um endereço que a internet roteia até esta
+/// máquina, e o único tipo que vai como candidato num `CHAMA`.
+///
+/// Só o que está em `2000::/3`, o espaço unicast global que a IANA distribui.
+/// Ficam de fora, por estarem fora dele: o loopback (`::1`), o «qualquer»
+/// (`::`), o link-local (`fe80::/10`), o local único (`fc00::/7`, o `192.168`
+/// do IPv6), o multicast (`ff00::/8`), o IPv4 mapeado (`::ffff:0:0/96`) e o
+/// NAT64 (`64:ff9b::/96`). E, de dentro dele, as faixas que não são o
+/// endereço de uma máquina na internet:
+///
+/// - `2001::/23`, os usos especiais da IANA (o Teredo em `2001::/32`, o ORCHID,
+///   a faixa de medição);
+/// - `2001:db8::/32` e `3fff::/20`, documentação (RFC 3849 e RFC 9637);
+/// - `2002::/16`, o 6to4, um túnel aposentado (RFC 7526) cujo caminho de volta
+///   depende de um relay de terceiro.
+///
+/// Mais estreito que o `alcancavel` do ponto de propósito: aquele decide para
+/// onde o ponto aceita apontar, e este decide o que esta máquina conta de si.
+#[must_use]
+pub(crate) fn e_ipv6_global(ip: Ipv6Addr) -> bool {
+    let [primeiro, segundo, ..] = ip.segments();
+    let unicast_global = primeiro & 0xe000 == 0x2000;
+    let uso_especial = primeiro == 0x2001 && segundo < 0x0200;
+    let documentacao =
+        (primeiro == 0x2001 && segundo == 0x0db8) || (primeiro == 0x3fff && segundo < 0x1000);
+    let seis_para_quatro = primeiro == 0x2002;
+    unicast_global && !uso_especial && !documentacao && !seis_para_quatro
+}
+
+/// A origem IPv6 que o sistema usaria para falar com `alvo`, **sem mandar
+/// pacote**: conectar um socket UDP escolhe a rota e associa o endereço local,
+/// e é só isso (o truque de `alcance::endereco_de_saida_v6`, de quem hospeda).
+///
+/// Um socket novo, e não o da sessão: `connect` no socket da sessão o prenderia
+/// a um destino só. O endereço que sai daqui vale para ele porque a ponta de
+/// quem liga é `[::]`, e quem escolhe a origem de cada pacote dela é esta mesma
+/// regra do sistema (RFC 6724).
+fn origem_ipv6_para(alvo: SocketAddr) -> Option<Ipv6Addr> {
+    let socket = std::net::UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))).ok()?;
+    socket.connect(alvo).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V6(origem) => Some(origem),
+        IpAddr::V4(_) => None,
+    }
+}
+
+/// Os candidatos IPv6 que a segunda chamada leva: os endereços IPv6
+/// **globais** desta máquina, na porta da ponta da sessão.
+///
+/// Por que eles vão, e por que só na segunda chamada: ver [`Chamada`].
+///
+/// # Quais endereços
+///
+/// **A origem que o sistema escolhe**, e não a lista das interfaces
+/// (`origem`, em produção [`origem_ipv6_para`]): uma para cada IPv6 do
+/// anfitrião que o convite trouxe (`do_anfitriao`, até [`SONDAS_DE_ORIGEM`]) e
+/// uma para a internet em geral ([`alvo_da_sonda`]). É o endereço de onde os
+/// pacotes desta ponta saem de fato, e só ele serve: o firewall do anfitrião
+/// abre para o endereço que ele furou, e um pacote vindo de outro endereço
+/// desta mesma máquina bate fechado.
+///
+/// **Com endereços temporários de privacidade (RFC 8981), a origem é o
+/// temporário**, e é ele que vai. Não é só o que funciona: é também o que
+/// menos conta, porque o temporário troca sozinho e o estável é o que
+/// identificaria a máquina de uma semana para outra. O estável nunca é
+/// anunciado quando o sistema sai pelo temporário.
+///
+/// Só os que [`e_ipv6_global`] aceita, sem repetir, no máximo
+/// `encontro::LIMITE_DE_CANDIDATOS` ([`caber_no_chama`]). Nenhum quando a ponta
+/// é só IPv4 (o recuo de `transporte::abrir_ponta`): ela não receberia a
+/// resposta. Uma ponta ligada a um endereço IPv6 só sai por ele.
+///
+/// # A quem isto conta o endereço
+///
+/// A quem já recebia o IPv4 público desta máquina, pelo mesmo caminho: ao
+/// ponto de encontro do convite, que passa a ler também o IPv6, e ao anfitrião
+/// do convite, que o recebe no `CHAMADO` ao lado do IPv4 que o ponto viu. A
+/// mais ninguém: não vai às outras pessoas da sala, a outro servidor nem a
+/// relato nenhum, e não é escrito no `seele.log` (o log de quem chama diz
+/// quantos candidatos foram, e não quais). E só quando o caminho IPv4 não
+/// abriu: quem entra por ele não conta o IPv6 a ninguém. **É metadado novo
+/// para quem opera o ponto**: até aqui ele só via o IPv4 de quem ligava a um
+/// anfitrião registrado por IPv4 (`docs/ponto-de-encontro.md`, «O que ele fica
+/// sabendo»).
+fn candidatos_ipv6(
+    local: SocketAddr,
+    do_anfitriao: &[SocketAddr],
+    origem: impl Fn(SocketAddr) -> Option<Ipv6Addr>,
+) -> Vec<SocketAddr> {
+    let SocketAddr::V6(local) = local else {
+        return Vec::new();
+    };
+    let origens: Vec<Ipv6Addr> = if local.ip().is_unspecified() {
+        do_anfitriao
+            .iter()
+            .copied()
+            // O IPv4 mapeado (`::ffff:a.b.c.d`) é IPv4 escrito de outro jeito.
+            .filter(|alvo| alvo.ip().to_canonical().is_ipv6())
+            .take(SONDAS_DE_ORIGEM)
+            .chain(std::iter::once(alvo_da_sonda()))
+            .filter_map(origem)
+            .collect()
+    } else {
+        vec![*local.ip()]
+    };
+    caber_no_chama(
+        origens
+            .into_iter()
+            .filter(|origem| e_ipv6_global(*origem))
+            .map(|origem| SocketAddr::from((origem, local.port())))
+            // A regra do ponto (`enc3::candidatos_do_chamado`): o que ela
+            // recusaria não chegaria ao anfitrião.
+            .filter(|candidato| encontro::alcancavel(*candidato))
+            .collect(),
+    )
+}
+
+/// O que cabe no campo de candidatos de um `CHAMA`: só os que
+/// `encontro::serve_de_candidato` aceita, sem repetir, no máximo
+/// `encontro::LIMITE_DE_CANDIDATOS`.
+///
+/// **A forma é do fio, e errar aqui custa a chamada inteira**: o ponto lê o
+/// campo com «um só que não sirva recusa todos», e um `CHAMA` que ele não lê é
+/// um `CHAMA` que ele cala. Um candidato com porta baixa, repetido ou a mais
+/// transformaria o degrau 4 em silêncio, o IPv4 junto.
+fn caber_no_chama(candidatos: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let mut cabem: Vec<SocketAddr> = Vec::new();
+    for candidato in candidatos {
+        if cabem.len() >= encontro::LIMITE_DE_CANDIDATOS {
+            break;
+        }
+        if encontro::serve_de_candidato(candidato) && !cabem.contains(&candidato) {
+            cabem.push(candidato);
+        }
+    }
+    cabem
+}
+
+// A feature da costura nunca entra num build otimizado, como a do guarda: com
+// ela, um teste escolhe o que o `CHAMA` conta desta máquina.
+#[cfg(all(feature = "costura-de-teste", not(debug_assertions)))]
+compile_error!(
+    "a feature `costura-de-teste` do seele-core é só de teste e não pode ir num build \
+     otimizado: com ela, os candidatos do CHAMA podem ser ditos de fora"
+);
+
+/// **Só nos testes** (o `cfg(test)` deste crate e a feature `costura-de-teste`,
+/// que só a `[dev-dependencies]` do `seele-conformance` liga): os candidatos
+/// que o `CHAMA` leva a um ponto dado, no lugar dos desta máquina.
+///
+/// # Por que existe
+///
+/// O que [`candidatos_ipv6`] anuncia é um endereço **global**, e numa máquina
+/// só não há dois: o caminho IPv6 de ponta a ponta se prova em `[::1]`, com um
+/// firewall de mentira no meio, e `[::1]` nunca passa em [`e_ipv6_global`].
+/// A costura troca **quais** endereços vão; o resto do caminho (o teto do fio,
+/// o `CHAMA`, o ponto, o furo do anfitrião, a discagem) é o do produto.
+///
+/// # Por que por ponto, e não global
+///
+/// Os testes de um arquivo rodam juntos num processo, cada um com o ponto
+/// dele. Dito por ponto, o candidato de um teste não alcança o `CHAMA` de
+/// outro.
+#[cfg(any(test, feature = "costura-de-teste"))]
+pub mod costura_de_teste {
+    use std::collections::BTreeMap;
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+
+    static DITOS: Mutex<BTreeMap<SocketAddr, Vec<SocketAddr>>> = Mutex::new(BTreeMap::new());
+
+    /// Enquanto o guarda viver, todo `CHAMA` que for a `ponto` leva
+    /// `candidatos` (dentro do teto do fio), e não os desta máquina.
+    #[must_use = "os candidatos valem só enquanto o guarda vive"]
+    pub fn anunciar_a_este_ponto(ponto: SocketAddr, candidatos: Vec<SocketAddr>) -> Ditos {
+        if let Ok(mut ditos) = DITOS.lock() {
+            ditos.insert(ponto, candidatos);
+        }
+        Ditos { ponto }
+    }
+
+    /// Os candidatos ditos para este ponto, se há.
+    pub(crate) fn ditos_para(ponto: SocketAddr) -> Option<Vec<SocketAddr>> {
+        DITOS.lock().ok()?.get(&ponto).cloned()
+    }
+
+    /// Desfaz [`anunciar_a_este_ponto`] ao cair.
+    #[derive(Debug)]
+    pub struct Ditos {
+        ponto: SocketAddr,
+    }
+
+    impl Drop for Ditos {
+        fn drop(&mut self) {
+            if let Ok(mut ditos) = DITOS.lock() {
+                ditos.remove(&self.ponto);
             }
         }
     }
@@ -3409,6 +3759,441 @@ mod testes {
             panic!("o anfitrião da linha 2 não foi achado: {achado:?}");
         };
         assert_eq!(achado, servidor);
+    }
+
+    // ------------------------------------------- o candidato IPv6 do CHAMA
+
+    fn v6(texto: &str) -> Ipv6Addr {
+        texto.parse().expect("IPv6 de teste inválido")
+    }
+
+    fn de(texto: &str) -> SocketAddr {
+        texto.parse().expect("endereço de teste inválido")
+    }
+
+    /// A ponta de uma sessão como a de produção: `[::]` de pilha dupla.
+    /// `None` numa máquina sem IPv6 nenhum, onde o recuo é só IPv4.
+    fn ponta_de_pilha_dupla() -> Option<crate::transporte::PontaDaSessao> {
+        let ponta = crate::transporte::abrir_ponta(None).unwrap();
+        ponta.ponta().local_addr().is_ipv6().then_some(ponta)
+    }
+
+    #[test]
+    fn so_um_ipv6_global_e_global() {
+        for global in [
+            // Uma casa na Claro, uma na Vivo, e um endereço temporário qualquer.
+            "2804:14c:5bb1:8a3f:1c2d:3e4f:5a6b:7c8d",
+            "2804:7f0:b0c0:1234::10",
+            "2a02:8108:1:2:3:4:5:6",
+            "2600:1f18::1",
+            "2001:4860:4860::8888",
+            // O primeiro bloco depois dos usos especiais (`2001::/23`).
+            "2001:200::1",
+            // O fim de `2000::/3`.
+            "3ffe:ffff::1",
+        ] {
+            assert!(e_ipv6_global(v6(global)), "{global} devia ser global");
+        }
+        for (fora, por_que) in [
+            ("::1", "loopback"),
+            ("::", "sem destino"),
+            ("fe80::1c2d:3e4f:5a6b:7c8d", "link-local: não sai do cabo"),
+            ("febf::1", "o fim de fe80::/10"),
+            ("fc00::1", "local único (fc00::/7)"),
+            ("fd12:3456:789a::1", "local único, a rede de casa"),
+            ("ff02::1", "multicast"),
+            ("::ffff:203.0.113.7", "IPv4 mapeado"),
+            ("::ffff:192.168.0.2", "IPv4 mapeado, e privado"),
+            ("64:ff9b::cb00:7107", "NAT64"),
+            ("2001:db8::1", "documentação (RFC 3849)"),
+            ("3fff:0abc::1", "documentação (RFC 9637)"),
+            ("2001:0:4136:e378::1", "Teredo (2001::/32)"),
+            ("2001:20::1", "ORCHIDv2, um uso especial de 2001::/23"),
+            ("2002:cb00:7107::1", "6to4"),
+            ("4000::1", "fora de 2000::/3"),
+            ("100::1", "o prefixo de descarte"),
+        ] {
+            assert!(
+                !e_ipv6_global(v6(fora)),
+                "{fora} passou por global, e é {por_que}"
+            );
+        }
+        // A fronteira do 3fff::/20: o que vem depois dele é espaço global.
+        assert!(e_ipv6_global(v6("3fff:1000::1")));
+    }
+
+    #[test]
+    fn o_candidato_e_a_origem_global_que_o_sistema_escolhe_na_porta_da_sessao() {
+        let local = de("[::]:50123");
+        let global = v6("2804:14c:5bb1:8a3f:1c2d:3e4f:5a6b:7c8d");
+
+        // O caso comum: nenhum IPv6 do anfitrião no convite, e a sonda geral
+        // diz por onde esta máquina sai.
+        let candidatos = candidatos_ipv6(local, &[], |alvo| {
+            assert_eq!(alvo, alvo_da_sonda(), "a sonda foi a outro lugar");
+            Some(global)
+        });
+        assert_eq!(
+            candidatos,
+            vec![SocketAddr::from((global, 50123))],
+            "o IPv6 global desta máquina não virou candidato, ou saiu com outra porta \
+             que a da sessão: o anfitrião furaria a porta errada"
+        );
+
+        // Nenhum endereço que não é global entra, um a um.
+        for fora in [
+            "::1",
+            "::",
+            "fe80::1",
+            "fd00::1",
+            "fc00::1",
+            "ff02::1",
+            "::ffff:203.0.113.7",
+            "2001:db8::7",
+            "2002:cb00:7107::1",
+            "2001:0:4136:e378::1",
+        ] {
+            assert_eq!(
+                candidatos_ipv6(local, &[], |_| Some(v6(fora))),
+                Vec::<SocketAddr>::new(),
+                "{fora} não é global e foi anunciado como candidato"
+            );
+        }
+
+        // Uma máquina sem rota IPv6 não tem origem, e não anuncia nada.
+        assert!(candidatos_ipv6(local, &[], |_| None).is_empty());
+    }
+
+    #[test]
+    fn a_origem_e_perguntada_para_os_ipv6_do_anfitriao_que_o_convite_trouxe() {
+        // Duas saídas: para o IPv6 do anfitrião o sistema sai por um endereço,
+        // e para o resto da internet por outro (uma VPN, dois prefixos). O
+        // candidato que serve é o do caminho até o anfitrião, e ele vai na
+        // frente; o IPv4 e o IPv4 mapeado do convite não viram sonda.
+        let local = de("[::]:50123");
+        let anfitriao = de("[2804:7f0:b0c0:1234::10]:8383");
+        let ate_ele = v6("2804:14c:5bb1:8a3f::aaaa");
+        let geral = v6("2a02:8108:1:2::bbbb");
+        let perguntados = std::sync::Mutex::new(Vec::new());
+        let candidatos = candidatos_ipv6(
+            local,
+            &[
+                de("203.0.113.7:8383"),
+                de("[::ffff:203.0.113.7]:8383"),
+                anfitriao,
+            ],
+            |alvo| {
+                perguntados.lock().unwrap().push(alvo);
+                Some(if alvo == anfitriao { ate_ele } else { geral })
+            },
+        );
+        assert_eq!(
+            *perguntados.lock().unwrap(),
+            vec![anfitriao, alvo_da_sonda()],
+            "a origem foi perguntada para um endereço que não é IPv6 do anfitrião"
+        );
+        assert_eq!(
+            candidatos,
+            vec![
+                SocketAddr::from((ate_ele, 50123)),
+                SocketAddr::from((geral, 50123))
+            ]
+        );
+
+        // A mesma origem para os dois não vai duas vezes (o ponto recusa um
+        // `CHAMA` com candidato repetido, e a chamada inteira calaria).
+        assert_eq!(
+            candidatos_ipv6(local, &[anfitriao], |_| Some(ate_ele)),
+            vec![SocketAddr::from((ate_ele, 50123))]
+        );
+
+        // E nunca mais que o teto do fio, mesmo com um convite cheio de IPv6.
+        let muitos: Vec<SocketAddr> = (1..=6_u16)
+            .map(|n| SocketAddr::from((Ipv6Addr::new(0x2804, 0x7f0, n, 0, 0, 0, 0, 1), 8383)))
+            .collect();
+        let sondas = std::sync::atomic::AtomicUsize::new(0);
+        let candidatos = candidatos_ipv6(local, &muitos, |alvo| {
+            let n = sondas.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let SocketAddr::V6(alvo) = alvo else {
+                return None;
+            };
+            // Uma origem diferente por alvo.
+            Some(Ipv6Addr::new(
+                0x2804,
+                0x14c,
+                alvo.ip().segments()[2],
+                0,
+                0,
+                0,
+                0,
+                u16::try_from(n).unwrap() + 1,
+            ))
+        });
+        assert_eq!(candidatos.len(), encontro::LIMITE_DE_CANDIDATOS);
+        assert_eq!(
+            sondas.load(std::sync::atomic::Ordering::SeqCst),
+            SONDAS_DE_ORIGEM + 1,
+            "cada IPv6 de um convite comprido abriu uma sonda"
+        );
+    }
+
+    #[test]
+    fn uma_ponta_que_nao_fala_ipv6_ou_de_porta_baixa_nao_anuncia_nada() {
+        let global = v6("2804:14c:5bb1:8a3f::aaaa");
+        // O recuo de `abrir_ponta`: um socket só IPv4 não receberia a resposta.
+        assert!(candidatos_ipv6(de("0.0.0.0:50123"), &[], |_| Some(global)).is_empty());
+        assert!(candidatos_ipv6(de("127.0.0.1:50123"), &[], |_| Some(global)).is_empty());
+        // Porta abaixo de 1024: o ponto recusaria o `CHAMA` inteiro por ela.
+        assert!(candidatos_ipv6(de("[::]:443"), &[], |_| Some(global)).is_empty());
+        // Uma ponta ligada a um endereço só sai por ele: é ele o candidato, se
+        // for global, e a sonda nem é feita.
+        let ligada = SocketAddr::from((global, 50123));
+        assert_eq!(
+            candidatos_ipv6(ligada, &[], |_| panic!("sondou com a ponta ligada")),
+            vec![ligada]
+        );
+        assert!(candidatos_ipv6(de("[::1]:50123"), &[], |_| Some(global)).is_empty());
+    }
+
+    #[test]
+    fn o_que_nao_cabe_no_fio_nao_vai_no_chama() {
+        // O ponto lê os candidatos com «um só que não sirva recusa todos»
+        // (`ler_enderecos`): cada um destes, sozinho, calaria a chamada.
+        let bom = de("[2804:14c:5bb1:8a3f::aaaa]:50123");
+        let outro = de("[2804:14c:5bb1:8a3f::bbbb]:50123");
+        let cabem = caber_no_chama(vec![
+            de("[2804:14c::1]:80"),
+            de("[::]:50123"),
+            de("[ff02::1]:50123"),
+            bom,
+            bom,
+            outro,
+            de("[2804:14c:5bb1:8a3f::cccc]:50123"),
+        ]);
+        assert_eq!(cabem, vec![bom, outro]);
+        // E o que sobra é um `CHAMA` que o leitor do ponto lê.
+        let marcas = Marcas::do_servidor(FP).unwrap();
+        let datagrama = encontro::chama(&encontro::Chama {
+            servidor: marcas.servidor().clone(),
+            escuta: marcas.escuta().clone(),
+            credencial: encontro::Credencial::nova(&"a".repeat(32)).unwrap(),
+            candidatos: cabem.clone(),
+        });
+        let Some(encontro::Pedido3::Chama(lido)) = encontro::analisar3(&datagrama) else {
+            panic!("o ponto não leria este CHAMA");
+        };
+        assert_eq!(lido.candidatos, cabem);
+    }
+
+    /// Um ponto que atende todo `CHAMA` com `AQUI`, como um anfitrião que
+    /// responde.
+    fn atende_sempre(chama: &encontro::Chama, _: SocketAddr) -> Option<encontro::Resposta3> {
+        Some(encontro::Resposta3::Aqui {
+            marca: chama.servidor.clone(),
+            endereco: "203.0.113.9:8383".parse().unwrap(),
+            dicas: Vec::new(),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_segunda_chamada_leva_o_candidato_ipv6_com_um_u_novo_e_o_log_nao_o_escreve() {
+        // De ponta a ponta até o ponto: o que a segunda chamada monta chega no
+        // datagrama, o leitor do ponto (`analisar3`) o lê, e ele vem da porta
+        // da sessão. Os endereços são ditos pela costura, porque numa máquina
+        // de teste o IPv6 global é o que ela tiver, ou nenhum.
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(Arc::clone(&captura));
+        let (ponto, vistos) = ponto_do_chama(atende_sempre).await;
+        let ponta = ponta_local();
+        let porta = ponta.ponta().local_addr().port();
+        let global = SocketAddr::from((v6("2804:14c:5bb1:8a3f:1c2d:3e4f:5a6b:7c8d"), porta));
+        let _ditos = costura_de_teste::anunciar_a_este_ponto(
+            ponto,
+            // O repetido e o de porta baixa não cabem no fio, e ficam.
+            vec![global, global, de("[2804:14c::2]:80")],
+        );
+        let chamada = chamada_para(ponto);
+        let primeira = chamada
+            .chamar(ponta.ponta(), Duration::from_secs(2))
+            .await
+            .expect("o CHAMA atendido não deu endereço");
+        // Pela mesma ponta, de novo: a primeira chamada devolveu os datagramas
+        // do ponto ao acabar.
+        let segunda = chamada
+            .chamar_pelo_ipv6(ponta.ponta(), Duration::from_secs(2), &[])
+            .await
+            .expect("com IPv6 global para dizer, a segunda chamada não saiu")
+            .expect(
+                "a segunda chamada não foi atendida: a ponta não devolveu os datagramas do ponto",
+            );
+
+        let vistos = vistos.lock().unwrap();
+        let [(de_onde, primeiro), (do_segundo, segundo)] = vistos.as_slice() else {
+            panic!("o ponto leu {} CHAMA, e eram dois", vistos.len());
+        };
+        assert!(
+            primeiro.candidatos.is_empty(),
+            "o primeiro CHAMA passou a levar candidato: o anfitrião tomaria o IPv6 como a \
+             origem do par, e o caminho IPv4 de sempre mudaria"
+        );
+        assert_eq!(
+            segundo.candidatos,
+            vec![global],
+            "o candidato IPv6 de quem chama não foi no CHAMA da segunda chamada: o anfitrião \
+             fura só o endereço que o ponto viu, numa família"
+        );
+        assert_ne!(
+            segundo.credencial, primeiro.credencial,
+            "a segunda chamada reusou o U da primeira, cuja discagem já acabou"
+        );
+        assert_eq!(primeiro.credencial.texto(), primeira.credencial);
+        assert_eq!(
+            segundo.credencial.texto(),
+            segunda.credencial,
+            "a discagem sairia com um U que o anfitrião não conhece"
+        );
+        assert_eq!(
+            (de_onde.port(), do_segundo.port()),
+            (porta, porta),
+            "um dos CHAMA saiu de outra porta que a da sessão"
+        );
+
+        // O endereço IPv6 desta máquina não vai ao `seele.log` (que grava
+        // `info`): o log diz quantos candidatos foram, e não quais.
+        let linhas = captura.linhas();
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.contains("candidatos_ipv6=1")),
+            "o log não disse quantos candidatos foram: {linhas:?}"
+        );
+        assert!(
+            !linhas.iter().any(|linha| linha.contains("2804:14c")),
+            "o log gravou o endereço IPv6 desta máquina: {linhas:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sem_ipv6_global_a_segunda_chamada_nao_manda_nada() {
+        // Quem não tem IPv6 global não chama de novo, e nada muda para ele:
+        // nem um pacote a mais ao ponto, nem um furo a mais no anfitrião.
+        let (ponto, vistos) = ponto_do_chama(atende_sempre).await;
+        let ponta = ponta_local();
+        let _ditos = costura_de_teste::anunciar_a_este_ponto(ponto, Vec::new());
+        let chamada = chamada_para(ponto);
+        chamada
+            .chamar(ponta.ponta(), Duration::from_secs(2))
+            .await
+            .expect("o CHAMA atendido não deu endereço");
+        assert!(
+            chamada
+                .chamar_pelo_ipv6(ponta.ponta(), Duration::from_secs(2), &[])
+                .await
+                .is_none(),
+            "sem candidato nenhum, a segunda chamada saiu"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let vistos = vistos.lock().unwrap();
+        assert_eq!(vistos.len(), 1, "saiu um CHAMA a mais sem candidato nenhum");
+        assert!(vistos.first().unwrap().1.candidatos.is_empty());
+    }
+
+    #[tokio::test]
+    async fn um_aqui_atrasado_da_primeira_chamada_nao_responde_a_segunda() {
+        // O `AQUI` não diz a que `CHAMA` responde. O ponto responde a cada
+        // repetição do primeiro, e um `AQUI` que sobrou na fila passaria por
+        // resposta à segunda chamada: a discagem sairia sem o anfitrião ter
+        // sido chamado de novo, e sem furo IPv6 nenhum.
+        //
+        // Este ponto responde duas vezes ao `CHAMA` sem candidato, e cala para
+        // o que leva um.
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let ponto = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO3 + 1];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let Some(encontro::Pedido3::Chama(chama)) =
+                    encontro::analisar3(balde.get(..lidos).unwrap_or_default())
+                else {
+                    continue;
+                };
+                if !chama.candidatos.is_empty() {
+                    continue;
+                }
+                let aqui = encontro::resposta3(&atende_sempre(&chama, de).unwrap());
+                for _ in 0..2 {
+                    let _ = socket.send_to(&aqui, de).await;
+                }
+            }
+        });
+        let ponta = ponta_local();
+        let global = SocketAddr::from((
+            v6("2804:14c:5bb1:8a3f::aaaa"),
+            ponta.ponta().local_addr().port(),
+        ));
+        let _ditos = costura_de_teste::anunciar_a_este_ponto(ponto, vec![global]);
+        let chamada = chamada_para(ponto);
+        chamada
+            .chamar(ponta.ponta(), Duration::from_secs(2))
+            .await
+            .expect("o CHAMA atendido não deu endereço");
+        // O segundo `AQUI` chega à fila da ponta.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let segunda = chamada
+            .chamar_pelo_ipv6(ponta.ponta(), Duration::from_millis(1200), &[])
+            .await;
+        assert_eq!(
+            segunda,
+            Some(Err(FalhaDaChamada::Mudo)),
+            "um AQUI que sobrou da primeira chamada passou por resposta à segunda"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_segunda_chamada_de_verdade_so_anuncia_o_ipv6_global_desta_maquina() {
+        // Sem costura: o que o produto anuncia **nesta** máquina. Depende da
+        // rede dela, e diz o que mediu: com IPv6 global, um candidato, que é a
+        // origem que o sistema escolhe, na porta da sessão; sem, nenhum, e
+        // nenhuma segunda chamada. Em nenhum caso um endereço que não é global.
+        let Some(ponta) = ponta_de_pilha_dupla() else {
+            eprintln!("pulado: esta máquina não abre socket IPv6");
+            return;
+        };
+        let (ponto, vistos) = ponto_do_chama(atende_sempre).await;
+        let esperado: Vec<SocketAddr> = origem_ipv6_para(alvo_da_sonda())
+            .filter(|origem| e_ipv6_global(*origem))
+            .map(|origem| SocketAddr::from((origem, ponta.ponta().local_addr().port())))
+            .into_iter()
+            .collect();
+        eprintln!(
+            "esta máquina anuncia {} candidato(s) IPv6 global(is) na segunda chamada",
+            esperado.len()
+        );
+        let segunda = chamada_para(ponto)
+            .chamar_pelo_ipv6(ponta.ponta(), Duration::from_secs(2), &[])
+            .await;
+        assert_eq!(
+            segunda.is_some(),
+            !esperado.is_empty(),
+            "a segunda chamada saiu sem IPv6 global para dizer, ou não saiu tendo um"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let anunciados: Vec<SocketAddr> = vistos
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|(_, chama)| chama.candidatos.clone())
+            .collect();
+        assert_eq!(
+            anunciados, esperado,
+            "o que foi ao ponto não é a origem IPv6 global que o sistema escolhe"
+        );
+        for candidato in &anunciados {
+            let IpAddr::V6(ip) = candidato.ip() else {
+                panic!("um candidato IPv4 foi anunciado: o ponto já o vê");
+            };
+            assert!(e_ipv6_global(ip), "anunciou um endereço que não é global");
+        }
     }
 
     #[test]

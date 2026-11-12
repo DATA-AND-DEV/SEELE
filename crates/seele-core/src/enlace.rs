@@ -52,7 +52,7 @@ use seele_proto::tunel::{ProtocoloDeTunel, RecusaDeTunel};
 use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
-use crate::client::{Client, ConnectError, MediaChannel, SessionInfo};
+use crate::client::{Client, ConnectError, MediaChannel, PeloChama, SessionInfo};
 // **A regra das despedidas que acabam a sessão mora no `seele-sessao`**, e o
 // `Room` chama a mesma: eram duas respostas, e o `Room` tratava toda
 // `Disconnecting` como fim enquanto este motor reconectava (pendência 61). A
@@ -1607,9 +1607,18 @@ enum Lote {
     /// impressão esperada, a chave de pino, o apelido, o segredo —, **sem** a
     /// prova pelo pino: é um candidato que ninguém escolheu
     /// ([`Destino::o_pino_prova_o_servidor`]).
+    ///
+    /// `do_convite_v6` são os candidatos IPv6 do anfitrião que o convite já
+    /// trazia ([`e_ipv6`]). Servem à **segunda chamada**
+    /// (`crate::encontro::Chamada::chamar_pelo_ipv6`), a que sai quando o
+    /// anfitrião atendeu e o IPv4 não abriu: é até eles que o sistema escolhe a
+    /// origem que vira candidato, e é a eles que a discagem seguinte vai, com
+    /// o que o segundo `AQUI` der. O `AQUI` não diz IPv6 nenhum do anfitrião:
+    /// o `ATENDE` só leva o endereço que o ponto viu e as dicas de rede local.
     PelaChamada {
         chamada: crate::encontro::Chamada,
         modelo: Box<Candidato>,
+        do_convite_v6: Vec<Candidato>,
     },
 }
 
@@ -1618,7 +1627,13 @@ impl Lote {
     fn candidatos(&self) -> Vec<&Candidato> {
         match self {
             Self::Direto(candidatos) => candidatos.iter().collect(),
-            Self::PelaChamada { modelo, .. } => vec![modelo.as_ref()],
+            Self::PelaChamada {
+                modelo,
+                do_convite_v6,
+                ..
+            } => std::iter::once(modelo.as_ref())
+                .chain(do_convite_v6)
+                .collect(),
         }
     }
 
@@ -1699,6 +1714,75 @@ fn destinos_da_chamada(modelo: &Candidato, atendida: &crate::encontro::Atendida)
             antes: modelo.antes.clone(),
         })
         .collect()
+}
+
+/// Os destinos da discagem que segue a **segunda chamada** do degrau 4, a que
+/// levou o IPv6 desta máquina: os do segundo `AQUI`
+/// ([`destinos_da_chamada`]), e os IPv6 do anfitrião que o convite já trazia,
+/// cada um com as regras que tinha.
+///
+/// **Os do convite vão junto porque o `AQUI` não os diz.** O anfitrião furou
+/// para o IPv6 de quem chama, e o pacote que entra por esse furo tem de ir ao
+/// IPv6 dele. Sem repetir o que o `AQUI` já deu (um anfitrião registrado no
+/// ponto por IPv6 diz o próprio).
+fn destinos_da_segunda_chamada(
+    modelo: &Candidato,
+    atendida: &crate::encontro::Atendida,
+    do_convite_v6: &[Candidato],
+) -> Vec<Candidato> {
+    let mut destinos = destinos_da_chamada(modelo, atendida);
+    for candidato in do_convite_v6 {
+        let repetido = destinos
+            .iter()
+            .any(|ja| mesmo_endereco(ja.destino.servidor, candidato.destino.servidor));
+        if !repetido {
+            destinos.push(candidato.clone());
+        }
+    }
+    destinos
+}
+
+/// Se este endereço é IPv6 de verdade: o `::ffff:a.b.c.d` é IPv4 escrito de
+/// outro jeito, e sai pelo caminho IPv4.
+fn e_ipv6(servidor: SocketAddr) -> bool {
+    servidor.ip().to_canonical().is_ipv6()
+}
+
+/// Os alvos da discagem que segue a segunda chamada na volta da bateria
+/// interna: o endereço que o ponto deu, as dicas, e o próprio endereço da
+/// sessão quando ele é IPv6 ([`e_ipv6`]).
+///
+/// A discagem direta a ele deu em silêncio, e o que mudou desde então é o
+/// furo: o anfitrião mandou para o IPv6 desta máquina, e o firewall dele
+/// passou a deixar entrar. Sem voltar a ele, o furo IPv6 abria e ninguém
+/// passava.
+fn alvos_da_segunda_volta(
+    servidor: SocketAddr,
+    atendida: &crate::encontro::Atendida,
+) -> Vec<SocketAddr> {
+    let mut alvos: Vec<SocketAddr> = std::iter::once(atendida.endereco)
+        .chain(atendida.dicas.iter().copied())
+        .collect();
+    if e_ipv6(servidor) && !alvos.iter().any(|ja| mesmo_endereco(*ja, servidor)) {
+        alvos.push(servidor);
+    }
+    alvos
+}
+
+/// Quanto um lote da corrida pode durar, quando corre com outros.
+///
+/// O degrau 4 soma o prazo da chamada ao da discagem. E o lote da chamada
+/// pode fazê-lo duas vezes: a segunda chamada, com o IPv6, só sai depois de a
+/// discagem da primeira dar em silêncio, e sem este dobro ela nasceria com o
+/// prazo do lote já gasto. Quem não tem IPv6 global não a faz, e o lote acaba
+/// na hora de sempre: isto é um teto, e não uma espera.
+fn prazo_do_lote(pela_chamada: bool) -> Duration {
+    let uma_volta = crate::encontro::PRAZO_DA_CHAMADA + PRAZO_DA_DISCAGEM_NA_CORRIDA;
+    if pela_chamada {
+        uma_volta * 2
+    } else {
+        uma_volta
+    }
 }
 
 /// Se dois endereços são o mesmo, com o IPv4 mapeado igual ao escrito.
@@ -1860,6 +1944,13 @@ impl Enlace {
             })
             .collect();
         let alvo = todos.first().cloned();
+        // Os IPv6 do anfitrião que o convite trouxe: servem à segunda chamada
+        // do degrau 4.
+        let do_convite_v6: Vec<Candidato> = todos
+            .iter()
+            .filter(|candidato| e_ipv6(candidato.destino.servidor))
+            .cloned()
+            .collect();
 
         // Com o quarto a caminho, quem precisa de furo espera a resposta dele, e
         // quem não precisa começa na hora.
@@ -1882,6 +1973,7 @@ impl Enlace {
             fila.push(Lote::PelaChamada {
                 chamada,
                 modelo: Box::new(modelo),
+                do_convite_v6,
             });
         }
         let corrida_de_um = fila.len() == 1 && quarto.is_none();
@@ -1905,6 +1997,7 @@ impl Enlace {
             tardios,
             Some(tocados),
             |posicao, lote: Lote| {
+                let pela_chamada = matches!(lote, Lote::PelaChamada { .. });
                 let chave = chave.clone();
                 let pins = Arc::clone(&pins);
                 let ponta = ponta.clone();
@@ -1931,10 +2024,9 @@ impl Enlace {
                     );
                     // Um lote sozinho não tem prazo além do da discagem e do
                     // aperto: é o caminho de antes para um link de um endereço.
-                    // O degrau 4 soma o prazo da chamada ao da discagem.
-                    let prazo = (!corrida_de_um).then_some(
-                        crate::encontro::PRAZO_DA_CHAMADA + PRAZO_DA_DISCAGEM_NA_CORRIDA,
-                    );
+                    // O degrau 4 soma o prazo da chamada ao da discagem, e pode
+                    // fazê-lo duas vezes ([`prazo_do_lote`]).
+                    let prazo = (!corrida_de_um).then(|| prazo_do_lote(pela_chamada));
                     match ate_o_prazo_ou_o_toque(
                         prazo,
                         tentativa,
@@ -2031,39 +2123,100 @@ impl Enlace {
         tocou: mpsc::UnboundedSender<(u8, u16)>,
         prazo_da_discagem: Duration,
     ) -> Result<(Self, String), ConnectError> {
-        let (candidatos, credencial, pelo_ponto) = match lote {
-            Lote::Direto(candidatos) => (candidatos, None, false),
-            Lote::PelaChamada { chamada, modelo } => {
+        let (candidatos, pelo_chama, segunda) = match lote {
+            Lote::Direto(candidatos) => (candidatos, None, None),
+            Lote::PelaChamada {
+                chamada,
+                modelo,
+                do_convite_v6,
+            } => {
                 let atendida = chamada
                     .chamar(ponta.ponta(), crate::encontro::PRAZO_DA_CHAMADA)
                     .await
                     .map_err(falha_da_chamada)?;
                 (
                     destinos_da_chamada(&modelo, &atendida),
-                    Some(atendida.credencial),
-                    true,
+                    Some(PeloChama {
+                        credencial: atendida.credencial,
+                        espera_checagem_ipv6: false,
+                    }),
+                    Some((chamada, modelo, do_convite_v6)),
                 )
             }
         };
-        let numerados: Vec<(Candidato, u8)> = candidatos
-            .into_iter()
-            .map(|candidato| {
-                let numero = numeracao.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                contar(
-                    olhos.as_ref(),
-                    Andamento::Tentando(Tentativa {
-                        candidato: numero,
-                        onde: candidato.destino.servidor,
-                        avisou: pelo_ponto,
-                    }),
-                );
-                (candidato, numero)
-            })
+        let pelo_ponto = pelo_chama.is_some();
+        let numerar = |candidatos: Vec<Candidato>| -> Vec<(Candidato, u8)> {
+            candidatos
+                .into_iter()
+                .map(|candidato| {
+                    let numero = numeracao.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    contar(
+                        olhos.as_ref(),
+                        Andamento::Tentando(Tentativa {
+                            candidato: numero,
+                            onde: candidato.destino.servidor,
+                            avisou: pelo_ponto,
+                        }),
+                    );
+                    (candidato, numero)
+                })
+                .collect()
+        };
+        let primeira = Self::discar_o_lote(
+            &ponta,
+            numerar(candidatos),
+            pelo_chama,
+            bilhete.clone(),
+            chave.clone(),
+            Arc::clone(&pins),
+            tocou.clone(),
+            prazo_da_discagem,
+        )
+        .await;
+        let Some((chamada, modelo, do_convite_v6)) = segunda else {
+            return primeira;
+        };
+        match primeira {
+            // **O ponto disse que o anfitrião atendeu, e o caminho não abriu.**
+            // É a falha que o degrau 4 tem de nomear: dois NATs que não deixam
+            // entrar o que não saiu, sem relay. Antes de nomeá-la, o que resta.
+            Err(ConnectError::SemResposta) => {}
+            outro => return outro,
+        }
+        // **A segunda chamada, com o IPv6 desta máquina.** O IPv4 não abriu, e
+        // o anfitrião só furou o endereço que o ponto viu. Com o IPv6 de quem
+        // chama no `CHAMA`, ele fura também o firewall IPv6 do roteador dele, e
+        // a discagem volta com o que o segundo `AQUI` der e com os IPv6 dele
+        // que o convite já trazia. Esta discagem aceita a checagem IPv6 do
+        // anfitrião mesmo sem conhecer IPv6 nenhum dele (quem liga por
+        // código): a primeira acabou, e não há outra com este `U`.
+        let enderecos_v6: Vec<SocketAddr> = do_convite_v6
+            .iter()
+            .map(|candidato| candidato.destino.servidor)
             .collect();
+        let Some(Ok(atendida)) = chamada
+            .chamar_pelo_ipv6(
+                ponta.ponta(),
+                crate::encontro::PRAZO_DA_CHAMADA,
+                &enderecos_v6,
+            )
+            .await
+        else {
+            // Sem IPv6 global para dizer, ou o ponto não atendeu desta vez: é
+            // a falha de antes, com o nome de antes.
+            return Err(ConnectError::NatNaoAbriu);
+        };
         Self::discar_o_lote(
             &ponta,
-            numerados,
-            credencial,
+            numerar(destinos_da_segunda_chamada(
+                &modelo,
+                &atendida,
+                &do_convite_v6,
+            )),
+            Some(PeloChama {
+                credencial: atendida.credencial,
+                espera_checagem_ipv6: true,
+            }),
             bilhete,
             chave,
             pins,
@@ -2072,10 +2225,7 @@ impl Enlace {
         )
         .await
         .map_err(|erro| match erro {
-            // **O ponto disse que o anfitrião atendeu, e o caminho não abriu.**
-            // É a falha que o degrau 4 tem de nomear: dois NATs que não deixam
-            // entrar o que não saiu, sem relay.
-            ConnectError::SemResposta if pelo_ponto => ConnectError::NatNaoAbriu,
+            ConnectError::SemResposta => ConnectError::NatNaoAbriu,
             outro => outro,
         })
     }
@@ -2094,7 +2244,7 @@ impl Enlace {
     async fn discar_o_lote(
         ponta: &crate::transporte::PontaDaSessao,
         mut restantes: Vec<(Candidato, u8)>,
-        credencial: Option<String>,
+        pelo_chama: Option<PeloChama>,
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
@@ -2110,7 +2260,7 @@ impl Enlace {
             let conexao = match crate::client::discar(
                 ponta.ponta(),
                 alvos,
-                credencial.clone(),
+                pelo_chama.clone(),
                 prazo,
             )
             .await
@@ -7925,17 +8075,49 @@ async fn voltar(
             let alvos = std::iter::once(atendida.endereco)
                 .chain(atendida.dicas.iter().copied())
                 .collect();
-            crate::client::discar(
+            let primeira = crate::client::discar(
                 ponta.ponta(),
                 alvos,
-                Some(atendida.credencial),
+                Some(PeloChama {
+                    credencial: atendida.credencial,
+                    espera_checagem_ipv6: false,
+                }),
                 PRAZO_POR_CANDIDATO,
             )
-            .await
-            .map_err(|erro| match erro {
-                ConnectError::SemResposta => ConnectError::NatNaoAbriu,
-                outro => outro,
-            })?
+            .await;
+            match primeira {
+                Ok(conexao) => conexao,
+                // O anfitrião atendeu e o IPv4 não abriu: a segunda chamada,
+                // com o IPv6 desta máquina, como na entrada
+                // ([`Enlace::tentar_o_lote`]).
+                Err(ConnectError::SemResposta) => {
+                    let Some(Ok(atendida)) = chamada
+                        .chamar_pelo_ipv6(
+                            ponta.ponta(),
+                            crate::encontro::PRAZO_DA_CHAMADA,
+                            &[destino.servidor],
+                        )
+                        .await
+                    else {
+                        return Err(ConnectError::NatNaoAbriu);
+                    };
+                    crate::client::discar(
+                        ponta.ponta(),
+                        alvos_da_segunda_volta(destino.servidor, &atendida),
+                        Some(PeloChama {
+                            credencial: atendida.credencial,
+                            espera_checagem_ipv6: true,
+                        }),
+                        PRAZO_POR_CANDIDATO,
+                    )
+                    .await
+                    .map_err(|erro| match erro {
+                        ConnectError::SemResposta => ConnectError::NatNaoAbriu,
+                        outro => outro,
+                    })?
+                }
+                Err(outro) => return Err(outro),
+            }
         }
         Err(erro) => return Err(erro),
     };
@@ -10053,6 +10235,147 @@ mod tests {
         assert!(
             lote_do_quarto(DoQuarto::default(), Vec::new(), false, &pins).is_empty(),
             "um quarto que não trouxe nada soltou um lote vazio na corrida"
+        );
+    }
+
+    #[test]
+    fn a_segunda_chamada_disca_o_que_o_ponto_deu_e_os_ipv6_do_convite() {
+        // O `AQUI` só diz o endereço que o ponto viu e as dicas de rede local.
+        // O anfitrião furou para o IPv6 de quem chama, e é ao IPv6 dele, que o
+        // convite já trazia, que a discagem da segunda chamada tem de ir.
+        let candidato = |onde: &str, prova: bool| Candidato {
+            destino: Destino {
+                o_pino_prova_o_servidor: prova,
+                ..guardado_em(onde)
+            },
+            antes: Some(format!("pino de {onde}")),
+        };
+        let modelo = candidato("203.0.113.1:8383", true);
+        let atendida = crate::encontro::Atendida {
+            endereco: "198.51.100.7:14178".parse().expect("endereço"),
+            dicas: vec!["192.168.0.9:8383".parse().expect("endereço")],
+            credencial: "u".repeat(32),
+        };
+        let do_convite_v6 = [
+            candidato("[2804:7f0:b0c0:1234::10]:8383", false),
+            candidato("[2804:7f0:b0c0:1234::20]:8383", false),
+        ];
+        let onde = |destinos: &[Candidato]| -> Vec<String> {
+            destinos
+                .iter()
+                .map(|candidato| candidato.destino.servidor.to_string())
+                .collect()
+        };
+
+        // A primeira chamada é a de sempre: só o que o ponto deu.
+        assert_eq!(
+            onde(&destinos_da_chamada(&modelo, &atendida)),
+            ["198.51.100.7:14178", "192.168.0.9:8383"],
+            "a discagem da primeira chamada mudou: ela é o caminho IPv4 de sempre"
+        );
+
+        let destinos = destinos_da_segunda_chamada(&modelo, &atendida, &do_convite_v6);
+        assert_eq!(
+            onde(&destinos),
+            [
+                "198.51.100.7:14178",
+                "192.168.0.9:8383",
+                "[2804:7f0:b0c0:1234::10]:8383",
+                "[2804:7f0:b0c0:1234::20]:8383",
+            ],
+            "a discagem da segunda chamada não foi aos IPv6 do anfitrião: o furo IPv6 abriria \
+             e ninguém passaria por ele"
+        );
+        // Os do `AQUI` herdam as regras do alvo, sem a prova pelo pino: são
+        // endereços que ninguém escolheu.
+        for do_aqui in destinos.iter().take(2) {
+            assert_eq!(do_aqui.destino.chave_do_pin, modelo.destino.chave_do_pin);
+            assert!(!do_aqui.destino.o_pino_prova_o_servidor);
+        }
+        // Os do convite ficam como o convite os trouxe: a chave de pino e o
+        // pin de antes deles, e não os do alvo.
+        for (do_convite, original) in destinos.iter().skip(2).zip(&do_convite_v6) {
+            assert_eq!(
+                do_convite.destino.chave_do_pin,
+                original.destino.chave_do_pin
+            );
+            assert_eq!(do_convite.antes, original.antes);
+        }
+
+        // Um `AQUI` que já é o IPv6 do convite (um anfitrião registrado no
+        // ponto por IPv6) não o põe duas vezes no mesmo agente ICE.
+        let por_ipv6 = crate::encontro::Atendida {
+            endereco: "[2804:7f0:b0c0:1234::10]:8383".parse().expect("endereço"),
+            dicas: Vec::new(),
+            credencial: "u".repeat(32),
+        };
+        assert_eq!(
+            destinos_da_segunda_chamada(&modelo, &por_ipv6, &do_convite_v6).len(),
+            2
+        );
+        // Quem liga por código não tem IPv6 nenhum do anfitrião: disca o que o
+        // ponto deu, e aprende o IPv6 dele da checagem que chega.
+        assert_eq!(
+            destinos_da_segunda_chamada(&modelo, &atendida, &[]).len(),
+            2
+        );
+
+        // O que conta como IPv6 do convite: IPv6 de verdade, e nunca o IPv4
+        // escrito como IPv6.
+        for (endereco, e) in [
+            ("[2804:7f0:b0c0:1234::10]:8383", true),
+            ("[fd12:3456::10]:8383", true),
+            ("[::1]:8383", true),
+            ("203.0.113.7:8383", false),
+            ("[::ffff:203.0.113.7]:8383", false),
+        ] {
+            assert_eq!(
+                e_ipv6(endereco.parse().expect("endereço")),
+                e,
+                "errou sobre {endereco}"
+            );
+        }
+
+        // E a segunda chamada cabe no prazo do lote: sem o dobro, ela nasceria
+        // com o prazo já gasto pela discagem da primeira.
+        assert_eq!(prazo_do_lote(true), prazo_do_lote(false) * 2);
+        assert_eq!(
+            prazo_do_lote(false),
+            crate::encontro::PRAZO_DA_CHAMADA + PRAZO_DA_DISCAGEM_NA_CORRIDA
+        );
+    }
+
+    #[test]
+    fn a_volta_disca_de_novo_o_ipv6_da_sessao_depois_do_furo() {
+        let atendida = crate::encontro::Atendida {
+            endereco: "198.51.100.7:14178".parse().expect("endereço"),
+            dicas: vec!["192.168.0.9:8383".parse().expect("endereço")],
+            credencial: "u".repeat(32),
+        };
+        let texto = |alvos: Vec<SocketAddr>| -> Vec<String> {
+            alvos.iter().map(ToString::to_string).collect()
+        };
+        // A sessão estava no IPv6 do anfitrião: a discagem direta a ele deu em
+        // silêncio, o anfitrião furou, e a discagem seguinte volta a ele.
+        assert_eq!(
+            texto(alvos_da_segunda_volta(
+                "[2804:7f0:b0c0:1234::10]:8383".parse().expect("endereço"),
+                &atendida
+            )),
+            [
+                "198.51.100.7:14178",
+                "192.168.0.9:8383",
+                "[2804:7f0:b0c0:1234::10]:8383"
+            ],
+            "a volta não discou de novo o IPv6 que o furo acabou de abrir"
+        );
+        // A sessão estava num IPv4: o `AQUI` já diz o de hoje, e nada muda.
+        assert_eq!(
+            texto(alvos_da_segunda_volta(
+                "203.0.113.1:8383".parse().expect("endereço"),
+                &atendida
+            )),
+            ["198.51.100.7:14178", "192.168.0.9:8383"]
         );
     }
 

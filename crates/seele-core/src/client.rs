@@ -2778,6 +2778,24 @@ thread_local! {
     > = const { std::cell::RefCell::new(None) };
 }
 
+/// O que a discagem que segue um `AQUI` herda do `CHAMA` que o pediu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PeloChama {
+    /// O U que foi no `CHAMA`: é por ele que o anfitrião reconhece quem furou.
+    pub(crate) credencial: String,
+    /// Se esta discagem aceita a checagem IPv6 do anfitrião sem ter alvo IPv6
+    /// (`Discagem::espera_checagem_ipv6`, no enlace).
+    ///
+    /// É a discagem que segue a segunda chamada
+    /// (`encontro::Chamada::chamar_pelo_ipv6`): o `CHAMA` levou o IPv6 desta
+    /// máquina, o anfitrião o checa do IPv6 dele, e o `AQUI` não diz que IPv6
+    /// é esse (o `ATENDE` só leva o endereço que o ponto viu e as dicas de
+    /// rede local). Aceitar a checagem é como este lado o aprende: o
+    /// peer-reflexive do ICE. A discagem da primeira chamada não a aceita, e
+    /// continua a de sempre.
+    pub(crate) espera_checagem_ipv6: bool,
+}
+
 /// Disca um anfitrião pela ponta desta sessão: todos os `alvos` num agente ICE
 /// só (D2 da 0.17).
 ///
@@ -2788,7 +2806,8 @@ thread_local! {
 /// (`Verdict::InviteDisagrees`), que um pino no DTLS recusaria. O que sai para
 /// quem atendeu antes disso é o DTLS e nada do protocolo.
 ///
-/// `credencial` é o U do `CHAMA` do degrau 4, quando houve; `None` sorteia.
+/// `pelo_chama` é o que a discagem herda do `CHAMA` do degrau 4, quando houve
+/// ([`PeloChama`]); `None` sorteia um U.
 ///
 /// # Errors
 ///
@@ -2797,12 +2816,15 @@ thread_local! {
 pub(crate) async fn discar(
     ponta: &crate::transporte::Ponta,
     alvos: Vec<SocketAddr>,
-    credencial: Option<String>,
+    pelo_chama: Option<PeloChama>,
     prazo: std::time::Duration,
 ) -> Result<crate::transporte::Conexao, ConnectError> {
     let quantos = alvos.len();
     let mut discagem = crate::transporte::Discagem::nova(alvos, crate::transporte::Pino::Qualquer);
-    discagem.credencial = credencial;
+    if let Some(pelo_chama) = pelo_chama {
+        discagem.credencial = Some(pelo_chama.credencial);
+        discagem.espera_checagem_ipv6 = pelo_chama.espera_checagem_ipv6;
+    }
     discagem.prazo = prazo;
     ponta.discar(discagem).await.map_err(|falha| {
         let erro = classificar_a_discagem(&falha);
