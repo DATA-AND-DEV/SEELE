@@ -1276,7 +1276,12 @@
   width: 44px;
   height: 44px;
   border-radius: 15px;
-  font-size: calc(17px * var(--cel-escala));
+  /* As iniciais são marca numa caixa fixa de 44, como as do cartão da CHAMADA
+     (`TEXTO_COM_TETO` da bancada do celular): com teto, ou a 2 o «DA» passava
+     da caixa (46 > 44, medido no Chromium do Linux em 12/11/2026). O guarda
+     `as_iniciais_numa_caixa_fixa_tem_teto`, em `tests/celular.rs`, exige o
+     teto. */
+  font-size: min(calc(17px * var(--cel-escala)), 22px);
 }
 
 /* O nome é texto: abrir a folha é tocar a linha. */

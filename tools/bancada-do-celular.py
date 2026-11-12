@@ -2843,7 +2843,10 @@ def aba_ajustes(pg: Page) -> list[str]:
 # `celular-texto.css` repete o tamanho, mais os tetos escritos à mão.
 TEXTO_COM_TETO = {
     ".cel-abas": "as abas têm teto de 13 px, como a barra de abas do iOS (spec, §5)",
-    ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar":
+    # O avatar da lista de PESSOAS entrou em 12/11/2026: na caixa de 44 px dele,
+    # a 2, o «DA» passava da caixa no Chromium do Linux (46 > 44). O teto é o do
+    # `celular-sessao.css`, escrito à mão, de 17 a 22 px.
+    ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar, #lista-roster .pessoa-avatar":
         "as iniciais numa caixa de tamanho fixo são marcas, e não texto de ler",
     ".barra, .sync-marca, .chamada-cartao-barra, .chamada-cartao-marca":
         "a barra do sinal é desenho; o número e a palavra ao lado crescem",
