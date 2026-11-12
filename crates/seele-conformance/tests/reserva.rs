@@ -200,7 +200,58 @@ fn porta_livre() -> u16 {
     }
 }
 
+/// **Quem nasce com tela nasce sozinho.** A tela de nascença é do processo
+/// ([`seele_core::enlace::este_processo_tem_tela`]), e este binário roda as
+/// provas em paralelo: quem liga o padrão ([`enlace_que_nasce_com_tela`])
+/// escreve aqui, e todo outro enlace nasce lendo ([`enlace`]) — nenhum nasce
+/// com a tela de outro.
+static TELA_DE_NASCENCA: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 async fn enlace(
+    endereco: SocketAddr,
+    conjunto: &str,
+    semente: u8,
+    apelido: &str,
+) -> Result<Enlace> {
+    let _sem_tela = TELA_DE_NASCENCA.read().await;
+    conectar(endereco, conjunto, semente, apelido).await
+}
+
+/// Um enlace que **já nasce com tela**, como o do app: o `main` dele diz
+/// `este_processo_tem_tela(true)` antes de conectar.
+///
+/// É o que a prova de quem **chega** precisa. O servidor manda o pedido de
+/// máquina na chegada, e o núcleo decide na hora em que ele chega: ligar a tela
+/// com [`Enlace::aceitar_pedidos_de_maquina`] depois de o enlace voltar perde
+/// essa corrida (é o que a documentação de `este_processo_tem_tela` diz), o
+/// pedido é recusado `sem-tela` e não chega a ninguém. Era assim que
+/// `o_pedido_a_quem_nao_esta_volta_quando_ela_chega` reprovava numa máquina
+/// carregada (medido em 12/11/2026 no Windows, com dois processadores: uma em
+/// oito, e sempre com 300 ms entre a chegada e a tela).
+///
+/// O padrão do processo fica ligado só enquanto este enlace nasce, com
+/// [`TELA_DE_NASCENCA`] presa para escrita: nenhum outro enlace deste binário
+/// nasce no meio.
+async fn enlace_que_nasce_com_tela(
+    endereco: SocketAddr,
+    conjunto: &str,
+    semente: u8,
+    apelido: &str,
+) -> Result<Enlace> {
+    /// Desliga o padrão ao sair, também se a conexão falhar ou for largada.
+    struct Desliga;
+    impl Drop for Desliga {
+        fn drop(&mut self) {
+            seele_core::enlace::este_processo_tem_tela(false);
+        }
+    }
+    let _so_este = TELA_DE_NASCENCA.write().await;
+    seele_core::enlace::este_processo_tem_tela(true);
+    let _desliga = Desliga;
+    conectar(endereco, conjunto, semente, apelido).await
+}
+
+async fn conectar(
     endereco: SocketAddr,
     conjunto: &str,
     semente: u8,
@@ -1298,9 +1349,9 @@ async fn o_pedido_a_quem_nao_esta_volta_quando_ela_chega() -> Result<()> {
     )
     .await?;
     esperar_momento(&mut joga, r#""motivo":"nao-esta-aqui""#).await?;
-    // Ela chega: o lugar volta à metade de servidor, que pede de novo.
-    let mut de_volta = enlace(endereco, &conjunto, 7, "ausente").await?;
-    de_volta.aceitar_pedidos_de_maquina(true);
+    // Ela chega **já com tela**, como quem abre o app: o lugar volta à metade
+    // de servidor, que pede de novo, e o pedido tem quem o leia quando chega.
+    let mut de_volta = enlace_que_nasce_com_tela(endereco, &conjunto, 7, "ausente").await?;
     esperar_momento(
         &mut joga,
         &format!(
