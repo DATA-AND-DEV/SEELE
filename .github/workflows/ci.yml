@@ -686,6 +686,12 @@ jobs:
       - run: node apps/seele-app/bancada/previas-de-tela.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # A gravação de tela que o macOS negou (o laço relatado na 1.0.0): o não
+      # tira o botão de pedir e põe o caminho dos Ajustes e as três saídas, e
+      # nada redesenha de volta ao pedido.
+      - run: node apps/seele-app/bancada/gravacao-de-tela-negada.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/apoio-na-ajuda.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

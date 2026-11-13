@@ -1461,6 +1461,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/camera.cjs
     uma_bancada node apps/seele-app/bancada/transmissao-que-cai.cjs
     uma_bancada node apps/seele-app/bancada/previas-de-tela.cjs
+    uma_bancada node apps/seele-app/bancada/gravacao-de-tela-negada.cjs
     uma_bancada node apps/seele-app/bancada/apoio-na-ajuda.cjs
     uma_bancada node apps/seele-app/bancada/teste-de-conexao.cjs
     uma_bancada node apps/seele-app/bancada/instalavel.cjs

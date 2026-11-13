@@ -2536,6 +2536,9 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
         ("src/main.rs", "FalhaAoHospedar"),
         ("src/main.rs", "FalhaAoEscolher"),
         ("src/main.rs", "FalhaNaPortaria"),
+        // As saídas da gravação de tela negada pelo macOS: um botão que falha
+        // sem frase é o beco que elas existem para tirar.
+        ("src/gravacao_de_tela.rs", "FalhaNaGravacaoDeTela"),
         (
             "../../crates/seele-sessao/src/catalogo.rs",
             "FalhaAoInstalarMod",
@@ -24845,9 +24848,13 @@ const ate = (promessa, nome, ms = 1500) => Promise.race([promessa, new Promise((
 const FONTES_BASE = [{ nome: "Monitor 1", monitor: true }, { nome: "SEELE" }, { nome: "Brave" }, { nome: "Bloco de Notas" }];
 // A cada chamada a lista vem girada: o mesmo conjunto, índices novos.
 const girada = (n) => FONTES_BASE.map((_, i) => FONTES_BASE[(i + n) % FONTES_BASE.length]);
-const caixaDeTela = async ({ listas = girada, falhar = null } = {}) => {
+// `sistema(cmd, args)` responde antes da tabela daqui (e `undefined` deixa passar): é o macOS de mentira
+// do guarda da gravação de tela negada. `plataforma` põe o sistema na barra e carrega o `frases.js` de verdade.
+const caixaDeTela = async ({ listas = girada, falhar = null, sistema = null, plataforma = null } = {}) => {
   const els = {};
   const $ = (id) => (els[id] ??= new El(id));
+  const chamadas = [];       // todo comando que a caixa mandou, na ordem
+  const confirmacoes = [];   // o que foi à caixa de confirmação (`abrirConfirmacao`)
   const ordem = [];          // fontes_de_tela / compartilhar_tela, na ordem em que o invoke os viu
   const enviadas = [];       // o que o compartilhar_tela recebeu, e a que janela o cache nativo o liga
   const portoes = {};
@@ -24859,6 +24866,8 @@ const caixaDeTela = async ({ listas = girada, falhar = null } = {}) => {
   const montar = (nomes) => nomes.map((f, i) => ({ id: i, nome: f.nome, monitor: Boolean(f.monitor), largura: 1280, altura: 720 }));
   const ouvintes = {};
   const invoke = async (cmd, args) => {
+    chamadas.push(cmd);
+    if (sistema) { const r = sistema(cmd, args); if (r !== undefined) return r; }
     if (cmd === "fontes_de_tela") {
       const n = rodadas++;
       ordem.push("fontes_de_tela");
@@ -24899,16 +24908,21 @@ const caixaDeTela = async ({ listas = girada, falhar = null } = {}) => {
     anunciar() {}, focavel: () => false, fecharAoClicarFora() {},
     fraseDeErro: (f) => String(f),
     abrirChamada: async () => {}, atualizarChamada: async () => {},
-    document: { activeElement: null, createElement: () => new El("") },
+    abrirConfirmacao: (titulo, consequencia, rotulo, executar) => confirmacoes.push({ titulo, consequencia, rotulo, executar }),
+    document: { activeElement: null, createElement: () => new El(""), getElementById: (id) => $(id) },
     window: { addEventListener() {} },
-    FRASES_DA_TELA_NO_NAVEGADOR: {},
+    ...(plataforma ? {} : { FRASES_DA_TELA_NO_NAVEGADOR: {} }),
   });
+  if (plataforma) {
+    $("barra-janela").dataset.plataforma = plataforma;
+    carregar({ ctx }, "frases.js");
+  }
   carregar({ ctx }, "camada-compartilhar.js");
   const botoes = () => $("compartilhar-fontes").children.map((li) => li.children[0]);
   // Dispara e dá um quadro; não espera o fim do ouvinte (um ouvinte pode estar preso numa fila de propósito).
   const toca = async (el, tipo = "click", evento = {}) => { el.handlers[tipo][0](evento); await tick(); };
   return {
-    $, ctx, ordem, enviadas, ouvintes,
+    $, ctx, ordem, enviadas, ouvintes, chamadas, confirmacoes,
     abrir: () => ctx.abrirCompartilhar(),
     segurar: (cmd) => { let soltar; portoes[cmd] = new Promise((r) => { soltar = r; }); return () => { delete portoes[cmd]; soltar(); }; },
     clicarNaFonte: async (nome) => {
@@ -24926,6 +24940,121 @@ const caixaDeTela = async ({ listas = girada, falhar = null } = {}) => {
   };
 };
 "##;
+
+/// **A gravação de tela que o macOS negou não gira em falso** (relato do dono em
+/// 13/11/2026, com a 1.0.0: «não habilita nunca, fica num loop infinito»).
+///
+/// O macOS de mentira nunca concede — é a permissão presa à versão anterior — e
+/// segue o contrato do núcleo (`seele-core/src/video.rs`,
+/// `MemoriaDoPedidoDeTela`): a consulta diz `NaoPerguntada` antes de um pedido e
+/// `Negada` depois de um pedido negado. A caixa é a fonte real, com as frases
+/// reais:
+///
+/// - abrir não pede nada; o pedido é um aperto, e um só;
+/// - depois do não o botão de pedir sai, e nenhum redesenho o traz de volta nem
+///   pede de novo;
+/// - a caixa diz que a permissão pode ter ficado presa a uma versão anterior, o
+///   caminho com o nome que o macOS escreve, e que só vale depois de reabrir;
+/// - os Ajustes, a redefinição e a reabertura só rodam no aperto de cada um; a
+///   falha de cada um é guardada para a linha de erro; depois de redefinir
+///   sobra só o reabrir; e reabrir com um servidor no ar pergunta antes.
+///
+/// A bancada `gravacao-de-tela-negada.cjs` confere o mesmo num navegador, com o
+/// que fica visível de verdade.
+#[test]
+fn a_gravacao_de_tela_negada_pelo_macos_nao_volta_a_pedir_e_tem_tres_saidas() {
+    rodar_node(
+        "a gravação de tela negada",
+        &format!(
+            "{CAIXA_NODE}\n{}",
+            r##"
+const mac = { negou: false, falhar: {}, servidor: null };
+const sistema = (cmd) => {
+  if (cmd in mac.falhar) throw mac.falhar[cmd];
+  if (cmd === "permissao_de_tela") return mac.negou ? "Negada" : "NaoPerguntada";
+  if (cmd === "pedir_permissao_de_tela") { mac.negou = true; return "Negada"; }
+  if (cmd === "fontes_de_tela") return [];
+  if (cmd === "meu_servidor") return mac.servidor;
+  if (["abrir_ajustes_da_gravacao_de_tela", "redefinir_permissao_de_tela", "reabrir_o_app"].includes(cmd)) return null;
+  return undefined;
+};
+const c = await caixaDeTela({ sistema, plataforma: "macos" });
+const vezes = (cmd) => c.chamadas.filter((x) => x === cmd).length;
+const aperta = async (id) => { await ate(c.$(id).handlers.click[0]({}), "o aperto em " + id); await tick(); };
+const SAIDAS = ["compartilhar-abrir-ajustes", "compartilhar-redefinir", "compartilhar-reabrir"];
+const naTela = (id) => !c.$("compartilhar-permissao-saidas").hidden && !c.$(id).hidden;
+const estado = () => JSON.stringify({ diz: c.$("compartilhar-permissao-diz").textContent, pedir: !c.$("compartilhar-pedir").hidden, saidas: SAIDAS.filter(naTela) });
+
+// Abrir não pede, e oferece o pedido.
+await ate(c.abrir(), "abrir");
+confere("abrir a caixa pediu a permissão sem ninguém apertar", vezes("pedir_permissao_de_tela") === 0);
+confere("sem permissão a caixa não ofereceu o pedido: " + estado(), !c.$("compartilhar-pedir").hidden && SAIDAS.every((id) => !naTela(id)));
+
+// O não: o pedido sai, a verdade e as três saídas entram.
+await ate(c.pedirPermissao(), "o pedido");
+confere("depois do não a caixa continuou oferecendo o mesmo pedido: " + estado(), c.$("compartilhar-pedir").hidden);
+confere("faltou uma das três saídas: " + estado(), SAIDAS.every(naTela));
+confere("a caixa não diz que o macOS não liberou: " + estado(), /O MACOS NÃO LIBEROU A GRAVAÇÃO DE TELA/.test(c.$("compartilhar-permissao-diz").textContent));
+const nota = c.$("compartilhar-permissao-nota").textContent;
+confere("a nota não diz que a permissão pode ter ficado presa a uma versão anterior: " + nota, /versão anterior/.test(nota) && /atualização/.test(nota));
+const passos = c.$("compartilhar-permissao-passos").children.map((li) => li.textContent);
+confere("os passos não dão o caminho com o nome que o macOS escreve: " + JSON.stringify(passos), passos.length === 4 && /Privacidade e Segurança › Gravação do Áudio do Sistema e da Tela/.test(passos[0]) && /«Gravação de Tela»/.test(passos[0]));
+confere("os passos não mandam tirar e pôr de novo: " + passos[2], /«−»/.test(passos[2]) && /«\+»/.test(passos[2]));
+confere("os passos não dizem que só vale depois de reabrir: " + passos[3], /só vale depois de reabrir/.test(passos[3]));
+confere("o que REDEFINIR faz não está dito antes do aperto", /apaga só a decisão do macOS sobre o SEELE gravar a tela/.test(c.$("compartilhar-permissao-o-que-fazem").textContent) && !c.$("compartilhar-permissao-o-que-fazem").hidden);
+
+// Sem laço: nenhum redesenho pede de novo nem devolve o botão de pedir.
+await ate(c.ctx.desenharCompartilhar(), "o redesenho");
+await ate(c.ctx.desenharCompartilhar({ relistar: true }), "a relista");
+c.ctx.fecharCompartilhar();
+await ate(c.abrir(), "abrir de novo");
+confere("um pedido negado disparou outro: " + vezes("pedir_permissao_de_tela"), vezes("pedir_permissao_de_tela") === 1);
+confere("a caixa saiu do estado negado sozinha: " + estado(), c.$("compartilhar-pedir").hidden && SAIDAS.every(naTela));
+confere("uma saída rodou sem aperto: " + JSON.stringify(c.chamadas), vezes("abrir_ajustes_da_gravacao_de_tela") + vezes("redefinir_permissao_de_tela") + vezes("reabrir_o_app") === 0);
+
+// Os Ajustes: no aperto, uma vez, e dito; a falha vai à linha de erro, e o «abriu» não é dito.
+await aperta("compartilhar-abrir-ajustes");
+confere("ABRIR OS AJUSTES não abriu uma vez: " + vezes("abrir_ajustes_da_gravacao_de_tela"), vezes("abrir_ajustes_da_gravacao_de_tela") === 1);
+confere("a caixa não disse que abriu os Ajustes", !c.$("compartilhar-permissao-feito").hidden && /foram abertos/.test(c.$("compartilhar-permissao-feito").textContent));
+mac.falhar.abrir_ajustes_da_gravacao_de_tela = "AjustesNaoAbriram";
+await aperta("compartilhar-abrir-ajustes");
+confere("os Ajustes que não abriram não foram ditos: " + c.$("compartilhar-erro").textContent, !c.$("compartilhar-erro").hidden && /OS AJUSTES DO SISTEMA NÃO ABRIRAM/.test(c.$("compartilhar-erro").textContent) && /Abra à mão/.test(c.$("compartilhar-erro").textContent));
+confere("a caixa disse que abriu os Ajustes que não abriram", c.$("compartilhar-permissao-feito").hidden);
+delete mac.falhar.abrir_ajustes_da_gravacao_de_tela;
+
+// Redefinir: a falha é dita e as saídas ficam; o sucesso deixa só o reabrir, sem pedir de novo.
+mac.falhar.redefinir_permissao_de_tela = "PermissaoNaoRedefinida";
+await aperta("compartilhar-redefinir");
+confere("a redefinição que falhou não foi dita: " + c.$("compartilhar-erro").textContent, /O MACOS NÃO REDEFINIU A PERMISSÃO/.test(c.$("compartilhar-erro").textContent));
+confere("a falha de redefinir tirou as saídas: " + estado(), SAIDAS.every(naTela));
+delete mac.falhar.redefinir_permissao_de_tela;
+await aperta("compartilhar-redefinir");
+confere("depois de redefinir sobrou mais que o reabrir: " + estado(), naTela("compartilhar-reabrir") && !naTela("compartilhar-redefinir") && !naTela("compartilhar-abrir-ajustes") && c.$("compartilhar-pedir").hidden);
+confere("a caixa não diz que a permissão foi redefinida: " + estado(), /FOI REDEFINIDA/.test(c.$("compartilhar-permissao-diz").textContent) && /Reabra o SEELE/.test(c.$("compartilhar-permissao-nota").textContent));
+confere("a falha antiga ficou na tela depois de redefinir", c.$("compartilhar-erro").hidden);
+c.ctx.fecharCompartilhar();
+await ate(c.abrir(), "abrir depois de redefinir");
+confere("a caixa reaberta esqueceu a redefinição: " + estado(), naTela("compartilhar-reabrir") && !naTela("compartilhar-redefinir") && c.$("compartilhar-pedir").hidden);
+confere("a redefinição pediu a permissão de novo sozinha", vezes("pedir_permissao_de_tela") === 1);
+
+// Reabrir: direto sem servidor; com um no ar, a pergunta vem antes e a caixa fecha.
+await aperta("compartilhar-reabrir");
+confere("REABRIR não reabriu: " + vezes("reabrir_o_app"), vezes("reabrir_o_app") === 1 && c.confirmacoes.length === 0);
+mac.servidor = { nome: "TERMINAL DOGMA" };
+await aperta("compartilhar-reabrir");
+confere("reabriu com um servidor no ar sem perguntar", vezes("reabrir_o_app") === 1);
+confere("a pergunta não diz quem sai do ar: " + JSON.stringify(c.confirmacoes), c.confirmacoes.length === 1 && c.confirmacoes[0].titulo === "REABRIR O SEELE" && /TERMINAL DOGMA sai do ar quando o SEELE fecha/.test(c.confirmacoes[0].consequencia) && c.confirmacoes[0].rotulo === "REABRIR E TIRAR TERMINAL DOGMA DO AR");
+confere("a pergunta abriu por cima da caixa de compartilhar", c.$("compartilhar").hidden);
+// Sem pergunta não há sim a dar: a falha de cima já disse, pelo nome.
+if (c.confirmacoes[0]) {
+  await c.confirmacoes[0].executar();
+  confere("o sim não reabriu", vezes("reabrir_o_app") === 2);
+}
+corpoTerminou = true;
+"##
+        ),
+    );
+}
 
 /// **(i) A reordenação.** O clique na fonte, a troca de qualidade e a de som só
 /// redesenham a caixa sobre a lista da abertura: nenhum chama `fontes_de_tela`,

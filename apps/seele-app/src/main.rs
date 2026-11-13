@@ -48,6 +48,9 @@ mod catalogo;
 // executor que perder.
 mod executor;
 mod firewall;
+// As saídas de quem teve a gravação de tela negada pelo macOS: os Ajustes e a
+// redefinição da permissão deste app (o laço relatado na 1.0.0).
+mod gravacao_de_tela;
 mod icone;
 mod ligar;
 mod maquina;
@@ -11387,6 +11390,54 @@ fn pedir_permissao_de_tela(
     Ok(session.conexao(carimbo)?.pedir_permissao_de_tela())
 }
 
+/// Abre a página dos Ajustes do Sistema em que o macOS lista quem pode gravar
+/// a tela. É a primeira saída de quem teve o pedido negado, e diz quando não
+/// abriu. Ver [`gravacao_de_tela`].
+#[tauri::command]
+async fn abrir_ajustes_da_gravacao_de_tela() -> Result<(), gravacao_de_tela::FalhaNaGravacaoDeTela>
+{
+    tauri::async_runtime::spawn_blocking(gravacao_de_tela::abrir_os_ajustes)
+        .await
+        .unwrap_or(Err(
+            gravacao_de_tela::FalhaNaGravacaoDeTela::AjustesNaoAbriram,
+        ))
+}
+
+/// Apaga a decisão que o macOS guardou sobre **este app** gravar a tela.
+///
+/// Só por aperto de botão, com a tela dizendo antes o que acontece: é o que o
+/// «−» da página dos Ajustes faz, e serve a quem ficou com a permissão presa a
+/// uma versão anterior. O identificador é o deste app, lido da configuração
+/// dele, e nunca vem da página. Ver [`gravacao_de_tela::comando_de_redefinir`].
+#[tauri::command]
+async fn redefinir_permissao_de_tela(
+    app: AppHandle,
+) -> Result<(), gravacao_de_tela::FalhaNaGravacaoDeTela> {
+    let identificador = app.config().identifier.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        gravacao_de_tela::redefinir_a_permissao(&identificador)
+    })
+    .await
+    .unwrap_or(Err(
+        gravacao_de_tela::FalhaNaGravacaoDeTela::PermissaoNaoRedefinida,
+    ))
+}
+
+/// Fecha o app e abre de novo.
+///
+/// O macOS só refaz a resposta sobre gravar a tela quando o app reabre: quem
+/// concedeu nos Ajustes com o SEELE aberto continua negado até lá.
+///
+/// `request_restart` e não `restart`: o primeiro passa pelo `RunEvent::Exit`,
+/// e é nele que a sessão e as hospedagens se despedem
+/// ([`despedir_no_fim_do_app`]); o segundo, chamado da linha principal, sai sem
+/// avisar ninguém. A página pergunta antes quando há um servidor no ar.
+#[tauri::command]
+fn reabrir_o_app(app: AppHandle) {
+    tracing::info!("reabrindo o app a pedido, pela caixa de compartilhar");
+    app.request_restart();
+}
+
 /// Começa a transmitir a fonte escolhida, com os limites escolhidos.
 ///
 /// `ConnectionError::ScreenShareTaken` quando alguém já está compartilhando nesta
@@ -13829,6 +13880,9 @@ fn main() {
             previas_de_tela,
             permissao_de_tela,
             pedir_permissao_de_tela,
+            abrir_ajustes_da_gravacao_de_tela,
+            redefinir_permissao_de_tela,
+            reabrir_o_app,
             compartilhar_tela,
             codificacao_da_camera,
             compartilhar_camera,

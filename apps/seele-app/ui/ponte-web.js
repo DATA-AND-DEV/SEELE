@@ -95,6 +95,10 @@ const RECUSA_MODS = "MODs se instalam, se ligam e se aplicam pelo app do SEELE q
 const RECUSA_VERSOES = "as versões do servidor moram no app do SEELE";
 const RECUSA_ATUALIZAR = "a versão é a desta página: não há o que instalar";
 const RECUSA_SISTEMA = "a página não abre os ajustes do sistema";
+// As saídas da gravação de tela negada pelo macOS (`gravacao_de_tela.rs`): a
+// permissão guardada e a reabertura são do app. Num navegador quem pergunta
+// pela tela é o navegador, e a caixa de compartilhar nem desenha estes botões.
+const RECUSA_GRAVACAO_DE_TELA = "a permissão de gravar a tela e a reabertura são do app do SEELE; numa página quem pergunta pela tela é o navegador";
 const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica é ele";
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
 // A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
@@ -109,6 +113,7 @@ const RECUSA_ATALHO = "o navegador não tem atalho para o computador inteiro: a 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
   ["abrir_a_porta_no_firewall", RECUSA_REDE],
+  ["abrir_ajustes_da_gravacao_de_tela", RECUSA_GRAVACAO_DE_TELA],
   ["abrir_ajustes_de_acessibilidade", RECUSA_SISTEMA],
   ["abrir_ajustes_do_microfone", RECUSA_SISTEMA],
   ["abrir_versao", RECUSA_VERSOES],
@@ -159,6 +164,8 @@ const RECUSAS_NOMEADAS = new Map([
   // servidor desta máquina, e o navegador não hospeda.
   ["preparar_copia", RECUSA_HOSPEDAR],
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
+  ["reabrir_o_app", RECUSA_GRAVACAO_DE_TELA],
+  ["redefinir_permissao_de_tela", RECUSA_GRAVACAO_DE_TELA],
   ["remover_versao", RECUSA_VERSOES],
   // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
   // tarefa 13 do plano da F3, Step 5b): mexem no banco de um servidor guardado

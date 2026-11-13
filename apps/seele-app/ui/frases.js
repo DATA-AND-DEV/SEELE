@@ -1638,6 +1638,20 @@ const FRASES = {
 
     ScreenShareUnavailable: "NÃO FOI POSSÍVEL COMPARTILHAR A TELA.\nConfira a permissão de captura do SEELE e escolha novamente uma tela ou janela disponível.",
 
+    // As saídas de quem teve a gravação de tela negada pelo macOS
+    // (`gravacao_de_tela.rs`, `FalhaNaGravacaoDeTela`). Cada uma diz o caminho
+    // à mão: o botão que falhou era a saída, e uma saída que falha calada é o
+    // mesmo beco de antes.
+    SoNoMacos:
+      "ISTO SÓ EXISTE NO MACOS.\n" +
+      "Neste sistema o SEELE não tem essa página dos ajustes para abrir nem essa permissão para redefinir.",
+    AjustesNaoAbriram:
+      "OS AJUSTES DO SISTEMA NÃO ABRIRAM.\n" +
+      "Abra à mão: Ajustes do Sistema › Privacidade e Segurança › Gravação do Áudio do Sistema e da Tela.",
+    PermissaoNaoRedefinida:
+      "O MACOS NÃO REDEFINIU A PERMISSÃO.\n" +
+      "Faça à mão, pelos passos acima: tire o SEELE da lista com o «−», ponha de novo com o «+» e reabra o SEELE.",
+
     // O arquivo veio e não ficou. É a única das três em que tentar de novo
     // resolve às vezes, e por isso é a única que manda tentar — e, quando não
     // resolver, a frase já diz onde olhar em vez de deixar a pessoa procurando.
@@ -2204,6 +2218,75 @@ const FRASES_DA_TELA_NO_NAVEGADOR = Object.freeze({
     "",
   palco: "Compartilhamento indisponível neste navegador.",
   recusa: "este navegador não compartilha a tela: use o app do SEELE, ou o Chrome ou o Edge no computador",
+});
+
+/**
+ * **A gravação de tela que o macOS não liberou**, na caixa de compartilhar
+ * (`camada-compartilhar.js`).
+ *
+ * Relato do dono em 13/11/2026, com a 1.0.0: «mesmo que eu permita o
+ * compartilhamento de tela nos Ajustes, ele não funciona, não habilita nunca,
+ * fica num loop infinito». A frase de antes mandava «marcar o SEELE» numa
+ * lista em que ele já estava marcado: a permissão era a de uma versão
+ * anterior, que o macOS guarda junto da assinatura do app e não passa para a
+ * versão nova (`gravacao_de_tela.rs` tem a medida). Estas dizem isso, e cada
+ * estado tem uma saída que funciona.
+ *
+ * O nome da página é o que o macOS 27 escreve em português, lido da extensão
+ * de Privacidade e Segurança em 13/11/2026: «Gravação do Áudio do Sistema e da
+ * Tela». Até o macOS 14 ela se chamava «Gravação de Tela», e a frase diz os
+ * dois: quem procura um nome que não está na tela não acha a página.
+ *
+ * Sem `**` nem outra marcação: tudo aqui é escrito com `textContent`. E cada
+ * frase cabe no teto de `no_sentence_the_screen_writes_runs_past_the_length_
+ * that_gets_read` (180), embora o guarda não leia este dicionário: o que não
+ * coube numa frase virou um passo da lista, que se lê um por vez.
+ */
+const FRASES_DA_GRAVACAO_DE_TELA = Object.freeze({
+  // Esta execução ainda não pediu, e o sistema não está deixando.
+  ainda: Object.freeze({
+    diz: "O MACOS AINDA NÃO LIBEROU A GRAVAÇÃO DE TELA PARA O SEELE",
+    nota:
+      "Aperte PEDIR AO SISTEMA, mesmo que o SEELE já apareça ligado nos Ajustes: " +
+      "se o macOS negar, esta caixa mostra como destravar.",
+  }),
+  // O pedido desta execução voltou negado. Serve aos dois casos: quem acabou
+  // de ser perguntado, e quem ficou com a permissão presa à versão anterior.
+  negada: Object.freeze({
+    diz: "O MACOS NÃO LIBEROU A GRAVAÇÃO DE TELA PARA O SEELE",
+    nota:
+      "Se o SEELE já aparece ligado nos Ajustes e não grava, a permissão ficou presa à versão anterior: " +
+      "depois de uma atualização, o macOS pode não passá-la para a versão nova.",
+    passos: Object.freeze([
+      "Abra Ajustes do Sistema › Privacidade e Segurança › Gravação do Áudio do Sistema e da Tela " +
+        "(«Gravação de Tela» em versões anteriores do macOS).",
+      "Se o SEELE não está na lista, ou está desligado: ligue a chave dele.",
+      "Se já está ligado e não funciona: tire-o da lista com o «−» e ponha de novo com o «+». " +
+        "Desligar e ligar a chave pode não bastar.",
+      "Reabra o SEELE. A permissão só vale depois de reabrir.",
+    ]),
+  }),
+  // Depois de REDEFINIR: a decisão antiga foi apagada, e este processo
+  // continua com a resposta velha até reabrir.
+  redefinida: Object.freeze({
+    diz: "A PERMISSÃO DE GRAVAR A TELA FOI REDEFINIDA",
+    nota:
+      "Reabra o SEELE, volte a esta caixa e aperte PEDIR AO SISTEMA: o macOS pergunta de novo. " +
+      "Depois de permitir, reabra mais uma vez.",
+  }),
+  // O que cada botão faz, dito antes do aperto.
+  oQueFazem:
+    "REDEFINIR A PERMISSÃO apaga só a decisão do macOS sobre o SEELE gravar a tela, e o macOS volta a " +
+    "perguntar. REABRIR O SEELE fecha e abre o app: você sai da sala.",
+  ajustesAbertos:
+    "Os Ajustes do Sistema foram abertos na página da gravação de tela. Depois de mudar lá, reabra o SEELE.",
+  // Reabrir com um servidor no ar: a mesma pergunta de fechar a janela.
+  reabrirComServidor: Object.freeze({
+    titulo: "REABRIR O SEELE",
+    consequencia: (nome) =>
+      `${nome} sai do ar quando o SEELE fecha, e todo mundo que estiver nele sai junto.`,
+    rotulo: (nome) => `REABRIR E TIRAR ${nome} DO AR`,
+  }),
 });
 
 /**

@@ -808,6 +808,7 @@
 :where(:root[data-casca="celular"]) .compartilhar-titulo { font-size: calc(32px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-fechar { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-pilula { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-permissao-passos { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-permissao-diz,
 :where(:root[data-casca="celular"]) .compartilhar-modulo-diz { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-modulo-onde { font-size: calc(12px * var(--cel-escala)); }

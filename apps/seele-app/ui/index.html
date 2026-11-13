@@ -5086,6 +5086,23 @@
         <p id="compartilhar-permissao-diz" class="compartilhar-permissao-diz"></p>
         <p id="compartilhar-permissao-nota" class="nota"></p>
         <button id="compartilhar-pedir" class="botao" type="button" hidden>PEDIR AO SISTEMA</button>
+        <!--
+          As saídas de quem o macOS negou (o laço relatado na 1.0.0): os passos
+          nos Ajustes, e três botões que fazem cada um uma coisa só — abrir a
+          página, apagar a decisão guardada deste app, reabrir. Nenhum roda
+          sozinho, e a linha abaixo deles diz o que cada um faz antes do aperto.
+          Os textos saem de `FRASES_DA_GRAVACAO_DE_TELA` (`frases.js`).
+        -->
+        <div id="compartilhar-permissao-saidas" class="compartilhar-permissao-saidas" hidden>
+          <ol id="compartilhar-permissao-passos" class="compartilhar-permissao-passos"></ol>
+          <div class="compartilhar-permissao-botoes">
+            <button id="compartilhar-abrir-ajustes" class="botao" type="button">ABRIR OS AJUSTES</button>
+            <button id="compartilhar-redefinir" class="botao" type="button">REDEFINIR A PERMISSÃO</button>
+            <button id="compartilhar-reabrir" class="botao" type="button">REABRIR O SEELE</button>
+          </div>
+          <p id="compartilhar-permissao-o-que-fazem" class="nota"></p>
+          <p id="compartilhar-permissao-feito" class="nota compartilhar-permissao-feito" role="status" hidden></p>
+        </div>
       </div>
 
       <!--
