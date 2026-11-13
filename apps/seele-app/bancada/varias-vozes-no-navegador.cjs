@@ -35,14 +35,21 @@
 // O roteiro é o do relato:
 //
 // 1. **uma voz**: quem ouve entra na sala, a primeira pessoa fala sem parar;
-// 2. **duas vozes**: mais uma entra e fala junto;
-// 3. **três vozes**: mais uma;
+// 2. **duas vozes**: mais uma entra e fala junto — e a primeira é medida
+//    também **enquanto a segunda entra**, que é o instante do relato;
+// 3. **três vozes**: mais uma, do mesmo jeito;
 // 4. **o revezamento**: todas se calam, a primeira fala, cala, a segunda fala,
-//    cala, e a primeira volta a falar — sem ninguém falar junto.
+//    cala, e a primeira volta a falar — sem ninguém falar junto;
+// 5. **a página que estraga a voz diz que é ela**: a bancada troca o instante
+//    de cada som que o decodificador de quem ouve devolve, e os quadros ficam
+//    sem cabeçalho, como no relato. O retrato tem de dizer `local_fault`, o
+//    rodapé tem de mostrar «ÁUDIO LOCAL FALHANDO», o console tem de ter a
+//    frase da ponte, e, parado o estrago, o aviso apaga sozinho e a voz volta.
 //
-// O que se exige, em cada passo: nenhum quadro decodificado sem o cabeçalho
-// dele, cada fonte com quase todos os quadros tocados e quase nenhum ocultado,
-// atrasado ou ressincronizado, e cada tom presente e sem estalos na saída.
+// O que se exige, nos passos de 1 a 4: nenhum quadro decodificado sem o
+// cabeçalho dele, cada fonte com quase todos os quadros tocados e quase nenhum
+// ocultado, atrasado ou ressincronizado, cada tom presente e sem estalos na
+// saída, e o aviso de falha local apagado.
 //
 // `--cpu <vezes>` estrangula a CPU da página de quem ouve
 // (`Emulation.setCPUThrottlingRate`), que é o que aproxima um celular ou um
@@ -218,6 +225,9 @@ async function abrirUmaPagina(navegador, endereco, { tom = null } = {}) {
   await contexto.route(/^https?:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])/, (rota) => rota.abort());
   const erros = [];
   aba.on("pageerror", (erro) => erros.push(`pageerror: ${erro.message}`));
+  /** As vezes em que a ponte disse, no console, que a página estraga a voz. */
+  const avisos = [];
+  aba.on("console", (mensagem) => mensagem.text().startsWith("ponte: a voz que chegou não está tocando inteira") && avisos.push(mensagem.text()));
   await aba.addInitScript(
     ({ tom, amplitude }) => {
       if (tom) {
@@ -240,11 +250,29 @@ async function abrirUmaPagina(navegador, endereco, { tom = null } = {}) {
           window.nosDaBancada.push({ ctx, nome, no: this });
         }
       };
+      // **O estrago do caso 5**: com `estragarAVozDaBancada` ligado, cada som
+      // que um decodificador devolve sai com outro instante, e a voz não acha
+      // o cabeçalho dele. Desligado, o decodificador é o do navegador.
+      const DecoderDoNavegador = window.AudioDecoder;
+      window.estragarAVozDaBancada = false;
+      const comOutroInstante = (dados) =>
+        new Proxy(dados, {
+          get: (alvo, chave) => {
+            if (chave === "timestamp") return alvo.timestamp + 1e12;
+            const valor = alvo[chave];
+            return typeof valor === "function" ? valor.bind(alvo) : valor;
+          },
+        });
+      window.AudioDecoder = class extends DecoderDoNavegador {
+        constructor(inicio) {
+          super({ ...inicio, output: (dados) => inicio.output(window.estragarAVozDaBancada ? comOutroInstante(dados) : dados) });
+        }
+      };
     },
     { tom, amplitude: AMPLITUDE },
   );
   await aba.goto(`${endereco}index.html`);
-  return { contexto, aba, erros };
+  return { contexto, aba, erros, avisos };
 }
 
 /** Entra pela identidade da página, como o COLAR UM LINK. */
@@ -289,11 +317,21 @@ function ligarOGravador(aba) {
   });
 }
 
+/** O que quem ouve diz da própria máquina: o `local_fault` do retrato e o aviso do rodapé. */
+function lerAFalhaLocal(aba) {
+  return aba.evaluate(async () => {
+    const retrato = await window.__TAURI__.core.invoke("snapshot");
+    const aviso = document.getElementById("tel-local");
+    return { retrato: retrato.telemetry.local_fault, rodape: aviso ? !aviso.hidden : null, tropecos: vozDaPonte.atual.tropecosDaEscuta() };
+  });
+}
+
 /** As contas de quem ouve, agora. */
 function lerAsContas(aba) {
   return aba.evaluate(async () => {
     const contas = await vozDaPonte.atual.contas();
     return {
+      falhaLocal: (await window.__TAURI__.core.invoke("snapshot")).telemetry.local_fault,
       pagina: {
         chegados: contas.pagina.chegados,
         decodificados: contas.pagina.decodificados,
@@ -312,7 +350,7 @@ function lerAsContas(aba) {
 }
 
 /**
- * Grava `segundos` da saída de quem ouve e procura cada tom nela.
+ * Fecha a gravação da saída de quem ouve e procura cada tom nela.
  *
  * Cada tom é medido de 5 em 5 ms, numa janela de Hann de 20 ms, contra uma
  * referência que conta as amostras desde o começo da gravação: um tom contínuo
@@ -321,14 +359,13 @@ function lerAsContas(aba) {
  * anda mais de 0,35 rad desde a anterior; um **estalo** é um trecho de janelas
  * perturbadas (dois trechos a menos de 20 ms um do outro contam como um).
  */
-function gravarEMedir(aba, segundos, tons) {
+function pararEMedir(aba, tons) {
   return aba.evaluate(
-    async ({ segundos, tons, amplitude }) => {
+    async ({ tons, amplitude }) => {
       const gravador = window.gravadorDaBancada;
       const som = await new Promise((resolver) => {
         gravador.port.onmessage = (evento) => resolver(evento.data);
-        gravador.port.postMessage("comecar");
-        setTimeout(() => gravador.port.postMessage("parar"), segundos * 1000);
+        gravador.port.postMessage("parar");
       });
       const JANELA = 960;
       const PASSO = 240;
@@ -382,8 +419,13 @@ function gravarEMedir(aba, segundos, tons) {
       for (let i = 0; i < som.length; i++) pico = Math.max(pico, Math.abs(som[i]));
       return { gravado_ms: Math.round(som.length / 48), pico, tons: medidos };
     },
-    { segundos, tons, amplitude: AMPLITUDE },
+    { tons, amplitude: AMPLITUDE },
   );
+}
+
+/** Começa a gravar a saída de quem ouve; o `pararEMedir` fecha a gravação. */
+function comecarAGravar(aba) {
+  return aba.evaluate(() => window.gravadorDaBancada.port.postMessage("comecar"));
 }
 
 /** O que andou entre duas leituras das contas, por fonte e na página. */
@@ -404,17 +446,26 @@ function diferenca(antes, depois) {
     fades: depois.fades - antes.fades,
     falhasDaMistura: depois.falhasDaMistura - antes.falhasDaMistura,
     cortadas: depois.mistura.cortadas - antes.mistura.cortadas,
+    falhaLocal: antes.falhaLocal || depois.falhaLocal,
     recepcao: { perda: depois.recepcao.perda, jitter_ms: depois.recepcao.jitterMs },
   };
 }
 
-/** Uma janela de medida em quem ouve: as contas antes e depois, e o som no meio. */
-async function medir(aba, tons, segundos = SEGUNDOS) {
+/**
+ * Uma janela de medida em quem ouve: as contas antes e depois, e o som no
+ * meio, gravado enquanto `enquanto` acontece.
+ */
+async function medirEnquanto(aba, tons, enquanto) {
   const antes = await lerAsContas(aba);
-  const som = await gravarEMedir(aba, segundos, tons);
+  await comecarAGravar(aba);
+  await enquanto();
+  const som = await pararEMedir(aba, tons);
   const depois = await lerAsContas(aba);
   return { ...diferenca(antes, depois), som };
 }
+
+/** Uma janela de medida de `segundos`. */
+const medir = (aba, tons, segundos = SEGUNDOS) => medirEnquanto(aba, tons, () => dormir(segundos * 1000));
 
 /** Uma linha por fonte e por tom, para quem lê a saída. */
 function dizer(nome, m) {
@@ -442,6 +493,7 @@ function exigir(caso, m, tons, segundos = SEGUNDOS) {
   const esperados = segundos * QUADROS_POR_SEGUNDO;
   confere(caso, m.pagina.semCabecalho === 0, `${m.pagina.semCabecalho} quadros decodificados ficaram sem o cabeçalho deles (de ${m.pagina.decodificados + m.pagina.semCabecalho})`);
   confere(caso, m.pagina.falhas === 0 && m.falhasDaMistura === 0, `a voz disse ${m.pagina.falhas} falhas e a mistura ${m.falhasDaMistura}`);
+  confere(caso, m.falhaLocal === false, "o retrato de quem ouve disse falha local (`local_fault`) com a voz tocando inteira");
   confere(caso, m.decodificadoresAbertos >= tons.length, `${m.decodificadoresAbertos} decodificadores abertos para ${tons.length} vozes`);
   const fontes = Object.values(m.fontes).filter((f) => f.recebidos > 0);
   confere(caso, fontes.length === tons.length, `${fontes.length} fontes receberam quadros, e falavam ${tons.length}: ${JSON.stringify(m.fontes)}`);
@@ -456,6 +508,22 @@ function exigir(caso, m, tons, segundos = SEGUNDOS) {
     const t = m.som.tons[tom];
     confere(caso, t.presenca >= 0.9, `o tom de ${tom} Hz esteve na saída em ${(t.presenca * 100).toFixed(1)}% do tempo: ${JSON.stringify(t)}`);
     confere(caso, t.estalos <= 2 * segundos, `o tom de ${tom} Hz estalou ${t.estalos} vezes em ${segundos} s: ${JSON.stringify(t)}`);
+  }
+}
+
+/**
+ * O que se exige de quem **já falava** enquanto mais uma pessoa entra: a
+ * janela dura o que a entrada durar, e por isso a conta é por tom, e não por
+ * quadros esperados.
+ */
+function exigirDeQuemJaFalava(caso, m, tons) {
+  const segundos = m.som.gravado_ms / 1000;
+  confere(caso, m.pagina.semCabecalho === 0, `${m.pagina.semCabecalho} quadros decodificados ficaram sem o cabeçalho deles enquanto mais uma pessoa entrava`);
+  confere(caso, m.falhaLocal === false, "o retrato de quem ouve disse falha local (`local_fault`) enquanto mais uma pessoa entrava");
+  for (const tom of tons) {
+    const t = m.som.tons[tom];
+    confere(caso, t.presenca >= 0.9, `enquanto mais uma pessoa entrava, o tom de ${tom} Hz esteve na saída em ${(t.presenca * 100).toFixed(1)}% do tempo: ${JSON.stringify(t)}`);
+    confere(caso, t.estalos <= 2 * segundos, `enquanto mais uma pessoa entrava, o tom de ${tom} Hz estalou ${t.estalos} vezes em ${segundos.toFixed(1)} s: ${JSON.stringify(t)}`);
   }
 }
 
@@ -516,13 +584,19 @@ function exigir(caso, m, tons, segundos = SEGUNDOS) {
     exigir("1. uma voz", medidas.uma, TONS.slice(0, 1));
 
     // ---------------------------------------------------------- 2. duas vozes
-    await maisUma();
+    // **O instante do relato**: a primeira segue tocando enquanto a segunda
+    // carrega a página, entra no servidor, entra na sala e começa a falar.
+    medidas.entradaDaSegunda = await medirEnquanto(ouvinte.aba, TONS.slice(0, 1), maisUma);
+    dizer("a primeira, enquanto a segunda entra", medidas.entradaDaSegunda);
+    exigirDeQuemJaFalava("2. duas vozes (a entrada)", medidas.entradaDaSegunda, TONS.slice(0, 1));
     medidas.duas = await medir(ouvinte.aba, TONS.slice(0, 2));
     dizer("duas vozes", medidas.duas);
     exigir("2. duas vozes", medidas.duas, TONS.slice(0, 2));
 
     // ---------------------------------------------------------- 3. três vozes
-    await maisUma();
+    medidas.entradaDaTerceira = await medirEnquanto(ouvinte.aba, TONS.slice(0, 2), maisUma);
+    dizer("as duas primeiras, enquanto a terceira entra", medidas.entradaDaTerceira);
+    exigirDeQuemJaFalava("3. três vozes (a entrada)", medidas.entradaDaTerceira, TONS.slice(0, 2));
     medidas.tres = await medir(ouvinte.aba, TONS.slice(0, 3));
     dizer("três vozes", medidas.tres);
     exigir("3. três vozes", medidas.tres, TONS.slice(0, 3));
@@ -546,6 +620,36 @@ function exigir(caso, m, tons, segundos = SEGUNDOS) {
     dizer("a primeira de novo, depois da segunda", medidas.volta);
     exigir("4. o revezamento", medidas.volta, TONS.slice(0, 1), SEGUNDOS_DA_VOLTA);
 
+    // ------------------------------- 5. a página que estraga a voz diz que é ela
+    // A primeira segue falando sozinha. Até aqui ninguém avisou nada.
+    const antesDoEstrago = await lerAFalhaLocal(ouvinte.aba);
+    confere("5. a falha local", antesDoEstrago.retrato === false && antesDoEstrago.rodape === false, `antes do estrago o aviso já estava aceso: ${JSON.stringify(antesDoEstrago)}`);
+    confere("5. a falha local", ouvinte.avisos.length === 0, `a ponte avisou sem estrago nenhum: ${JSON.stringify(ouvinte.avisos)}`);
+    await ouvinte.aba.evaluate(() => {
+      window.estragarAVozDaBancada = true;
+    });
+    const acendeu = await esperar(ouvinte.aba, async () => {
+      const retrato = await window.__TAURI__.core.invoke("snapshot");
+      const aviso = document.getElementById("tel-local");
+      return { pronto: retrato.telemetry.local_fault === true && aviso && !aviso.hidden, retrato: retrato.telemetry.local_fault, rodape: aviso ? !aviso.hidden : null, tropecos: vozDaPonte.atual.tropecosDaEscuta() };
+    }, undefined, 5000);
+    confere("5. a falha local", acendeu.pronto, `com os quadros ficando sem cabeçalho, a página não disse que a falha é dela: ${JSON.stringify(acendeu)}`);
+    confere("5. a falha local", ouvinte.avisos.length === 1, `a ponte disse ${ouvinte.avisos.length} vezes no console que a página estraga a voz, e é uma por vez que acende`);
+    medidas.falhaLocal = { antes: antesDoEstrago, acesa: acendeu };
+    await ouvinte.aba.evaluate(() => {
+      window.estragarAVozDaBancada = false;
+    });
+    const apagou = await esperar(ouvinte.aba, async () => {
+      const retrato = await window.__TAURI__.core.invoke("snapshot");
+      const aviso = document.getElementById("tel-local");
+      return { pronto: retrato.telemetry.local_fault === false && aviso && aviso.hidden, retrato: retrato.telemetry.local_fault, rodape: aviso ? !aviso.hidden : null };
+    }, undefined, 10_000);
+    confere("5. a falha local", apagou.pronto, `parado o estrago, o aviso não apagou sozinho: ${JSON.stringify(apagou)}`);
+    // E a voz voltou: a primeira toca inteira de novo.
+    medidas.depoisDoEstrago = await medir(ouvinte.aba, TONS.slice(0, 1), SEGUNDOS_DA_VOLTA);
+    dizer("a primeira, depois do estrago", medidas.depoisDoEstrago);
+    exigir("5. a falha local", medidas.depoisDoEstrago, TONS.slice(0, 1), SEGUNDOS_DA_VOLTA);
+
     for (const pagina of paginas) {
       confere("a página", pagina.erros.length === 0, `erros que a página não pegou: ${JSON.stringify(pagina.erros.slice(0, 5))}`);
     }
@@ -554,7 +658,8 @@ function exigir(caso, m, tons, segundos = SEGUNDOS) {
       const estalos = ["uma", "duas", "tres", "volta"].map((nome) => Object.values(medidas[nome].som.tons).reduce((soma, t) => soma + t.estalos, 0));
       console.log(
         `varias-vozes-no-navegador: quem ouve pela página ouviu uma, duas e três vozes ao mesmo tempo e a primeira de novo depois do revezamento, ` +
-          `sem nenhum quadro sem cabeçalho e com ${estalos.join(", ")} estalos nos tons${CPU > 1 ? `, com a CPU dela ${CPU}× mais lenta` : ""}.`,
+          `sem nenhum quadro sem cabeçalho e com ${estalos.join(", ")} estalos nos tons${CPU > 1 ? `, com a CPU dela ${CPU}× mais lenta` : ""}; ` +
+          `e quando a bancada deixou os quadros dela sem cabeçalho (${acendeu.tropecos} até o aviso acender), o rodapé disse «ÁUDIO LOCAL FALHANDO» e apagou sozinho depois.`,
       );
     }
   } finally {

@@ -193,6 +193,18 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     decodificados: 0,
     semCabecalho: 0,
     esquecidas: 0,
+    /**
+     * **Quantas vezes esta página estragou a voz que chegou inteira**: um
+     * quadro decodificado que ficou sem o cabeçalho dele, um decodificador que
+     * falhou, a mistura do worklet que recusou um quadro ou não misturou. Não
+     * é perda de rede (o datagrama chegou) nem o buffer de jitter ocultando um
+     * quadro que faltou: é desta página, e soa igual às duas. Só cresce; quem
+     * quer saber se está acontecendo **agora** olha se cresceu (a ponte, que
+     * acende o «ÁUDIO LOCAL FALHANDO» do rodapé, como o `FalhaLocal` do
+     * desktop). No relato de 13/11/2026 a página deixou metade dos quadros sem
+     * cabeçalho, contou isso em `semCabecalho`, e não disse a ninguém.
+     */
+    tropecosDaEscuta: 0,
     falhas: [],
   };
 
@@ -412,7 +424,10 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     const dele = { decoder: null, chegadas: new Map(), proxima: 0 };
     dele.decoder = new AudioDecoder({
       output: (dados) => decodificado(alca, dele, dados),
-      error: (erro) => falha(`decodificador da alça ${alca}`, erro),
+      error: (erro) => {
+        contas.tropecosDaEscuta++;
+        falha(`decodificador da alça ${alca}`, erro);
+      },
     });
     dele.decoder.configure(cfg.decoder);
     return dele;
@@ -428,6 +443,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
       const formato = dados.format === "f32" || dados.format === "f32-planar" ? {} : { format: "f32-planar" };
       dados.copyTo(pcm, { planeIndex: 0, ...formato });
     } catch (erro) {
+      contas.tropecosDaEscuta++;
       falha(`decodificador da alça ${alca}`, erro);
       return;
     } finally {
@@ -435,6 +451,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     }
     if (!info) {
       contas.semCabecalho++;
+      contas.tropecosDaEscuta++;
       return;
     }
     contas.decodificados++;
@@ -483,6 +500,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     try {
       decodificar(alca, { seq: vista.getUint16(4, true), carimbo: vista.getUint32(6, true), chegada: agora }, bytes.subarray(10));
     } catch (erro) {
+      contas.tropecosDaEscuta++;
       falha(`decodificador da alça ${alca}`, erro);
     }
   }
@@ -516,6 +534,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     try {
       decodificar(ALCA_DA_TELA, info, opus);
     } catch (erro) {
+      contas.tropecosDaEscuta++;
       falha("decodificador do som da tela", erro);
     }
   }
@@ -588,12 +607,19 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     vivo.reproducaoPronta = new Promise((resolve) => {
       pronta = resolve;
     });
+    // As falhas da mistura que este worklet já contou: ele diz o total, uma
+    // vez por segundo, e o que cresceu é tropeço da escuta.
+    let falhasDaMisturaVistas = 0;
     no.port.onmessage = (evento) => {
       const m = evento.data;
       if (m.tipo === "pronto") {
         aoAcontecer({ tipo: "reproducao-pronta", compilouEmMs: performance.now() - nasceu });
         pronta(true);
       } else if (m.tipo === "andamento") {
+        if (m.falhasDaMistura > falhasDaMisturaVistas) {
+          contas.tropecosDaEscuta += m.falhasDaMistura - falhasDaMisturaVistas;
+          falhasDaMisturaVistas = m.falhasDaMistura;
+        }
         esquecerCaladas();
       } else if (m.tipo === "contas") {
         const resolver = pedidosDeContas.get(m.pedido);
@@ -604,6 +630,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
         // enlace) mediu outra voz: não é dita.
         if (m.pedido === geracaoDaRecepcao && vivo.dentro && m.medida) aoAcontecer({ tipo: "recepcao", medida: m.medida });
       } else if (m.tipo === "falha") {
+        contas.tropecosDaEscuta++;
         falha(m.onde, m.texto);
         if (m.texto.startsWith("o .wasm") || m.texto.startsWith("o worklet nasceu")) pronta(false);
       }
@@ -1214,6 +1241,8 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     contas: lerContas,
     /** Pede uma volta da medida da recepção; a resposta é o evento `recepcao`. */
     pedirARecepcao,
+    /** Quantas vezes esta página estragou a voz que chegou (`contas.tropecosDaEscuta`). */
+    tropecosDaEscuta: () => contas.tropecosDaEscuta,
     /** A promessa do `.wasm` compilado no worklet (`false` se falhou). */
     reproducaoPronta: () => vivo.reproducaoPronta,
     abrirTeste,
