@@ -2045,6 +2045,16 @@ const FRASES_DA_PORTA_AO_HOSPEDAR = Object.freeze({
     "Hospedado de novo pela lista, ele nasce COM A SUA APROVAÇÃO, e a senha se põe em CONFIGURAÇÕES · A PORTA.",
 });
 
+/**
+ * **A senha do servidor, de quem entra** (`oferecerASenhaNaEntrada`, em
+ * `tela-boot.js`): a nota debaixo de CREDENCIAL RECUSADA. O servidor recusa
+ * igual a senha errada, o convite gasto e o vencido, e a nota não afirma que
+ * ele tem senha.
+ */
+const FRASES_DA_SENHA_NA_ENTRADA = Object.freeze({
+  nota: "Se este servidor tem senha, digite-a aqui. Ela não vem no link: quem hospeda é quem a passa.",
+});
+
 /** A frase de uma senha de servidor recusada, pelo nome da recusa. */
 function fraseDaSenhaRecusada(recusa, minimo) {
   const frase = FRASES_DA_PORTA_AO_HOSPEDAR.recusas[recusa];

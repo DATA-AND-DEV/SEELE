@@ -1274,6 +1274,37 @@
   gap: 12px;
 }
 
+/* ---------- a senha do servidor, de quem entra ----------
+   Debaixo da frase vermelha: o campo e o ENTRAR lado a lado quando cabem, e a nota na linha inteira. */
+.boot-senha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.boot-senha-campo {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.boot-senha-campo input { width: 100%; }
+
+.boot-senha > button {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: 40px;
+}
+
+.boot-senha > .nota {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
 /* ---------- quem pode entrar (preparar) ----------
    Duas opções, cada uma uma linha inteira clicável: o rádio nativo à esquerda (o teclado troca com as setas, o leitor diz «1 de 2»), o nome
    e a frase que diz o que ela faz. A escolhida é dita pelo rádio marcado, e a borda laranja só repete. Os campos da senha vêm logo abaixo, e

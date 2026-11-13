@@ -554,6 +554,12 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
         // Numa ligação pelo código não há oferta: o teste mede pelo convite de
         // um servidor, e quem liga por código não tem um para colar lá.
         oferecerOTesteNaEntrada(ligacao ? null : motivo);
+        // **A credencial recusada oferece o campo da senha do servidor**
+        // (1.1.1), depois da frase, como a oferta de cima. Numa ligação pelo
+        // código não: a sala pessoal não tem senha.
+        oferecerASenhaNaEntrada(
+          !ligacao && motivo?.Refused?.reason === "CredentialRejected" ? { alvo, apelido } : null,
+        );
         // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
         // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
         // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
@@ -819,6 +825,47 @@ function oferecerOTesteNaEntrada(erro) {
   fraseDaOfertaNaEntrada = ofereceu ? $("boot-erro").textContent : null;
 }
 
+/**
+ * A tentativa recusada a que a senha digitada volta, `{ alvo, apelido }`, e a
+ * frase de `#boot-erro` com que a oferta nasceu; `null` sem oferta na tela.
+ * **Não guarda segredo nenhum**: a senha é lida do campo no envio.
+ */
+let recusaPelaSenha = null;
+
+/**
+ * **O campo da senha do servidor debaixo de CREDENCIAL RECUSADA** (1.1.1), para
+ * a tentativa `{ alvo, apelido }` que o servidor acabou de recusar; com `null`,
+ * a oferta sai, e o que estava digitado sai com ela.
+ *
+ * O link não leva a senha (ADR 0006), e este app não tinha onde digitá-la: num
+ * servidor com senha, quem colava o link parava na frase vermelha.
+ */
+function oferecerASenhaNaEntrada(tentativa) {
+  $("boot-senha-valor").value = "";
+  $("boot-senha").hidden = tentativa === null;
+  if (tentativa === null) {
+    recusaPelaSenha = null;
+    return;
+  }
+  $("boot-senha-nota").textContent = FRASES_DA_SENHA_NA_ENTRADA.nota;
+  recusaPelaSenha = { ...tentativa, frase: $("boot-erro").textContent };
+}
+
+$("boot-senha").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  const campo = $("boot-senha-valor");
+  const senha = campo.value;
+  if (!recusaPelaSenha || senha.trim() === "") {
+    campo.focus();
+    return;
+  }
+  const { alvo, apelido } = recusaPelaSenha;
+  // Lida, a senha sai do campo e a oferta sai da tela: a tentativa que começa
+  // agora tem a frase dela, e uma recusa nova traz um campo vazio.
+  oferecerASenhaNaEntrada(null);
+  conectar(alvo, apelido, senha).catch((falha) => console.warn("conectar:", falha));
+});
+
 // **A oferta some quando a frase dela some.** `#boot-erro` tem meia dúzia de
 // escritores — esta tela, o HOSPEDAR, as camadas de MODs, de servidores e de
 // versões, a configuração do servidor —, e só o `conectar` sabe de rede. Um
@@ -826,8 +873,12 @@ function oferecerOTesteNaEntrada(erro) {
 // medir a rede de quem tem outra coisa a resolver. Vigiado aqui, e não por uma
 // chamada em cada escritor, que o próximo a escrever na linha esqueceria.
 new MutationObserver(() => {
-  if (fraseDaOfertaNaEntrada === null) return;
   const linha = $("boot-erro");
+  // A mesma regra para o campo da senha: ele é da frase com que nasceu.
+  if (recusaPelaSenha !== null && (linha.hidden || linha.textContent !== recusaPelaSenha.frase)) {
+    oferecerASenhaNaEntrada(null);
+  }
+  if (fraseDaOfertaNaEntrada === null) return;
   if (linha.hidden || linha.textContent !== fraseDaOfertaNaEntrada) oferecerOTesteNaEntrada(null);
 }).observe($("boot-erro"), {
   attributes: true,

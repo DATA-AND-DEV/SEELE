@@ -481,6 +481,9 @@ jobs:
       - run: node apps/seele-app/bancada/porta-ao-hospedar.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/senha-na-entrada.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/espera-e-carregando.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

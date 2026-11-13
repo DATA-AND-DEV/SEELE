@@ -503,6 +503,33 @@
     -->
     <div id="boot-teste-de-conexao" hidden></div>
     <!--
+      **A senha do servidor, de quem foi recusado na porta** (1.1.1).
+
+      O servidor aceita uma senha desde o ADR 0021, e o link não a leva, de
+      propósito (ADR 0006: «quem usa senha digita a senha»). Só que este app
+      nunca teve onde digitá-la: quem colava o link de um servidor com senha lia
+      CREDENCIAL RECUSADA e não tinha o que fazer. Com HOSPEDAR oferecendo COM
+      SENHA logo de cara, esse beco passou a ser o caminho principal.
+
+      Escondida até a frase de cima ser a de uma credencial recusada, e some
+      quando a frase muda (`oferecerASenhaNaEntrada`, em `tela-boot.js`). A
+      recusa do servidor é a mesma para senha errada, convite gasto e convite
+      vencido (`specs/08`), e por isso a nota diz «se este servidor tem senha»:
+      o app não sabe se tem.
+
+      Um formulário, para o Enter do campo ser o ENTRAR. A senha sai do campo
+      ao ser enviada, vai ao `connect` e a nenhum outro lugar.
+    -->
+    <form id="boot-senha" class="boot-senha" hidden>
+      <label class="boot-senha-campo">
+        <span class="rotulo">SENHA DO SERVIDOR</span>
+        <input id="boot-senha-valor" type="password" autocomplete="off" spellcheck="false"
+               autocapitalize="none" aria-describedby="boot-senha-nota">
+      </label>
+      <button id="boot-senha-entrar" type="submit" class="botao-fantasma">ENTRAR COM A SENHA</button>
+      <p id="boot-senha-nota" class="nota"></p>
+    </form>
+    <!--
       As saídas de quem hospeda com um MOD de API antiga moravam aqui, debaixo
       da frase vermelha. Foram para a tela ANTES DE HOSPEDAR (E2 da 0.17), no
       bloco dos MODs: a entrada não é lugar de decidir MOD de servidor.

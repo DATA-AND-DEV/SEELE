@@ -12274,9 +12274,10 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
 ///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
 ///    ela sai.
-/// 3. **Só quatro chamadas de `conectar` passam credencial por argumento**: o
-///    link colado, o link do lançador, a volta que aceita os MODs e a entrada
-///    pelo navegador. O RECONECTAR, a batida da espera, o hospedar e a troca de
+/// 3. **Só cinco chamadas de `conectar` passam credencial por argumento**: o
+///    link colado, o link do lançador, a volta que aceita os MODs, a entrada
+///    pelo navegador e, desde a 1.1.1, a senha do servidor que a pessoa digita
+///    debaixo de CREDENCIAL RECUSADA (`oferecerASenhaNaEntrada`). O RECONECTAR, a batida da espera, o hospedar e a troca de
 ///    servidor não passam nenhuma — uma reconexão que a passasse gastaria de
 ///    novo o convite que a entrada gastou. Desde o lote W, `conectar` anexa por
 ///    conta própria a credencial que um apelido tomado deixou
@@ -12663,7 +12664,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         }
     }
 
-    // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
+    // 3. Só cinco chamadas de `conectar` passam credencial por argumento (a do
     //    apelido tomado, `conectar` anexa sozinho: ver a parte 6). A credencial é
     //    o terceiro argumento; o quarto é o link colado (parte 7, da F6), e o quinto
     //    a ligação (tarefa 28 da F7), que leva só o nome de quem é chamado, e uma chamada com `undefined` ou `null`
@@ -12682,6 +12683,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // tentativa. Só quem não é conhecido o leva. O quarto argumento da
         // identidade é somente { sinal, ate }, sem outro caminho para o token.
         ("identidade-web.js", "alvo, apelido, credencial, preparo"),
+        // A senha do servidor, digitada debaixo de CREDENCIAL RECUSADA (1.1.1):
+        // lida do campo no envio, e entregue aqui. Não é reconexão: é a pessoa
+        // respondendo à recusa, e uma senha não se gasta.
+        ("tela-boot.js", "alvo, apelido, senha"),
     ];
     let mut levam: Vec<(String, String)> = Vec::new();
     for nome in ui_files(".js") {
@@ -12731,8 +12736,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 .iter()
                 .any(|(dono, conhecidos)| dono == nome && conhecidos == argumentos),
             "`conectar` passou a levar credencial em `{nome}`: conectar({argumentos}).\n\
-             Só o link colado, o link do lançador, a volta que aceita os MODs e a \
-             entrada pelo navegador levam \
+             Só o link colado, o link do lançador, a volta que aceita os MODs, a \
+             entrada pelo navegador e a senha digitada depois da recusa levam \
              uma; uma reconexão que a levasse gastaria de novo o convite que a \
              entrada gastou."
         );
@@ -12740,7 +12745,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     assert_eq!(
         levam.len(),
         LEVAM.len(),
-        "as chamadas de `conectar` com credencial não são as quatro conhecidas: {levam:?}"
+        "as chamadas de `conectar` com credencial não são as cinco conhecidas: {levam:?}"
     );
     let reconectar = js_function(&read("ui/tela-fim.js"), "async function reconectar(");
     assert!(
@@ -32023,9 +32028,11 @@ fn a_opcao_das_notificacoes_nasce_desligada_ao_lado_dos_alertas() {
 ///    o explica, e só o do portão com `checked`.
 /// 2. **Os campos da senha são de senha**, têm rótulo, não trazem valor nem
 ///    `data-*` na marcação, e nascem escondidos.
-/// 3. **Cada linha de `tela-boot.js` que toca a senha está na lista.** Uma
-///    linha nova — um `console.warn`, um `dataset`, um `localStorage`, um
-///    `registrarNoAnfitriao` — reprova aqui até alguém olhar para ela.
+/// 3. **Cada linha de `tela-boot.js` que toca uma senha de servidor está na
+///    lista**: a de um servidor novo, e a que quem entra digita debaixo de
+///    CREDENCIAL RECUSADA. Uma linha nova — um `console.warn`, um `dataset`,
+///    um `localStorage`, um `registrarNoAnfitriao` — reprova aqui até alguém
+///    olhar para ela.
 /// 4. **O `hospedar` leva `senha`, e nenhum outro `invoke` do arquivo leva.**
 #[test]
 fn a_porta_de_um_servidor_novo_e_um_grupo_de_opcoes_e_a_senha_so_vai_ao_hospedar() {
@@ -32129,6 +32136,11 @@ fn a_porta_de_um_servidor_novo_e_um_grupo_de_opcoes_e_a_senha_so_vai_ao_hospedar
     assert_eq!(
         tocam,
         [
+            // Quem entra: a senha digitada debaixo de CREDENCIAL RECUSADA.
+            "const senha = campo.value;",
+            "if (!recusaPelaSenha || senha.trim() === \"\") {",
+            "conectar(alvo, apelido, senha).catch((falha) => console.warn(\"conectar:\", falha));",
+            // Quem hospeda: a senha de um servidor novo.
             "async function hospedar(senhaDoNovo = null) {",
             "senha: senhaDoNovo,",
             "if (senhaDoNovo !== null && !subiu) {",
@@ -32142,7 +32154,7 @@ fn a_porta_de_um_servidor_novo_e_um_grupo_de_opcoes_e_a_senha_so_vai_ao_hospedar
             "return { senha };",
             "await hospedar(porta.senha);",
         ],
-        "uma linha de `tela-boot.js` passou a tocar a senha de um servidor novo (ou deixou de). \
+        "uma linha de `tela-boot.js` passou a tocar uma senha de servidor (ou deixou de). \
          Confira que ela não vai a console, a registro, a `data-*`, a evento nem a \
          armazenamento, e acerte a lista"
     );
