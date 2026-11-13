@@ -2,12 +2,17 @@
 //!
 //! `specs/03-audio.md`:
 //!
-//! > - **Push-to-talk** is the default. More predictable, no false positives.
+//! > - **Push-to-talk** was the default of the original design: more
+//! >   predictable, no false positives. It is still the mode a gate is born in.
 //! > - **Voice activation** with hysteresis: an opening threshold higher than
 //! >   the closing one, and a hangover of ~300 ms so the end of a sentence is
 //! >   not cut.
 //! > - Both feed the same `speaking: bool` signal, which is announced to the
 //! >   server so the interface can highlight who is talking.
+//!
+//! Which mode a person who never chose gets is not decided here: a new
+//! installation gets voice activation, one that already existed keeps the key
+//! (`seele_core::preferences::Preferences::assentar_o_padrao_do_microfone`).
 //!
 //! That last channel is the design: whatever the user chose, everything downstream
 //! sees one boolean. Nothing outside this module knows which mode is active.

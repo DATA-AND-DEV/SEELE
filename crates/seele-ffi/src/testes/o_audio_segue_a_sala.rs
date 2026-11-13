@@ -1310,6 +1310,162 @@ async fn a_supressao_e_a_sensibilidade_gravadas_valem_na_primeira_abertura() {
     );
 }
 
+// ---- o padrão de quem não escolheu o modo (pedido do dono, 13/11/2026) ----
+
+/// Uma pasta de dados vazia, como a de quem acabou de instalar.
+fn pasta_de_dados(nome: &str) -> std::path::PathBuf {
+    let pasta = std::env::temp_dir().join(format!(
+        "seele-ffi-padrao-do-microfone-{nome}-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&pasta);
+    std::fs::create_dir_all(&pasta).expect("a pasta de dados");
+    pasta
+}
+
+/// O que a casca faz no arranque e logo depois do `connect`: assenta o padrão
+/// desta instalação, e veste a sessão com o disco. Devolve o modo assentado e
+/// o modo com que a sessão ficou.
+fn arrancar_e_conectar(
+    home: &std::path::Path,
+    identidade: Option<&std::path::Path>,
+) -> (Option<crate::VoiceMode>, VoiceMode) {
+    use seele_core::preferences::Preferences;
+
+    let mut ajustes = Preferences::open(home.join("preferences")).expect("as preferências");
+    let assentado = super::assentar_o_padrao_do_microfone_com(
+        home.to_str().expect("a pasta em UTF-8"),
+        identidade.map(|pasta| pasta.to_str().expect("a pasta em UTF-8")),
+        &mut ajustes,
+    );
+    // Lidas de novo do disco, como a casca as lê a cada conexão.
+    let do_disco = Preferences::open(home.join("preferences")).expect("relê as preferências");
+    let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+    assert_eq!(
+        voz.escolhida().modo,
+        VoiceMode::PushToTalk,
+        "a sessão nasceu com o microfone podendo abrir sozinho, antes de alguém vesti-la"
+    );
+    super::vestir_com_o_disco(&voz, &do_disco);
+    (assentado, voz.escolhida().modo)
+}
+
+/// **Quem usa pela primeira vez fala sem tecla.** O pedido do dono: «o padrão
+/// agora para novos usuários, quando eles forem usar pela primeira vez, é o
+/// microfone aberto, não usando o botão».
+///
+/// Instalação nova é a que não tem chave nem preferências quando o app arranca.
+/// E a resposta fica gravada: no segundo arranque a chave já existe (o
+/// `connect` a criou), e refazer a conta devolveria a tecla a quem chegou ontem.
+#[test]
+fn quem_chega_numa_instalacao_nova_entra_com_o_microfone_por_voz() {
+    let home = pasta_de_dados("nova");
+    assert_eq!(
+        arrancar_e_conectar(&home, None),
+        (
+            Some(crate::VoiceMode::VoiceActivated),
+            VoiceMode::VoiceActivated
+        ),
+        "a instalação nova não entrou com o microfone abrindo por voz"
+    );
+
+    // O segundo arranque, com a chave que a primeira conexão deixou.
+    std::fs::write(home.join("identity.key"), [7_u8; 32]).expect("a chave");
+    assert_eq!(
+        arrancar_e_conectar(&home, None),
+        (
+            Some(crate::VoiceMode::VoiceActivated),
+            VoiceMode::VoiceActivated
+        ),
+        "o segundo arranque tratou a instalação de ontem como uma que já usava a tecla"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// **Quem já usava e nunca escolheu continua na tecla.** A escolha só vai para
+/// o disco quando a pessoa escolhe: quem usa há um ano sem abrir a configuração
+/// não tem `voice_mode` gravado, igual a quem instalou hoje. O que os separa é
+/// o que uma instalação usada deixa — a chave, ou o arquivo de preferências.
+#[test]
+fn quem_ja_usava_e_nunca_escolheu_continua_na_tecla() {
+    use seele_core::preferences::Preferences;
+    let na_tecla = (Some(crate::VoiceMode::PushToTalk), VoiceMode::PushToTalk);
+
+    // Só a chave: conectou, e nunca gravou preferência nenhuma.
+    let home = pasta_de_dados("so-a-chave");
+    std::fs::write(home.join("identity.key"), [7_u8; 32]).expect("a chave");
+    assert_eq!(
+        arrancar_e_conectar(&home, None),
+        na_tecla,
+        "a atualização abriu por voz o microfone de quem já tinha chave"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+
+    // Só as preferências, sem modo: escolheu o microfone, e nunca conectou.
+    let home = pasta_de_dados("so-as-preferencias");
+    Preferences::open(home.join("preferences"))
+        .expect("as preferências")
+        .set_capture(Some("alsa:hw:1,0"))
+        .expect("grava o microfone");
+    assert_eq!(
+        arrancar_e_conectar(&home, None),
+        na_tecla,
+        "a atualização abriu por voz o microfone de quem já tinha preferências"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+
+    // A chave na pasta da identidade (ADR 0061), e a pasta de dados vazia: uma
+    // linha que o launcher abre pela primeira vez, na máquina de quem já usa.
+    let home = pasta_de_dados("dados-da-linha");
+    let maquina = pasta_de_dados("a-maquina");
+    std::fs::write(maquina.join("identity.key"), [7_u8; 32]).expect("a chave");
+    assert_eq!(
+        arrancar_e_conectar(&home, Some(&maquina)),
+        na_tecla,
+        "a chave da máquina não contou como instalação que já usava"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+    let _ = std::fs::remove_dir_all(&maquina);
+}
+
+/// **Quem escolheu entra com o que escolheu**, nas duas instalações: a tecla
+/// escolhida de propósito numa instalação nova, e a voz ou o sempre aberto
+/// escolhidos numa antiga.
+#[test]
+fn quem_escolheu_o_modo_entra_com_ele_seja_qual_for_o_padrao() {
+    use seele_core::preferences::Preferences;
+
+    for (nome, ja_usava) in [("escolheu-na-nova", false), ("escolheu-na-antiga", true)] {
+        for modo in [
+            VoiceMode::PushToTalk,
+            VoiceMode::VoiceActivated,
+            VoiceMode::Open,
+        ] {
+            let home = pasta_de_dados(&format!("{nome}-{}", modo.as_str()));
+            if ja_usava {
+                std::fs::write(home.join("identity.key"), [7_u8; 32]).expect("a chave");
+            }
+            // Numa instalação nova a escolha vem depois do primeiro arranque,
+            // que é quando o padrão é assentado; numa antiga, veio antes.
+            if !ja_usava {
+                arrancar_e_conectar(&home, None);
+            }
+            Preferences::open(home.join("preferences"))
+                .expect("as preferências")
+                .set_voice_mode(Some(modo))
+                .expect("grava o modo");
+            let (_, da_sessao) = arrancar_e_conectar(&home, None);
+            assert_eq!(
+                da_sessao,
+                modo,
+                "{nome}: quem escolheu {} entrou com outro modo",
+                modo.as_str()
+            );
+            let _ = std::fs::remove_dir_all(&home);
+        }
+    }
+}
+
 // ---- o volume de cada pessoa (F1-vazamento, passo 3 (2), e acréscimo B) ----
 
 /// A Rafa sentada na sala, com o `ssrc` que o servidor deu a ela nesta

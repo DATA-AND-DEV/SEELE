@@ -20685,6 +20685,61 @@ fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
     );
 }
 
+/// **O padrão do microfone desta instalação é assentado antes de a janela
+/// existir.** Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem
+/// tecla, e quem já usava e nunca escolheu continua nela.
+///
+/// O que separa os dois é a chave da identidade e o arquivo de preferências
+/// (`seele_ffi::assentar_o_padrao_do_microfone`; a FFI prova as duas contas em
+/// `quem_chega_numa_instalacao_nova_entra_com_o_microfone_por_voz` e
+/// `quem_ja_usava_e_nunca_escolheu_continua_na_tecla`). E a chave nasce quando a
+/// janela pede o código da pessoa ou conecta: assentado depois de a janela
+/// existir, toda instalação nova já teria chave, pareceria usada, e ficaria na
+/// tecla — o pedido deixaria de valer sem teste nenhum reprovar.
+///
+/// E a tela de entrada lê o modo que vai valer, e não só o escolhido: sem isso
+/// a configuração de quem nunca escolheu não marca nenhum dos três modos.
+#[test]
+fn o_padrao_do_microfone_e_assentado_antes_de_a_janela_existir() {
+    let principal = read("src/main.rs");
+    let Some(setup) = principal.find(".setup(move |app|") else {
+        panic!("o `setup` do app saiu do main.rs, e este guarda mediu outra coisa");
+    };
+    let depois = &principal[setup..];
+    let Some(janela) = depois.find("WebviewWindowBuilder::from_config(") else {
+        panic!("o `setup` não cria mais a janela, e este guarda mediu outra coisa");
+    };
+    let Some(assenta) = depois.find("assentar_o_padrao_do_microfone(app.handle())") else {
+        panic!(
+            "o `setup` não assenta mais o padrão do microfone: quem chega fica na tecla, \
+             que é o padrão de antes"
+        );
+    };
+    assert!(
+        assenta < janela,
+        "o padrão do microfone é assentado depois de a janela existir: ela já pode ter \
+         criado a chave, e a instalação nova passa por usada"
+    );
+    let assentar = body_of(&principal, "fn assentar_o_padrao_do_microfone(");
+    assert!(
+        assentar
+            .contains("seele_ffi::assentar_o_padrao_do_microfone(&config_dir(app), &mut ajustes)"),
+        "a casca não pergunta mais à FFI se a instalação já era usada"
+    );
+    let lido = body_of(&principal, "fn modo_de_voz_escolhido(");
+    assert!(
+        lido.contains("modo_do_microfone()"),
+        "a tela de entrada voltou a ler só o modo escolhido: para quem nunca escolheu, a \
+         configuração não marca nenhum dos três modos"
+    );
+    let conectar = body_of(&principal, "async fn connect(");
+    assert!(
+        !conectar.contains("assentar_o_padrao_do_microfone"),
+        "o `connect` assenta o padrão do microfone: ali a chave já existe, e toda \
+         instalação pareceria usada"
+    );
+}
+
 /// **A conversa pedida numa sessão não é escrita noutra.** Rodada 1 do lote
 /// I-b, M-1.
 ///

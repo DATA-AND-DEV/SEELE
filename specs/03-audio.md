@@ -2,8 +2,9 @@
 
 > **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original.
 >
-> - **Continua valendo:** os dois pipelines, as regras do thread de tempo real, os parâmetros do Opus (48 kHz, mono, 20 ms, 16 a 48 kbps, modo VOIP, DTX ligado, FEC desligado), o jitter buffer adaptativo e o push-to-talk como padrão (`crates/seele-core/src/voice.rs`).
+> - **Continua valendo:** os dois pipelines, as regras do thread de tempo real, os parâmetros do Opus (48 kHz, mono, 20 ms, 16 a 48 kbps, modo VOIP, DTX ligado, FEC desligado), o jitter buffer adaptativo e o push-to-talk como o modo em que uma voz nasce, antes de alguém vesti-la (`crates/seele-core/src/voice.rs`).
 > - **Mudou:**
+>   - **o padrão de quem chega é a ativação por voz, e não mais o push-to-talk** (decisão do dono, 13/11/2026). Vale para instalação nova; quem já usava e nunca escolheu continua na tecla, e quem escolheu continua com o que escolheu (`Preferences::assentar_o_padrao_do_microfone`, em `crates/seele-core/src/preferences.rs`). Na página e no celular já era a voz (`ui/ponte-web.js`);
 >   - **a voz sai pelo canal `voz` do WebRTC**, sem ordem e sem retransmissão, e não por RTP (`crates/seele-enlace/src/ponta.rs`, ADR 0063);
 >   - **o binding do Opus é o `shiguredo_opus`**, e não `audiopus` nem `opus` (ADR 0008, `crates/seele-audio/src/codec.rs`);
 >   - **a ativação por voz não usa `webrtc-vad`:** é energia com histerese, em Rust (ADR 0015);
@@ -92,7 +93,7 @@ Escrever o jitter buffer como módulo **puro e determinístico**, testável sem 
 
 ## VAD e push-to-talk
 
-- **Push-to-talk** é o padrão. Mais previsível, sem falso positivo.
+- **Push-to-talk** era o padrão do desenho original: mais previsível, sem falso positivo. Continua sendo o modo em que a voz nasce e o de quem já usava o produto; o padrão de quem chega passou a ser a ativação por voz (ver «Estado na 1.0», acima).
 - **Ativação por voz** via `webrtc-vad`, com histerese: limiar de abertura mais alto que o de fechamento, e um *hangover* de ~300 ms para não cortar fim de frase.
 - Ambos alimentam o mesmo sinal `falando: bool`, que é anunciado ao servidor para a interface poder destacar quem fala.
 

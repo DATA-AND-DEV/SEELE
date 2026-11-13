@@ -1801,10 +1801,12 @@ async fn connect<R: tauri::Runtime>(
     // O modo de microfone, a supressão de ruído e a sensibilidade gravados,
     // aplicados assim que há o que aplicar.
     //
-    // Aqui e não num campo de `connect`: a sessão nasce no padrão da spec —
-    // push-to-talk, microfone fechado — e só então abre para o que a pessoa
-    // escolheu. A ordem é a segura; a inversa teria um instante em que um
-    // microfone poderia estar aberto antes de alguém ter dito que podia.
+    // Aqui e não num campo de `connect`: a sessão nasce fechada — push-to-talk
+    // — e só então abre para o que a pessoa escolheu ou, sem escolha, para o
+    // padrão desta instalação (a voz para quem chegou, a tecla para quem já
+    // usava: `assentar_o_padrao_do_microfone`, no `setup`). A ordem é a segura;
+    // a inversa teria um instante em que um microfone poderia estar aberto
+    // antes de alguém ter dito que podia.
     //
     // **Os três, e não só o modo** (acréscimo A do lote I-b). A supressão e a
     // sensibilidade gravadas ficavam de fora, e a sessão começava nos padrões
@@ -10779,10 +10781,9 @@ fn segurar_a_fala(session: &Session, talking: bool) {
 /// valer amanhã, a aplicação é o que faz valer agora.
 ///
 /// Antes daqui só existia a segunda, e o preço tinha duas faces. Quem escolhia
-/// voz achava push-to-talk de volta no dia seguinte — e o padrão é
-/// push-to-talk *porque nunca dispara sozinho*, argumento que vale para quem
-/// não escolheu e não para quem escolheu. E, por exigir sessão, não dava para
-/// escolher o modo na tela de entrada; agora dá.
+/// voz achava push-to-talk de volta no dia seguinte — e um padrão é argumento
+/// sobre quem não escolheu, e não sobre quem escolheu. E, por exigir sessão,
+/// não dava para escolher o modo na tela de entrada; agora dá.
 ///
 /// # Errors
 ///
@@ -10811,16 +10812,40 @@ fn set_voice_mode(
     Ok(())
 }
 
-/// Qual modo de microfone está escolhido, ou `None` para o padrão da spec.
+/// Como o microfone vai abrir na próxima sessão: o modo escolhido, ou, sem
+/// escolha, o padrão desta instalação. `None` só se as preferências não abrem.
+///
+/// **O padrão também, e não só a escolha.** Antes daqui quem nunca escolheu
+/// recebia `None`, e a configuração aberta pela entrada desenhava os três modos
+/// sem nenhum marcado — uma tela que não dizia o que ia valer. Com a voz de
+/// padrão para quem chega, é ali que a pessoa descobre que há uma tecla a
+/// escolher, e ela precisa ver qual dos três está valendo. É também o que a
+/// página responde por este nome (`modoDeVozGuardado`, em `ponte-web.js`).
 ///
 /// Do disco e não do `Snapshot`, pela mesma razão que [`microfone_escolhido`]:
 /// esta pergunta tem resposta sem sessão nenhuma, e é a que a tela de entrada
 /// precisa fazer.
 #[tauri::command]
 fn modo_de_voz_escolhido(app: AppHandle) -> Option<VoiceMode> {
-    preferencias(&app)
-        .and_then(|p| p.voice_mode())
-        .map(VoiceMode::from)
+    preferencias(&app).map(|p| VoiceMode::from(p.modo_do_microfone()))
+}
+
+/// Assenta o padrão do microfone desta instalação: a voz para quem chega, a
+/// tecla para quem já usava. Uma vez; depois disso, só relê.
+///
+/// Chamado no `setup`, **antes** de a janela existir — ver lá. Sem preferências
+/// (o arquivo não abre) ou com o disco recusando, nada é assentado, e a sessão
+/// fica na tecla, que é o lado seguro de não saber.
+fn assentar_o_padrao_do_microfone<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let Some(mut ajustes) = preferencias(app) else {
+        tracing::warn!("sem preferências: o padrão do microfone não foi assentado");
+        return;
+    };
+    let ja_assentado = ajustes.padrao_do_microfone().is_some();
+    let padrao = seele_ffi::assentar_o_padrao_do_microfone(&config_dir(app), &mut ajustes);
+    if !ja_assentado {
+        tracing::info!(?padrao, "padrão do microfone desta instalação assentado");
+    }
 }
 
 // ------------------------------------------------- qualidade de voz (F01, F02)
@@ -13552,6 +13577,15 @@ fn main() {
             audio_de_mentira::relatar(app.handle().clone());
             let primeira = versoes::primeira_abertura(&config_dir(app.handle()));
             let houve_0_15 = primeira.houve_0_15();
+            // **O padrão do microfone desta instalação, assentado antes de a
+            // janela existir.** Quem chega fala sem tecla; quem já usava e
+            // nunca escolheu continua nela (pedido do dono, 13/11/2026). O que
+            // separa os dois é a chave e o arquivo de preferências, e é a
+            // janela que cria a chave (o código da pessoa, o `connect`):
+            // perguntado depois dela, toda instalação nova pareceria usada. Ver
+            // `seele_ffi::assentar_o_padrao_do_microfone` e o guarda
+            // `o_padrao_do_microfone_e_assentado_antes_de_a_janela_existir`.
+            assentar_o_padrao_do_microfone(app.handle());
             app.manage(versoes::EstadoDaPrimeiraAbertura(std::sync::Mutex::new(
                 Some(versoes::PrimeiraAbertura {
                     dados: primeira,
