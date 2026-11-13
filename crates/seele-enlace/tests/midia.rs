@@ -20,6 +20,14 @@ use std::time::{Duration, Instant};
 use seele_enlace::teste::{par_em_loopback, par_por_cano, ConfigDoCano, Sentido};
 use seele_enlace::{EventoDeMidia, Midia, Trilha, RELOGIO_DO_VIDEO};
 
+/// **Um teste de tempo real por vez neste binário.** Cada um manda vídeo a 30
+/// quadros por segundo e cobra o que chega dentro da janela da retransmissão;
+/// o `libtest` os roda juntos, e num runner de três núcleos eles se atrasam uns
+/// aos outros até um quadro perdido não voltar a tempo (macOS do CI, 13/11:
+/// «com 27 datagramas perdidos», um buraco). É a vaga do `seele-conformance`
+/// (`tests/vaga/mod.rs`), aqui dentro de um arquivo só.
+static VAGA: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 const QUADROS_POR_SEGUNDO: u64 = 30;
 
 /// A faixa dos testes: não a primeira, para provar que a faixa viaja.
@@ -60,6 +68,7 @@ async fn proximo(midia: &mut Midia, prazo: Duration) -> Option<EventoDeMidia> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn o_video_atravessa_tres_por_cento_de_perda_sem_buraco() {
+    let _vaga = VAGA.lock().await;
     let sentido = Sentido {
         perda: 0.03,
         atraso: Duration::from_millis(30),
@@ -183,6 +192,7 @@ async fn perdas_lidas(perda: f64, semente: u64) -> (Option<f32>, Option<f32>) {
 /// nenhum do anfitrião, então a de saída dele fica em `None` para sempre.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_perda_do_caminho_aparece_na_leitura_das_duas_pontas() {
+    let _vaga = VAGA.lock().await;
     let (saida, entrada) = perdas_lidas(0.08, 21).await;
     println!("8% de perda: saída {saida:?}, entrada {entrada:?}");
     let entrada = entrada.expect("quem recebe RTP não mediu perda de entrada nenhuma");
@@ -210,6 +220,7 @@ async fn a_perda_do_caminho_aparece_na_leitura_das_duas_pontas() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
+    let _vaga = VAGA.lock().await;
     let par = par_em_loopback().await;
     let mut de_ca = par.cliente.ligar_midia();
     let mut de_la = par.anfitriao.ligar_midia();
@@ -271,6 +282,7 @@ async fn o_pedido_de_quadro_chave_chega_a_quem_manda_e_o_som_passa() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn quem_nao_ligou_a_midia_larga_o_pacote_e_conta() {
+    let _vaga = VAGA.lock().await;
     let par = par_em_loopback().await;
     let mut enc = par.ponta_do_anfitriao.mensagens_enc().unwrap();
     // Só quem liga declarou a mídia: o anfitrião é um par que não fala RTP.
@@ -298,6 +310,7 @@ async fn quem_nao_ligou_a_midia_larga_o_pacote_e_conta() {
 /// quadro, e nunca a voz e o controle de quem assiste.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn um_quadro_que_nao_e_h264_nao_derruba_a_conexao() {
+    let _vaga = VAGA.lock().await;
     let par = par_em_loopback().await;
     let mut de_la = par.anfitriao.ligar_midia();
     let para_la = par.cliente.ligar_midia().remetente();

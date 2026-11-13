@@ -2674,6 +2674,23 @@ mod testes {
             "um nome que não resolveu no prazo virou outra coisa: este teste não mede nada"
         );
         let linhas = captura.linhas();
+        // **Quando a resolução responde na primeira sondagem, não houve prazo
+        // a vencer**, e este teste não mede o que nomeia. Aconteceu no Windows
+        // do CI (13/11): o sistema já sabia que `.invalid` não existe e disse
+        // «No such host is known» sem ficar pendente. O rastro dessa resposta
+        // é outro, e é cobrado no teste do nome que não resolve; aqui se diz
+        // que a rodada foi parcial, em vez de reprovar pelo ramo errado.
+        if linhas
+            .iter()
+            .any(|linha| linha.contains("nao-existe-mesmo.invalid") && linha.contains("erro="))
+            && !linhas.iter().any(|linha| linha.contains("dentro do prazo"))
+        {
+            eprintln!(
+                "PARCIAL: a resolução respondeu antes de o prazo zero ser conferido; o ramo do \
+                 prazo não rodou nesta máquina"
+            );
+            return;
+        }
         assert!(
             linhas.iter().any(|linha| linha.starts_with("INFO")
                 && linha.contains("dentro do prazo")

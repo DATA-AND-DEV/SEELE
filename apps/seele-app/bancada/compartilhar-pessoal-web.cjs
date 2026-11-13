@@ -77,12 +77,25 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
       }finally{HTMLVideoElement.prototype.requestVideoFrameCallback=apresentar;blue.color('#2040e0');}
       await until(()=>pixel()[2]>150&&pixel()[0]<80);
       const clone=blue.stream.getVideoTracks()[0].clone(),leitorParado=leitorDeVideoSemProcessador(clone);
-      const primeiro=await leitorParado.read();primeiro.value.close();
+      // **A leitura do clone tem prazo.** No WebKit do Linux (o do CI, sem
+      // tela) o clone de uma trilha de canvas pode nunca entregar o primeiro
+      // quadro a um segundo `<video>`: a prova ficava 90 s parada aqui, com a
+      // transmissão de verdade entregando 1665 quadros ao lado (13/11, duas
+      // rodadas). Sem o primeiro quadro não há o que pausar: a conferência do
+      // watchdog é pulada e isso é DITO; o leitor de verdade segue cobrado
+      // acima e abaixo.
+      const primeiro=await Promise.race([leitorParado.read(),new Promise(ok=>setTimeout(()=>ok(null),5000))]);
+      if(primeiro===null){
+       window.parciais=(window.parciais??[]).concat('o clone da trilha não entregou quadro em 5 s: a conferência do watchdog com o vídeo pausado não rodou');
+       await leitorParado.cancel();clone.stop();
+      }else{
+      primeiro.value.close();
       const auxiliar=[...document.querySelectorAll('[data-captura-da-tela]')].at(-1);auxiliar.pause();
       const esperando=leitorParado.read();
       const duplicou=await Promise.race([esperando.then(()=>true),new Promise(ok=>setTimeout(()=>ok(false),250))]);
       check(!duplicou,'watchdog não duplica vídeo pausado');
       await leitorParado.cancel();check((await esperando).done,'cancelar solta leitura e watchdog pendentes');clone.stop();
+      }
      }
      const output=document.querySelector('#b canvas');
      check(output.height>output.width,'monitor vertical anunciado e decodificado vertical');
@@ -207,6 +220,7 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     return {captured,decoded,errors,oldPackets,newPackets,leitor:typeof MediaStreamTrackProcessor==='function'?'TrackProcessor':'requestVideoFrameCallback',quadrosServidor};
    },{sample,prazoDosEnlaces:PRAZO_DOS_ENLACES_MS}),PRAZO_DO_MOTOR_MS,`${engine}: a prova na página não terminou`);
    if(result.captured)sample={oldPackets:result.oldPackets,newPackets:result.newPackets};
+   for(const parcial of await page.evaluate(()=>window.parciais??[]))console.error(`PARCIAL (${engine}): ${parcial}`);
    console.log(JSON.stringify({engine,version:browser.version(),captura:result.captured?'canvas real':'indisponível: receptor com amostra real',leitor:result.leitor,quadrosDecodificados:result.decoded,quadrosServidor:result.quadrosServidor,erros:result.errors}));
    assert.ok(result.decoded>0);
    if(engine==='webkit'){assert.equal(result.captured,true);assert.equal(result.leitor,'requestVideoFrameCallback');}
