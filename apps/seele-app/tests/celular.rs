@@ -721,7 +721,16 @@ fn o_texto_do_sistema_alcanca_todo_tamanho_do_desktop() {
 
 /// Os avatares de iniciais da sessão: marca numa caixa de tamanho fixo, e não
 /// texto de ler (`TEXTO_COM_TETO`, na bancada do celular).
-const AVATARES_DE_INICIAIS: &[&str] = &[".pessoa-avatar", ".chamada-avatar", ".mensagem-avatar"];
+const AVATARES_DE_INICIAIS: &[&str] = &[
+    ".pessoa-avatar",
+    ".chamada-avatar",
+    ".mensagem-avatar",
+    // O retrato de SEU PERFIL (52 px) e o avatar da folha (56 px): a 2, a letra
+    // de 44 px media 54 px de alto numa caixa de 52, e duas letras 58,9 px de
+    // largo numa de 56 (medido na bancada do celular, a 390, 360 e 1280).
+    ".cel-perfil-retrato",
+    ".cel-folha-avatar",
+];
 
 /// O valor de uma propriedade no corpo de uma regra: a última declaração dela.
 fn declarado<'a>(corpo: &'a str, propriedade: &str) -> Option<&'a str> {
@@ -799,9 +808,16 @@ fn as_iniciais_numa_caixa_fixa_tem_teto() {
             .any(|onde| onde.contains(".pessoa-avatar"))
             && conferidas
                 .iter()
-                .any(|onde| onde.contains(".chamada-avatar")),
-        "o guarda não achou as regras do avatar da lista de PESSOAS e do cartão da CHAMADA \
-         com teto — achou {conferidas:?} —, e sem elas ele passa sem conferir nada"
+                .any(|onde| onde.contains(".chamada-avatar"))
+            && conferidas
+                .iter()
+                .any(|onde| onde.contains(".cel-perfil-retrato"))
+            && conferidas
+                .iter()
+                .any(|onde| onde.contains(".cel-folha-avatar")),
+        "o guarda não achou as regras do avatar da lista de PESSOAS, do cartão da CHAMADA, \
+         do retrato de SEU PERFIL e do avatar da folha com teto — achou {conferidas:?} —, e \
+         sem elas ele passa sem conferir nada"
     );
 }
 

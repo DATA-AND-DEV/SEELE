@@ -2970,6 +2970,11 @@ TEXTO_COM_TETO = {
     # `celular-sessao.css`, escrito à mão, de 17 a 22 px.
     ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar, #lista-roster .pessoa-avatar":
         "as iniciais numa caixa de tamanho fixo são marcas, e não texto de ler",
+    # O retrato de SEU PERFIL e o avatar da folha: o teto é o do
+    # `celular-sessao.css` e do `celular-folhas.css`, de 22 a 26 e a 28 px, e o
+    # `INICIAIS_NA_CAIXA` mede que a letra cabe.
+    ".cel-perfil-retrato, .cel-folha-avatar":
+        "as iniciais de SEU PERFIL e da folha, na caixa de 52 e de 56 px",
     ".barra, .sync-marca, .chamada-cartao-barra, .chamada-cartao-marca":
         "a barra do sinal é desenho; o número e a palavra ao lado crescem",
 }
@@ -3014,6 +3019,36 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
     return { nos: nos.length, parados, porque };
 }"""
 
+
+# As iniciais de SEU PERFIL e da folha cabem na caixa delas, com o texto do
+# sistema a 2. A caixa é fixa (52 e 56 px) e a letra crescia sem teto: a 2, o
+# «R» de 44 px media 54 px de alto na caixa de 52, e duas letras 58,9 px de
+# largo na de 56 (medido a 390, 360 e 1280). O `transborda` do `MEDIR` não vê:
+# a caixa é uma grade que centra, e o que sobra sai pelos dois lados.
+#
+# Nenhum script cria hoje o `.cel-folha-avatar` (só a regra existe); a medida
+# põe um, com duas letras, ao lado do retrato, e o tira.
+INICIAIS_NA_CAIXA = """() => {
+    const retrato = document.querySelector('.cel-perfil-retrato');
+    if (!retrato || !retrato.checkVisibility()) return ['o retrato de SEU PERFIL não está à vista'];
+    const daFolha = document.createElement('span');
+    daFolha.className = 'cel-folha-avatar';
+    daFolha.textContent = 'RA';
+    retrato.parentElement.append(daFolha);
+    const medir = (nome, e) => {
+        const caixa = e.getBoundingClientRect();
+        const faixa = document.createRange();
+        faixa.selectNodeContents(e);
+        const tinta = faixa.getBoundingClientRect();
+        if (!tinta.width) return [`${nome}: sem letra, e a medida não mediu nada`];
+        return tinta.width <= caixa.width + 0.5 && tinta.height <= caixa.height + 0.5 ? []
+            : [`${nome}: a letra de ${getComputedStyle(e).fontSize} mede ${tinta.width.toFixed(1)} × ${tinta.height.toFixed(1)} px`
+               + ` na caixa de ${caixa.width} × ${caixa.height} px`];
+    };
+    const vistos = [...medir('.cel-perfil-retrato', retrato), ...medir('.cel-folha-avatar', daFolha)];
+    daFolha.remove();
+    return vistos;
+}"""
 
 # A 1, o celular-texto.css não muda nada: com ele ligado e desligado, todo nó da
 # página tem o mesmo tamanho de letra. O arquivo só declara tamanho de letra,
@@ -3064,9 +3099,12 @@ def texto_maior(pg: Page) -> list[str]:
         pg.evaluate("document.documentElement.style.setProperty('--cel-escala', '2')")
         pg.wait_for_timeout(100)
         m = pg.evaluate(MEDIR, [0, 0, "#tela-sessao, #tela-server"])
+        iniciais = pg.evaluate(INICIAIS_NA_CAIXA) if estado == "a lista de AJUSTES" else []
         pg.evaluate("document.documentElement.style.removeProperty('--cel-escala')")
         if m["vaza"] or m["larguraDoDocumento"] > pg.evaluate("innerWidth"):
             falhas.append(f"{estado}: a 2, rola de lado: {m['vaza']} (documento com {m['larguraDoDocumento']} px)")
+        for passa in iniciais:
+            falhas.append(f"{estado}: a 2, as iniciais passam da caixa: {passa}")
         if m["transborda"]:
             falhas.append(f"{estado}: a 2, texto passa da caixa: {m['transborda']}")
 

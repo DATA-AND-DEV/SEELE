@@ -1859,7 +1859,9 @@
   height: 52px;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: calc(22px * var(--cel-escala));
+  /* A caixa é fixa, e a letra para na metade dela: a 2, sem o teto, a letra
+     de 44 px media 54 px de alto na caixa de 52 (bancada, `texto-maior`). */
+  font-size: min(calc(22px * var(--cel-escala)), 26px);
   color: var(--seele-laranja-nerv);
   background: color-mix(in srgb, var(--seele-laranja-nerv) 18%, transparent);
   border: 0;

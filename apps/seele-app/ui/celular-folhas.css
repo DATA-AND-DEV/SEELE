@@ -211,7 +211,9 @@
   border-radius: 18px;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: calc(22px * var(--cel-escala));
+  /* A caixa é fixa, e a letra para na metade dela: a 2, sem o teto, duas
+     letras de 44 px mediam 58,9 px na caixa de 56 (bancada, `texto-maior`). */
+  font-size: min(calc(22px * var(--cel-escala)), 28px);
   color: var(--seele-osso);
   background: var(--seele-controle);
 }
