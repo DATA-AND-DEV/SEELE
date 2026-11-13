@@ -123,16 +123,14 @@ pub struct Recorte {
 impl Recorte {
     /// O recorte aparado a uma imagem de `largura × altura`: a conta da tela é
     /// em frações, e um pixel de arredondamento para fora não é recusa. `None`
-    /// quando não sobra pixel nenhum.
+    /// quando não sobra pixel nenhum. As contas saturam: o canto que começa
+    /// depois da borda sobra com zero, e não com a volta de um `u32`.
     fn dentro_de(self, largura: u32, altura: u32) -> Option<Self> {
-        if self.x >= largura || self.y >= altura {
-            return None;
-        }
         let aparado = Self {
             x: self.x,
             y: self.y,
-            largura: self.largura.min(largura - self.x),
-            altura: self.altura.min(altura - self.y),
+            largura: self.largura.min(largura.saturating_sub(self.x)),
+            altura: self.altura.min(altura.saturating_sub(self.y)),
         };
         (aparado.largura > 0 && aparado.altura > 0).then_some(aparado)
     }
@@ -1593,6 +1591,18 @@ mod testes {
             imagem_do_perfil_recortada(&pequena, false, pedaco(0, 0, 400, 400)).expect("passa"),
             pequena
         );
+        // Num JPEG se vê: regravado, ele sairia com outros bytes (e pior).
+        let foto = jpeg_de(&quadrantes(400, 400));
+        assert_eq!(
+            imagem_do_perfil_recortada(&foto, false, pedaco(0, 0, 400, 400)).expect("passa"),
+            foto,
+            "o recorte que é a imagem inteira regravou um JPEG que já cabia"
+        );
+        // Um pixel a menos já é recorte, e aí ele é regravado.
+        assert_ne!(
+            imagem_do_perfil_recortada(&foto, false, pedaco(0, 0, 399, 400)).expect("recorta"),
+            foto
+        );
         let grande = png_de(&quadrantes(2000, 2000));
         assert_eq!(
             imagem_do_perfil_recortada(&grande, false, pedaco(0, 0, 2000, 2000)).expect("reduz"),
@@ -1615,11 +1625,20 @@ mod testes {
         let aparado = image::load_from_memory(&aparado).expect("abre").to_rgba8();
         assert_eq!(aparado.dimensions(), (100, 100));
         assert!(aparado.pixels().all(|pixel| pixel.0 == AMARELO));
+        // O tamanho que não cabe num `u32` somado ao canto também é aparado.
+        let enorme =
+            imagem_do_perfil_recortada(&original, false, pedaco(300, 200, u32::MAX, u32::MAX))
+                .expect("apara");
+        assert_eq!(dimensoes(&enorme), (100, 100));
         for vazio in [
             pedaco(400, 0, 10, 10),
             pedaco(0, 300, 10, 10),
             pedaco(10, 10, 0, 10),
             pedaco(10, 10, 10, 0),
+            // Depois da borda, e no fim do `u32`: zero pixels, e não a volta.
+            pedaco(5000, 0, 10, 10),
+            pedaco(0, 5000, 10, 10),
+            pedaco(u32::MAX, u32::MAX, u32::MAX, u32::MAX),
         ] {
             assert_eq!(
                 imagem_do_perfil_recortada(&original, false, vazio).unwrap_err(),
