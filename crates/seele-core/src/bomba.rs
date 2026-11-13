@@ -1273,6 +1273,17 @@ pub enum EspelhoDaTela<'a> {
         /// O quadro, em Annex-B.
         bytes: &'a [u8],
     },
+    /// O teto parou o vídeo, e o fluxo fechou. A bomba segue viva: a volta é
+    /// um [`Self::Abriu`] novo.
+    ///
+    /// # O silêncio que isto fecha
+    ///
+    /// O [`EventoDaBomba::Parou`] chegava a quem escoa **com** o motivo, e quem
+    /// escoa o jogava fora (`Parou(_)`): fechava o fluxo e não contava a
+    /// ninguém. Quem transmitia ficava olhando o próprio espelho congelado, com
+    /// o botão em PARAR DE COMPARTILHAR, sem saber que a sala já não via nada
+    /// — nem que a tela volta sozinha. O produto sabia e não contava.
+    Parou(MotivoDeParada),
 }
 
 /// Escoa o que a bomba produz para dentro da conexão que já existe.
@@ -1480,11 +1491,15 @@ pub async fn escoar_com_espelho(
             // §3.2: quem para é o vídeo. O fluxo fecha e a sala fica sabendo
             // pelo fim dele; a bomba continua viva esperando o teto voltar, e
             // quando voltar chega um `Fluxo` novo.
-            EventoDaBomba::Parou(_) => {
+            EventoDaBomba::Parou(motivo) => {
                 if let Some(velha) = transmissao.take() {
                     somar(&mut contagem, &velha);
                     velha.encerrar();
                 }
+                // Depois de fechar, pelo mesmo motivo de o espelho do quadro
+                // vir depois do byte: o que se diz a quem transmite é o que já
+                // aconteceu no fio.
+                espelho(EspelhoDaTela::Parou(motivo));
             }
             EventoDaBomba::Fim(erro) => {
                 if let Some(velha) = transmissao.take() {
@@ -2634,6 +2649,63 @@ pub(crate) mod tests {
                 .iter()
                 .any(|linha| linha.contains("passou do teto do fio") && linha.contains("4194305")),
             "o descarte não foi dito no registro com o tamanho: {linhas:#?}"
+        );
+    }
+
+    /// **A pausa pelo sinal chega a quem transmite, com o motivo, e a volta
+    /// também.**
+    ///
+    /// Sem codec: os eventos são os que a bomba manda, postos à mão no canal.
+    /// O que se prende é quem escoa — era ele que recebia o `Parou(motivo)` e
+    /// o jogava fora.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_pausa_pelo_sinal_e_dita_ao_espelho_com_o_motivo_e_a_volta_tambem() {
+        let (saida, _entrada) = par_paciente().await;
+        let (manda, mut eventos) = canal::channel(16);
+        let fluxo = |geracao| EventoDaBomba::Fluxo {
+            geracao,
+            resolucao: Resolucao::P540,
+            medidas: (960, 540),
+            teto_bps: 1_000_000,
+        };
+        for evento in [
+            fluxo(1),
+            EventoDaBomba::Parou(MotivoDeParada::SinalCritico),
+            fluxo(2),
+            EventoDaBomba::Parou(MotivoDeParada::AbaixoDoPiso),
+            EventoDaBomba::Fim(None),
+        ] {
+            manda.send(evento).await.unwrap();
+        }
+        let mut vistos = Vec::new();
+        escoar_com_espelho(
+            &saida,
+            None,
+            ScreenId(44),
+            ScreenSource::Monitor,
+            &mut eventos,
+            |evento| {
+                vistos.push(match evento {
+                    EspelhoDaTela::Abriu { .. } => "abriu".to_owned(),
+                    EspelhoDaTela::Quadro { .. } => "quadro".to_owned(),
+                    EspelhoDaTela::Parou(motivo) => format!("parou: {motivo:?}"),
+                });
+            },
+            None,
+        )
+        .await
+        .expect("escoar até o fim pedido");
+        assert_eq!(
+            vistos,
+            [
+                "abriu",
+                "parou: SinalCritico",
+                "abriu",
+                "parou: AbaixoDoPiso"
+            ],
+            "o teto parou o vídeo e quem escoa não disse a quem transmite — ou disse sem o \
+             motivo, ou fora de ordem: a pessoa ficaria olhando o espelho congelado sem \
+             saber que a sala não vê nada"
         );
     }
 

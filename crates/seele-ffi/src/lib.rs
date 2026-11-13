@@ -1530,6 +1530,14 @@ struct Shared {
     /// casca já escrevia do lado dela: guardá-lo faria o painel da próxima
     /// comparar o que está saindo agora com um teto de outra vez.
     limites_da_tela: Mutex<Option<LimitesDeTela>>,
+    /// Se o teto pausou a transmissão **desta pessoa**, e por quê.
+    ///
+    /// Ao lado do pedido porque é a mesma espécie de coisa: algo que só esta
+    /// ponta sabe sobre a própria transmissão, e que o `Room` — o que o
+    /// servidor contou — nunca viu. Escrita pelo `Aviso::TelaParou`, apagada
+    /// pelo `Aviso::TelaAbriu` da mesma tela (a volta) e pelo fim da
+    /// transmissão. Ver [`seele_core::retrato::ParadaDaMinhaTela`].
+    parada_da_tela: Mutex<seele_core::retrato::ParadaDaMinhaTela>,
     /// Qual transmissão esta sessão escolheu assistir, e em que estado a escolha
     /// está. ADR 0054.
     ///
@@ -1623,6 +1631,39 @@ impl Shared {
         if let Ok(mut guardado) = self.limites_da_tela.lock() {
             *guardado = limites;
         }
+    }
+
+    /// O teto pausou a transmissão desta pessoa. Devolve se o retrato mudou.
+    fn a_tela_parou(&self, tela: seele_core::ScreenId, motivo: seele_core::MotivoDeParada) -> bool {
+        self.parada_da_tela
+            .lock()
+            .is_ok_and(|mut parada| parada.parou(tela, nome_da_parada(motivo)))
+    }
+
+    /// O fluxo de uma tela abriu: se era a pausada, a pausa acabou. Devolve se
+    /// o retrato mudou.
+    fn a_tela_voltou(&self, tela: seele_core::ScreenId) -> bool {
+        self.parada_da_tela
+            .lock()
+            .is_ok_and(|mut parada| parada.voltou(tela))
+    }
+
+    /// A transmissão desta pessoa acabou, e a pausa dela com ela.
+    fn esquecer_a_parada_da_tela(&self) {
+        if let Ok(mut parada) = self.parada_da_tela.lock() {
+            parada.esquecer();
+        }
+    }
+
+    /// A pausa da transmissão desta pessoa, para o retrato.
+    ///
+    /// Um cadeado envenenado responde «sem pausa», que é o retrato de antes de
+    /// este campo existir.
+    fn parada_da_tela(&self) -> seele_core::retrato::ParadaDaMinhaTela {
+        self.parada_da_tela
+            .lock()
+            .map(|parada| *parada)
+            .unwrap_or_default()
     }
 
     /// O que esta pessoa pediu para a tela dela, se ainda vale.
@@ -2286,6 +2327,7 @@ impl Connection {
             pending_weights: Mutex::new(Vec::new()),
             tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
+            parada_da_tela: Mutex::new(Default::default()),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
@@ -4535,6 +4577,7 @@ impl Connection {
         // dobra. As duas limpam, porque só uma delas acontece de cada vez:
         // quando esta pessoa aperta PARAR, o quadro do servidor pode nunca chegar.
         self.shared.gravar_pedido_da_tela(None);
+        self.shared.esquecer_a_parada_da_tela();
         // E a porta da câmera, se era uma câmera: um quadro que a casca ainda
         // empurrar depois de parar ouve [`ConnectionError::CameraNotLive`].
         self.shared.largar_a_camera();
@@ -4649,8 +4692,11 @@ impl Connection {
         // sozinho na primeira transmissão (ver `TelaLigada`).
         let escolhida = self.shared.tela_assistida();
         let pedido = self.shared.pedido_da_tela();
+        let parada = self.shared.parada_da_tela();
         let foto = match self.shared.room.lock() {
-            Ok(room) => foto_da_sala(&room, escolhida, pedido),
+            // A pausa entra por cima da foto, e não pelo `Room`: quem pausa é
+            // o teto desta máquina, e o servidor não sabe dela.
+            Ok(room) => foto_da_sala(&room, escolhida, pedido).com_a_parada_da_minha_tela(parada),
             // Um cadeado envenenado é uma sessão que já não tem estado. A foto
             // vazia é a resposta honesta, e é a mesma que o `Room::new()` de
             // antes dava.
@@ -6004,6 +6050,9 @@ async fn drive(
                         // **Gravada antes do evento**: a casca que reage ao
                         // `ScreenOpened` relendo o retrato já acha a tela nele.
                         shared.tela_abriu(tela, leitura);
+                        // E se era a própria, pausada pelo teto, a pausa
+                        // acabou: a volta é esta abertura, da mesma tela.
+                        shared.a_tela_voltou(tela);
                         shared.notify(&Event::ScreenOpened {
                             screen: tela.0,
                             width: largura,
@@ -6019,6 +6068,19 @@ async fn drive(
                     seele_core::enlace::Aviso::TelaIlegivel { motivo } => {
                         shared.notify(&Event::ScreenUnreadable { reason: motivo });
                     }
+                    // O teto pausou a transmissão desta pessoa. Vai ao retrato
+                    // (`TelaEmCurso::parada`), que é de onde a casca já lia a
+                    // frase — e que até aqui era sempre `None`. O evento é o
+                    // grosso de sempre: «a tela mudou, releia o retrato».
+                    //
+                    // A câmera recebe também o `CameraPaused` dela, por
+                    // `Aviso::Camera`: aquele manda a janela parar de
+                    // codificar, e este escreve a frase no palco.
+                    seele_core::enlace::Aviso::TelaParou { tela, motivo, .. } => {
+                        if shared.a_tela_parou(tela, motivo) {
+                            shared.notify(&Event::ScreenChanged);
+                        }
+                    }
                     // A transmissão desta pessoa caiu, e o núcleo já a
                     // encerrou. O retrato se acerta sozinho — o
                     // `ScreenShareStopped` que o servidor devolve tira a
@@ -6030,6 +6092,8 @@ async fn drive(
                         origem,
                         motivo,
                     } => {
+                        // Caiu: não está mais pausada, está acabada.
+                        shared.esquecer_a_parada_da_tela();
                         shared.notify(&evento_da_queda(tela, origem, motivo));
                     }
                     seele_core::enlace::Aviso::TelaQuadro {
@@ -8003,6 +8067,7 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         // lado a lado, o da direita mentindo, e nada na tela dizendo qual.
         if minha.is_none() {
             shared.gravar_pedido_da_tela(None);
+            shared.esquecer_a_parada_da_tela();
         }
         // **E a escolha de assistir é esquecida quando a tela escolhida sai do
         // ar.** ADR 0054: sem isto, a escolha ficaria apontando para uma

@@ -2779,6 +2779,72 @@ fn every_reason_a_screen_share_can_stop_for_has_a_sentence() {
 }
 
 #[test]
+fn the_person_sharing_is_told_when_the_signal_pauses_their_screen() {
+    // `TelaEmCurso::parada` was always `None` until 1.0: the ceiling stopped the
+    // video so the voice would not stutter, and the person sharing was the one
+    // person in the room with no way to know — their own mirror frozen on the
+    // last frame, the button on «PARAR DE COMPARTILHAR». The core now carries
+    // the pause to the portrait (`minha_transmissao.parada`), and this window
+    // says it beside the share button.
+    let file = without_comments(&read("ui/frases.js"));
+    let written: BTreeSet<String> = sentences_of(&file, "PAUSAS_DA_MINHA_TELA")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    let reasons: BTreeSet<String> = seele_ffi::motivos_de_parada_da_tela()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        !reasons.is_empty(),
+        "`seele_ffi::motivos_de_parada_da_tela` came back empty, so this guard is \
+         asserting over nothing"
+    );
+    // Both directions, like `QUEDAS`: a reason with no sentence is the silence,
+    // and a sentence with no reason is a cause this window would be inventing.
+    assert_eq!(
+        written, reasons,
+        "`PAUSAS_DA_MINHA_TELA` and `seele_ffi::motivos_de_parada_da_tela` no longer name \
+         the same reasons"
+    );
+    // A pause comes back by itself and nobody is watching meanwhile: the two
+    // things the person sharing cannot see from their side. And it is not a
+    // fall — it must not tell them to share again.
+    for (variant, sentence) in sentences_of(&file, "PAUSAS_DA_MINHA_TELA") {
+        let baixa = sentence.to_lowercase();
+        assert!(
+            baixa.contains("volta sozinha"),
+            "`PAUSAS_DA_MINHA_TELA.{variant}` does not say the screen comes back by \
+             itself: {sentence}"
+        );
+        assert!(
+            baixa.contains("ninguém a está vendo"),
+            "`PAUSAS_DA_MINHA_TELA.{variant}` does not say nobody is watching: {sentence}"
+        );
+        assert!(
+            !baixa.contains("compartilhe de novo"),
+            "`PAUSAS_DA_MINHA_TELA.{variant}` tells the person to share again, and a \
+             paused share is still on: {sentence}"
+        );
+    }
+    // Somebody says it: the line beside the share button reads the portrait.
+    let compartilhar = without_comments(&read("ui/camada-compartilhar.js"));
+    assert!(
+        compartilhar.contains("fraseDaPausaDaMinhaTela(noRetrato)"),
+        "o `camada-compartilhar.js` não diz a pausa da transmissão desta pessoa: o retrato a \
+         traz em `minha_transmissao.parada` e ninguém a leria"
+    );
+    // And the portrait carries it: the bridge lays the pause over the photo.
+    let ponte = without_comments(&read("../../crates/seele-ffi/src/lib.rs"));
+    assert!(
+        ponte.contains(".com_a_parada_da_minha_tela(parada)")
+            && ponte.contains("seele_core::enlace::Aviso::TelaParou {"),
+        "a ponte deixou de levar a pausa do motor ao retrato: `minha_transmissao.parada` \
+         voltaria a ser sempre `null`"
+    );
+}
+
+#[test]
 fn every_reason_a_screen_share_can_fall_for_has_a_sentence_and_somebody_says_it() {
     // The twin of the guard above for the transmission that **falls** instead
     // of pausing: the encoder refused a frame, the capture stopped, the stream

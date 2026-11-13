@@ -1041,7 +1041,17 @@ function desenharAQuedaDaTela(voice_room, minha) {
   if (queda && voice_room !== undefined && (!dentro || (noRetrato && noRetrato.tela !== queda.tela))) {
     quedasDaTela.delete(sessao);
   }
-  const frase = quedasDaTela.get(sessao)?.frase ?? "";
+  // **A pausa pelo sinal, na mesma linha.** O teto parou o vídeo para a voz
+  // não picotar: a transmissão continua anunciada e volta sozinha, e quem
+  // transmite era a única pessoa da sala sem como saber que a imagem parou. O
+  // retrato traz o motivo (`minha_transmissao.parada`).
+  //
+  // A queda vem antes: ela é o que a pessoa tem de resolver, e uma transmissão
+  // que caiu não está pausada. A da câmera não é daqui — ela é dita no
+  // controle da câmera, como a queda dela.
+  const daCamera = noRetrato && typeof ehAMinhaCamera === "function" && ehAMinhaCamera(noRetrato.tela);
+  const pausa = dentro && noRetrato && !daCamera ? fraseDaPausaDaMinhaTela(noRetrato) : "";
+  const frase = quedasDaTela.get(sessao)?.frase || pausa;
   for (const onde of [$("tela-estado"), $("chamada-tela-estado")]) {
     if (!onde) continue;
     porOEscondido(onde, !frase);

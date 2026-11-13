@@ -680,6 +680,45 @@ function fraseDaQuedaDaTransmissao(tipo, motivo) {
 }
 
 /**
+ * Por que a transmissão de tela **desta pessoa** está pausada, dito a ela.
+ *
+ * Os nomes são os de `PARADAS` (`seele_ffi::motivos_de_parada_da_tela`), e
+ * chegam em `minha_transmissao.parada`. É outro dicionário porque quem lê é
+ * outro: `PARADAS` fala a quem assiste, no palco; estas falam a quem
+ * transmite, ao lado do COMPARTILHAR, e a primeira coisa que ela precisa saber
+ * é que **ninguém está vendo** — o espelho dela mostra o último quadro e o
+ * botão segue em PARAR DE COMPARTILHAR, como se estivesse tudo no ar.
+ *
+ * É o contrário de `QUEDAS`: a transmissão continua, o núcleo a retoma
+ * sozinho, e a frase diz para esperar. Não há o que apertar.
+ *
+ * Até a 1.0 esta pausa era muda para quem transmitia: o teto parava o vídeo
+ * para a voz não picotar, e o `parada` do retrato era sempre `null`.
+ */
+const PAUSAS_DA_MINHA_TELA = {
+  SinalCritico:
+    "A SUA TELA ESTÁ PAUSADA PARA A VOZ NÃO PICOTAR.\n" +
+    "Ninguém a está vendo agora. Ela volta sozinha quando o sinal melhorar.",
+  AbaixoDoPiso:
+    "A SUA TELA ESTÁ PAUSADA: O QUE SOBROU DA CONEXÃO NÃO SUSTENTA NEM A MENOR IMAGEM.\n" +
+    "Ninguém a está vendo agora. Ela volta sozinha quando o caminho abrir.",
+};
+
+/** A pausa cujo motivo esta janela não conhece: diz o que sabe, e não inventa a causa. */
+const PAUSA_DESCONHECIDA_DA_MINHA_TELA =
+  "A SUA TELA ESTÁ PAUSADA.\nNinguém a está vendo agora. Ela volta sozinha.";
+
+/**
+ * A frase da pausa da transmissão de tela desta pessoa, ou `""` sem pausa.
+ * `transmissao` é a `minha_transmissao` do retrato.
+ */
+function fraseDaPausaDaMinhaTela(transmissao) {
+  const motivo = transmissao?.parada;
+  if (!motivo) return "";
+  return PAUSAS_DA_MINHA_TELA[motivo] ?? PAUSA_DESCONHECIDA_DA_MINHA_TELA;
+}
+
+/**
  * O nome do caminho, ou nada.
  *
  * `null` e não «DIRETO», e não «DESCONHECIDO»: **sem informação a tela não

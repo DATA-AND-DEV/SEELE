@@ -234,6 +234,30 @@ const retratoCom = (server, tela, extra = {}) => retrato({
         `com outra transmissão no ar a frase da queda anterior continua escrita: ${JSON.stringify(visto)}`);
     });
 
+    await caso("5b. a pausa pelo sinal é dita a quem transmite na mesma linha, e some quando a tela volta", async () => {
+      // O teto parou o vídeo para a voz não picotar: a transmissão segue no
+      // retrato, com o nome do motivo em `parada`. Não é queda — o botão não
+      // muda, nada recomeça, e a frase diz que volta sozinha.
+      const PAUSAS = await page.evaluate(() => ({ ...PAUSAS_DA_MINHA_TELA, desconhecida: PAUSA_DESCONHECIDA_DA_MINHA_TELA }));
+      assert.deepEqual(Object.keys(PAUSAS).sort(), ["AbaixoDoPiso", "SinalCritico", "desconhecida"],
+        `o dicionário de pausas não é o que esta bancada mede: ${Object.keys(PAUSAS)}`);
+      for (const [motivo, frase] of [["SinalCritico", PAUSAS.SinalCritico], ["AbaixoDoPiso", PAUSAS.AbaixoDoPiso], ["MotivoDoFuturo", PAUSAS.desconhecida]]) {
+        const pausada = retratoCom("A", 6);
+        pausada.minha_transmissao.parada = motivo;
+        await retratoPassaASer(1, pausada);
+        const visto = await oQueSeVe();
+        assert.deepEqual([visto.botao, visto.modo, visto.frase], ["PARAR DE COMPARTILHAR", "parar", frase],
+          `a tela foi pausada por \`${motivo}\` e quem transmite não ficou sabendo: ${JSON.stringify(visto)}`);
+        assert.match(frase, /PAUSADA/, `a frase não diz que a tela está pausada: ${frase}`);
+        assert.match(frase, /ninguém a está vendo/i, `a frase não diz que ninguém está vendo: ${frase}`);
+        assert.match(frase, /volta sozinha/i, `a frase não diz que a volta é sozinha: ${frase}`);
+      }
+      // A tela voltou: o retrato não traz mais a pausa, e a linha se cala.
+      await retratoPassaASer(1, retratoCom("A", 6));
+      assert.equal((await oQueSeVe()).frase, null, "a tela voltou e a frase da pausa continua escrita");
+      assert.equal(await comecos(), 0, "a pausa fez a janela pedir uma transmissão nova");
+    });
+
     await caso("6. sair da sala apaga a frase", async () => {
       await emitir(1, { ScreenShareFell: { screen: 6, source: "monitor", reason: "Captura" } });
       await retratoPassaASer(1, retratoCom("A", null));

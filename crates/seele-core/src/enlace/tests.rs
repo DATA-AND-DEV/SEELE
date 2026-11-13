@@ -3794,3 +3794,65 @@ fn ponta_de_sessao_de_teste() -> crate::transporte::PontaDaSessao {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
     crate::transporte::abrir_ponta(Some(socket)).expect("ponta da sessão")
 }
+
+/// **O que o espelho diz vira aviso, e a pausa não fica pelo caminho.**
+///
+/// O `EspelhoDaTela::Parou` é novo, e o `match` que o traduz tem um braço que
+/// devolve `None` (o quadro da câmera): é o lugar em que uma pausa calada
+/// caberia sem nada reprovar. A tela e a câmera passam pelo mesmo espelho, e
+/// as duas têm de ouvir a pausa — com a origem, que é o que deixa a casca
+/// escolher entre «a tela» e «a câmera».
+#[test]
+fn a_pausa_do_espelho_vira_aviso_com_a_origem_e_o_motivo() {
+    use crate::bomba::EspelhoDaTela;
+    use crate::tela::MotivoDeParada;
+    use seele_proto::screen::ScreenSource;
+
+    for origem in [
+        ScreenSource::Monitor,
+        ScreenSource::Window,
+        ScreenSource::Camera,
+    ] {
+        for motivo in [MotivoDeParada::SinalCritico, MotivoDeParada::AbaixoDoPiso] {
+            match aviso_do_espelho(EspelhoDaTela::Parou(motivo), ScreenId(9), origem, 3) {
+                Some(Aviso::TelaParou {
+                    tela,
+                    origem: dita,
+                    motivo: dito,
+                }) => assert_eq!((tela, dita, dito), (ScreenId(9), origem, motivo)),
+                outro => panic!(
+                    "o teto pausou a transmissão ({origem:?}, {motivo:?}) e o espelho disse \
+                     {outro:?}: quem transmite não ficaria sabendo que a imagem parou"
+                ),
+            }
+        }
+    }
+    // A volta é a abertura de sempre, da mesma tela.
+    assert!(matches!(
+        aviso_do_espelho(
+            EspelhoDaTela::Abriu {
+                largura: 960,
+                altura: 540
+            },
+            ScreenId(9),
+            ScreenSource::Monitor,
+            3,
+        ),
+        Some(Aviso::TelaAbriu {
+            tela: ScreenId(9),
+            leitura: 3,
+            ..
+        })
+    ));
+    // E o quadro da câmera segue não voltando: quem a codifica é a janela.
+    assert!(aviso_do_espelho(
+        EspelhoDaTela::Quadro {
+            chave: true,
+            bytes: &[0, 0, 0, 1],
+        },
+        ScreenId(9),
+        ScreenSource::Camera,
+        3,
+    )
+    .is_none());
+}

@@ -291,3 +291,74 @@ fn o_som_da_leitura_substituida_nao_entra_na_fila() {
         "o som da leitura nova não entraria na fila"
     );
 }
+
+/// **O retrato carrega a pausa quando o motor pausa a transmissão desta
+/// pessoa, e a larga quando ela volta.**
+///
+/// `TelaEmCurso::parada` era sempre `None`: o teto parava o vídeo (o §3.2 —
+/// quando o sinal aperta, quem cede é a imagem), quem escoava fechava o fluxo
+/// e ninguém contava a quem transmitia. A casca já tinha a frase e o lugar;
+/// faltava o estado chegar.
+///
+/// O que entra aqui é o que o `Aviso::TelaParou` e o `Aviso::TelaAbriu` fazem
+/// na ponte, e o que sai é o retrato que a casca lê.
+#[test]
+fn o_retrato_diz_que_a_minha_tela_esta_pausada_e_deixa_de_dizer_quando_ela_volta() {
+    use seele_core::MotivoDeParada;
+
+    let (conexao, shared) = sessao();
+    if let Ok(mut room) = shared.room.lock() {
+        room.apply(&ServerMessage::ScreenShareStarted {
+            voice_room: VoiceRoomId(1),
+            person: PersonId(7),
+            screen: ScreenId(13),
+        });
+    }
+    let parada_da_minha = |conexao: &Connection| {
+        conexao
+            .snapshot()
+            .minha_transmissao
+            .expect("esta pessoa está transmitindo")
+            .parada
+    };
+    assert_eq!(parada_da_minha(&conexao), None);
+
+    // O motor pausa: o sinal ficou crítico.
+    assert!(shared.a_tela_parou(ScreenId(13), MotivoDeParada::SinalCritico));
+    assert_eq!(
+        parada_da_minha(&conexao).as_deref(),
+        Some("SinalCritico"),
+        "o motor pausou a transmissão desta pessoa e o retrato não diz: ela seguiria vendo o \
+         espelho congelado e o botão em PARAR DE COMPARTILHAR, como se a sala estivesse vendo"
+    );
+    assert!(
+        crate::motivos_de_parada_da_tela().contains(&"SinalCritico"),
+        "o nome que o retrato carrega saiu da lista de que a casca tira as frases"
+    );
+    // E não vaza para a tela de outra pessoa que esta esteja assistindo.
+    shared.tela_abriu(ScreenId(9), 1);
+    let retrato = conexao.snapshot();
+    assert_eq!(retrato.tela.as_ref().map(|tela| tela.tela), Some(9));
+    assert_eq!(
+        retrato.tela.and_then(|tela| tela.parada),
+        None,
+        "a pausa do que esta máquina manda foi dita sobre a tela de outra pessoa"
+    );
+
+    // A abertura da tela de outra pessoa não é a volta da nossa.
+    assert!(!shared.a_tela_voltou(ScreenId(9)));
+    assert_eq!(parada_da_minha(&conexao).as_deref(), Some("SinalCritico"));
+    // A da nossa é.
+    assert!(shared.a_tela_voltou(ScreenId(13)));
+    assert_eq!(
+        parada_da_minha(&conexao),
+        None,
+        "a transmissão voltou e o retrato segue dizendo que ela está pausada"
+    );
+
+    // Parar de compartilhar esquece a pausa: a próxima transmissão não nasce
+    // «pausada» por causa desta.
+    assert!(shared.a_tela_parou(ScreenId(13), MotivoDeParada::AbaixoDoPiso));
+    let _ = conexao.parar_de_compartilhar();
+    assert_eq!(parada_da_minha(&conexao), None);
+}

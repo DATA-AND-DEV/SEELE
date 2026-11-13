@@ -391,6 +391,22 @@ pub enum Aviso {
         /// Por quê, enumerado. O detalhe do sistema ficou no `seele.log`.
         motivo: crate::tela::MotivoDeQueda,
     },
+    /// **A transmissão desta pessoa está pausada**: o teto parou o vídeo, o
+    /// fluxo fechou, e ela volta sozinha.
+    ///
+    /// É o §3.2 visto por quem transmite. Não é [`Self::TelaCaiu`]: ali a
+    /// transmissão acabou e recomeçar é com a pessoa; aqui ela continua
+    /// anunciada, a bomba continua viva, e a volta é o [`Self::TelaAbriu`] de
+    /// sempre, da mesma tela. Até este aviso existir, quem transmitia era a
+    /// única pessoa da sala que não tinha como saber que a imagem parou.
+    TelaParou {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// O que ela mostra: é a casca que decide entre «a tela» e «a câmera».
+        origem: seele_proto::screen::ScreenSource,
+        /// Por quê, enumerado.
+        motivo: crate::tela::MotivoDeParada,
+    },
     /// A transmissão da **própria câmera** pede alguma coisa a quem a
     /// codifica, que está fora deste processo (`crate::de_fora`).
     ///
@@ -533,6 +549,16 @@ impl std::fmt::Debug for Aviso {
                 motivo,
             } => f
                 .debug_struct("TelaCaiu")
+                .field("tela", tela)
+                .field("origem", origem)
+                .field("motivo", motivo)
+                .finish(),
+            Self::TelaParou {
+                tela,
+                origem,
+                motivo,
+            } => f
+                .debug_struct("TelaParou")
                 .field("tela", tela)
                 .field("origem", origem)
                 .field("motivo", motivo)
@@ -994,6 +1020,48 @@ const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
 /// e o resto desta sessão até o par responder ou o prazo vencer. A tarefa roda
 /// solta (ver [`Motor::assistir_por_par`]) e devolve o que decidiu por aqui; só
 /// quem tem o `&mut Client` — o laço de `rodar` — pode falar com o servidor.
+/// O que o espelho da própria transmissão vira para a casca.
+///
+/// Os mesmos avisos que uma tela alheia produz, pelo mesmo caminho, para a
+/// casca não ter dois modos de desenhar a mesma coisa — e mais o que só quem
+/// transmite tem a ouvir: que o teto pausou a imagem ([`Aviso::TelaParou`]).
+///
+/// `None` é o quadro da câmera, que não volta: ver `talvez_ligar_a_bomba`.
+///
+/// Fora da tarefa que escoa para ter teste sem enlace nenhum.
+fn aviso_do_espelho(
+    visto: crate::bomba::EspelhoDaTela<'_>,
+    tela: ScreenId,
+    origem: seele_proto::screen::ScreenSource,
+    leitura: u64,
+) -> Option<Aviso> {
+    Some(match visto {
+        crate::bomba::EspelhoDaTela::Abriu { largura, altura } => Aviso::TelaAbriu {
+            tela,
+            largura,
+            altura,
+            origem,
+            leitura,
+        },
+        crate::bomba::EspelhoDaTela::Quadro { .. }
+            if origem == seele_proto::screen::ScreenSource::Camera =>
+        {
+            return None;
+        }
+        crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
+            tela,
+            chave,
+            bytes: bytes.to_vec(),
+            leitura,
+        },
+        crate::bomba::EspelhoDaTela::Parou(motivo) => Aviso::TelaParou {
+            tela,
+            origem,
+            motivo,
+        },
+    })
+}
+
 /// O que a tarefa que escoa a transmissão desta pessoa devolve ao laço de
 /// [`Motor::rodar`] quando ela acaba **com erro**.
 ///
@@ -7170,29 +7238,9 @@ impl Motor {
                 // de codificar. A abertura vai, porque é ela que diz à janela
                 // que o fluxo existe e que os quadros já têm para onde ir.
                 let espelho = |visto: crate::bomba::EspelhoDaTela<'_>| {
-                    let aviso = match visto {
-                        crate::bomba::EspelhoDaTela::Abriu { largura, altura } => {
-                            Aviso::TelaAbriu {
-                                tela,
-                                largura,
-                                altura,
-                                origem,
-                                leitura,
-                            }
-                        }
-                        crate::bomba::EspelhoDaTela::Quadro { .. }
-                            if origem == seele_proto::screen::ScreenSource::Camera =>
-                        {
-                            return;
-                        }
-                        crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
-                            tela,
-                            chave,
-                            bytes: bytes.to_vec(),
-                            leitura,
-                        },
-                    };
-                    let _ = avisos.send(aviso);
+                    if let Some(aviso) = aviso_do_espelho(visto, tela, origem, leitura) {
+                        let _ = avisos.send(aviso);
+                    }
                 };
                 let fim = escoadouro
                     .escoar_espelhado(tela, origem, &mut eventos, espelho, Some(&pedido_de_chave))
