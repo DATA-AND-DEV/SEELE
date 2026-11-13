@@ -221,7 +221,9 @@ if (pasta) fs.mkdirSync(pasta, { recursive: true });
         // a recusa nasce logo abaixo dele, debaixo da barra de ações.
         await page.evaluate(() => $("preparar-senha").closest("label").scrollIntoView({ block: "end" }));
         await page.keyboard.press("Enter");
-        await page.waitForFunction(() => !$("preparar-senha-erro").hidden);
+        // Sem recusa em dois segundos, ou o Enter não seguiu, ou a senha passou.
+        const recusou = await page.waitForFunction(() => !$("preparar-senha-erro").hidden, null, { timeout: 2000 }).then(() => true, () => false);
+        assert.equal(recusou, true, `${tamanho}: Enter no campo com «${senha}» e «${deNovo}» não recusou nada (o Enter não seguiu, ou a senha passou)`);
         const visto = await page.evaluate(() => {
           // A recusa e o campo a que o foco voltou, os dois inteiros na área
           // que rola: acima da barra de ações, sem ninguém rolar.
