@@ -41,7 +41,22 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
     // Duas primeiras abas disputam a criação: a transação escolhe uma só chave.
     const codigos = await Promise.all([a, concorrente].map(p => p.evaluate(() => meuCodigoPessoalWeb())));
     assert.equal(codigos[0], codigos[1]); await concorrente.close();
-    const codigoA = codigos[0], codigoB = await b.evaluate(() => meuCodigoPessoalWeb()); assert.notEqual(codigoA, codigoB);
+    // **A primeira chave de um contexto novo pode falhar no WebKit do Linux.**
+    // Em 13/11 (execução 43399009850) esta chamada voltou `OperationError` uma
+    // vez, do WebCrypto, com o mesmo código que passa nas outras rodadas e no
+    // WebKit do Mac. A causa não foi medida (não há WebKit de Linux fora do
+    // CI); o que se sabe é que é intermitente e só de lá. Até três
+    // tentativas, cada falha DITA, para a frequência ficar visível.
+    let codigoB;
+    for (let tentativa = 1; ; tentativa += 1) {
+     try { codigoB = await b.evaluate(() => meuCodigoPessoalWeb()); break; }
+     catch (falha) {
+      if (motor !== 'webkit' || process.platform !== 'linux' || tentativa >= 3) throw falha;
+      console.error(`PARCIAL (${motor}, linux): a tentativa ${tentativa} de criar o código falhou (${String(falha).split('\n')[0]}); tentando de novo`);
+      await new Promise(ok => setTimeout(ok, 500));
+     }
+    }
+    const codigoA = codigos[0]; assert.notEqual(codigoA, codigoB);
     await a.evaluate(async codigo => {
      const chave = (await identidadePessoalDoNavegador()).chave;
      let exportavel = true; try { await crypto.subtle.exportKey('pkcs8', chave.privateKey); } catch { exportavel = false; }
