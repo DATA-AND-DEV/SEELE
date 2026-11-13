@@ -47,7 +47,15 @@ fn crt_estatico() {
             caminho.display()
         );
     }
-    println!("cargo:rustc-link-search=native={saida}");
+    // **Só nos executáveis deste pacote** (`-bins`), e o caminho da biblioteca
+    // vazia como argumento do ligador, e não como `rustc-link-search`: esse
+    // vaza para todo crate que depende deste. Foi o que aconteceu na primeira
+    // versão (13/11/2026): o `seele-server` é biblioteca de meio workspace, os
+    // testes dos dependentes acharam o `msvcrt.lib` vazio sem receber os
+    // `/DEFAULTLIB` de baixo, e nenhum ligava («símbolo externo não resolvido
+    // mainCRTStartup»). O `/LIBPATH` do ligador é procurado antes do `LIB` do
+    // ambiente, que é o que põe a vazia na frente da de verdade.
+    println!("cargo:rustc-link-arg-bins=/LIBPATH:{saida}");
     for fora in [
         "libvcruntimed.lib",
         "vcruntime.lib",
@@ -58,9 +66,9 @@ fn crt_estatico() {
         "libucrt.lib",
         "libucrtd.lib",
     ] {
-        println!("cargo:rustc-link-arg=/NODEFAULTLIB:{fora}");
+        println!("cargo:rustc-link-arg-bins=/NODEFAULTLIB:{fora}");
     }
     for dentro in ["libcmt.lib", "libvcruntime.lib", "ucrt.lib"] {
-        println!("cargo:rustc-link-arg=/DEFAULTLIB:{dentro}");
+        println!("cargo:rustc-link-arg-bins=/DEFAULTLIB:{dentro}");
     }
 }
