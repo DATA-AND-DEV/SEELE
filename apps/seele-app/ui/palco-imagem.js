@@ -955,6 +955,10 @@ async function trocarCinema(ligada) {
   }
 }
 
+/** Quanto a tela cheia espera pela imagem antes de sair sozinha. */
+const ESPERA_DA_REABERTURA_MS = 2000;
+let saidaDoCinemaSemImagem = null;
+
 /**
  * Mostra ou esconde o botão, conforme haja imagem.
  *
@@ -965,10 +969,27 @@ function botaoDeCinema(temImagem) {
   const botao = $("palco-cheia");
   if (!botao) return;
   botao.hidden = !temImagem;
+  if (temImagem) {
+    clearTimeout(saidaDoCinemaSemImagem);
+    saidaDoCinemaSemImagem = null;
+    return;
+  }
   // A transmissão acabou enquanto alguém assistia em tela cheia: sair sozinho,
   // porque o que sobra é uma janela preta sem nada dizendo como voltar.
-  if (!temImagem && noCinema) {
-    trocarCinema(false).catch((falha) => console.warn("sair do cinema:", falha));
+  //
+  // **Mas não no primeiro redesenho sem imagem.** Uma transmissão que troca de
+  // resolução é reaberta: o fluxo de antes fecha e o novo abre, e entre os
+  // dois o retrato fica sem tela por um instante (no log do relato da 1.0.0, a
+  // de quem transmitia foi reaberta duas vezes nos primeiros seis segundos).
+  // Sair ali tirava da tela cheia quem só estava assistindo. A saída espera o
+  // tempo de uma reabertura; se a imagem voltar, não acontece.
+  if (noCinema && saidaDoCinemaSemImagem === null) {
+    saidaDoCinemaSemImagem = setTimeout(() => {
+      saidaDoCinemaSemImagem = null;
+      if (noCinema && $("palco-cheia")?.hidden) {
+        trocarCinema(false).catch((falha) => console.warn("sair do cinema:", falha));
+      }
+    }, ESPERA_DA_REABERTURA_MS);
   }
 }
 

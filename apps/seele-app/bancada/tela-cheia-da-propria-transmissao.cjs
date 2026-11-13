@@ -143,11 +143,59 @@ const MINHA = { tela: 7, de: EU, e_minha: true, espectadores: 0, parada: null, p
           desenhar(r);
           return atualizarChamada();
         }, acabou);
-        await page.waitForTimeout(300);
-        assert.equal((await estado()).cinema, null, `${motor}: a transmissão acabou e a tela cheia ficou, preta`);
+        // Não no primeiro redesenho (uma reabertura passa por aqui, abaixo), e
+        // sim depois da espera de uma reabertura.
+        await page.waitForTimeout(400);
+        assert.equal((await estado()).cinema, "sim", `${motor}: a tela cheia saiu no primeiro redesenho sem imagem`);
+        await page.waitForFunction(() => !document.body.dataset.cinema, null, { timeout: 5000 })
+          .catch(() => { throw new Error(`${motor}: a transmissão acabou e a tela cheia ficou, preta`); });
+        const depois = await page.evaluate(() => window.pedidos.filter(([c]) => c === "tela_cheia").map(([, a]) => a.ligada));
+        assert.equal(depois.at(-1), false, `${motor}: a janela não foi tirada da tela cheia: ${JSON.stringify(depois)}`);
+
+        // ------------------------------------------- quem assiste, e a reabertura
+        //
+        // A transmissão de outra pessoa troca de resolução: o fluxo fecha e
+        // abre de novo, e por um instante o retrato não tem tela. Quem assiste
+        // em tela cheia continua nela.
+        const DELA = { tela: 9, de: 2, e_minha: false, espectadores: 1, parada: null, pedido: null, codificador: null };
+        const vendo = retrato({ tela: DELA, minha_transmissao: null, transmissoes: [{ ...DELA, assistida: true }] });
+        const noVao = retrato({ tela: null, minha_transmissao: null, transmissoes: [{ ...DELA, assistida: false }] });
+        const abrirADela = () => page.evaluate(() => {
+          for (const [nome, f] of window.ouvintes) {
+            if (nome === "seele://event") f({ payload: { ScreenOpened: { screen: 9, width: 1280, height: 720, source: "screen" } } });
+          }
+          const c = $("palco-imagem"); c.hidden = false; c.width = 1280; c.height = 720;
+          c.getContext("2d").fillRect(0, 0, 1280, 720);
+        });
+        const redesenhar = (r) => page.evaluate((r2) => { window.tabela.snapshot = r2; return atualizarChamada(); }, r);
+        await redesenhar(vendo);
+        await abrirADela();
+        await redesenhar(vendo);
+        await page.locator("#palco-imagem").dblclick();
+        await page.waitForTimeout(150);
+        assert.equal((await estado()).cinema, "sim", `${motor}: quem assiste não entrou em tela cheia`);
+        // O vão da reabertura: o fluxo fecha, o retrato fica sem tela, e 600 ms
+        // depois o novo abre.
+        await page.evaluate(() => {
+          for (const [nome, f] of window.ouvintes) {
+            if (nome === "seele://event") f({ payload: { ScreenClosed: { screen: 9 } } });
+          }
+        });
+        await redesenhar(noVao);
+        await page.waitForTimeout(600);
+        assert.equal((await estado()).cinema, "sim",
+          `${motor}: a transmissão foi reaberta (troca de resolução) e quem assistia saiu da tela cheia`);
+        await abrirADela();
+        await redesenhar(vendo);
+        await page.waitForTimeout(2600);
+        const firme = await estado();
+        assert.equal(firme.cinema, "sim", `${motor}: a imagem voltou e a tela cheia saiu depois: ${JSON.stringify(firme)}`);
+        await page.locator("#palco-sair-desktop").click();
+        await page.waitForTimeout(150);
+        assert.equal((await estado()).cinema, null, `${motor}: o SAIR DA TELA CHEIA de quem assiste não saiu`);
 
         assert.deepEqual(erros, [], `${motor}: erros de página: ${erros.join(" | ")}`);
-        console.log(`ok: a tela cheia da própria transmissão fica, e sai quando ela acaba (${motor})`);
+        console.log(`ok: a tela cheia fica para quem transmite e para quem assiste, e sai quando a transmissão acaba (${motor})`);
       } finally {
         await browser.close();
       }
