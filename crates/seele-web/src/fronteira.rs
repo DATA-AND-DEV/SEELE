@@ -163,6 +163,7 @@
 //! | `voz_tocar_isolado(isolado)` | — | — |
 //! | `voz_tocar_esquecer(alca)` | — | — |
 //! | `voz_tocar_contas()` | 0 | `{"fontes": {alça: …}, "fades", "mistura", …}` |
+//! | `voz_tocar_recepcao(agora_ms, fora)` | 0 | `{"jitter_ms", "perda", "relato": {"perda", "jitter_ms"} \| null}` |
 //! | | 1 | `{"erro": …}` |
 //!
 //! O som atravessa como bytes de `f32` em little-endian, e não como um
@@ -2395,6 +2396,24 @@ pub extern "C" fn voz_tocar_esquecer(alca: u32) {
 #[no_mangle]
 pub extern "C" fn voz_tocar_contas() -> u32 {
     com_a_reproducao(|reproducao| dizer(reproducao.contas().to_string().into_bytes(), 0))
+}
+
+/// Uma volta da medida da recepção ([`Reproducao::recepcao`]): o jitter e a
+/// perda de agora, e o relato para o servidor quando é a vez dele. `null` é
+/// «não medido». `fora` é a alça que não é voz (o som da tela), e não entra
+/// na conta.
+#[no_mangle]
+pub extern "C" fn voz_tocar_recepcao(agora_ms: f64, fora: u32) -> u32 {
+    com_a_reproducao(|reproducao| {
+        dizer(
+            reproducao
+                .recepcao(agora_ms, Some(fora))
+                .em_json()
+                .to_string()
+                .into_bytes(),
+            0,
+        )
+    })
 }
 
 /// As funções só de teste: o `cargo xtask web` confere com elas os bytes-ouro
