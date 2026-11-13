@@ -20840,6 +20840,13 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
              `geracaoDaSessao`, que já muda a cada sessão",
         ),
         (
+            "avisoDoMicrofoneLido",
+            "desta máquina: se a pessoa já leu que o microfone abre por voz; é a cópia em \
+             memória de uma marca do armazenamento da janela, e a frase é sobre o microfone \
+             dela, e não sobre um servidor. Esquecida ao sair, a faixa voltaria em cada \
+             servidor para quem já disse ENTENDI",
+        ),
+        (
             "limiteDaMensagem",
             "do app: o teto do corpo em bytes é do protocolo, lido uma vez no \
              carregamento",

@@ -739,6 +739,9 @@ jobs:
       - run: node apps/seele-app/bancada/faixa-do-toque.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/microfone-por-voz.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # Plataformas dos MODs (API 8): nos dois motores, por isso depois do
       # `install webkit` de cima.
       - run: node apps/seele-app/bancada/plataformas-dos-mods.cjs

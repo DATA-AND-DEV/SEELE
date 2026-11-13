@@ -27,6 +27,10 @@
   // O aviso de fone do navegador (P9): a frase do desktop fala do SEELE, e aqui
   // quem trata o microfone é o navegador. A frase e o porquê estão no frases.js.
   CASCA.avisoDeFone = () => AVISO_DE_FONE_CELULAR;
+  // O aviso do microfone por voz: no celular não acende. A frase do desktop
+  // manda trocar para uma tecla que aqui não existe, e o padrão do celular já
+  // era a voz antes dela. O porquê está no frases.js.
+  CASCA.avisoDoMicrofonePorVoz = () => AVISO_DO_MICROFONE_POR_VOZ_NO_CELULAR;
 
   // ------------------------------------------------------------- as abas
 

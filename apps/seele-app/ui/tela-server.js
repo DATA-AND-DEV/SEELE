@@ -408,10 +408,14 @@ function desenharNivel(snapshot) {
 /**
  * Qual dos três modos do microfone está valendo.
  *
- * Três e não a chave de sim ou não do comp. `specs/03-audio.md` faz da tecla o
- * padrão porque ela nunca dispara sozinha, e uma chave de dois lados esconderia
+ * Três e não a chave de sim ou não do comp: uma chave de dois lados esconderia
  * o terceiro estado — o aberto, que é justamente o que ninguém quer ligar sem
  * saber. `aria-pressed` carrega a escolha para quem não vê o preenchimento.
+ *
+ * **Um dos três está sempre marcado.** Sem sessão, `gravado` é o que vai valer
+ * na próxima: a escolha ou, sem escolha, o padrão desta instalação — a voz para
+ * quem chegou, a tecla para quem já usava (`modo_de_voz_escolhido`, no Rust).
+ * Antes ele era só a escolha, e quem nunca escolheu via três botões apagados.
  *
  * **Sem sessão eles funcionam**, e isto mudou. O texto aqui dizia que ficavam
  * apagados porque «`set_voice_mode` fala com uma sessão aberta, e não há
@@ -424,7 +428,7 @@ function desenharNivel(snapshot) {
  * verdade, e ele vence o que estava escrito.
  *
  * @param {object|null} snapshot a sessão, ou `null` quando não há
- * @param {string|null} gravado o modo em disco, para quando não há sessão
+ * @param {string|null} gravado o modo que vai valer, para quando não há sessão
  */
 function desenharModos(snapshot, gravado) {
   const valendo = snapshot ? snapshot.voice_mode : gravado;
@@ -801,6 +805,9 @@ async function escolher(lado, id) {
 async function escolherModo(modo) {
   try {
     await invoke("set_voice_mode", { mode: modo });
+    // Quem escolheu um modo achou o lugar que o aviso do microfone por voz
+    // ensina: ele não precisa mais ser dito (`tela-sessao.js`).
+    marcarOAvisoDoMicrofoneComoLido();
   } catch (falha) {
     // Gravar é o que pode falhar; aplicar sem sessão não é falha. Um aviso e
     // o redesenho abaixo, que mostra o que ficou valendo de verdade.

@@ -2160,6 +2160,19 @@ def faixa_de_voz(pg: Page) -> list[str]:
     # Playwright e estouraria, em vez de dizer o que reprovou.
     if faixa["escondida"]:
         return falhas + ["dentro da PONTE, a faixa de voz está escondida"]
+    # **O aviso do microfone por voz é do computador** (13/11/2026): ele manda
+    # trocar para SEGURAR TECLA, e o celular não tem tecla. Aqui é o estado em
+    # que ele acenderia — numa sala, com o áudio aberto e o modo em voz —, e o
+    # que se confere é que a casca do celular o deixa apagado.
+    aviso = pg.evaluate("""(() => ({
+        frase: CASCA.avisoDoMicrofonePorVoz(),
+        aVista: document.getElementById('aviso-microfone').checkVisibility(),
+        daSala: SEELE_QUADRO.voice_rooms.some((s) => s.occupied_by_us) && SEELE_QUADRO.audio_available === true,
+    }))()""")
+    if not aviso["daSala"]:
+        falhas.append("o duble não está numa sala com o áudio aberto: a conferência do aviso do microfone não vale")
+    elif aviso["frase"] or aviso["aVista"]:
+        falhas.append(f"o celular mostra o aviso do microfone por voz, que manda trocar para uma tecla que ele não tem: {aviso}")
 
     pg.evaluate("window.__SEELE_ARGS.set_muted = undefined")
     exigir_toque(pg, "#voz-mudo", falhas)

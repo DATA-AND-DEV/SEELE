@@ -449,6 +449,79 @@ function desenharAvisoDeFone(snapshot) {
 }
 
 /**
+ * Onde fica guardado, nesta máquina, que o aviso do microfone por voz foi lido.
+ *
+ * No armazenamento da janela, como as preferências dos alertas sonoros
+ * (`alertas-sonoros.js`): é uma marca desta tela, e não um ajuste do microfone.
+ * O `.v1` é do formato: uma frase que mude de assunto ganha outra chave.
+ */
+const AVISO_DO_MICROFONE_LIDO = "seele.aviso-do-microfone-por-voz.v1";
+
+/**
+ * Se o aviso do microfone por voz já foi lido. `null` é «ainda não perguntei
+ * ao armazenamento»: ele é síncrono, e é lido uma vez, e não a cada quadro.
+ */
+let avisoDoMicrofoneLido = null;
+
+/** Se o aviso já foi lido nesta máquina. Sem armazenamento, vale a memória. */
+function oAvisoDoMicrofoneFoiLido() {
+  if (avisoDoMicrofoneLido === null) {
+    try {
+      avisoDoMicrofoneLido = localStorage.getItem(AVISO_DO_MICROFONE_LIDO) === "sim";
+    } catch {
+      avisoDoMicrofoneLido = false;
+    }
+  }
+  return avisoDoMicrofoneLido;
+}
+
+/**
+ * Guarda que o aviso do microfone por voz foi lido, e apaga a faixa.
+ *
+ * Dois caminhos chegam aqui: o ENTENDI da faixa, e escolher um modo em
+ * CONFIGURAÇÕES (`escolherModo`, em `tela-server.js`) — quem escolheu achou o
+ * lugar que a frase ensina, qualquer que tenha sido a escolha.
+ */
+function marcarOAvisoDoMicrofoneComoLido() {
+  avisoDoMicrofoneLido = true;
+  try {
+    localStorage.setItem(AVISO_DO_MICROFONE_LIDO, "sim");
+  } catch {
+    // Sem onde gravar, a marca vale até a janela fechar, e a faixa volta na
+    // próxima abertura: repetir um aviso é melhor que não o dar.
+  }
+  porOEscondido($("aviso-microfone"), true);
+}
+
+/**
+ * A faixa que diz que o microfone abre por voz, a quem entra numa sala de voz.
+ *
+ * Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem tecla. A
+ * faixa é a outra metade desse padrão — a pessoa passa a ir ao ar sem apertar
+ * nada, e precisa saber disso, ver onde aparece que está sendo ouvida, e achar
+ * onde se troca para a tecla.
+ *
+ * **Do retrato, a cada quadro**, e não de um evento: ela vale com o modo em voz
+ * e dentro de uma sala, e some sozinha quando qualquer um dos dois deixa de ser
+ * verdade — inclusive ao trocar para a tecla com ela na tela. Com o microfone
+ * que não abriu (`audio_available`), quem fala é a faixa do áudio, e esta se
+ * cala: dizer «abre quando você fala» de um microfone fechado seria mentira.
+ *
+ * Lida uma vez, não volta (`marcarOAvisoDoMicrofoneComoLido`). Revelada antes
+ * de escrita, como a do fone.
+ */
+function desenharAvisoDoMicrofonePorVoz(snapshot) {
+  const frase = CASCA.avisoDoMicrofonePorVoz();
+  const mostrar = Boolean(frase)
+    && snapshot.voice_mode === "VoiceActivated"
+    && snapshot.audio_available === true
+    && snapshot.voice_rooms.some((sala) => sala.occupied_by_us)
+    && !oAvisoDoMicrofoneFoiLido();
+  porOEscondido($("aviso-microfone"), !mostrar);
+  if (mostrar) porOTexto($("aviso-microfone-texto"), frase);
+}
+
+/**
  * A faixa do áudio que não abriu, a partir do estado. Pendência 52.
  *
  * O áudio abre ao entrar numa sala, numa thread própria e com prazo. Quando o
@@ -606,6 +679,7 @@ function desenhar(snapshot) {
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
   desenharAvisoDeFone(snapshot);
+  desenharAvisoDoMicrofonePorVoz(snapshot);
   desenharAberturaDoAudio(snapshot);
   // O palco dos MODs sobre a chamada, também com a chamada escondida: sair da
   // sala o desmonta, e é este desenho que vê a sala mudar (`tela-chamada.js`).
@@ -6265,6 +6339,8 @@ async function ejetar() {
   // A do áudio que não abriu também: ela é da sala daquela sessão, e o primeiro
   // quadro da próxima a redesenha do estado dela.
   $("aviso-audio").hidden = true;
+  // E a do microfone por voz, pela mesma razão: ela é da sala em que se estava.
+  $("aviso-microfone").hidden = true;
   document.body.classList.remove("na-bateria");
   // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
   // da próxima sessão com a lista de salas da anterior ainda desenhada.
@@ -6946,6 +7022,7 @@ $("veredito-fechar").addEventListener("click", () => {
 // Fechada, ela não volta nesta execução — ver `foneJaAvisado`. A frase continua
 // na ajuda e em CONFIGURAÇÕES · MICROFONE E SOM para quem quiser relê-la.
 $("aviso-fone-fechar").addEventListener("click", () => ($("aviso-fone").hidden = true));
+$("aviso-microfone-fechar").addEventListener("click", marcarOAvisoDoMicrofoneComoLido);
 
 $("botao-mudo").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");

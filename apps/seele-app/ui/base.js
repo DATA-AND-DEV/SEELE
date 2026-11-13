@@ -631,6 +631,10 @@ async function passaDoTeto(campo, texto) {
 //   - `enterEnvia`: o Enter do compositor envia; no celular o Return quebra a
 //     fileira, e só o ENVIAR envia (P8);
 //   - `avisoDeFone`: a frase do aviso de fone (P9);
+//   - `avisoDoMicrofonePorVoz`: a frase que diz, a quem entra numa sala com o
+//     microfone abrindo por voz, que ele abre sozinho e onde se troca para a
+//     tecla. No celular não há tecla, e a casca dele a devolve vazia: a faixa
+//     não acende;
 //   - `fraseDoModo`: como o microfone abre, na faixa de contexto de
 //     CONFIGURAÇÕES. Recebe o modo e a frase do desktop, e o padrão a devolve:
 //     a frase, com o nome da tecla, continua no `tela-server.js`;
@@ -662,6 +666,7 @@ const CASCA = Object.seal({
   pedirSenhaDaSala: async () => window.prompt("Senha da sala"),
   enterEnvia: true,
   avisoDeFone: () => AVISO_DE_FONE,
+  avisoDoMicrofonePorVoz: () => AVISO_DO_MICROFONE_POR_VOZ,
   fraseDoModo: (_modo, doDesktop) => doDesktop,
   entradaDireta: (_veredito, _deOnde) => null,
   oferecerLinkDoNavegador: null,

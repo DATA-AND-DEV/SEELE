@@ -510,6 +510,24 @@ const MICROFONE_EM_SILENCIO_NO_MACOS =
 const AVISO_DE_FONE = "";
 
 /**
+ * O microfone que abre por voz, dito a quem entra numa sala de voz e ainda não
+ * leu isto.
+ *
+ * Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem tecla. Um
+ * padrão que põe a pessoa no ar sem ela apertar nada tem de dizer três coisas
+ * no instante em que passa a valer: que o microfone abre sozinho, onde ela vê
+ * que está sendo ouvida (o nome dela na sala ganha «fala»: `linhaDeQuemEstaDentro`),
+ * e onde se troca para a tecla — pelo nome que o botão de lá tem.
+ *
+ * Vazia, a faixa não acende: é o que a casca do celular faz, que não tem tecla
+ * (`CASCA.avisoDoMicrofonePorVoz`, em `base.js`).
+ */
+const AVISO_DO_MICROFONE_POR_VOZ =
+  "SEU MICROFONE ABRE QUANDO VOCÊ FALA.\n" +
+  "Enquanto os outros ouvem você, o seu nome na sala diz «fala». " +
+  "Para falar só segurando uma tecla: CONFIGURAÇÕES · MICROFONE E SOM · SEGURAR TECLA.";
+
+/**
  * Com que nome entra quem fecha a pergunta do nome sem responder.
  *
  * **Não diz o nome**, e não é descuido: ele é derivado em Rust, dentro do
@@ -3403,6 +3421,15 @@ const SEM_CANCELAMENTO_DE_ECO =
   "Microfone sem cancelamento de eco.";
 
 const AVISO_DE_FONE_CELULAR = "";
+
+/**
+ * O aviso do microfone por voz, no celular: nenhum.
+ *
+ * O do desktop (`AVISO_DO_MICROFONE_POR_VOZ`) manda trocar para SEGURAR TECLA, e
+ * o celular não tem tecla; o padrão dele já era a voz desde a F8, e o botão do
+ * microfone fica na faixa de voz, sempre à vista. Vazia, a faixa não acende.
+ */
+const AVISO_DO_MICROFONE_POR_VOZ_NO_CELULAR = "";
 
 /**
  * O que só o app do SEELE faz, a lista canônica da matriz: a mesma nas duas
