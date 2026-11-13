@@ -174,6 +174,29 @@ jobs:
       # masking a bug: the point of this job is to prove the `#[cfg(windows)]`
       # paths still *compile and link*, which every run of this step already
       # does for the whole workspace, hardware or not.
+      # **O vigia do Linux.** Em 13/11/2026 o `test (linux)` morreu duas vezes
+      # seguidas aos ~54 min com «the hosted runner lost communication with
+      # the server» (execuções 43355895287 e 43370570352; a rodada boa leva 38
+      # min). Quando o runner morre o log do passo se perde inteiro, e não se
+      # soube qual teste o levou. O vigia anota a memória e os três maiores
+      # processos a cada 20 s e, antes de a máquina sufocar, mata o maior
+      # binário de teste e diz qual foi: o passo reprova, e o log fica.
+      - name: vigia de memória (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          cat > "$RUNNER_TEMP/vigia.sh" <<'VIGIA'
+          while sleep 20; do
+            livre=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+            maiores=$(ps -eo rss,etimes,args --sort=-rss | awk 'NR>1 && NR<5 {printf "%d MiB %ds %s | ", $1/1024, $2, substr($0, index($0,$3), 110)}')
+            echo "$(date -u +%T) livre=${livre}MiB carga=$(cut -d" " -f1 /proc/loadavg) :: $maiores"
+            if [ "$livre" -lt 700 ]; then
+              alvo=$(ps -eo pid,rss,args --sort=-rss | awk '/target\/debug\/deps/ {print $1; exit}')
+              echo "VIGIA: memória livre em ${livre} MiB; matando o maior binário de teste (pid ${alvo:-nenhum})"
+              [ -n "$alvo" ] && kill -KILL "$alvo"
+            fi
+          done
+          VIGIA
+          nohup sh "$RUNNER_TEMP/vigia.sh" > "$RUNNER_TEMP/vigia.log" 2>&1 &
       - name: cargo test (workspace)
         # One command. The separate `cargo test -p seele-conformance --
         # --test-threads=1` step, and the `--exclude seele-conformance` it
@@ -267,6 +290,17 @@ jobs:
         # dois, não se soube nada. O passo continua vermelho com um vermelho
         # só; o que muda é que ele diz todos.
         run: cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada
+        # O passo bom leva de 25 a 45 min nos três sistemas; um teste pendurado
+        # não segura a máquina até ela cair.
+        timeout-minutes: 60
+      - name: o que o vigia viu (Linux)
+        if: ${{ always() && matrix.name == 'linux' }}
+        run: |
+          grep VIGIA "$RUNNER_TEMP/vigia.log" || echo "o vigia não matou nada"
+          echo "--- os 15 momentos de menor memória livre"
+          sort -t= -k2 -n "$RUNNER_TEMP/vigia.log" | grep -v VIGIA | head -15
+          echo "--- o fim"
+          tail -8 "$RUNNER_TEMP/vigia.log"
 
   # As bancadas de navegador, que nada automático rodava.
   #
