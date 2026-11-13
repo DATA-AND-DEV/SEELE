@@ -3763,11 +3763,21 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .na-bateria .telemetria { opacity: 0.55; }
 
 /* O cartão do anexo do canvas: ícone, nome com o tamanho embaixo, e os verbos à
-   direita. Só o arranjo — os botões e o texto são os de sempre. */
+   direita. Só o arranjo — os botões e o texto são os de sempre.
+
+   **A prévia aberta tem a fileira dela** (`fig`; 1.0.1, relato do dono: «o nome
+   do arquivo fica em pé, uma letra por linha»). A figura não tinha área: com a
+   prévia aberta o botão PRÉVIA sai, a área `previa` fica vazia, e a grade punha
+   a figura nela — uma coluna `auto` do tamanho da imagem, ao lado do nome, que
+   tirava toda a largura da coluna `minmax(0, 1fr)` dele. O nome quebrava a
+   cada letra (`overflow-wrap: anywhere`), o «1.3 MB» em duas linhas, e o SALVAR
+   ia para o meio da altura. Agora a figura — e a frase da recusa, que caía no
+   mesmo lugar — fica embaixo da fileira do nome, na largura do cartão. A
+   bancada `anexo-com-previa-aberta.cjs` mede. */
 :root:not([data-casca="celular"]) .mensagem .anexo {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "ic nome salvar previa" "ic tam salvar previa" "est est est est";
+  grid-template-areas: "ic nome salvar previa" "ic tam salvar previa" "fig fig fig fig" "est est est est";
   align-items: center;
   column-gap: 12px;
   row-gap: 0;
@@ -3785,6 +3795,14 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-salvar { grid-area: salvar; min-height: 36px; font-size: 12px; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-previa { grid-area: previa; min-height: 36px; font-size: 12px; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-estado { grid-area: est; }
+:root:not([data-casca="celular"]) .mensagem .anexo > :is(.anexo-desenho, .anexo-recusa) { grid-area: fig; }
+/* Sem o botão PRÉVIA a coluna dele fica vazia, e o vão dela sobrava à direita
+   do SALVAR: com a prévia aberta, ele encosta na borda do cartão, alinhado com
+   a figura embaixo. */
+:root:not([data-casca="celular"]) .mensagem .anexo:has(> :is(.anexo-desenho, .anexo-recusa)) > .anexo-salvar {
+  grid-column: salvar-start / previa-end;
+  justify-self: end;
+}
 
 /* ---------- a reserva da coluna do «⋯» nas linhas de pessoa ----------
    Estas duas regras moravam em `mods-controles.css` (02a2c4af), mas `.roster` é

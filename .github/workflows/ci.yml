@@ -704,6 +704,11 @@ jobs:
       - run: node apps/seele-app/bancada/ficha-de-quem-esta-fora.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O cartão do anexo com a prévia aberta (1.0.1): o nome do arquivo numa
+      # linha, o SALVAR na fileira dele, e a figura embaixo, na largura do cartão.
+      - run: node apps/seele-app/bancada/anexo-com-previa-aberta.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # A notificação do sistema na página de navegador, com a ponte de verdade e
       # um `Notification` de mentira: a opção nasce desligada, a permissão é
       # pedida dentro do clique, a recusa do navegador fica dita, e a menção e o
