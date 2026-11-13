@@ -74,6 +74,24 @@ fn agora() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
+/// O carimbo de um uso que acontece agora: o relógio, e **sempre depois** de
+/// todo carimbo de `outros`.
+///
+/// O relógio daqui tem segundo inteiro, e a lista é ordenada por ele. Só com o
+/// relógio, o servidor usado no mesmo segundo em que outro foi criado ou usado
+/// empatava com ele, e a ordem saía da posição no arquivo: o que acabou de ser
+/// usado podia vir em segundo. O mesmo com o relógio da máquina atrasado
+/// depois de um uso. O campo só serve para ordenar; então o uso mais novo
+/// passa um segundo à frente do mais recente que houver, e «o último usado vem
+/// primeiro» deixa de depender de em que milissegundo as duas coisas caíram.
+fn carimbo_de_uso<'a>(outros: impl Iterator<Item = &'a Servidor>) -> i64 {
+    let relogio = agora();
+    outros
+        .map(|servidor| servidor.ultimo_uso)
+        .max()
+        .map_or(relogio, |visto| relogio.max(visto.saturating_add(1)))
+}
+
 /// Lê o registro, já adotando o servidor antigo quando há um.
 ///
 /// **Ler é o que adota.** Não há passo de migração em outro lugar para alguém
@@ -185,7 +203,8 @@ pub(crate) fn criar_conferido(config: &str, nome: &str, versao: &str) -> Result<
         id,
         nome: nome.trim().to_owned(),
         versao: versao.to_owned(),
-        ultimo_uso: agora(),
+        // Criar é o uso mais novo da lista: ver `carimbo_de_uso`.
+        ultimo_uso: carimbo_de_uso(lista.iter()),
     };
     lista.push(novo.clone());
     let bytes = serde_json::to_vec_pretty(&lista).map_err(|e| e.to_string())?;
@@ -423,10 +442,13 @@ fn herdar_a_chave(config: &str, banco: &Path) {
 /// Anota que este servidor foi usado agora, para a lista vir na ordem certa.
 pub(crate) fn marcar_uso(config: &str, id: &str) {
     let mut lista = listar(config);
+    // Depois de todos os **outros**: marcar o mesmo servidor duas vezes no
+    // mesmo segundo não o empurra para o futuro.
+    let carimbo = carimbo_de_uso(lista.iter().filter(|s| s.id != id));
     let Some(servidor) = lista.iter_mut().find(|s| s.id == id) else {
         return;
     };
-    servidor.ultimo_uso = agora();
+    servidor.ultimo_uso = carimbo;
     gravar(config, &lista);
 }
 
@@ -792,18 +814,84 @@ mod os_servidores_guardados {
         let config = texto(&dir);
         let primeiro = criar(&config, "Um", "0.11.0");
         let segundo = criar(&config, "Dois", "0.11.0");
+        assert_eq!(
+            listar(&config).first().map(|s| s.id.clone()),
+            Some(segundo.id.clone()),
+            "o servidor recém-criado não veio primeiro"
+        );
 
-        // O relógio tem segundo inteiro; sem isto os dois empatam e a ordem
-        // seria a de inserção por acaso, e não pelo uso.
         marcar_uso(&config, &primeiro.id);
-        let mut lista = listar(&config);
-        lista.sort_by_key(|s| std::cmp::Reverse(s.ultimo_uso));
+        let lista = listar(&config);
 
         assert!(lista.iter().any(|s| s.id == segundo.id));
         assert_eq!(
             lista.first().map(|s| s.id.clone()),
             Some(primeiro.id),
             "o último usado vem primeiro"
+        );
+    }
+
+    /// **O último usado vem primeiro mesmo quando o relógio não separa os
+    /// dois.**
+    ///
+    /// O teste de cima oscilava: 9 falhas em 400 rodadas sozinho (12/11/2026),
+    /// e mais na bateria carregada. O relógio do registro tem segundo inteiro.
+    /// Quando o segundo virava entre os dois `criar`, o segundo servidor
+    /// ficava com T+1; `marcar_uso` relia a lista já ordenada (ele na frente),
+    /// carimbava o primeiro com o mesmo T+1 e a gravava nessa ordem; e a
+    /// ordenação, estável, deixava o que acabou de ser usado em segundo.
+    ///
+    /// Aqui o empate é posto à mão, e pior que ele: os dois carimbos uma hora
+    /// à frente do relógio, com o outro servidor na frente no arquivo. É também
+    /// a máquina cujo relógio foi atrasado depois de um uso. Sem o
+    /// `carimbo_de_uso`, o servidor marcado ficava com o relógio de agora,
+    /// atrás do outro, toda vez.
+    #[test]
+    fn o_ultimo_usado_vem_primeiro_mesmo_quando_o_relogio_nao_separa_os_dois() {
+        let dir = pasta();
+        let config = texto(&dir);
+        let primeiro = criar(&config, "Um", "0.11.0");
+        let segundo = criar(&config, "Dois", "0.11.0");
+
+        let adiante = super::agora() + 3600;
+        let mut lista = listar(&config);
+        for servidor in &mut lista {
+            servidor.ultimo_uso = adiante;
+        }
+        lista.sort_by_key(|s| s.id != segundo.id);
+        assert_eq!(
+            lista.first().map(|s| s.id.as_str()),
+            Some(segundo.id.as_str())
+        );
+        super::gravar(&config, &lista);
+
+        marcar_uso(&config, &primeiro.id);
+        assert_eq!(
+            listar(&config)
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            [primeiro.id.as_str(), segundo.id.as_str()],
+            "o servidor que acabou de ser usado não veio primeiro: o carimbo dele empatou \
+             com o do outro, ou ficou atrás, e a ordem saiu da posição no arquivo"
+        );
+
+        // E marcar o mesmo de novo não o empurra: o carimbo só passa dos outros.
+        let do_primeiro = |config: &str| listar(config).first().map(|s| s.ultimo_uso);
+        let antes = do_primeiro(&config);
+        marcar_uso(&config, &primeiro.id);
+        assert_eq!(
+            do_primeiro(&config),
+            antes,
+            "marcar duas vezes o mesmo servidor andou o carimbo dele sem o relógio andar"
+        );
+
+        // Criar também é o uso mais novo.
+        let terceiro = criar(&config, "Três", "0.11.0");
+        assert_eq!(
+            listar(&config).first().map(|s| s.id.clone()),
+            Some(terceiro.id),
+            "o servidor recém-criado ficou atrás dos que o relógio não separa dele"
         );
     }
 
