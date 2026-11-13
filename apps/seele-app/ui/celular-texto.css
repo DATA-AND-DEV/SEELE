@@ -144,6 +144,9 @@
 :where(:root[data-casca="celular"]) #tela-boot .boot-amigos-campo-rotulo { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) .boot-meu-servidor .boot-saidas > button { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #tela-boot:not(:has(.inicio-introducao)) #boot-meu-servidor-frase { font-size: calc(13px * var(--cel-escala)); }
+@media (min-width: 1101px) and (max-width: 1500px) {
+  :where(:root[data-casca="celular"]) #tela-boot #boot-codigo-valor { font-size: calc(15px * var(--cel-escala)); }
+}
 
 /* tela-antes-de-hospedar.css */
 :where(:root[data-casca="celular"]) .antes-linha-texto { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }

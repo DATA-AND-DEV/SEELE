@@ -154,44 +154,6 @@
     "trilha barra painelmod";
 }
 
-/* **A casca larga do 0.19 fixava cinco colunas** em `.paineis` com um seletor
-   mais forte que o de cima (`tela-sessao.css`, `min-width: 1241px`). As áreas
-   continuavam as três da ligação, e a chamada inteira caía na segunda coluna,
-   de 316 px, com o resto da janela vazio. Esta regra repete as três colunas
-   com a força daquela; abaixo de 701 px manda a regra estreita, no fim. */
-@media (min-width: 701px) {
-  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .paineis {
-    grid-template-columns: 72px minmax(0, 1fr) auto;
-  }
-  /* O cabeçalho do servidor (`.canais-servidor`) é filho da coluna que virou
-     `display: contents`: sem isto o nome dele ia sozinho para a coluna do
-     painel de MOD, cortado na borda direita. O nome já está no cabeçalho da
-     ligação. E o CHAT da barra de cima é o da chamada de servidor (volta à
-     conversa do canal): aqui o chat é o da barra de baixo. */
-  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] :is(.canais-servidor, #chamada-chat) {
-    display: none;
-  }
-
-  /* A barra tem mais de uma fileira (o aviso de voz, os botões, a dica): com o
-     raio de pílula as pontas cortavam o aviso. E o microfone vem antes: o
-     DESLIGAR fecha a fileira. */
-  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .operador {
-    border-radius: 24px;
-    padding: 12px 20px;
-    margin: 8px 0 0;
-  }
-
-  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .operador-fileira {
-    order: 5;
-  }
-
-  /* Numa janela baixa a barra toma a altura e a grade fica com pouco: ela
-     rola dentro do centro, em vez de sumir cortada atrás da barra. */
-  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .painel-linha { min-height: 0; overflow: hidden; }
-  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] #vista-chamada { min-height: 0; overflow-y: auto; }
-  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] #chamada-grade { flex: 0 0 auto; }
-}
-
 #tela-sessao[data-vista="ligacao"] .operador {
   grid-area: barra;
   flex-direction: row;
