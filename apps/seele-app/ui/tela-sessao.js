@@ -3378,10 +3378,19 @@ function pintarVolumesDoRoster() {
  * por último» seria dizer a todo membro quando cada outro sai.
  *
  * **Não é um `li.pessoa`.** Aquela é a linha de quem está aqui: um MOD a
- * apresenta (`pessoa.cartao`, `pessoa.identidade`), o celular abre a folha dela
- * ao toque (`celular-pessoas.js`), e ela carrega sinal e volume. Nada disso
- * cabe a quem está fora: nenhuma medida existe, nenhuma ação o alcança, e
- * nenhum MOD ganhou a lista de membros.
+ * apresenta (`pessoa.cartao`, `pessoa.identidade`), e ela carrega sinal e
+ * volume. Nada disso cabe a quem está fora: nenhuma medida existe, e nenhum MOD
+ * ganhou a lista de membros.
+ *
+ * **A linha abre a ficha do membro, e só isso** (1.0.1, aprovado pelo dono em
+ * 13/11/2026). Ela era texto solto, e a ficha de quem está fora do ar só se
+ * alcançava pela página de perfis. Agora o nome é um botão do produto
+ * (`botaoDaFicha`, o mesmo `data-ficha-pessoa` das linhas de quem está aqui):
+ * o clique, o Enter e o toque no celular abrem `abrirFichaDaPessoa`, pela
+ * delegação da lista. A ficha de quem não está conectado diz FORA DO AR e não
+ * tem volume, moderação nem ação ou seção de MOD (`pessoaQueNaoEstaConectada`,
+ * `fichaDaPessoa`): a linha não ganhou nenhuma ação de MOD, nenhum estado e
+ * nenhum horário — continua sendo o apelido.
  *
  * **Cada linha é o membro** (`membro:<id>`; lote FORA, pendência 63). Sem chave,
  * as linhas casavam pela posição em `reconciliarALista`, e quando alguém do
@@ -3390,12 +3399,18 @@ function pintarVolumesDoRoster() {
  * do último, e não o de quem se conectou. O prefixo é um espaço só dele: a
  * mesma conta é `pessoa:<id>` quando está conectada, e por um instante é as duas
  * — o retrato chega antes de a lista de membros ser buscada —, sem uma tomar o
- * nó da outra. O `id` é a conta, e fica na chave: o texto da linha segue sendo
- * só o apelido.
+ * nó da outra. O `id` é a conta: fica na chave e no alvo da ficha, e o texto da
+ * linha segue sendo só o apelido.
  */
 function grupoForaDoAr(membros) {
   const linhas = membros.map((membro) => {
-    const li = elemento("li", "membro-fora-do-ar", apelidoApresentado(membro.id, membro.nickname));
+    const nome = String(apelidoApresentado(membro.id, membro.nickname) ?? "");
+    const li = elemento("li", "membro-fora-do-ar");
+    // O apelido é o texto do botão, e o nome acessível o repete («Abrir a
+    // ficha de …»): quem ouve a tela sabe de quem é a ficha e o que o Enter faz.
+    const abrir = botaoDaFicha({ id: membro.id, nome }, nome);
+    abrir.classList.add("membro-fora-do-ar-abrir");
+    li.append(abrir);
     chaveNaLista.set(li, `membro:${membro.id}`);
     return li;
   });

@@ -1252,6 +1252,16 @@
   cursor: pointer;
 }
 
+/* **O FORA DO AR: a linha é o botão que abre a folha do membro** (1.0.1;
+   `grupoForaDoAr`, em `tela-sessao.js`). Os 44px do alvo de toque já vêm de
+   `celular-base.css`, que os dá a todo botão, e o nome fica no meio deles. O
+   que falta é o recuo dos lados igual ao das linhas de quem está aqui, com a
+   área segura: o do desktop (10px) deixava o nome fora do prumo delas. */
+:root[data-casca="celular"] #lista-roster .membro-fora-do-ar-abrir {
+  padding-right: calc(14px + var(--cel-seguro-dir));
+  padding-left: calc(14px + var(--cel-seguro-esq));
+}
+
 /* Quem fala: o fósforo na borda de cima e no avatar, e **sem o fundo** do
    desktop. Sobre o tom fraco do fósforo, o rótulo cai a 3,5:1 (medido na
    bancada). */

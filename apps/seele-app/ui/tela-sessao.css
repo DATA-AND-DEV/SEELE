@@ -1905,15 +1905,20 @@ button.linha-nome:hover { text-decoration: underline; }
 }
 
 /* **FORA DO AR** (D-fio-4, P6): quem é membro e não está conectado. Apagado, e
-   só o nome — nada ali foi medido e nada ali responde.
+   só o nome — nada ali foi medido.
 
    Apagado com `--seele-rotulo-painel`, e não com `osso-apagado`: o nome é a
    única coisa que a linha diz, e aquele mede 4,11:1, que só vale para texto
    grande. Este mede 5,52:1 e continua abaixo do `osso` de quem está aqui, que
-   é a diferença que o grupo precisa mostrar. */
+   é a diferença que o grupo precisa mostrar.
+
+   **O nome é o botão que abre a ficha do membro** (1.0.1; `grupoForaDoAr`). O
+   recuo da linha passou para ele, que a ocupa inteira: o alvo do clique é a
+   linha, e não só as letras. A letra é a da linha (`font: inherit`), e o
+   contorno do foco fica por dentro, porque a linha corta o que passa dela. */
 .membro-fora-do-ar {
   border-bottom: 1px solid var(--seele-linha);
-  padding: 6px 10px;
+  padding: 0;
   font-size: 14px;
   letter-spacing: 0.02em;
   color: var(--seele-rotulo-painel);
@@ -1925,6 +1930,35 @@ button.linha-nome:hover { text-decoration: underline; }
   font-family: var(--seele-ui);
   opacity: 0.7;
 }
+.membro-fora-do-ar-abrir {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.membro-fora-do-ar-abrir:hover {
+  background: color-mix(in srgb, var(--seele-osso) 4%, transparent);
+}
+.membro-fora-do-ar-abrir:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+/* Com o foco do teclado, a linha deixa de estar apagada: o contorno a 70% não
+   é o contorno que o resto da lista mostra. */
+.membro-fora-do-ar:has(> .membro-fora-do-ar-abrir:focus-visible) { opacity: 1; }
 
 /* A região `pessoas.lista` (rascunho da API 6, §3): acima da lista, fechada e
    com teto de altura, como as outras regiões. */

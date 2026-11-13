@@ -22905,6 +22905,14 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
     // E a linha não passa pelo caminho das linhas de quem está aqui: aquelas
     // um MOD apresenta (`pessoa.cartao`, `pessoa.identidade`), e nenhum MOD
     // ganhou a lista de membros.
+    //
+    // **A linha abre a ficha do membro, e só isso** (1.0.1, aprovado pelo dono
+    // em 13/11/2026). Ela era texto solto, e a regra era «nenhuma ação a
+    // alcança»; a regra nova é uma ação só, do produto: o nome é o botão que
+    // abre `abrirFichaDaPessoa`. O que continua recusado, e este guarda cobra:
+    // o id não vira texto, a linha não ganha horário, estado, volume nem ação
+    // de MOD, e a ficha de quem não está conectado diz FORA DO AR e não entrega
+    // o membro a MOD nenhum.
     let tipos = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
     let Some(depois) = tipos.split("pub struct MembroForaDoAr {").nth(1) else {
         panic!("`seele-ffi/src/types.rs` não declara mais `MembroForaDoAr`");
@@ -22941,8 +22949,8 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
                 .next()
         })
         .collect();
-    // O id só seleciona a apresentação pública e a chave estável da linha;
-    // nunca vira texto. Papel, horário e o resto não chegam.
+    // O id só seleciona a apresentação pública, a chave estável da linha e a
+    // ficha que ela abre; nunca vira texto. Papel, horário e o resto não chegam.
     assert!(
         lidos.contains("nickname"),
         "a linha do FORA DO AR não lê mais o apelido do membro:\n{linha}"
@@ -22958,12 +22966,29 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
         1,
         "o nome deve vir uma vez da apresentação pública do membro:\n{linha}"
     );
+    // A ficha: o botão do produto, uma vez, com o apelido como texto e como
+    // nome acessível (`botaoDaFicha` escreve «Abrir a ficha de …»). É o único
+    // uso novo do id, e o único controle da linha.
+    const ABRIR_A_FICHA: &str = "botaoDaFicha({ id: membro.id, nome }, nome)";
+    assert_eq!(
+        linha.matches(ABRIR_A_FICHA).count(),
+        1,
+        "a linha do FORA DO AR deve abrir a ficha do membro por um botão do produto, uma vez, \
+         com o apelido no texto e no nome acessível:\n{linha}"
+    );
+    assert_eq!(
+        linha.matches("elemento(\"button\"").count() + linha.matches("botaoDaFicha(").count(),
+        1,
+        "a linha do FORA DO AR tem mais de um controle: ela abre a ficha, e só isso:\n{linha}"
+    );
     let sem_usos_internos = linha
         .replace("`membro:${membro.id}`", "")
-        .replace("apelidoApresentado(membro.id, membro.nickname)", "");
+        .replace("apelidoApresentado(membro.id, membro.nickname)", "")
+        .replace(ABRIR_A_FICHA, "");
     assert!(
         !sem_usos_internos.contains("membro.id"),
-        "o id só pode escolher a apresentação e a chave da linha, nunca o texto:\n{linha}"
+        "o id só pode escolher a apresentação, a chave da linha e a ficha que ela abre, nunca o \
+         texto:\n{linha}"
     );
     for proibido in [
         "Date",
@@ -22974,13 +22999,75 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
         "cartoesDaPessoa",
         "conteudoDasContribuicoes",
         "\"pessoa",
+        // Nenhuma ação de MOD, nenhum estado, nenhum volume e nenhuma
+        // moderação na linha: o botão dela abre a ficha, e mais nada.
+        "acoesDasContribuicoes",
+        "aPortaDoProvedor",
+        "acaoDeMod",
+        "nosDeMod",
+        "estadosDaPessoa",
+        "volume",
+        "moderar",
     ] {
         assert!(
             !linha.contains(proibido),
-            "a linha do FORA DO AR usa `{proibido}`: ela é só o nome, sem horário, e não passa \
-             pelo caminho que os MODs apresentam:\n{linha}"
+            "a linha do FORA DO AR usa `{proibido}`: ela é o nome que abre a ficha, sem horário, \
+             sem estado e sem ação de MOD, e não passa pelo caminho que os MODs apresentam:\n{linha}"
         );
     }
+    // E o que a linha abre: a ficha de quem não está conectado. Ela sai de
+    // `pessoaQueNaoEstaConectada`, que só entrega id, nome e a marca `fora`; a
+    // marca tira da ficha as ações e as seções de MOD, e troca o estado — que
+    // ninguém mediu — por FORA DO AR. Volume e moderação pedem campos que essa
+    // pessoa não tem. Sem horário em nenhuma das três.
+    let fora = body_of(&sessao, "function pessoaQueNaoEstaConectada(");
+    assert_eq!(
+        fora.matches("return {").count(),
+        fora.matches("fora: true }").count(),
+        "quem não está conectado tem de sair marcado como `fora` em todo caminho:\n{fora}"
+    );
+    assert!(
+        fora.matches("return {").count() >= 2,
+        "`pessoaQueNaoEstaConectada` não monta mais a pessoa da ficha:\n{fora}"
+    );
+    for proibido in [
+        "Date",
+        "at_seconds",
+        "segundos",
+        "volume",
+        "moderar",
+        "nossaSala",
+    ] {
+        assert!(
+            !fora.contains(proibido),
+            "quem está fora do ar ganhou `{proibido}` na ficha: ela é o perfil e FORA DO AR, sem \
+             horário, volume nem moderação:\n{fora}"
+        );
+    }
+    let ficha = body_of(&sessao, "function fichaDaPessoa(");
+    assert!(
+        ficha.contains("pessoa.id !== null && !pessoa.fora) {"),
+        "a ficha de quem está fora do ar voltou a montar ações e seções de MOD: nenhum MOD \
+         ganhou a lista de membros:\n{ficha}"
+    );
+    for proibido in ["Date", "at_seconds", "segundos"] {
+        assert!(
+            !ficha.contains(proibido),
+            "a ficha da pessoa usa `{proibido}`: ela não diz horário de ninguém:\n{ficha}"
+        );
+    }
+    let estados = body_of(&sessao, "function estadosDaPessoa(");
+    let (Some(da_fora), Some(do_estado)) = (
+        estados.find("if (pessoa.fora) {"),
+        estados.find("pessoa.atField"),
+    ) else {
+        panic!("`estadosDaPessoa` não separa mais quem está fora do ar:\n{estados}");
+    };
+    assert!(
+        da_fora < do_estado && estados.contains("FRASES_DA_FICHA.foraDoAr"),
+        "quem está fora do ar tem de sair de `estadosDaPessoa` com FORA DO AR antes de qualquer \
+         estado medido:\n{estados}"
+    );
     // E o grupo é desenhado: uma função que ninguém chama guardaria nada.
     assert!(
         names(

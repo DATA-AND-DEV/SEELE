@@ -236,6 +236,7 @@
 :where(:root[data-casca="celular"]) .pessoas-conta { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .roster-sala { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .membro-fora-do-ar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .membro-fora-do-ar-abrir { font-size: inherit; }
 :where(:root[data-casca="celular"]) .roster-subgrupo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .sync-marca { font-size: 11px; }

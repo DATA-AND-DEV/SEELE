@@ -18,9 +18,19 @@
 //      lista de membros, ou o perfil some, sem estar conectada;
 //   5. quem está conectado e cai continua com a ficha aberta, que passa a dizer
 //      FORA DO AR e perde o volume;
-//   6. a sessão que sai fecha a ficha.
+//   6. a linha de um membro FORA DO AR abre a ficha dele ao clique (aprovado
+//      pelo dono em 13/11/2026): um botão de verdade, com o nome da pessoa no
+//      nome acessível, do tamanho da linha — e a linha segue sendo só o nome,
+//      sem horário, sem estado e sem ação de MOD;
+//   7. pelo teclado também: o Tab chega à linha seguinte, e o Enter abre;
+//   8. a sessão que sai fecha a ficha;
+//   9. no celular, o toque na linha abre a folha da pessoa, com alvo de 44 px
+//      e o nome no recuo das linhas de quem está aqui.
 //
 //   PLAYWRIGHT=<playwright-core> node apps/seele-app/bancada/ficha-de-quem-esta-fora.cjs
+//
+// Com `SEELE_PREVIEW_DIR=<pasta>`, ela deixa lá as capturas da linha com o foco
+// e da lista e da folha no celular.
 
 const path = require("node:path");
 const assert = require("node:assert/strict");
@@ -67,6 +77,49 @@ const ficha = () => {
     moderar: corpo.querySelectorAll("button[data-moderar-pessoa]").length,
   };
 };
+
+/** A linha do FORA DO AR de um membro, como a página a desenhou. */
+const linhaDoMembro = (id) => {
+  const botao = document.querySelector(`#lista-roster li.membro-fora-do-ar button[data-ficha-pessoa="${id}"]`);
+  const linha = botao?.closest("li.membro-fora-do-ar") ?? null;
+  if (!linha) {
+    return {
+      tem: false,
+      linhas: document.querySelectorAll("#lista-roster li.membro-fora-do-ar").length,
+      botoesNasLinhas: document.querySelectorAll("#lista-roster li.membro-fora-do-ar button").length,
+    };
+  }
+  const caixa = (no) => {
+    const r = no.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height };
+  };
+  return {
+    tem: true,
+    texto: linha.textContent,
+    botoes: linha.querySelectorAll("button").length,
+    tipo: botao.type,
+    nomeAcessivel: botao.getAttribute("aria-label") ?? botao.textContent,
+    abre: botao.getAttribute("aria-haspopup"),
+    noTeclado: botao.tabIndex,
+    // O que a linha não pode ganhar junto com o botão: nada de MOD, nenhum
+    // horário, nenhum estado, nenhum outro controle.
+    alheios: [...linha.querySelectorAll("[data-acao-de-mod], [data-mod], a, input, select, time, .pastilha, .pessoa-estados")]
+      .map((no) => no.className || no.localName),
+    linha: caixa(linha),
+    botao: caixa(botao),
+    // As letras do nome dentro do alvo.
+    letras: (() => {
+      const faixa = document.createRange();
+      faixa.selectNodeContents(botao);
+      return caixa(faixa);
+    })(),
+    comOFoco: document.activeElement === botao,
+  };
+};
+
+/** O que a ficha tem de MOD: ações e seções. */
+const modsNaFicha = () =>
+  document.querySelectorAll("#ficha-pessoa-corpo :is(.ficha-acoes-de-mod, .contribuicao-de-mod-caixa, [data-acao-de-mod])").length;
 
 (async () => {
   const server = servir();
@@ -200,12 +253,122 @@ const ficha = () => {
     assert.equal(visto.volume, 0, `a ficha de quem caiu segue com o volume: ${JSON.stringify(visto)}`);
     console.log(`5. conectada que caiu: aberta, ${visto.estados.join("+")}, sem volume`);
 
-    // ---- 6. a sessão sai: a ficha fecha.
+    await page.keyboard.press("Escape");
+
+    // ---- 6. a linha do FORA DO AR abre a ficha, pelo clique.
+    let linha = await page.evaluate(linhaDoMembro, 5);
+    assert.ok(linha.tem, `a linha de um membro FORA DO AR não tem o botão que abre a ficha dele: ${JSON.stringify(linha)}`);
+    assert.equal(linha.texto, "Carla#A102", `a linha do FORA DO AR diz mais que o nome: ${JSON.stringify(linha)}`);
+    assert.deepEqual(linha.alheios, [], `a linha do FORA DO AR ganhou mais que o botão da ficha: ${JSON.stringify(linha)}`);
+    assert.equal(linha.botoes, 1, `a linha do FORA DO AR tem mais de um botão: ${JSON.stringify(linha)}`);
+    assert.ok(linha.tipo === "button" && linha.noTeclado === 0 && linha.abre === "dialog",
+      `o alvo da linha não é um botão de verdade, no caminho do teclado, que anuncia o diálogo: ${JSON.stringify(linha)}`);
+    assert.ok(linha.nomeAcessivel.includes("Carla#A102"), `o nome acessível do botão não diz de quem é a ficha: ${JSON.stringify(linha)}`);
+    assert.ok(
+      Math.abs(linha.botao.left - linha.linha.left) <= 1 && Math.abs(linha.botao.right - linha.linha.right) <= 1
+        && Math.abs(linha.botao.top - linha.linha.top) <= 1 && Math.abs(linha.botao.bottom - linha.linha.bottom) <= 1,
+      `o botão não ocupa a linha inteira: ${JSON.stringify(linha)}`,
+    );
+    assert.ok(linha.botao.height >= 24, `o alvo da linha tem menos de 24 px de altura: ${JSON.stringify(linha)}`);
+    await page.locator('#lista-roster li.membro-fora-do-ar button[data-ficha-pessoa="5"]').click();
+    await redesenhar();
+    visto = await page.evaluate(ficha);
+    assert.ok(visto.aberta, `o clique na linha de um membro FORA DO AR não abriu a ficha dele: ${JSON.stringify(visto)}`);
+    assert.equal(visto.titulo, "Carla#A102", `a ficha aberta pela linha não é a do membro: ${JSON.stringify(visto)}`);
+    assert.deepEqual(visto.estados, ["FORA DO AR"], `a ficha aberta pela linha diz outro estado: ${JSON.stringify(visto)}`);
+    assert.equal(visto.volume + visto.moderar + await page.evaluate(modsNaFicha), 0,
+      `a ficha aberta pela linha oferece volume, moderação ou ação de MOD: ${JSON.stringify(visto)}`);
+    // Esc fecha, e o foco volta à linha: o nó dela atravessou os redesenhos.
+    await page.keyboard.press("Escape");
+    linha = await page.evaluate(linhaDoMembro, 5);
+    assert.ok(!(await page.evaluate(ficha)).aberta && linha.comOFoco, `Esc não devolveu o foco à linha que abriu a ficha: ${JSON.stringify(linha)}`);
+    console.log(`6. clique na linha do FORA DO AR: «${visto.titulo}», ${visto.estados.join("+")}, botão de ${Math.round(linha.botao.height)} px na linha inteira, foco de volta`);
+
+    // ---- 7. e pelo teclado: o Tab chega à linha seguinte, o Enter abre.
+    await page.keyboard.press("Tab");
+    linha = await page.evaluate(linhaDoMembro, 6);
+    assert.ok(linha.tem && linha.comOFoco, `o Tab não chegou à linha seguinte do FORA DO AR: ${JSON.stringify(linha)}`);
+    if (process.env.SEELE_PREVIEW_DIR) await page.screenshot({ path: path.join(process.env.SEELE_PREVIEW_DIR, "fora-do-ar-com-o-foco-1600x917.png") });
+    await page.keyboard.press("Enter");
+    visto = await page.evaluate(ficha);
+    assert.ok(visto.aberta && visto.titulo === "Davi#A103", `o Enter na linha de um membro FORA DO AR não abriu a ficha dele: ${JSON.stringify(visto)}`);
+    console.log(`7. Tab e Enter na linha seguinte: «${visto.titulo}»`);
+
+    // ---- 8. a sessão sai: a ficha fecha.
     await page.evaluate(() => esquecerOEstadoDaSessao());
     assert.equal((await page.evaluate(ficha)).aberta, false, "a ficha seguiu aberta depois de a sessão sair");
-    console.log("6. a sessão saiu: a ficha fechou");
+    console.log("8. a sessão saiu: a ficha fechou");
 
     assert.deepEqual(erros, [], `a página lançou: ${erros.join(" | ")}`);
+    await page.close();
+
+    // ---- 9. no celular: o toque na linha abre a folha da pessoa.
+    const contexto = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+    const celular = await contexto.newPage();
+    celular.setDefaultTimeout(10000);
+    const errosDoCelular = [];
+    celular.on("pageerror", (erro) => errosDoCelular.push(String(erro)));
+    await celular.addInitScript(
+      (table) => {
+        new MutationObserver((_, o) => {
+          if (!document.documentElement) return;
+          document.documentElement.dataset.casca = "celular";
+          o.disconnect();
+        }).observe(document, { childList: true });
+        window.testTable = table;
+        window.__TAURI__ = {
+          core: { invoke: async (cmd) => (Object.hasOwn(table, cmd) ? structuredClone(table[cmd]) : null) },
+          event: { listen: async () => () => {} },
+          window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+        };
+      },
+      respostas({
+        snapshot: null, microfones: [], saidas: [], pacotes_no_cache: [], aceites_de_mods: [],
+        membros_fora_do_ar: membros(),
+        perfis: [perfil(1, "Alex"), perfil(3, "Marina do Lago")],
+      }),
+    );
+    await celular.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: "domcontentloaded" });
+    await celular.waitForTimeout(700);
+    await celular.evaluate((r) => {
+      window.testTable.snapshot = r;
+      for (const secao of document.querySelectorAll("section.tela")) secao.hidden = true;
+      $("tela-sessao").hidden = false;
+      $("tela-sessao").dataset.aba = "pessoas";
+      desenhar(r);
+    }, cena());
+    assert.equal(await celular.evaluate(() => document.documentElement.dataset.casca), "celular", "a casca do celular não subiu");
+    await celular.waitForFunction(() => document.querySelectorAll("#lista-roster li.membro-fora-do-ar").length === 14);
+    await celular.waitForFunction(() => typeof perfilOficial === "function" && perfilOficial(3) !== null);
+    linha = await celular.evaluate(linhaDoMembro, 3);
+    assert.ok(linha.tem, `no celular, a linha de um membro FORA DO AR não tem o botão que abre a ficha dele: ${JSON.stringify(linha)}`);
+    assert.ok(linha.botao.height >= 44, `no celular, o alvo de toque da linha tem menos de 44 px: ${JSON.stringify(linha)}`);
+    assert.ok(Math.abs(linha.letras.left - linha.botao.left - 14) <= 1,
+      `no celular, o nome do membro não tem o recuo de 14 px das linhas de quem está aqui (tem ${Math.round(linha.letras.left - linha.botao.left)}): ${JSON.stringify(linha)}`);
+    const alvoNoCelular = celular.locator('#lista-roster li.membro-fora-do-ar button[data-ficha-pessoa="3"]');
+    await alvoNoCelular.scrollIntoViewIfNeeded();
+    if (process.env.SEELE_PREVIEW_DIR) await celular.screenshot({ path: path.join(process.env.SEELE_PREVIEW_DIR, "fora-do-ar-celular-390x844.png") });
+    await alvoNoCelular.tap();
+    await celular.waitForSelector("#cel-folha-pessoa", { state: "visible", timeout: 3000 }).catch(() => {});
+    const folha = await celular.evaluate(() => {
+      const no = document.querySelector("#cel-folha-pessoa");
+      return {
+        aberta: Boolean(no && no.getClientRects().length),
+        titulo: no?.querySelector(".cel-folha-titulo")?.textContent ?? "",
+        cartaoDe: no?.querySelector(".perfil-cartao")?.dataset.pessoa ?? null,
+        estados: [...(no?.querySelectorAll(".ficha-estados .pastilha") ?? [])].map((p) => p.textContent),
+        alheios: no?.querySelectorAll("input.volume, button[data-moderar-pessoa], .ficha-moderar-fora, .ficha-acoes-de-mod, .contribuicao-de-mod-caixa").length ?? 0,
+      };
+    });
+    if (process.env.SEELE_PREVIEW_DIR) await celular.screenshot({ path: path.join(process.env.SEELE_PREVIEW_DIR, "fora-do-ar-folha-celular-390x844.png") });
+    assert.ok(folha.aberta, `no celular, o toque na linha de um membro FORA DO AR não abriu a folha dele: ${JSON.stringify(folha)}`);
+    assert.equal(folha.titulo, "Marina do Lago", `no celular, a folha não é a do membro: ${JSON.stringify(folha)}`);
+    assert.equal(folha.cartaoDe, "3", `no celular, a folha não mostra o perfil dele: ${JSON.stringify(folha)}`);
+    assert.deepEqual(folha.estados, ["FORA DO AR"], `no celular, a folha diz outro estado: ${JSON.stringify(folha)}`);
+    assert.equal(folha.alheios, 0, `no celular, a folha de quem está fora do ar oferece volume, moderação ou MOD: ${JSON.stringify(folha)}`);
+    assert.deepEqual(errosDoCelular, [], `a página do celular lançou: ${errosDoCelular.join(" | ")}`);
+    console.log(`9. celular 390×844: toque na linha de ${Math.round(linha.botao.height)} px, folha «${folha.titulo}», ${folha.estados.join("+")}`);
+    await contexto.close();
     console.log("ficha de quem está fora: ok");
   } finally {
     await browser.close();
