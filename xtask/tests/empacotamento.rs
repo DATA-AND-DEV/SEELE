@@ -682,6 +682,18 @@ fn marcar_executavel(_caminho: &PathBuf, _executavel: bool) {}
 /// como texto e continuam rodando lá — e são eles que pegam fim de linha, que é
 /// o defeito que só o Windows mostra.
 fn falta_ao_banco() -> Option<String> {
+    // **No Windows o script não é executado, e isto é dito a cada teste.** No
+    // runner do GitHub há `sh` (o do Git) e há Python de verdade, então a
+    // verificação de baixo passava e 64 testes reprovavam (rodada 43341701057):
+    // a bancada monta caminhos do Windows, o `sh` do Git os vê como `/tmp/…`, e
+    // os dois lados não acham os arquivos um do outro. Quem publica é um Mac;
+    // portar a bancada para o MSYS seria testar o MSYS.
+    if cfg!(windows) {
+        return Some(
+            "o publicar.sh é a ferramenta de um Mac, e a bancada dele não roda sob o sh do Git no Windows"
+                .to_owned(),
+        );
+    }
     let interpretador = interpretador();
     if Command::new(&interpretador)
         .arg("-c")
