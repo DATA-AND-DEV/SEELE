@@ -4199,6 +4199,9 @@ const FRASES_DA_FICHA = Object.freeze({
   moderar: "MODERAR",
   moderarDe: (quem) => `Moderar ${quem}: expulsar, banir ou mover`,
   moderarFora: "Moderar é pelo SEELE no computador.",
+  // O estado na ficha de um membro que não está conectado (1.0.1): o nome do
+  // grupo da lista, e não um estado que ninguém mediu.
+  foraDoAr: "FORA DO AR",
 });
 
 /**

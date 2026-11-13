@@ -3342,7 +3342,7 @@ function desenharPessoas(snapshot) {
   reconciliarALista($("lista-roster"), grupos);
   // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
   ligarAcoesDeApresentacao($("lista-roster"));
-  conferirAFichaAberta();
+  conferirAFichaAberta(snapshot);
 
   // Duas contagens, e a de fora existe porque a de dentro sozinha mentia por
   // omissão: `12 EM SALAS DE VOZ` ao lado de `PESSOAS` era lido como a
@@ -3753,6 +3753,14 @@ function botaoDaFicha(pessoa, rotulo = null) {
  */
 function estadosDaPessoa(pessoa, classe = "pessoa-estados", tag = "span") {
   const estados = elemento(tag, classe);
+  // **Quem não está conectado não está EM ESCUTA** (1.0.1): a ficha de um
+  // membro fora do ar diz isso, e mais nada — nenhum estado dele foi medido.
+  if (pessoa.fora) {
+    const pastilha = elemento("span", "pastilha", FRASES_DA_FICHA.foraDoAr);
+    pastilha.dataset.estado = "fora";
+    estados.append(pastilha);
+    return estados;
+  }
   // **Capturar não é transmitir** — U15: `speaking` dentro de uma sala é voz
   // indo para quem está lá; fora de sala, só o microfone aberto.
   const estado = pessoa.atField
@@ -3774,7 +3782,7 @@ function estadosDaPessoa(pessoa, classe = "pessoa-estados", tag = "span") {
 }
 
 /** A ficha aberta: de quem, e o foco de antes, para devolvê-lo. */
-let fichaAberta = { id: null, focoAntes: null };
+let fichaAberta = { id: null, focoAntes: null, conectada: false };
 
 /**
  * **O conteúdo da ficha de uma pessoa** — o mesmo no modal do desktop e na
@@ -3789,7 +3797,7 @@ let fichaAberta = { id: null, focoAntes: null };
  */
 function fichaDaPessoa(id) {
   const registro = pessoasDaLista.get(String(id));
-  const pessoa = registro?.pessoa ?? { id, nome: String(id) };
+  const pessoa = registro?.pessoa ?? pessoaQueNaoEstaConectada(id);
   const temAudio = registro?.temAudio ?? false;
   const nos = [];
   const comPerfis = typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis()
@@ -3833,8 +3841,10 @@ function fichaDaPessoa(id) {
     nos.push(campo);
   }
 
-  // As ações e as seções dos MODs, com o dono escrito pelo produto.
-  if (pessoa.id !== undefined && pessoa.id !== null) {
+  // As ações e as seções dos MODs, com o dono escrito pelo produto. **Só de
+  // quem está conectado**: nenhum MOD ganhou a lista de membros (D-fio-4), e a
+  // ficha de quem está fora do ar não entrega o id dele a uma ação de MOD.
+  if (pessoa.id !== undefined && pessoa.id !== null && !pessoa.fora) {
     const acoes = acoesDasContribuicoes("pessoa.acoes", String(pessoa.id), { pessoa: pessoa.id });
     // **Vazia, só no modo de desenvolvedor**: é onde o contorno mostra a quem
     // escreve um MOD que as ações entram aqui. Na linha de antes da 0.19 o
@@ -3873,6 +3883,30 @@ function fichaDaPessoa(id) {
 }
 
 /**
+ * **Quem não está conectado, para a ficha** (1.0.1): um membro FORA DO AR, ou
+ * alguém de quem este servidor só guarda o perfil. O nome é o que a linha do
+ * FORA DO AR mostra (`grupoForaDoAr`); sem ser membro, o da identidade
+ * apresentada. E `fora`, que a ficha lê para dizer FORA DO AR no lugar de um
+ * estado que ninguém mediu, e para não oferecer volume, MOD nem moderação.
+ */
+function pessoaQueNaoEstaConectada(id) {
+  const membro = foraDoAr.find((outro) => String(outro.id) === String(id));
+  if (membro) return { id: membro.id, nome: String(apelidoApresentado(membro.id, membro.nickname) ?? ""), fora: true };
+  const nome = typeof apelidoETagDe === "function" ? apelidoETagDe(id).apelido : String(id);
+  return { id, nome, fora: true };
+}
+
+/**
+ * **Se a pessoa ainda existe neste servidor**: conectada (na lista), membro
+ * FORA DO AR, ou com perfil conhecido. É o que mantém a ficha aberta.
+ */
+function aPessoaExisteAqui(id) {
+  if (pessoasDaLista.has(String(id))) return true;
+  if (foraDoAr.some((membro) => String(membro.id) === String(id))) return true;
+  return typeof perfilOficial === "function" && perfilOficial(id) !== null;
+}
+
+/**
  * O apelido com a tag, como o servidor registra a pessoa («teste#4F2A»), ou
  * vazio quando o servidor não disse (um 0.18 sem `IdentidadeApresentada`).
  */
@@ -3904,6 +3938,7 @@ function abrirFichaDaPessoa(id) {
   if (!camada) return;
   if (camada.hidden) fichaAberta.focoAntes = document.activeElement;
   fichaAberta.id = String(id);
+  fichaAberta.conectada = pessoasDaLista.has(String(id));
   $("ficha-pessoa-titulo").textContent = exibido;
   $("ficha-pessoa-fechar").setAttribute("aria-label", FRASES_DA_FICHA.fecharDe(exibido));
   $("ficha-pessoa-corpo").replaceChildren(...nos);
@@ -3925,9 +3960,37 @@ function fecharFichaDaPessoa({ devolverOFoco = true } = {}) {
 /**
  * Quem saiu do servidor com a ficha aberta: ela fecha, em vez de seguir
  * mostrando uma pessoa que não está mais aqui.
+ *
+ * **«Não está mais aqui» não é «não está conectada»** (1.0.1, relato do dono:
+ * a ficha abria e fechava sozinha). A conta era `pessoasDaLista.has`, e esse
+ * mapa só tem quem está conectado: num servidor com uma pessoa no ar e catorze
+ * membros fora, a ficha de qualquer um deles — aberta pela página de perfis —
+ * fechava no redesenho seguinte da lista, meio segundo depois. A ficha fica
+ * enquanto a pessoa existir neste servidor (`aPessoaExisteAqui`).
+ *
+ * **E não fecha com a lista de membros por buscar.** Quem cai some do retrato
+ * num quadro, e só entra no FORA DO AR quando `sincronizarForaDoAr` volta: por
+ * esse intervalo a pessoa não está em lugar nenhum. A busca que chega redesenha
+ * as pessoas, e a conferência roda de novo com a lista de agora.
+ *
+ * Quem passa de conectado a fora do ar (ou volta) tem a ficha refeita: o
+ * estado, o volume e a moderação são de quem está aqui.
  */
-function conferirAFichaAberta() {
-  if (fichaAberta.id !== null && !pessoasDaLista.has(fichaAberta.id)) fecharFichaDaPessoa({ devolverOFoco: false });
+function conferirAFichaAberta(snapshot) {
+  const id = fichaAberta.id;
+  if (id === null) return;
+  const conectada = pessoasDaLista.has(id);
+  if (!conectada && !aPessoaExisteAqui(id)) {
+    const membrosPorBuscar = buscandoForaDoAr || snapshot.fora_do_ar_revision !== revisaoDoForaDoAr;
+    if (!membrosPorBuscar) fecharFichaDaPessoa({ devolverOFoco: false });
+    return;
+  }
+  if (conectada === fichaAberta.conectada) return;
+  fichaAberta.conectada = conectada;
+  const corpo = $("ficha-pessoa-corpo");
+  const focoNoCorpo = corpo.contains(document.activeElement);
+  corpo.replaceChildren(...fichaDaPessoa(id).nos);
+  if (focoNoCorpo) $("ficha-pessoa-fechar").focus();
 }
 
 function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
@@ -6047,7 +6110,7 @@ function esquecerOEstadoDaSessao() {
   // A ficha de uma pessoa é deste servidor: fecha, e quem estava na lista sai.
   fecharFichaDaPessoa({ devolverOFoco: false });
   pessoasDaLista.clear();
-  fichaAberta = { id: null, focoAntes: null };
+  fichaAberta = { id: null, focoAntes: null, conectada: false };
   // O `atualizar()` que um evento deixou para o próximo quadro: ele pediria o
   // retrato depois da saída. O quadro pendente também é recurso.
   if (quadroDaAtualizacao) cancelAnimationFrame(quadroDaAtualizacao);
