@@ -398,6 +398,51 @@ pub struct Bomba {
     ordens: mpsc::Sender<Ordem>,
     thread: Option<JoinHandle<()>>,
     largados: Arc<AtomicU64>,
+    codificador: CodificadorEmUso,
+}
+
+/// Qual codificador de vídeo a bomba armou, dito pela thread dela a quem está
+/// do lado de fora.
+///
+/// **O motor sabia e a tela não contava.** O `armar` escolhe entre o
+/// codificador do sistema e o de software, e a escolha só ia ao `seele.log`:
+/// quem transmitia e via a CPU subir não tinha como saber que tinha caído para
+/// software. Esta placa é por onde o nome sai da thread.
+///
+/// Uma placa compartilhada, como os `largados`, e não um campo do
+/// [`EventoDaBomba::Fluxo`]: o nome é o da máquina (num Mac o VideoToolbox,
+/// noutra o de software), e o fluxo é comparado inteiro pelos testes do
+/// contrato de ordem, que não podem depender de em que máquina rodam.
+///
+/// **Escrita antes de o `Fluxo` sair**, na mesma thread: quem lê ao receber o
+/// fluxo acha o nome do codificador que o abriu, ou o de um mais novo.
+#[derive(Debug, Clone, Default)]
+pub struct CodificadorEmUso(Arc<std::sync::Mutex<Option<String>>>);
+
+impl CodificadorEmUso {
+    /// A thread da bomba diz qual armou.
+    fn dizer(&self, nome: &str) {
+        // Um cadeado envenenado fica com o nome de antes: é uma `String`, e
+        // quem a escreve não entra em pânico com ela na mão.
+        let mut guardado = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guardado.as_deref() != Some(nome) {
+            *guardado = Some(nome.to_owned());
+        }
+    }
+
+    /// O nome do codificador armado. `None` enquanto nenhum armou, e sempre
+    /// numa transmissão que a bomba não codifica (a câmera, que a janela
+    /// codifica: ver `crate::de_fora`).
+    #[must_use]
+    pub fn nome(&self) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 impl Bomba {
@@ -434,7 +479,13 @@ impl Bomba {
     /// [`PedidoDeChave`].
     #[must_use]
     pub fn pedido_de_chave(&self) -> PedidoDeChave {
-        PedidoDeChave(self.ordens.clone())
+        PedidoDeChave(self.ordens.clone(), self.codificador.clone())
+    }
+
+    /// Qual codificador de vídeo está armado. Ver [`CodificadorEmUso`].
+    #[must_use]
+    pub fn codificador(&self) -> Option<String> {
+        self.codificador.nome()
     }
 
     /// Quantos quadros foram largados por quem escreve estar atrasado.
@@ -496,6 +547,7 @@ where
     let (manda_ordem, recebe_ordem) = mpsc::channel();
     let (manda_evento, recebe_evento) = canal::channel(CAPACIDADE_DO_CANAL);
     let largados = Arc::new(AtomicU64::new(0));
+    let codificador = CodificadorEmUso::default();
 
     let laco = Laco {
         // Um codificador por transmissão, com o perfil de som de tela
@@ -524,6 +576,7 @@ where
         ordens: recebe_ordem,
         para: manda_evento,
         largados: Arc::clone(&largados),
+        codificador: codificador.clone(),
     };
 
     let thread = thread::Builder::new()
@@ -538,6 +591,7 @@ where
             ordens: manda_ordem,
             thread: Some(thread),
             largados,
+            codificador,
         },
         recebe_evento,
     ))
@@ -578,6 +632,9 @@ struct Laco<C: Captura> {
     ordens: mpsc::Receiver<Ordem>,
     para: canal::Sender<EventoDaBomba>,
     largados: Arc<AtomicU64>,
+    /// Por onde o nome do codificador de vídeo sai desta thread. Ver
+    /// [`CodificadorEmUso`].
+    codificador: CodificadorEmUso,
     /// O codificador do som da tela, quando esta máquina tem um.
     ///
     /// `None` é uma transmissão muda, e não uma transmissão que não sai: a
@@ -925,6 +982,9 @@ impl<C: Captura> Laco<C> {
             .refazer_com(para)
             .map_err(|erro| QuedaDaBomba::do_codificador(&erro))?;
         let medidas = compartilhamento.medidas();
+        // O degrau novo refez o codificador, e o do sistema pode ter recusado
+        // este: o nome é dito de novo, antes de o fluxo sair.
+        self.codificador.dizer(compartilhamento.codificador());
         let fonte = self
             .captura
             .iniciar_com_medidas(para, cadencia, medidas)
@@ -971,6 +1031,7 @@ impl<C: Captura> Laco<C> {
         let resolucao = compartilhamento.resolucao();
         let teto_bps = compartilhamento.teto().bps();
         let medidas = compartilhamento.medidas();
+        self.codificador.dizer(compartilhamento.codificador());
         // Depois do codificador: se o OpenH264 recusar a configuração, não vale
         // ter acendido o indicador de captura do sistema para nada.
         let fonte = self
@@ -1098,8 +1159,11 @@ impl<C: Captura> Laco<C> {
 /// descarta um quadro que outros usariam de referência — um quadro acima do
 /// teto do fio ou do orçamento. A confirmação libera a próxima codificação
 /// somente depois de terminarem as fatias; geração e sequência recusam ACKs antigos.
+///
+/// E carrega a placa do codificador ([`CodificadorEmUso`]): é por esta alça
+/// que quem escoa diz ao espelho qual codificador abriu o fluxo.
 #[derive(Debug, Clone)]
-pub struct PedidoDeChave(mpsc::Sender<Ordem>);
+pub struct PedidoDeChave(mpsc::Sender<Ordem>, CodificadorEmUso);
 
 impl PedidoDeChave {
     /// Uma alça para quem escoa uma transmissão que **não** vem da bomba, e o
@@ -1108,7 +1172,15 @@ impl PedidoDeChave {
     /// está de fora as ignora: não há codificador deste lado a segurar.
     pub(crate) fn de_fora() -> (Self, mpsc::Receiver<Ordem>) {
         let (manda, recebe) = mpsc::channel();
-        (Self(manda), recebe)
+        // A placa fica vazia: quem codifica a câmera é a janela.
+        (Self(manda, CodificadorEmUso::default()), recebe)
+    }
+
+    /// Qual codificador de vídeo a bomba desta alça armou. Ver
+    /// [`CodificadorEmUso`].
+    #[must_use]
+    pub fn codificador(&self) -> Option<String> {
+        self.1.nome()
     }
 
     fn ativar_confirmacao(&self) {
@@ -1265,6 +1337,10 @@ pub enum EspelhoDaTela<'a> {
         largura: u16,
         /// Altura em pixels.
         altura: u16,
+        /// Qual codificador abriu este fluxo, quando quem escoa sabe: a alça
+        /// da bomba o diz ([`PedidoDeChave::codificador`]). `None` sem alça, e
+        /// na câmera, que a janela codifica.
+        codificador: Option<String>,
     },
     /// Um quadro foi escrito no fio.
     Quadro {
@@ -1387,6 +1463,7 @@ pub async fn escoar_com_espelho(
                 espelho(EspelhoDaTela::Abriu {
                     largura: cabecalho.width,
                     altura: cabecalho.height,
+                    codificador: pedido_de_chave.and_then(PedidoDeChave::codificador),
                 });
             }
             EventoDaBomba::Teto { teto_bps } => {
@@ -2597,7 +2674,7 @@ pub(crate) mod tests {
             let (saida, _entrada) = crate::tela::tests::par().await;
             let (manda, mut eventos) = canal::channel(8);
             let (manda_ordem, recebe_ordem) = mpsc::channel();
-            let pedido = PedidoDeChave(manda_ordem);
+            let pedido = PedidoDeChave(manda_ordem, CodificadorEmUso::default());
             let escoando = tokio::spawn(async move {
                 escoar_com_espelho(
                     &saida,
@@ -2709,6 +2786,115 @@ pub(crate) mod tests {
         );
     }
 
+    /// **O espelho diz qual codificador abriu o fluxo**, pelo nome que a
+    /// thread da bomba escreveu na placa.
+    ///
+    /// É o caminho por onde o nome sai do motor: a thread o diz
+    /// ([`CodificadorEmUso::dizer`]), quem escoa o lê da alça ao abrir o fluxo, e
+    /// o espelho o leva ao `Aviso::TelaAbriu`. Sem alça, ou com a placa vazia (a
+    /// câmera), o espelho diz `None` em vez de um nome inventado.
+    ///
+    /// Sem o módulo do Cisco: os eventos são escritos à mão, e o nome também.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_espelho_diz_qual_codificador_abriu_o_fluxo() {
+        async fn aberto_com(pedido: Option<PedidoDeChave>) -> Vec<Option<String>> {
+            let (saida, _entrada) = par_paciente().await;
+            let (manda, mut eventos) = canal::channel(4);
+            for evento in [
+                EventoDaBomba::Fluxo {
+                    geracao: 1,
+                    resolucao: Resolucao::P720,
+                    medidas: (1280, 720),
+                    teto_bps: 4_000_000,
+                },
+                EventoDaBomba::Fim(None),
+            ] {
+                manda.send(evento).await.expect("o canal cabe os dois");
+            }
+            let mut ditos = Vec::new();
+            escoar_com_espelho(
+                &saida,
+                None,
+                ScreenId(1),
+                ScreenSource::Monitor,
+                &mut eventos,
+                |visto| {
+                    if let EspelhoDaTela::Abriu { codificador, .. } = visto {
+                        ditos.push(codificador);
+                    }
+                },
+                pedido.as_ref(),
+            )
+            .await
+            .expect("o laço acabou bem");
+            ditos
+        }
+
+        let (manda_ordem, _ordens) = mpsc::channel();
+        let placa = CodificadorEmUso::default();
+        placa.dizer(seele_video::codec::NOME_DO_OPENH264);
+        assert_eq!(
+            aberto_com(Some(PedidoDeChave(manda_ordem, placa))).await,
+            vec![Some(seele_video::codec::NOME_DO_OPENH264.to_owned())],
+            "a thread da bomba disse qual codificador armou, e o espelho abriu o fluxo sem \
+             o nome: a tela de quem transmite não tem como mostrá-lo"
+        );
+
+        let (manda_ordem, _ordens) = mpsc::channel();
+        assert_eq!(
+            aberto_com(Some(PedidoDeChave(
+                manda_ordem,
+                CodificadorEmUso::default()
+            )))
+            .await,
+            vec![None],
+            "com a placa vazia (a câmera, que a janela codifica) o espelho inventou um nome"
+        );
+        assert_eq!(
+            aberto_com(None).await,
+            vec![None],
+            "sem alça nenhuma o espelho inventou um nome"
+        );
+    }
+
+    /// **A bomba diz o codificador que armou antes de o fluxo sair.**
+    ///
+    /// Pela thread de verdade: quem recebe o primeiro `Fluxo` já acha o nome
+    /// na alça, e é o nome de um codificador desta casa. Precisa do módulo do
+    /// Cisco (`SEELE_OPENH264`), como os outros testes que armam a bomba.
+    #[test]
+    fn a_bomba_diz_o_codificador_que_armou_antes_de_o_fluxo_sair() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
+            .com_espectadores(1);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            CapturaParada,
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P720),
+            || {},
+        )
+        .expect("criar a thread da tela");
+        let alca = bomba.pedido_de_chave();
+        assert!(
+            matches!(esperar(&mut eventos), Some(EventoDaBomba::Fluxo { .. })),
+            "a bomba não abriu fluxo"
+        );
+        let nome = alca.codificador();
+        assert!(
+            nome.as_deref().is_some_and(|nome| !nome.trim().is_empty()),
+            "o fluxo abriu e a bomba não disse qual codificador o abriu: {nome:?}"
+        );
+        assert_eq!(
+            nome,
+            bomba.codificador(),
+            "a alça e a bomba dizem nomes diferentes"
+        );
+        bomba.parar();
+    }
+
     /// A bomba inteira, ligada num par QUIC de verdade: da captura ao byte que
     /// o outro lado lê.
     ///
@@ -2721,7 +2907,7 @@ pub(crate) mod tests {
         let (saida, _entrada) = par_paciente().await;
         let (manda, mut eventos) = canal::channel(16);
         let (manda_ordem, recebe_ordem) = mpsc::channel();
-        let pedido = PedidoDeChave(manda_ordem);
+        let pedido = PedidoDeChave(manda_ordem, CodificadorEmUso::default());
         manda
             .send(EventoDaBomba::Fluxo {
                 geracao: 1,

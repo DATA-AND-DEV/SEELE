@@ -648,6 +648,20 @@ pub struct TelaEmCurso {
     /// - **uma transmissão própria que este processo não começou** — a sessão
     ///   caiu e voltou, ou o servidor reanunciou uma tela de antes.
     pub pedido: Option<LimitesDeTela>,
+    /// **Qual codificador de vídeo está produzindo esta transmissão**, quando
+    /// ela é desta pessoa e esta máquina a codifica: o nome que o motor dá
+    /// («VideoToolbox», o do Media Foundation com o fabricante, «OpenH264
+    /// (software)»).
+    ///
+    /// O motor sabia e a tela não contava: a escolha entre o codificador do
+    /// sistema e a queda para software só ia ao `seele.log`, e é ela que
+    /// explica a CPU de quem transmite.
+    ///
+    /// Dado desta máquina, como [`Self::pedido`]: não atravessa o fio, e é
+    /// `None` para quem só assiste, na câmera (que a janela codifica), antes
+    /// de o primeiro fluxo abrir, e no produtor de retrato do navegador, que
+    /// não tem codificador deste lado.
+    pub codificador: Option<String>,
 }
 
 /// O tema do servidor, como a casca o recebe: quem o declarou e o JSON dos
@@ -870,6 +884,9 @@ pub fn tela_por_id(
         // lado da tela de outra pessoa seria a coluna «pedido» exibindo o que
         // um terceiro pediu na vez passada.
         pedido: if e_minha { pedido } else { None },
+        // Quem sabe é a ponte de cada casca, e não o `Room`: ver
+        // `seele_ffi::Shared::vestir_o_codificador`.
+        codificador: None,
     })
 }
 

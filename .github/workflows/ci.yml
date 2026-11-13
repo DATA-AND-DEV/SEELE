@@ -416,6 +416,11 @@ jobs:
       - run: node apps/seele-app/bancada/nucleo.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O codificador de vídeo em uso no rodapé da sessão: o nome que o retrato
+      # traz, à vista só durante a transmissão própria, e como texto.
+      - run: node apps/seele-app/bancada/codificador-no-rodape.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # O tema do servidor na casca (tarefa 17d da F3): chega pelo retrato e é
       # aplicado antes de desenhar a sessão, e o None o tira.
       - run: node apps/seele-app/bancada/tema-do-servidor.cjs

@@ -1538,6 +1538,14 @@ struct Shared {
     /// pelo `Aviso::TelaAbriu` da mesma tela (a volta) e pelo fim da
     /// transmissão. Ver [`seele_core::retrato::ParadaDaMinhaTela`].
     parada_da_tela: Mutex<seele_core::retrato::ParadaDaMinhaTela>,
+    /// Qual codificador de vídeo abriu a transmissão desta pessoa, e de qual
+    /// tela: o que o último `Aviso::TelaAbriu` com nome disse.
+    ///
+    /// Com a tela junto porque o nome só descreve **aquela** transmissão: o
+    /// retrato o veste só na tela de mesmo número
+    /// ([`Self::vestir_o_codificador`]). Limpo quando a transmissão desta
+    /// pessoa acaba, como o pedido acima.
+    codificador_da_tela: Mutex<Option<(seele_core::ScreenId, String)>>,
     /// Qual transmissão esta sessão escolheu assistir, e em que estado a escolha
     /// está. ADR 0054.
     ///
@@ -1664,6 +1672,38 @@ impl Shared {
             .lock()
             .map(|parada| *parada)
             .unwrap_or_default()
+    }
+
+    /// Guarda qual codificador abriu a transmissão desta pessoa, ou esquece.
+    fn gravar_codificador_da_tela(&self, de: Option<(seele_core::ScreenId, String)>) {
+        if let Ok(mut guardado) = self.codificador_da_tela.lock() {
+            *guardado = de;
+        }
+    }
+
+    /// Põe na foto o codificador da transmissão desta pessoa.
+    ///
+    /// Só na tela **desta pessoa** e **de mesmo número** que o motor disse: o
+    /// nome ao lado da tela de outra pessoa, ou de uma transmissão de antes,
+    /// seria o rodapé afirmando o que ninguém mediu. Um cadeado envenenado
+    /// deixa o `None`, que a tela lê como «não sei».
+    fn vestir_o_codificador(&self, foto: &mut seele_core::retrato::FotoDaSala) {
+        let Some((tela, nome)) = self
+            .codificador_da_tela
+            .lock()
+            .ok()
+            .and_then(|guardado| guardado.clone())
+        else {
+            return;
+        };
+        for em_curso in [&mut foto.minha_transmissao, &mut foto.tela]
+            .into_iter()
+            .flatten()
+        {
+            if em_curso.e_minha && em_curso.tela == tela.0 {
+                em_curso.codificador = Some(nome.clone());
+            }
+        }
     }
 
     /// O que esta pessoa pediu para a tela dela, se ainda vale.
@@ -2328,6 +2368,7 @@ impl Connection {
             tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             parada_da_tela: Mutex::new(Default::default()),
+            codificador_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
@@ -4691,7 +4732,7 @@ impl Connection {
         let escolhida = self.shared.tela_assistida();
         let pedido = self.shared.pedido_da_tela();
         let parada = self.shared.parada_da_tela();
-        let foto = match self.shared.room.lock() {
+        let mut foto = match self.shared.room.lock() {
             // A pausa entra por cima da foto, e não pelo `Room`: quem pausa é
             // o teto desta máquina, e o servidor não sabe dela.
             Ok(room) => foto_da_sala(&room, escolhida, pedido).com_a_parada_da_minha_tela(parada),
@@ -4700,6 +4741,9 @@ impl Connection {
             // antes dava.
             Err(_) => foto_da_sala(&Room::new(), None, None),
         };
+        // Depois do cadeado do `Room`, com o próprio: o codificador é dado
+        // desta máquina, e não do `Room`.
+        self.shared.vestir_o_codificador(&mut foto);
         // A perda que o servidor contou vai na telemetria, e não na parte do
         // `Room`: ela é lida antes de a foto virar o retrato da sala. O apelido
         // e as permissões saem do retrato (`seele_core::retrato`), que é a
@@ -6044,6 +6088,7 @@ async fn drive(
                         altura,
                         origem,
                         leitura,
+                        codificador,
                     } => {
                         // **Gravada antes do evento**: a casca que reage ao
                         // `ScreenOpened` relendo o retrato já acha a tela nele.
@@ -6051,6 +6096,12 @@ async fn drive(
                         // E se era a própria, pausada pelo teto, a pausa
                         // acabou: a volta é esta abertura, da mesma tela.
                         shared.a_tela_voltou(tela);
+                        // E o codificador junto, pelo mesmo motivo. Só a
+                        // transmissão desta máquina traz nome; a de outra
+                        // pessoa não mexe no que está guardado.
+                        if let Some(nome) = codificador {
+                            shared.gravar_codificador_da_tela(Some((tela, nome)));
+                        }
                         shared.notify(&Event::ScreenOpened {
                             screen: tela.0,
                             width: largura,
@@ -8137,6 +8188,8 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         if minha.is_none() {
             shared.gravar_pedido_da_tela(None);
             shared.esquecer_a_parada_da_tela();
+            // E o codificador com ele: o nome é o daquela transmissão.
+            shared.gravar_codificador_da_tela(None);
         }
         // **E a escolha de assistir é esquecida quando a tela escolhida sai do
         // ar.** ADR 0054: sem isto, a escolha ficaria apontando para uma
@@ -10161,6 +10214,11 @@ mod o_codigo_esperado;
 #[path = "testes/o_toque.rs"]
 #[cfg(test)]
 mod o_toque;
+
+/// O codificador de vídeo em uso chega ao retrato, na tela de quem transmite.
+#[path = "testes/o_codificador_no_retrato.rs"]
+#[cfg(test)]
+mod o_codificador_no_retrato;
 
 /// O pânico da thread da conexão vira fim de sessão, com motivo, e não silêncio.
 #[path = "testes/o_panico_da_thread_da_conexao.rs"]

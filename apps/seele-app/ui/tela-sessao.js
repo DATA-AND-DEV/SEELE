@@ -4100,6 +4100,25 @@ function redesenharAsEntradasDeMod() {
 
 // ---------------------------------------------------------------- telemetria
 
+/**
+ * A célula VÍDEO do rodapé: qual codificador produz a transmissão desta pessoa.
+ *
+ * O nome vem do motor (`TelaEmCurso::codificador`): «VideoToolbox», o do Media
+ * Foundation com o fabricante, ou «OpenH264 (software)», que é a queda. Escrito
+ * como texto, nunca como HTML: no Windows é o sistema quem dá o nome.
+ *
+ * Sem transmissão própria, ou sem nome (a câmera, que a janela codifica; o
+ * navegador; antes de o primeiro fluxo abrir), a célula some. E só muta
+ * quando muda: o retrato chega duas vezes por segundo.
+ */
+function desenharOCodificadorDeVideo(minha) {
+  const celula = $("tel-video-celula");
+  if (!celula) return;
+  const nome = typeof minha?.codificador === "string" && minha.codificador.trim() !== "" ? minha.codificador : null;
+  if (celula.hidden !== (nome === null)) celula.hidden = nome === null;
+  if (nome !== null && $("tel-video").textContent !== nome) medido($("tel-video"), nome);
+}
+
 function desenharTelemetria(snapshot) {
   // **Sem o rodapé** (o celular o tira desde a 0.18, `celular-voz.js`), o que
   // não é medida continua: a faixa da queda (`desenharEnlace`) e o aviso ao
@@ -4133,6 +4152,8 @@ function desenharTelemetria(snapshot) {
       ? `${Math.round(tel.bitrate_bps / 1000)}k`
       : (ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.rodape ?? SEM_MEDIDA),
   );
+
+  desenharOCodificadorDeVideo(snapshot.minha_transmissao);
 
   medido($("tel-uptime"), duracao(comecoDaSessao));
 

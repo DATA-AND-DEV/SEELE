@@ -2399,6 +2399,15 @@
     <span class="metrica"><b class="rotulo">JITTER</b> <span id="tel-jit">·</span></span>
     <span class="metrica"><b class="rotulo">DISTÚRBIO</b> <span id="tel-loss">·</span></span>
     <span class="metrica"><b class="rotulo">VOZ</b> <span id="tel-codec">·</span></span>
+    <!--
+      Qual codificador de vídeo está produzindo a transmissão desta pessoa
+      (`minha_transmissao.codificador`): o do sistema, pelo nome que o sistema
+      dá, ou «OpenH264 (software)». O motor sabia e só o seele.log contava; é o
+      que explica a CPU de quem transmite. Escondida fora de uma transmissão
+      própria e enquanto o motor não disse o nome: não há medida a mostrar, e
+      um travessão permanente seria uma célula a mais sem dizer nada.
+    -->
+    <span class="metrica" id="tel-video-celula" hidden><b class="rotulo">VÍDEO</b> <span id="tel-video">·</span></span>
     <span class="metrica"><b class="rotulo">UPTIME</b> <span id="tel-uptime">·</span></span>
     <span class="metrica"><b class="rotulo">SALA</b> <span id="tel-voice_room">·</span></span>
     <!--

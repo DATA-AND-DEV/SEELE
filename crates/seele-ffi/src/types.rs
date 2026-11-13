@@ -2816,6 +2816,7 @@ mod tests {
                 prioridade: Prioridade::Nitidez,
                 com_som: true,
             }),
+            codificador: Some("OpenH264 (software)".into()),
         };
         let json = serde_json::to_string(&tela).expect("uma estrutura simples sempre serializa");
 
@@ -2826,6 +2827,8 @@ mod tests {
             "\"espectadores\"",
             "\"parada\"",
             "\"pedido\"",
+            // O nome que o rodapé da sessão lê (`tel-video`, em `tela-sessao.js`).
+            "\"codificador\":\"OpenH264 (software)\"",
         ] {
             assert!(json.contains(nome), "{nome} não atravessa: {json}");
         }
@@ -2875,6 +2878,7 @@ mod tests {
             espectadores: 6,
             parada: None,
             pedido: None,
+            codificador: None,
         };
         let json = serde_json::to_string(&alheia).expect("uma estrutura simples sempre serializa");
         assert!(

@@ -291,6 +291,12 @@ pub enum Aviso {
         /// renomeado aborta a anterior da mesma tela) não se distinguia do fim
         /// da que está no ar.
         leitura: u64,
+        /// **Qual codificador de vídeo abriu este fluxo**, quando a transmissão
+        /// é desta máquina e a bomba a codifica: o nome que
+        /// `seele_video::codec::CodificaVideo::nome` dá. `None` numa tela
+        /// alheia (o cabeçalho do fio não diz, e não precisa) e na câmera, que
+        /// a janela codifica. Dado desta máquina: não atravessa o fio.
+        codificador: Option<String>,
     },
     /// Um quadro comprimido de uma tela alheia.
     ///
@@ -501,6 +507,7 @@ impl std::fmt::Debug for Aviso {
                 altura,
                 origem,
                 leitura,
+                codificador,
             } => f
                 .debug_struct("TelaAbriu")
                 .field("tela", tela)
@@ -508,6 +515,7 @@ impl std::fmt::Debug for Aviso {
                 .field("altura", altura)
                 .field("origem", origem)
                 .field("leitura", leitura)
+                .field("codificador", codificador)
                 .finish(),
             Self::TelaIlegivel { motivo } => f
                 .debug_struct("TelaIlegivel")
@@ -1036,12 +1044,19 @@ fn aviso_do_espelho(
     leitura: u64,
 ) -> Option<Aviso> {
     Some(match visto {
-        crate::bomba::EspelhoDaTela::Abriu { largura, altura } => Aviso::TelaAbriu {
+        crate::bomba::EspelhoDaTela::Abriu {
+            largura,
+            altura,
+            codificador,
+        } => Aviso::TelaAbriu {
             tela,
             largura,
             altura,
             origem,
             leitura,
+            // O nome que a bomba escreveu na placa: é por aqui que a tela de
+            // quem transmite fica sabendo qual codificador abriu o fluxo.
+            codificador,
         },
         crate::bomba::EspelhoDaTela::Quadro { .. }
             if origem == seele_proto::screen::ScreenSource::Camera =>
@@ -7014,6 +7029,7 @@ async fn ler_a_tela_alheia(
                     altura: cabecalho.height,
                     origem: cabecalho.source,
                     leitura,
+                    codificador: None,
                 })
                 .is_err()
             {

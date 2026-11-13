@@ -1511,6 +1511,17 @@ impl Compartilhamento {
         self.codificador.medidas()
     }
 
+    /// Qual codificador está armado, pelo nome que a tela mostra. Ver
+    /// [`CodificaVideo::nome`].
+    ///
+    /// Lido **depois de cada armar**, e não uma vez: trocar de degrau refaz o
+    /// codificador ([`Self::refazer_com`]), e o do sistema que aceitou 720p
+    /// pode recusar 1080p e deixar o de software no lugar.
+    #[must_use]
+    pub fn codificador(&self) -> &str {
+        self.codificador.nome()
+    }
+
     /// A resolução que a pessoa pediu, que é teto e nunca piso (§5).
     #[must_use]
     pub const fn escolha_de_resolucao(&self) -> Resolucao {

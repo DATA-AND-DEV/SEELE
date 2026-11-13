@@ -866,6 +866,10 @@ impl Codificador {
 }
 
 impl super::CodificaVideo for Codificador {
+    fn nome(&self) -> &str {
+        Self::nome(self)
+    }
+
     fn medidas(&self) -> (usize, usize) {
         self.medidas
     }

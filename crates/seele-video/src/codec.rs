@@ -468,6 +468,20 @@ pub mod windows;
 /// [`Codificador`]: o §2 manda o encoder morar numa thread própria, e dois
 /// lados codificando no mesmo embaralhariam a predição.
 pub trait CodificaVideo: Send + std::fmt::Debug {
+    /// **Qual codificador é este**, pelo nome que a tela mostra a quem
+    /// transmite.
+    ///
+    /// O [`armar`] escolhe entre o do sistema e o de software e só o registro
+    /// ficava sabendo qual: quem via a CPU subir numa transmissão não tinha na
+    /// tela a única informação que explica («caiu para software»). O nome sobe
+    /// daqui até o retrato da sessão, e não atravessa o fio.
+    ///
+    /// O de software é [`NOME_DO_OPENH264`]; o do macOS é
+    /// `macos::NOME_DO_VIDEOTOOLBOX`; o do Windows é o que o Media Foundation
+    /// dá ao transformador armado (o da placa de vídeo, com o nome do
+    /// fabricante).
+    fn nome(&self) -> &str;
+
     /// A resolução com que está armado — a que **está saindo**, e não a que
     /// alguém pediu.
     fn resolucao(&self) -> Resolucao;
@@ -534,7 +548,17 @@ pub trait CodificaVideo: Send + std::fmt::Debug {
     ) -> Result<Option<QuadroCodificado>, ErroDeVideo>;
 }
 
+/// O nome do codificador de software, como a tela o mostra.
+///
+/// Com «software» escrito: é a palavra que diz a quem transmite por que a CPU
+/// subiu. Os do sistema levam o nome que o sistema lhes dá.
+pub const NOME_DO_OPENH264: &str = "OpenH264 (software)";
+
 impl CodificaVideo for Codificador {
+    fn nome(&self) -> &str {
+        NOME_DO_OPENH264
+    }
+
     fn medidas(&self) -> (usize, usize) {
         self.medidas
     }

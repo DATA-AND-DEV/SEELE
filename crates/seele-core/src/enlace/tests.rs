@@ -3828,19 +3828,44 @@ fn a_pausa_do_espelho_vira_aviso_com_a_origem_e_o_motivo() {
         }
     }
     // A volta é a abertura de sempre, da mesma tela.
+    // E leva o nome do codificador que abriu o fluxo, como a bomba o disse.
+    match aviso_do_espelho(
+        EspelhoDaTela::Abriu {
+            largura: 960,
+            altura: 540,
+            codificador: Some("OpenH264 (software)".to_owned()),
+        },
+        ScreenId(9),
+        ScreenSource::Monitor,
+        3,
+    ) {
+        Some(Aviso::TelaAbriu {
+            tela: ScreenId(9),
+            leitura: 3,
+            codificador,
+            ..
+        }) => assert_eq!(
+            codificador.as_deref(),
+            Some("OpenH264 (software)"),
+            "o espelho abriu o fluxo e o aviso perdeu o nome do codificador: o rodapé de \
+             quem transmite não tem como mostrá-lo"
+        ),
+        outro => panic!("a volta não é a abertura da mesma tela: {outro:?}"),
+    }
+    // Sem nome (a câmera, que a janela codifica), o aviso não inventa um.
     assert!(matches!(
         aviso_do_espelho(
             EspelhoDaTela::Abriu {
                 largura: 960,
-                altura: 540
+                altura: 540,
+                codificador: None,
             },
             ScreenId(9),
-            ScreenSource::Monitor,
+            ScreenSource::Camera,
             3,
         ),
         Some(Aviso::TelaAbriu {
-            tela: ScreenId(9),
-            leitura: 3,
+            codificador: None,
             ..
         })
     ));
