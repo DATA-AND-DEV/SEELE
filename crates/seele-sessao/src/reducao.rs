@@ -103,6 +103,246 @@ pub fn imagem_do_perfil_para_a_janela(bytes: &[u8], capa: bool) -> Result<Vec<u8
     reduzir(bytes, &teto).map(|reduzida| reduzida.bytes)
 }
 
+/// **O pedaço de uma imagem que a pessoa escolheu**, em pixels da imagem
+/// **como ela é vista** (com a orientação do EXIF aplicada): o canto de cima à
+/// esquerda e o tamanho. Quem o desenha é o passo de recorte do editor do
+/// perfil (`ui/camada-recorte.js`), sobre a prévia de [`previa_do_recorte`], e
+/// as medidas que ele usa são as que ela diz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct Recorte {
+    /// A coluna do canto de cima à esquerda.
+    pub x: u32,
+    /// A linha do canto de cima à esquerda.
+    pub y: u32,
+    /// A largura do pedaço.
+    pub largura: u32,
+    /// A altura do pedaço.
+    pub altura: u32,
+}
+
+impl Recorte {
+    /// O recorte aparado a uma imagem de `largura × altura`: a conta da tela é
+    /// em frações, e um pixel de arredondamento para fora não é recusa. `None`
+    /// quando não sobra pixel nenhum.
+    fn dentro_de(self, largura: u32, altura: u32) -> Option<Self> {
+        if self.x >= largura || self.y >= altura {
+            return None;
+        }
+        let aparado = Self {
+            x: self.x,
+            y: self.y,
+            largura: self.largura.min(largura - self.x),
+            altura: self.altura.min(altura - self.y),
+        };
+        (aparado.largura > 0 && aparado.altura > 0).then_some(aparado)
+    }
+
+    /// Se o recorte é a imagem inteira.
+    fn e_a_imagem_inteira(self, largura: u32, altura: u32) -> bool {
+        self.x == 0 && self.y == 0 && self.largura == largura && self.altura == altura
+    }
+}
+
+/// O nome da recusa de um recorte que não tem pixel nenhum dentro da imagem.
+pub const RECORTE_VAZIO: &str = "recorte-vazio";
+
+/// **A imagem de um perfil recortada, como ela sobe e fica guardada**: o
+/// pedaço escolhido, e depois o **mesmo teto** de
+/// [`imagem_do_perfil_para_a_janela`] (a capa em até 1280 × 720, a foto em
+/// até 512; na animada, os mesmos quadros e a mesma duração).
+///
+/// **O formato é o de sempre**: JPEG fica JPEG, o resto parado vira PNG, e a
+/// animação segue animada, em GIF — o recorte é feito quadro a quadro, e não
+/// num canvas, que a congelaria. O recorte que é a imagem inteira, numa imagem
+/// sem orientação de EXIF, sai pelo caminho de antes, byte a byte.
+///
+/// # Errors
+///
+/// `formato-desconhecido` e [`GRANDE_DEMAIS`], como [`reduzir`], e
+/// [`RECORTE_VAZIO`].
+pub fn imagem_do_perfil_recortada(
+    bytes: &[u8],
+    capa: bool,
+    recorte: Recorte,
+) -> Result<Vec<u8>, String> {
+    let teto = if capa {
+        TETO_DA_CAPA_DO_PERFIL
+    } else {
+        TETO_DA_FOTO_DO_PERFIL
+    };
+    recortar(bytes, &teto, recorte).map(|recortada| recortada.bytes)
+}
+
+/// **Recorta `bytes` e os reduz ao teto**, numa passada só: decodificar duas
+/// vezes uma imagem em 8K, ou regravar um JPEG duas vezes, é pagar o dobro
+/// para perder qualidade.
+///
+/// # Errors
+///
+/// `formato-desconhecido` e [`GRANDE_DEMAIS`], como [`reduzir`], e
+/// [`RECORTE_VAZIO`].
+pub fn recortar(bytes: &[u8], teto: &Teto, recorte: Recorte) -> Result<Reduzida, String> {
+    let formato = image::guess_format(bytes).map_err(|_| desconhecido())?;
+    let (largura, altura) = image::ImageReader::with_format(Cursor::new(bytes), formato)
+        .into_dimensions()
+        .map_err(|_| desconhecido())?;
+    if u64::from(largura) * u64::from(altura) > TETO_DE_PIXELS {
+        return Err(GRANDE_DEMAIS.to_owned());
+    }
+    // A animação não tem orientação de EXIF: as medidas do cabeçalho são as
+    // que a pessoa viu.
+    if e_animada(bytes, formato)? {
+        let pedaco = recorte
+            .dentro_de(largura, altura)
+            .ok_or_else(|| RECORTE_VAZIO.to_owned())?;
+        if pedaco.e_a_imagem_inteira(largura, altura) {
+            return reduzir(bytes, teto);
+        }
+        return match quadros_dentro_do_teto(bytes, formato, teto, Some(pedaco))? {
+            Some(quadros) => reduzir_animacao(quadros, teto),
+            // Um quadro só dentro do teto de duração: o primeiro, parado.
+            None => {
+                let primeiro = image::load_from_memory_with_format(bytes, formato)
+                    .map_err(|_| desconhecido())?;
+                recortar_parada(&primeiro, formato, teto, pedaco)
+            }
+        };
+    }
+    let (imagem, orientada) = aberta_como_se_ve(bytes, formato)?;
+    let pedaco = recorte
+        .dentro_de(imagem.width(), imagem.height())
+        .ok_or_else(|| RECORTE_VAZIO.to_owned())?;
+    if !orientada && pedaco.e_a_imagem_inteira(imagem.width(), imagem.height()) {
+        return reduzir(bytes, teto);
+    }
+    recortar_parada(&imagem, formato, teto, pedaco)
+}
+
+/// O pedaço de uma imagem parada, dentro do teto e gravado.
+fn recortar_parada(
+    imagem: &image::DynamicImage,
+    formato: ImageFormat,
+    teto: &Teto,
+    pedaco: Recorte,
+) -> Result<Reduzida, String> {
+    let mut cortada = imagem.crop_imm(pedaco.x, pedaco.y, pedaco.largura, pedaco.altura);
+    let (mut largura, mut altura) = (cortada.width(), cortada.height());
+    if largura > teto.largura || altura > teto.altura {
+        (largura, altura) = caber(largura, altura, teto);
+        cortada = cortada.resize_exact(largura, altura, FilterType::Triangle);
+    }
+    Ok(Reduzida {
+        bytes: gravar_parada(&cortada, formato)?,
+        decodificados: decodificados(largura, altura, 1),
+    })
+}
+
+/// Se os bytes são uma animação de mais de um quadro. Lê só os dois primeiros
+/// quadros: contar os de um GIF longo seria decodificá-lo inteiro.
+fn e_animada(bytes: &[u8], formato: ImageFormat) -> Result<bool, String> {
+    let dois = Teto {
+        largura: u32::MAX,
+        altura: u32::MAX,
+        quadros: 2,
+        milissegundos: u32::MAX,
+    };
+    Ok(quadros_dentro_do_teto(bytes, formato, &dois, None)?.is_some())
+}
+
+/// **A imagem parada como a pessoa a vê**: decodificada, com a orientação do
+/// EXIF aplicada. Uma foto de celular em pé é gravada deitada, com a
+/// orientação anotada; o navegador a mostra em pé, e um recorte medido sobre a
+/// imagem deitada cortaria outro pedaço. O `bool` diz se a orientação mudou
+/// alguma coisa.
+fn aberta_como_se_ve(
+    bytes: &[u8],
+    formato: ImageFormat,
+) -> Result<(image::DynamicImage, bool), String> {
+    use image::metadata::Orientation;
+    use image::ImageDecoder as _;
+
+    let mut decodificador = image::ImageReader::with_format(Cursor::new(bytes), formato)
+        .into_decoder()
+        .map_err(|_| desconhecido())?;
+    let orientacao = decodificador
+        .orientation()
+        .unwrap_or(Orientation::NoTransforms);
+    let mut imagem =
+        image::DynamicImage::from_decoder(decodificador).map_err(|_| desconhecido())?;
+    imagem.apply_orientation(orientacao);
+    Ok((imagem, orientacao != Orientation::NoTransforms))
+}
+
+/// **A prévia do passo de recorte**: a imagem parada (o primeiro quadro de uma
+/// animação) como a pessoa a vê, reduzida a [`TETO_DA_PREVIA_DO_RECORTE`], e as
+/// medidas da imagem inteira, que são as do [`Recorte`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviaDoRecorte {
+    /// A prévia: JPEG quando a escolhida é JPEG, PNG no resto.
+    pub bytes: Vec<u8>,
+    /// A largura da imagem inteira, como ela é vista.
+    pub largura: u32,
+    /// A altura da imagem inteira, como ela é vista.
+    pub altura: u32,
+    /// Se a imagem é uma animação: o recorte vale para todos os quadros.
+    pub animada: bool,
+}
+
+/// **O maior lado da prévia do recorte.** A moldura do diálogo tem algumas
+/// centenas de pixels e o zoom vai a oito vezes: 2048 seguram a nitidez do que
+/// se vê sem levar à janela os megabytes de um papel de parede em 8K — que é o
+/// defeito que este arquivo existe para impedir. O que sai do recorte é
+/// cortado da imagem inteira, e não desta prévia.
+pub const TETO_DA_PREVIA_DO_RECORTE: Teto = Teto {
+    largura: 2048,
+    altura: 2048,
+    quadros: 2,
+    milissegundos: u32::MAX,
+};
+
+/// **O que o passo de recorte mostra de uma imagem escolhida.**
+///
+/// # Errors
+///
+/// `formato-desconhecido` e [`GRANDE_DEMAIS`], como [`reduzir`].
+pub fn previa_do_recorte(bytes: &[u8]) -> Result<PreviaDoRecorte, String> {
+    let teto = &TETO_DA_PREVIA_DO_RECORTE;
+    let formato = image::guess_format(bytes).map_err(|_| desconhecido())?;
+    let (largura, altura) = image::ImageReader::with_format(Cursor::new(bytes), formato)
+        .into_dimensions()
+        .map_err(|_| desconhecido())?;
+    if u64::from(largura) * u64::from(altura) > TETO_DE_PIXELS {
+        return Err(GRANDE_DEMAIS.to_owned());
+    }
+    // Os dois primeiros quadros dizem se é animação, e o primeiro já chega
+    // dentro do teto.
+    if let Some(quadros) = quadros_dentro_do_teto(bytes, formato, teto, None)? {
+        let primeiro = quadros
+            .into_iter()
+            .next()
+            .map(Frame::into_buffer)
+            .ok_or_else(desconhecido)?;
+        return Ok(PreviaDoRecorte {
+            bytes: gravar_parada(&image::DynamicImage::ImageRgba8(primeiro), ImageFormat::Png)?,
+            largura,
+            altura,
+            animada: true,
+        });
+    }
+    let (mut imagem, _) = aberta_como_se_ve(bytes, formato)?;
+    let (largura, altura) = (imagem.width(), imagem.height());
+    if largura > teto.largura || altura > teto.altura {
+        let (menor_largura, menor_altura) = caber(largura, altura, teto);
+        imagem = imagem.resize_exact(menor_largura, menor_altura, FilterType::Triangle);
+    }
+    Ok(PreviaDoRecorte {
+        bytes: gravar_parada(&imagem, formato)?,
+        largura,
+        altura,
+        animada: false,
+    })
+}
+
 /// **A mídia de um MOD que não nomeia uso**: a imagem de uma região, o fundo
 /// de uma `tela`, um retrato. O maior lugar em que ela aparece é uma página de
 /// MOD do tamanho da janela, e 1920 × 1080 a cobre: uma imagem em 4K cabe nele
@@ -302,7 +542,7 @@ pub fn reduzir(bytes: &[u8], teto: &Teto) -> Result<Reduzida, String> {
     if u64::from(largura) * u64::from(altura) > TETO_DE_PIXELS {
         return Err(GRANDE_DEMAIS.to_owned());
     }
-    if let Some(quadros) = quadros_dentro_do_teto(bytes, formato, teto)? {
+    if let Some(quadros) = quadros_dentro_do_teto(bytes, formato, teto, None)? {
         return reduzir_animacao(quadros, teto);
     }
     let imagem = image::load_from_memory_with_format(bytes, formato).map_err(|_| desconhecido())?;
@@ -315,20 +555,25 @@ pub fn reduzir(bytes: &[u8], teto: &Teto) -> Result<Reduzida, String> {
     }
     let (nova_largura, nova_altura) = caber(largura, altura, teto);
     let reduzida = imagem.resize_exact(nova_largura, nova_altura, FilterType::Triangle);
-    let mut saida = Vec::new();
-    // **JPEG fica JPEG**: uma foto regravada em PNG cresce, e o que se queria
-    // era o contrário. O resto vira PNG, sem perda.
-    let gravou = if formato == ImageFormat::Jpeg {
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut saida, 85)
-            .encode_image(&reduzida.to_rgb8())
-    } else {
-        reduzida.write_to(&mut Cursor::new(&mut saida), ImageFormat::Png)
-    };
-    gravou.map_err(|_| desconhecido())?;
     Ok(Reduzida {
-        bytes: saida,
+        bytes: gravar_parada(&reduzida, formato)?,
         decodificados: decodificados(nova_largura, nova_altura, 1),
     })
+}
+
+/// Grava uma imagem parada no formato em que ela segue. **JPEG fica JPEG**:
+/// uma foto regravada em PNG cresce, e o que se queria era o contrário. O
+/// resto vira PNG, sem perda.
+fn gravar_parada(imagem: &image::DynamicImage, formato: ImageFormat) -> Result<Vec<u8>, String> {
+    let mut saida = Vec::new();
+    let gravou = if formato == ImageFormat::Jpeg {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut saida, 85)
+            .encode_image(&imagem.to_rgb8())
+    } else {
+        imagem.write_to(&mut Cursor::new(&mut saida), ImageFormat::Png)
+    };
+    gravou.map_err(|_| desconhecido())?;
+    Ok(saida)
 }
 
 /// O lado máximo, em pixels, de um ícone de pessoa: o do protocolo
@@ -580,6 +825,7 @@ fn quadros_dentro_do_teto(
     bytes: &[u8],
     formato: ImageFormat,
     teto: &Teto,
+    recorte: Option<Recorte>,
 ) -> Result<Option<Vec<Frame>>, String> {
     let quadros = match formato {
         ImageFormat::Gif => GifDecoder::new(Cursor::new(bytes))
@@ -608,6 +854,23 @@ fn quadros_dentro_do_teto(
             break;
         }
         duracao = duracao.saturating_add(deste);
+        // **Recortado ao chegar, antes de reduzir**: o pedaço escolhido de cada
+        // quadro, que é o que mantém a animação animada depois do recorte.
+        let quadro = match recorte {
+            Some(pedaco) => {
+                let atraso = quadro.delay();
+                let cortado = image::imageops::crop_imm(
+                    quadro.buffer(),
+                    pedaco.x,
+                    pedaco.y,
+                    pedaco.largura,
+                    pedaco.altura,
+                )
+                .to_image();
+                Frame::from_parts(cortado, 0, 0, atraso)
+            }
+            None => quadro,
+        };
         // **Reduzido ao chegar, e não depois de juntar todos**: sessenta
         // quadros de uma animação em 4K, guardados inteiros, são 2 GB. Assim a
         // memória segura um quadro grande por vez.
@@ -1128,5 +1391,352 @@ mod testes {
             GRANDE_DEMAIS,
         );
         assert!(reduzir(&png(7680, 4320), &TETO_DA_CAPA).is_ok());
+    }
+
+    // ------------------------------------------------------------ o recorte
+
+    const VERMELHO: [u8; 4] = [220, 30, 30, 255];
+    const VERDE: [u8; 4] = [30, 200, 60, 255];
+    const AZUL: [u8; 4] = [30, 60, 220, 255];
+    const AMARELO: [u8; 4] = [230, 220, 40, 255];
+
+    /// Quatro quadrantes de cores diferentes: vermelho em cima à esquerda,
+    /// verde em cima à direita, azul embaixo à esquerda e amarelo embaixo à
+    /// direita. Pelo que sobra no recorte se sabe que pedaço saiu.
+    fn quadrantes(largura: u32, altura: u32) -> RgbaImage {
+        RgbaImage::from_fn(largura, altura, |x, y| {
+            image::Rgba(match (x < largura / 2, y < altura / 2) {
+                (true, true) => VERMELHO,
+                (false, true) => VERDE,
+                (true, false) => AZUL,
+                (false, false) => AMARELO,
+            })
+        })
+    }
+
+    fn png_de(imagem: &RgbaImage) -> Vec<u8> {
+        let mut saida = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut saida)
+            .write_image(
+                imagem,
+                imagem.width(),
+                imagem.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("gravar o PNG de teste");
+        saida
+    }
+
+    fn jpeg_de(imagem: &RgbaImage) -> Vec<u8> {
+        let mut saida = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut saida, 95)
+            .encode_image(&image::DynamicImage::ImageRgba8(imagem.clone()).to_rgb8())
+            .expect("gravar o JPEG de teste");
+        saida
+    }
+
+    /// A cor de um pixel, com a folga de um JPEG.
+    fn perto(pixel: image::Rgba<u8>, cor: [u8; 4]) -> bool {
+        pixel
+            .0
+            .iter()
+            .zip(cor)
+            .take(3)
+            .all(|(a, b)| a.abs_diff(b) <= 24)
+    }
+
+    fn pedaco(x: u32, y: u32, largura: u32, altura: u32) -> Recorte {
+        Recorte {
+            x,
+            y,
+            largura,
+            altura,
+        }
+    }
+
+    /// **O que sai é o pedaço escolhido**, e não o centro nem a imagem
+    /// encolhida: cada quadrante pedido volta com a cor dele, inteiro.
+    #[test]
+    fn o_recorte_tira_o_pedaco_escolhido() {
+        let original = png_de(&quadrantes(400, 300));
+        for (recorte, cor) in [
+            (pedaco(0, 0, 150, 150), VERMELHO),
+            (pedaco(200, 0, 150, 150), VERDE),
+            (pedaco(0, 150, 150, 150), AZUL),
+            (pedaco(250, 150, 150, 150), AMARELO),
+        ] {
+            let saida = imagem_do_perfil_recortada(&original, false, recorte).expect("recorta");
+            let imagem = image::load_from_memory(&saida).expect("abre").to_rgba8();
+            assert_eq!(imagem.dimensions(), (150, 150), "{recorte:?}");
+            assert!(
+                imagem.pixels().all(|pixel| pixel.0 == cor),
+                "{recorte:?} trouxe um pixel de outro quadrante"
+            );
+        }
+        // O pedaço que pega os quatro traz os quatro, cada um no canto dele.
+        let meio = imagem_do_perfil_recortada(&original, false, pedaco(150, 100, 100, 100))
+            .expect("recorta");
+        let meio = image::load_from_memory(&meio).expect("abre").to_rgba8();
+        assert_eq!(meio.get_pixel(0, 0).0, VERMELHO);
+        assert_eq!(meio.get_pixel(99, 0).0, VERDE);
+        assert_eq!(meio.get_pixel(0, 99).0, AZUL);
+        assert_eq!(meio.get_pixel(99, 99).0, AMARELO);
+    }
+
+    /// **O recorte segue pelo teto de sempre**: a foto sai em até 512 e a
+    /// capa em até 1280 × 720, com a proporção do pedaço.
+    #[test]
+    fn o_recorte_sai_dentro_do_teto_de_sempre() {
+        let grande = png_de(&quadrantes(4000, 3000));
+        // O quadrante de baixo à direita, quadrado: 512 × 512, amarelo.
+        let foto = imagem_do_perfil_recortada(&grande, false, pedaco(2200, 1600, 1400, 1400))
+            .expect("recorta");
+        let foto = image::load_from_memory(&foto).expect("abre").to_rgba8();
+        assert_eq!(foto.dimensions(), (512, 512));
+        assert!(foto.pixels().all(|pixel| pixel.0 == AMARELO));
+        // Um 16:9 maior que o teto da capa: 1280 × 720.
+        let capa = imagem_do_perfil_recortada(&grande, true, pedaco(400, 300, 3200, 1800))
+            .expect("recorta");
+        let capa = image::load_from_memory(&capa).expect("abre").to_rgba8();
+        assert_eq!(capa.dimensions(), (1280, 720));
+        assert_eq!(capa.get_pixel(4, 4).0, VERMELHO);
+        assert_eq!(capa.get_pixel(1275, 715).0, AMARELO);
+        // O pedaço menor que o teto não é ampliado.
+        let pequena =
+            imagem_do_perfil_recortada(&grande, true, pedaco(0, 0, 640, 360)).expect("recorta");
+        assert_eq!(dimensoes(&pequena), (640, 360));
+    }
+
+    /// **JPEG fica JPEG** depois do recorte, como depois da redução: uma foto
+    /// regravada em PNG cresce.
+    #[test]
+    fn o_recorte_de_um_jpeg_continua_jpeg() {
+        let foto = jpeg_de(&quadrantes(800, 600));
+        let saida =
+            imagem_do_perfil_recortada(&foto, false, pedaco(420, 320, 200, 200)).expect("recorta");
+        assert_eq!(
+            image::guess_format(&saida).expect("é imagem"),
+            ImageFormat::Jpeg
+        );
+        let imagem = image::load_from_memory(&saida).expect("abre").to_rgba8();
+        assert_eq!(imagem.dimensions(), (200, 200));
+        assert!(imagem.pixels().all(|pixel| perto(*pixel, AMARELO)));
+    }
+
+    /// **Um GIF animado continua animado depois do recorte**: o pedaço é
+    /// tirado de cada quadro, com o atraso de cada um. Um canvas o congelaria
+    /// no primeiro.
+    #[test]
+    fn o_recorte_de_uma_animacao_continua_animado() {
+        let mut animada = Vec::new();
+        {
+            let mut gravador = GifEncoder::new(&mut animada);
+            gravador.set_repeat(Repeat::Infinite).expect("repetir");
+            for i in 0..5_u8 {
+                // O quadrante de baixo à direita muda a cada quadro.
+                let mut quadro = quadrantes(400, 300);
+                for (x, y, pixel) in quadro.enumerate_pixels_mut() {
+                    if x >= 200 && y >= 150 {
+                        *pixel = image::Rgba([40 * i, 0, 250 - 40 * i, 255]);
+                    }
+                }
+                gravador
+                    .encode_frame(Frame::from_parts(
+                        quadro,
+                        0,
+                        0,
+                        Delay::from_numer_denom_ms(120, 1),
+                    ))
+                    .expect("gravar o quadro");
+            }
+        }
+        let saida =
+            imagem_do_perfil_recortada(&animada, false, pedaco(220, 160, 120, 120)).expect("corta");
+        let quadros = GifDecoder::new(Cursor::new(&saida))
+            .expect("continua um GIF")
+            .into_frames()
+            .collect_frames()
+            .expect("quadros");
+        assert_eq!(quadros.len(), 5);
+        for (i, quadro) in quadros.iter().enumerate() {
+            assert_eq!(quadro.buffer().dimensions(), (120, 120));
+            assert_eq!(quadro.delay().numer_denom_ms(), (120, 1));
+            let i = u8::try_from(i).expect("cabe");
+            assert!(
+                perto(
+                    *quadro.buffer().get_pixel(60, 60),
+                    [40 * i, 0, 250 - 40 * i, 255]
+                ),
+                "o quadro {i} não é o pedaço do quadro {i}"
+            );
+        }
+        // E maior que o teto, cada quadro cabe nele.
+        let grande = gif(1600, 1200, 3, 100);
+        let saida = imagem_do_perfil_recortada(&grande, false, pedaco(100, 100, 1000, 1000))
+            .expect("corta");
+        let quadros = GifDecoder::new(Cursor::new(&saida))
+            .expect("continua um GIF")
+            .into_frames()
+            .collect_frames()
+            .expect("quadros");
+        assert_eq!(quadros.len(), 3);
+        assert_eq!(quadros[0].buffer().dimensions(), (512, 512));
+    }
+
+    /// **Quem confirma sem recortar uma imagem que já está na proporção não
+    /// perde nada**: o recorte que é a imagem inteira sai pelo caminho de
+    /// antes, com os mesmos bytes.
+    #[test]
+    fn o_recorte_que_e_a_imagem_inteira_sai_como_antes() {
+        let pequena = png_de(&quadrantes(400, 400));
+        assert_eq!(
+            imagem_do_perfil_recortada(&pequena, false, pedaco(0, 0, 400, 400)).expect("passa"),
+            pequena
+        );
+        let grande = png_de(&quadrantes(2000, 2000));
+        assert_eq!(
+            imagem_do_perfil_recortada(&grande, false, pedaco(0, 0, 2000, 2000)).expect("reduz"),
+            imagem_do_perfil_para_a_janela(&grande, false).expect("reduz")
+        );
+        let animada = gif(300, 300, 3, 100);
+        assert_eq!(
+            imagem_do_perfil_recortada(&animada, false, pedaco(0, 0, 300, 300)).expect("passa"),
+            imagem_do_perfil_para_a_janela(&animada, false).expect("passa")
+        );
+    }
+
+    /// O recorte que passa da borda é aparado a ela (a conta da tela é em
+    /// frações), e o que não tem pixel nenhum é recusado pelo nome.
+    #[test]
+    fn o_recorte_e_aparado_a_imagem_e_o_vazio_e_recusado() {
+        let original = png_de(&quadrantes(400, 300));
+        let aparado = imagem_do_perfil_recortada(&original, false, pedaco(300, 200, 500, 500))
+            .expect("apara");
+        let aparado = image::load_from_memory(&aparado).expect("abre").to_rgba8();
+        assert_eq!(aparado.dimensions(), (100, 100));
+        assert!(aparado.pixels().all(|pixel| pixel.0 == AMARELO));
+        for vazio in [
+            pedaco(400, 0, 10, 10),
+            pedaco(0, 300, 10, 10),
+            pedaco(10, 10, 0, 10),
+            pedaco(10, 10, 10, 0),
+        ] {
+            assert_eq!(
+                imagem_do_perfil_recortada(&original, false, vazio).unwrap_err(),
+                RECORTE_VAZIO,
+                "{vazio:?}"
+            );
+        }
+        // E os tetos de sempre continuam valendo com recorte.
+        assert_eq!(
+            imagem_do_perfil_recortada(&png(9000, 5000), true, pedaco(0, 0, 100, 100)).unwrap_err(),
+            GRANDE_DEMAIS
+        );
+        assert!(imagem_do_perfil_recortada(b"nada disto", true, pedaco(0, 0, 1, 1)).is_err());
+    }
+
+    /// Um JPEG com a orientação 6 do EXIF (a foto de celular em pé: gravada
+    /// deitada, com «gire 90° no sentido do relógio» anotado).
+    fn jpeg_em_pe(deitada: &RgbaImage) -> Vec<u8> {
+        let jpeg = jpeg_de(deitada);
+        let exif: &[u8] = &[
+            b'E', b'x', b'i', b'f', 0, 0, // o nome do bloco
+            b'I', b'I', 0x2a, 0, 8, 0, 0, 0, // TIFF, little-endian, o IFD no byte 8
+            1, 0, // uma entrada
+            0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0,
+            0, // 0x0112 (orientação), SHORT, 1, valor 6
+            0, 0, 0, 0, // sem outro IFD
+        ];
+        let tamanho = u16::try_from(exif.len() + 2).expect("cabe");
+        let mut saida = jpeg[..2].to_vec();
+        saida.extend_from_slice(&[0xff, 0xe1]);
+        saida.extend_from_slice(&tamanho.to_be_bytes());
+        saida.extend_from_slice(exif);
+        saida.extend_from_slice(&jpeg[2..]);
+        saida
+    }
+
+    /// **O recorte é medido sobre a imagem como a pessoa a vê.** Uma foto em
+    /// pé (orientação do EXIF) aparece em pé na prévia, e o pedaço de cima da
+    /// prévia é o pedaço de cima da foto — e não o lado esquerdo do arquivo.
+    #[test]
+    fn o_recorte_respeita_a_orientacao_do_exif() {
+        // Deitada no arquivo: a metade esquerda vermelha, a direita azul.
+        let deitada = RgbaImage::from_fn(400, 200, |x, _| {
+            image::Rgba(if x < 200 { VERMELHO } else { AZUL })
+        });
+        let foto = jpeg_em_pe(&deitada);
+        // Girada 90° no sentido do relógio, a esquerda vai para cima.
+        let previa = previa_do_recorte(&foto).expect("abre");
+        assert_eq!((previa.largura, previa.altura), (200, 400));
+        let vista = image::load_from_memory(&previa.bytes)
+            .expect("abre")
+            .to_rgba8();
+        assert_eq!(vista.dimensions(), (200, 400));
+        assert!(perto(*vista.get_pixel(100, 50), VERMELHO));
+        assert!(perto(*vista.get_pixel(100, 350), AZUL));
+        // O quadrado de baixo é azul, e o de cima, vermelho.
+        for (recorte, cor) in [
+            (pedaco(0, 0, 200, 180), VERMELHO),
+            (pedaco(0, 220, 200, 180), AZUL),
+        ] {
+            let saida = imagem_do_perfil_recortada(&foto, false, recorte).expect("recorta");
+            let imagem = image::load_from_memory(&saida).expect("abre").to_rgba8();
+            assert_eq!(imagem.dimensions(), (200, 180));
+            assert!(
+                imagem.pixels().all(|pixel| perto(*pixel, cor)),
+                "{recorte:?} não trouxe o pedaço que a pessoa viu"
+            );
+        }
+        // A imagem inteira de uma foto orientada é regravada em pé: o caminho
+        // de antes a reduziria deitada.
+        let inteira =
+            imagem_do_perfil_recortada(&foto, false, pedaco(0, 0, 200, 400)).expect("recorta");
+        assert_eq!(dimensoes(&inteira), (200, 400));
+    }
+
+    /// **A prévia do recorte cabe no teto dela e diz as medidas da imagem
+    /// inteira**, que são as do recorte; a de uma animação é o primeiro
+    /// quadro, e diz que é animação.
+    #[test]
+    fn a_previa_do_recorte_cabe_no_teto_e_diz_as_medidas_da_inteira() {
+        let grande = previa_do_recorte(&png_de(&quadrantes(4096, 3072))).expect("abre");
+        assert_eq!((grande.largura, grande.altura), (4096, 3072));
+        assert!(!grande.animada);
+        let vista = image::load_from_memory(&grande.bytes)
+            .expect("abre")
+            .to_rgba8();
+        assert_eq!(vista.dimensions(), (2048, 1536));
+        assert_eq!(vista.get_pixel(10, 10).0, VERMELHO);
+        assert_eq!(vista.get_pixel(2040, 1530).0, AMARELO);
+
+        // A que cabe não é ampliada.
+        let pequena = previa_do_recorte(&png_de(&quadrantes(64, 48))).expect("abre");
+        assert_eq!(dimensoes(&pequena.bytes), (64, 48));
+
+        // Uma foto em JPEG tem prévia em JPEG: a de um papel de parede em PNG
+        // seria megabytes a mais na janela.
+        let foto = previa_do_recorte(&jpeg_de(&quadrantes(3000, 2000))).expect("abre");
+        assert_eq!(
+            image::guess_format(&foto.bytes).expect("é imagem"),
+            ImageFormat::Jpeg
+        );
+
+        let animada = previa_do_recorte(&gif(600, 400, 4, 100)).expect("abre");
+        assert!(animada.animada);
+        assert_eq!((animada.largura, animada.altura), (600, 400));
+        assert_eq!(dimensoes(&animada.bytes), (600, 400));
+        // Um GIF de um quadro só é uma imagem parada.
+        assert!(
+            !previa_do_recorte(&gif(60, 40, 1, 100))
+                .expect("abre")
+                .animada
+        );
+
+        assert_eq!(
+            previa_do_recorte(&png(9000, 5000)).unwrap_err(),
+            GRANDE_DEMAIS
+        );
+        assert!(previa_do_recorte(b"nada disto").is_err());
     }
 }
