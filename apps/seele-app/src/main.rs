@@ -57,6 +57,8 @@ mod maquina;
 mod mods;
 mod notificacao;
 mod perfil_padrao;
+// A imagem escolhida que espera o recorte, e a prévia que a janela desenha.
+mod recorte;
 // A redução de imagem de MOD mora no `seele-sessao` desde a Tarefa 2.6 da F4.
 use seele_ffi::reducao;
 mod sala;
@@ -9968,47 +9970,31 @@ fn tirar_imagem_do_perfil(
         .map_err(Into::into)
 }
 
-/// O que `enviar_imagem_do_perfil` fez.
-#[derive(serde::Serialize)]
-struct ImagemDoPerfilEnviada {
-    /// `false` é ter fechado o seletor sem escolher: o desfecho mais comum.
-    escolheu: bool,
-    /// Na foto nova, o ícone nativo (PNG de até 256 px e 8 KiB, do primeiro
-    /// quadro) também foi mandado pelo `SetPersonIcon`, para os clientes 0.18
-    /// verem o mesmo rosto. `false` quando a imagem não decodifica aqui (o
-    /// perfil já foi gravado; só o rosto dos 0.18 fica como estava) ou quando
-    /// é a capa.
-    icone_nativo: bool,
-}
-
-/// Abre o seletor, confere a imagem e a manda como a foto ou a capa de quem
-/// está usando esta janela.
+/// **Abre o seletor e prepara a imagem escolhida para o passo de recorte**
+/// (`recorte.rs`): a janela recebe a prévia e as medidas, e os bytes inteiros
+/// esperam aqui pela alça, que `enviar_imagem_do_perfil` e
+/// `guardar_imagem_do_perfil_padrao` recebem de volta com o pedaço escolhido.
 ///
-/// **Confere antes de subir**: até 10 MiB e o tipo pelos bytes (PNG, JPEG, WebP
-/// ou GIF; o HEIC volta nomeado). Sem filtro de extensão no seletor, de
+/// **Confere antes de mostrar**: até 10 MiB e o tipo pelos bytes (PNG, JPEG,
+/// WebP ou GIF; o HEIC volta nomeado). Sem filtro de extensão no seletor, de
 /// propósito: quem escolhe uma foto do iPhone precisa ouvir «HEIC não é aceito»
 /// e não achar que o arquivo sumiu.
 ///
-/// **Foto nova gera o ícone nativo** (§9 Q1 da especificação): o mesmo
-/// `icone::encolher` do `escolher_minha_imagem`, e o `SetPersonIcon` vai só
-/// para **esta** sessão — o perfil é do servidor, e o retrato desta máquina
-/// (`retrato.png`) não é tocado.
+/// Sem sessão: é o mesmo passo na tela inicial (o perfil padrão) e dentro de um
+/// servidor.
 ///
 /// # Errors
 ///
 /// `ImagemGrandeDemais`, `Heic`, `TipoRecusado`, `ImagemVazia`,
-/// `ArquivoIlegivel`, `ServidorAntigo`, a recusa do servidor, `NotConnected`.
+/// `ArquivoIlegivel`.
 #[tauri::command]
-async fn enviar_imagem_do_perfil(
+async fn escolher_imagem_para_recortar(
     app: AppHandle,
-    session: State<'_, Session>,
-    carimbo: sessoes::CarimboDaJanela,
     lado: seele_ffi::perfis::LadoDoPerfil,
-) -> Result<ImagemDoPerfilEnviada, seele_ffi::perfis::FalhaNoPerfil> {
+) -> Result<recorte::ParaRecortar, seele_ffi::perfis::ErroDoPerfil> {
     use seele_ffi::perfis::{ErroDoPerfil, LadoDoPerfil};
     use tauri_plugin_dialog::DialogExt as _;
 
-    let conexao = session.conexao(carimbo)?;
     let (envia, mut recebe) = tauri::async_runtime::channel(1);
     app.dialog()
         .file()
@@ -10020,23 +10006,73 @@ async fn enviar_imagem_do_perfil(
             let _ = envia.try_send(escolha);
         });
     let Some(Some(escolha)) = recebe.recv().await else {
-        return Ok(ImagemDoPerfilEnviada {
-            escolheu: false,
-            icone_nativo: false,
-        });
+        return Ok(recorte::ParaRecortar::nada());
     };
     // Só o Android devolve `content://`, e este binário não roda lá.
     let Ok(caminho) = escolha.into_path() else {
-        return Err(ErroDoPerfil::ArquivoIlegivel.into());
+        return Err(ErroDoPerfil::ArquivoIlegivel);
     };
-    // O tamanho é perguntado antes de ler, e a leitura é fora da linha
-    // principal: dez megabytes no laço de eventos congelam a janela.
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        seele_ffi::perfis::ler_o_arquivo_da_imagem(&caminho)
+    // O tamanho é perguntado antes de ler, e a leitura e a prévia são fora da
+    // linha principal: dez megabytes no laço de eventos congelam a janela, e
+    // decodificar um papel de parede em 8K leva um tempo que se vê.
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = seele_ffi::perfis::ler_o_arquivo_da_imagem(&caminho)?;
+        recorte::preparar(&app.state::<recorte::ImagensARecortar>(), bytes)
     })
     .await
-    .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
-    let bytes = imagem_de_perfil_para_subir(bytes, lado).await?;
+    .map_err(|_| ErroDoPerfil::ArquivoIlegivel)?
+}
+
+/// **Solta a imagem que esperava o recorte**: a pessoa cancelou o diálogo, e
+/// os bytes (até 10 MiB) não têm por que ficar na memória. A alça de outra
+/// imagem não solta nada.
+#[tauri::command]
+fn esquecer_imagem_a_recortar(a_recortar: State<'_, recorte::ImagensARecortar>, alca: u64) {
+    drop(a_recortar.tirar(alca));
+}
+
+/// O que `enviar_imagem_do_perfil` fez.
+#[derive(serde::Serialize)]
+struct ImagemDoPerfilEnviada {
+    /// Na foto nova, o ícone nativo (PNG de até 256 px e 8 KiB, do primeiro
+    /// quadro) também foi mandado pelo `SetPersonIcon`, para os clientes 0.18
+    /// verem o mesmo rosto. `false` quando a imagem não decodifica aqui (o
+    /// perfil já foi gravado; só o rosto dos 0.18 fica como estava) ou quando
+    /// é a capa.
+    icone_nativo: bool,
+}
+
+/// Manda a imagem escolhida (a da `alca`, de `escolher_imagem_para_recortar`),
+/// recortada no `recorte`, como a foto ou a capa de quem está usando esta
+/// janela.
+///
+/// **O que sobe é o pedaço escolhido, pelo caminho de sempre**
+/// ([`imagem_de_perfil_para_subir`]): os mesmos tetos, o mesmo formato, a
+/// mesma conferência da `Connection` antes de gastar a subida.
+///
+/// **Foto nova gera o ícone nativo** (§9 Q1 da especificação): o mesmo
+/// `icone::encolher` do `escolher_minha_imagem`, e o `SetPersonIcon` vai só
+/// para **esta** sessão — o perfil é do servidor, e o retrato desta máquina
+/// (`retrato.png`) não é tocado.
+///
+/// # Errors
+///
+/// `Mudou` (a alça não é a da imagem que espera), `TipoRecusado`,
+/// `ServidorAntigo`, a recusa do servidor, `NotConnected`.
+#[tauri::command]
+async fn enviar_imagem_do_perfil(
+    session: State<'_, Session>,
+    a_recortar: State<'_, recorte::ImagensARecortar>,
+    carimbo: sessoes::CarimboDaJanela,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+    alca: u64,
+    recorte: reducao::Recorte,
+) -> Result<ImagemDoPerfilEnviada, seele_ffi::perfis::FalhaNoPerfil> {
+    use seele_ffi::perfis::{ErroDoPerfil, LadoDoPerfil};
+
+    let conexao = session.conexao(carimbo)?;
+    let bytes = a_recortar.tirar(alca).ok_or(ErroDoPerfil::Mudou)?;
+    let bytes = imagem_de_perfil_para_subir(bytes, lado, recorte).await?;
 
     let para_o_icone = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
     conexao.enviar_imagem_do_perfil(lado, bytes).await?;
@@ -10061,39 +10097,33 @@ async fn enviar_imagem_do_perfil(
             ),
         }
     }
-    Ok(ImagemDoPerfilEnviada {
-        escolheu: true,
-        icone_nativo,
-    })
+    Ok(ImagemDoPerfilEnviada { icone_nativo })
 }
 
-/// **A imagem de perfil que a pessoa escolheu, do tamanho em que aparece**
-/// (`reducao::imagem_do_perfil_para_a_janela`: a capa em até 1280 × 720, a foto
-/// em até 512), fora da linha principal.
+/// **A imagem de perfil que a pessoa escolheu, recortada e do tamanho em que
+/// aparece** (`recorte::recortada`: o pedaço escolhido, e depois o teto de
+/// `reducao::imagem_do_perfil_para_a_janela` — a capa em até 1280 × 720, a
+/// foto em até 512), fora da linha principal.
 ///
 /// É o que sobe ao servidor e o que fica guardado no perfil padrão. Subia o
 /// arquivo inteiro, e quem recebia uma capa em 4K pagava por ela: os clientes
 /// de antes da redução ao mostrar (a 0.19.6) ficam lentos com ela.
 ///
-/// O que não decodifica aqui segue como veio: quem diz que os bytes não são
-/// uma imagem é a conferência do envio, com o erro dela. Só o que tem pixels
-/// demais é recusado.
+/// **O recorte que é a imagem inteira sai como saía antes do recorte**, com os
+/// mesmos bytes quando ela já cabia: quem confirma sem recortar uma imagem que
+/// já está na proporção não perde nada.
+///
+/// O que não decodifica ou tem pixels demais é recusado; o recorte sem pixel
+/// nenhum dentro da imagem é `Mudou`.
 async fn imagem_de_perfil_para_subir(
     bytes: Vec<u8>,
     lado: seele_ffi::perfis::LadoDoPerfil,
+    recorte: reducao::Recorte,
 ) -> Result<Vec<u8>, seele_ffi::perfis::ErroDoPerfil> {
     let capa = lado == seele_ffi::perfis::LadoDoPerfil::Capa;
-    tauri::async_runtime::spawn_blocking(move || {
-        match seele_ffi::reducao::imagem_do_perfil_para_a_janela(&bytes, capa) {
-            Ok(reduzida) => Ok(reduzida),
-            Err(motivo) if motivo == seele_ffi::reducao::GRANDE_DEMAIS => {
-                Err(seele_ffi::perfis::ErroDoPerfil::TipoRecusado)
-            }
-            Err(_) => Ok(bytes),
-        }
-    })
-    .await
-    .map_err(|_| seele_ffi::perfis::ErroDoPerfil::ArquivoIlegivel)?
+    tauri::async_runtime::spawn_blocking(move || recorte::recortada(&bytes, capa, recorte))
+        .await
+        .map_err(|_| seele_ffi::perfis::ErroDoPerfil::ArquivoIlegivel)?
 }
 
 /// A imagem de um perfil, em `data:` para a janela desenhar. `hash` é o que o
@@ -10177,15 +10207,8 @@ fn gravar_perfil_padrao(
     Ok(armazem.na_tela())
 }
 
-/// O que `escolher_imagem_do_perfil_padrao` fez.
-#[derive(serde::Serialize)]
-struct ImagemDoPadraoEscolhida {
-    /// `false` é ter fechado o seletor sem escolher.
-    escolheu: bool,
-}
-
-/// Abre o seletor e guarda a imagem como a foto ou a capa do padrão,
-/// conferida como num envio (até 10 MiB, o tipo pelos bytes, o HEIC nomeado).
+/// Guarda a imagem escolhida (a da `alca`, de `escolher_imagem_para_recortar`),
+/// recortada no `recorte`, como a foto ou a capa do padrão.
 ///
 /// **A foto do padrão também vira o retrato desta máquina** (o ícone nativo de
 /// 8 KiB que sobe em todo `connect`): é o rosto que os servidores 0.18 veem, e
@@ -10194,42 +10217,23 @@ struct ImagemDoPadraoEscolhida {
 ///
 /// # Errors
 ///
-/// `ImagemGrandeDemais`, `Heic`, `TipoRecusado`, `ImagemVazia`,
-/// `ArquivoIlegivel`, `NaoGravei`.
+/// `Mudou` (a alça não é a da imagem que espera), `TipoRecusado`, `NaoGravei`.
 #[tauri::command]
-async fn escolher_imagem_do_perfil_padrao(
+async fn guardar_imagem_do_perfil_padrao(
     app: AppHandle,
+    a_recortar: State<'_, recorte::ImagensARecortar>,
     lado: seele_ffi::perfis::LadoDoPerfil,
-) -> Result<ImagemDoPadraoEscolhida, perfil_padrao::FalhaNoPadrao> {
+    alca: u64,
+    recorte: reducao::Recorte,
+) -> Result<(), perfil_padrao::FalhaNoPadrao> {
     use seele_ffi::perfis::{ErroDoPerfil, LadoDoPerfil};
-    use tauri_plugin_dialog::DialogExt as _;
 
-    let (envia, mut recebe) = tauri::async_runtime::channel(1);
-    app.dialog()
-        .file()
-        .set_title(match lado {
-            LadoDoPerfil::Foto => "Escolha a foto do seu perfil padrão",
-            LadoDoPerfil::Capa => "Escolha a capa do seu perfil padrão",
-        })
-        .pick_file(move |escolha| {
-            let _ = envia.try_send(escolha);
-        });
-    let Some(Some(escolha)) = recebe.recv().await else {
-        return Ok(ImagemDoPadraoEscolhida { escolheu: false });
-    };
-    let Ok(caminho) = escolha.into_path() else {
-        return Err(ErroDoPerfil::ArquivoIlegivel.into());
-    };
+    let bytes = a_recortar.tirar(alca).ok_or(ErroDoPerfil::Mudou)?;
     let armazem = armazem_do_padrao(&app);
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        seele_ffi::perfis::ler_o_arquivo_da_imagem(&caminho)
-    })
-    .await
-    .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
     // **Guardada do tamanho em que aparece.** O que fica guardado é o que
     // sobe a cada servidor, e o hash dele é o que diz se o servidor já tem
     // esta imagem: reduzir só ao enviar faria os dois nunca baterem.
-    let bytes = imagem_de_perfil_para_subir(bytes, lado).await?;
+    let bytes = imagem_de_perfil_para_subir(bytes, lado, recorte).await?;
     let para_o_retrato = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
     armazem.guardar_imagem(lado, &bytes)?;
     if let Some(bytes) = para_o_retrato {
@@ -10248,7 +10252,7 @@ async fn escolher_imagem_do_perfil_padrao(
             ),
         }
     }
-    Ok(ImagemDoPadraoEscolhida { escolheu: true })
+    Ok(())
 }
 
 /// Tira a foto ou a capa do padrão. Tirar a foto tira também o retrato desta
@@ -13514,6 +13518,8 @@ fn main() {
         // A tecla de falar fora da janela. O plugin dela **não** sobe aqui: ver
         // `tecla_global::iniciar`, chamado do `setup`.
         .manage(tecla_global::TeclaGlobal::default())
+        // A imagem do perfil que espera o passo de recorte (`recorte.rs`).
+        .manage(recorte::ImagensARecortar::default())
         // A janela vir à frente devolve a tecla ao sistema, e sair da frente a
         // pede; fechada, devolve. Só avisa: este fecho roda na thread principal.
         .on_window_event(|janela, evento| {
@@ -13820,7 +13826,9 @@ fn main() {
             imagem_do_perfil,
             perfil_padrao,
             gravar_perfil_padrao,
-            escolher_imagem_do_perfil_padrao,
+            escolher_imagem_para_recortar,
+            esquecer_imagem_a_recortar,
+            guardar_imagem_do_perfil_padrao,
             tirar_imagem_do_perfil_padrao,
             seguimento_do_perfil_padrao,
             guardar_seguimento_do_perfil_padrao,

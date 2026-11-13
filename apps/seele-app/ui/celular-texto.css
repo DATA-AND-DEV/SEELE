@@ -561,6 +561,17 @@
 :where(:root[data-casca="celular"]) #perfil .perfil-cartao-codigo > .rotulo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil #perfil-codigo { font-size: calc(15px * var(--cel-escala)); }
 
+/* camada-recorte.css */
+:where(:root[data-casca="celular"]) .recorte-titulo { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-ajuda { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-zoom-rotulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-zoom-passo { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-zoom-valor { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-nota { font-size: calc(12px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .recorte-titulo { font-size: calc(22px * var(--cel-escala)); }
+}
+
 /* camada-mods.css */
 :where(:root[data-casca="celular"]) .mods-repo,
 :where(:root[data-casca="celular"]) .mods-hash { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }

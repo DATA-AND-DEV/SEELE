@@ -4216,6 +4216,33 @@ const FRASES_DOS_PERFIS = Object.freeze({
   continuarEditando: "CONTINUAR EDITANDO",
   descartarBotao: "DESCARTAR",
   imagensNaHora: "Foto e capa valem na hora em que são enviadas; o SALVAR é dos textos.",
+  // **O passo de recorte** (1.0.1, `camada-recorte.js`): depois de escolher a
+  // foto ou a capa, a pessoa põe na moldura o pedaço que quer e confirma.
+  abrindo: "Abrindo a imagem…",
+  recorte: Object.freeze({
+    titulo: (lado) => (lado === "Capa" ? "Recortar a capa" : "Recortar a foto"),
+    ajuda: "Arraste para posicionar e use o zoom para aproximar. O que fica dentro da moldura é o que aparece.",
+    palco: (lado) =>
+      lado === "Capa"
+        ? "Área de recorte da capa. As setas movem a moldura; mais e menos mudam o zoom."
+        : "Área de recorte da foto. As setas movem a moldura; mais e menos mudam o zoom.",
+    aberto: (lado) =>
+      lado === "Capa"
+        ? "Recortar a capa. As setas movem a moldura, mais e menos mudam o zoom, Enter confirma e Escape cancela."
+        : "Recortar a foto. As setas movem a moldura, mais e menos mudam o zoom, Enter confirma e Escape cancela.",
+    zoom: "Zoom",
+    menos: "Diminuir o zoom",
+    mais: "Aumentar o zoom",
+    zoomValor: (vezes) => `${vezes}×`,
+    zoomFalado: (vezes) => `${vezes} vezes`,
+    posicao: (x, y, vezes) => `Moldura a ${x}% da esquerda e ${y}% do alto, zoom de ${vezes} vezes.`,
+    semZoom: "Esta imagem é pequena: não há o que aproximar.",
+    animada: "A imagem é animada: o recorte vale para todos os quadros, e ela continua animada.",
+    capa: "Os dois traços marcam a faixa do meio, que é a que o cartão do perfil mostra.",
+    cancelar: "CANCELAR",
+    confirmar: "CONFIRMAR",
+    cancelado: "Recorte cancelado. Nada mudou.",
+  }),
   // O diretório, a entrada e a folha.
   entrada: "Perfis",
   entradaRotulo: "Perfis deste servidor",
@@ -4262,6 +4289,7 @@ const FRASES_DOS_PERFIS = Object.freeze({
     aviso: "Seu perfil padrão não foi aplicado aqui. Ver",
     semResposta: "O servidor não confirmou o perfil.",
     salvo: "Perfil padrão salvo.",
+    guardando: "Guardando…",
     guardada: (lado) => (lado === "Capa" ? "Capa guardada no seu perfil padrão." : "Foto guardada no seu perfil padrão."),
     removida: (lado) => (lado === "Capa" ? "Capa tirada do seu perfil padrão." : "Foto tirada do seu perfil padrão."),
   }),

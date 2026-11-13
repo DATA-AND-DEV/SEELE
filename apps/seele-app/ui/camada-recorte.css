@@ -1,0 +1,217 @@
+/* SEELE — o passo de recorte da foto e da capa (`#recorte`, 1.0.1;
+   `camada-recorte.js`).
+
+   A caixa das camadas da 0.19 (a do perfil, `camada-nomear.css`, e a de sair
+   da espera): opaca, 28px de raio, o título em Inter Tight e as ações à
+   direita, com a primária laranja. O palco é o único lugar negro absoluto: a
+   imagem é o assunto, e a caixa em volta não disputa com ela.
+
+   Quarenta e seis: acima do «Seu perfil» (26), que é quem a abre, das folhas
+   do celular (até 25) e das camadas de MOD e de sala (até 45); abaixo das
+   perguntas do produto que não esperam (moderar e travessia, 80; a máquina,
+   85 e 90; sair da espera, 88).
+
+   **A moldura é a medida.** Ela não tem borda: o contorno é `outline` e o
+   escuro em volta é `box-shadow`, os dois por fora da caixa, de modo que a
+   caixa da moldura é exatamente o pedaço que sai. `camada-recorte.js` a mede
+   e a põe no meio do palco.
+
+   Toda classe começa por `recorte-` ou `camada-recorte`. Nenhuma cor literal:
+   só tokens. */
+
+.camada-recorte {
+  position: fixed;
+  inset: 0;
+  z-index: 46;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.camada-recorte[hidden] { display: none; }
+
+.camada-recorte::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.85;
+}
+
+/* Sem rolagem: quem cede altura numa janela baixa é o palco, e os controles e
+   as ações ficam sempre à vista. */
+.recorte-caixa {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 560px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 28px 30px 26px;
+  border: var(--seele-b) solid var(--seele-controle-borda);
+  border-radius: 28px;
+  background: var(--seele-negro-painel);
+  font-family: var(--seele-ui);
+}
+
+.recorte-cabeca {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.recorte-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+}
+
+.recorte-ajuda {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--seele-osso-apagado);
+}
+
+/* O palco: a imagem inteira atrás, a moldura no meio. `touch-action: none`
+   para o dedo arrastar a imagem e a pinça aproximá-la, em vez de o navegador
+   rolar ou ampliar a página. */
+.recorte-palco {
+  position: relative;
+  flex: 0 1 340px;
+  min-height: 140px;
+  overflow: hidden;
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio);
+  background: var(--seele-negro-absoluto);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.recorte-palco[data-arrastando="sim"] { cursor: grabbing; }
+.recorte-palco:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+/* O tamanho e o lugar vêm do script, a cada gesto. Sem `max-width`: a imagem
+   aproximada é maior que o palco, e é ele que a corta. */
+.recorte-imagem {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+.recorte-imagem:not([src]) { visibility: hidden; }
+
+.recorte-moldura {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+  border-radius: var(--seele-raio-miudo);
+  outline: 2px solid var(--seele-osso);
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--seele-negro-absoluto) 68%, transparent);
+}
+/* A foto aparece no produto num quadrado de cantos redondos (o cartão do
+   perfil: 72px com 20px de raio), e a moldura a mostra assim. O que sai é o
+   quadrado inteiro: os cantos são do desenho, não do arquivo. */
+.camada-recorte[data-lado="Foto"] .recorte-moldura { border-radius: 27%; }
+/* A capa é guardada em 16:9 e aparece cortada em faixas: as duas linhas
+   marcam a do cartão do perfil (400 × 96), que mostra o meio dela. */
+.camada-recorte[data-lado="Capa"] .recorte-moldura::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 28.67%;
+  bottom: 28.67%;
+  border-top: var(--seele-b) dashed color-mix(in srgb, var(--seele-osso) 60%, transparent);
+  border-bottom: var(--seele-b) dashed color-mix(in srgb, var(--seele-osso) 60%, transparent);
+}
+
+.recorte-zoom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.recorte-zoom-rotulo {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--seele-osso);
+}
+.recorte-zoom input[type="range"] {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: 36px;
+  margin: 0;
+  accent-color: var(--seele-laranja-nerv);
+}
+.recorte-zoom input[type="range"]:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+.recorte-zoom input[type="range"]:disabled { opacity: 0.45; }
+.recorte-zoom-passo {
+  flex: 0 0 auto;
+  width: 36px;
+  min-height: 36px;
+  margin: 0;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+.recorte-zoom-valor {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  text-align: right;
+  font-family: var(--seele-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-fosforo);
+}
+
+.recorte-nota {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--seele-rotulo-painel);
+}
+
+.recorte-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.recorte-acoes > button { margin: 0; }
+
+/* A janela estreita e o celular: o diálogo ocupa a tela, o palco toma a altura
+   que sobra, e as duas ações dividem a largura, ao alcance do polegar. */
+@media (max-width: 700px) {
+  .camada-recorte { padding: 0; }
+  .recorte-caixa {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    gap: 14px;
+    padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    border: 0;
+    border-radius: 0;
+  }
+  .recorte-palco { flex: 1 1 auto; }
+  .recorte-titulo { font-size: 22px; }
+  .recorte-zoom-passo { width: 44px; min-height: 44px; }
+  .recorte-acoes > button { flex: 1 1 0; min-height: 48px; }
+}

@@ -282,9 +282,13 @@ const COMANDOS_DA_PONTE = new Set([
   // da sessão; as imagens pelo fluxo bidirecional, como no desktop.
   "perfis", "gravar_perfil", "tirar_imagem_do_perfil", "enviar_imagem_do_perfil",
   "imagem_do_perfil",
+  // O passo de recorte (1.0.1, `camada-recorte.js`): a imagem escolhida fica
+  // nesta página, a prévia vai ao diálogo, e o pedaço volta ao comando que a
+  // manda ou guarda. Cancelar a solta.
+  "escolher_imagem_para_recortar", "esquecer_imagem_a_recortar",
   // O perfil padrão (0.19, `perfil-padrao.js`): guardado no IndexedDB desta
   // origem, e subido pela sessão da vista como no desktop.
-  "perfil_padrao", "gravar_perfil_padrao", "escolher_imagem_do_perfil_padrao",
+  "perfil_padrao", "gravar_perfil_padrao", "guardar_imagem_do_perfil_padrao",
   "tirar_imagem_do_perfil_padrao", "seguimento_do_perfil_padrao",
   "guardar_seguimento_do_perfil_padrao", "enviar_imagem_do_perfil_padrao"
 ]);
@@ -2271,29 +2275,101 @@ async function transferirAImagemDoPerfil(sessao, pedido, corpo, hash) {
   return feito.bytes;
 }
 
+// ----------------------------------------------- o passo de recorte (1.0.1)
+//
+// **Escolher a foto ou a capa são dois passos**, como no desktop
+// (`recorte.rs`): `escolher_imagem_para_recortar` abre o seletor, confere a
+// imagem como num envio e devolve a **prévia** dela, dentro de um teto; os
+// bytes inteiros ficam aqui, sob uma alça. O diálogo (`camada-recorte.js`)
+// devolve a alça e o pedaço escolhido, e `enviar_imagem_do_perfil` ou
+// `guardar_imagem_do_perfil_padrao` recortam a imagem inteira pelo `.wasm`
+// (`perfil_recortar`, o mesmo código do desktop) e seguem pelo caminho de
+// sempre. Uma por vez: escolher outra solta a anterior.
+
+const IMAGEM_A_RECORTAR = { proxima: 0, alca: 0, bytes: null };
+
+/** O teto do arquivo de uma imagem de perfil (`seele_proto::perfil::TETO_DA_IMAGEM`). */
+const TETO_DA_IMAGEM_DO_PERFIL = 10 * 1024 * 1024;
+
+/** Os bytes da alça, que deixam de esperar; `null` para a alça de uma imagem que já saiu. */
+function tirarAImagemARecortar(alca) {
+  if (!IMAGEM_A_RECORTAR.bytes || IMAGEM_A_RECORTAR.alca !== alca) return null;
+  const bytes = IMAGEM_A_RECORTAR.bytes;
+  IMAGEM_A_RECORTAR.bytes = null;
+  return bytes;
+}
+
 /**
- * `enviar_imagem_do_perfil`: o seletor dentro do gesto, a conferência pelos
- * bytes (até 10 MiB; o HEIC nomeado) e a subida. A foto nova também vira o
- * ícone nativo (`perfil_icone` → `minha_imagem`), para quem ainda usa a 0.18
- * ver o mesmo rosto — como o desktop.
+ * `escolher_imagem_para_recortar`: o seletor dentro do gesto, a conferência
+ * pelos bytes (até 10 MiB; o HEIC nomeado) antes de o diálogo abrir, e a
+ * prévia. Desistir do seletor devolve `escolheu: false`, como no desktop.
  */
-async function enviarAImagemDoPerfil(lado) {
+async function escolherAImagemParaRecortar() {
   const arquivo = await escolherUmaImagem();
-  if (!arquivo) return { escolheu: false, icone_nativo: false };
-  const sessao = sessaoDaPonte.atual;
-  if (!sessao) throw "NotConnected";
+  if (!arquivo) return { escolheu: false, alca: 0, previa: "", largura: 0, altura: 0, animada: false };
   // O tamanho antes de ler: dez megabytes a mais na memória por nada.
-  if (arquivo.size > 10 * 1024 * 1024) throw { ImagemGrandeDemais: { limite_bytes: 10 * 1024 * 1024 } };
+  if (arquivo.size > TETO_DA_IMAGEM_DO_PERFIL) throw { ImagemGrandeDemais: { limite_bytes: TETO_DA_IMAGEM_DO_PERFIL } };
   let bytes;
   try {
     bytes = new Uint8Array(await arquivo.arrayBuffer());
   } catch {
     throw "ArquivoIlegivel";
   }
-  // **Sobe do tamanho em que aparece**, e não do que a pessoa escolheu: quem
-  // recebe uma capa em 4K paga por ela, e os clientes de antes desta regra não
-  // a reduzem ao mostrar.
-  bytes = await reduzirAImagemDoPerfil(lado, bytes);
+  const lida = (await regraDoPadrao()).previaDoRecorte(bytes);
+  if (lida.falha) throw lida.falha;
+  IMAGEM_A_RECORTAR.proxima += 1;
+  IMAGEM_A_RECORTAR.alca = IMAGEM_A_RECORTAR.proxima;
+  IMAGEM_A_RECORTAR.bytes = bytes;
+  return {
+    escolheu: true,
+    alca: IMAGEM_A_RECORTAR.alca,
+    previa: dataUriDe(lida.previa, tipoDaImagemDoPerfil(lida.previa)),
+    largura: lida.largura,
+    altura: lida.altura,
+    animada: lida.animada,
+  };
+}
+
+/** Um número do recorte como o `.wasm` o lê: inteiro, sem sinal. */
+function inteiroDoRecorte(valor) {
+  const numero = Math.trunc(Number(valor));
+  return Number.isFinite(numero) && numero > 0 ? Math.min(numero, 0xffffffff) : 0;
+}
+
+/**
+ * **A imagem que espera sob a `alca`, recortada e do tamanho em que aparece**
+ * (`reducao::imagem_do_perfil_recortada`: o pedaço, e depois o teto de sempre
+ * — a capa em até 1280 × 720, a foto em até 512). `Mudou` para a alça de uma
+ * imagem que já saiu.
+ */
+async function recortarAImagemQueEspera(lado, alca, recorte) {
+  const inteira = tirarAImagemARecortar(alca);
+  if (!inteira) throw "Mudou";
+  const pedaco = {
+    x: inteiroDoRecorte(recorte?.x),
+    y: inteiroDoRecorte(recorte?.y),
+    largura: inteiroDoRecorte(recorte?.largura),
+    altura: inteiroDoRecorte(recorte?.altura),
+  };
+  const recortada = (await regraDoPadrao()).recortar(lado === "Capa", pedaco, inteira);
+  if (recortada.falha) throw recortada.falha;
+  return recortada.bytes;
+}
+
+/**
+ * `enviar_imagem_do_perfil`: a imagem que espera sob a `alca`, recortada, e a
+ * subida. A foto nova também vira o ícone nativo (`perfil_icone` →
+ * `minha_imagem`), para quem ainda usa a 0.18 ver o mesmo rosto — como o
+ * desktop.
+ */
+async function enviarAImagemDoPerfil(lado, alca, recorte) {
+  // A sessão do pedido só vale na parte síncrona do atendimento.
+  const sessao = sessaoDaPonte.atual;
+  if (!sessao) throw "NotConnected";
+  // **Sobe o pedaço escolhido, do tamanho em que aparece**, e não o arquivo:
+  // quem recebe uma capa em 4K paga por ela, e os clientes de antes desta
+  // regra não a reduzem ao mostrar.
+  const bytes = await recortarAImagemQueEspera(lado, alca, recorte);
   const montado = sessao.perfil.enviar(lado, bytes);
   if (montado.falha) throw montado.falha;
   await transferirAImagemDoPerfil(sessao, montado.pedido, bytes, "");
@@ -2311,7 +2387,7 @@ async function enviarAImagemDoPerfil(lado) {
       console.warn("ponte: a foto do perfil subiu, mas não virou um ícone nativo: os clientes 0.18 seguem vendo o de antes");
     }
   }
-  return { escolheu: true, icone_nativo: iconeNativo };
+  return { icone_nativo: iconeNativo };
 }
 
 // ------------------------------------------------------- o perfil padrão
@@ -2402,6 +2478,30 @@ async function regraDoPadrao() {
     /** A imagem reduzida ao lugar em que aparece (a mesma conta do desktop), sem sessão. */
     paraAJanela(capa, bytes) {
       const codigo = com(bytes, (p, n) => w.perfil_para_a_janela(capa ? 1 : 0, p, n));
+      return codigo === 0
+        ? { bytes: memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()) }
+        : { falha: JSON.parse(saida()) };
+    },
+    /**
+     * A prévia do passo de recorte (a mesma do desktop, `recorte.rs`): as
+     * medidas da imagem inteira, se é animação, e os bytes da prévia.
+     */
+    previaDoRecorte(bytes) {
+      const codigo = com(bytes, (p, n) => w.perfil_previa_do_recorte(p, n));
+      if (codigo !== 0) return { falha: JSON.parse(saida()) };
+      const tudo = memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len());
+      const cabeca = new DataView(tudo.buffer, 0, 9);
+      return {
+        largura: cabeca.getUint32(0, true),
+        altura: cabeca.getUint32(4, true),
+        animada: cabeca.getUint8(8) !== 0,
+        previa: tudo.subarray(9),
+      };
+    },
+    /** A imagem recortada e dentro do teto do lado (a mesma conta do desktop), sem sessão. */
+    recortar(capa, recorte, bytes) {
+      const codigo = com(bytes, (p, n) =>
+        w.perfil_recortar(capa ? 1 : 0, recorte.x, recorte.y, recorte.largura, recorte.altura, p, n));
       return codigo === 0
         ? { bytes: memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()) }
         : { falha: JSON.parse(saida()) };
@@ -2514,38 +2614,27 @@ async function trocarAImagemDoPadrao(lado, imagem, bytes) {
 }
 
 /**
- * `escolher_imagem_do_perfil_padrao`: o seletor dentro do gesto, a conferência
- * do servidor (até 10 MiB, o tipo pelos bytes, o HEIC nomeado), e a imagem
- * guardada pelo hash. A foto também vira o retrato desta origem (o ícone
- * nativo que sobe em cada entrada), como no desktop.
+ * `guardar_imagem_do_perfil_padrao`: a imagem que espera sob a `alca`,
+ * recortada, conferida pela regra do servidor e guardada pelo hash. A foto
+ * também vira o retrato desta origem (o ícone nativo que sobe em cada
+ * entrada), como no desktop — feito do pedaço escolhido, e não do arquivo.
  */
-async function escolherAImagemDoPadrao(lado) {
-  const arquivo = await escolherUmaImagem();
-  if (!arquivo) return { escolheu: false };
-  if (arquivo.size > 10 * 1024 * 1024) throw { ImagemGrandeDemais: { limite_bytes: 10 * 1024 * 1024 } };
-  let bytes;
-  try {
-    bytes = new Uint8Array(await arquivo.arrayBuffer());
-  } catch {
-    throw "ArquivoIlegivel";
-  }
-  const original = (await regraDoPadrao()).conferir(bytes);
-  if (original.falha) throw original.falha;
+async function guardarAImagemDoPadrao(lado, alca, recorte) {
   // **Guardada do tamanho em que aparece.** O que fica guardado é o que sobe
   // a cada servidor, e o hash dele é o que diz se o servidor já tem esta
   // imagem: reduzir só na hora de enviar faria os dois nunca baterem.
-  bytes = await reduzirAImagemDoPerfil(lado, bytes);
+  const bytes = await recortarAImagemQueEspera(lado, alca, recorte);
   const conferido = (await regraDoPadrao()).conferir(bytes);
   if (conferido.falha) throw conferido.falha;
   const imagem = { hash: await hashDaImagemDoPadrao(bytes), tipo: conferido.tipo, bytes: bytes.length };
   await trocarAImagemDoPadrao(lado, imagem, bytes);
   if (lado === "Foto") {
-    const png = await encolherAImagem(arquivo);
+    const png = await encolherAImagem(new Blob([bytes], { type: tipoDaImagemDoPerfil(bytes) }));
     if (!png || !gravarNaOrigem(CHAVES_DA_ORIGEM.retrato, dataUriDoPng(png))) {
       console.warn("ponte: a foto do perfil padrão foi guardada, mas o retrato desta origem não");
     }
   }
-  return { escolheu: true };
+  return null;
 }
 
 /** O registro de um servidor (pela impressão); sem registro, não segue. */
@@ -3214,14 +3303,19 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   perfis: pelaSessao("perfis"),
   gravar_perfil: pelaSessao("gravar_perfil"),
   tirar_imagem_do_perfil: pelaSessao("tirar_imagem_do_perfil"),
-  enviar_imagem_do_perfil: ({ lado } = {}) => enviarAImagemDoPerfil(lado),
+  escolher_imagem_para_recortar: () => escolherAImagemParaRecortar(),
+  esquecer_imagem_a_recortar: ({ alca } = {}) => {
+    tirarAImagemARecortar(alca);
+    return null;
+  },
+  enviar_imagem_do_perfil: ({ lado, alca, recorte } = {}) => enviarAImagemDoPerfil(lado, alca, recorte),
   imagem_do_perfil: (args) => lerAImagemDoPerfil(args ?? {}),
   // **O perfil padrão** (0.19): os mesmos comandos, argumentos e respostas do
   // desktop (`perfil_padrao.rs`). A sessão é pega antes de qualquer espera:
   // a do pedido só vale na parte síncrona do atendimento.
   perfil_padrao: () => perfilPadraoNaOrigem(),
   gravar_perfil_padrao: ({ entrada } = {}) => gravarOPerfilPadraoNaOrigem(entrada),
-  escolher_imagem_do_perfil_padrao: ({ lado } = {}) => escolherAImagemDoPadrao(lado),
+  guardar_imagem_do_perfil_padrao: ({ lado, alca, recorte } = {}) => guardarAImagemDoPadrao(lado, alca, recorte),
   tirar_imagem_do_perfil_padrao: async ({ lado } = {}) => {
     const tinha = Boolean((await padraoGuardado()).foto);
     await trocarAImagemDoPadrao(lado, null, null);
