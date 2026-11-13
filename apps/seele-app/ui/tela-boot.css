@@ -2016,3 +2016,22 @@
 
 /* Caminho local completo no aviso de recuperação, sem sair da janela. */
 #boot-dados-locais { overflow-wrap: anywhere; }
+
+/* **As três colunas em janela média** (1101 a 1500 px, o caso medido foi
+   1280×720): a coluna do meio fica com uns 330 px, e na fileira única o seu
+   código saía cortado («K9P2-CSM7-NBFR-AY…»), o nome do amigo virava «Ana B…» e
+   o código dele ficava com 91 px. Aqui o nome vai em cima do código, o seu
+   código usa o corpo menor, e abaixo de 1340 px as ações descem para uma
+   fileira própria. */
+@media (min-width: 1101px) and (max-width: 1500px) {
+  #tela-boot #boot-codigo-valor { font-size: 15px; letter-spacing: 0.04em; }
+  #tela-boot:not(:has(.inicio-introducao)) .amigo-texto { flex-direction: column; align-items: stretch; gap: 0; }
+  #tela-boot:not(:has(.inicio-introducao)) .amigo-nome { flex: none; width: 100%; max-width: none; }
+  #tela-boot:not(:has(.inicio-introducao)) .amigo-detalhe { flex-direction: column; }
+}
+@media (min-width: 1101px) and (max-width: 1339px) {
+  #tela-boot:not(:has(.inicio-introducao)) #boot-amigos .amigo-cartao {
+    grid-template-columns: 36px minmax(0, 1fr); grid-template-areas: "avatar texto" "acoes acoes";
+  }
+  #tela-boot:not(:has(.inicio-introducao)) .amigo-acoes { justify-content: flex-end; }
+}
