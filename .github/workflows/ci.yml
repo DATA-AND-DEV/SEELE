@@ -331,10 +331,82 @@ jobs:
         if: ${{ !cancelled() && matrix.name == 'linux' }}
         timeout-minutes: 15
         run: cargo test -p seele-enlace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada
-      - name: cargo test -p seele-core (Linux)
+      # O `seele-core` vai aos pedaços: na execução 43391202136 foi durante
+      # ele que o runner parou de responder (nem o prazo de 15 min do passo
+      # chegou a valer). Os pedaços são os módulos maiores da biblioteca, o
+      # resto dela, e cada binário de integração.
+      - name: cargo test -p seele-core · enlace (Linux)
         if: ${{ !cancelled() && matrix.name == 'linux' }}
-        timeout-minutes: 15
-        run: cargo test -p seele-core --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib enlace:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · voice (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib voice:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · encontro (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib encontro:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · programa (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib programa:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · tunel (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib tunel:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · tela (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib tela:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · bomba (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib bomba:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · video (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib video:: -- --skip a_saida_desta_maquina_abre_como_entrada
+      - name: cargo test -p seele-core · o resto da biblioteca (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --lib -- --skip a_saida_desta_maquina_abre_como_entrada --skip enlace:: --skip voice:: --skip encontro:: --skip programa:: --skip tunel:: --skip tela:: --skip bomba:: --skip video::
+      - name: cargo test -p seele-core · a_voz_usa_a_supressao_neural (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test a_voz_usa_a_supressao_neural
+      - name: cargo test -p seele-core · previa_de_tela (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test previa_de_tela
+      - name: cargo test -p seele-core · programa_arquivos (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test programa_arquivos
+      - name: cargo test -p seele-core · programa_copia (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test programa_copia
+      - name: cargo test -p seele-core · programa_https (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test programa_https
+      - name: cargo test -p seele-core · programa_processo (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test programa_processo
+      - name: cargo test -p seele-core · programa_sobras (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test programa_sobras
+      - name: cargo test -p seele-core · teto_do_quadro_de_tela (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --test teto_do_quadro_de_tela
+      - name: cargo test -p seele-core · exemplos e doc (Linux)
+        if: ${{ !cancelled() && matrix.name == 'linux' }}
+        timeout-minutes: 12
+        run: cargo test -p seele-core --doc
       - name: cargo test -p seele-server (Linux)
         if: ${{ !cancelled() && matrix.name == 'linux' }}
         timeout-minutes: 15
