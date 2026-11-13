@@ -61,6 +61,7 @@ import dataclasses
 import functools
 import http.server
 import importlib.util
+import io
 import json
 import pathlib
 import re
@@ -68,6 +69,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 from typing import Callable
 
 from PIL import Image, ImageChops
@@ -214,9 +216,120 @@ def entrar(pg: Page) -> None:
     pg.evaluate("document.getElementById('aviso-fone').hidden = true")
 
 
+# A foto do G3 é a da página parada: tirada de novo até saírem FOTOS_IGUAIS
+# seguidas iguais, pixel a pixel, com ENTRE_FOTOS_MS entre uma e outra, e no
+# máximo por TETO_DA_FOTO_MS.
+#
+# **O que se mediu (12/11/2026, no Chromium, num Mac), e por que três.** A
+# espera fixa de 1,5 s que havia aqui supunha que a barra da janela «assenta
+# depois do `entrar`». Não é isso: uma foto atrás da outra por 5 a 6 s, em 30
+# páginas, mostrou a página num estado quase o tempo todo e, de vez em quando,
+# noutro por 0,05 a 0,54 s — a caixa (1308, 8, 1399, 15), nas bordas do
+# minimizar e do maximizar —, voltando ao primeiro. O outro estado começa e
+# acaba numa grade de meio segundo, a qualquer altura: aos 0,13 s, aos 3,06 s,
+# aos 5,13 s depois do `entrar`. Uma espera fixa de qualquer tamanho cai
+# dentro dele de vez em quando, e foi o que o runner do `ci.yml` pegou
+# (execução 43264412497: «DIFERENTE em (1308, 8, 1399, 15)»). O WebKit não
+# mostrou o segundo estado em 6 páginas. **O que o desenha não foi medido**: a
+# página tem dois temporizadores nessa grade (o relógio da barra, de 1 s, e o
+# `atualizar` da sessão, de 0,5 s), e isso é leitura, não medida.
+#
+# Duas fotos seguidas não bastam: mais juntas que 0,54 s, as duas cabem dentro
+# do mesmo estado passageiro; mais afastadas, cabem em dois. Três, a 0,4 s uma
+# da outra, cobrem 0,8 s: não cabem num estado que dura até 0,54 s, e um que
+# alternasse a cada meio segundo nunca daria três iguais — a foto não assenta,
+# e o G3 diz isso com a frase dele, em vez de culpar os arquivos do celular.
+FOTOS_IGUAIS = 3
+ENTRE_FOTOS_MS = 400
+TETO_DA_FOTO_MS = 20_000
+
+
+def foto_assentada(pg, caminho: pathlib.Path, teto_ms: int = TETO_DA_FOTO_MS, **opcoes) -> tuple[int, float, str | None]:
+    """A foto da página parada, gravada em `caminho`.
+
+    Devolve quantas fotos tirou, quanto levou e, se o teto venceu sem
+    `FOTOS_IGUAIS` seguidas iguais, onde a página mudou por último (`None`
+    quando assentou). A última foto é gravada nos dois casos: é ela que quem lê
+    o artefato vai querer ver.
+    """
+    comeco = time.monotonic()
+    anterior = None
+    iguais = 0
+    fotos = 0
+    mudou_em = None
+    while True:
+        bruta = pg.screenshot(**opcoes)
+        fotos += 1
+        atual = Image.open(io.BytesIO(bruta)).convert("RGB")
+        caixa = None if anterior is None else ImageChops.difference(anterior, atual).getbbox()
+        if caixa is not None:
+            mudou_em = f"{caixa}, na foto {fotos}"
+        iguais = 1 if anterior is None or caixa is not None else iguais + 1
+        levou = time.monotonic() - comeco
+        if iguais >= FOTOS_IGUAIS:
+            caminho.write_bytes(bruta)
+            return fotos, levou, None
+        if levou * 1000 >= teto_ms:
+            caminho.write_bytes(bruta)
+            return fotos, levou, mudou_em or "em nenhuma foto, e o teto venceu antes da terceira"
+        anterior = atual
+        pg.wait_for_timeout(ENTRE_FOTOS_MS)
+
+
+class _PaginaDeMentira:
+    """Uma página que só sabe tirar foto: um ponto da cor de cada letra do roteiro,
+    na ordem, e a última para sempre. Para `conferir_a_foto_assentada`."""
+
+    CORES = {"A": (10, 10, 10), "B": (14, 10, 10)}
+
+    def __init__(self, roteiro: str, repete: bool = False):
+        self.roteiro, self.repete, self.tiradas = roteiro, repete, 0
+
+    def screenshot(self, **_opcoes) -> bytes:
+        ultima = len(self.roteiro) - 1
+        letra = self.roteiro[self.tiradas % len(self.roteiro) if self.repete else min(self.tiradas, ultima)]
+        self.tiradas += 1
+        saida = io.BytesIO()
+        Image.new("RGB", (4, 4), self.CORES[letra]).save(saida, format="PNG")
+        return saida.getvalue()
+
+    def wait_for_timeout(self, _ms: int) -> None:
+        """Não espera: o roteiro anda por foto, e não por relógio."""
+
+
+def conferir_a_foto_assentada(temporaria: pathlib.Path) -> list[str]:
+    """A `foto_assentada` contra uma página de mentira, antes de o G3 confiar nela.
+
+    O estado passageiro que se mediu na página de verdade (ver `FOTOS_IGUAIS`)
+    não aparece em toda rodada, e nesta máquina a espera fixa de antes passou
+    16 vezes em 16: sem isto, voltar a uma foto só, ou a duas, não reprovaria
+    nada aqui. O roteiro é o que se mediu: o estado de sempre (A), o
+    passageiro por duas fotos (B), e o de sempre de novo.
+    """
+    falhas = []
+    temporaria.mkdir(parents=True, exist_ok=True)
+    foto = temporaria / "foto-assentada.png"
+
+    pagina = _PaginaDeMentira("ABBAAA")
+    tiradas, _levou, mudou = foto_assentada(pagina, foto)
+    cor = Image.open(foto).convert("RGB").getpixel((0, 0))
+    if mudou is not None or cor != _PaginaDeMentira.CORES["A"] or tiradas != 6:
+        falhas.append(
+            f"G3: a foto assentada parou no estado passageiro: de A, B, B, A, A, A ela devolveu {cor} "
+            f"na foto {tiradas} (mudou: {mudou}), e o certo é o A da sexta, a terceira igual seguida")
+
+    pagina = _PaginaDeMentira("AB", repete=True)
+    tiradas, _levou, mudou = foto_assentada(pagina, foto, teto_ms=30)
+    if mudou is None:
+        falhas.append(
+            f"G3: a foto assentada deu por parada uma página que alterna a cada foto ({tiradas} fotos): "
+            "o teto tem de vencer, e o G3 tem de dizer que a página não parou")
+    return falhas
+
+
 def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
     """O desktop igual pixel a pixel com os arquivos das cascas do navegador."""
-    falhas = []
+    falhas = conferir_a_foto_assentada(temporaria / "foto-assentada")
     for motor in (p.chromium, p.webkit):
         navegador = motor.launch()
         fotos = {}
@@ -228,16 +341,25 @@ def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
             pg.goto(f"file://{pagina}")
             entrar(pg)
-            # **A barra da janela ainda assenta depois do `entrar`.** Medido em
-            # 31/10, no Chromium: sem esta espera, duas fotos em cinco diferiam
-            # em 33 pixels de 1 a 4 níveis nas bordas do minimizar e do
-            # maximizar (1308–1399 × 8–15), igual na base `d79ef846` e com as
-            # duas cópias idênticas; com 1,5 s a mais, oito em oito iguais. A
-            # comparação continua pixel a pixel, e sem máscara nova.
-            pg.wait_for_timeout(1500)
+            # **A foto é a da página parada** (`foto_assentada`, e o que se
+            # mediu está ao lado dela). Em 31/10 havia aqui uma espera fixa de
+            # 1,5 s: sem ela, duas fotos em cinco diferiam em 33 pixels de 1 a
+            # 4 níveis nas bordas do minimizar e do maximizar (1308–1399 ×
+            # 8–15), igual na base `d79ef846` e com as duas cópias idênticas, e
+            # com ela oito em oito saíram iguais. No runner do `ci.yml` não
+            # bastou. A comparação continua pixel a pixel, e sem máscara nova.
             fotos[nome] = saida / f"g3-{nome}-{motor.name}.png"
-            pg.screenshot(path=fotos[nome], animations="disabled",
-                          mask=[pg.locator("#barra-relogio"), pg.locator("#tel-uptime")])
+            tiradas, levou, ainda_difere = foto_assentada(
+                pg, fotos[nome], animations="disabled",
+                mask=[pg.locator("#barra-relogio"), pg.locator("#tel-uptime")])
+            print(f"G3 ({motor.name}, {nome}): a foto",
+                  f"assentou em {tiradas} fotos, {levou:.1f} s" if ainda_difere is None
+                  else f"NÃO assentou em {tiradas} fotos, {levou:.1f} s")
+            if ainda_difere is not None:
+                falhas.append(
+                    f"G3 ({motor.name}, {nome}): a página não parou em {TETO_DA_FOTO_MS // 1000} s "
+                    f"({tiradas} fotos sem {FOTOS_IGUAIS} seguidas iguais; a última mudança foi em "
+                    f"{ainda_difere}): a comparação abaixo é de uma página que ainda muda")
             if celular and pg.evaluate("typeof CELULAR !== 'undefined'"):
                 falhas.append(f"G3 ({motor.name}): sem a marca, um script do celular rodou e deixou CELULAR")
             if erros:
@@ -2760,7 +2882,8 @@ def ajustes_medida(pg: Page) -> list[str]:
 # CONEXÃO saiu na 0.18 (`5dfe9c59`, com a telemetria da CHAMADA), e CARGOS E
 # PERMISSÕES entrou (a camada da 0.17, E6, que a 0.18 pôs na lista).
 ORDEM_DE_AJUSTES = ["ÁUDIO", "APARÊNCIA", "ESTE SERVIDOR", "MODS DESTE SERVIDOR", "IDENTIDADE",
-                    "O QUE O CELULAR NÃO FAZ", "COMO ESTA PÁGINA ABRE", "CARGOS E PERMISSÕES", "SOBRE", "SAIR DO SERVIDOR"]
+                    "O QUE O CELULAR NÃO FAZ", "PÔR NA TELA INICIAL", "COMO ESTA PÁGINA ABRE", "CARGOS E PERMISSÕES",
+                    "SOBRE", "SAIR DO SERVIDOR"]
 
 
 def aba_ajustes(pg: Page) -> list[str]:
@@ -2842,8 +2965,16 @@ def aba_ajustes(pg: Page) -> list[str]:
 # `celular-texto.css` repete o tamanho, mais os tetos escritos à mão.
 TEXTO_COM_TETO = {
     ".cel-abas": "as abas têm teto de 13 px, como a barra de abas do iOS (spec, §5)",
-    ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar":
+    # O avatar da lista de PESSOAS entrou em 12/11/2026: na caixa de 44 px dele,
+    # a 2, o «DA» passava da caixa no Chromium do Linux (46 > 44). O teto é o do
+    # `celular-sessao.css`, escrito à mão, de 17 a 22 px.
+    ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar, #lista-roster .pessoa-avatar":
         "as iniciais numa caixa de tamanho fixo são marcas, e não texto de ler",
+    # O retrato de SEU PERFIL e o avatar da folha: o teto é o do
+    # `celular-sessao.css` e do `celular-folhas.css`, de 22 a 26 e a 28 px, e o
+    # `INICIAIS_NA_CAIXA` mede que a letra cabe.
+    ".cel-perfil-retrato, .cel-folha-avatar":
+        "as iniciais de SEU PERFIL e da folha, na caixa de 52 e de 56 px",
     ".barra, .sync-marca, .chamada-cartao-barra, .chamada-cartao-marca":
         "a barra do sinal é desenho; o número e a palavra ao lado crescem",
 }
@@ -2888,6 +3019,36 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
     return { nos: nos.length, parados, porque };
 }"""
 
+
+# As iniciais de SEU PERFIL e da folha cabem na caixa delas, com o texto do
+# sistema a 2. A caixa é fixa (52 e 56 px) e a letra crescia sem teto: a 2, o
+# «R» de 44 px media 54 px de alto na caixa de 52, e duas letras 58,9 px de
+# largo na de 56 (medido a 390, 360 e 1280). O `transborda` do `MEDIR` não vê:
+# a caixa é uma grade que centra, e o que sobra sai pelos dois lados.
+#
+# Nenhum script cria hoje o `.cel-folha-avatar` (só a regra existe); a medida
+# põe um, com duas letras, ao lado do retrato, e o tira.
+INICIAIS_NA_CAIXA = """() => {
+    const retrato = document.querySelector('.cel-perfil-retrato');
+    if (!retrato || !retrato.checkVisibility()) return ['o retrato de SEU PERFIL não está à vista'];
+    const daFolha = document.createElement('span');
+    daFolha.className = 'cel-folha-avatar';
+    daFolha.textContent = 'RA';
+    retrato.parentElement.append(daFolha);
+    const medir = (nome, e) => {
+        const caixa = e.getBoundingClientRect();
+        const faixa = document.createRange();
+        faixa.selectNodeContents(e);
+        const tinta = faixa.getBoundingClientRect();
+        if (!tinta.width) return [`${nome}: sem letra, e a medida não mediu nada`];
+        return tinta.width <= caixa.width + 0.5 && tinta.height <= caixa.height + 0.5 ? []
+            : [`${nome}: a letra de ${getComputedStyle(e).fontSize} mede ${tinta.width.toFixed(1)} × ${tinta.height.toFixed(1)} px`
+               + ` na caixa de ${caixa.width} × ${caixa.height} px`];
+    };
+    const vistos = [...medir('.cel-perfil-retrato', retrato), ...medir('.cel-folha-avatar', daFolha)];
+    daFolha.remove();
+    return vistos;
+}"""
 
 # A 1, o celular-texto.css não muda nada: com ele ligado e desligado, todo nó da
 # página tem o mesmo tamanho de letra. O arquivo só declara tamanho de letra,
@@ -2938,9 +3099,12 @@ def texto_maior(pg: Page) -> list[str]:
         pg.evaluate("document.documentElement.style.setProperty('--cel-escala', '2')")
         pg.wait_for_timeout(100)
         m = pg.evaluate(MEDIR, [0, 0, "#tela-sessao, #tela-server"])
+        iniciais = pg.evaluate(INICIAIS_NA_CAIXA) if estado == "a lista de AJUSTES" else []
         pg.evaluate("document.documentElement.style.removeProperty('--cel-escala')")
         if m["vaza"] or m["larguraDoDocumento"] > pg.evaluate("innerWidth"):
             falhas.append(f"{estado}: a 2, rola de lado: {m['vaza']} (documento com {m['larguraDoDocumento']} px)")
+        for passa in iniciais:
+            falhas.append(f"{estado}: a 2, as iniciais passam da caixa: {passa}")
         if m["transborda"]:
             falhas.append(f"{estado}: a 2, texto passa da caixa: {m['transborda']}")
 

@@ -51,6 +51,38 @@ impl<T: Copy + Ord + std::ops::Add<Duration, Output = T>> Relogio for T {}
 /// depois da página inteira que o `FetchHistory` logo antes dele pediu.
 pub const MARCA_DO_PING_DO_BURACO: u64 = 1 << 62;
 
+/// A marca do `Ping` que fecha a página mais nova de um canal recém-aberto: o
+/// bit 61, com o número do canal nos 32 bits de baixo.
+///
+/// **Disjunta das outras três**, pelo mesmo raciocínio de
+/// [`MARCA_DO_PING_DO_BURACO`]: o `Ping` de rotina nunca chega a 2^61, o de
+/// entrada usa o bit 63 e o do buraco o 62 — e [`canal_do_carimbo_do_historico`]
+/// exige os dois de cima apagados. Quem lê é [`Room::apply`], que deixa de
+/// tratar o que chega naquele canal como histórico
+/// ([`Room::esperar_historico`]).
+pub const MARCA_DO_PING_DO_HISTORICO: u64 = 1 << 61;
+
+/// O carimbo do `Ping` que segue o `FetchHistory` da página mais nova de
+/// `canal`.
+#[must_use]
+pub const fn carimbo_do_historico(canal: ChannelId) -> u64 {
+    MARCA_DO_PING_DO_HISTORICO | canal.0 as u64
+}
+
+/// O canal cuja página este carimbo de `Pong` fecha, se ele é uma cerca de
+/// histórico.
+#[must_use]
+pub const fn canal_do_carimbo_do_historico(carimbo: u64) -> Option<ChannelId> {
+    if carimbo >> 61 != 1 {
+        return None;
+    }
+    let canal = carimbo & !MARCA_DO_PING_DO_HISTORICO;
+    if canal > u32::MAX as u64 {
+        return None;
+    }
+    Some(ChannelId(canal as u32))
+}
+
 /// Quantas páginas o buraco pede, no máximo: 2 000 mensagens.
 ///
 /// Um teto e não «até fechar»: uma queda de cinco minutos num canal muito
@@ -482,6 +514,8 @@ pub enum Repetir {
         canal: ChannelId,
         /// O corpo, como foi escrito.
         corpo: String,
+        /// A mensagem a que ela responde, como foi anotada no primeiro envio.
+        responde_a: Option<MessageId>,
         /// A chave de idempotência de sempre.
         chave: ClientMessageId,
     },
@@ -507,7 +541,7 @@ pub fn repetir(room: &mut Room, chave: ClientMessageId, agora_em_segundos: i64) 
     ) {
         return Repetir::Nada;
     }
-    let (canal, corpo) = (pendente.channel, pendente.body.clone());
+    let (canal, corpo, responde_a) = (pendente.channel, pendente.body.clone(), pendente.replies_to);
     if let Some(recusa) = grande_demais(&corpo) {
         room.recusar_envio(chave, recusa);
         return Repetir::Recusada;
@@ -516,6 +550,7 @@ pub fn repetir(room: &mut Room, chave: ClientMessageId, agora_em_segundos: i64) 
     Repetir::Mandar {
         canal,
         corpo,
+        responde_a,
         chave,
     }
 }

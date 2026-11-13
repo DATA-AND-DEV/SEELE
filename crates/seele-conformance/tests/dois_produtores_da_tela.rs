@@ -56,6 +56,7 @@ fn a_tela_sai_nos_eventos_do_desktop() {
             screen: 9,
             width: 1920,
             height: 1080,
+            source: seele_ffi::ScreenKind::Window,
         },
         Event::ScreenFrame {
             screen: 9,
@@ -100,4 +101,48 @@ fn a_tela_sai_nos_eventos_do_desktop() {
             .keys()
             .collect::<Vec<_>>()
     );
+}
+
+/// **O tipo da transmissão atravessa com o mesmo nome nos dois produtores**:
+/// a câmera, a tela e a janela. O navegador escreve o nome à mão
+/// (`seele_web::tela::nome_da_fonte`) e o desktop o serializa do
+/// `seele_ffi::ScreenKind`; se um dos dois mudar sozinho, a casca rotula a
+/// câmera de um como a tela do outro.
+#[test]
+fn a_fonte_da_transmissao_tem_o_mesmo_nome_nos_dois_produtores() {
+    for (fonte, do_desktop) in [
+        (ScreenSource::Monitor, seele_ffi::ScreenKind::Monitor),
+        (ScreenSource::Window, seele_ffi::ScreenKind::Window),
+        (ScreenSource::Camera, seele_ffi::ScreenKind::Camera),
+    ] {
+        let mut abertura = [0_u8; SCREEN_HEADER_LEN];
+        ScreenHeader {
+            version: 1,
+            screen: ScreenId(4),
+            source: fonte,
+            codec: ScreenCodec::H264Baseline,
+            width: 1280,
+            height: 720,
+        }
+        .encode(&mut abertura)
+        .unwrap();
+        let mut fluxo = vec![StreamType::Screen.byte()];
+        fluxo.extend(abertura);
+        let do_navegador = FluxoQueChega::novo()
+            .chegou(&fluxo)
+            .iter()
+            .find_map(evento)
+            .expect("a abertura não virou evento");
+        assert_eq!(
+            do_navegador,
+            serde_json::to_value(Event::ScreenOpened {
+                screen: 4,
+                width: 1280,
+                height: 720,
+                source: do_desktop,
+            })
+            .unwrap(),
+            "a fonte {fonte:?} sai com nomes diferentes no navegador e no desktop"
+        );
+    }
 }

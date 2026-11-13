@@ -271,8 +271,66 @@ fn ninguem_na_porta(porta: u16) -> Result<()> {
     Ok(())
 }
 
+/// Quantas portas do sistema [`pilha_dupla`] experimenta antes de desistir.
+///
+/// Cada volta só se repete quando alguém tomou a porta entre a sonda que a
+/// escolheu e o `bind` do socket duplo, uma janela de microssegundos. Oito
+/// seguidas é uma máquina que não tem porta livre, e isso é dito como porta
+/// em uso.
+const TENTATIVAS_DE_PORTA_DO_SISTEMA: usize = 8;
+
+/// Uma porta que o sistema diz estar livre **em IPv4**, para a porta zero de
+/// [`pilha_dupla`]: liga `0.0.0.0:0`, lê a porta e solta. `None` numa máquina
+/// sem IPv4.
+fn porta_livre_no_ipv4() -> Option<u16> {
+    let sonda = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).ok()?;
+    sonda.local_addr().ok().map(|local| local.port())
+}
+
 /// Um socket IPv6 que atende IPv4 junto, ou um erro dizendo por que não.
+///
+/// # A porta zero
+///
+/// «O sistema escolhe» não pode ir direto ao `bind` do socket duplo. **Medido
+/// no macOS em 13/11/2026**: com 4000 sockets UDP presos em `0.0.0.0` (ou em
+/// `127.0.0.1`) em portas do sistema, 739 de 3000 `bind`s de `[::]:0` em pilha
+/// dupla receberam uma porta que um deles já tinha, 4000/16384 — o sistema
+/// escolhe a porta de um socket IPv6 olhando só o IPv6. O servidor subia
+/// «atendendo as duas famílias» numa porta cujo IPv4 era de outro, e ninguém
+/// dizia: a porta zero pulava a sonda de [`ninguem_na_porta`], que é quem vê
+/// esse ocupante. Só aparecia depois, em quem hospedava de novo na mesma
+/// porta e lia «a porta já está em uso (0.0.0.0:…)» de uma porta que tinha
+/// acabado de soltar (`hospedar_ejetar_e_hospedar_de_novo_libera_a_porta`,
+/// no CI do macOS).
+///
+/// Então a porta sai de uma sonda IPv4, e segue o caminho de uma porta
+/// nomeada: as duas sondas, e o `bind`. Quem a tomar nesse meio é visto pela
+/// sonda, e a volta seguinte pede outra.
 fn pilha_dupla(escuta: SocketAddr) -> Result<UdpSocket> {
+    if escuta.port() != 0 {
+        return pilha_dupla_na(escuta);
+    }
+    let mut ocupada = None;
+    for _ in 0..TENTATIVAS_DE_PORTA_DO_SISTEMA {
+        // Sem IPv4 não há ocupante IPv4 a evitar, e a porta zero vai ao
+        // sistema como sempre foi.
+        let Some(porta) = porta_livre_no_ipv4() else {
+            return pilha_dupla_na(escuta);
+        };
+        match pilha_dupla_na(SocketAddr::new(escuta.ip(), porta)) {
+            Err(erro) if porta_em_uso(&erro) => ocupada = Some(erro),
+            resultado => return resultado,
+        }
+    }
+    match ocupada {
+        Some(erro) => Err(erro.context("o sistema não deu uma porta livre nas duas famílias")),
+        None => pilha_dupla_na(escuta),
+    }
+}
+
+/// O socket duplo em `escuta`, com a porta já decidida (ou zero, quando não
+/// há IPv4 em que conferi-la).
+fn pilha_dupla_na(escuta: SocketAddr) -> Result<UdpSocket> {
     use socket2::{Domain, Protocol, Socket, Type};
 
     ninguem_na_porta(escuta.port())?;
@@ -2698,6 +2756,57 @@ mod testes {
             erro.contains(&porta.to_string()),
             "o erro não diz qual porta colidiu: {erro}"
         );
+    }
+
+    /// **A porta que o sistema escolhe é livre nas duas famílias.**
+    ///
+    /// O defeito: `[::]:0` em pilha dupla ia direto ao sistema, e o macOS
+    /// escolhe a porta de um socket IPv6 sem olhar quem a tem em IPv4 (a
+    /// medida está em [`pilha_dupla`]). O servidor subia numa porta cujo IPv4
+    /// era de outro socket.
+    ///
+    /// A prova prende 150 portas do sistema em `0.0.0.0` e pede a porta zero
+    /// 4000 vezes. Sem o conserto, cada pedido cai numa das presas com
+    /// 150/16384 de chance, umas 36 vezes em 4000; com ele, nunca, porque a
+    /// sonda IPv4 não liga numa porta presa. **Os dentes são do macOS**: o
+    /// Linux já confere as duas famílias ao escolher, e lá o teste passa com
+    /// e sem o conserto.
+    #[test]
+    fn a_porta_que_o_sistema_escolhe_nao_e_a_de_outro_no_ipv4() {
+        let presas: Vec<UdpSocket> = (0..150)
+            .filter_map(|_| UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).ok())
+            .collect();
+        let portas: std::collections::BTreeSet<u16> = presas
+            .iter()
+            .filter_map(|socket| socket.local_addr().ok())
+            .map(|local| local.port())
+            .collect();
+        if portas.len() < 100 {
+            eprintln!(
+                "pulado: esta máquina só deixou prender {} portas IPv4",
+                portas.len()
+            );
+            return;
+        }
+        for volta in 0..4000 {
+            let Ok((socket, pilha)) = abrir_escuta(qualquer_porta_v6()) else {
+                eprintln!("pulado: esta máquina não liga em nenhuma porta UDP");
+                return;
+            };
+            if pilha != Pilha::Dupla {
+                eprintln!("pulado: esta máquina não faz pilha dupla, e caiu para {pilha:?}");
+                return;
+            }
+            let porta = socket
+                .local_addr()
+                .expect("o socket não diz onde ligou")
+                .port();
+            assert!(
+                !portas.contains(&porta),
+                "na volta {volta}, o servidor subiu em pilha dupla na porta {porta}, que outro \
+                 socket já tinha em IPv4"
+            );
+        }
     }
 
     /// O IPv6 global que o roteador **disse** ter liberado, no formato em que

@@ -191,7 +191,25 @@ use thiserror::Error;
 /// é `vocabulario::desde` (servidor) e `desde_do_cliente` (cliente): um par 11
 /// nunca recebe um `Perfis`, que desalinharia o fluxo de controle dele. Ele
 /// continua vendo apelido e ícone nativo.
-pub const PROTOCOL_VERSION: u8 = 12;
+///
+/// **13 desde 10/11/2026: a mesa mínima de texto da 1.0.**
+///
+/// A 12 **está publicada** (v0.19.6, commit `f7ea590e9`, conferido no release
+/// em 10/11), então nada pôde pegar carona nela. Entram três verbos do cliente
+/// — `EditMessage` (editar a própria mensagem), `UnbanPerson` e `ListBans` — e
+/// uma resposta do servidor, `Banidos` (a lista de banimentos que valem, em
+/// partes). Tudo variante nova no fim das listas (ADR 0058).
+///
+/// O que **não** precisou de número: a edição chega a quem lê pelo
+/// `MessageEdited`, que é do 9, e o histórico marca a editada mandando esse
+/// mesmo `MessageEdited` atrás da página — um par 12 também o lê. Responder
+/// (`replies_to`) já estava no `SendMessage`.
+///
+/// **Um par 12 continua entrando** e não recebe o `Banidos`
+/// ([`crate::vocabulario::desde`]); um cliente 13 diante de um servidor 12 não
+/// escreve os três verbos ([`crate::vocabulario::desde_do_cliente`]), e a
+/// casca recebe um erro com nome em vez de silêncio.
+pub const PROTOCOL_VERSION: u8 = 13;
 
 /// O primeiro número da linha 1. **Congelado** (ADR 0058), e desde a linha 2 o
 /// único número dela: a linha 1 não recebe versão nova (ADR 0063).
@@ -488,7 +506,7 @@ mod tests {
     /// `assert!` abaixo.
     #[test]
     fn a_linha_dois_fala_dez_e_onze_e_a_0_16_fica_de_fora() {
-        assert_eq!(PROTOCOL_VERSION, 12);
+        assert_eq!(PROTOCOL_VERSION, 13);
         assert_eq!(VERSAO_MINIMA, 10);
         assert!(
             confere_o_carimbo(8).is_err(),
@@ -640,7 +658,7 @@ mod tests {
     /// anúncio de MODs —, e de que o anúncio continua alcançado pela global.
     #[test]
     fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
-        assert_eq!(PROTOCOL_VERSION, 12);
+        assert_eq!(PROTOCOL_VERSION, 13);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
             5,

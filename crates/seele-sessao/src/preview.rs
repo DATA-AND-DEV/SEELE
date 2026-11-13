@@ -81,10 +81,14 @@ pub use seele_proto::imagem::{sniff, ImageFormat, SNIFF_LEN};
 /// screenshot a laptop takes, which is what a preview is for.
 ///
 /// What it bounds and what it does not, said rather than assumed: it bounds the
-/// download and the bytes held in the window. It does **not** bound the decoded
-/// pixels — that would need each format's header read for its dimensions, which
-/// is four more parsers and is not built. The drawn size is capped in CSS; the
-/// decode is not.
+/// download and the bytes fetched. It does **not** bound the decoded pixels —
+/// a 4 MiB PNG can declare 30 000 × 30 000. That is the other ceiling, and it
+/// is `reducao::previa_na_janela` (behind the `reducao` feature, which brings
+/// the header parsers): both producers of a preview pass the bytes through it
+/// before a `data:` URI is written, so a picture reaches the window reduced
+/// to where it is drawn, and one that declares too many pixels is refused by
+/// name. Until 11/11/2026 the drawn size was capped in CSS and the decode was
+/// not.
 pub const PREVIEW_LIMIT: u64 = 4 * 1024 * 1024;
 
 /// What a sender's declared type claims the file is.

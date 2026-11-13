@@ -52,6 +52,7 @@ mod icone;
 mod ligar;
 mod maquina;
 mod mods;
+mod notificacao;
 mod perfil_padrao;
 // A redução de imagem de MOD mora no `seele-sessao` desde a Tarefa 2.6 da F4.
 use seele_ffi::reducao;
@@ -64,6 +65,7 @@ mod audio_de_mentira;
 mod escolhas_de_mods;
 // As sessões cliente, todas iguais, e o foco de voz da máquina (E3 da 0.17).
 mod sessoes;
+mod tecla_global;
 mod toque;
 // O cenário da multi-sessão contra servidores de verdade (E3 da 0.17).
 #[cfg(test)]
@@ -104,8 +106,6 @@ const CANAL_DE_ATUALIZACAO: &str = "seele://atualizacao";
 /// Everything the commands share.
 #[derive(Default)]
 struct Session {
-    /// Chamada direta da WebView, por id; saída velha não libera a seguinte.
-    pessoal_web: Mutex<Option<String>>,
     /// Com que intenção este processo foi aberto, se com alguma.
     ///
     /// É por onde o launcher fala com a versão que ele abriu: `--hospedar`, e
@@ -1098,27 +1098,30 @@ fn motivo_da_trilha(event: &Event, reconectou: bool) -> Option<&'static str> {
     }
 }
 
-#[cfg(test)]
-mod o_motivo_da_trilha {
-    use super::{motivo_da_trilha, Event};
-
-    #[test]
-    fn os_cargos_marcam_a_placa_e_a_telemetria_so_na_volta() {
-        assert_eq!(
-            motivo_da_trilha(&Event::CargosChanged { marca: 3 }, false),
-            Some("cargos")
-        );
-        assert_eq!(
-            motivo_da_trilha(&Event::MessagesChanged, false),
-            Some("mensagens")
-        );
-        assert_eq!(motivo_da_trilha(&Event::TelemetryChanged, false), None);
-        assert_eq!(
-            motivo_da_trilha(&Event::TelemetryChanged, true),
-            Some("enlace")
-        );
-    }
+/// Os eventos depois dos quais «estou numa sala de voz» pode ter mudado.
+///
+/// Os que não entram são os de alta frequência que não dizem nada de sala
+/// (telemetria, quadros de tela, mensagens): um aviso por quadro acordaria a
+/// conferida sessenta vezes por segundo. A rede de segurança
+/// (`tecla_global::REDE_DE_SEGURANCA`) cobre o que esta lista esquecer.
+fn muda_a_sala_da_tecla_global(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::RosterChanged
+            | Event::ChannelsChanged
+            | Event::Ended { .. }
+            | Event::CaiuComMotivo { .. }
+            | Event::ConnectStageChanged { .. }
+    )
 }
+
+#[path = "testes/os_eventos_que_avisam_a_tecla_global.rs"]
+#[cfg(test)]
+mod os_eventos_que_avisam_a_tecla_global;
+
+#[path = "testes/o_motivo_da_trilha.rs"]
+#[cfg(test)]
+mod o_motivo_da_trilha;
 
 /// Emite o sinal da trilha. Uma janela fechada não é motivo de log.
 fn avisar_a_trilha<R: tauri::Runtime>(app: &AppHandle<R>, sessao: u64, motivo: &'static str) {
@@ -1222,6 +1225,11 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
         // A failed emit means the window is gone, which is not worth a log channel
         // per event during shutdown.
         let _ = self.app.emit(EVENT_CHANNEL, carga);
+        // Entrar e sair de sala, cair, ser movido: a tecla de fora da janela
+        // só vale em sala. Só avisa; quem confere é outra thread.
+        if muda_a_sala_da_tecla_global(&event) {
+            tecla_global::avisar(&self.app);
+        }
         // O sinal da trilha, para o que a placa de uma sessão mostra.
         if matches!(event, Event::MessagesChanged) && !na_vista {
             self.marcas.mudou.store(true, Ordering::Release);
@@ -1255,52 +1263,9 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
     }
 }
 
+#[path = "testes/a_etapa_leva_a_tentativa.rs"]
 #[cfg(test)]
-mod a_etapa_leva_a_tentativa {
-    use super::carga_do_evento;
-    use seele_ffi::{ConnectStage, Event};
-
-    fn etapa() -> Event {
-        Event::ConnectStageChanged {
-            stage: ConnectStage::Parada {
-                candidatos: 2,
-                com_bilhete_e_impressao: false,
-            },
-        }
-    }
-
-    /// **A etapa leva a tentativa da janela, e o resto vai como sempre** (item
-    /// 52 da pendência 58). A etapa continua com o `stage` de antes, e ganha a
-    /// `tentativa` ao lado dele; sem tentativa, ela sai igual ao evento; e um
-    /// evento que não é etapa não ganha nada, com tentativa ou sem.
-    #[test]
-    fn so_a_etapa_ganha_a_tentativa_e_sem_ela_nada_muda() {
-        let com = carga_do_evento(&etapa(), Some(7));
-        assert_eq!(
-            com.pointer("/ConnectStageChanged/tentativa"),
-            Some(&serde_json::Value::from(7)),
-            "a etapa não levou a tentativa: {com}"
-        );
-        assert_eq!(
-            com.pointer("/ConnectStageChanged/stage"),
-            serde_json::to_value(etapa())
-                .unwrap()
-                .pointer("/ConnectStageChanged/stage"),
-            "a etapa com a tentativa mudou o `stage`: {com}"
-        );
-        assert_eq!(
-            carga_do_evento(&etapa(), None),
-            serde_json::to_value(etapa()).unwrap()
-        );
-        for outro in [Event::RosterChanged, Event::MessagesChanged] {
-            assert_eq!(
-                carga_do_evento(&outro, Some(7)),
-                serde_json::to_value(&outro).unwrap(),
-                "um evento que não é etapa ganhou a tentativa"
-            );
-        }
-    }
-}
+mod a_etapa_leva_a_tentativa;
 
 /// Where this client keeps its identity and its pins. ADR 0017.
 ///
@@ -2190,908 +2155,9 @@ fn soltar_a_entrada_em(session: &Session, geracao: u64) -> bool {
 /// slot ficava com o servidor velho, a mensagem ia a ele, e a conexão da nova
 /// era solta e desligada calada — nenhum `Ended` chegava à janela, e a pessoa
 /// sumia da lista do servidor novo.
+#[path = "testes/a_entrada_velha_que_chega_tarde.rs"]
 #[cfg(test)]
-mod a_entrada_velha_que_chega_tarde {
-    use super::{connect, send_message, Session};
-    use seele_server::persistence::Location;
-    use seele_server::{Daemon, ServerConfig};
-    use std::net::SocketAddr;
-    use std::sync::{Arc, OnceLock};
-    use std::time::Duration;
-    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
-    use tauri::{AppHandle, Manager};
-
-    /// A casa do app neste teste: identidade e pinos numa pasta temporária,
-    /// e não na de quem roda a bateria. Uma só para o processo inteiro, porque
-    /// `SEELE_HOME` é do processo.
-    fn casa() -> &'static std::path::Path {
-        static CASA: OnceLock<tempfile::TempDir> = OnceLock::new();
-        let pasta = CASA
-            .get_or_init(|| tempfile::tempdir().expect("a pasta temporária não abriu"))
-            .path();
-        std::env::set_var("SEELE_HOME", pasta);
-        pasta
-    }
-
-    /// Um teste deste módulo por vez: a casa é uma só, e a identidade e os
-    /// pinos dela são arquivos que dois `connect` de testes diferentes
-    /// escreveriam ao mesmo tempo. **E os do módulo vizinho que usa esta casa**
-    /// (`o_apelido_grande_demais_no_hello`, lote C55 da F5): a `SEELE_HOME` é
-    /// do processo, e uma segunda casa a trocaria por baixo destes testes.
-    pub(super) fn vez() -> std::sync::MutexGuard<'static, ()> {
-        static VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        VEZ.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    /// O runtime de um teste deste módulo: uma thread só, a do teste, para o
-    /// `seele.log` capturado ver o que o `connect` escreve.
-    pub(super) fn runtime() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("o runtime do teste não subiu")
-    }
-
-    /// Um servidor de verdade, em porta zero e banco em memória.
-    pub(super) async fn servidor(nome: &str) -> (SocketAddr, Arc<Daemon>) {
-        let config = ServerConfig {
-            name: nome.into(),
-            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-            database: Location::Memory,
-            ..ServerConfig::default()
-        };
-        let servidor = Arc::new(Daemon::bind(config).await.expect("o servidor não subiu"));
-        let endereco = servidor
-            .local_addr()
-            .expect("o servidor não disse o endereço");
-        let aceitando = Arc::clone(&servidor);
-        tokio::spawn(async move {
-            let _ = aceitando.run().await;
-        });
-        (endereco, servidor)
-    }
-
-    /// O app, com o runtime falso. Vazado: o `connect` corre numa tarefa
-    /// própria, e o `State` que ele recebe empresta do app.
-    ///
-    /// **E sempre na casa temporária** (R1-I2 da re-revisão do E54). A casa
-    /// era montada por cada teste, e o teste do M1 esqueceu: rodado sozinho,
-    /// o `config_dir` dele caía em `$HOME/.config/seele`, e o `connect` lia a
-    /// identidade e o retrato de quem roda a bateria e gravava pinos de
-    /// `127.0.0.1` ao lado dos dela. Montada aqui, nenhum teste do módulo pode
-    /// esquecer; e a casa que o app vai usar é conferida antes de qualquer
-    /// `connect`, para um caminho novo do `config_dir` reprovar em vez de
-    /// escrever na casa de alguém.
-    pub(super) fn app() -> &'static AppHandle<MockRuntime> {
-        let casa = casa();
-        let app = mock_builder()
-            .manage(Session::default())
-            .build(mock_context(noop_assets()))
-            .expect("o app falso não montou");
-        let handle = app.handle().clone();
-        let do_app = super::config_dir(&handle);
-        assert_eq!(
-            std::path::Path::new(&do_app),
-            casa,
-            "a casa do app falso não é a temporária deste módulo: um `connect` daqui escreveria \
-             a identidade e os pinos em {do_app}"
-        );
-        Box::leak(Box::new(app));
-        Box::leak(Box::new(handle))
-    }
-
-    /// Quem recebeu `corpo`, entre os servidores dados, esperando até `prazo`.
-    async fn quem_recebeu(
-        ouvidos: &mut [(
-            &str,
-            tokio::sync::broadcast::Receiver<seele_server::server::Event>,
-        )],
-        corpo: &str,
-        prazo: Duration,
-    ) -> Vec<String> {
-        let fim = tokio::time::Instant::now() + prazo;
-        let mut receberam = Vec::new();
-        while tokio::time::Instant::now() < fim {
-            for (nome, ouvido) in ouvidos.iter_mut() {
-                while let Ok(evento) = ouvido.try_recv() {
-                    if let seele_server::server::Event::MessagePosted(mensagem) = evento {
-                        if mensagem.body == corpo && !receberam.contains(&(*nome).to_owned()) {
-                            receberam.push((*nome).to_owned());
-                        }
-                    }
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        receberam
-    }
-
-    /// Quantos estão presentes no servidor, esperando até `prazo` pelo número
-    /// que se espera.
-    async fn presentes(servidor: &Daemon, espera: usize, prazo: Duration) -> usize {
-        let fim = tokio::time::Instant::now() + prazo;
-        loop {
-            let agora = servidor.server().presentes.lock().await.todos().len();
-            if agora == espera || tokio::time::Instant::now() >= fim {
-                return agora;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
-    /// Um retrato desta máquina, para o `connect` ter um efeito de entrada que
-    /// o servidor vê: ele manda o retrato guardado logo depois de conectar.
-    fn guardar_um_retrato() {
-        let mut png = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::new_rgba8(1, 1)
-            .write_to(&mut png, image::ImageFormat::Png)
-            .expect("o retrato de teste não codificou");
-        std::fs::write(casa().join("retrato.png"), png.into_inner())
-            .expect("o retrato de teste não gravou");
-    }
-
-    /// Um `connect` numa thread só dele, com um runtime próprio.
-    ///
-    /// Para os testes que seguram um cadeado da sessão e precisam que o
-    /// `connect` pare nele: no runtime de uma thread só em que os servidores
-    /// andam, um `connect` parado num cadeado pararia os servidores junto.
-    fn connect_noutra_thread(
-        app: &'static AppHandle<MockRuntime>,
-        servidor: String,
-        apelido: &str,
-    ) -> std::thread::JoinHandle<Result<super::Entrada, super::FalhaDaEntrada>> {
-        let apelido = apelido.to_owned();
-        std::thread::spawn(move || {
-            runtime().block_on(connect(
-                app.clone(),
-                app.state::<Session>(),
-                servidor,
-                apelido,
-                false,
-                None,
-                None,
-            ))
-        })
-    }
-
-    /// Espera uma thread terminar sem parar o runtime do teste, até `prazo`.
-    async fn quando_terminar<T>(thread: std::thread::JoinHandle<T>, prazo: Duration) -> T {
-        let fim = tokio::time::Instant::now() + prazo;
-        while !thread.is_finished() {
-            assert!(
-                tokio::time::Instant::now() < fim,
-                "a thread não terminou no prazo"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        thread.join().expect("a thread caiu")
-    }
-
-    /// Segura, numa thread própria, a guarda que `tomar` devolve — um cadeado
-    /// da sessão —, até o `Sender` devolvido ser usado ou cair. Numa thread, e
-    /// não no teste, para nenhuma guarda atravessar um `await`.
-    fn segurar<G>(
-        tomar: impl FnOnce() -> G + Send + 'static,
-    ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
-        let (tomado, foi_tomado) = std::sync::mpsc::channel();
-        let (soltar, quando_soltar) = std::sync::mpsc::channel::<()>();
-        let thread = std::thread::spawn(move || {
-            let guarda = tomar();
-            let _ = tomado.send(());
-            let _ = quando_soltar.recv();
-            drop(guarda);
-        });
-        foi_tomado.recv().expect("o cadeado não foi tomado");
-        (soltar, thread)
-    }
-
-    /// Espera o servidor anunciar um retrato novo, até `prazo`.
-    async fn um_retrato_chegou(
-        ouvido: &mut tokio::sync::broadcast::Receiver<seele_server::server::Event>,
-        prazo: Duration,
-    ) -> bool {
-        tokio::time::timeout(prazo, async {
-            loop {
-                match ouvido.recv().await {
-                    Ok(seele_server::server::Event::PersonIconChanged { .. }) => break true,
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(_) => break false,
-                }
-            }
-        })
-        .await
-        .unwrap_or(false)
-    }
-
-    /// O cenário inteiro, do começo da velha à mensagem: o que ficou errado.
-    async fn a_velha_termina_depois_da_nova() -> Vec<String> {
-        guardar_um_retrato();
-        let (velho, servidor_velho) = servidor("Velho").await;
-        let (novo, servidor_novo) = servidor("Novo").await;
-        let app = app();
-        let sessao = app.state::<Session>();
-
-        // A velha sai primeiro e fica presa no aperto de mão do servidor dela.
-        let trava = servidor_velho.server().persistence.lock().await;
-        let velha = tokio::spawn(connect(
-            app.clone(),
-            app.state::<Session>(),
-            velho.to_string(),
-            "velha".to_owned(),
-            false,
-            None,
-            None,
-        ));
-        let comeco = tokio::time::Instant::now();
-        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(
-            !velha.is_finished(),
-            "a tentativa velha terminou antes da hora"
-        );
-
-        // A nova entra, inteira, com a velha ainda andando.
-        let nova = tokio::time::timeout(
-            Duration::from_secs(10),
-            connect(
-                app.clone(),
-                app.state::<Session>(),
-                novo.to_string(),
-                "nova".to_owned(),
-                false,
-                None,
-                None,
-            ),
-        )
-        .await
-        .expect("a tentativa nova não voltou")
-        .map_err(|falha| format!("{falha:?}"))
-        .expect("a tentativa nova não entrou");
-        assert_eq!(nova.geracao, 2, "a tentativa nova não abriu a geração dois");
-        let canal = nova
-            .snapshot
-            .channels
-            .first()
-            .map(|canal| canal.id)
-            .expect("o servidor novo não tem canal nenhum");
-
-        // Solta a velha, e ela termina depois da nova. O que o servidor velho
-        // recebe dela daqui em diante é o que os efeitos de entrada fizeram.
-        let mut do_velho = servidor_velho.server().events.subscribe();
-        drop(trava);
-        let velha = tokio::time::timeout(Duration::from_secs(10), velha)
-            .await
-            .expect("a tentativa velha não voltou")
-            .expect("a tarefa da tentativa velha caiu");
-
-        let mut vermelhos = Vec::new();
-        match &velha {
-            Ok(entrada) => vermelhos.push(format!(
-                "a tentativa velha voltou como entrada (geração {}), depois de a nova ter entrado",
-                entrada.geracao
-            )),
-            Err(falha) => {
-                let dita = serde_json::to_value(falha).unwrap_or_default();
-                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
-                    vermelhos.push(format!(
-                        "a recusa da tentativa velha não diz que ela foi substituída, e a janela \
-                         não tem como calá-la: {dita}"
-                    ));
-                }
-            }
-        }
-        // Pelo nome que cada servidor dá a si mesmo no aperto de mão, e não
-        // pela impressão: a FFI da linha 0.15 não diz a impressão da conexão,
-        // e o teste é o mesmo nas duas linhas.
-        let qual = |nome: Option<&str>| match nome {
-            Some("Novo") => "o servidor novo",
-            Some("Velho") => "o servidor velho",
-            Some(_) => "um servidor desconhecido",
-            None => "nenhum",
-        };
-        let no_slot = sessao
-            .connection()
-            .ok()
-            .map(|conexao| conexao.snapshot().server);
-        if qual(no_slot.as_deref()) != "o servidor novo" {
-            vermelhos.push(format!(
-                "o slot da sessão ficou com {}, e não com a conexão da nova",
-                qual(no_slot.as_deref())
-            ));
-        }
-        if sessao.geracao() != nova.geracao {
-            vermelhos.push(format!(
-                "a geração de pé é {}, e não a da nova ({})",
-                sessao.geracao(),
-                nova.geracao
-            ));
-        }
-        let onde = sessao
-            .endereco_da_sessao
-            .lock()
-            .ok()
-            .and_then(|onde| onde.clone());
-        if onde.as_deref() != Some(novo.to_string().as_str()) {
-            vermelhos.push(format!(
-                "o endereço da sessão é {onde:?}, e não o do servidor novo ({novo})"
-            ));
-        }
-
-        // A mensagem que a pessoa manda em seguida: qual servidor a recebe.
-        let mut ouvidos = [
-            (
-                "o servidor velho",
-                servidor_velho.server().events.subscribe(),
-            ),
-            ("o servidor novo", servidor_novo.server().events.subscribe()),
-        ];
-        let corpo = "para onde eu vou?";
-        if let Err(erro) = send_message(
-            app.state::<Session>(),
-            super::sessoes::CarimboDaJanela::da(&nova),
-            canal,
-            corpo.to_owned(),
-        ) {
-            vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
-        }
-        let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
-        if receberam != ["o servidor novo"] {
-            vermelhos.push(format!(
-                "a mensagem mandada em seguida chegou a {receberam:?}, e não só ao servidor novo"
-            ));
-        }
-
-        // E a conexão da velha não fica pendurada no servidor que a pessoa
-        // deixou, nem a da nova sai do servidor em que ela está.
-        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
-        if no_velho != 0 {
-            vermelhos.push(format!(
-                "a conexão da velha continua presente no servidor velho ({no_velho})"
-            ));
-        }
-        let no_novo = presentes(&servidor_novo, 1, Duration::from_secs(2)).await;
-        if no_novo != 1 {
-            vermelhos.push(format!(
-                "a pessoa não está presente no servidor novo ({no_novo})"
-            ));
-        }
-
-        // Nem os efeitos de entrada valem para ela: o retrato desta máquina
-        // não vai ao servidor que a pessoa deixou.
-        let mut retratos = 0;
-        while let Ok(evento) = do_velho.try_recv() {
-            if matches!(
-                evento,
-                seele_server::server::Event::PersonIconChanged { .. }
-            ) {
-                retratos += 1;
-            }
-        }
-        if retratos != 0 {
-            vermelhos.push(format!(
-                "a tentativa velha mandou o retrato ao servidor que a pessoa deixou ({retratos} \
-                 vez(es)): os efeitos de entrada valeram para ela"
-            ));
-        }
-        vermelhos
-    }
-
-    /// O cenário, com o `seele.log` capturado: a linha da velha descartada
-    /// sai na thread do teste, que é a do runtime em que o `connect` corre.
-    #[test]
-    fn a_velha_que_entra_depois_da_nova_nao_toma_a_conexao() {
-        let _vez = vez();
-        let runtime = runtime();
-        let (mut vermelhos, rastro) =
-            crate::rastro_de_teste::capturar(|| runtime.block_on(a_velha_termina_depois_da_nova()));
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("substituída") && linha.contains(" WARN "));
-        if linha.is_none() {
-            vermelhos.push(
-                "o seele.log não tem uma linha WARN dizendo que a entrada substituída foi \
-                 descartada"
-                    .to_owned(),
-            );
-        }
-        assert!(
-            vermelhos.is_empty(),
-            "a entrada velha que chegou tarde tomou a sessão nova:\n  {}",
-            vermelhos.join("\n  ")
-        );
-    }
-
-    /// **A outra ordem**: a velha entra no Rust antes de a nova chegar a ele.
-    ///
-    /// A nova já começou na janela (`++tentativas`), e ainda não chamou o
-    /// `connect` — está no `conferir_esta_versao`, por exemplo. A geração da
-    /// velha ainda é a de pé, e ela entra. A janela não a quer, e a solta pela
-    /// geração dela. O que se cobra: a velha sai do slot e do servidor dela, a
-    /// nova entra em vez de receber `AlreadyConnected`, a mensagem vai à nova,
-    /// e um pedido com uma geração que já não é a de pé não derruba ninguém.
-    async fn a_janela_larga_a_velha_antes_de_a_nova_chegar() -> Vec<String> {
-        casa();
-        let (velho, servidor_velho) = servidor("Velho").await;
-        let (novo, servidor_novo) = servidor("Novo").await;
-        let app = app();
-        let sessao = app.state::<Session>();
-        let mut vermelhos = Vec::new();
-
-        let velha = tokio::time::timeout(
-            Duration::from_secs(10),
-            connect(
-                app.clone(),
-                app.state::<Session>(),
-                velho.to_string(),
-                "velha".to_owned(),
-                false,
-                None,
-                None,
-            ),
-        )
-        .await
-        .expect("a tentativa velha não voltou")
-        .map_err(|falha| format!("{falha:?}"))
-        .expect("a tentativa velha não entrou");
-        assert_eq!(
-            presentes(&servidor_velho, 1, Duration::from_secs(2)).await,
-            1
-        );
-
-        // A janela larga a velha pela geração dela.
-        if !super::soltar_a_entrada_em(&sessao, velha.geracao) {
-            vermelhos.push(format!(
-                "pedir para soltar a entrada da geração {} — a de pé — não soltou nada",
-                velha.geracao
-            ));
-        }
-        if sessao.connection().is_ok() {
-            vermelhos
-                .push("a conexão da velha continua no slot depois de a janela largá-la".into());
-        }
-        if sessao.geracao_vale(velha.geracao) {
-            vermelhos.push(format!(
-                "a geração da velha ({}) continua de pé depois de a janela largá-la: um comando \
-                 dela ainda seria atendido",
-                velha.geracao
-            ));
-        }
-        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
-        if no_velho != 0 {
-            vermelhos.push(format!(
-                "a conexão largada continua presente no servidor velho ({no_velho})"
-            ));
-        }
-        let onde = sessao
-            .endereco_da_sessao
-            .lock()
-            .ok()
-            .and_then(|onde| onde.clone());
-        if onde.is_some() {
-            vermelhos.push(format!(
-                "o endereço da sessão continua {onde:?} depois de a janela largar a entrada"
-            ));
-        }
-
-        // A nova chega ao `connect` e entra.
-        let nova = tokio::time::timeout(
-            Duration::from_secs(10),
-            connect(
-                app.clone(),
-                app.state::<Session>(),
-                novo.to_string(),
-                "nova".to_owned(),
-                false,
-                None,
-                None,
-            ),
-        )
-        .await
-        .expect("a tentativa nova não voltou");
-        let nova = match nova {
-            Ok(entrada) => entrada,
-            Err(falha) => {
-                vermelhos.push(format!(
-                    "a tentativa nova não entrou depois de a janela largar a velha: {}",
-                    serde_json::to_string(&falha).unwrap_or_default()
-                ));
-                return vermelhos;
-            }
-        };
-        let canal = nova
-            .snapshot
-            .channels
-            .first()
-            .map(|canal| canal.id)
-            .expect("o servidor novo não tem canal nenhum");
-
-        // Um pedido com a geração da velha, que já não é a de pé, não derruba
-        // a nova.
-        if super::soltar_a_entrada_em(&sessao, velha.geracao) {
-            vermelhos.push(
-                "um pedido com a geração da velha, que já não era a de pé, soltou a entrada nova"
-                    .into(),
-            );
-        }
-        if sessao.geracao() != nova.geracao {
-            vermelhos.push("o pedido com a geração velha revogou a geração da nova".into());
-        }
-        let mut ouvidos = [
-            (
-                "o servidor velho",
-                servidor_velho.server().events.subscribe(),
-            ),
-            ("o servidor novo", servidor_novo.server().events.subscribe()),
-        ];
-        let corpo = "e agora, para onde?";
-        if let Err(erro) = send_message(
-            app.state::<Session>(),
-            super::sessoes::CarimboDaJanela::da(&nova),
-            canal,
-            corpo.to_owned(),
-        ) {
-            vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
-        }
-        let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
-        if receberam != ["o servidor novo"] {
-            vermelhos.push(format!(
-                "a mensagem mandada depois chegou a {receberam:?}, e não só ao servidor novo"
-            ));
-        }
-        let no_novo = presentes(&servidor_novo, 1, Duration::from_secs(2)).await;
-        if no_novo != 1 {
-            vermelhos.push(format!(
-                "a pessoa não está presente no servidor novo ({no_novo})"
-            ));
-        }
-        vermelhos
-    }
-
-    /// **A nova começa entre as duas conferências da velha** (I1 da revisão
-    /// do E54).
-    ///
-    /// A velha passa a primeira conferência e aplica os efeitos de entrada; a
-    /// nova começa e revoga a geração antes de a velha gravar o slot. O teste
-    /// para a velha no cadeado do slot, que ele segura: solta o banco do
-    /// servidor velho, espera o retrato da velha chegar a ele (ela passou da
-    /// primeira conferência), revoga a geração como o `connect` da nova faz ao
-    /// começar, e só então solta o slot. A velha tem de ser largada ali.
-    async fn a_nova_comeca_entre_as_duas_conferencias() -> Vec<String> {
-        guardar_um_retrato();
-        let (velho, servidor_velho) = servidor("Velho").await;
-        let app = app();
-        let sessao = app.state::<Session>();
-        let mut vermelhos = Vec::new();
-
-        let trava = servidor_velho.server().persistence.lock().await;
-        let velha = connect_noutra_thread(app, velho.to_string(), "velha");
-        let comeco = tokio::time::Instant::now();
-        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
-
-        // O slot, seguro: a velha para nele, na segunda conferência.
-        let (soltar_o_slot, quem_segura) =
-            segurar(move || app.state::<Session>().inner().connection.lock());
-        let mut do_velho = servidor_velho.server().events.subscribe();
-        drop(trava);
-        assert!(
-            um_retrato_chegou(&mut do_velho, Duration::from_secs(8)).await,
-            "o retrato da velha não chegou ao servidor velho: ela não passou da primeira \
-             conferência, e este teste não mede a segunda"
-        );
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(
-            !velha.is_finished(),
-            "a velha terminou sem esperar o slot, e este teste não mede a segunda conferência"
-        );
-
-        // A nova começa, e revoga a geração da velha.
-        sessao.revogar();
-        let _ = soltar_o_slot.send(());
-        quem_segura.join().expect("quem segurava o slot caiu");
-
-        match quando_terminar(velha, Duration::from_secs(10)).await {
-            Ok(entrada) => vermelhos.push(format!(
-                "a velha voltou como entrada (geração {}) depois de a nova revogar a geração dela \
-                 no meio dos efeitos de entrada",
-                entrada.geracao
-            )),
-            Err(falha) => {
-                let dita = serde_json::to_value(&falha).unwrap_or_default();
-                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
-                    vermelhos.push(format!(
-                        "a recusa da velha substituída entre as duas conferências não vem marcada: \
-                         {dita}"
-                    ));
-                }
-            }
-        }
-        if let Ok(conexao) = sessao.connection() {
-            vermelhos.push(format!(
-                "o slot ficou com a conexão da velha ({})",
-                conexao.snapshot().server
-            ));
-        }
-        let onde = sessao
-            .endereco_da_sessao
-            .lock()
-            .ok()
-            .and_then(|onde| onde.clone());
-        if onde.is_some() {
-            vermelhos.push(format!(
-                "o endereço da sessão ficou {onde:?}, o do servidor que a pessoa deixou"
-            ));
-        }
-        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
-        if no_velho != 0 {
-            vermelhos.push(format!(
-                "a velha continua presente no servidor velho ({no_velho})"
-            ));
-        }
-        vermelhos
-    }
-
-    #[test]
-    fn a_velha_que_a_nova_substitui_entre_as_duas_conferencias_nao_grava_o_slot() {
-        let _vez = vez();
-        let vermelhos = runtime().block_on(a_nova_comeca_entre_as_duas_conferencias());
-        assert!(
-            vermelhos.is_empty(),
-            "a velha substituída entre as duas conferências do `connect` tomou a sessão:\n  {}",
-            vermelhos.join("\n  ")
-        );
-    }
-
-    /// **A nova que falha não deixa a velha órfã no slot** (M1 da revisão do
-    /// E54, a sonda P53).
-    ///
-    /// A ordem forçada: a nova passa pelo `AlreadyConnected` com o slot vazio
-    /// e para antes de revogar (o teste segura `mods_nativos`, que a revogação
-    /// toma antes de somar); a velha passa as duas conferências com a geração
-    /// dela ainda de pé; a nova revoga e falha (a porta 99999 não existe, e a
-    /// recusa sai sem rede nenhuma). A janela larga a velha, porque a nova é a
-    /// mais nova, e pede para soltá-la pela geração dela — que já não é a de
-    /// pé. Sem conferir o slot e revogar com o cadeado dele na mão, a velha
-    /// ficava no slot e presente no servidor deixado, e toda entrada seguinte
-    /// recebia `AlreadyConnected` até o app fechar.
-    async fn a_nova_falha_no_meio_da_velha() -> Vec<String> {
-        // O retrato é a prova de que a velha passou da primeira conferência
-        // (R1-I2 da re-revisão: sem ele, o teste dependia de outro do módulo
-        // tê-lo gravado antes).
-        guardar_um_retrato();
-        let (velho, servidor_velho) = servidor("Velho").await;
-        let (novo, _servidor_novo) = servidor("Novo").await;
-        let app = app();
-        let sessao = app.state::<Session>();
-        let mut vermelhos = Vec::new();
-
-        let trava = servidor_velho.server().persistence.lock().await;
-        let velha = connect_noutra_thread(app, velho.to_string(), "velha");
-        let comeco = tokio::time::Instant::now();
-        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        // A nova começa e para antes de revogar.
-        let (soltar_os_mods, quem_segura) =
-            segurar(move || app.state::<Session>().inner().mods_nativos.lock());
-        let nova = connect_noutra_thread(app, "127.0.0.1:99999".to_owned(), "nova");
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(
-            sessao.geracao(),
-            1,
-            "a nova revogou sem esperar os MODs, e a ordem não foi a forçada"
-        );
-
-        // A velha termina o aperto de mão e passa a primeira conferência.
-        let mut do_velho = servidor_velho.server().events.subscribe();
-        drop(trava);
-        assert!(
-            um_retrato_chegou(&mut do_velho, Duration::from_secs(8)).await,
-            "o retrato da velha não chegou ao servidor velho: ela não passou da primeira \
-             conferência, e a ordem não foi a forçada"
-        );
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        // A nova revoga e falha.
-        let _ = soltar_os_mods.send(());
-        quem_segura.join().expect("quem segurava os MODs caiu");
-        let da_nova = quando_terminar(nova, Duration::from_secs(10)).await;
-        let da_velha = quando_terminar(velha, Duration::from_secs(10)).await;
-
-        // **A ordem foi a forçada** (R1-M5 da re-revisão). A nova falha pela
-        // porta que não existe, e não por `AlreadyConnected`: chegando ao slot
-        // depois de a velha gravá-lo, a recusa seria essa, a janela soltaria a
-        // velha pela geração ainda de pé, e o teste passaria sem medir nada.
-        match &da_nova {
-            Ok(_) => vermelhos.push("a nova a uma porta que não existe entrou".to_owned()),
-            Err(falha) if falha.falha.error == super::ConnectionError::AlreadyConnected => {
-                vermelhos.push(
-                    "a nova recebeu `AlreadyConnected`: chegou ao slot depois de a velha gravá-lo, \
-                     e a ordem não foi a forçada"
-                        .to_owned(),
-                );
-            }
-            Err(_) => {}
-        }
-        // A velha cai na segunda conferência dela, marcada como substituída.
-        match &da_velha {
-            Ok(entrada) => vermelhos.push(format!(
-                "a velha voltou como entrada (geração {}) com a geração da nova de pé",
-                entrada.geracao
-            )),
-            Err(falha) => {
-                let dita = serde_json::to_value(falha).unwrap_or_default();
-                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
-                    vermelhos.push(format!(
-                        "a recusa da velha não vem marcada como substituída: {dita}"
-                    ));
-                }
-            }
-        }
-        // O slot fica vazio sem pedido nenhum da janela.
-        if let Ok(conexao) = sessao.connection() {
-            vermelhos.push(format!(
-                "a velha ficou no slot ({}) sem a janela pedir nada",
-                conexao.snapshot().server
-            ));
-        }
-        // E o que a janela faz em seguida, para o vermelho dizer a
-        // consequência: ela larga a velha que voltou entrando, pela geração
-        // dela, que já não é a de pé.
-        if let Ok(entrada) = &da_velha {
-            let _ = super::soltar_a_entrada_em(&sessao, entrada.geracao);
-            if let Ok(conexao) = sessao.connection() {
-                vermelhos.push(format!(
-                    "a velha ficou órfã no slot ({}): a janela a largou e o Rust não a soltou",
-                    conexao.snapshot().server
-                ));
-            }
-        }
-        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
-        if no_velho != 0 {
-            vermelhos.push(format!(
-                "a velha continua presente no servidor que a pessoa deixou ({no_velho})"
-            ));
-        }
-        let seguinte = quando_terminar(
-            connect_noutra_thread(app, novo.to_string(), "seguinte"),
-            Duration::from_secs(10),
-        )
-        .await;
-        if let Err(falha) = seguinte {
-            vermelhos.push(format!(
-                "a entrada seguinte não entrou: {}",
-                serde_json::to_string(&falha).unwrap_or_default()
-            ));
-        }
-        vermelhos
-    }
-
-    #[test]
-    fn a_nova_que_falha_no_meio_da_velha_nao_a_deixa_orfa_no_slot() {
-        let _vez = vez();
-        let vermelhos = runtime().block_on(a_nova_falha_no_meio_da_velha());
-        assert!(
-            vermelhos.is_empty(),
-            "a nova falhou no meio da velha, e a velha ficou com a sessão sem tela:\n  {}",
-            vermelhos.join("\n  ")
-        );
-    }
-
-    /// **As duas conferências do `connect`, pela forma.**
-    ///
-    /// O comportamento das duas tem teste: a primeira em
-    /// `a_velha_que_entra_depois_da_nova_nao_toma_a_conexao`, e a segunda em
-    /// `a_velha_que_a_nova_substitui_entre_as_duas_conferencias_nao_grava_o_slot`,
-    /// que para o `connect` no cadeado do slot. (Este doc dizia que nenhum teste
-    /// conseguia parar o `connect` ali, e não era verdade: a sonda P2 da
-    /// revisão o parou, e o teste dela entrou aqui.) Este guarda prende a forma
-    /// que dá aquele comportamento, sem ler comentário:
-    ///
-    /// 1. entre o `connect_watching` voltar e o primeiro efeito de entrada há a
-    ///    conferência da geração, e ela **volta** com a substituída largada;
-    /// 2. o slot só é gravado com o cadeado dele tomado e a geração conferida
-    ///    ali, sem espera no meio;
-    /// 3. quem não gravou **volta** largada, antes de o endereço da sessão ser
-    ///    escrito. Largar sem voltar (o mutante R3b da revisão) fechava a
-    ///    conexão e seguia gravando o endereço e a lista da velha, e devolvia
-    ///    `Ok`: o guarda só conferia a ordem do texto, e o deixava passar.
-    #[test]
-    fn o_connect_confere_a_geracao_antes_dos_efeitos_e_ao_gravar_o_slot() {
-        let fonte = super::fonte_sem_comentarios();
-        let corpo = super::corpo_de(&fonte, "async fn connect<");
-        let Some(volta) = corpo.find("let (connection, veredito) = resultado") else {
-            panic!("o `connect` não recebe mais a conexão do `connect_watching`: {corpo}");
-        };
-        let Some(primeiro_efeito) = [
-            "connection.subscribe(",
-            "vestir_as_escolhas_gravadas(",
-            "set_person_icon(",
-            "consentir_no_caminho_entre_pares(",
-        ]
-        .iter()
-        .filter_map(|efeito| corpo[volta..].find(efeito).map(|n| volta + n))
-        .min() else {
-            panic!("o `connect` não tem mais efeitos de entrada que este guarda conheça: {corpo}");
-        };
-        let antes_dos_efeitos = &corpo[volta..primeiro_efeito];
-        assert!(
-            antes_dos_efeitos.contains("session.confere_geracao(geracao).is_err()")
-                && antes_dos_efeitos.contains("return Err(largar_a_substituida("),
-            "o `connect` aplica os efeitos de entrada sem conferir antes se a geração dele \
-             ainda é a de pé: a tentativa que outra substituiu manda o retrato e o \
-             consentimento ao servidor que a pessoa deixou.\n{antes_dos_efeitos}"
-        );
-        // Desde a 0.17 (E3), gravar é pôr a sessão nova na vista, com o cadeado
-        // da conexão da vista na mão.
-        let Some(gravar) = corpo.find("session.por_na_vista_com(&mut slot, Some(&nova))") else {
-            panic!("o `connect` não grava mais o slot: {corpo}");
-        };
-        let Some(cadeado) = corpo[..gravar].rfind("session.connection.lock()") else {
-            panic!("o `connect` grava o slot sem tomar o cadeado dele: {corpo}");
-        };
-        let ao_gravar = &corpo[cadeado..gravar];
-        assert!(
-            ao_gravar.contains("session.confere_geracao(geracao).is_ok()")
-                && !ao_gravar.contains(".await"),
-            "o `connect` grava o slot sem conferir a geração com o cadeado na mão: a tentativa \
-             que outra substituiu no meio dos efeitos de entrada grava a conexão dela por cima \
-             da nova.\n{ao_gravar}"
-        );
-        let depois = &corpo[gravar..];
-        let Some(ramo) = depois.find("if let Some(connection) = substituida {") else {
-            panic!(
-                "depois de gravar o slot, o `connect` não tem mais o ramo da tentativa que não \
-                 gravou: {depois}"
-            );
-        };
-        let Some(fim_do_ramo) = depois[ramo..].find("\n    }\n").map(|n| ramo + n) else {
-            panic!("o ramo da tentativa que não gravou não fecha: {depois}");
-        };
-        let bloco = &depois[ramo..fim_do_ramo];
-        let endereco = depois.find("endereco_da_sessao");
-        assert!(
-            bloco.contains("return Err(largar_a_substituida(")
-                && endereco.is_some_and(|endereco| fim_do_ramo < endereco),
-            "depois de gravar o slot, a tentativa que não gravou não volta largada antes de o \
-             endereço da sessão ser escrito: largada sem voltar, ela fecha a conexão e segue \
-             gravando o endereço, o alvo e a lista de visitados dela, e volta `Ok`.\n{bloco}"
-        );
-    }
-
-    #[test]
-    fn a_entrada_que_a_janela_larga_e_solta_pela_geracao_dela() {
-        let _vez = vez();
-        let runtime = runtime();
-        let (mut vermelhos, rastro) = crate::rastro_de_teste::capturar(|| {
-            runtime.block_on(a_janela_larga_a_velha_antes_de_a_nova_chegar())
-        });
-        let linhas = rastro
-            .lines()
-            .filter(|linha| linha.contains("a janela largou") && linha.contains(" WARN "))
-            .count();
-        if linhas != 1 {
-            vermelhos.push(format!(
-                "o seele.log tem {linhas} linha(s) WARN de entrada que a janela largou, e não uma: \
-                 a que soltou diz, a que não soltou não diz como se tivesse soltado"
-            ));
-        }
-        assert!(
-            vermelhos.is_empty(),
-            "a entrada que a janela largou não foi solta como devia:\n  {}",
-            vermelhos.join("\n  ")
-        );
-    }
-}
+mod a_entrada_velha_que_chega_tarde;
 
 /// **O apelido grande demais é recusado com nome, antes de abrir a conexão**
 /// (pendência 58, item 55; lote C55 da F5).
@@ -3119,118 +2185,9 @@ mod a_entrada_velha_que_chega_tarde {
 /// (`Connection::abrir`) e recusa com `ConnectionError::ApelidoGrandeDemais`,
 /// que leva o teto. A trilha vazia é a prova de que nada foi tentado: a
 /// chegada não começou, e nenhum candidato foi discado.
+#[path = "testes/o_apelido_grande_demais_no_hello.rs"]
 #[cfg(test)]
-mod o_apelido_grande_demais_no_hello {
-    use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
-    use super::{connect, Session};
-    use std::time::Duration;
-    use tauri::Manager;
-
-    #[test]
-    fn o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao() {
-        let _vez = vez();
-        runtime().block_on(async {
-            let teto = seele_ffi::Connection::limites_dos_campos().apelido;
-            let (endereco, servidor) = servidor("Apelido").await;
-            let mut vermelhos = Vec::new();
-
-            // Vinte letras `á` para o teto de hoje: 40 bytes, a medida da base.
-            let grande = "á".repeat(teto / 2 + 4);
-            let primeira = app();
-            let resultado = tokio::time::timeout(
-                Duration::from_secs(30),
-                connect(
-                    primeira.clone(),
-                    primeira.state::<Session>(),
-                    endereco.to_string(),
-                    grande.clone(),
-                    false,
-                    None,
-                    None,
-                ),
-            )
-            .await
-            .expect("o connect com o apelido grande demais não voltou");
-            match &resultado {
-                Ok(entrada) => vermelhos.push(format!(
-                    "um apelido de {} bytes entrou (geração {}), e o fio leva {teto}",
-                    grande.len(),
-                    entrada.geracao
-                )),
-                Err(falha) => {
-                    let dita = serde_json::to_value(falha).unwrap_or_default();
-                    let esperada =
-                        serde_json::json!({ "ApelidoGrandeDemais": { "limite_bytes": teto } });
-                    if dita.get("error") != Some(&esperada) {
-                        vermelhos.push(format!(
-                            "um apelido de {} bytes não voltou recusado com nome e teto \
-                             ({esperada}), e a janela não sabe o que dizer: {dita}",
-                            grande.len()
-                        ));
-                    }
-                    let tentou = !matches!(
-                        dita.get("trail").and_then(serde_json::Value::as_array),
-                        Some(trilha) if trilha.is_empty()
-                    );
-                    if tentou {
-                        vermelhos.push(format!(
-                            "a conexão foi aberta para um apelido que o `Hello` não leva: a \
-                             trilha não está vazia: {}",
-                            dita.get("trail").cloned().unwrap_or_default()
-                        ));
-                    }
-                }
-            }
-            if let Ok(sessao) = primeira.state::<Session>().connection() {
-                sessao.disconnect();
-            }
-
-            // E um apelido no teto ainda entra: sem isto, um `connect` que
-            // recusasse tudo passaria.
-            let certo = "á".repeat(teto / 2);
-            let segunda = app();
-            match tokio::time::timeout(
-                Duration::from_secs(30),
-                connect(
-                    segunda.clone(),
-                    segunda.state::<Session>(),
-                    endereco.to_string(),
-                    certo.clone(),
-                    false,
-                    None,
-                    None,
-                ),
-            )
-            .await
-            .expect("o connect com o apelido no teto não voltou")
-            {
-                Ok(_) => {
-                    let presentes = servidor.server().presentes.lock().await.todos().len();
-                    if presentes != 1 {
-                        vermelhos.push(format!(
-                            "depois das duas tentativas, o servidor tem {presentes} presentes, \
-                             e não só a do apelido no teto"
-                        ));
-                    }
-                }
-                Err(falha) => vermelhos.push(format!(
-                    "um apelido de {} bytes, no teto, não entrou: {}",
-                    certo.len(),
-                    serde_json::to_value(&falha).unwrap_or_default()
-                )),
-            }
-            if let Ok(sessao) = segunda.state::<Session>().connection() {
-                sessao.disconnect();
-            }
-
-            assert!(
-                vermelhos.is_empty(),
-                "o apelido grande demais no `Hello`:\n  {}",
-                vermelhos.join("\n  ")
-            );
-        });
-    }
-}
+mod o_apelido_grande_demais_no_hello;
 
 /// As hospedagens deste app (Plano 2, spec de 23/09, «Hospedagens»): o
 /// servidor guardado, que a pessoa sobe com HOSPEDAR, e a sala pessoal.
@@ -3402,129 +2359,6 @@ fn atender(
 ///
 /// Nunca com motivo: a identidade que não abre é dita no `seele.log`, e a tela
 /// mostra o campo vazio.
-#[derive(serde::Serialize)]
-struct IdentidadePessoalNaTela {
-    publica: [u8; 32],
-    receber: bool,
-}
-
-#[tauri::command]
-fn pessoal_identidade(
-    app: AppHandle,
-) -> Result<IdentidadePessoalNaTela, seele_ffi::chamada_pessoal::Falha> {
-    let receber = preferencias(&app)
-        .ok_or(seele_ffi::chamada_pessoal::Falha::Armazenamento)?
-        .receber_ligacoes();
-    Ok(IdentidadePessoalNaTela {
-        publica: seele_ffi::chamada_pessoal::publica(&config_dir(&app))?,
-        receber,
-    })
-}
-
-#[tauri::command]
-fn pessoal_assinar(
-    app: AppHandle,
-    intencao: seele_ffi::chamada_pessoal::Intencao,
-) -> Result<seele_ffi::chamada_pessoal::Prova, seele_ffi::chamada_pessoal::Falha> {
-    let receber = preferencias(&app)
-        .ok_or(seele_ffi::chamada_pessoal::Falha::Armazenamento)?
-        .receber_ligacoes();
-    let agora = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| seele_ffi::chamada_pessoal::Falha::Invalido)?
-        .as_secs();
-    seele_ffi::chamada_pessoal::assinar(&config_dir(&app), &intencao, agora, receber)
-}
-
-#[tauri::command]
-fn pessoal_conferir_par(
-    app: AppHandle,
-    codigo: String,
-    publica: [u8; 32],
-    apelido: Option<String>,
-    direcao: Option<String>,
-) -> Result<(), seele_ffi::chamada_pessoal::Falha> {
-    let agora = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| seele_ffi::chamada_pessoal::Falha::Invalido)?
-        .as_secs();
-    seele_ffi::chamada_pessoal::conferir_par(
-        &config_dir(&app),
-        &codigo,
-        &publica,
-        apelido.as_deref(),
-        direcao.as_deref(),
-        i64::try_from(agora).map_err(|_| seele_ffi::chamada_pessoal::Falha::Invalido)?,
-    )
-}
-
-#[tauri::command]
-fn pessoal_reservar(
-    session: State<'_, Session>,
-    id: String,
-    ativo: bool,
-) -> Result<(), seele_ffi::chamada_pessoal::Falha> {
-    pessoal_reservar_em(&session, &id, ativo)
-}
-
-fn pessoal_reservar_em(
-    session: &Session,
-    id: &str,
-    ativo: bool,
-) -> Result<(), seele_ffi::chamada_pessoal::Falha> {
-    use seele_ffi::chamada_pessoal::Falha;
-    if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(Falha::Invalido);
-    }
-    let mut pessoal = session
-        .pessoal_web
-        .lock()
-        .map_err(|_| Falha::Armazenamento)?;
-    if !ativo {
-        if pessoal.as_deref() == Some(id) {
-            *pessoal = None;
-        }
-        return Ok(());
-    }
-    if pessoal.as_deref().is_some_and(|anterior| anterior != id)
-        || !session
-            .toques
-            .lock()
-            .map_err(|_| Falha::Armazenamento)?
-            .na_faixa()
-            .is_empty()
-        || sessoes_na_tela(session).iter().any(|s| {
-            s.enlace != "encerrada" && (s.onde == OndeEstou::Pessoal || s.ligacao.is_some())
-        })
-    {
-        return Err(Falha::Ocupado);
-    }
-    *pessoal = Some(id.to_owned());
-    Ok(())
-}
-
-#[cfg(test)]
-mod reserva_pessoal_web {
-    #[test]
-    fn encerramento_tardio_nao_libera_nova_chamada() {
-        let session = super::Session::default();
-        let primeira = "a".repeat(64);
-        let segunda = "b".repeat(64);
-        assert!(super::pessoal_reservar_em(&session, &primeira, true).is_ok());
-        assert_eq!(
-            super::pessoal_reservar_em(&session, &segunda, true),
-            Err(seele_ffi::chamada_pessoal::Falha::Ocupado)
-        );
-        assert!(super::pessoal_reservar_em(&session, &primeira, false).is_ok());
-        assert!(super::pessoal_reservar_em(&session, &segunda, true).is_ok());
-        assert!(super::pessoal_reservar_em(&session, &primeira, false).is_ok());
-        assert_eq!(
-            session.pessoal_web.lock().unwrap().as_deref(),
-            Some(segunda.as_str())
-        );
-    }
-}
-
 #[tauri::command]
 fn meu_codigo(app: AppHandle) -> Result<String, ()> {
     sala::meu_codigo_em(&config_dir(&app)).ok_or(())
@@ -3702,10 +2536,6 @@ async fn receber_ligacoes(
             "as preferências não abriram: a escolha de receber ligações vale até o app fechar"
         ),
     }
-    // A escolha governa também a recepção RTC, independentemente de a sala
-    // QUIC ter conseguido abrir sua porta ou registrar no encontro legado.
-    let _ = app.emit("seele://preferencia-pessoal", receber);
-
     if !receber {
         sala::desligar(&app).await;
         return Ok(());
@@ -4056,34 +2886,9 @@ fn desfazer_escolha_de_mod_em(
 
 /// **O DESFAZER só desfaz no servidor guardado que existe** (revisão do Codex):
 /// um id desconhecido é recusado antes de qualquer caminho.
+#[path = "testes/o_desfazer_confere_o_servidor.rs"]
 #[cfg(test)]
-mod o_desfazer_confere_o_servidor {
-    #[test]
-    fn um_servidor_que_esta_maquina_nao_guarda_e_recusado() {
-        let casa = tempfile::tempdir().expect("a casa");
-        let config = casa.path().to_string_lossy().into_owned();
-        for torto in ["nunca-existiu", "../sentinela", "/tmp/x"] {
-            assert_eq!(
-                super::desfazer_escolha_de_mod_em(&config, Some(torto), "x/y"),
-                Err(super::mods::FalhaAoResolverModAntigo::ServidorDesconhecido),
-                "o DESFAZER aceitou {torto:?}"
-            );
-        }
-        assert!(
-            !casa
-                .path()
-                .join(super::escolhas_de_mods::PASTA_DAS_ESCOLHAS)
-                .exists(),
-            "um servidor recusado ainda tocou a pasta das escolhas"
-        );
-        let guardado = super::servidores::criar(&config, "Casa", "0.17.0");
-        assert_eq!(
-            super::desfazer_escolha_de_mod_em(&config, Some(&guardado.id), "x/y"),
-            Ok(()),
-            "o DESFAZER recusou um guardado de verdade"
-        );
-    }
-}
+mod o_desfazer_confere_o_servidor;
 
 /// Guarda um servidor novo e devolve o que foi guardado.
 ///
@@ -4641,173 +3446,18 @@ fn preparar_a_casa_de_quem_hospeda(
 /// local), quem hospeda entra e tem a autoridade de dono — cria salas, gere
 /// cargos, administra —, e a impressão declarada é a desta máquina. Outra
 /// conta no mesmo banco não vira dona.
+#[path = "testes/quem_hospeda_e_o_dono.rs"]
 #[cfg(test)]
-mod quem_hospeda_e_o_dono {
-    use super::a_entrada_velha_que_chega_tarde::{app, runtime, vez};
-    use super::{config_dir, connect, disconnect, hospedar_em, Session};
-    use seele_proto::control::Permission;
-    use seele_proto::ids::PersonId;
-    use tauri::Manager;
-
-    #[test]
-    fn hospedar_declara_a_chave_desta_maquina_dona_e_outra_conta_nao_e() {
-        let _vez = vez();
-        runtime().block_on(async {
-            let app = app();
-            let session = app.state::<Session>();
-            let config = config_dir(app);
-            let anfitriao = hospedar_em(&session, &config, None, None, None, 0, true)
-                .await
-                .unwrap_or_else(|falha| panic!("o hospedar não subiu: {falha:?}"));
-
-            let entrada = tokio::time::timeout(
-                std::time::Duration::from_secs(20),
-                connect(
-                    app.clone(),
-                    app.state::<Session>(),
-                    anfitriao.aqui.clone(),
-                    "dona".to_owned(),
-                    false,
-                    None,
-                    None,
-                ),
-            )
-            .await
-            .expect("a entrada de quem hospeda não voltou")
-            .unwrap_or_else(|falha| {
-                panic!("quem hospeda não entrou no próprio servidor: {falha:?}")
-            });
-            let eu = PersonId(entrada.snapshot.me.expect("o servidor disse quem eu sou"));
-
-            let banco = session
-                .hospedagens
-                .lock()
-                .expect("as hospedagens")
-                .do_guardado()
-                .expect("o guardado de pé")
-                .persistence();
-            {
-                let banco = banco.lock().await;
-                let minha = seele_ffi::impressao_desta_maquina(&config).expect("a impressão daqui");
-                assert_eq!(
-                    seele_server::cargos::aviso_sem_dono(&banco),
-                    None,
-                    "o servidor que o HOSPEDAR subiu está sem dono"
-                );
-                for permissao in [
-                    Permission::ManageVoiceRooms,
-                    Permission::ManageRoles,
-                    Permission::AdministerServer,
-                    Permission::Kick,
-                ] {
-                    assert!(
-                        seele_server::cargos::pode(&banco, eu, permissao),
-                        "quem hospeda ({minha}) não pode {permissao:?} no próprio servidor"
-                    );
-                }
-                assert!(seele_server::cargos::administra(&banco, eu));
-
-                // Outra conta, no mesmo banco: não é dona, nem por ter entrado.
-                let outra = seele_server::permissions::Permissions::new(&banco)
-                    .register_or_find(&[0x77; 32], "outra")
-                    .expect("a outra conta");
-                assert!(
-                    !seele_server::cargos::pode(&banco, outra.id, Permission::ManageRoles),
-                    "outra conta virou dona"
-                );
-                assert!(!seele_server::cargos::administra(&banco, outra.id));
-            }
-
-            disconnect(
-                app.clone(),
-                app.state::<Session>(),
-                super::sessoes::CarimboDaJanela::da(&entrada),
-            )
-            .await
-            .expect("o `disconnect` nunca falha");
-            let guardado = session
-                .hospedagens
-                .lock()
-                .expect("as hospedagens")
-                .guardado
-                .take();
-            if let Some(guardado) = guardado {
-                guardado.hospedagem.encerrar().await;
-            }
-        });
-    }
-}
+mod quem_hospeda_e_o_dono;
 
 /// **A ordem do CTA, no `hospedar` de verdade** (P1 da 0.17). Os testes do
 /// `mods.rs` provam cada passo com bancos reais; este prende que o comando os
 /// chama **nesta ordem**: a recusa pelos MODs (menos os estagiados), o portão
 /// da cópia, a chave, as escolhas aplicadas, e só então a subida. E que os
 /// caminhos de MOD com o servidor parado não abrem o banco para escrever.
+#[path = "testes/a_ordem_do_cta_no_hospedar.rs"]
 #[cfg(test)]
-mod a_ordem_do_cta_no_hospedar {
-    use super::{corpo_de, fonte_sem_comentarios};
-
-    #[test]
-    fn a_copia_vem_antes_de_toda_abertura_do_banco_e_as_escolhas_antes_da_subida() {
-        let fonte = fonte_sem_comentarios();
-        let corpo = corpo_de(&fonte, concat!("async fn hospedar_em", "("));
-        let onde = |trecho: &str| {
-            corpo
-                .find(trecho)
-                .unwrap_or_else(|| panic!("o `hospedar` não chama `{trecho}`"))
-        };
-        let ordem = [
-            onde("mods::recusas_de_hospedar("),
-            onde("antes_de_hospedar::garantir_a_copia("),
-            onde("servidores::plantar_a_chave_depois_do_portao("),
-            onde("escolhas_de_mods::aplicar_depois_do_portao("),
-            onde("subir_o_guardado("),
-        ];
-        assert!(
-            ordem
-                .windows(2)
-                .all(|par| matches!(par, [antes, depois] if antes < depois)),
-            "a ordem do CTA no `hospedar` mudou: {ordem:?}"
-        );
-        assert!(
-            !corpo.contains("mods::mods_de_api_antiga("),
-            "o `hospedar` voltou a recusar sem olhar as escolhas estagiadas"
-        );
-        // O comando é só a casca do `hospedar_em`, com a porta e o modo do
-        // produto: é o mesmo corpo que os testes de dono sobem.
-        let comando = corpo_de(&fonte, concat!("async fn hospedar", "(\n"));
-        assert!(
-            comando.contains("hospedar_em(")
-                && comando.contains("PORTA_PADRAO,")
-                && comando.contains("modo_local(),"),
-            "o comando `hospedar` não sobe pelo `hospedar_em` com a porta e o modo do produto"
-        );
-    }
-
-    #[test]
-    fn nenhum_caminho_de_mod_com_o_servidor_parado_abre_o_banco_para_escrever() {
-        let fonte = fonte_sem_comentarios();
-        // Os cabeçalhos partidos: inteiros, este próprio teste seria a primeira
-        // ocorrência que o `corpo_de` acha.
-        for cabecalho in [
-            concat!("async fn resolver_mod_de_api_antiga", "("),
-            concat!("async fn apagar_pacote_do_cache", "("),
-            concat!("fn antes_de_hospedar", "("),
-        ] {
-            let corpo = corpo_de(&fonte, cabecalho);
-            assert!(
-                !corpo.contains("Persistence::open"),
-                "`{cabecalho}` abre o banco com `Persistence::open`, que migra"
-            );
-        }
-        let mods = include_str!("mods.rs");
-        let resolver = corpo_de(mods, "pub(crate) fn resolver_mod_de_api_antiga(");
-        assert!(
-            !resolver.contains("Persistence::open") && !resolver.contains("banco_de_hospedar"),
-            "o resolvedor das saídas voltou a abrir o banco (ou a pedi-lo com a chave plantada)"
-        );
-    }
-}
+mod a_ordem_do_cta_no_hospedar;
 
 /// **O modo local (E9 da 0.17): só na build de teste, e só pedido.**
 ///
@@ -4836,101 +3486,9 @@ pub(crate) const fn modo_local() -> bool {
 /// do `hospedar` e a sala pessoal do `setup` sobem só em `127.0.0.1` e sem a
 /// escada (o alcance é `SoEstaMaquina`, e o convite não leva bilhete). E o modo
 /// não existe num build otimizado.
+#[path = "testes/o_modo_local_da_build_de_teste.rs"]
 #[cfg(test)]
-mod o_modo_local_da_build_de_teste {
-    use super::{fonte_sem_comentarios, modo_local, subir_o_guardado};
-
-    /// A variável é do processo: um teste por vez, e ela volta ao que era.
-    struct ComOModoLocal(Option<std::ffi::OsString>);
-
-    impl ComOModoLocal {
-        fn ligar() -> Self {
-            let antes = std::env::var_os("SEELE_MODO_LOCAL");
-            std::env::set_var("SEELE_MODO_LOCAL", "1");
-            Self(antes)
-        }
-    }
-
-    impl Drop for ComOModoLocal {
-        fn drop(&mut self) {
-            match self.0.take() {
-                Some(valor) => std::env::set_var("SEELE_MODO_LOCAL", valor),
-                None => std::env::remove_var("SEELE_MODO_LOCAL"),
-            }
-        }
-    }
-
-    #[test]
-    fn o_guardado_e_a_sala_sobem_so_em_loopback_e_sem_escada() {
-        let _vez = super::a_entrada_velha_que_chega_tarde::vez();
-        let _modo = ComOModoLocal::ligar();
-        assert!(
-            modo_local(),
-            "a variável não ligou o modo local num build de debug"
-        );
-        super::a_entrada_velha_que_chega_tarde::runtime().block_on(async {
-            let guardado = subir_o_guardado(
-                0,
-                seele_server::persistence::Location::Memory,
-                None,
-                |_| Ok(()),
-                modo_local(),
-            )
-            .await
-            .expect("o guardado no modo local");
-            assert!(
-                guardado.endereco().ip().is_loopback(),
-                "o guardado do modo local atende fora do loopback: {}",
-                guardado.endereco()
-            );
-            assert_eq!(
-                guardado.alcance().map(|alcance| alcance.degrau().nome()),
-                Some("SoEstaMaquina"),
-                "o guardado do modo local subiu a escada"
-            );
-            guardado.encerrar().await;
-
-            let casa = tempfile::tempdir().expect("a casa");
-            let sala = super::sala::subir_em(&casa.path().display().to_string(), 0, None)
-                .await
-                .expect("a sala no modo local");
-            assert!(
-                sala.endereco().ip().is_loopback(),
-                "a sala do modo local atende fora do loopback: {}",
-                sala.endereco()
-            );
-            assert_eq!(
-                sala.alcance().map(|alcance| alcance.degrau().nome()),
-                Some("SoEstaMaquina"),
-                "a sala do modo local subiu a escada"
-            );
-            sala.encerrar().await;
-        });
-    }
-
-    /// Num build otimizado o modo é `false` constante, e a variável nem é lida.
-    #[test]
-    fn o_modo_local_nao_existe_num_build_otimizado() {
-        let fonte = fonte_sem_comentarios();
-        let otimizado = fonte
-            .split("#[cfg(not(debug_assertions))]\npub(crate) const fn modo_local() -> bool {")
-            .nth(1)
-            .and_then(|resto| resto.split('}').next())
-            .expect("a versão otimizada do modo local sumiu");
-        assert_eq!(
-            otimizado.trim(),
-            "false",
-            "o modo local num build otimizado faz outra coisa que não `false`"
-        );
-        let debug = fonte
-            .split("#[cfg(debug_assertions)]\npub(crate) fn modo_local() -> bool {")
-            .nth(1)
-            .expect("a versão de debug do modo local sumiu ou perdeu o cfg");
-        assert!(debug
-            .trim_start()
-            .starts_with("std::env::var(\"SEELE_MODO_LOCAL\")"));
-    }
-}
+mod o_modo_local_da_build_de_teste;
 
 /// Toda hospedagem deste app sobe com o ponto de encontro do projeto.
 ///
@@ -4948,242 +3506,13 @@ mod o_modo_local_da_build_de_teste {
 /// propósito (o padrão seguro, acima): o MOD do guardado
 /// (`o_mod_do_guardado_continua_respondendo`, tarefa 20 da F7) precisa de uma
 /// hospedagem com MODs, e com o ponto padrão ela convocaria o ponto do projeto.
+#[path = "testes/o_banco_de_uma_versao_mais_nova.rs"]
 #[cfg(test)]
-mod o_banco_de_uma_versao_mais_nova {
-    use super::{classificar, FalhaAoHospedar};
+mod o_banco_de_uma_versao_mais_nova;
 
-    /// **Hospedar um banco de uma versão mais nova diz isso pelo nome** (spec da
-    /// 0.16, §8). O erro é o de verdade: o `Persistence::open` sobre um banco
-    /// gravado num esquema acima do deste build, embrulhado como a subida o
-    /// embrulha. Sem o nome, a tela dizia NÃO CONSEGUI SUBIR O SERVIDOR AQUI, e
-    /// a pessoa não teria como saber que atualizar resolve.
-    #[test]
-    fn o_banco_do_futuro_chega_a_tela_pelo_nome() {
-        use seele_server::persistence::{esquema_conhecido, Location, Persistence};
-        let pasta = std::env::temp_dir().join(format!("seele-futuro-app-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&pasta);
-        std::fs::create_dir_all(&pasta).expect("pasta");
-        let arquivo = pasta.join("seele.db");
-        let conexao = rusqlite::Connection::open(&arquivo).expect("criar");
-        conexao
-            .execute_batch(
-                "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT;",
-            )
-            .expect("a tabela");
-        conexao
-            .execute(
-                "INSERT INTO schema_version (version, applied_at) VALUES (?1, 0)",
-                [esquema_conhecido() + 1],
-            )
-            .expect("a versão");
-        drop(conexao);
-
-        let Err(erro) = Persistence::open(&Location::File(arquivo)) else {
-            panic!("o servidor abriu um banco de uma versão mais nova");
-        };
-        let embrulhado = erro.context("subindo o servidor desta janela");
-        assert!(
-            matches!(
-                classificar(&embrulhado),
-                FalhaAoHospedar::BancoDoFuturo { gravado, conhecido }
-                    if gravado == esquema_conhecido() + 1 && conhecido == esquema_conhecido()
-            ),
-            "o banco de uma versão mais nova chegou à tela como outra falha: {:?}",
-            classificar(&embrulhado)
-        );
-        let _ = std::fs::remove_dir_all(&pasta);
-    }
-}
-
+#[path = "testes/o_ponto_de_encontro_de_quem_hospeda.rs"]
 #[cfg(test)]
-mod o_ponto_de_encontro_de_quem_hospeda {
-    /// As duas formas, partidas para não casarem com este texto.
-    const COM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
-    const SEM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar(");
-
-    /// Este arquivo sem comentários e sem os módulos `#[cfg(test)]`. Cada um é
-    /// de primeiro nível e fecha numa linha `}` sozinha, onde a produção
-    /// recomeça. Só os módulos: um `use` sob `#[cfg(test)]` não tem `}`, e
-    /// cortar até a próxima levaria junto a produção que vem depois dele.
-    fn producao() -> String {
-        producao_de(&super::fonte_sem_comentarios())
-    }
-
-    /// [`producao`] sobre um texto qualquer, para o recorte ter prova própria.
-    ///
-    /// **E ele se confere sozinho** (sugestão da F5, ao aceitar o recorte): o
-    /// que se corta é um módulo, e dentro de um módulo toda linha é recuada,
-    /// menos a do nome e a do `}` final. Um `#[cfg(test)] mod x;`, **sem
-    /// corpo** (o módulo mora noutro arquivo), não tem o que cortar: só a linha
-    /// dele sai, e o resto volta à produção. Sem isso o corte iria até a `}` da
-    /// próxima função de produção — e a conferência da coluna zero acusa
-    /// qualquer corte que ainda leve produção junto.
-    fn producao_de(fonte: &str) -> String {
-        let mut pedacos = fonte.split(concat!("\n#[cfg(test)]\n", "mod "));
-        let mut producao = pedacos.next().unwrap_or_default().to_owned();
-        for pedaco in pedacos {
-            let (nome, resto) = pedaco.split_once('\n').unwrap_or((pedaco, ""));
-            if nome.trim_end().ends_with(';') {
-                producao.push('\n');
-                producao.push_str(resto);
-                continue;
-            }
-            if let Some(fim) = pedaco.find("\n}\n") {
-                let soltas: Vec<&str> = pedaco[..fim]
-                    .lines()
-                    .skip(1)
-                    .filter(|linha| linha.starts_with(|c: char| !c.is_whitespace()))
-                    .collect();
-                assert!(
-                    soltas.is_empty(),
-                    "o recorte de um módulo de teste levou linhas da coluna zero, que são de \
-                     produção: {soltas:?}"
-                );
-                producao.push_str(&pedaco[fim + 2..]);
-            }
-        }
-        producao
-    }
-
-    /// **Um módulo de teste sem corpo não leva a produção junto**: o
-    /// `#[cfg(test)] mod fora;` sai, e a função de produção logo depois dele
-    /// continua no recorte. E um módulo de teste com corpo sai inteiro.
-    #[test]
-    fn o_recorte_tira_o_modulo_de_teste_sem_corpo_e_deixa_a_producao() {
-        let fonte = concat!(
-            "fn antes() {}\n",
-            "#[cfg(test)]\n",
-            "mod fora;\n",
-            "\n",
-            "async fn hospedar_de_producao() {\n",
-            "    let _ = 1;\n",
-            "}\n",
-            "#[cfg(test)]\n",
-            "mod dentro {\n",
-            "    fn so_de_teste() {}\n",
-            "}\n",
-            "fn depois() {}\n",
-        );
-        let recortada = producao_de(fonte);
-        assert!(
-            recortada.contains("async fn hospedar_de_producao() {"),
-            "o recorte levou a produção que vem depois de um módulo de teste sem corpo: {recortada}"
-        );
-        assert!(recortada.contains("fn antes() {}") && recortada.contains("fn depois() {}"));
-        assert!(
-            !recortada.contains("mod fora;") && !recortada.contains("so_de_teste"),
-            "o recorte deixou módulos de teste na produção: {recortada}"
-        );
-    }
-
-    #[test]
-    fn nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao() {
-        let fonte = producao();
-        assert!(
-            fonte.contains("async fn hospedar(") && !fonte.contains("mod o_ponto_de_encontro"),
-            "o recorte da produção deste arquivo quebrou"
-        );
-        let sem: Vec<&str> = fonte
-            .lines()
-            .filter(|linha| linha.contains(SEM_O_PADRAO))
-            .map(str::trim)
-            .collect();
-        assert!(
-            sem.is_empty(),
-            "este arquivo sobe hospedagem com `{SEM_O_PADRAO}`, que sem `$SEELE_ENCONTRO` não \
-             convoca ponto de encontro nenhum: quem hospeda por esse caminho perde o degrau 4 em \
-             silêncio. Use `{COM_O_PADRAO}`. Linhas: {sem:?}"
-        );
-        assert!(
-            fonte.contains(COM_O_PADRAO),
-            "nenhuma hospedagem deste arquivo usa `{COM_O_PADRAO}`: o app hospeda sem o ponto de \
-             encontro do projeto"
-        );
-    }
-
-    /// **Quem hospeda com um MOD de API antiga sabe antes de o servidor subir**
-    /// (tarefa 13 do plano da F3, Step 5b). A conferência é a de
-    /// `mods::mods_de_api_antiga` (provada lá, com a pasta da 0.15.1); aqui, que
-    /// ela é chamada com o banco e as raízes que vão ao servidor, e **antes**
-    /// de marcar o servidor hospedado e de `iniciar`: depois, a recusa chegaria
-    /// com o servidor já no ar. Tirada a chamada, ou posta depois do `iniciar`,
-    /// reprova.
-    #[test]
-    fn hospedar_confere_os_mods_de_api_antiga_antes_de_subir() {
-        let fonte = super::fonte_sem_comentarios();
-        let corpo = super::corpo_de(&fonte, concat!("async fn hospedar_em", "("));
-        // A conferência é `mods::recusas_de_hospedar` desde o P1 da 0.17: a de
-        // `mods_de_api_antiga`, com o mesmo banco e as mesmas raízes, menos os
-        // MODs que já têm uma escolha estagiada (aplicada antes da subida).
-        let conferir = corpo
-            .find("mods::recusas_de_hospedar(")
-            .expect("`hospedar` não confere os MODs de API antiga: o servidor subiria calado");
-        let marcar = corpo
-            .find("session.servidor_hospedado.lock()")
-            .expect("`hospedar` deixou de marcar o servidor hospedado");
-        let subir = corpo
-            .find("subir_o_guardado(")
-            .expect("`hospedar` deixou de subir o servidor");
-        assert!(
-            conferir < marcar && conferir < subir,
-            "a conferência dos MODs de API antiga vem depois de marcar o servidor ou de subi-lo: \
-             a recusa chegaria com o servidor no ar"
-        );
-        assert!(
-            corpo[conferir..]
-                .starts_with("mods::recusas_de_hospedar(&config, id_do_servidor, &banco)"),
-            "a conferência não usa o banco e o servidor que vão à subida"
-        );
-        let mods = include_str!("mods.rs");
-        let regra = super::corpo_de(mods, "pub(crate) fn recusas_de_hospedar(");
-        assert!(
-            regra.contains(
-                "mods_de_api_antiga(banco, &crate::servidores::raizes_dos_mods(config, servidor))"
-            ),
-            "a regra da recusa não usa as raízes do servidor que sobe"
-        );
-    }
-
-    /// **As saídas de quem hospeda leem da janela se há servidor no ar**
-    /// (tarefa 13 do plano da F3, Step 5b). A recusa é de
-    /// `mods::resolver_mod_de_api_antiga` (provada lá); aqui, que o comando
-    /// lhe passa o `guardado` desta janela, o campo do `apagar_servidor`, e
-    /// não uma constante. Com `false` no lugar, reprova.
-    #[test]
-    fn as_saidas_de_quem_hospeda_leem_da_janela_se_ha_servidor_no_ar() {
-        let fonte = super::fonte_sem_comentarios();
-        let corpo = super::corpo_de(&fonte, "async fn resolver_mod_de_api_antiga(");
-        let no_ar = corpo.find("guardado.is_some()").expect(
-            "as saídas não leem o servidor guardado desta janela: mexeriam num banco de pé",
-        );
-        let chamada = corpo
-            .find("mods::resolver_mod_de_api_antiga(")
-            .expect("o comando não chama a regra das saídas");
-        assert!(
-            no_ar < chamada && corpo[chamada..].contains("no_ar)"),
-            "o comando não passa à regra o «no ar» que leu da janela"
-        );
-    }
-
-    #[test]
-    fn hospedar_sobe_com_o_ponto_de_encontro_padrao() {
-        let fonte = super::fonte_sem_comentarios();
-        let corpo = super::corpo_de(&fonte, concat!("async fn hospedar_em", "("));
-        // A subida mora em `subir_o_guardado` desde o modo local (E9): o
-        // `hospedar` a chama, e ela sobe com o ponto padrão fora do modo local.
-        assert!(
-            corpo.contains("subir_o_guardado(") && !corpo.contains(SEM_O_PADRAO),
-            "o `hospedar` não sobe pelo `subir_o_guardado`"
-        );
-        let corpo = super::corpo_de(&fonte, concat!("async fn subir_o_guardado", "("));
-        assert!(
-            corpo.contains(COM_O_PADRAO) && !corpo.contains(SEM_O_PADRAO),
-            "o `hospedar` não sobe o servidor com `{COM_O_PADRAO}`: sem ele, e sem \
-             `$SEELE_ENCONTRO`, a hospedagem não convoca ponto de encontro nenhum, e quem hospeda \
-             atrás de CGNAT perde o degrau 4 em silêncio"
-        );
-    }
-}
+mod o_ponto_de_encontro_de_quem_hospeda;
 
 /// Desfaz `%XX` num caminho de URL. O resto passa inteiro.
 ///
@@ -5277,6 +3606,86 @@ fn abrir_no_navegador(url: String) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|erro| format!("não consegui abrir o navegador: {erro}"))
+}
+
+/// O arquivo do teste de rede, na origem do web app (`ui/diagnostico-rede.html`,
+/// servido com a política própria dele em `web/_headers`).
+const PAGINA_DO_TESTE_DE_REDE: &str = "diagnostico-rede.html";
+
+/// Quantas letras o nome de uma falha pode ter para viajar no endereço. O mais
+/// longo de hoje (`VerificacaoDaConexaoSegura`) tem 26.
+const TETO_DO_NOME_DA_FALHA: usize = 40;
+
+/// **O endereço do teste de rede publicado**, com o nome da falha que a pessoa
+/// viu, quando ele é um nome.
+///
+/// A origem é a [`seele_ffi::ORIGEM_DO_NAVEGADOR`], e não um texto daqui: o
+/// guarda `a_origem_do_web_app_e_escrita_num_lugar_so` reprova a cópia.
+///
+/// **Só o nome da falha vai junto**, e só se for letras e números: é um
+/// identificador de enum (`NatNaoAbriu`, `SemResposta`), que a página põe no
+/// texto copiado para quem relata não ter de redigitar o que leu. O que não
+/// for isso — um endereço, um apelido, um convite que alguém passasse aqui por
+/// engano — não entra no endereço: a consulta de uma URL chega ao registro de
+/// acesso de quem serve a página, e ali só cabe o que não identifica ninguém.
+fn endereco_do_teste_de_rede(falha: Option<&str>) -> String {
+    let pagina = format!(
+        "https://{}/{PAGINA_DO_TESTE_DE_REDE}",
+        seele_ffi::ORIGEM_DO_NAVEGADOR
+    );
+    match falha.map(str::trim) {
+        Some(nome)
+            if !nome.is_empty()
+                && nome.len() <= TETO_DO_NOME_DA_FALHA
+                && nome.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            format!("{pagina}?erro={nome}")
+        }
+        _ => pagina,
+    }
+}
+
+/// Por que o teste de rede não abriu.
+///
+/// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
+/// Carrega o endereço porque a tela não o conhece (a origem mora no Rust), e
+/// «não abriu» sem ele é um botão que falha sem deixar caminho.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+enum TesteDeRedeNaoAbriu {
+    /// O sistema não iniciou o navegador.
+    NavegadorNaoAbriu {
+        /// O endereço que se tentou abrir, para a tela dizê-lo.
+        endereco: String,
+    },
+}
+
+/// **Abre o teste de rede no navegador do sistema**, na página publicada.
+///
+/// É o caminho de quem leu que não conectou por causa de rede (a lacuna 8 da
+/// análise para a 1.0: a página existia e nada levava a ela).
+///
+/// **No navegador, e não nesta janela**, por três razões medidas:
+///
+///   - navegar esta janela para a página levaria as sessões e a voz embora, e
+///     a casca tem uma janela só (`capabilities/janela.json` não deixa criar
+///     outra);
+///   - a página trata um convite **colado**, e na origem publicada ela roda com
+///     a política mais estreita do produto (`connect-src` só para a própria
+///     origem e o ponto de encontro oficial), sem `ipc:` nenhum ao alcance;
+///     dentro desta janela ela rodaria na origem que fala com o Rust;
+///   - o que ela mede é o caminho de um navegador até o servidor, e o botão
+///     «Entrar no servidor» dela, quando o caminho abre, entra pelo navegador:
+///     é a saída de quem o app não deixou entrar.
+///
+/// `erro` é o nome da falha que a tela mostrou (ver
+/// [`endereco_do_teste_de_rede`]).
+#[tauri::command]
+fn abrir_o_teste_de_rede(erro: Option<String>) -> Result<(), TesteDeRedeNaoAbriu> {
+    let endereco = endereco_do_teste_de_rede(erro.as_deref());
+    abrir_no_navegador(endereco.clone()).map_err(|motivo| {
+        tracing::warn!(%motivo, "o teste de rede não abriu no navegador");
+        TesteDeRedeNaoAbriu::NavegadorNaoAbriu { endereco }
+    })
 }
 
 /// Se o firewall do Windows **não** deixa chegar conexão a este SEELE, e por
@@ -5747,9 +4156,6 @@ async fn focar_voz_em<R: tauri::Runtime>(
         avisar_a_trilha(app, antiga.id(), "foco");
     }
     let agora = session.sessoes.com_o_foco().map(|sessao| sessao.id());
-    if agora.is_some() {
-        let _ = app.emit("seele://foco-pessoal", ());
-    }
     if let Some(agora) = agora {
         avisar_a_trilha(app, agora, "foco");
     }
@@ -5959,188 +4365,9 @@ fn desmontar_o_cliente<R: tauri::Runtime>(
 /// do guardado antes de ele subir (como `seele-server/tests/exemplo_com_mod.rs`).
 /// O pedido entra por `pedidos::executar`, que é por onde o do fio entra
 /// (`seele-server/src/session.rs`), com a conta de quem ficou.
+#[path = "testes/o_mod_do_guardado_continua_respondendo.rs"]
 #[cfg(test)]
-mod o_mod_do_guardado_continua_respondendo {
-    use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
-    use super::{
-        connect, disconnect, onde_estou_na, parar_de_hospedar_em, servidor_do_mod, Hospedado,
-        OndeEstou, Session,
-    };
-    use seele_server::hospedagem::Hospedagem;
-    use seele_server::mods::instalar::{instalar_de_pasta, raizes_de_um_mundo};
-    use seele_server::permissions::Permissions;
-    use seele_server::persistence::mods::{enable, EnabledMod};
-    use seele_server::persistence::{Location, Persistence};
-    use std::time::Duration;
-    use tauri::test::MockRuntime;
-    use tauri::{AppHandle, Manager};
-
-    /// O MOD de referência do produto, que tem as duas metades.
-    const MOD_DE_REFERENCIA: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/testes/mod-de-referencia");
-
-    /// Entra em `alvo` pelo `connect` da casca, até 30 s cada tentativa. Um
-    /// servidor com MOD pergunta antes (`ModsNaoAceitos`): a dona aceita como a
-    /// casca aceita (o corpo de `aceitar_mods`) e entra de novo.
-    async fn entrar(app: &AppHandle<MockRuntime>, alvo: &str) {
-        for _ in 0..2 {
-            let tentativa = tokio::time::timeout(
-                Duration::from_secs(30),
-                connect(
-                    app.clone(),
-                    app.state::<Session>(),
-                    alvo.to_owned(),
-                    "dona".to_owned(),
-                    false,
-                    None,
-                    None,
-                ),
-            )
-            .await
-            .unwrap_or_else(|_| panic!("o `connect` a {alvo} não voltou"));
-            let Err(falha) = tentativa else {
-                return;
-            };
-            let dita = serde_json::to_value(&falha).unwrap_or_default();
-            let Some(conjunto) = dita
-                .pointer("/error/ModsNaoAceitos/conjunto")
-                .and_then(serde_json::Value::as_str)
-            else {
-                panic!("o `connect` a {alvo} não entrou: {dita}");
-            };
-            seele_ffi::mods::aceitar(&super::config_dir(app), alvo, conjunto)
-                .expect("o sim aos MODs não gravou");
-        }
-        panic!("o `connect` a {alvo} não entrou nem com o sim aos MODs");
-    }
-
-    /// O que o MOD `id` responde a `contar`, pedido por quem ficou no
-    /// guardado, no servidor que os comandos de MOD do app acham. `quando` diz
-    /// onde a dona está, para a falha dizer em que ponto o guardado sumiu.
-    async fn contar(
-        session: &tauri::State<'_, Session>,
-        id: &str,
-        quando: &str,
-    ) -> serde_json::Value {
-        let servidor = servidor_do_mod(session).unwrap_or_else(|falha| {
-            panic!("{quando}, os comandos de MOD não acham o guardado: {falha:?}")
-        });
-        // Quem ficou: uma conta do guardado, criada depois da dona, que é a
-        // primeira e por isso a Comandante.
-        let quem_ficou = {
-            let banco = servidor.persistence.lock().await;
-            Permissions::new(&banco)
-                .register_or_find(&[7; 32], "quem-ficou")
-                .expect("a conta de quem ficou")
-                .id
-        };
-        let resposta = seele_server::mods::pedidos::executar(
-            &servidor,
-            quem_ficou,
-            // O canal zero, «nenhum canal»: por `into`, porque a casca não
-            // nomeia o `seele-proto` (ADR 0002).
-            0_u32.into(),
-            id,
-            r#"{"op":"contar"}"#,
-        )
-        .await;
-        serde_json::from_str(&resposta)
-            .unwrap_or_else(|_| serde_json::json!({ "resposta": resposta }))
-    }
-
-    #[test]
-    fn um_mod_do_guardado_continua_respondendo_enquanto_o_dono_visita_outro_servidor() {
-        let _vez = vez();
-        runtime().block_on(async {
-            let app = app();
-            let session = app.state::<Session>();
-
-            // O guardado, com o MOD de referência ligado antes de subir: a
-            // subida carrega o que está ligado.
-            let mundo = tempfile::tempdir().expect("a pasta do guardado não abriu");
-            let raizes = raizes_de_um_mundo(mundo.path());
-            let (manifesto, hash) =
-                instalar_de_pasta(std::path::Path::new(MOD_DE_REFERENCIA), &raizes)
-                    .expect("o MOD de referência não instalou");
-            let banco = Location::File(mundo.path().join("seele.db"));
-            enable(
-                &Persistence::open(&banco).expect("o banco do guardado não abriu"),
-                &EnabledMod {
-                    id: manifesto.id.clone(),
-                    version: manifesto.version.clone(),
-                    hash,
-                    repo: manifesto.repo.clone(),
-                    reach: manifesto.reach.clone(),
-                    server_half: manifesto.server.is_some(),
-                    api: manifesto.api,
-                    tema: manifesto.tema,
-                    plataformas: None,
-                },
-            )
-            .expect("o MOD de referência não ligou");
-            let guardado = Hospedagem::iniciar(0, banco, "Casa", Some(raizes), |_| Ok(()))
-                .await
-                .expect("o guardado não subiu");
-            let casa = format!("127.0.0.1:{}", guardado.endereco().port());
-            session.hospedagens.lock().expect("as hospedagens").guardado =
-                Some(Hospedado::novo(guardado, None));
-
-            // A dona entra no próprio servidor, e o MOD responde.
-            entrar(app, &casa).await;
-            assert_eq!(
-                onde_estou_na(&session),
-                OndeEstou::Guardado,
-                "a dona não entrou no próprio servidor, e o teste não mede a visita"
-            );
-            let dentro = contar(&session, &manifesto.id, "com a dona dentro").await;
-            assert_eq!(
-                dentro.get("vezes"),
-                Some(&serde_json::json!(1)),
-                "o MOD do guardado não responde nem com a dona dentro, e o teste não mede a \
-                 visita: {dentro}"
-            );
-
-            // A dona sai e vai a outro servidor.
-            disconnect(
-                app.clone(),
-                app.state::<Session>(),
-                session.carimbo_da_vista(),
-            )
-            .await
-            .expect("o `disconnect` nunca falha");
-            let (outro, servidor_outro) = servidor("Outro").await;
-            entrar(app, &outro.to_string()).await;
-            assert_eq!(
-                onde_estou_na(&session),
-                OndeEstou::Outro,
-                "a dona não está noutro servidor, e o teste não mede a visita"
-            );
-
-            // E o MOD do guardado continua respondendo a quem ficou: a mesma
-            // instância, com a conta de antes.
-            let fora = contar(&session, &manifesto.id, "com a dona noutro servidor").await;
-            assert_eq!(
-                fora.get("vezes"),
-                Some(&serde_json::json!(2)),
-                "o MOD do guardado não continuou respondendo a quem ficou nele, com a dona \
-                 noutro servidor: {fora}"
-            );
-
-            disconnect(
-                app.clone(),
-                app.state::<Session>(),
-                session.carimbo_da_vista(),
-            )
-            .await
-            .expect("o `disconnect` nunca falha");
-            assert!(
-                parar_de_hospedar_em(&session).await,
-                "o guardado não estava mais no ar no fim"
-            );
-            servidor_outro.shutdown();
-        });
-    }
-}
+mod o_mod_do_guardado_continua_respondendo;
 
 // **O teto de um pedaço de texto de terceiro numa linha do `seele.log`** mora
 // em `seele_motor::TETO_DA_FRASE_NO_REGISTRO` desde 09/10/2026, com a regra das
@@ -6565,6 +4792,7 @@ fn snapshot(
     let retrato = sessoes::RetratoNaSessao {
         carimbo: conexao.carimbo(),
         epoca: session.geracao(),
+        protocolo: conexao.protocolo_negociado(),
         retrato: conexao.snapshot(),
     };
     tracing::trace!("retrato pronto");
@@ -6852,14 +5080,44 @@ fn open_channel(
 ///
 /// Texto e não número: a chave passa de 2^53 e o `Number` do JavaScript a
 /// arredondaria — ver `seele_ffi::Message::client_message_id`.
+///
+/// `replies_to` é a mensagem a que esta responde, quando a pessoa apertou
+/// RESPONDER numa (a mesa de texto da 1.0): o `id` que o servidor deu a ela.
+/// Opcional, e o mesmo comando, como no navegador (`send_message` com
+/// `repliesTo`, em `seele-web`): responder é mandar uma mensagem, e dois
+/// comandos seriam dois caminhos para a pendente, o reenvio e o rascunho.
 #[tauri::command]
 fn send_message(
     session: State<'_, Session>,
     carimbo: sessoes::CarimboDaJanela,
     channel: u32,
     body: String,
+    replies_to: Option<u64>,
 ) -> Result<String, ConnectionError> {
-    session.conexao(carimbo)?.send_message(channel, body)
+    let conexao = session.conexao(carimbo)?;
+    match replies_to {
+        Some(citada) => conexao.send_reply(channel, body, citada),
+        None => conexao.send_message(channel, body),
+    }
+}
+
+/// Reescreve o corpo de uma mensagem **desta pessoa** (protocolo 13).
+///
+/// Pede, e não espera: a confirmação é a mensagem mudar na conversa, com a
+/// marca «editada», pelo `MessagesChanged` de sempre. O que este comando
+/// recusa na hora volta com nome, e a janela tem frase para cada um:
+/// `MensagemVazia`, `MensagemGrandeDemais`, `UnknownMessage` (uma pendente
+/// ainda não tem `id`) e `ServidorAntigo`, quando o servidor negociou menos
+/// que o 13 — a tela nem oferece o EDITAR ali (`RetratoNaSessao::protocolo`).
+/// A de outra pessoa quem recusa é o servidor, com o aviso de permissão.
+#[tauri::command]
+fn editar_mensagem(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    message: u64,
+    body: String,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.edit_message(message, body)
 }
 
 /// Manda de novo uma mensagem que não foi gravada, com a mesma chave.
@@ -7211,39 +5469,9 @@ async fn salvar_do_mod(
     Ok(Some(SalvoParaOMod { bytes: quantos }))
 }
 
+#[path = "testes/salvar_testes.rs"]
 #[cfg(test)]
-mod salvar_testes {
-    #![allow(clippy::unwrap_used)]
-
-    /// O MOD sugere, e o produto limpa: sem barra (nada de caminho), sem
-    /// arquivo escondido, com teto.
-    #[test]
-    fn o_nome_sugerido_nao_vira_caminho() {
-        assert_eq!(
-            super::nome_sugerido_ao_salvar("Casa do SEELE.mrpack"),
-            "Casa do SEELE.mrpack"
-        );
-        assert_eq!(super::nome_sugerido_ao_salvar("../../.zshrc"), "zshrc");
-        assert_eq!(
-            super::nome_sugerido_ao_salvar("a/b\\c.mrpack"),
-            "abc.mrpack"
-        );
-        assert_eq!(super::nome_sugerido_ao_salvar("..."), "arquivo");
-        assert_eq!(super::nome_sugerido_ao_salvar(&"x".repeat(200)).len(), 80);
-    }
-
-    #[test]
-    fn o_salvo_entra_de_uma_vez_e_sem_parcial() {
-        let pasta = std::env::temp_dir().join(format!("seele-salvar-{}", std::process::id()));
-        std::fs::create_dir_all(&pasta).unwrap();
-        let destino = pasta.join("pack.mrpack");
-        super::gravar_o_salvo(&destino, b"PK pack").unwrap();
-        assert_eq!(std::fs::read(&destino).unwrap(), b"PK pack");
-        assert!(!pasta.join("pack.mrpack.seele-parcial").exists());
-        assert!(super::gravar_o_salvo(&pasta.join("nao/existe/x"), b"x").is_err());
-        let _ = std::fs::remove_dir_all(&pasta);
-    }
-}
+mod salvar_testes;
 
 /// O corpo de [`tunel_entrar`], sem o `State`: é o que deixa um teste chamá-lo
 /// com uma `Session` à mão.
@@ -9207,64 +7435,9 @@ fn habilitado_de(
     }
 }
 
+#[path = "testes/habilitar_grava_as_plataformas_do_manifesto.rs"]
 #[cfg(test)]
-mod habilitar_grava_as_plataformas_do_manifesto {
-    use super::habilitado_de;
-    use seele_server::persistence::mods::{enable, enabled};
-    use seele_server::persistence::{Location, Persistence};
-
-    /// Um pacote de verdade numa pasta, lido pelo caminho da casca
-    /// (`seele_ffi::mods::ler_pasta`) — a casca não nomeia o protocolo.
-    fn instalado(resto: &str, conteudo: &str) -> seele_ffi::mods::ModInstalado {
-        let pasta = tempfile::tempdir().expect("pasta");
-        std::fs::create_dir_all(pasta.path().join("cliente")).expect("cliente");
-        std::fs::write(pasta.path().join("cliente/main.js"), conteudo).expect("script");
-        std::fs::write(
-            pasta.path().join("mod.json"),
-            format!(
-                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{},"repo":"https://github.com/seele/bot","reach":[],"client":"cliente/main.js"{resto}}}"#,
-                seele_ffi::mods::MOD_API_VERSION
-            ),
-        )
-        .expect("manifesto");
-        seele_ffi::mods::ler_pasta(&pasta.path().to_string_lossy()).expect("pacote válido")
-    }
-
-    /// **Habilitar grava as plataformas do manifesto no mesmo ato que o hash**,
-    /// e habilitar de novo, com outros bytes, as regrava. Com `None` aqui, um
-    /// MOD `["app"]` seria anunciado nas duas até a próxima subida.
-    #[test]
-    fn habilitar_grava_e_regrava_as_plataformas() {
-        let banco = Persistence::open(&Location::Memory).expect("banco");
-        let so_app = instalado(r#","plataformas":["app"]"#, "1");
-        enable(&banco, &habilitado_de(so_app.clone())).expect("habilitar");
-        let gravada = enabled(&banco)
-            .expect("listar")
-            .first()
-            .expect("o habilitado está na lista")
-            .plataformas
-            .clone();
-        assert_eq!(
-            serde_json::to_value(gravada).expect("json"),
-            serde_json::json!(["app"])
-        );
-
-        let sem_chave = instalado("", "2");
-        assert_ne!(so_app.hash, sem_chave.hash);
-        enable(&banco, &habilitado_de(sem_chave)).expect("habilitar");
-        let gravada = enabled(&banco)
-            .expect("listar")
-            .first()
-            .expect("o habilitado está na lista")
-            .plataformas
-            .clone();
-        assert_eq!(
-            serde_json::to_value(gravada).expect("json"),
-            serde_json::json!(["app", "navegador"]),
-            "sem a chave, as duas, regravadas com os bytes novos"
-        );
-    }
-}
+mod habilitar_grava_as_plataformas_do_manifesto;
 
 /// Desliga um MOD. Os dados dele ficam — ADR 0045.
 async fn desabilitar_mod(session: State<'_, Session>, id: String) -> Result<(), FalhaNoMod> {
@@ -9428,299 +7601,17 @@ fn gravar_o_sim_se_for_o_guardado(
 /// - a gravação, sobre o arquivo de aceites de verdade, numa pasta de passagem.
 ///
 /// O guarda de texto-fonte prende os dois gravadores ao `onde_estou`.
+#[path = "testes/o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui.rs"]
 #[cfg(test)]
-mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
-    use seele_server::mods::anuncio::conjunto_exigido;
-    use seele_server::persistence::mods::{definir_conjunto, enable, EnabledMod};
-    use seele_server::persistence::{Location, Persistence};
+mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui;
 
-    use super::{
-        corpo_de, fonte_sem_comentarios, gravar_o_sim_de_quem_hospeda,
-        gravar_o_sim_se_for_o_guardado, onde_estou_em, Session,
-    };
-
-    /// A chave do guardado, a da sala e a de outro servidor S.
-    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
-    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
-    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
-
-    fn versao(numero: &str, byte: char) -> EnabledMod {
-        EnabledMod {
-            id: "autor/rpg".to_owned(),
-            version: numero.to_owned(),
-            hash: byte.to_string().repeat(64),
-            repo: "https://example.invalid/rpg".to_owned(),
-            reach: vec!["dom".to_owned()],
-            server_half: false,
-            api: seele_ffi::mods::MOD_API_VERSION,
-            tema: false,
-            plataformas: None,
-        }
-    }
-
-    /// Uma pasta de configuração só deste teste.
-    fn pasta(nome: &str) -> tempfile::TempDir {
-        tempfile::Builder::new()
-            .prefix(&format!("seele-lote-x-{nome}-"))
-            .tempdir()
-            .unwrap()
-    }
-
-    /// A identidade que cada gravador grava, calculada como ele a calcula.
-    fn identidades_dos_gravadores() -> [(&'static str, String); 2] {
-        let salvar = Persistence::open(&Location::Memory).unwrap();
-        definir_conjunto(&salvar, &[versao("1.0.0", 'a')]).unwrap();
-        let atualizar = Persistence::open(&Location::Memory).unwrap();
-        enable(&atualizar, &versao("1.0.0", 'a')).unwrap();
-        enable(&atualizar, &versao("2.0.0", 'b')).unwrap();
-        [
-            (
-                "o SALVAR da gestão (`aplicar_conjunto_de_mods`)",
-                conjunto_exigido(&salvar).unwrap().identidade,
-            ),
-            (
-                "a atualização pela gestão (`aplicar_mod`, QA-01)",
-                conjunto_exigido(&atualizar).unwrap().identidade,
-            ),
-        ]
-    }
-
-    /// Um caso do portão: por onde a sessão entrou, a chave que ela conferiu, e
-    /// as das hospedagens no ar.
-    struct Caso {
-        nome: &'static str,
-        endereco: &'static str,
-        impressao: &'static str,
-        guardado: Option<&'static str>,
-        grava: bool,
-    }
-
-    /// O que o portão grava, para cada caso e cada gravador: a lista do que
-    /// saiu diferente do esperado.
-    fn o_portao_nos(casos: &[Caso]) -> Vec<String> {
-        let mut errados = Vec::new();
-        for (quem, daqui) in identidades_dos_gravadores() {
-            for caso in casos {
-                let config = pasta("portao");
-                let config = config.path().to_str().unwrap();
-                let antes = "5".repeat(64);
-                seele_ffi::mods::aceitar(config, caso.endereco, &antes).unwrap();
-                let onde = onde_estou_em(
-                    Some(caso.endereco),
-                    Some(caso.impressao),
-                    caso.guardado,
-                    Some(SALA),
-                );
-                gravar_o_sim_se_for_o_guardado(config, Some(caso.endereco), onde, &daqui).unwrap();
-                let esperado = if caso.grava { &daqui } else { &antes };
-                if seele_ffi::mods::aceite_de(config, caso.endereco).as_deref()
-                    != Some(esperado.as_str())
-                {
-                    errados.push(format!("{quem}, {}", caso.nome));
-                }
-            }
-        }
-        errados
-    }
-
-    /// A medida: a sessão em S, a janela hospedando, e o sim de S fica como
-    /// estava. Pela chave, também com S no mesmo endereço do guardado.
-    #[test]
-    fn com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava() {
-        let errados = o_portao_nos(&[
-            Caso {
-                nome: "a sessão em S, noutro endereço",
-                endereco: "198.51.100.7:8383",
-                impressao: DE_S,
-                guardado: Some(GUARDADO),
-                grava: false,
-            },
-            Caso {
-                nome: "a sessão em S, no mesmo endereço do guardado",
-                endereco: "127.0.0.1:8383",
-                impressao: DE_S,
-                guardado: Some(GUARDADO),
-                grava: false,
-            },
-        ]);
-        assert!(
-            errados.is_empty(),
-            "com a sessão em outro servidor, o sim dele virou a identidade do servidor daqui: \
-             {errados:?}. Ele pergunta de novo, ou, com os conjuntos iguais, não pergunta, e a \
-             lista de aceites mostra um sim que a pessoa não deu (ADR 0045)"
-        );
-    }
-
-    /// O A04 e o próprio link: com a chave do guardado, o sim de quem hospeda é
-    /// gravado, entre a sessão pelo `aqui` ou pelo endereço da rede local que o
-    /// convite anuncia.
-    #[test]
-    fn na_sessao_do_guardado_o_sim_e_gravado_entre_por_onde_entrar() {
-        let errados = o_portao_nos(&[
-            Caso {
-                nome: "o `aqui`",
-                endereco: "127.0.0.1:8383",
-                impressao: GUARDADO,
-                guardado: Some(GUARDADO),
-                grava: true,
-            },
-            Caso {
-                nome: "o próprio link, pela rede local",
-                endereco: "192.168.1.20:8383",
-                impressao: GUARDADO,
-                guardado: Some(GUARDADO),
-                grava: true,
-            },
-        ]);
-        assert!(
-            errados.is_empty(),
-            "na sessão do servidor guardado, o sim de quem hospeda não foi gravado: \
-             {errados:?}. Quem acabou de decidir o conjunto é perguntado de novo na volta (A04)"
-        );
-    }
-
-    /// A sala pessoal não tem MODs, e sem guardado de pé não há servidor daqui:
-    /// nos dois, nada é gravado.
-    #[test]
-    fn na_sala_e_sem_guardado_nada_e_gravado() {
-        let errados = o_portao_nos(&[
-            Caso {
-                nome: "a sala pessoal",
-                endereco: "127.0.0.1:8385",
-                impressao: SALA,
-                guardado: Some(GUARDADO),
-                grava: false,
-            },
-            Caso {
-                nome: "sem guardado de pé, no `aqui`",
-                endereco: "127.0.0.1:8383",
-                impressao: GUARDADO,
-                guardado: None,
-                grava: false,
-            },
-        ]);
-        assert!(
-            errados.is_empty(),
-            "o sim de quem hospeda foi gravado fora do servidor guardado: {errados:?} (ADR 0045)"
-        );
-
-        // E pela sessão de verdade: sem conexão nem hospedagem, nada.
-        let sessao = Session::default();
-        *sessao.endereco_da_sessao.lock().unwrap() = Some("127.0.0.1:8383".to_owned());
-        let config = pasta("sem-guardado");
-        let config = config.path().to_str().unwrap();
-        gravar_o_sim_de_quem_hospeda(config, &sessao, &"6".repeat(64)).unwrap();
-        assert_eq!(
-            seele_ffi::mods::aceite_de(config, "127.0.0.1:8383"),
-            None,
-            "sem conexão nem hospedagem, o sim de quem hospeda foi gravado no endereço da sessão"
-        );
-    }
-
-    /// Os dois gravadores gravam o sim só por [`gravar_o_sim_de_quem_hospeda`],
-    /// e ela só pela resposta de `onde_estou`.
-    ///
-    /// As agulhas são montadas por `concat!`, para que este guarda não case com
-    /// o próprio texto, e a fonte é lida sem as linhas de comentário.
-    #[test]
-    fn os_dois_gravadores_passam_pelo_sim_de_quem_hospeda() {
-        let fonte = fonte_sem_comentarios();
-        let fora: Vec<&str> = [
-            ("aplicar_mod", concat!("async fn aplicar_mod", "(")),
-            (
-                "aplicar_conjunto_de_mods",
-                concat!("async fn aplicar_conjunto_de_mods", "("),
-            ),
-        ]
-        .into_iter()
-        .filter(|(_, cabecalho)| {
-            let corpo = corpo_de(&fonte, cabecalho);
-            !(corpo.contains(concat!("gravar_o_sim_de_quem_hospeda", "("))
-                && !corpo.contains(concat!("seele_ffi::mods::aceitar", "("))
-                && !corpo.contains(concat!("endereco_da", "_sessao")))
-        })
-        .map(|(quem, _)| quem)
-        .collect();
-        assert!(
-            fora.is_empty(),
-            "{fora:?} grava o sim sem passar por `gravar_o_sim_de_quem_hospeda`: com a sessão \
-             em outro servidor, o sim dele vira a identidade do servidor daqui (ADR 0045)"
-        );
-
-        let grava = corpo_de(&fonte, concat!("fn gravar_o_sim_de_quem_hospeda", "("));
-        let se_for = corpo_de(&fonte, concat!("fn gravar_o_sim_se_for_o_guardado", "("));
-        let comando = corpo_de(&fonte, concat!("fn onde_estou", "(session"));
-        assert!(
-            grava.contains(concat!("onde_estou_na", "(session)"))
-                && grava.contains(concat!("gravar_o_sim_se_for_o", "_guardado("))
-                && se_for.contains(concat!("onde == OndeEstou::", "Guardado"))
-                && comando.contains(concat!("onde_estou_na", "(&session)")),
-            "o sim de quem hospeda deixou de passar pela resposta de `onde_estou`, ou o comando \
-             deixou de dar a mesma: são duas respostas a «estou no meu servidor?», e o sim vai \
-             a um servidor que não é o guardado (ADR 0045):\n{grava}\n{se_for}\n{comando}"
-        );
-    }
-}
-
+#[path = "testes/o_conjunto_recusa_o_incorporado.rs"]
 #[cfg(test)]
-mod o_conjunto_recusa_o_incorporado {
-    use super::*;
+mod o_conjunto_recusa_o_incorporado;
 
-    fn escolhido(id: &str) -> ModEscolhido {
-        serde_json::from_value(serde_json::json!({ "id": id, "hash": "0".repeat(64) }))
-            .expect("um ModEscolhido")
-    }
-
-    /// Aplicar um conjunto com o PERFIS devolve `ModIncorporado`, antes de
-    /// qualquer leitura de disco. Tirar a chamada de `conferir_incorporados` do
-    /// comando (ou o corpo dela) reprova aqui.
-    #[test]
-    fn o_perfis_nao_se_liga_mais() {
-        let Err(FalhaNoMod::ModIncorporado { id, desde }) =
-            conferir_incorporados(&[escolhido("ana/outro"), escolhido("seele/perfis")])
-        else {
-            panic!("o PERFIS passou");
-        };
-        assert_eq!((id.as_str(), desde.as_str()), ("seele/perfis", "0.19"));
-        assert!(conferir_incorporados(&[escolhido("ana/outro")]).is_ok());
-        let fonte = fonte_sem_comentarios();
-        let corpo = corpo_de(&fonte, concat!("async fn aplicar_conjunto_de_mods", "("));
-        let chama = corpo.find(concat!("conferir_incorporados", "(&ligados)"));
-        let le = corpo.find(concat!("ler_por_", "hash("));
-        assert!(
-            chama.is_some() && chama < le,
-            "o comando não confere os incorporados antes de ler os pacotes"
-        );
-    }
-}
-
+#[path = "testes/o_sim_de_quem_hospeda_vem_antes_da_queda.rs"]
 #[cfg(test)]
-mod o_sim_de_quem_hospeda_vem_antes_da_queda {
-    use super::*;
-
-    /// **O sim de quem hospeda é gravado com o banco ainda na mão** (e2e de
-    /// 31/10, passo 1). A sessão dele cai com `ModsMudaram` assim que o banco
-    /// é solto, e a volta sozinha (`voltarSozinhoSeOConjuntoEMeu`) só passa se
-    /// o sim já está no disco. Gravado depois do cadeado, a queda podia chegar
-    /// antes, e quem ouviu «você não será perguntado de novo» lia «entre de
-    /// novo». Mover a gravação para depois do `drop(persistence)` reprova.
-    #[test]
-    fn o_sim_e_gravado_antes_de_soltar_o_banco() {
-        let fonte = fonte_sem_comentarios();
-        let corpo = corpo_de(&fonte, concat!("async fn aplicar_conjunto_de_mods", "("));
-        let define = corpo.find(concat!("definir_", "conjunto("));
-        let grava = corpo.find(concat!("gravar_o_sim_de_quem_", "hospeda("));
-        let solta = corpo.find(concat!("drop(", "persistence)"));
-        assert!(
-            define.is_some() && grava.is_some() && solta.is_some(),
-            "o comando mudou de forma: {corpo}"
-        );
-        assert!(
-            define < grava && grava < solta,
-            "o sim de quem hospeda não é gravado entre a escrita do conjunto e a soltura do banco"
-        );
-    }
-}
+mod o_sim_de_quem_hospeda_vem_antes_da_queda;
 
 /// O texto deste arquivo, para os guardas que afirmam sobre ele.
 #[cfg(test)]
@@ -9752,6 +7643,41 @@ fn corpo_de<'a>(fonte: &'a str, cabecalho: &str) -> &'a str {
         .map_or(depois, |(corpo, _)| corpo)
 }
 
+/// O texto dos módulos de teste deste arquivo, que moram em `testes/`, um
+/// arquivo por módulo.
+///
+/// Para o guarda que **proíbe** um texto no arquivo inteiro, ou conta quantas
+/// vezes ele aparece: o [`FONTE_DESTE_ARQUIVO`] não traz mais o que um teste
+/// escreve, e quem lesse só ele deixaria de ver o que via quando os testes
+/// eram texto do `main.rs`. Quem procura o corpo de uma função de produção
+/// não precisa disto.
+///
+/// Lido do disco, e a pasta inteira: um módulo novo entra sem ser listado.
+#[cfg(test)]
+fn fonte_dos_modulos_de_teste() -> String {
+    let pasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/testes");
+    let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&pasta)
+        .unwrap_or_else(|erro| panic!("{} não abre: {erro}", pasta.display()))
+        .map(|entrada| entrada.expect("uma entrada de src/testes").path())
+        .filter(|caminho| caminho.extension().is_some_and(|extensao| extensao == "rs"))
+        .collect();
+    arquivos.sort();
+    assert!(
+        !arquivos.is_empty(),
+        "{} não tem mais os módulos de teste do `main.rs`: o guarda que os lê ficou cego",
+        pasta.display()
+    );
+    arquivos
+        .iter()
+        .map(|arquivo| {
+            std::fs::read_to_string(arquivo)
+                .unwrap_or_else(|erro| panic!("{} não se lê: {erro}", arquivo.display()))
+                .replace("\r\n", "\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Por que um link de imagem não virou imagem.
 ///
 /// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
@@ -9765,6 +7691,17 @@ enum FalhaNaPrevia {
     GrandeDemais,
     /// Respondeu, e o que veio não é imagem — ou não é a imagem que disse ser.
     NaoEImagem,
+    /// Respondeu uma imagem que cabe no teto de bytes e declara mais pixels do
+    /// que uma prévia decodifica. Com os números: a janela a diz no lugar da
+    /// imagem, e «grande demais» sem número não diz o que passou.
+    PixelsDemais {
+        /// A largura declarada.
+        largura: u32,
+        /// A altura declarada.
+        altura: u32,
+        /// O teto, em pixels (largura × altura).
+        teto: u64,
+    },
     /// O destino é desta máquina, desta rede, ou de um endereço reservado.
     ///
     /// ADR 0053. Separada de [`Self::NaoEAberto`] porque não é o esquema que
@@ -9830,9 +7767,8 @@ async fn previa_de_link(app: AppHandle, url: String) -> Result<String, FalhaNaPr
     // A mesma conferência do anexo, e não uma segunda cópia dela: o tipo
     // alegado tem de bater com o que os bytes dizem ser. Um endereço que
     // promete `image/gif` e entrega HTML é recusado aqui.
-    if let seele_ffi::preview::Verdict::Draw(formato) = seele_ffi::preview::judge(&alegado, &bytes)
-    {
-        return Ok(seele_ffi::preview::data_uri(formato, &bytes));
+    if let seele_ffi::preview::Verdict::Draw(_) = seele_ffi::preview::judge(&alegado, &bytes) {
+        return imagem_de_link_para_a_janela(bytes).await;
     }
 
     // **A página de um site de GIF, resolvida até a mídia que ela declara.**
@@ -9853,14 +7789,49 @@ async fn previa_de_link(app: AppHandle, url: String) -> Result<String, FalhaNaPr
         }
         let (alegado, bytes) = buscar_com_teto(&midia).await?;
         return match seele_ffi::preview::judge(&alegado, &bytes) {
-            seele_ffi::preview::Verdict::Draw(formato) => {
-                Ok(seele_ffi::preview::data_uri(formato, &bytes))
-            }
+            seele_ffi::preview::Verdict::Draw(_) => imagem_de_link_para_a_janela(bytes).await,
             _ => Err(FalhaNaPrevia::NaoEImagem),
         };
     }
 
     Err(FalhaNaPrevia::NaoEImagem)
+}
+
+/// **A imagem de um link como ela vai à janela**: o `data:` com o tipo que os
+/// bytes provaram ser, reduzida ao lugar em que a prévia aparece
+/// (`reducao::previa_na_janela`, o mesmo caminho da prévia de um anexo).
+///
+/// O teto de bytes (`PREVIEW_LIMIT`) limita a busca, e não o que a imagem
+/// ocupa aberta: quem controla o endereço escolhia as medidas, e um PNG de
+/// poucos megabytes que declara 30 000 × 30 000 ia inteiro ao `<img>` da
+/// conversa (a varredura do incidente da capa em 4K, 11/11/2026). Fora da
+/// linha do runtime: decodificar e reduzir uma imagem grande leva tempo.
+///
+/// # Errors
+///
+/// [`FalhaNaPrevia::PixelsDemais`], com as medidas e o teto, e
+/// [`FalhaNaPrevia::NaoEImagem`] para a que não abre.
+async fn imagem_de_link_para_a_janela(bytes: Vec<u8>) -> Result<String, FalhaNaPrevia> {
+    let previa = tauri::async_runtime::spawn_blocking(move || reducao::previa_na_janela(bytes))
+        .await
+        .map_err(|_| FalhaNaPrevia::NaoEImagem)?;
+    imagem_de_link_pronta(previa)
+}
+
+/// O desfecho de [`reducao::previa_na_janela`], na resposta de
+/// [`previa_de_link`]. Fora da função assíncrona para um teste a ler.
+fn imagem_de_link_pronta(previa: reducao::PreviaNaJanela) -> Result<String, FalhaNaPrevia> {
+    match previa {
+        reducao::PreviaNaJanela::Pronta(uri) => Ok(uri),
+        reducao::PreviaNaJanela::PixelsDemais { largura, altura } => {
+            Err(FalhaNaPrevia::PixelsDemais {
+                largura,
+                altura,
+                teto: reducao::TETO_DE_PIXELS,
+            })
+        }
+        reducao::PreviaNaJanela::Ilegivel => Err(FalhaNaPrevia::NaoEImagem),
+    }
 }
 
 /// Os domínios cuja **página** é resolvida até a mídia que ela declara.
@@ -10497,6 +8468,7 @@ fn midia_declarada_do_mod(
     id: &str,
     hash: &str,
     caminho: &str,
+    teto: Option<&reducao::Teto>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     bytes_declarados_do_mod(pasta, id, hash, caminho)
         .and_then(|bytes| {
@@ -10512,12 +8484,21 @@ fn midia_declarada_do_mod(
                     decodificados: None,
                 });
             }
+            // **Reduzida ao lugar em que aparece antes do `data:`**, como a
+            // do servidor (`seele_ffi::midia_de_mod::reduzir_ao_uso`). A
+            // imagem do pacote ia à janela do tamanho que o MOD a trouxe — até
+            // 10 MiB, qualquer medida —, e era o irmão do incidente da capa em
+            // 4K (10/11/2026) que a varredura daquela vez deixou sem conserto.
+            // A que declara pixels demais é recusada aqui, pelo nome e com os
+            // números, e a recusa vai ao registro logo abaixo.
+            let (bytes, decodificados) = seele_ffi::midia_de_mod::reduzir_ao_uso(bytes, teto)
+                .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
             let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(desconhecido)?;
             Ok(MidiaDoMod {
                 uri: Some(lida.uri),
                 papel: lida.papel,
                 bytes: lida.bytes,
-                decodificados: None,
+                decodificados,
             })
         })
         .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))
@@ -10545,7 +8526,12 @@ fn midia_declarada_do_mod(
 /// Toda recusa, exceto a de geração morta (contada em
 /// `comandos_de_geracao_morta`), vai ao `seele.log` por
 /// [`recusa_de_midia_dita`], com o id do MOD e o motivo.
-#[tauri::command]
+///
+/// **`uso`** nomeia o lugar em que a imagem vai aparecer (`"fundo"`), como em
+/// [`midia_em_bytes`]; sem ele, vale o teto geral da mídia de MOD. Fora da
+/// thread da janela (`async`), pelo mesmo motivo de lá: reduzir uma imagem
+/// grande leva tempo, e um comando síncrono do Tauri roda na thread principal.
+#[tauri::command(async)]
 fn midia_do_mod(
     app: AppHandle,
     session: State<'_, Session>,
@@ -10553,6 +8539,7 @@ fn midia_do_mod(
     id: String,
     hash: String,
     caminho: String,
+    uso: Option<String>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     session.recusar_se_morta(geracao)?;
     let midia = midia_declarada_do_mod(
@@ -10562,6 +8549,7 @@ fn midia_do_mod(
         &id,
         &hash,
         &caminho,
+        uso.as_deref().and_then(reducao::teto_do_uso).as_ref(),
     )?;
     // **Dito, como o código do MOD é dito.** Um arquivo que sai do pacote de um
     // terceiro e vira som na máquina de quem está numa conversa é um evento que
@@ -11658,152 +9646,9 @@ async fn mod_exigido_aqui(session: &State<'_, Session>, id: &str) -> bool {
 /// [`aplicar_mod`]: `habilitar_mod` grava a linha **por identificador**, então
 /// reaplicar troca a versão exigida e a identidade do conjunto — e, com a
 /// identidade nova, o servidor derruba quem estava dentro.
+#[path = "testes/so_a_gestao_reaplica_no_servidor_hospedado.rs"]
 #[cfg(test)]
-mod so_a_gestao_reaplica_no_servidor_hospedado {
-    use seele_server::mods::anuncio::conjunto_exigido;
-    use seele_server::persistence::mods::{enable, enabled, EnabledMod};
-    use seele_server::persistence::{Location, Persistence};
-
-    use super::{corpo_de, fonte_sem_comentarios, reaplica_no_hospedado, UsoDoCatalogo};
-
-    const ID: &str = "autor/rpg";
-
-    /// Uma versão do MOD, como o banco do servidor a guarda.
-    fn versao(numero: &str, byte: char) -> EnabledMod {
-        EnabledMod {
-            id: ID.to_owned(),
-            version: numero.to_owned(),
-            hash: byte.to_string().repeat(64),
-            repo: "https://example.invalid/rpg".to_owned(),
-            reach: vec!["dom".to_owned()],
-            server_half: false,
-            api: seele_ffi::mods::MOD_API_VERSION,
-            tema: false,
-            plataformas: None,
-        }
-    }
-
-    /// O servidor que esta janela hospeda, exigindo o MOD na 1.0.0.
-    fn hospedado() -> Persistence {
-        let banco = Persistence::open(&Location::Memory).unwrap();
-        enable(&banco, &versao("1.0.0", 'a')).unwrap();
-        banco
-    }
-
-    /// A versão que o servidor hospedado exige, e a identidade que ele anuncia.
-    fn exigido(banco: &Persistence) -> (String, String) {
-        let ligado = enabled(banco)
-            .unwrap()
-            .into_iter()
-            .find(|ligado| ligado.id == ID)
-            .unwrap();
-        (ligado.version, conjunto_exigido(banco).unwrap().identidade)
-    }
-
-    /// O que `instalar_mod_do_catalogo` faz no servidor hospedado depois de
-    /// baixar `chegou`: a decisão do comando, sobre o que `mod_exigido_aqui`
-    /// lê, e, se ela mandar, o que `aplicar_mod` grava.
-    fn depois_de_baixar(banco: &Persistence, uso: UsoDoCatalogo, chegou: &EnabledMod) -> bool {
-        let ja_exigido = enabled(banco).unwrap().iter().any(|ligado| ligado.id == ID);
-        let reaplicar = reaplica_no_hospedado(uso, ja_exigido);
-        if reaplicar {
-            enable(banco, chegou).unwrap();
-        }
-        reaplicar
-    }
-
-    /// A medida do lote: outro servidor exige o mesmo MOD na 2.0.0, e a janela
-    /// o obtém. É a mesma chamada na pergunta dos MODs, depois de a pessoa
-    /// desistir dela (a obtenção segue até o fim) e na sessão que já aceitou.
-    #[test]
-    fn obter_o_que_outro_servidor_exige_nao_troca_a_versao_do_servidor_hospedado() {
-        let banco = hospedado();
-        let antes = exigido(&banco);
-
-        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Obter, &versao("2.0.0", 'b'));
-
-        let depois = exigido(&banco);
-        assert_eq!(
-            depois, antes,
-            "obter o MOD que outro servidor exige trocou a versão exigida pelo servidor que \
-             esta janela hospeda, de {} para {}: quem estava dentro dele cai, e ele passa a \
-             exigir uma versão que quem hospeda não escolheu (ADR 0045)",
-            antes.0, depois.0
-        );
-        assert!(
-            !reaplicou,
-            "a obtenção para outro servidor respondeu que reaplicou no servidor hospedado aqui"
-        );
-    }
-
-    /// O QA-01 continua: atualizar pela gestão um MOD que o servidor daqui
-    /// exige passa a exigência aos bytes novos, e um que ele não exige fica
-    /// desligado.
-    #[test]
-    fn a_atualizacao_pela_gestao_continua_reaplicando() {
-        let banco = hospedado();
-        let antes = exigido(&banco);
-
-        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'));
-
-        let depois = exigido(&banco);
-        assert!(
-            reaplicou && depois.0 == "2.0.0" && depois.1 != antes.1,
-            "atualizar pela gestão um MOD exigido aqui deixou de reaplicar: o disco tem a \
-             versão nova e o servidor continua exigindo a antiga (QA-01) — {antes:?} → {depois:?}"
-        );
-
-        let vazio = Persistence::open(&Location::Memory).unwrap();
-        assert!(
-            !depois_de_baixar(&vazio, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'))
-                && enabled(&vazio).unwrap().is_empty(),
-            "atualizar um MOD que o servidor daqui não exige o ligou: atualizar não é ligar"
-        );
-    }
-
-    /// A janela diz o uso com estas palavras (`camada-mods.js`, `base.js`), e
-    /// nenhuma outra passa.
-    #[test]
-    fn a_janela_diz_o_uso_com_as_palavras_que_o_comando_entende() {
-        let ler = |texto: &str| serde_json::from_str::<UsoDoCatalogo>(texto).ok();
-        assert_eq!(
-            (ler("\"obter\""), ler("\"atualizar\"")),
-            (Some(UsoDoCatalogo::Obter), Some(UsoDoCatalogo::Atualizar)),
-            "o comando deixou de entender a palavra que a janela manda: toda obtenção e \
-             toda atualização pelo catálogo são recusadas antes de baixar"
-        );
-        assert_eq!(
-            (ler("null"), ler("\"Atualizar\"")),
-            (None, None),
-            "o comando aceita um uso que a janela não escreve: uma chamada sem uso passaria \
-             a ter um padrão calado"
-        );
-    }
-
-    /// O comando reaplica pela decisão que lê o uso, e por nenhum outro
-    /// caminho. Sem isto, a decisão acima podia estar certa e o comando voltar
-    /// a reaplicar por `mod_exigido_aqui` sozinho.
-    ///
-    /// A agulha do cabeçalho é montada por `concat!` (rodada 1): escrita
-    /// inteira, ela casava com este mesmo teste quando o comando mudava de
-    /// nome ou de cabeçalho, e o guarda conferia a si mesmo.
-    #[test]
-    fn o_comando_reaplica_pela_decisao_que_le_o_uso() {
-        let fonte = fonte_sem_comentarios();
-        let corpo = corpo_de(&fonte, concat!("async fn instalar_mod_do_catalogo", "("));
-        let decide = corpo.find("reaplica_no_hospedado(uso,");
-        let aplica = corpo.find("if reaplicar {");
-        assert!(
-            corpo.contains("uso: UsoDoCatalogo,")
-                && matches!((decide, aplica), (Some(decide), Some(aplica)) if decide < aplica)
-                && corpo.matches("aplicar_mod(").count() == 1
-                && corpo.contains("Ok(reaplicar)"),
-            "`instalar_mod_do_catalogo` deixou de reaplicar só pela decisão que lê o uso: a \
-             obtenção para outro servidor volta a trocar o MOD do servidor hospedado aqui \
-             (ADR 0045):\n{corpo}"
-        );
-    }
-}
+mod so_a_gestao_reaplica_no_servidor_hospedado;
 
 /// Todo sim que esta máquina já deu a um servidor.
 ///
@@ -12188,6 +10033,7 @@ async fn enviar_imagem_do_perfil(
     })
     .await
     .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
+    let bytes = imagem_de_perfil_para_subir(bytes, lado).await?;
 
     let para_o_icone = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
     conexao.enviar_imagem_do_perfil(lado, bytes).await?;
@@ -12218,6 +10064,35 @@ async fn enviar_imagem_do_perfil(
     })
 }
 
+/// **A imagem de perfil que a pessoa escolheu, do tamanho em que aparece**
+/// (`reducao::imagem_do_perfil_para_a_janela`: a capa em até 1280 × 720, a foto
+/// em até 512), fora da linha principal.
+///
+/// É o que sobe ao servidor e o que fica guardado no perfil padrão. Subia o
+/// arquivo inteiro, e quem recebia uma capa em 4K pagava por ela: os clientes
+/// de antes da redução ao mostrar (a 0.19.6) ficam lentos com ela.
+///
+/// O que não decodifica aqui segue como veio: quem diz que os bytes não são
+/// uma imagem é a conferência do envio, com o erro dela. Só o que tem pixels
+/// demais é recusado.
+async fn imagem_de_perfil_para_subir(
+    bytes: Vec<u8>,
+    lado: seele_ffi::perfis::LadoDoPerfil,
+) -> Result<Vec<u8>, seele_ffi::perfis::ErroDoPerfil> {
+    let capa = lado == seele_ffi::perfis::LadoDoPerfil::Capa;
+    tauri::async_runtime::spawn_blocking(move || {
+        match seele_ffi::reducao::imagem_do_perfil_para_a_janela(&bytes, capa) {
+            Ok(reduzida) => Ok(reduzida),
+            Err(motivo) if motivo == seele_ffi::reducao::GRANDE_DEMAIS => {
+                Err(seele_ffi::perfis::ErroDoPerfil::TipoRecusado)
+            }
+            Err(_) => Ok(bytes),
+        }
+    })
+    .await
+    .map_err(|_| seele_ffi::perfis::ErroDoPerfil::ArquivoIlegivel)?
+}
+
 /// A imagem de um perfil, em `data:` para a janela desenhar. `hash` é o que o
 /// `perfis` entrega (hexadecimal), e a imagem é cacheada por ele para sempre:
 /// a segunda chamada não toca a rede. `Mudou` quer dizer que o perfil trocou a
@@ -12240,6 +10115,19 @@ async fn imagem_do_perfil(
     // Um hash que não tem forma de hash é um perfil que mudou debaixo da tela.
     let hash = hash_de_hex(&hash).ok_or(ErroDoPerfil::Mudou)?;
     let bytes = conexao.imagem_do_perfil(pessoa, lado, hash).await?;
+    conferir_imagem(&bytes).map_err(|_| ErroDoPerfil::TipoRecusado)?;
+    // **Reduzida ao lugar em que aparece, antes de atravessar a ponte.** A
+    // imagem chega do tamanho que subiu (até 10 MiB, qualquer medida), e uma
+    // capa em 4K ia à janela como um `data:` de megabytes: o aplicativo inteiro
+    // ficava lento (relato do dono, 10/11/2026). Fora da linha principal:
+    // decodificar e reduzir uma imagem grande leva tempo.
+    let capa = lado == seele_ffi::perfis::LadoDoPerfil::Capa;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        seele_ffi::reducao::imagem_do_perfil_para_a_janela(&bytes, capa)
+    })
+    .await
+    .map_err(|_| ErroDoPerfil::TipoRecusado)?
+    .map_err(|_| ErroDoPerfil::TipoRecusado)?;
     let tipo = conferir_imagem(&bytes).map_err(|_| ErroDoPerfil::TipoRecusado)?;
     Ok(format!(
         "data:{};base64,{}",
@@ -12335,6 +10223,10 @@ async fn escolher_imagem_do_perfil_padrao(
     })
     .await
     .map_err(|_| ErroDoPerfil::ArquivoIlegivel)??;
+    // **Guardada do tamanho em que aparece.** O que fica guardado é o que
+    // sobe a cada servidor, e o hash dele é o que diz se o servidor já tem
+    // esta imagem: reduzir só ao enviar faria os dois nunca baterem.
+    let bytes = imagem_de_perfil_para_subir(bytes, lado).await?;
     let para_o_retrato = (lado == LadoDoPerfil::Foto).then(|| bytes.clone());
     armazem.guardar_imagem(lado, &bytes)?;
     if let Some(bytes) = para_o_retrato {
@@ -12676,6 +10568,50 @@ fn banir_pessoa(
         .ban_person(person, reason, expires_at)
 }
 
+/// Pede ao servidor que tire um banimento — `desbanir` (protocolo 13).
+///
+/// Só quem pode banir, e a hierarquia é a de `banir_pessoa`: quem recusa é o
+/// servidor. A resposta é a lista de banidos inteira de novo
+/// (`Event::BanidosChanged`), e a pessoa volta ao FORA DO AR de todo mundo.
+#[tauri::command]
+fn desbanir_pessoa(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    person: u64,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.unban_person(person)
+}
+
+/// Pede ao servidor a lista dos banimentos que valem (protocolo 13).
+///
+/// Pede, e não espera: a lista chega pelo `BanidosChanged` e é lida em
+/// [`banidos`]. Ela não se atualiza sozinha quando outra pessoa bane — a tela
+/// pede de novo cada vez que abre a lista.
+#[tauri::command]
+fn listar_banidos(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.list_bans()
+}
+
+/// A lista de banidos como chegou da última vez que foi pedida.
+///
+/// Fora do `snapshot`, como o FORA DO AR e pela mesma razão: um MOD recebe o
+/// retrato, e nenhum MOD ganhou a lista de quem foi banido e por quê.
+#[tauri::command]
+fn banidos(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<sessoes::NaSessao<Vec<seele_ffi::Banido>>, ConnectionError> {
+    let conexao = session.conexao(carimbo)?;
+    Ok(sessoes::NaSessao::de(
+        &conexao,
+        session.geracao(),
+        conexao.banidos(),
+    ))
+}
+
 /// Pede ao servidor que tire uma mensagem da Linha.
 ///
 /// Sem permissão nenhuma quando a mensagem é de quem pede: a permissão do
@@ -12812,6 +10748,12 @@ fn em_todas(
 /// pode ficar segura numa sessão que perdeu o foco no meio da pressão.
 #[tauri::command]
 fn set_talking(session: State<'_, Session>, talking: bool) {
+    segurar_a_fala(&session, talking);
+}
+
+/// [`set_talking`] sem o `State`: a tecla de falar da janela e a de fora dela
+/// ([`tecla_global`]) abrem e fecham o mesmo microfone, pela mesma regra.
+fn segurar_a_fala(session: &Session, talking: bool) {
     if talking {
         if let Some(com_o_foco) = session.sessoes.com_o_foco() {
             com_o_foco.conexao.set_talking(true);
@@ -12857,6 +10799,8 @@ fn set_voice_mode(
     for connection in session.sessoes.conexoes() {
         connection.set_voice_mode(mode);
     }
+    // Saindo do modo tecla, a tecla de fora da janela volta ao sistema.
+    tecla_global::avisar(&app);
     Ok(())
 }
 
@@ -13138,7 +11082,165 @@ fn escolher_tecla_de_falar(app: AppHandle, tecla: Option<String>) -> Result<(), 
         .map_err(|erro| {
             tracing::warn!(%erro, "não consegui gravar a tecla de falar");
             FalhaAoEscolher::NaoGravei
-        })
+        })?;
+    // A tecla de fora da janela é a mesma: trocada aqui, ela troca no sistema.
+    if let Some(global) = app.try_state::<tecla_global::TeclaGlobal>() {
+        global.anotar(ajustes.tecla_de_falar_global(), ajustes.push_to_talk_key());
+    }
+    tecla_global::avisar(&app);
+    Ok(())
+}
+
+/// Como está a tecla de falar fora da janela: se a opção está ligada, e o que
+/// a tela diz dela. Ver [`tecla_global`].
+///
+/// O último estado conferido, e não uma conferida nova: este comando roda na
+/// thread principal, e conferir espera por ela.
+#[tauri::command]
+fn estado_da_tecla_global(estado: State<'_, tecla_global::TeclaGlobal>) -> tecla_global::Retrato {
+    estado.retrato()
+}
+
+/// Liga ou desliga a tecla de falar fora da janela, e devolve o que a tela diz
+/// agora — inclusive que a tecla escolhida não serve de atalho, que é o que
+/// quem acabou de ligar precisa ler.
+///
+/// # Errors
+///
+/// [`FalhaAoEscolher::NaoGravei`] se o disco recusar. Nada muda no sistema.
+#[tauri::command]
+async fn ligar_tecla_global(
+    app: AppHandle,
+    ligada: bool,
+) -> Result<tecla_global::Retrato, FalhaAoEscolher> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    ajustes.set_tecla_de_falar_global(ligada).map_err(|erro| {
+        tracing::warn!(%erro, "não consegui gravar a tecla de falar fora da janela");
+        FalhaAoEscolher::NaoGravei
+    })?;
+    if let Some(global) = app.try_state::<tecla_global::TeclaGlobal>() {
+        global.anotar(ligada, ajustes.push_to_talk_key());
+    }
+    Ok(tecla_global::conferir_fora_da_thread(&app).await)
+}
+
+/// As notificações do sistema: a escolha desta máquina, e o que se sabe da
+/// permissão do sistema — que no desktop é «não se sabe», dito assim. Ver
+/// [`notificacao`].
+///
+/// Sem o arquivo de preferências, desligadas: é o padrão de quem nunca
+/// escolheu, e é o que [`notificar_no_sistema`] vai conferir.
+#[tauri::command]
+fn estado_das_notificacoes(app: AppHandle) -> notificacao::Retrato {
+    notificacao::Retrato::do_desktop(
+        preferencias(&app)
+            .as_ref()
+            .is_some_and(seele_ffi::preferences::Preferences::notificacoes_do_sistema),
+    )
+}
+
+/// Liga ou desliga as notificações do sistema, e devolve o que a tela diz
+/// agora.
+///
+/// **Só grava.** Não sai notificação nenhuma daqui: no macOS o sistema não
+/// mostra a faixa com o app na frente, que é onde a pessoa está ao ligar, e uma
+/// «notificação de teste» que não aparece ensinaria que a opção não funciona.
+/// A pergunta do sistema, onde ele a faz, vem com a primeira notificação de
+/// verdade.
+///
+/// `confirmacao` é o texto da notificação que a **página de navegador** mostra
+/// ao ligar, onde ela é a única prova de que o navegador notifica; a casca o
+/// manda sempre, porque é a mesma nos dois lugares, e este lado o recebe e não
+/// o usa.
+///
+/// # Errors
+///
+/// [`FalhaAoEscolher::NaoGravei`] se o disco recusar. Nada muda.
+#[tauri::command]
+fn ligar_notificacoes(
+    app: AppHandle,
+    ligadas: bool,
+    confirmacao: Option<serde_json::Value>,
+) -> Result<notificacao::Retrato, FalhaAoEscolher> {
+    drop(confirmacao);
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err(FalhaAoEscolher::NaoGravei);
+    };
+    ajustes
+        .set_notificacoes_do_sistema(ligadas)
+        .map_err(|erro| {
+            tracing::warn!(%erro, "não consegui gravar a escolha das notificações do sistema");
+            FalhaAoEscolher::NaoGravei
+        })?;
+    Ok(notificacao::Retrato::do_desktop(ligadas))
+}
+
+/// Pede uma notificação ao sistema. A única porta do plugin: a página não o
+/// alcança (`capabilities/janela.json`, `tests/permissoes.rs`).
+///
+/// A regra — o que notifica, a repetição, o texto — é da casca
+/// (`ui/notificacao-do-sistema.js`). Aqui se confere o que só este lado sabe:
+/// a preferência no disco e a janela na frente, lida do sistema. Ver
+/// [`notificacao::pedir`].
+///
+/// O `motivo` é lista fechada e vai ao registro; o texto **não** vai, nem na
+/// falha: ele tem o nome de um servidor ou de uma pessoa.
+///
+/// `lugar` é para onde o clique levaria (a sessão da menção, a portaria). O
+/// plugin não devolve o clique no desktop — o sistema só traz o app à frente —,
+/// então este lado o recebe e não tem o que fazer com ele; quem o usa é a
+/// página de navegador, pela ponte.
+///
+/// # Errors
+///
+/// [`notificacao::RecusaDeNotificar`], pelo nome. `Ok` quer dizer que o pedido
+/// foi entregue ao sistema, e não que a notificação apareceu: o plugin não
+/// devolve isso.
+#[tauri::command]
+fn notificar_no_sistema(
+    app: AppHandle,
+    motivo: notificacao::Motivo,
+    titulo: String,
+    corpo: String,
+    lugar: Option<serde_json::Value>,
+) -> Result<(), notificacao::RecusaDeNotificar> {
+    drop(lugar);
+    let ligadas = preferencias(&app)
+        .as_ref()
+        .is_some_and(seele_ffi::preferences::Preferences::notificacoes_do_sistema);
+    let pedido = notificacao::pedir(
+        ligadas,
+        notificacao::janela_na_frente(&app),
+        &titulo,
+        &corpo,
+        |titulo, corpo| notificacao::emitir(&app, titulo, corpo),
+    );
+    match &pedido {
+        Ok(()) => tracing::info!(?motivo, "notificação entregue ao sistema"),
+        Err(recusa) => tracing::info!(?motivo, ?recusa, "notificação não saiu"),
+    }
+    pedido
+}
+
+/// O que a tecla de falar fora da janela precisa saber da voz: se a sessão com
+/// a voz desta máquina está numa sala, e se o microfone abre por tecla.
+///
+/// A sessão com o foco de voz, e não a da vista: é a ela que [`segurar_a_fala`]
+/// manda o aperto. Sem ela, ninguém está em sala.
+fn voz_para_a_tecla_global<R: tauri::Runtime>(app: &AppHandle<R>) -> (bool, bool) {
+    let Some(session) = app.try_state::<Session>() else {
+        return (false, false);
+    };
+    let Some(com_o_foco) = session.sessoes.com_o_foco() else {
+        return (false, false);
+    };
+    let retrato = com_o_foco.conexao.snapshot();
+    (
+        retrato.voice_rooms.iter().any(|sala| sala.occupied_by_us),
+        retrato.voice_mode == VoiceMode::PushToTalk,
+    )
 }
 
 #[tauri::command]
@@ -13200,6 +11302,68 @@ fn fontes_de_tela(
     session.conexao(carimbo)?.fontes_de_tela()
 }
 
+/// Uma prévia como ela vai à janela: de qual fonte (o `id` e o nome que a lista
+/// deu) e a imagem, em `data:`.
+#[derive(Clone, serde::Serialize)]
+struct PreviaNaJanela {
+    id: u64,
+    nome: String,
+    url: String,
+}
+
+/// **Tira a prévia de cada fonte da última lista** e as manda à janela uma a
+/// uma (`seele://previa-de-tela`), para a caixa de compartilhar mostrar o que
+/// cada monitor e cada janela tem, e não só o título.
+///
+/// Volta na hora: capturar leva tempo, e a lista não espera por isso. Uma
+/// rodada por vez; um pedido no meio de outra não faz nada (a tela pede de
+/// novo quando a lista muda).
+#[tauri::command]
+fn previas_de_tela(
+    app: AppHandle,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static EM_CURSO: AtomicBool = AtomicBool::new(false);
+
+    let conexao = session.conexao(carimbo)?;
+    if EM_CURSO.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        conexao.previas_de_tela(|id, nome, previa| {
+            let Some(url) = previa_em_data(&previa) else {
+                return;
+            };
+            let _ = app.emit(
+                "seele://previa-de-tela",
+                PreviaNaJanela {
+                    id,
+                    nome: nome.to_owned(),
+                    url,
+                },
+            );
+        });
+        EM_CURSO.store(false, Ordering::Release);
+    });
+    Ok(())
+}
+
+/// A prévia em JPEG, como `data:`. Uma miniatura de 320 pontos fica em poucos
+/// kilobytes; `None` se as medidas não batem com os bytes.
+fn previa_em_data(previa: &seele_ffi::PreviaDeTela) -> Option<String> {
+    let imagem = image::RgbImage::from_raw(previa.largura, previa.altura, previa.rgb.clone())?;
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 70)
+        .encode_image(&imagem)
+        .ok()?;
+    Some(format!(
+        "data:image/jpeg;base64,{}",
+        seele_ffi::base64_de(&jpeg)
+    ))
+}
+
 /// O que o sistema operacional respondeu sobre gravar a tela.
 #[tauri::command]
 fn permissao_de_tela(
@@ -13238,6 +11402,107 @@ fn compartilhar_tela(
 ) -> Result<(), ConnectionError> {
     session.conexao(carimbo)?.compartilhar_tela(fonte, limites)
 }
+
+/// O que o codificador desta janela faz com a câmera: as medidas, a cadência,
+/// o teto de banda e o codec. É conta, e não fala com o servidor.
+///
+/// A janela pergunta antes de pedir a câmera ao servidor, com as medidas que o
+/// sistema entregou: é com a resposta que ela põe o `VideoEncoder` à prova, e
+/// uma janela que não codifica recusa antes de a sala ouvir que há uma câmera.
+#[tauri::command]
+fn codificacao_da_camera(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    largura: u32,
+    altura: u32,
+    limites: seele_ffi::LimitesDeTela,
+) -> Result<seele_ffi::CodificacaoDaCamera, ConnectionError> {
+    Ok(session
+        .conexao(carimbo)?
+        .codificacao_da_camera(largura, altura, limites))
+}
+
+/// Começa a transmitir a câmera, no lugar da tela.
+///
+/// Quem captura e codifica é a janela (`ui/camera.js`): este processo não tem
+/// captura de câmera, porque o workspace proíbe `unsafe`. `largura` e `altura`
+/// são as do codificador dela. `ConnectionError::ServidorAntigo` quando o
+/// servidor é de antes do protocolo da câmera — nada sai.
+#[tauri::command]
+fn compartilhar_camera(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    largura: u32,
+    altura: u32,
+    limites: seele_ffi::LimitesDeTela,
+) -> Result<(), ConnectionError> {
+    session
+        .conexao(carimbo)?
+        .compartilhar_camera(largura, altura, limites)
+}
+
+/// O cabeçalho que diz se o quadro é um quadro-chave: `1` ou `0`.
+const CABECALHO_DA_CHAVE: &str = "seele-chave";
+/// O cabeçalho com o `SessaoId` da sessão a que o quadro pertence.
+const CABECALHO_DA_SESSAO: &str = "seele-sessao";
+/// O cabeçalho com a geração que a janela viu dessa sessão.
+const CABECALHO_DA_GERACAO: &str = "seele-geracao";
+
+/// Um quadro da câmera, codificado pela janela, a caminho da sala.
+///
+/// # O corpo é cru, e o resto vai nos cabeçalhos
+///
+/// Trinta quadros por segundo em base64 dentro de JSON seriam um terço de
+/// bytes a mais e duas cópias por quadro. O corpo do pedido são os bytes do
+/// quadro, em Annex-B, e o que um comando comum levaria em argumentos — a
+/// sessão, a geração e se é quadro-chave — vai nos cabeçalhos.
+///
+/// O WebView que não entrega corpo cru (o `postMessage` que o Tauri usa quando
+/// o protocolo `ipc:` não está disponível) manda os mesmos bytes como uma
+/// lista de números: ela é lida, mais devagar, em vez de recusada.
+///
+/// # Errors
+///
+/// Nenhum quadro some calado: `CameraNotLive`, `CameraQueueFull` e
+/// `CameraBadSize` voltam à janela, que diz o que houve; e os erros de carimbo
+/// de todo comando de sessão.
+#[tauri::command]
+fn quadro_da_camera(
+    session: State<'_, Session>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<u32, ConnectionError> {
+    let (carimbo, chave) = cabecalhos_do_quadro(request.headers())?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
+        tauri::ipc::InvokeBody::Json(valor) => serde_json::from_value::<Vec<u8>>(valor.clone())
+            .map_err(|_| ConnectionError::CameraBadSize)?,
+    };
+    session.conexao(carimbo)?.quadro_da_camera(chave, bytes)
+}
+
+/// O carimbo e a marca de quadro-chave, lidos dos cabeçalhos do pedido.
+///
+/// Sem a sessão ou sem a geração o quadro não tem dono, e a resposta é a de
+/// um comando sem sessão. A marca de chave ausente é «não é chave»: é o lado
+/// seguro, porque quem assiste só começa a decodificar por um quadro-chave.
+fn cabecalhos_do_quadro(
+    cabecalhos: &tauri::http::HeaderMap,
+) -> Result<(sessoes::CarimboDaJanela, bool), ConnectionError> {
+    let numero =
+        |nome: &str| -> Option<u64> { cabecalhos.get(nome)?.to_str().ok()?.trim().parse().ok() };
+    let (Some(sessao), Some(geracao)) = (numero(CABECALHO_DA_SESSAO), numero(CABECALHO_DA_GERACAO))
+    else {
+        return Err(ConnectionError::NotConnected);
+    };
+    let chave = cabecalhos
+        .get(CABECALHO_DA_CHAVE)
+        .is_some_and(|valor| valor.as_bytes() == b"1");
+    Ok((sessoes::CarimboDaJanela { sessao, geracao }, chave))
+}
+
+#[path = "testes/quadro_da_camera_testes.rs"]
+#[cfg(test)]
+mod quadro_da_camera_testes;
 
 /// Para de transmitir. Idempotente do outro lado: parar sem estar
 /// compartilhando não é erro.
@@ -14089,71 +12354,9 @@ fn persistence_do_ato(
 /// **Parar A e subir B nunca aplica a B uma decisão aberta para A** (E7, a
 /// portaria), com hospedagens de verdade: a mesma chave e o mesmo servidor
 /// guardado (`None`, o de sempre) não bastam, porque a geração muda.
+#[path = "testes/a_decisao_e_da_hospedagem_em_que_abriu.rs"]
 #[cfg(test)]
-mod a_decisao_e_da_hospedagem_em_que_abriu {
-    use super::{
-        persistence_da_hospedagem, persistence_do_ato, FalhaNaPortaria, Hospedado, Hospedagens,
-    };
-    use seele_server::hospedagem::Hospedagem;
-    use seele_server::persistence::Location;
-
-    #[tokio::test]
-    async fn a_decisao_aberta_em_a_e_recusada_em_b_e_aceita_em_a() {
-        let a = Hospedagem::iniciar(0, Location::Memory, "A", None, |_| Ok(()))
-            .await
-            .expect("A subiu");
-        let mut hospedagens = Hospedagens {
-            guardado: Some(Hospedado::novo(a, None)),
-            pessoal: None,
-        };
-        let de_a = hospedagens.guardado.as_ref().expect("A").identidade();
-        assert!(
-            persistence_da_hospedagem(&hospedagens, &de_a).is_ok(),
-            "a decisão aberta em A foi recusada em A"
-        );
-
-        // Parar A, subir B (o mesmo servidor guardado, `None`).
-        if let Some(parado) = hospedagens.guardado.take() {
-            parado.hospedagem.encerrar().await;
-        }
-        assert!(matches!(
-            persistence_da_hospedagem(&hospedagens, &de_a),
-            Err(FalhaNaPortaria::NaoEstaHospedando)
-        ));
-        let b = Hospedagem::iniciar(0, Location::Memory, "B", None, |_| Ok(()))
-            .await
-            .expect("B subiu");
-        hospedagens.guardado = Some(Hospedado::novo(b, None));
-        let de_b = hospedagens.guardado.as_ref().expect("B").identidade();
-        assert_eq!(
-            de_a.servidor, de_b.servidor,
-            "o teste quer o mesmo servidor guardado"
-        );
-        match persistence_da_hospedagem(&hospedagens, &de_a) {
-            Err(FalhaNaPortaria::HospedagemNaoConfere { agora }) => {
-                assert_eq!(agora, de_b, "a recusa não diz qual hospedagem está de pé");
-            }
-            Err(outra) => panic!("a decisão de A em B foi recusada pelo motivo errado: {outra:?}"),
-            Ok(_) => panic!("a decisão aberta em A foi aplicada em B"),
-        }
-        assert!(persistence_da_hospedagem(&hospedagens, &de_b).is_ok());
-        // **O ato sem hospedagem é recusado** (rodada 3), e não cai no
-        // guardado de pé; com ela, passa pelo mesmo caminho dos comandos.
-        match persistence_do_ato(&hospedagens, None) {
-            Err(FalhaNaPortaria::HospedagemNaoConfere { agora }) => assert_eq!(agora, de_b),
-            Err(outra) => panic!("o ato sem hospedagem foi recusado pelo motivo errado: {outra:?}"),
-            Ok(_) => panic!("o ato sem hospedagem caiu no guardado de pé"),
-        }
-        assert!(persistence_do_ato(&hospedagens, Some(&de_b)).is_ok());
-        assert!(matches!(
-            persistence_do_ato(&hospedagens, Some(&de_a)),
-            Err(FalhaNaPortaria::HospedagemNaoConfere { .. })
-        ));
-        if let Some(parado) = hospedagens.guardado.take() {
-            parado.hospedagem.encerrar().await;
-        }
-    }
-}
+mod a_decisao_e_da_hospedagem_em_que_abriu;
 
 /// O que o servidor que esta janela hospeda tem a dizer de si, para a tela de
 /// quem hospeda (a P12 do plano F1b).
@@ -14204,48 +12407,9 @@ fn estado_do_servidor(session: State<'_, Session>) -> Result<EstadoDoServidor, &
     ))
 }
 
+#[path = "testes/o_estado_do_servidor.rs"]
 #[cfg(test)]
-mod o_estado_do_servidor {
-    use super::*;
-
-    #[test]
-    fn quem_nao_hospeda_diz_que_nao_hospeda_e_nada_mais() {
-        assert_eq!(
-            estado_do_servidor_de(None),
-            EstadoDoServidor {
-                hospedando: false,
-                mensagens_desconhecidas: 0,
-                sessoes_com_desconhecidas: 0,
-            }
-        );
-    }
-
-    #[test]
-    fn quem_hospeda_diz_os_numeros_do_servidor_e_o_zero_tambem() {
-        let numeros = |mensagens, sessoes| {
-            estado_do_servidor_de(Some(seele_server::hospedagem::EstadoDoServidor {
-                mensagens_desconhecidas: mensagens,
-                sessoes_com_desconhecidas: sessoes,
-            }))
-        };
-        assert_eq!(
-            numeros(0, 0),
-            EstadoDoServidor {
-                hospedando: true,
-                mensagens_desconhecidas: 0,
-                sessoes_com_desconhecidas: 0,
-            }
-        );
-        assert_eq!(
-            numeros(3, 1),
-            EstadoDoServidor {
-                hospedando: true,
-                mensagens_desconhecidas: 3,
-                sessoes_com_desconhecidas: 1,
-            }
-        );
-    }
-}
+mod o_estado_do_servidor;
 
 /// O estado das três camadas da porta.
 #[tauri::command]
@@ -15287,6 +13451,28 @@ fn main() {
         // quem abre um diálogo neste app é um comando desta casca, com o título
         // escrito aqui, e não uma linha de JavaScript.
         .plugin(tauri_plugin_dialog::init())
+        // A notificação do sistema. Registrado para que o comando desta casca
+        // possa chamá-lo daqui de dentro; a página **não** o alcança — a única
+        // permissão dele em `capabilities/janela.json` é
+        // `allow-is-permission-granted`, e ela existe por causa do script que o
+        // plugin injeta em toda página, que faz essa pergunta ao carregar sem
+        // `catch`: recusada, virava uma «promise recusada sem catch» no
+        // registro de toda abertura. `notify` continua fechado
+        // (`tests/permissoes.rs`).
+        .plugin(tauri_plugin_notification::init())
+        // A tecla de falar fora da janela. O plugin dela **não** sobe aqui: ver
+        // `tecla_global::iniciar`, chamado do `setup`.
+        .manage(tecla_global::TeclaGlobal::default())
+        // A janela vir à frente devolve a tecla ao sistema, e sair da frente a
+        // pede; fechada, devolve. Só avisa: este fecho roda na thread principal.
+        .on_window_event(|janela, evento| {
+            if matches!(
+                evento,
+                tauri::WindowEvent::Focused(_) | tauri::WindowEvent::Destroyed
+            ) {
+                tecla_global::avisar(janela.app_handle());
+            }
+        })
         .manage(Session {
             // Lida aqui e não dentro do `Default`: um `Default` que lê o
             // ambiente é um `Default` que se comporta diferente em teste e em
@@ -15324,6 +13510,18 @@ fn main() {
                 };
                 janela.build()?;
             }
+
+            // A tecla de falar fora da janela: a opção e a tecla que estão no
+            // disco, o serviço de atalhos e a tarefa que confere. Depois da
+            // janela, que é de quem a conferida lê o foco.
+            let ajustes = preferencias(app.handle());
+            tecla_global::iniciar(
+                app.handle(),
+                ajustes
+                    .as_ref()
+                    .is_some_and(seele_ffi::preferences::Preferences::tecla_de_falar_global),
+                ajustes.as_ref().and_then(|p| p.push_to_talk_key()),
+            );
 
             // **Os pacotes do layout antigo, levados uma vez.**
             //
@@ -15452,11 +13650,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            pessoal_identidade,
-            pessoal_assinar,
-            pessoal_conferir_par,
-            pessoal_reservar,
             abrir_no_navegador,
+            abrir_o_teste_de_rede,
             previa_de_link,
             dominios_de_gif,
             apis_de_mod_aceitas,
@@ -15614,6 +13809,10 @@ fn main() {
             atribuir_cargo,
             revogar_cargo,
             banir_pessoa,
+            desbanir_pessoa,
+            listar_banidos,
+            banidos,
+            editar_mensagem,
             remover_mensagem,
             mover_pessoa,
             apagar_voice_room,
@@ -15627,9 +13826,13 @@ fn main() {
             volumes_locais,
             avisos_dos_dados_locais,
             fontes_de_tela,
+            previas_de_tela,
             permissao_de_tela,
             pedir_permissao_de_tela,
             compartilhar_tela,
+            codificacao_da_camera,
+            compartilhar_camera,
+            quadro_da_camera,
             ajustar_limites_da_tela,
             parar_de_compartilhar,
             pedir_quadro_chave,
@@ -15651,6 +13854,11 @@ fn main() {
             modo_de_voz_escolhido,
             tecla_de_falar,
             escolher_tecla_de_falar,
+            estado_da_tecla_global,
+            ligar_tecla_global,
+            estado_das_notificacoes,
+            ligar_notificacoes,
+            notificar_no_sistema,
             escolher_microfone,
             saidas,
             saida_escolhida,
@@ -16319,495 +14527,25 @@ fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
 /// **Uma despedida por saída** (revisão da 0.19, M1 e M6): o sinal que chega
 /// com a despedida da janela correndo não sai por cima dela, e a janela que
 /// fecha com a despedida de um sinal correndo não despede de novo.
+#[path = "testes/uma_despedida_por_saida.rs"]
 #[cfg(test)]
-mod uma_despedida_por_saida {
-    use super::ao_fechar_a_ultima_janela;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    /// Sem a conferência no `ExitRequested`, a janela que fecha com a
-    /// despedida de um sinal correndo começava outra, e este teste reprova.
-    #[test]
-    fn a_janela_que_fecha_durante_a_despedida_nao_despede_de_novo() {
-        let feita = AtomicBool::new(false);
-        let mut comecou = 0;
-        ao_fechar_a_ultima_janela(&feita, || comecou += 1);
-        assert_eq!(comecou, 1, "a primeira saída não despediu");
-        assert!(feita.load(Ordering::SeqCst));
-        ao_fechar_a_ultima_janela(&feita, || comecou += 1);
-        assert_eq!(
-            comecou, 1,
-            "a saída com a despedida correndo despediu de novo"
-        );
-    }
-
-    /// Com a despedida da janela correndo, o sinal não chama o `exit` (o dela
-    /// vem). Sem o `return`, o sinal saía na hora, e este teste reprova.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn o_sinal_durante_a_despedida_da_janela_nao_sai_por_cima() {
-        let feita = AtomicBool::new(true);
-        let (mut despediu, mut saiu) = (false, false);
-        super::despedir_no_sinal(
-            &feita,
-            "SIGTERM",
-            async { despediu = true },
-            std::future::pending(),
-            || saiu = true,
-        )
-        .await;
-        assert!(!saiu, "o sinal saiu por cima da despedida que já corria");
-        assert!(!despediu, "o sinal despediu de novo");
-
-        // Sem despedida correndo, ele despede e sai.
-        let feita = AtomicBool::new(false);
-        let (mut despediu, mut saiu) = (false, false);
-        super::despedir_no_sinal(
-            &feita,
-            "SIGTERM",
-            async { despediu = true },
-            std::future::pending(),
-            || saiu = true,
-        )
-        .await;
-        assert!(despediu && saiu, "o sinal não despediu e saiu");
-        assert!(feita.load(Ordering::SeqCst));
-    }
-}
+mod uma_despedida_por_saida;
 
 /// A despedida de quem sai sem fechar a janela (tarefa 21 da F7): o Sair do
 /// Dock, o logout, um `quit` de fora. O que se prova aqui é a forma, com
 /// metades de mentira; se o runtime ainda a entrega no `RunEvent::Exit` é
 /// medida no app de verdade.
+#[path = "testes/a_despedida_do_fim.rs"]
 #[cfg(test)]
-mod a_despedida_do_fim {
-    use super::{despedir_no_fim, dizer_a_despedida_do_fim, DespedidaNoFim};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
+mod a_despedida_do_fim;
 
-    /// **A saída nunca trava.** Com as duas metades presas, a despedida volta
-    /// no teto, e diz que ele venceu.
-    #[test]
-    fn a_despedida_do_fim_nunca_passa_do_teto() {
-        let feita = AtomicBool::new(false);
-        let teto = Duration::from_millis(300);
-        let comeco = Instant::now();
-        let (desfecho, levou) = despedir_no_fim(
-            &feita,
-            teto,
-            || std::thread::sleep(Duration::from_secs(3)),
-            async { tokio::time::sleep(Duration::from_secs(3)).await },
-        );
-        let medido = comeco.elapsed();
-        assert_eq!(desfecho, DespedidaNoFim::TetoVenceu);
-        assert!(
-            medido < teto + Duration::from_millis(200),
-            "a despedida do fim segurou a saída {medido:?}, com teto de {teto:?}: o \
-             AppKit espera, e o app não fecha"
-        );
-        assert!(levou >= teto, "o teto venceu e a conta diz {levou:?}");
-    }
-
-    /// **As duas metades, qualquer que acabe primeiro.** A despedida só diz
-    /// que rodou depois de a sessão **e** as hospedagens acabarem.
-    #[test]
-    fn a_despedida_do_fim_espera_as_duas_metades() {
-        for (da_sessao, das_hospedagens) in [(100, 250), (250, 100)] {
-            let feita = AtomicBool::new(false);
-            let sessao = Arc::new(AtomicBool::new(false));
-            let hospedagens = Arc::new(AtomicBool::new(false));
-            let (marca_a_sessao, marca_as_hospedagens) =
-                (Arc::clone(&sessao), Arc::clone(&hospedagens));
-            let (desfecho, _) = despedir_no_fim(
-                &feita,
-                Duration::from_secs(2),
-                move || {
-                    std::thread::sleep(Duration::from_millis(da_sessao));
-                    marca_a_sessao.store(true, Ordering::SeqCst);
-                },
-                async move {
-                    tokio::time::sleep(Duration::from_millis(das_hospedagens)).await;
-                    marca_as_hospedagens.store(true, Ordering::SeqCst);
-                },
-            );
-            assert_eq!(desfecho, DespedidaNoFim::Rodou);
-            assert!(
-                sessao.load(Ordering::SeqCst) && hospedagens.load(Ordering::SeqCst),
-                "a despedida do fim voltou antes de uma metade acabar (sessão em \
-                 {da_sessao} ms, hospedagens em {das_hospedagens} ms)"
-            );
-            assert!(
-                feita.load(Ordering::SeqCst),
-                "a despedida rodou e não ficou marcada"
-            );
-        }
-    }
-
-    /// **Uma vez por processo.** Depois da saída comum, que já despediu e
-    /// marcou, o `RunEvent::Exit` não despede de novo.
-    #[test]
-    fn a_despedida_do_fim_nao_repete_a_da_janela() {
-        let feita = AtomicBool::new(true);
-        let chamou = Arc::new(AtomicBool::new(false));
-        let (pela_sessao, pelas_hospedagens) = (Arc::clone(&chamou), Arc::clone(&chamou));
-        let (desfecho, _) = despedir_no_fim(
-            &feita,
-            Duration::from_secs(1),
-            move || pela_sessao.store(true, Ordering::SeqCst),
-            async move { pelas_hospedagens.store(true, Ordering::SeqCst) },
-        );
-        std::thread::sleep(Duration::from_millis(100));
-        assert_eq!(desfecho, DespedidaNoFim::JaFeita);
-        assert!(
-            !chamou.load(Ordering::SeqCst),
-            "a despedida do fim despediu de novo uma saída que já tinha se despedido"
-        );
-    }
-
-    /// **Uma metade que cai não vira «rodou».**
-    #[test]
-    fn a_despedida_do_fim_diz_quando_uma_metade_cai() {
-        let feita = AtomicBool::new(false);
-        let (desfecho, _) = despedir_no_fim(
-            &feita,
-            Duration::from_secs(1),
-            || panic!("a metade da sessão caiu (de propósito, no teste)"),
-            async {},
-        );
-        assert_eq!(desfecho, DespedidaNoFim::Caiu);
-    }
-
-    /// **O `seele.log` diz o que aconteceu**: se rodou e quanto levou, ou que
-    /// o teto venceu. Um silêncio aqui é a pergunta de quem usa, dias depois,
-    /// sem dado nenhum.
-    #[test]
-    fn a_despedida_do_fim_diz_no_log_o_que_conseguiu() {
-        for (desfecho, agulhas) in [
-            (DespedidaNoFim::JaFeita, &["já tinha rodado"][..]),
-            (
-                DespedidaNoFim::Rodou,
-                &["se despediram", "levou_ms=420"][..],
-            ),
-            (
-                DespedidaNoFim::TetoVenceu,
-                &[
-                    "WARN",
-                    "o teto da despedida venceu",
-                    "levou_ms=420",
-                    "teto_ms=1000",
-                ][..],
-            ),
-            (DespedidaNoFim::Caiu, &["WARN", "caiu antes de acabar"][..]),
-        ] {
-            let ((), rastro) = crate::rastro_de_teste::capturar(|| {
-                dizer_a_despedida_do_fim(desfecho, Duration::from_millis(420));
-            });
-            for agulha in agulhas {
-                assert!(
-                    rastro.contains(agulha),
-                    "a linha de {desfecho:?} não diz `{agulha}`: {rastro}"
-                );
-            }
-        }
-    }
-}
-
+#[path = "testes/a_tela_le_o_que_o_rust_manda.rs"]
 #[cfg(test)]
-mod a_tela_le_o_que_o_rust_manda {
-    use super::{pinta_o_servidor, ModNaTela};
-    use seele_ffi::mods::ModInstalado;
-    use std::collections::BTreeSet;
+mod a_tela_le_o_que_o_rust_manda;
 
-    /// As chaves que um `ModNaTela` de verdade produz, e não as que parecem.
-    fn chaves_serializadas() -> BTreeSet<String> {
-        let amostra = ModNaTela {
-            instalado: ModInstalado {
-                id: "autor/nome".to_owned(),
-                version: "1.0.0".to_owned(),
-                api: seele_ffi::mods::MOD_API_VERSION,
-                hash: "0".repeat(64),
-                client: Some("cliente/main.js".to_owned()),
-                arquivos: vec!["som/toque.wav".to_owned()],
-                repo: "https://exemplo".to_owned(),
-                reach: vec!["dom".to_owned()],
-                server: true,
-                tema: true,
-                plataformas: Vec::new(),
-                poderes: Vec::new(),
-                maquina: false,
-                refused: None,
-            },
-            enabled: false,
-            pinta: false,
-            exigencia_vale_na_rede: true,
-        };
-        let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(amostra) else {
-            panic!("um `ModNaTela` tem de serializar para objeto");
-        };
-        mapa.keys().cloned().collect()
-    }
-
-    /// **O defeito que este guarda existe para impedir, e que já aconteceu.**
-    ///
-    /// `ModNaTela` embrulha um `ModInstalado` num campo `instalado`, e o campo
-    /// tem `#[serde(flatten)]` — então o invólucro **não existe** no JSON: os
-    /// campos saem no topo. A página lia `mod.instalado.id` em sete lugares.
-    /// `mod.instalado` é `undefined`, e `undefined.id` lança.
-    ///
-    /// O que isso fazia na tela é a metade que dói: a contagem do catálogo é
-    /// escrita **antes** da lista, e o erro subia até um `console.warn`. Quem
-    /// usava lia «1 no catálogo» ao lado de lista nenhuma, sem uma palavra
-    /// sobre o motivo — o «o produto sabe e não conta» do `CLAUDE.md`, e ainda
-    /// por cima quebrando a gestão de MODs inteira junto.
-    ///
-    /// Nenhum teste viu porque nenhum tinha um MOD instalado: com a lista
-    /// vazia o `some()` nunca chama o predicado, e o caminho quebrado não é
-    /// percorrido.
-    ///
-    /// A regra é sobre a **forma** do defeito, e não sobre o nome `instalado`:
-    /// ler `x.<meio>.<folha>` em que `<meio>` não é chave e `<folha>` é, é
-    /// exatamente atravessar um invólucro que o `flatten` apagou.
-    /// **O `pinta` nos dois valores** (tarefa 17f.0 da F3): o pacote ligado do
-    /// escolhido pinta; o outro MOD ligado, o pacote desligado do mesmo MOD e
-    /// um servidor sem escolhido, não.
-    #[test]
-    fn so_o_pacote_ligado_do_escolhido_pinta_o_servidor() {
-        assert!(
-            pinta_o_servidor(true, Some("seele/estilo"), "seele/estilo"),
-            "o pacote ligado do escolhido tem de pintar"
-        );
-        assert!(
-            !pinta_o_servidor(true, Some("seele/estilo"), "seele/noite"),
-            "outro MOD ligado não pinta"
-        );
-        assert!(
-            !pinta_o_servidor(false, Some("seele/estilo"), "seele/estilo"),
-            "o outro conteúdo do mesmo MOD, desligado, não pinta"
-        );
-        assert!(
-            !pinta_o_servidor(true, None, "seele/estilo"),
-            "sem escolhido, ninguém pinta"
-        );
-    }
-
-    /// **`mods_instalados` diz os `poderes` de cada MOD**, como lista de nomes
-    /// no topo do objeto (o `flatten` apaga o invólucro): vazia sem a chave, e
-    /// `["porta"]` para quem a declara. É o que a casca lê para saber se o MOD
-    /// tem túnel, sem abrir o manifesto.
-    #[test]
-    fn mods_instalados_diz_os_poderes_de_cada_mod() {
-        let tela = |poderes: Vec<seele_ffi::mods::Poder>| {
-            let mut v = serde_json::to_value(ModNaTela {
-                instalado: ModInstalado {
-                    id: "autor/nome".to_owned(),
-                    version: "1.0.0".to_owned(),
-                    api: seele_ffi::mods::MOD_API_VERSION,
-                    hash: "0".repeat(64),
-                    client: None,
-                    arquivos: Vec::new(),
-                    repo: String::new(),
-                    reach: Vec::new(),
-                    server: true,
-                    tema: false,
-                    plataformas: Vec::new(),
-                    poderes,
-                    maquina: false,
-                    refused: None,
-                },
-                enabled: false,
-                pinta: false,
-                exigencia_vale_na_rede: true,
-            })
-            .expect("serializa");
-            v.get_mut("poderes")
-                .map(serde_json::Value::take)
-                .unwrap_or_default()
-        };
-        assert_eq!(tela(Vec::new()), serde_json::json!([]));
-        assert_eq!(
-            tela(vec![seele_ffi::mods::Poder::Porta]),
-            serde_json::json!(["porta"])
-        );
-    }
-
-    #[test]
-    fn a_pagina_nao_atravessa_um_involucro_que_o_flatten_apagou() {
-        let chaves = chaves_serializadas();
-        assert!(
-            !chaves.contains("instalado"),
-            "o `flatten` saiu do `ModNaTela`; este guarda foi escrito para quando ele estava lá"
-        );
-
-        let script = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/camada-mods.js"),
-        )
-        .unwrap_or_else(|erro| panic!("a camada de MODs tem de ser legível: {erro}"));
-
-        let mut culpados = Vec::new();
-        for palavra in script.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.')) {
-            let partes: Vec<&str> = palavra.split('.').collect();
-            for janela in partes.windows(3) {
-                let [inicio, meio, folha] = janela else {
-                    continue;
-                };
-                if !chaves.contains(*meio) && chaves.contains(*folha) {
-                    culpados.push(format!("{inicio}.{meio}.{folha}"));
-                }
-            }
-        }
-
-        assert!(
-            culpados.is_empty(),
-            "a página lê {culpados:?}, e o meio dessas cadeias não é campo nenhum do que o \
-             Rust serializa — quase sempre um invólucro que o `flatten` apagou. As chaves \
-             que existem são {chaves:?}"
-        );
-    }
-}
-
+#[path = "testes/a_tela_le_os_limites_que_o_rust_manda.rs"]
 #[cfg(test)]
-mod a_tela_le_os_limites_que_o_rust_manda {
-    use super::RegrasDoIcone;
-
-    /// **A02 da auditoria de 17/09.** A tela de preparar mostrava, literalmente,
-    /// `Até NaN KiB, undefined px de lado`.
-    ///
-    /// Eu li `regras.teto_em_bytes` e `regras.lado_maximo`; o Rust serializa
-    /// `limite_bytes` e `lado`. A tela de CONFIGURAÇÕES já usava os certos —
-    /// dois leitores do mesmo comando, e só um deles conferiu o nome.
-    ///
-    /// O guarda deriva as chaves de um `RegrasDoIcone` **serializado de
-    /// verdade**, e não de uma lista escrita aqui: assim ele não pode divergir
-    /// do Rust no dia em que o campo mudar de nome.
-    ///
-    /// A forma cobrada é a mesma do guarda dos MODs: ler de um objeto do Rust
-    /// um nome que ele não produz não lança, não aparece no console e não
-    /// reprova teste nenhum. Chega na tela como `undefined`.
-    #[test]
-    fn nenhuma_tela_le_um_limite_de_imagem_que_nao_existe() {
-        let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(RegrasDoIcone {
-            limite_bytes: 8 * 1024,
-            lado: 256,
-        }) else {
-            panic!("`RegrasDoIcone` tem de serializar para objeto");
-        };
-        let chaves: std::collections::BTreeSet<&str> = mapa.keys().map(String::as_str).collect();
-
-        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
-        let mut culpados = Vec::new();
-        for arquivo in ["tela-boot.js", "tela-server.js"] {
-            let script = std::fs::read_to_string(raiz.join(arquivo))
-                .unwrap_or_else(|erro| panic!("{arquivo} tem de ser legível: {erro}"));
-            // Toda leitura de `<algo com "regras" no nome>.<campo>`.
-            for (at, _) in script.match_indices("regras") {
-                let Some(resto) = script.get(at..) else {
-                    continue;
-                };
-                let Some(ponto) = resto.find('.') else {
-                    continue;
-                };
-                // Só o acesso imediato: `regras.x`, `regrasDoIcone.x`.
-                if resto[..ponto].contains(['(', ')', ' ', '\n', ';']) {
-                    continue;
-                }
-                let campo: String = resto[ponto + 1..]
-                    .chars()
-                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                    .collect();
-                if !campo.is_empty() && !chaves.contains(campo.as_str()) {
-                    culpados.push(format!("{arquivo}: regras.{campo}"));
-                }
-            }
-        }
-
-        assert!(
-            culpados.is_empty(),
-            "estas telas leem um limite de imagem que o Rust não serializa, e o que \
-             chega é `undefined`: {culpados:?}. As chaves que existem são {chaves:?}"
-        );
-    }
-
-    /// Os tetos que cada tela lê de `limites_dos_campos`, por arquivo: os nomes
-    /// passados a `passaDoTeto("…"` e os lidos direto de `tetosDosCampos())?.…`.
-    fn tetos_lidos_pelas_telas() -> Vec<(String, String)> {
-        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
-        let mut lidos = Vec::new();
-        let mut arquivos: Vec<_> = std::fs::read_dir(&raiz)
-            .expect("ui/ tem de ser legível")
-            .filter_map(Result::ok)
-            .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
-            .filter(|nome| nome.ends_with(".js"))
-            .collect();
-        arquivos.sort();
-        for arquivo in arquivos {
-            let script = std::fs::read_to_string(raiz.join(&arquivo))
-                .unwrap_or_else(|erro| panic!("{arquivo} tem de ser legível: {erro}"));
-            for pedaco in script.split("passaDoTeto(\"").skip(1) {
-                if let Some(campo) = pedaco.split('"').next() {
-                    lidos.push((arquivo.clone(), campo.to_owned()));
-                }
-            }
-            for pedaco in script.split("tetosDosCampos())?.").skip(1) {
-                // `?.[campo]` é o acesso por nome variável do próprio
-                // `passaDoTeto`, cujos nomes são os de quem o chama, lidos acima.
-                if pedaco.starts_with('[') {
-                    continue;
-                }
-                let campo: String = pedaco
-                    .chars()
-                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                    .collect();
-                lidos.push((arquivo.clone(), campo));
-            }
-        }
-        lidos
-    }
-
-    /// **E os tetos dos campos, pela mesma razão** (pendência 58, item 55; lote
-    /// C55 da F5).
-    ///
-    /// A janela pede cada teto pelo nome, e um nome que o Rust não serializa
-    /// não lança: chega `undefined`, `passaDoTeto` não confere nada, e o campo
-    /// volta a mandar calado o que o núcleo recusa. As chaves vêm de um
-    /// `LimitesDosCampos` serializado de verdade. E, na outra mão, todo teto
-    /// que o Rust serializa tem uma tela que o lê.
-    #[test]
-    fn nenhuma_tela_le_um_teto_de_campo_que_nao_existe() {
-        let Ok(serde_json::Value::Object(mapa)) =
-            serde_json::to_value(seele_ffi::Connection::limites_dos_campos())
-        else {
-            panic!("`LimitesDosCampos` tem de serializar para objeto");
-        };
-        let chaves: std::collections::BTreeSet<&str> = mapa.keys().map(String::as_str).collect();
-        let lidos = tetos_lidos_pelas_telas();
-        assert!(
-            !lidos.is_empty(),
-            "nenhuma tela lê um teto de `limites_dos_campos`, ou a leitura deste guarda \
-             quebrou: ele passaria sem olhar nada"
-        );
-        let culpados: Vec<_> = lidos
-            .iter()
-            .filter(|(_, campo)| !chaves.contains(campo.as_str()))
-            .collect();
-        assert!(
-            culpados.is_empty(),
-            "estas telas leem um teto de campo que o Rust não serializa, e o que chega é \
-             `undefined`, que não confere nada: {culpados:?}. As chaves que existem são \
-             {chaves:?}"
-        );
-        // E todo teto que o Rust manda tem quem o confira: um teto sem leitor é
-        // um campo que voltou a mandar sem conferir, ou um teto que sobrou.
-        let sem_leitor: Vec<_> = chaves
-            .iter()
-            .filter(|chave| !lidos.iter().any(|(_, campo)| campo == *chave))
-            .collect();
-        assert!(
-            sem_leitor.is_empty(),
-            "nenhuma tela confere estes tetos de `limites_dos_campos`: {sem_leitor:?}. Os \
-             lidos são {lidos:?}"
-        );
-    }
-}
+mod a_tela_le_os_limites_que_o_rust_manda;
 
 /// O que sai desta janela por um link, e o que não sai.
 ///
@@ -16816,385 +14554,9 @@ mod a_tela_le_os_limites_que_o_rust_manda {
 /// aqueles testes saíram com ele; o nome ficou descrevendo o que não está mais
 /// aqui, e um módulo cujo nome mente é onde o próximo teste entra no lugar
 /// errado.
+#[path = "testes/o_que_sai_desta_janela_por_um_link.rs"]
 #[cfg(test)]
-mod o_que_sai_desta_janela_por_um_link {
-    use super::{
-        e_de_um_dominio_de_gif, endereco_de_previa, endereco_que_pode_sair,
-        midia_declarada_pela_pagina, FalhaNaPrevia, DOMINIOS_DE_GIF,
-    };
-
-    /// **A lista de domínios é fechada, e o sufixo é conferido com o ponto.**
-    ///
-    /// O defeito que este teste existe para impedir é de uma linha: um
-    /// `ends_with("tenor.com")` sem ponto deixa `tenor.com.exemplo.br` passar,
-    /// e aí quem cola um link escolhe o domínio que esta janela busca — que é
-    /// exatamente o que a lista fechada existe para não permitir.
-    #[test]
-    fn so_os_dominios_da_lista_tem_a_pagina_resolvida() {
-        for bom in [
-            "https://tenor.com/view/gato-dancando-gif-12345",
-            "https://www.tenor.com/view/x-gif-1",
-            "https://media.tenor.com/abc/dancando.gif",
-            "https://GIPHY.com/gifs/algo",
-            "https://i.imgur.com/abc.gif",
-        ] {
-            assert!(e_de_um_dominio_de_gif(bom), "recusou `{bom}`");
-        }
-        for hostil in [
-            // O sufixo sem o ponto: o caso que a comparação ingênua deixa passar.
-            "https://tenor.com.exemplo.br/colher-ip",
-            "https://naotenor.com/x",
-            "https://exemplo.br/tenor.com/x",
-            "https://exemplo.br/?a=tenor.com",
-            "https://192.168.0.1/roteador",
-            "nao e um endereco",
-        ] {
-            assert!(!e_de_um_dominio_de_gif(hostil), "aceitou `{hostil}`");
-        }
-    }
-
-    /// **O que a página declara é lido de `og:image`, em qualquer ordem.**
-    ///
-    /// A ordem dos atributos é de quem escreve o HTML, e um leitor que exigisse
-    /// `property` antes de `content` funcionaria num dos três sites e não nos
-    /// outros — a forma de defeito que só aparece em produção, num site só.
-    #[test]
-    fn a_midia_declarada_e_lida_venha_em_que_ordem_vier() {
-        let casos = [
-            r#"<meta property="og:image" content="https://media.tenor.com/a.gif">"#,
-            r#"<meta content="https://media.tenor.com/a.gif" property="og:image"/>"#,
-            r#"<meta   property = 'og:image'   content = 'https://media.tenor.com/a.gif' >"#,
-            r#"<META PROPERTY="OG:IMAGE" CONTENT="https://media.tenor.com/a.gif">"#,
-            r#"<meta name="twitter:image" content="https://media.tenor.com/a.gif">"#,
-            r#"<meta property="og:image:secure_url" content="https://media.tenor.com/a.gif">"#,
-        ];
-        for html in casos {
-            assert_eq!(
-                midia_declarada_pela_pagina(html).as_deref(),
-                Some("https://media.tenor.com/a.gif"),
-                "não leu: {html}"
-            );
-        }
-    }
-
-    /// `&amp;` volta a ser `&`: um endereço de mídia carrega consulta.
-    #[test]
-    fn a_entidade_do_e_comercial_volta_ao_endereco() {
-        let html =
-            r#"<meta property="og:image" content="https://media.tenor.com/a.gif?w=1&amp;h=2">"#;
-        assert_eq!(
-            midia_declarada_pela_pagina(html).as_deref(),
-            Some("https://media.tenor.com/a.gif?w=1&h=2")
-        );
-    }
-
-    /// **Uma página sem declaração não vira imagem nenhuma.**
-    ///
-    /// E o que ela traz de parecido não conta: um `<img>` no corpo é desenho da
-    /// página, não o que ela publicou para quem compartilha o link.
-    #[test]
-    fn uma_pagina_sem_declaracao_nao_da_midia() {
-        for html in [
-            "<html><body><img src=\"https://media.tenor.com/a.gif\"></body></html>",
-            r#"<meta name="description" content="um gato dançando">"#,
-            r#"<meta property="og:title" content="og:image">"#,
-            r#"<meta property="og:image" content="">"#,
-            r#"<meta property="og:image">"#,
-            "",
-        ] {
-            assert_eq!(midia_declarada_pela_pagina(html), None, "leu de: {html}");
-        }
-    }
-
-    /// A lista existe e é pequena: ela é uma troca de privacidade, e uma troca
-    /// que cresce sem ninguém olhar deixa de ser uma troca.
-    #[test]
-    fn a_lista_de_dominios_e_curta_e_nomeada() {
-        assert!(
-            DOMINIOS_DE_GIF.len() <= 5,
-            "a lista cresceu sem quem a defendesse: {DOMINIOS_DE_GIF:?}"
-        );
-        for dominio in DOMINIOS_DE_GIF {
-            assert!(
-                dominio.contains('.') && !dominio.starts_with('.'),
-                "`{dominio}` não é um domínio registrável"
-            );
-        }
-    }
-
-    /// **A busca de uma imagem de link tem três travas, e elas têm de estar lá.**
-    ///
-    /// Esta busca é a única do produto que vai a um endereço que outra pessoa
-    /// escolheu. O que a segura:
-    ///
-    ///   - **o esquema**, pela mesma lista do `abrir_no_navegador`. Sem ela,
-    ///     um `file://` colado na conversa faria esta janela ler o disco;
-    ///   - **o teto, enquanto chega.** Confiar no `Content-Length` é confiar
-    ///     em quem está do outro lado, e juntar tudo para medir depois é
-    ///     deixá-lo escolher quanta memória esta janela gasta;
-    ///   - **os bytes contra o tipo alegado**, pela mesma regra do anexo. Um
-    ///     endereço que promete `image/gif` e entrega HTML é recusado.
-    ///
-    /// Guarda de texto-fonte porque as três só se exercitam contra um servidor
-    /// de verdade, e um teste que levantasse um seria um teste que sai à rede.
-    ///
-    /// **As travas moram em `buscar_com_teto`**, e não no comando, desde que a
-    /// prévia passou a fazer duas buscas — a página e a mídia que ela declara.
-    /// Isso é o ponto: uma segunda busca escrita à mão, ao lado, é uma segunda
-    /// busca sem as três travas, e este teste é o que obriga as duas a
-    /// passarem pela mesma porta.
-    #[test]
-    fn a_busca_de_imagem_de_link_confere_esquema_teto_e_bytes() {
-        let sem_comentario = super::fonte_sem_comentarios();
-        let busca = super::corpo_de(&sem_comentario, "async fn buscar_com_teto(");
-
-        assert!(
-            busca.contains("endereco_de_previa(&texto)?"),
-            "a busca deixou de conferir o destino: um `file://` colado na \
-             conversa faria esta janela ler o disco de quem lê, e um \
-             `http://127.0.0.1` a faria bater num serviço da máquina dela: \
-             {busca}"
-        );
-        assert!(
-            busca.contains("PREVIEW_LIMIT") && busca.contains(".chunk()"),
-            "o teto deixou de ser aplicado enquanto os bytes chegam: quem \
-             responde escolhe quanta memória esta janela gasta: {busca}"
-        );
-
-        let comando = super::corpo_de(&sem_comentario, "async fn previa_de_link(");
-        assert!(
-            comando.matches("judge(&alegado, &bytes)").count() == 2,
-            "uma das duas buscas deixou de conferir os bytes contra o tipo \
-             alegado: um endereço que promete imagem e entrega outra coisa \
-             passa: {comando}"
-        );
-        // **A segunda busca é a que a página escolhe**, e é por isso que ela
-        // tem uma trava a mais: sem a conferência de domínio, uma página desta
-        // lista apontaria esta janela para qualquer endereço do mundo, e a
-        // lista fechada não teria fechado nada.
-        assert!(
-            comando.contains("if !e_de_um_dominio_de_gif(&midia)"),
-            "a mídia declarada por uma página deixou de ser conferida contra a \
-             lista de domínios: {comando}"
-        );
-        assert!(
-            comando.contains("alegado.starts_with(\"text/html\")"),
-            "a resolução de página deixou de exigir que a resposta fosse HTML: \
-             {comando}"
-        );
-
-        // **Nenhum redirecionamento é seguido por baixo.** Antes do ADR 0053 o
-        // cliente os seguia com uma política própria, e essa política conferia
-        // o salto pela régua de *abrir um link* — que aceita a rede local. Agora
-        // quem os segue é o laço de `buscar_com_teto`, que revalida e resolve
-        // cada um; a metade que fica aqui é a proibição de o cliente fazer isso
-        // sozinho, porque ele está fixado no endereço do salto anterior.
-        let cliente = super::corpo_de(&sem_comentario, "fn cliente_da_previa(");
-        assert!(
-            cliente.contains("redirect(reqwest::redirect::Policy::none())"),
-            "o cliente voltou a seguir redirecionamento por conta própria: um \
-             `302` para a rede local atravessa sem passar pela validação do \
-             laço, e com o endereço fixado no host errado: {cliente}"
-        );
-    }
-
-    /// **O que um link de chat não pode abrir.**
-    ///
-    /// Cada um destes é um programa que alguém do outro lado da conversa
-    /// escolheria iniciar na máquina de quem lê. A lista é de casos vistos em
-    /// produtos que aprenderam isso pelo caminho difícil.
-    #[test]
-    fn so_http_e_https_saem_desta_janela() {
-        for hostil in [
-            "file:///etc/passwd",
-            "file://C:/Windows/System32",
-            "javascript:alert(1)",
-            "data:text/html,<script>x</script>",
-            "smb://servidor/compartilhado",
-            "vscode://file/etc/hosts",
-            "ms-msdt:/id",
-            "seele://casa.exemplo",
-            "//exemplo.br",
-            "exemplo.br",
-            "",
-            "   ",
-            "http://",
-            "https://",
-        ] {
-            assert!(
-                endereco_que_pode_sair(hostil).is_err(),
-                "deixou sair `{hostil}`"
-            );
-        }
-    }
-
-    /// E o que **tem** de sair, senão o ajuste não serve para nada.
-    #[test]
-    fn um_endereco_comum_atravessa_inteiro() {
-        for bom in [
-            "https://exemplo.br",
-            "http://exemplo.br/pagina?a=1&b=2#parte",
-            "HTTPS://EXEMPLO.BR",
-            "https://exemplo.br/caminho%20escapado",
-        ] {
-            assert_eq!(endereco_que_pode_sair(bom), Ok(bom), "recusou `{bom}`");
-        }
-        // O espaço em volta é de quem colou, e não do endereço.
-        assert_eq!(
-            endereco_que_pode_sair("  https://exemplo.br  "),
-            Ok("https://exemplo.br")
-        );
-    }
-
-    /// **O que separa um argumento de dois.** Um endereço com nova linha
-    /// dentro é a forma clássica de fazer um programa ler duas coisas onde
-    /// quem conferiu viu uma.
-    #[test]
-    fn nada_com_espaco_ou_controle_no_meio_atravessa() {
-        for torto in [
-            "https://exemplo.br/a b",
-            "https://exemplo.br\n/etc/passwd",
-            "https://exemplo.br\u{0}",
-            "https://exemplo.br\ta",
-        ] {
-            assert!(
-                endereco_que_pode_sair(torto).is_err(),
-                "deixou sair `{torto:?}`"
-            );
-        }
-    }
-
-    /// **Uma prévia não alcança esta máquina, esta rede, nem nada reservado.**
-    ///
-    /// ADR 0053 e R06. A revisão da v15 verificou que a janela classificava
-    /// `http://127.0.0.1:9999/private.png` como prévia automática, e que a
-    /// cadeia nativa faria a busca. Conferir os bytes depois da resposta não
-    /// evita a requisição — e é a requisição que é o problema.
-    #[test]
-    fn uma_previa_nao_alcanca_a_maquina_nem_a_rede_de_quem_le() {
-        for privado in [
-            // A reprodução literal do review.
-            "http://127.0.0.1:9999/private.png",
-            "http://localhost/x.png",
-            "http://LOCALHOST./x.png",
-            "http://algo.local/x.png",
-            "http://nas.internal/x.png",
-            // O roteador da casa, e as três faixas privadas.
-            "http://192.168.0.1/x.png",
-            "http://10.0.0.5/x.png",
-            "http://172.16.3.9/x.png",
-            // `0.0.0.0/8`, que em várias pilhas é «esta máquina».
-            "http://0.0.0.0/x.png",
-            // Metadados de nuvem, que é link-local.
-            "http://169.254.169.254/latest/meta-data",
-            // Compartilhado entre operadoras.
-            "http://100.100.1.1/x.png",
-            // IPv6: loopback, local único, link-local…
-            "http://[::1]/x.png",
-            "http://[fd00::1]/x.png",
-            "http://[fe80::1]/x.png",
-            // …e o mapeado, que é o que uma régua só de IPv4 deixa passar.
-            "http://[::ffff:127.0.0.1]/x.png",
-        ] {
-            assert!(
-                matches!(
-                    endereco_de_previa(privado),
-                    Err(FalhaNaPrevia::DestinoPrivado(_))
-                ),
-                "a prévia alcançaria `{privado}`"
-            );
-            // **E a política de abrir um link continua aceitando.** As duas são
-            // políticas diferentes de propósito: `http://192.168.0.1` clicado
-            // por uma pessoa é o roteador da casa dela, e recusá-lo seria o
-            // produto decidindo onde ela pode navegar.
-            assert!(
-                endereco_que_pode_sair(privado).is_ok(),
-                "abrir um link parou de aceitar `{privado}`: as duas políticas \
-                 voltaram a ser uma, que é o defeito que o ADR 0053 separou"
-            );
-        }
-    }
-
-    /// E a internet pública continua passando, senão o guarda acima é uma porta
-    /// fechada para todo mundo — que passaria no teste de cima sem fazer nada.
-    #[test]
-    fn uma_previa_alcanca_a_internet_publica() {
-        for publico in [
-            "https://exemplo.br/foto.png",
-            "https://media.tenor.com/algo.gif",
-            "http://8.8.8.8/x.png",
-            "http://[2606:4700::1]/x.png",
-        ] {
-            assert!(
-                endereco_de_previa(publico).is_ok(),
-                "recusou `{publico}`, que é internet pública"
-            );
-        }
-    }
-
-    /// **Cada salto é revalidado, e o endereço resolvido é fixado.**
-    ///
-    /// Guarda de texto-fonte pelo mesmo motivo dos vizinhos: exercitar isto
-    /// pediria um servidor que redireciona, e um teste que levantasse um seria
-    /// um teste que sai à rede.
-    ///
-    /// As três metades que o R06 pede — «restrição de destinos privados/loopback/
-    /// link-local e nova validação em cada redirecionamento e resolução»:
-    #[test]
-    fn cada_salto_da_previa_e_validado_resolvido_e_fixado() {
-        let sem_comentario = super::fonte_sem_comentarios();
-        let busca = super::corpo_de(&sem_comentario, "async fn buscar_com_teto(");
-
-        assert!(
-            busca.contains("endereco_de_previa(&texto)?")
-                && busca.contains("enderecos_publicos_de("),
-            "um salto deixou de ser validado e resolvido de novo: um `302` para \
-             a rede local atravessa: {busca}"
-        );
-        assert!(
-            busca.contains("reqwest::header::LOCATION"),
-            "o laço deixou de seguir os saltos à mão, e quem os seguir por \
-             baixo os seguirá sem passar por esta validação: {busca}"
-        );
-
-        let cliente = super::corpo_de(&sem_comentario, "fn cliente_da_previa(");
-        assert!(
-            cliente.contains("resolve_to_addrs(host, enderecos)"),
-            "o endereço deixou de ser fixado: o nome é resolvido uma vez para \
-             conferir e outra para conectar, e nada obriga as duas respostas a \
-             serem a mesma: {cliente}"
-        );
-        assert!(
-            cliente.contains("Policy::none()"),
-            "o cliente voltou a seguir redirecionamento por conta própria, com \
-             o endereço fixado no host errado: {cliente}"
-        );
-    }
-
-    /// **Nenhuma prévia sai antes do consentimento do domínio.**
-    ///
-    /// A ordem importa: a pergunta vem **antes** de `buscar_com_teto`. Um
-    /// consentimento conferido depois seria um consentimento pedido depois de a
-    /// requisição já ter aparecido no servidor de outra pessoa.
-    #[test]
-    fn a_previa_pergunta_antes_de_buscar() {
-        let sem_comentario = super::fonte_sem_comentarios();
-        let comando = super::corpo_de(&sem_comentario, "async fn previa_de_link(");
-
-        let pergunta = comando
-            .find("previa_consentida(")
-            .expect("o comando deixou de conferir o consentimento");
-        let busca = comando
-            .find("buscar_com_teto(")
-            .expect("o comando deixou de buscar");
-        assert!(
-            pergunta < busca,
-            "o consentimento é conferido depois da busca: a requisição já \
-             apareceu no servidor de quem escreveu a mensagem quando alguém \
-             for perguntado: {comando}"
-        );
-    }
-}
+mod o_que_sai_desta_janela_por_um_link;
 
 /// **A supervisão de MODs nativos, sem janela nenhuma** — revisão de `8adebb8`.
 ///
@@ -17206,1710 +14568,13 @@ mod o_que_sai_desta_janela_por_um_link {
 /// não pedir — e nada disso pode deixar bytes retidos na memória de quem usa.
 /// Por isso aqui não há `AppHandle`, não há evento e não há colheita: só a
 /// tabela, os créditos e o que sobra depois.
+#[path = "testes/a_supervisao_dos_mods_nativos.rs"]
 #[cfg(test)]
-mod a_supervisao_dos_mods_nativos {
-    use super::{
-        liberar_reserva, registrar_reserva, revogar_em, EstadoNativo, InstanciaNativa, ModsNativos,
-    };
-    use crate::executor::{ExecutorQuickJs, Limites};
+mod a_supervisao_dos_mods_nativos;
 
-    /// Uma instância com um executor de verdade, na geração dada.
-    fn instancia(geracao: u64) -> InstanciaNativa {
-        InstanciaNativa {
-            id: "prova/mod".to_owned(),
-            geracao,
-            hash: "a".repeat(64),
-            capacidades: seele_ffi::mods::capacidades_da_api(seele_ffi::mods::MOD_API_VERSION)
-                .to_vec(),
-            estado: EstadoNativo::Ativa,
-            executor: ExecutorQuickJs::novo(Limites::default()).expect("motor"),
-            pendentes: std::collections::VecDeque::new(),
-            bytes_pendentes: 0,
-            avisos: std::collections::VecDeque::new(),
-            avisos_perdidos: 0,
-            parou: false,
-            codigo: Some("/* o fonte do MOD */".to_owned()),
-            avisado: false,
-        }
-    }
-
-    /// Enche a fila de mensagens como a bomba encheria, reservando crédito.
-    fn produzir(instancia: &mut InstanciaNativa, quantas: usize, bytes: usize) {
-        for _ in 0..quantas {
-            let corpo = "x".repeat(bytes);
-            assert!(
-                instancia.executor.fila().cabe(corpo.len()),
-                "a fila recusou antes do esperado"
-            );
-            instancia.guardar_fala("mensagem", corpo);
-        }
-    }
-
-    /// **Sair com mensagem na fila solta tudo, e sem a janela.**
-    ///
-    /// A revisão: «sair com uma mensagem ainda na fila deixa dados e a
-    /// instância retidos mesmo depois de `Parou`, sem caminho de colheita
-    /// válido» — porque a colheita recusa a geração que saiu.
-    ///
-    /// Provar que a fila parou de crescer não basta: **ela precisa ser
-    /// liberada**.
-    #[test]
-    fn revogar_solta_o_que_a_janela_nao_colheu() {
-        let mut mods = ModsNativos::default();
-        let mut viva = instancia(7);
-        produzir(&mut viva, 20, 1024);
-        let (antes, bytes_antes) = viva.executor.fila().ocupacao();
-        assert_eq!(antes, 20, "a produção não reservou crédito");
-        assert!(bytes_antes > 0);
-
-        let numero = mods.guardar(viva);
-        // Ninguém colhe. A sessão acaba.
-        mods.revogar_geracao(7);
-
-        // A instância foi para a tabela de encerramento — ela ainda não
-        // confirmou — mas **os dados já saíram**.
-        let retida = mods
-            .encerrando
-            .get(&numero)
-            .expect("a instância sumiu antes de confirmar");
-        assert!(
-            retida.pendentes.is_empty() && retida.bytes_pendentes == 0,
-            "a revogação não soltou as mensagens não colhidas"
-        );
-        let (depois, bytes_depois) = retida.executor.fila().ocupacao();
-        assert_eq!(
-            (depois, bytes_depois),
-            (0, 0),
-            "os créditos ficaram reservados depois da saída"
-        );
-
-        // E quando a parada chega, ela sai da supervisão — sem a janela.
-        mods.confirmar_parada(numero);
-        assert!(
-            mods.vivos.is_empty() && mods.encerrando.is_empty(),
-            "a instância continuou supervisionada depois de parar"
-        );
-    }
-
-    /// **A saída do app manda os MODs nativos parar, e diz quantos.**
-    ///
-    /// Fechar a janela não passava por [`super::Session::revogar`]: a
-    /// despedida era `disconnect` e um `sleep`, e um MOD nativo de pé seguia
-    /// rodando até o processo morrer, sem nenhuma linha no `seele.log` dizendo
-    /// que houve MOD algum. Aqui ninguém confirma a parada — não há bomba
-    /// ouvindo o executor —, então a instância fica onde a revogação a pôs:
-    /// em `encerrando`, que é o retrato de «mandei parar».
-    #[test]
-    fn despedir_da_sessao_manda_os_mods_nativos_parar_e_diz_quantos() {
-        let sessao = super::Session::default();
-        let mut reservada = instancia(sessao.geracao());
-        reservada.estado = EstadoNativo::Reservada;
-        let numero = sessao
-            .mods_nativos
-            .lock()
-            .expect("a supervisão")
-            .guardar(reservada);
-
-        let ((), rastro) = crate::rastro_de_teste::capturar(|| {
-            super::despedir_da_sessao(&sessao, std::time::Duration::from_millis(20));
-        });
-
-        let mods = sessao.mods_nativos.lock().expect("a supervisão");
-        assert!(
-            mods.encerrando.contains_key(&numero) && !mods.vivos.contains_key(&numero),
-            "a saída do app não mandou parar o MOD nativo de pé: ele continua entre os vivos, e \
-             roda até o processo morrer"
-        );
-        assert!(
-            rastro.lines().any(|linha| linha.contains("INFO")
-                && linha.contains("saída do app: MODs nativos mandados parar")
-                && linha.contains("mods=1")),
-            "a saída do app não disse no seele.log quantos MODs nativos mandou parar: {rastro}"
-        );
-    }
-
-    /// Uma instância da geração `geracao` entre as vivas, e o número dela.
-    fn de_pe(sessao: &super::Session, geracao: u64) -> u64 {
-        sessao
-            .mods_nativos
-            .lock()
-            .expect("a supervisão")
-            .guardar(instancia(geracao))
-    }
-
-    /// Confirma a parada de `numero` depois de `depois`, tomando o cadeado da
-    /// supervisão como a bomba de um MOD toma.
-    fn confirmar_depois(sessao: &super::Session, numero: u64, depois: std::time::Duration) {
-        std::thread::sleep(depois);
-        sessao
-            .mods_nativos
-            .lock()
-            .expect("a supervisão")
-            .confirmar_parada(numero);
-    }
-
-    /// Roda `despedir_da_sessao` com um MOD que confirma a parada 30 ms depois,
-    /// noutra thread, e devolve quanto ela levou e o rastro.
-    fn despedir_com_um_mod_que_confirma(
-        sessao: &super::Session,
-        numero: u64,
-        teto: std::time::Duration,
-    ) -> (std::time::Duration, String) {
-        std::thread::scope(|escopo| {
-            escopo.spawn(|| confirmar_depois(sessao, numero, std::time::Duration::from_millis(30)));
-            let comeco = std::time::Instant::now();
-            let ((), rastro) =
-                crate::rastro_de_teste::capturar(|| super::despedir_da_sessao(sessao, teto));
-            (comeco.elapsed(), rastro)
-        })
-    }
-
-    /// **A saída do app espera os MODs sem segurar o cadeado da supervisão.**
-    ///
-    /// A bomba de cada MOD confirma a parada tomando esse cadeado
-    /// (`assentar_fala`). Uma espera que o segurasse de uma conferência a outra
-    /// deixaria a confirmação parada atrás dela até o teto, e toda saída do app
-    /// pagaria o teto inteiro dizendo que os MODs não confirmaram.
-    #[test]
-    fn despedir_da_sessao_espera_os_mods_sem_segurar_o_cadeado() {
-        let sessao = super::Session::default();
-        let numero = de_pe(&sessao, sessao.geracao());
-        let teto = std::time::Duration::from_secs(2);
-
-        let (levou, rastro) = despedir_com_um_mod_que_confirma(&sessao, numero, teto);
-
-        assert!(
-            levou < teto / 2,
-            "a saída do app levou {levou:?} com um MOD que confirmou a parada em 30 ms: a espera \
-             segurou o cadeado da supervisão, e a confirmação ficou parada atrás dela até o teto"
-        );
-        assert!(
-            !rastro.contains("sem confirmar a parada"),
-            "a saída do app disse que um MOD não confirmou a parada, e ele confirmou em 30 ms: \
-             {rastro}"
-        );
-    }
-
-    /// **A saída do app conta e espera só os MODs da sessão que ela fechou.**
-    ///
-    /// Uma instância de uma sessão anterior que nunca confirmou a parada fica em
-    /// `encerrando` para sempre, de propósito (ver [`ModsNativos::encerrando`]).
-    /// Contada junto, a linha dizia MODs a mais, e a espera corria sempre até o
-    /// teto por uma instância que nenhuma saída vai ver parar.
-    #[test]
-    fn despedir_da_sessao_conta_e_espera_so_a_geracao_que_revogou() {
-        let sessao = super::Session::default();
-        let antiga = {
-            let mut mods = sessao.mods_nativos.lock().expect("a supervisão");
-            let antiga = mods.guardar(instancia(sessao.geracao()));
-            mods.encerrar(antiga);
-            antiga
-        };
-        // A sessão da antiga acabou, e ela não confirmou.
-        let _ = sessao.revogar();
-        let atual = de_pe(&sessao, sessao.geracao());
-        let teto = std::time::Duration::from_secs(2);
-
-        let (levou, rastro) = despedir_com_um_mod_que_confirma(&sessao, atual, teto);
-
-        assert!(
-            sessao
-                .mods_nativos
-                .lock()
-                .expect("a supervisão")
-                .encerrando
-                .contains_key(&antiga),
-            "a instância antiga, que nunca confirmou, saiu da supervisão: o teste não mede mais \
-             o que diz medir"
-        );
-        assert!(
-            rastro.lines().any(
-                |linha| linha.contains("saída do app: MODs nativos mandados parar")
-                    && linha.split_whitespace().any(|campo| campo == "mods=1")
-            ),
-            "a saída do app não disse `mods=1`, o único MOD que ela mandou parar: contou também \
-             a instância de uma sessão anterior que nunca confirmou: {rastro}"
-        );
-        assert!(
-            levou < teto / 2,
-            "a saída do app levou {levou:?}, com o MOD da sessão dela confirmando em 30 ms: a \
-             espera correu até o teto por outra coisa — a instância de uma sessão anterior, que \
-             nunca vai confirmar, ou o cadeado da supervisão preso durante a espera (o teste \
-             irmão, `despedir_da_sessao_espera_os_mods_sem_segurar_o_cadeado`, separa os dois)"
-        );
-    }
-
-    /// **Uma parada espontânea muda o estado nativo.**
-    ///
-    /// A revisão: «`confirmar_parada` escreve `parou = true` somente na tabela
-    /// `encerrando`. Para a tabela `vivos`, ele verifica `i.parou` sem tê-lo
-    /// alterado». Uma instância cujo motor cai sozinha continuava descrita como
-    /// ativa para sempre.
-    #[test]
-    fn uma_parada_espontanea_tira_a_instancia_de_viva() {
-        let mut mods = ModsNativos::default();
-        let numero = mods.guardar(instancia(7));
-        assert_eq!(mods.vivos.len(), 1);
-
-        // O motor caiu sozinho: ninguém pediu para encerrar.
-        mods.confirmar_parada(numero);
-
-        assert!(
-            mods.vivos.is_empty(),
-            "a instância parada continuou entre as vivas"
-        );
-        assert!(
-            mods.encerrando.is_empty(),
-            "sem nada a colher, ela devia ter saído da supervisão"
-        );
-    }
-
-    /// E se ela tinha fala a colher, continua supervisionada até esvaziar.
-    #[test]
-    fn uma_parada_espontanea_com_fala_continua_visivel() {
-        let mut mods = ModsNativos::default();
-        let mut viva = instancia(7);
-        produzir(&mut viva, 3, 64);
-        let numero = mods.guardar(viva);
-
-        mods.confirmar_parada(numero);
-        let retida = mods
-            .encerrando
-            .get(&numero)
-            .expect("sumiu com fala por colher");
-        assert!(retida.parou, "parou sem ser marcada");
-        assert_eq!(retida.pendentes.len(), 3);
-        assert_eq!(retida.estado, EstadoNativo::Encerrando);
-    }
-
-    /// **Um erro não reserva crédito, e colhê-lo não devolve crédito nenhum.**
-    ///
-    /// A revisão: «colher um erro sem crédito reservado pode fazer o contador
-    /// atômico dar a volta; repetir erros também contorna o teto da fila de
-    /// mensagens».
-    #[test]
-    fn um_erro_fica_fora_da_contabilidade_de_dados() {
-        let mut viva = instancia(7);
-        // Só erros, nenhuma mensagem — pelo mesmo caminho da bomba.
-        for _ in 0..5 {
-            viva.guardar_fala("falhou", "o MOD lançou".to_owned());
-        }
-        let (mensagens, bytes) = viva.executor.fila().ocupacao();
-        assert_eq!(
-            (mensagens, bytes),
-            (0, 0),
-            "um erro reservou crédito de dados"
-        );
-        // E os cinco iguais viraram um, com a contagem.
-        assert_eq!(viva.avisos.len(), 1, "os avisos repetidos não agregaram");
-        assert_eq!(viva.avisos.front().map(|a| a.vezes), Some(5));
-    }
-
-    /// **Erros repetidos não empurram mensagens para fora do teto.**
-    ///
-    /// Com a janela parada, um MOD que só falha não pode consumir a cota do que
-    /// está funcionando — e não pode deixar a contabilidade num estado em que
-    /// mensagens futuras sejam recusadas para sempre.
-    #[test]
-    fn uma_chuva_de_erros_nao_bloqueia_mensagens_futuras() {
-        let mut viva = instancia(7);
-        for n in 0..10_000 {
-            // Alternados para a agregação não os esconder todos.
-            viva.guardar_fala("falhou", format!("erro {}", n % 3));
-        }
-        assert!(
-            viva.avisos.len() <= super::AVISOS_POR_INSTANCIA,
-            "a lista de avisos passou do teto: {}",
-            viva.avisos.len()
-        );
-        assert!(viva.avisos_perdidos > 0, "nada foi contado como perdido");
-
-        // E a fila de dados continua intacta: uma mensagem ainda cabe.
-        assert!(
-            viva.executor.fila().cabe(1024),
-            "uma chuva de erros bloqueou as mensagens futuras"
-        );
-        let (mensagens, bytes) = viva.executor.fila().ocupacao();
-        assert_eq!((mensagens, bytes), (1, 1024));
-    }
-
-    /// **Uma reserva que nunca foi ativada não guarda o fonte do MOD.**
-    ///
-    /// A revisão: «`codigos_reservados` […] só perde uma entrada na ativação.
-    /// Reservar e sair sem ativar pode conservar o fonte».
-    ///
-    /// Medido sobre a mesma lista que a revogação usa: se ela não nomear a
-    /// reserva, o código dela fica na memória desta janela para sempre.
-    #[test]
-    fn uma_reserva_sem_ativacao_nao_deixa_fonte_orfao() {
-        let mut mods = ModsNativos::default();
-        let mut reservada = instancia(7);
-        reservada.estado = EstadoNativo::Reservada;
-        let numero = mods.guardar(reservada);
-        assert!(
-            mods.vivos
-                .get(&numero)
-                .and_then(|i| i.codigo.as_ref())
-                .is_some(),
-            "a reserva devia nascer com o fonte dentro"
-        );
-
-        // Ninguém ativa. A sessão acaba.
-        mods.revogar_geracao(7);
-
-        // **Não há «entre».** O fonte mora dentro da instância, e a revogação o
-        // solta pelo mesmo ato que solta o resto. Na versão anterior ele morava
-        // numa tabela ao lado, inserida **depois** de o cadeado da instância ser
-        // liberado — e uma revogação no meio apagava um fonte que ainda não
-        // existia, deixando o comando inseri-lo depois do descarte.
-        let orfao = mods
-            .vivos
-            .values()
-            .chain(mods.encerrando.values())
-            .any(|i| i.codigo.is_some());
-        assert!(!orfao, "sobrou fonte de uma reserva que nunca foi ativada");
-
-        // E ela continua supervisionada até confirmar — encerrar não é parar.
-        assert!(
-            mods.encerrando.contains_key(&numero),
-            "a reserva revogada saiu da supervisão sem ter confirmado"
-        );
-        mods.confirmar_parada(numero);
-        assert!(mods.encerrando.is_empty() && mods.vivos.is_empty());
-    }
-
-    /// **A reserva que chega numa geração morta é contada** em
-    /// `comandos_de_geracao_morta`, como a leitura de `codigo_do_mod` que
-    /// chega atrasada.
-    ///
-    /// Ela era recusada sem conta: `comandos_de_geracao_morta`, o contador que
-    /// diz «alguma coisa da sessão anterior ainda estava falando», não subia
-    /// para a reserva atrasada — e o doc da recusa de carga dizia que subia.
-    /// A que vale não é contada.
-    #[test]
-    fn a_reserva_recusada_por_geracao_morta_e_contada() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        let mods = std::sync::Mutex::new(ModsNativos::default());
-        let mortos = AtomicU64::new(0);
-        let mut atrasada = instancia(7);
-        atrasada.estado = EstadoNativo::Reservada;
-        let recusa = registrar_reserva(&mods, &|| false, &mortos, atrasada)
-            .expect_err("a reserva de uma geração morta foi aceita");
-        assert_eq!(
-            super::motivo_de(&recusa),
-            "sessao-encerrada",
-            "a reserva de uma geração morta foi recusada por outro motivo"
-        );
-        assert_eq!(
-            mortos.load(Ordering::Relaxed),
-            1,
-            "a reserva recusada por geração morta não foi contada em \
-             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
-        );
-
-        let mut viva = instancia(7);
-        viva.estado = EstadoNativo::Reservada;
-        registrar_reserva(&mods, &|| true, &mortos, viva).expect("a reserva viva foi recusada");
-        assert_eq!(
-            mortos.load(Ordering::Relaxed),
-            1,
-            "a reserva de uma geração viva foi contada como de geração morta"
-        );
-    }
-
-    /// **A ativação que chega numa geração morta também é contada e dita**,
-    /// como a reserva logo acima e como os comandos que passam por
-    /// [`super::Session::recusar_se_morta`].
-    ///
-    /// Ela era a ressalva do doc de `registrar_reserva`: recusada sem conta, e
-    /// um zero em `comandos_de_geracao_morta` não queria dizer que nada da
-    /// sessão anterior tinha falado. Depois de contada, ainda não dizia: os
-    /// outros comandos de MOD escreviam a linha DEBUG de `confere_geracao`, e
-    /// a ativação, não. A que vale não é contada nem dita, nem quando é
-    /// recusada por outro motivo.
-    #[test]
-    fn a_ativacao_recusada_por_geracao_morta_e_contada_e_dita() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        let mods = std::sync::Mutex::new(ModsNativos::default());
-        let nenhum = AtomicU64::new(0);
-        let mut reservada = instancia(7);
-        reservada.estado = EstadoNativo::Reservada;
-        let numero = registrar_reserva(&mods, &|| true, &nenhum, reservada)
-            .expect("a reserva viva foi recusada");
-
-        let mortos = AtomicU64::new(0);
-        let (recusa, rastro) = crate::rastro_de_teste::capturar(|| {
-            liberar_reserva(&mods, &|| false, &mortos, 7, numero)
-        });
-        let recusa = recusa.expect_err("a ativação de uma geração morta foi aceita");
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("comando recusado: a sessão dele já acabou"))
-            .unwrap_or_else(|| {
-                panic!(
-                    "a ativação recusada por geração morta foi contada e não foi dita: os \
-                     outros comandos de MOD deixam a linha DEBUG de `confere_geracao`, e esta \
-                     some do registro — {rastro}"
-                )
-            });
-        for pedaco in ["DEBUG", "geracao=7", &format!("instancia={numero}")] {
-            assert!(
-                linha.contains(pedaco),
-                "a linha da ativação recusada por geração morta não traz `{pedaco}`, e quem lê \
-                 o registro não acha de que sessão e de que instância ela era: {linha}"
-            );
-        }
-        assert_eq!(
-            super::motivo_de(&recusa),
-            "sessao-encerrada",
-            "a ativação de uma geração morta foi recusada por outro motivo"
-        );
-        assert_eq!(
-            mortos.load(Ordering::Relaxed),
-            1,
-            "a ativação recusada por geração morta não foi contada em \
-             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
-        );
-        assert!(
-            mods.lock()
-                .expect("cadeado")
-                .encerrando
-                .contains_key(&numero),
-            "a reserva de uma ativação recusada por geração morta não foi encerrada"
-        );
-
-        let (recusa, rastro) = crate::rastro_de_teste::capturar(|| {
-            liberar_reserva(&mods, &|| true, &mortos, 7, numero)
-        });
-        let recusa = recusa.expect_err("a ativação de uma reserva já encerrada foi aceita");
-        assert_eq!(
-            super::motivo_de(&recusa),
-            "instancia-nao-esta-reservada",
-            "a ativação viva de uma reserva encerrada foi recusada por outro motivo"
-        );
-        assert_eq!(
-            mortos.load(Ordering::Relaxed),
-            1,
-            "a ativação de uma geração viva foi contada como de geração morta"
-        );
-        assert!(
-            !rastro.contains("comando recusado: a sessão dele já acabou"),
-            "a ativação de uma geração viva foi dita como de uma sessão que acabou: {rastro}"
-        );
-    }
-
-    /// **Um comando de MOD de uma geração morta é recusado, contado e dito**,
-    /// pela mesma função em todos eles ([`super::Session::recusar_se_morta`]).
-    ///
-    /// Eram treze conferências com um `if` cada uma, em dez funções, e sete não
-    /// contavam: `comandos_de_geracao_morta` dizia zero com a sessão anterior
-    /// ainda falando. Nenhum teste daqui monta um `State`, e por isso a prova é
-    /// da função; o guarda de fonte logo abaixo prende que os comandos a usam.
-    #[test]
-    fn o_comando_de_uma_geracao_morta_e_recusado_contado_e_dito() {
-        use std::sync::atomic::Ordering;
-
-        let sessao = super::Session::default();
-        sessao.geracao.store(3, Ordering::Release);
-        let (resultado, rastro) = crate::rastro_de_teste::capturar(|| sessao.recusar_se_morta(2));
-        let falha = resultado.expect_err("um comando de uma geração morta foi admitido");
-        assert_eq!(
-            super::motivo_de(&falha),
-            "sessao-encerrada",
-            "um comando de uma geração morta foi recusado por outro motivo, e a janela não o \
-             lê como a sessão que acabou"
-        );
-        assert_eq!(
-            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
-            1,
-            "um comando recusado por geração morta não foi contado em \
-             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
-        );
-        assert!(
-            rastro.contains("DEBUG")
-                && rastro.contains("comando recusado: a sessão dele já acabou"),
-            "um comando recusado por geração morta não deixou a linha DEBUG de \
-             `confere_geracao`: {rastro}"
-        );
-
-        sessao
-            .recusar_se_morta(0)
-            .expect_err("o zero, que é «a casca não sabe», foi admitido");
-        assert_eq!(
-            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
-            2,
-            "o comando com geração zero foi recusado sem ser contado"
-        );
-
-        sessao
-            .recusar_se_morta(3)
-            .expect("um comando da geração de pé foi recusado");
-        assert_eq!(
-            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
-            2,
-            "um comando da geração de pé foi contado como de geração morta"
-        );
-    }
-
-    /// **Nenhuma conferência de geração recusa por fora de
-    /// [`super::Session::recusar_se_morta`].**
-    ///
-    /// O arquivo inteiro, menos `impl Session`, e não só os corpos de
-    /// `#[tauri::command]`: a conferência de `ler_codigo_do_mod` mora num
-    /// auxiliar, e um guarda que olhasse só os comandos não a veria. Os fechos
-    /// `&|| session.geracao_vale(geracao)` não são negação, e ficam: quem os
-    /// recebe (`registrar_reserva`, `liberar_reserva`) conta em `mortos`.
-    ///
-    /// E cada função que conferia continua conferindo: tirar a conferência, em
-    /// vez de trocá-la, também deixaria este guarda sem negação nenhuma. A
-    /// lista é a conta inteira — as chamadas de `recusar_se_morta` fora de
-    /// `impl Session` e dos testes têm de ser as dela, uma por uma —, e uma
-    /// conferência nova só passa depois de entrar nela.
-    #[test]
-    fn nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta() {
-        let fonte = super::fonte_sem_comentarios();
-        let (antes, resto) = fonte
-            .split_once("\nimpl Session {\n")
-            .expect("`impl Session` não está mais neste arquivo");
-        let (_, depois) = resto.split_once("\n}\n").expect(
-            "`impl Session` não fecha mais na coluna zero: sem o fim dela, o guarda leria só o \
-             que vem antes, e uma conferência crua depois dela passaria calada",
-        );
-        let fora_da_sessao = [antes, depois].concat();
-        let sem_espaco =
-            |texto: &str| -> String { texto.chars().filter(|c| !c.is_whitespace()).collect() };
-        let fora = sem_espaco(&fora_da_sessao);
-        // Montado, e não escrito: escrito, o padrão acharia este teste.
-        let chamada = format!(".{}(", "geracao_vale");
-        let cruas: Vec<String> = fora
-            .match_indices(&chamada)
-            .filter_map(|(posicao, _)| {
-                let receptor = fora
-                    .get(..posicao)?
-                    .trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
-                receptor.ends_with('!').then(|| {
-                    let inicio = receptor.len().saturating_sub(48);
-                    fora.get(inicio..posicao + chamada.len())
-                        .unwrap_or_default()
-                        .to_owned()
-                })
-            })
-            .collect();
-        assert!(
-            cruas.is_empty(),
-            "{} conferência(s) de geração recusam com um `if` próprio, e não por \
-             `recusar_se_morta`: o comando de uma geração morta volta à janela sem ser contado \
-             em `comandos_de_geracao_morta`, e o zero dele mente — {cruas:#?}",
-            cruas.len()
-        );
-
-        // Montado também.
-        let regra = format!(".{}(", "recusar_se_morta");
-        let mut na_lista = 0;
-        for (funcao, minimas) in [
-            ("fn mod_nativo_colher(", 1),
-            ("fn mod_nativo_entregar(", 1),
-            ("fn ler_codigo_do_mod(", 1),
-            ("async fn entrar_no_tunel_do_mod(", 1),
-            ("fn reservar_no_executor(", 1),
-            ("fn midia_do_mod(", 1),
-            ("fn som_do_mod(", 1),
-            ("fn midia_em_bytes(", 1),
-            ("async fn enviar_imagem_mod(", 2),
-            ("async fn ler_imagem_mod(", 2),
-            ("async fn salvar_do_mod(", 2),
-            ("async fn escolher_para_o_mod(", 2),
-            ("fn pedaco_do_escolhido(", 1),
-        ] {
-            let feitas = sem_espaco(super::corpo_de(&fonte, funcao))
-                .matches(&regra)
-                .count();
-            na_lista += feitas;
-            assert!(
-                feitas >= minimas,
-                "`{funcao}` confere a geração {feitas} vez(es) por `recusar_se_morta`, e \
-                 conferia {minimas}: um comando de uma geração morta passa a ser admitido"
-            );
-        }
-        let na_producao = sem_espaco(&sem_itens_de_teste(&fora_da_sessao))
-            .matches(&regra)
-            .count();
-        assert_eq!(
-            na_producao, na_lista,
-            "há {na_producao} chamada(s) de `recusar_se_morta` fora de `impl Session` e dos \
-             testes, e as funções da lista deste guarda somam {na_lista}: uma conferência ficou \
-             fora da lista, e apagá-la não reprovaria nada"
-        );
-    }
-
-    /// O fonte sem os itens `#[cfg(test)]` do topo do arquivo, para que a
-    /// conta de [`nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta`]
-    /// seja a do produto, e não a dos testes que chamam `recusar_se_morta`.
-    ///
-    /// Um item vai até a chave que fecha na coluna zero, ou até a linha na
-    /// coluna zero que termina em `;` (a `const` do fonte). Errar o fim só
-    /// pode deixar teste na conta, e a igualdade reprova: o corte falha
-    /// fechado.
-    fn sem_itens_de_teste(fonte: &str) -> String {
-        let mut producao = Vec::new();
-        let mut linhas = fonte.lines();
-        while let Some(linha) = linhas.next() {
-            if linha != "#[cfg(test)]" {
-                producao.push(linha);
-                continue;
-            }
-            for linha in linhas.by_ref() {
-                let de_uma_linha =
-                    linha.ends_with(';') && !linha.starts_with(' ') && !linha.starts_with('#');
-                if de_uma_linha || linha == "}" {
-                    break;
-                }
-            }
-        }
-        producao.join("\n")
-    }
-
-    /// **A corrida entre registrar uma reserva e revogar a geração.**
-    ///
-    /// A revisão pedia «uma prova com barreira entre registrar a instância e
-    /// guardar o fonte». **Essa barreira não tem onde ser posta**: o fonte mora
-    /// dentro da instância, e não há instante entre as duas inserções porque
-    /// não são duas. O que resta para provar é a corrida que sobrou — a que
-    /// existe de verdade — e ela se prova com threads, não com prosa.
-    ///
-    /// A ordem que a torna segura mora em dois lugares e só funciona nos dois:
-    /// [`revogar_em`] incrementa a geração **antes** de tomar o cadeado;
-    /// [`registrar_reserva`] confere a geração **depois** de tomá-lo. Os dois
-    /// desfechos possíveis são bons: quem registra primeiro é varrido pela
-    /// revogação, quem registra depois é recusado.
-    ///
-    /// **A prova precisa de disputa pelo cadeado**, e não de duas threads
-    /// soltas. A janela que a inversão abre fica entre soltar o cadeado e
-    /// incrementar a geração — nanossegundos — e duzentas rodadas sem disputa
-    /// não caem nela nenhuma vez: foi o que a primeira versão deste guarda fez,
-    /// e ela passava com a ordem invertida. Com a tabela povoada, a varredura
-    /// demora, os registradores se empilham no cadeado e acordam exatamente ali
-    /// dentro.
-    #[test]
-    fn registrar_e_revogar_ao_mesmo_tempo_nao_deixa_fonte_orfao() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        const POVOAR: usize = 24;
-        const REGISTRADORES: usize = 4;
-
-        for rodada in 0..30u64 {
-            let mods = std::sync::Arc::new(std::sync::Mutex::new(ModsNativos::default()));
-            let geracao = std::sync::Arc::new(AtomicU64::new(7));
-            let mortos = std::sync::Arc::new(AtomicU64::new(0));
-            {
-                let mut vivos = mods.lock().expect("cadeado");
-                for _ in 0..POVOAR {
-                    let mut habitante = instancia(7);
-                    produzir(&mut habitante, 2, 256);
-                    vivos.guardar(habitante);
-                }
-            }
-            // As instâncias nascem antes da largada: criar um motor QuickJS
-            // custa, e pagar esse custo dentro da corrida a desfaria.
-            let prontas: Vec<InstanciaNativa> = (0..REGISTRADORES)
-                .map(|_| {
-                    let mut nova = instancia(7);
-                    nova.estado = EstadoNativo::Reservada;
-                    nova
-                })
-                .collect();
-
-            let largada = std::sync::Arc::new(std::sync::Barrier::new(REGISTRADORES + 1));
-            let registradores: Vec<_> = prontas
-                .into_iter()
-                .map(|nova| {
-                    let mods = std::sync::Arc::clone(&mods);
-                    let geracao = std::sync::Arc::clone(&geracao);
-                    let mortos = std::sync::Arc::clone(&mortos);
-                    let largada = std::sync::Arc::clone(&largada);
-                    std::thread::spawn(move || {
-                        largada.wait();
-                        // Um respiro para o revogador tomar o cadeado antes:
-                        // é dentro da varredura dele que se quer chegar.
-                        for _ in 0..64 {
-                            std::hint::spin_loop();
-                        }
-                        registrar_reserva(
-                            &mods,
-                            &|| geracao.load(Ordering::Acquire) == 7,
-                            &mortos,
-                            nova,
-                        )
-                    })
-                })
-                .collect();
-            let revogador = {
-                let mods = std::sync::Arc::clone(&mods);
-                let geracao = std::sync::Arc::clone(&geracao);
-                let largada = std::sync::Arc::clone(&largada);
-                // **A revogação de verdade**, e não uma cópia da ordem dela:
-                // uma cópia provaria a cópia.
-                std::thread::spawn(move || {
-                    largada.wait();
-                    revogar_em(&geracao, &mods)
-                })
-            };
-            let registradas: Vec<_> = registradores
-                .into_iter()
-                .map(|t| t.join().expect("registrador"))
-                .collect();
-            revogador.join().expect("revogador");
-            // Cada reserva que a revogação recusou é contada, uma vez.
-            let recusadas = registradas.iter().filter(|r| r.is_err()).count() as u64;
-            assert_eq!(
-                mortos.load(Ordering::Relaxed),
-                recusadas,
-                "rodada {rodada}: as reservas recusadas pela revogação e as contadas em \
-                 `comandos_de_geracao_morta` não batem"
-            );
-
-            let vivos = mods.lock().expect("cadeado");
-            let orfao = vivos
-                .vivos
-                .values()
-                .chain(vivos.encerrando.values())
-                .any(|i| i.codigo.is_some());
-            assert!(
-                !orfao,
-                "rodada {rodada}: sobrou fonte de uma geração revogada"
-            );
-            // Registrou antes: a revogação tem de tê-la varrido para o
-            // encerramento, e não pode tê-la deixado viva. Recusou: nada
-            // entrou, nem para ser varrido.
-            for numero in registradas.into_iter().flatten() {
-                assert!(
-                    !vivos.vivos.contains_key(&numero),
-                    "rodada {rodada}: a reserva {numero} ficou viva numa \
-                     geração que já tinha sido revogada"
-                );
-            }
-            assert!(
-                vivos.vivos.is_empty(),
-                "rodada {rodada}: sobrou instância viva de uma geração revogada"
-            );
-        }
-    }
-
-    /// **Enquanto alguém registra, a geração não muda.**
-    ///
-    /// Este é o guarda que a corrida por thread não conseguia ser. A janela que
-    /// a ordem antiga deixava durava poucas instruções, e nenhuma disputa caía
-    /// nela: trinta rodadas com quatro registradores, com a ordem invertida de
-    /// propósito, passaram todas. Um guarda que não falha quando o defeito está
-    /// lá não é um guarda.
-    ///
-    /// Com o incremento **dentro** do cadeado, a propriedade vira observável:
-    /// segurando o cadeado — que é exatamente o que [`registrar_reserva`] faz
-    /// enquanto confere e insere —, a revogação não anda. Nem a geração sobe,
-    /// nem a varredura roda. Tirar o incremento de dentro do cadeado faz esta
-    /// asserção falhar na hora.
-    #[test]
-    fn registrar_e_revogar_se_excluem_inteiros() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        let mods = std::sync::Arc::new(std::sync::Mutex::new(ModsNativos::default()));
-        let geracao = std::sync::Arc::new(AtomicU64::new(7));
-        let (avisou, chegou) = std::sync::mpsc::channel::<()>();
-
-        let segurando = mods.lock().expect("cadeado");
-
-        let revogador = {
-            let mods = std::sync::Arc::clone(&mods);
-            let geracao = std::sync::Arc::clone(&geracao);
-            std::thread::spawn(move || {
-                let _ = avisou.send(());
-                revogar_em(&geracao, &mods)
-            })
-        };
-        chegou.recv().expect("o revogador não largou");
-
-        // Espera limitada, e sem prazo fixo: a asserção não é «ainda não
-        // mudou», é «não pode mudar». Sob o arranjo certo isto roda até o fim
-        // sem nunca ver 8; sob o errado, a primeira volta já vê.
-        for volta in 0..2_000 {
-            assert_eq!(
-                geracao.load(Ordering::Acquire),
-                7,
-                "volta {volta}: a geração morreu enquanto um registro estava \
-                 em curso — a revogação voltou a andar fora do cadeado"
-            );
-            std::thread::yield_now();
-        }
-
-        // E o que este registro inseriu é varrido assim que o cadeado sai.
-        let mut reservada = instancia(7);
-        reservada.estado = EstadoNativo::Reservada;
-        let numero = {
-            let mut vivos = segurando;
-            vivos.guardar(reservada)
-        };
-        assert_eq!(revogador.join().expect("revogador"), 8);
-
-        let vivos = mods.lock().expect("cadeado");
-        assert!(
-            !vivos.vivos.contains_key(&numero),
-            "a reserva inserida sob o cadeado escapou da varredura"
-        );
-        assert!(
-            vivos
-                .vivos
-                .values()
-                .chain(vivos.encerrando.values())
-                .all(|i| i.codigo.is_none()),
-            "sobrou fonte de uma geração revogada"
-        );
-    }
-
-    /// Uma instância montada em volta de um executor já escutado.
-    ///
-    /// A da corrida nasce com o executor dentro e o canal ainda fechado; aqui o
-    /// canal precisa ficar na mão de quem testa, porque é ele que faz o papel
-    /// da bomba lenta.
-    fn com_canal(
-        geracao: u64,
-    ) -> (
-        InstanciaNativa,
-        std::sync::mpsc::Receiver<crate::executor::ParaOFora>,
-        std::sync::Arc<crate::executor::Fila>,
-    ) {
-        let mut nova = instancia(geracao);
-        let (recebedor, fila) = nova.executor.escutar().expect("canal");
-        (nova, recebedor, fila)
-    }
-
-    /// Espera uma condição, com teto, **afirmando a condição e não o tempo**.
-    fn ate(prazo: std::time::Duration, o_que: &str, mut condicao: impl FnMut() -> bool) {
-        let limite = std::time::Instant::now() + prazo;
-        while std::time::Instant::now() < limite {
-            if condicao() {
-                return;
-            }
-            std::thread::yield_now();
-        }
-        panic!("passou o prazo sem {o_que}");
-    }
-
-    /// **Um produtor de erros de verdade, com a bomba e a janela paradas.**
-    ///
-    /// A revisão: «testar produtor de erros real com bomba/consumidor lentos e
-    /// entrega à janela suspensa, contando todos os pontos de retenção e
-    /// notificações». Aqui o MOD lança a cada resposta entregue — não é um
-    /// `ParaOFora::Falhou` fabricado pelo teste, é o motor traduzindo uma
-    /// exceção —, ninguém escoa o canal, e ninguém colhe.
-    ///
-    /// São **três** pontos de retenção, e a cota é uma só atravessando os três:
-    /// o que o motor recusou antes de mandar, o que está no canal esperando a
-    /// bomba, e o que está na instância esperando a janela.
-    #[test]
-    fn um_produtor_de_erros_real_para_nas_tres_cotas() {
-        use crate::executor::AVISOS_NA_FILA;
-
-        let (viva, recebedor, fila) = com_canal(7);
-        viva.executor
-            .iniciar(
-                "globalThis.aoResponder = () => { throw new Error('sempre'); };\
-                 seele.postar('pronto');",
-            )
-            .expect("código");
-
-        // O MOD lança em toda resposta. Entregar bem mais que a cota é o que
-        // faz a recusa acontecer no motor, antes de ocupar o canal.
-        ate(
-            std::time::Duration::from_secs(5),
-            "o MOD ficar de pé",
-            || viva.executor.entregar("{\"v\":1}").is_ok(),
-        );
-        for _ in 0..(AVISOS_NA_FILA * 8) {
-            // Recusa de entrada não é o que se mede aqui: o teto de entrada é
-            // outro, e ele se solta sozinho quando o motor consome.
-            let _ = viva.executor.entregar("{\"v\":1}");
-            std::thread::yield_now();
-        }
-
-        // **Primeiro ponto: o motor recusa.** Sem cota lá, um MOD que lança num
-        // laço enche o canal entre o motor e a bomba, que nenhum teto alcança.
-        ate(
-            std::time::Duration::from_secs(10),
-            "o motor recusar um aviso",
-            || fila.avisos_recusados() > 0,
-        );
-        assert_eq!(
-            fila.avisos_de_pe(),
-            AVISOS_NA_FILA,
-            "a cota de avisos parou num número que não é o teto"
-        );
-
-        // **Segundo ponto: o canal.** A bomba é lenta — é este laço — e cada
-        // fala que ela assenta carrega a mesma reserva para a instância.
-        let mods = std::sync::Mutex::new(ModsNativos::default());
-        let numero = mods.lock().expect("cadeado").guardar(viva);
-        let mut notificacoes = 0usize;
-        while let Ok(fala) = recebedor.recv_timeout(std::time::Duration::from_millis(50)) {
-            if let super::Assentada::Guardada { avisar: true } | super::Assentada::Fim { .. } =
-                super::assentar_fala(&mods, &|| true, &fila, numero, fala, "prova/mod")
-            {
-                notificacoes += 1;
-            }
-        }
-
-        // **A notificação é agregada.** A janela suspensa recebe **um** aviso
-        // sem carga, e não um por fala: a versão anterior emitia um evento por
-        // fala, inclusive pelas que ela mesma agregava ou descartava.
-        assert_eq!(
-            notificacoes, 1,
-            "a janela suspensa recebeu mais de um aviso para a mesma colheita"
-        );
-
-        // **Terceiro ponto: a instância.** Um MOD que lança num laço manda
-        // sempre o mesmo texto, e é por isso que a agregação é o que contém
-        // este caso: as repetições viram contagem, e cada uma **devolve** o
-        // lugar na cota, porque nenhuma entrada nova foi ocupada. A perda do
-        // mais velho é o outro caminho — avisos diferentes entre si —, e quem
-        // o cobre é `uma_chuva_de_erros_nao_bloqueia_mensagens_futuras`.
-        let mut vivos = mods.lock().expect("cadeado");
-        let dentro = vivos.achar_mut(numero).expect("instância");
-        assert_eq!(
-            dentro.avisos.len(),
-            1,
-            "o mesmo erro repetido ocupou mais de uma entrada"
-        );
-        let repetido = dentro.avisos.front().expect("o aviso agregado");
-        assert!(
-            repetido.vezes > 1,
-            "as repetições não foram agregadas: vezes = {}",
-            repetido.vezes
-        );
-        assert!(
-            dentro.avisos.len() <= super::AVISOS_POR_INSTANCIA,
-            "a lista de avisos da instância passou do teto dela"
-        );
-        assert_eq!(
-            fila.avisos_de_pe(),
-            1,
-            "a cota de avisos não acompanhou a agregação: o que está retido é \
-             uma entrada, e é uma que tem de estar reservada"
-        );
-
-        // E é a colheita que solta o que sobrou, e que rearma o aviso.
-        let colhidas = dentro.colher_falas(64);
-        assert!(!colhidas.is_empty());
-        assert_eq!(
-            fila.avisos_de_pe(),
-            0,
-            "a colheita não devolveu a cota de avisos"
-        );
-        assert!(
-            dentro.precisa_avisar(),
-            "a janela drenou e o aviso não rearmou"
-        );
-    }
-
-    /// **Um erro tardio no meio de mensagens ainda contabilizadas.**
-    ///
-    /// A revisão: «provar um erro tardio intercalado com mensagens ainda
-    /// contabilizadas, em vez de testar apenas contadores já zerados». Um teste
-    /// que drena tudo antes de conferir não distingue a contabilidade certa da
-    /// que devolve crédito da classe errada: com os dois contadores em zero,
-    /// tirar da cota de mensagens ou da de avisos dá no mesmo.
-    ///
-    /// Aqui o MOD fala, e **só então** lança. As mensagens continuam retidas
-    /// enquanto o erro chega, e cada classe tem de voltar pela cota dela.
-    #[test]
-    fn um_erro_tardio_nao_come_o_credito_das_mensagens() {
-        let (viva, recebedor, fila) = com_canal(7);
-        viva.executor
-            .iniciar(
-                "globalThis.aoResponder = (j) => {\
-                   if (JSON.parse(j).falhar) { throw new Error('tarde'); }\
-                   seele.postar('x'.repeat(512));\
-                 };\
-                 seele.postar('pronto');",
-            )
-            .expect("código");
-        ate(
-            std::time::Duration::from_secs(5),
-            "o MOD ficar de pé",
-            || viva.executor.entregar("{\"falhar\":false}").is_ok(),
-        );
-        for _ in 0..4 {
-            viva.executor
-                .entregar("{\"falhar\":false}")
-                .expect("entrega");
-        }
-        // O erro vem **depois**, com as mensagens ainda na fila e ninguém
-        // colhendo.
-        ate(
-            std::time::Duration::from_secs(5),
-            "as mensagens saírem do motor",
-            || fila.ocupacao().0 >= 6,
-        );
-        viva.executor
-            .entregar("{\"falhar\":true}")
-            .expect("entrega do erro");
-        ate(
-            std::time::Duration::from_secs(5),
-            "o erro sair do motor",
-            || fila.avisos_de_pe() == 1,
-        );
-
-        let (mensagens_antes, bytes_antes) = fila.ocupacao();
-        assert!(
-            mensagens_antes >= 6,
-            "as mensagens foram consumidas antes do erro chegar, e o teste \
-             voltaria a medir contadores zerados"
-        );
-
-        let mods = std::sync::Mutex::new(ModsNativos::default());
-        let numero = mods.lock().expect("cadeado").guardar(viva);
-        while let Ok(fala) = recebedor.recv_timeout(std::time::Duration::from_millis(50)) {
-            super::assentar_fala(&mods, &|| true, &fila, numero, fala, "prova/mod");
-        }
-
-        let mut vivos = mods.lock().expect("cadeado");
-        let dentro = vivos.achar_mut(numero).expect("instância");
-        assert_eq!(dentro.avisos.len(), 1, "o erro tardio não chegou inteiro");
-        assert!(
-            dentro.pendentes.len() >= 6,
-            "as mensagens sumiram na passagem do erro"
-        );
-        // **Nada foi solto na travessia.** Esta é a asserção que os contadores
-        // zerados não conseguiam fazer.
-        assert_eq!(
-            (fila.ocupacao(), fila.avisos_de_pe()),
-            ((mensagens_antes, bytes_antes), 1),
-            "assentar as falas mexeu na cota antes de a janela colher"
-        );
-
-        dentro.colher_falas(64);
-        assert_eq!(
-            (fila.ocupacao(), fila.avisos_de_pe()),
-            ((0, 0), 0),
-            "a colheita não devolveu cada classe pela cota dela"
-        );
-    }
-
-    /// **A imagem com um uso chega reduzida a ele, e diz quanto pesa
-    /// decodificada** (`reducao`; tarefa 6 da F3, Step 5), pelos dois caminhos
-    /// da mídia do servidor: o texto em base64 e a leitura por volume. Sem uso,
-    /// ela segue como veio.
-    #[test]
-    fn a_imagem_com_uso_chega_reduzida_e_diz_quanto_pesa_decodificada() {
-        use image::ImageEncoder as _;
-        let foto = image::RgbaImage::from_pixel(2000, 700, image::Rgba([40, 200, 120, 255]));
-        let mut grande = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut grande)
-            .write_image(&foto, 2000, 700, image::ExtendedColorType::Rgba8)
-            .expect("gravar a foto de teste");
-        let base64 = seele_ffi::base64_de(&grande);
-        let teto = crate::reducao::TETO_DA_CAPA;
-        // 2000 × 700 cabe em 960 × 320 como 914 × 320.
-        let esperado = Some(914 * 320 * 4);
-
-        let sem_uso = super::ler_midia_do_servidor(&base64, None).expect("imagem aceita");
-        assert_eq!((sem_uso.bytes, sem_uso.decodificados), (grande.len(), None));
-
-        let com_uso = super::ler_midia_do_servidor(&base64, Some(&teto)).expect("imagem reduzida");
-        assert!(
-            com_uso.bytes < grande.len(),
-            "a imagem não encolheu: {} bytes",
-            com_uso.bytes
-        );
-        assert_eq!(com_uso.decodificados, esperado);
-
-        let lida = super::imagem_lida_dita(
-            &super::BaldesDoRegistro::default(),
-            std::time::Instant::now(),
-            "seele/perfis",
-            Ok(grande.clone()),
-            Some(&teto),
-        )
-        .expect("imagem reduzida pelo volume");
-        assert_eq!(lida.decodificados, esperado);
-    }
-
-    #[test]
-    fn imagem_do_perfis_em_data_uri_chega_ao_decodificador() {
-        for (mime, bytes) in [
-            ("image/png", b"\x89PNG\r\n\x1a\n".as_slice()),
-            ("image/jpeg", b"\xff\xd8\xff\xe0".as_slice()),
-            ("image/webp", b"RIFF\0\0\0\0WEBP".as_slice()),
-        ] {
-            let base64 = seele_ffi::base64_de(bytes);
-            for entrada in [base64.clone(), format!("data:{mime};base64,{base64}")] {
-                let midia = super::ler_midia_do_servidor(&entrada, None).expect("imagem aceita");
-                assert_eq!(midia.bytes, bytes.len());
-                assert_eq!(
-                    midia.uri,
-                    Some(format!("data:{mime};base64,{base64}")),
-                    "a mídia do servidor saiu sem o `data:` que os bytes provaram, e a janela \
-                     fica sem o que mostrar"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn midia_do_servidor_confere_bytes_e_limite_mesmo_com_cabecalho() {
-        let png = b"\x89PNG\r\n\x1a\n";
-        let alegada = format!("data:image/jpeg;base64,{}", seele_ffi::base64_de(png));
-        assert!(
-            super::ler_midia_do_servidor(&alegada, None)
-                .unwrap()
-                .uri
-                .is_some_and(|uri| uri.starts_with("data:image/png;")),
-            "o tipo da mídia do servidor saiu do cabeçalho que o terceiro escreveu, e não dos \
-             bytes"
-        );
-        for invalida in [
-            "data:image/png,abc",
-            "data:image/png;base64",
-            "data:image/png;base64,%%%",
-            "https://example.com/a.png",
-        ] {
-            assert!(super::ler_midia_do_servidor(invalida, None).is_err());
-        }
-        let mut bytes = vec![0; seele_ffi::mods::TETO_DE_MIDIA];
-        // `get_mut` e não um fatiamento: `indexing_slicing` é `warn` no
-        // workspace e o CI roda `-D warnings`. O `expect` mantém o teste
-        // honesto — se o teto de mídia um dia não couber uma assinatura de
-        // PNG, isto tem de gritar, não passar de lado.
-        bytes
-            .get_mut(..png.len())
-            .expect("o teto de mídia cabe uma assinatura de PNG")
-            .copy_from_slice(png);
-        let uri = format!("data:image/png;base64,{}", seele_ffi::base64_de(&bytes));
-        assert_eq!(
-            super::ler_midia_do_servidor(&uri, None).unwrap().bytes,
-            bytes.len()
-        );
-        bytes.push(0);
-        let uri = format!("data:image/png;base64,{}", seele_ffi::base64_de(&bytes));
-        assert!(super::ler_midia_do_servidor(&uri, None).is_err());
-    }
-
-    /// **Um arquivo escolhido não sobrevive à sessão que o escolheu.**
-    ///
-    /// É a mesma promessa que a sonda E1 mediu e encontrou falsa no Worker de
-    /// `blob:` — o que um MOD guardou lá reapareceu depois de o aplicativo ser
-    /// reiniciado. Aqui os bytes são do produto, e a saída os solta.
-    ///
-    /// Dez megabytes por arquivo, quatro arquivos: uma sessão que sai sem
-    /// soltar deixa quarenta megabytes presos por um MOD que já não roda.
-    #[test]
-    fn a_saida_solta_os_arquivos_escolhidos_daquela_geracao() {
-        let mut guardados = super::ArquivosEscolhidos::default();
-        let de = |geracao: u64| super::Escolhido {
-            de_quem: "prova/mod".to_owned(),
-            geracao,
-            tipo: "image/png",
-            tamanho: 16,
-            conteudo: vec![0; 16],
-        };
-        assert!(guardados.guardar(de(7)).is_ok());
-        assert!(guardados.guardar(de(7)).is_ok());
-        let da_seguinte = guardados.guardar(de(8)).expect("guardou");
-
-        assert_eq!(guardados.soltar_geracao(7).len(), 2);
-        // E o da geração seguinte fica: soltar o que não é dela seria derrubar
-        // a sessão que acabou de começar.
-        assert_eq!(guardados.len(), 1);
-        assert!(guardados.de(8, "prova/mod", da_seguinte).is_ok());
-    }
-
-    /// **O pedaço só sai para quem escolheu, e o `soltar` devolve agora**
-    /// (`actions.pedaco` e `actions.soltar-arquivo`; a auditoria do `v6.json`,
-    /// tabela 2). O teste dos pedaços provava a constante, e não a entrega:
-    /// tirar a conferência de dono passava, e o `soltar` não tinha prova
-    /// nenhuma. O corpo dos dois comandos, pela mesma função que eles chamam.
-    #[test]
-    fn o_pedaco_so_sai_para_quem_escolheu_e_o_soltar_devolve_agora() {
-        let mut guardados = super::ArquivosEscolhidos::default();
-        let bytes: Vec<u8> = (0..=255).collect();
-        let numero = guardados
-            .guardar(super::Escolhido {
-                de_quem: "prova/mod".to_owned(),
-                geracao: 7,
-                tipo: "image/png",
-                tamanho: bytes.len(),
-                conteudo: bytes.clone(),
-            })
-            .expect("guardou");
-        let pedaco = |guardados: &super::ArquivosEscolhidos, geracao, id: &str, inicio| {
-            super::pedaco_em_base64(guardados, geracao, id, numero, inicio)
-        };
-        let motivo = |r: Result<String, super::FalhaNoMod>| match r {
-            Ok(_) => "(saiu)".to_owned(),
-            Err(falha) => super::motivo_de(&falha).to_owned(),
-        };
-
-        assert_eq!(
-            pedaco(&guardados, 7, "prova/mod", 0).ok(),
-            Some(seele_ffi::base64_de(&bytes)),
-            "quem escolheu não recebeu o arquivo"
-        );
-        assert_eq!(
-            pedaco(&guardados, 7, "prova/mod", 250).ok(),
-            Some(seele_ffi::base64_de(bytes.get(250..).unwrap_or_default())),
-            "o pedaço do meio não começou onde o MOD pediu"
-        );
-        assert_eq!(
-            motivo(pedaco(&guardados, 7, "outro/mod", 0)),
-            "arquivo-de-outro-mod",
-            "um MOD que sabe o número leu o arquivo que outro escolheu"
-        );
-        assert_eq!(
-            motivo(pedaco(&guardados, 8, "prova/mod", 0)),
-            "arquivo-de-outro-mod",
-            "a sessão seguinte leu o arquivo da anterior"
-        );
-
-        // O `soltar` de quem não é o dono não solta; o do dono solta agora.
-        guardados.soltar(7, "outro/mod", numero);
-        assert!(
-            guardados.de(7, "prova/mod", numero).is_ok(),
-            "outro MOD soltou o arquivo que não era dele"
-        );
-        guardados.soltar(7, "prova/mod", numero);
-        assert_eq!(
-            motivo(pedaco(&guardados, 7, "prova/mod", 0)),
-            "arquivo-nao-esta-de-pe",
-            "o arquivo solto continuou de pé"
-        );
-        // E soltar de novo não é erro.
-        guardados.soltar(7, "prova/mod", numero);
-    }
-
-    /// **O escolhido tem teto de 100 MiB, e o MOD só o aperta** (`volume.cliente`
-    /// e `recusas.volume[3]`). A 0.19 subiu o teto de 10 para 100 MiB; a API 7
-    /// publicada promete «até 10 MiB», e a promessa segue cumprida: o teto
-    /// desta máquina nunca fica abaixo do número do texto. O texto da API 8
-    /// diz o número novo. O comando abre o seletor do sistema e não sobe em
-    /// teste, então o número é conferido contra o texto e contra o teto do
-    /// servidor, que tem de ser o mesmo.
-    #[test]
-    fn o_escolhido_tem_teto_de_100_mib_e_o_mod_so_o_aperta() {
-        const MIB: usize = 1024 * 1024;
-        let v7: serde_json::Value =
-            serde_json::from_str(include_str!("../../../api/v7.json")).expect("o v7.json");
-        let texto = v7
-            .get("volume")
-            .and_then(|volume| volume.get("cliente"))
-            .and_then(serde_json::Value::as_str)
-            .expect("o texto do volume.cliente");
-        let prometido: usize = texto
-            .split("até ")
-            .nth(1)
-            .and_then(|resto| resto.split(" MiB").next())
-            .and_then(|numero| numero.trim().parse().ok())
-            .expect("o v7.json não diz «até N MiB» no volume.cliente");
-        assert!(
-            super::TETO_DO_ESCOLHIDO >= prometido * MIB,
-            "o teto do escolhido ({} MiB) ficou abaixo do que a API 7 promete ({prometido} MiB)",
-            super::TETO_DO_ESCOLHIDO / MIB
-        );
-        assert_eq!(
-            super::TETO_DO_ESCOLHIDO,
-            seele_proto::midia_de_mod::TETO_DE_ARQUIVO,
-            "a pessoa escolhe um arquivo que o servidor não grava, ou o contrário"
-        );
-        assert_eq!(super::teto_do_escolhido(None), 100 * MIB);
-        assert_eq!(
-            super::teto_do_escolhido(Some(0)),
-            100 * MIB,
-            "zero é «não declarou»"
-        );
-        assert_eq!(
-            super::teto_do_escolhido(Some(MIB)),
-            MIB,
-            "o MOD não apertou o teto"
-        );
-        assert_eq!(
-            super::teto_do_escolhido(Some(200 * MIB)),
-            100 * MIB,
-            "o MOD ampliou o que esta máquina aceita ler"
-        );
-    }
-
-    /// **O papel que o MOD não pediu é `papel-nao-serve`, com o papel**
-    /// (`recusas` do `v6.json`, «leva papel»; `actions.escolher-arquivo`, a
-    /// auditoria, tabela 2). A conferência morava dentro do comando, que abre o
-    /// seletor do sistema e não sobe em teste: tirá-la passava.
-    #[test]
-    fn o_papel_que_o_mod_nao_pediu_e_papel_nao_serve_com_o_papel() {
-        let v6 = include_str!("../../../api/v6.json");
-        assert!(
-            v6.contains("papel-nao-serve (o arquivo não é do papel pedido; leva papel)"),
-            "o v6.json não diz mais o papel-nao-serve como este teste o confere"
-        );
-        let pedidos = |p: &[&str]| p.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
-        let motivo =
-            |r: Result<(), super::FalhaNoMod>| r.err().map(|f| super::motivo_de(&f).to_owned());
-        assert_eq!(
-            motivo(super::o_papel_serve(None, "som")),
-            None,
-            "sem pedido, o papel não foi aceito"
-        );
-        assert_eq!(
-            motivo(super::o_papel_serve(Some(&[]), "imagem")),
-            None,
-            "a lista vazia é «não pediu», e recusou"
-        );
-        assert_eq!(
-            motivo(super::o_papel_serve(Some(&pedidos(&["imagem"])), "imagem")),
-            None,
-            "o papel pedido foi recusado"
-        );
-        assert_eq!(
-            motivo(super::o_papel_serve(Some(&pedidos(&["imagem"])), "som")).as_deref(),
-            Some("papel-nao-serve:som"),
-            "o som, para um MOD que pediu imagem, passou ou saiu sem o papel"
-        );
-        assert_eq!(
-            motivo(super::o_papel_serve(
-                Some(&pedidos(&["som", "imagem"])),
-                "som"
-            )),
-            None,
-            "um dos dois papéis pedidos foi recusado"
-        );
-    }
-
-    /// **A mídia do servidor acima do teto é `arquivo-grande-demais`**
-    /// (`recusas.volume[3]`): antes de decodificar, pelo tamanho do texto, e
-    /// depois, pelo dos bytes. Nenhum teste passava do teto em nenhum dos
-    /// caminhos.
-    #[test]
-    fn a_midia_do_servidor_acima_do_teto_e_arquivo_grande_demais() {
-        let teto = seele_ffi::mods::TETO_DE_MIDIA;
-        let motivo = |base64: &str| match super::ler_midia_do_servidor(base64, None) {
-            Ok(_) => "(aceita)".to_owned(),
-            Err(falha) => super::motivo_de(&falha).to_owned(),
-        };
-        // Caracteres que não são base64: só a conferência de antes, pelo
-        // tamanho do texto, diz `arquivo-grande-demais`; decodificado, seria
-        // `nao-e-base64`.
-        assert_eq!(
-            motivo(&"!".repeat(teto * 2 + 4)),
-            "arquivo-grande-demais",
-            "o texto acima do dobro do teto foi decodificado antes de ser medido"
-        );
-        let um_a_mais = seele_ffi::base64_de(&vec![0_u8; teto + 1]);
-        assert!(
-            um_a_mais.len() <= teto * 2,
-            "o caso não mede o que diz: o texto já passa do corte de antes"
-        );
-        assert_eq!(
-            motivo(&um_a_mais),
-            "arquivo-grande-demais",
-            "os bytes acima do teto passaram"
-        );
-    }
-
-    /// **Dois pedaços seguidos, concatenados, são o arquivo.**
-    ///
-    /// O base64 codifica três bytes em quatro caracteres. Uma janela que não
-    /// fecha um grupo de três sai com `=` no meio, e o que o MOD junta deixa de
-    /// ser o arquivo — uma imagem que chega corrompida sem nada acusar, porque
-    /// cada pedaço, sozinho, é base64 válido.
-    ///
-    /// `65536` não é múltiplo de três. `65535` é.
-    #[test]
-    fn os_pedacos_de_um_arquivo_escolhido_se_juntam_de_volta() {
-        assert_eq!(
-            super::PEDACO_DO_ESCOLHIDO % 3,
-            0,
-            "o pedaço deixou de fechar grupos de três, e dois seguidos não se juntam"
-        );
-        // Dois pedaços e meio, para o último ser o único com enchimento.
-        let bytes: Vec<u8> = (0..super::PEDACO_DO_ESCOLHIDO * 2 + 7)
-            .map(|i| u8::try_from(i % 251).unwrap_or(0))
-            .collect();
-        let inteiro = seele_ffi::base64_de(&bytes);
-        let mut juntado = String::new();
-        let mut inicio = 0;
-        while inicio < bytes.len() {
-            let fim = inicio
-                .saturating_add(super::PEDACO_DO_ESCOLHIDO)
-                .min(bytes.len());
-            juntado.push_str(&seele_ffi::base64_de(
-                bytes.get(inicio..fim).expect("a fatia"),
-            ));
-            inicio = fim;
-        }
-        assert_eq!(juntado, inteiro, "os pedaços não se juntam no arquivo");
-        // E só o último tem enchimento: um `=` no meio é o defeito com nome.
-        assert!(
-            !juntado[..juntado.len() - 4].contains('='),
-            "sobrou enchimento no meio do que foi juntado"
-        );
-    }
-
-    /// **E há teto: um MOD que abre o seletor num laço não enche a memória.**
-    #[test]
-    fn os_arquivos_de_pe_tem_teto_e_o_numero_nunca_se_repete() {
-        let mut guardados = super::ArquivosEscolhidos::default();
-        let de = || super::Escolhido {
-            de_quem: "prova/mod".to_owned(),
-            geracao: 1,
-            tipo: "image/png",
-            tamanho: 0,
-            conteudo: Vec::new(),
-        };
-        let numeros: Vec<u64> = (0..super::ARQUIVOS_DE_PE)
-            .map(|_| guardados.guardar(de()).expect("cabe"))
-            .collect();
-        assert!(
-            guardados.guardar(de()).is_err(),
-            "o teto de arquivos de pé não segurou"
-        );
-
-        // **Monotônico.** Soltar um e guardar outro não reaproveita o número:
-        // um pedido atrasado com o número velho leria o arquivo que ocupou o
-        // lugar dele, e seria o arquivo errado sem nada dizer.
-        assert!(guardados.soltar(
-            1,
-            "prova/mod",
-            *numeros.first().expect("o primeiro guardado")
-        ));
-        let novo = guardados.guardar(de()).expect("cabe depois de soltar");
-        assert!(
-            !numeros.contains(&novo),
-            "um número de arquivo foi reaproveitado: {novo} já tinha sido usado"
-        );
-    }
-
-    /// **Uma montagem que não completa desfaz tudo.**
-    ///
-    /// Sem o desfazer, a instância ficava na tabela com o fonte dentro e sem
-    /// ninguém para escutá-la — e só uma ativação futura, que pode nunca vir, a
-    /// tiraria de lá.
-    #[test]
-    fn uma_montagem_que_falha_no_meio_desfaz_tudo() {
-        let mut mods = ModsNativos::default();
-        let mut viva = instancia(7);
-        produzir(&mut viva, 4, 128);
-        let numero = mods.guardar(viva);
-
-        // É o que o comando faz quando a bomba não sobe.
-        mods.encerrar(numero);
-        mods.descartar(numero);
-
-        assert!(
-            mods.vivos.is_empty() && mods.encerrando.is_empty(),
-            "a montagem desfeita continuou na supervisão"
-        );
-    }
-
-    /// **Colher um erro não devolve crédito que ninguém tomou.**
-    ///
-    /// A revisão: «`mod_nativo_colher` subtrai quantidade e bytes de **todas**
-    /// as falas colhidas» — e erro nunca reservou nada. Colhendo mensagens e
-    /// erros juntos, a contabilidade devolvia mais do que tinha sido tomado, e
-    /// a fila passava a aceitar acima do teto.
-    #[test]
-    fn colher_devolve_o_credito_das_mensagens_e_so_delas() {
-        let mut viva = instancia(7);
-        produzir(&mut viva, 4, 100);
-        // Intercalados, como acontece de verdade: o MOD fala e falha.
-        viva.guardar_fala("falhou", "um".to_owned());
-        viva.guardar_fala("interrompido", String::new());
-        produzir(&mut viva, 2, 100);
-
-        let (antes, bytes_antes) = viva.executor.fila().ocupacao();
-        assert_eq!(
-            (antes, bytes_antes),
-            (6, 600),
-            "só as mensagens deviam ter reservado crédito"
-        );
-
-        // **Colhe uma mensagem só, e os avisos vêm junto.** É o estado
-        // intermediário que denuncia a conta errada: com mensagens ainda
-        // pendentes, devolver crédito por um aviso aparece como crédito a
-        // menos. Drenando tudo de uma vez o contador satura em zero e o erro
-        // fica invisível — foi assim que a primeira versão deste teste passou
-        // com o defeito de volta.
-        let parcial = viva.colher_falas(1);
-        assert_eq!(parcial.len(), 3, "uma mensagem e os dois avisos");
-        let (meio, bytes_meio) = viva.executor.fila().ocupacao();
-        assert_eq!(
-            (meio, bytes_meio),
-            (5, 500),
-            "a devolução não fechou: sobraram cinco mensagens de cem bytes"
-        );
-
-        let colhidas = viva.colher_falas(64);
-        assert_eq!(colhidas.len(), 5, "a colheita não trouxe o resto");
-        let (depois, bytes_depois) = viva.executor.fila().ocupacao();
-        assert_eq!(
-            (depois, bytes_depois),
-            (0, 0),
-            "a devolução não fechou com o que foi tomado"
-        );
-
-        // **E a fila volta a aceitar exatamente o teto**, nem mais nem menos:
-        // um crédito devolvido a mais faria caber acima dele.
-        let mut couberam = 0;
-        while viva.executor.fila().cabe(1024) {
-            couberam += 1;
-            if couberam > crate::executor::MENSAGENS_NA_FILA + 1 {
-                break;
-            }
-        }
-        assert_eq!(
-            couberam,
-            crate::executor::MENSAGENS_NA_FILA,
-            "a fila aceitou fora do teto depois de colher erros"
-        );
-    }
-
-    /// E o descarte não encosta em quem é de outra geração.
-    #[test]
-    fn o_descarte_de_uma_geracao_nao_toca_na_outra() {
-        let mut mods = ModsNativos::default();
-        let mut da_sete = instancia(7);
-        produzir(&mut da_sete, 5, 128);
-        mods.guardar(da_sete);
-
-        let mut da_oito = instancia(8);
-        produzir(&mut da_oito, 5, 128);
-        let outro = mods.guardar(da_oito);
-
-        mods.revogar_geracao(7);
-
-        let sobrevivente = mods.vivos.get(&outro).expect("a de outra geração caiu");
-        assert_eq!(
-            sobrevivente.pendentes.len(),
-            5,
-            "o descarte de uma geração levou a fala de outra"
-        );
-        let (mensagens, _) = sobrevivente.executor.fila().ocupacao();
-        assert_eq!(mensagens, 5, "os créditos de outra geração foram soltos");
-    }
-}
-
+#[path = "testes/a_janela_sabe_de_onde_veio_a_impressao.rs"]
 #[cfg(test)]
-mod a_janela_sabe_de_onde_veio_a_impressao {
-    use super::{DeOndeVeio, FalhaDaEntrada, OrigemDaImpressao};
-    use seele_ffi::{ConnectFailure, ConnectionError};
-
-    #[test]
-    fn a_origem_e_a_da_impressao_que_se_confere() {
-        // As duas regras leem as mesmas entradas, e esta prende uma à outra: a
-        // origem dita à janela tem de ser a da impressão que o TLS conferiu. Se
-        // a ordem de `impressao_a_conferir` mudasse e esta não, a tela acusaria
-        // o link de uma impressão que veio da lista, ou o contrário.
-        let do_link = Some("bbbb2222");
-        let guardada = Some("aaaa1111");
-        for (link, lista) in [
-            (do_link, guardada),
-            (do_link, None),
-            (None, guardada),
-            (None, None),
-        ] {
-            let conferida = seele_ffi::impressao_a_conferir(link, lista);
-            let origem = OrigemDaImpressao::da_conferida(link, lista);
-            let de_onde_veio = match origem {
-                Some(OrigemDaImpressao::Link) => link,
-                Some(OrigemDaImpressao::Lista) => lista,
-                None => None,
-            };
-            assert_eq!(
-                de_onde_veio.map(str::to_owned),
-                conferida,
-                "com o link {link:?} e a guardada {lista:?}, a origem dita à janela \
-                 ({origem:?}) não é a da impressão conferida ({conferida:?}): a frase acusaria \
-                 quem não prometeu nada"
-            );
-        }
-    }
-
-    #[test]
-    fn a_falha_leva_o_erro_a_trilha_e_a_origem_no_topo() {
-        // `tela-boot.js` lê `falha.error` e `falha.trail` desde que a trilha
-        // existe, e agora também de onde veio a impressão. O `flatten` põe os
-        // quatro no topo; sem ele, o erro ficaria dentro de um invólucro que a
-        // janela não atravessa, e toda falha viraria «falha sem nome».
-        let falha = FalhaDaEntrada {
-            falha: ConnectFailure {
-                error: ConnectionError::InviteMismatch {
-                    expected: "bbbb2222".into(),
-                    offered: "aaaa1111".into(),
-                },
-                trail: Vec::new(),
-            },
-            de_onde: DeOndeVeio {
-                origem_da_impressao: Some(OrigemDaImpressao::Lista),
-                a_lista_guardou: false,
-            },
-            substituida: false,
-        };
-        let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(&falha) else {
-            panic!("a falha da entrada tem de serializar para objeto");
-        };
-        // A marca da tentativa substituída (lote E54) só aparece quando é
-        // verdade: toda outra recusa chega à janela com a forma de antes.
-        assert!(
-            !mapa.contains_key("substituida"),
-            "uma recusa que não é de tentativa substituída chegou à janela com a marca: {mapa:?}"
-        );
-        for chave in ["error", "trail", "origem_da_impressao", "a_lista_guardou"] {
-            assert!(
-                mapa.contains_key(chave),
-                "a falha da entrada não traz `{chave}` no topo, e a janela o lê de lá: {mapa:?}"
-            );
-        }
-        assert_eq!(
-            mapa.get("origem_da_impressao"),
-            Some(&serde_json::Value::String("Lista".into())),
-            "a origem chegou à janela com outra forma que não o nome da variante"
-        );
-    }
-
-    #[test]
-    fn a_janela_le_o_que_o_rust_manda() {
-        // Os nomes saem da serialização de verdade: renomear um campo ou uma
-        // variante de um lado só faria a janela ler `undefined`, sem erro nenhum,
-        // e dizer a frase do link para uma impressão que veio da lista.
-        let ler = |nome: &str| {
-            std::fs::read_to_string(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("ui")
-                    .join(nome),
-            )
-            .unwrap_or_else(|erro| panic!("ui/{nome} tem de ser legível: {erro}"))
-        };
-        let entrada = ler("tela-boot.js");
-        let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(DeOndeVeio::default())
-        else {
-            panic!("`DeOndeVeio` tem de serializar para objeto");
-        };
-        for chave in mapa.keys() {
-            assert!(
-                entrada.contains(chave.as_str()),
-                "`tela-boot.js` não lê `{chave}`, que o `connect` manda"
-            );
-        }
-        let Ok(serde_json::Value::String(lista)) = serde_json::to_value(OrigemDaImpressao::Lista)
-        else {
-            panic!("a origem tem de serializar como texto");
-        };
-        let comparacao = format!("=== \"{lista}\"");
-        for nome in ["frases.js", "tela-sessao.js", "tela-auth.js"] {
-            assert!(
-                ler(nome).contains(&comparacao),
-                "`{nome}` não compara a origem com `\"{lista}\"`, que é como o Rust a manda: \
-                 a frase da lista nunca aparece ali"
-            );
-        }
-    }
-}
+mod a_janela_sabe_de_onde_veio_a_impressao;
 
 /// **O relógio fixo dos testes do registro.**
 ///
@@ -18918,14 +14583,9 @@ mod a_janela_sabe_de_onde_veio_a_impressao {
 /// recarga que o tempo da própria execução trouxe. Aqui o relógio é lido uma
 /// vez no processo: todo instante de um teste é esta origem mais uma duração
 /// escrita nele.
+#[path = "testes/relogio_de_teste.rs"]
 #[cfg(test)]
-mod relogio_de_teste {
-    /// A origem do relógio fixo, a mesma para todo teste do processo.
-    pub(crate) fn origem() -> std::time::Instant {
-        static ORIGEM: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        *ORIGEM.get_or_init(std::time::Instant::now)
-    }
-}
+mod relogio_de_teste;
 
 /// **O rastro de um teste, capturado.**
 ///
@@ -19044,264 +14704,17 @@ mod rastro_de_teste {
 }
 
 /// O gancho de pânico, pelo que ele deixa no log. F1-audio-panico.
+#[path = "testes/gancho_de_panico.rs"]
 #[cfg(test)]
-mod gancho_de_panico {
-    use std::io::Write;
-    use std::sync::{Arc, Mutex};
-
-    /// Onde o formatador escreve, dividido com quem lê depois.
-    #[derive(Clone, Default)]
-    struct Captura(Arc<Mutex<Vec<u8>>>);
-
-    impl Write for Captura {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .expect("o rastro capturado")
-                .extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// (e) Um pânico numa thread com nome deixa a linha, com o nome e a
-    /// mensagem.
-    ///
-    /// O assinante é por thread (`with_default`), e por isso ele é posto
-    /// **dentro** da thread que entra em pânico: o gancho roda nela, antes de a
-    /// pilha desenrolar, e escreve no assinante dela. É o caso da thread que
-    /// abre o áudio e da thread da voz — threads soltas, cujo pânico antes não
-    /// deixava rastro nenhum no `seele.log`.
-    ///
-    /// O segundo despachante vem antes, como em `rastro_de_teste::capturar`:
-    /// sem ele, a linha pode sumir quando a bateria roda em paralelo
-    /// (pendência 56).
-    #[test]
-    fn um_panico_numa_thread_deixa_linha_no_log() {
-        crate::rastro_de_teste::segundo_despachante();
-        super::instalar_gancho_de_panico();
-
-        let captura = Captura::default();
-        let escreve = captura.clone();
-        let caiu = std::thread::Builder::new()
-            .name("seele-teste-do-panico".into())
-            .spawn(move || {
-                let assinante = tracing_subscriber::fmt()
-                    .with_writer(move || escreve.clone())
-                    .with_max_level(tracing::Level::TRACE)
-                    .without_time()
-                    .with_ansi(false)
-                    .finish();
-                tracing::subscriber::with_default(assinante, || {
-                    panic!("o driver caiu no meio da abertura");
-                });
-            })
-            .expect("a thread do pânico proposital subiu")
-            .join();
-        assert!(caiu.is_err(), "o pânico proposital não aconteceu");
-
-        let rastro = String::from_utf8(captura.0.lock().expect("o rastro").clone()).expect("UTF-8");
-        assert!(
-            rastro.contains("pânico:"),
-            "um pânico numa thread não deixou linha no log: quem relata «o áudio \
-             não abre» não tem o que mostrar. Rastro: {rastro:?}"
-        );
-        assert!(
-            rastro.contains("o driver caiu no meio da abertura"),
-            "a linha do pânico não diz a mensagem dele: {rastro:?}"
-        );
-        assert!(
-            rastro.contains("seele-teste-do-panico"),
-            "a linha do pânico não diz em que thread foi: {rastro:?}"
-        );
-    }
-}
+mod gancho_de_panico;
 
 /// **O `console` de um MOD chega ao `seele.log`, com o id e o nível.**
 ///
 /// Pelo caminho real: a mesma `assentar_fala` que a bomba chama para cada fala
 /// do executor, chamada na thread do teste para o rastro ser capturável.
+#[path = "testes/o_console_do_mod_chega_ao_registro.rs"]
 #[cfg(test)]
-mod o_console_do_mod_chega_ao_registro {
-    use super::{assentar_fala, Assentada, ModsNativos};
-    use crate::executor::{Fila, NivelDoConsole, ParaOFora};
-    use crate::rastro_de_teste::capturar;
-
-    /// Assenta uma linha de console como a bomba assentaria, e devolve o que
-    /// sobrou, o rastro, e a fila para conferir que nada foi reservado.
-    fn assentar(nivel: NivelDoConsole, texto: &str) -> (Assentada, String, std::sync::Arc<Fila>) {
-        assentar_contando(nivel, texto, 0)
-    }
-
-    /// O mesmo, com quantas linhas o balde segurou antes desta.
-    fn assentar_contando(
-        nivel: NivelDoConsole,
-        texto: &str,
-        suprimidas: u32,
-    ) -> (Assentada, String, std::sync::Arc<Fila>) {
-        let mods = std::sync::Mutex::new(ModsNativos::default());
-        let fila = std::sync::Arc::new(Fila::default());
-        let (assentada, rastro) = capturar(|| {
-            assentar_fala(
-                &mods,
-                &|| true,
-                &fila,
-                1,
-                ParaOFora::Console {
-                    nivel,
-                    texto: texto.to_owned(),
-                    suprimidas,
-                },
-                "seele/perfis",
-            )
-        });
-        (assentada, rastro, fila)
-    }
-
-    /// **A parada de um MOD nativo sai no `seele.log` pelo filtro padrão**, com o
-    /// id e a instância.
-    ///
-    /// Era DEBUG, e o filtro padrão não a escreve: numa saída do app, o registro
-    /// dizia que os MODs foram mandados parar e nunca que algum parou. A
-    /// instância, e não a geração: o número não se repete nesta janela, e a
-    /// linha «MOD reservado no executor nativo» o liga à geração.
-    #[test]
-    fn a_parada_do_mod_nativo_sai_em_info_com_o_id_e_a_instancia() {
-        let mods = std::sync::Mutex::new(ModsNativos::default());
-        let fila = std::sync::Arc::new(Fila::default());
-        let (assentada, rastro) =
-            capturar(|| assentar_fala(&mods, &|| true, &fila, 7, ParaOFora::Parou, "seele/perfis"));
-        assert_eq!(assentada, Assentada::Fim { avisar: true });
-        assert!(
-            rastro.lines().any(|linha| linha.contains("INFO")
-                && linha.contains("MOD nativo parou")
-                && linha.contains("mod_id=seele/perfis")
-                && linha.contains("instancia=7")),
-            "a parada do MOD nativo não saiu em INFO com o id e a instância: o filtro padrão \
-             não a escreve, e o seele.log de uma saída do app nunca diz que algum MOD parou: \
-             {rastro}"
-        );
-    }
-
-    /// Nos quatro níveis: um MOD em laço escreve com `log` tanto quanto com
-    /// `error`, e um braço que esquecesse a conta a perderia só no nível dele.
-    #[test]
-    fn a_linha_depois_do_aperto_diz_quantas_ficaram_para_tras() {
-        for (nivel, marca) in [
-            (NivelDoConsole::Depuracao, "DEBUG"),
-            (NivelDoConsole::Informacao, "INFO"),
-            (NivelDoConsole::Aviso, "WARN"),
-            (NivelDoConsole::Erro, "ERROR"),
-        ] {
-            let (_, rastro, _) = assentar_contando(nivel, "de novo", 7);
-            let linha = rastro
-                .lines()
-                .find(|linha| linha.contains("console do MOD"))
-                .unwrap_or_else(|| panic!("a linha {nivel:?} não chegou ao registro: {rastro}"));
-            assert!(
-                linha.contains(marca) && linha.contains("suprimidas=7"),
-                "o registro não diz que houve mais do que ele mostra, e quem lê toma o pouco por \
-                 tudo ({nivel:?}): {linha}"
-            );
-        }
-        let (_, sozinha, _) = assentar(NivelDoConsole::Aviso, "sozinha");
-        assert!(
-            !sozinha.contains("suprimidas"),
-            "uma linha sem aperto ganhou um `suprimidas=0` que só faz barulho: {sozinha}"
-        );
-    }
-
-    #[test]
-    fn um_console_warn_sai_como_warn_com_o_id_do_mod() {
-        let (assentada, rastro, fila) =
-            assentar(NivelDoConsole::Aviso, "avatar recusado: 12 bytes");
-        assert_eq!(
-            assentada,
-            Assentada::Nada,
-            "uma linha de console virou fala para a janela, e ocuparia a cota dela"
-        );
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("console do MOD"))
-            .unwrap_or_else(|| {
-                panic!(
-                    "o console do MOD não chegou ao registro — é o `console.warn` do caminho \
-                     de erro sumindo em silêncio: {rastro}"
-                )
-            });
-        for pedaco in [
-            "WARN",
-            "mod_id=seele/perfis",
-            "texto=\"avatar recusado: 12 bytes\"",
-        ] {
-            assert!(
-                linha.contains(pedaco),
-                "a linha do console não traz `{pedaco}`, e é por ele que quem lê o registro \
-                 acha o MOD e o que ele disse: {linha}"
-            );
-        }
-        assert_eq!(
-            (fila.ocupacao(), fila.avisos_de_pe()),
-            ((0, 0), 0),
-            "a linha de console tomou crédito da fila da janela"
-        );
-    }
-
-    #[test]
-    fn cada_nivel_do_console_vira_o_mesmo_nivel_no_registro() {
-        for (nivel, marca) in [
-            (NivelDoConsole::Depuracao, "DEBUG"),
-            (NivelDoConsole::Informacao, "INFO"),
-            (NivelDoConsole::Aviso, "WARN"),
-            (NivelDoConsole::Erro, "ERROR"),
-        ] {
-            let (_, rastro, _) = assentar(nivel, "linha");
-            let linha = rastro
-                .lines()
-                .find(|linha| linha.contains("console do MOD"))
-                .unwrap_or_else(|| panic!("{nivel:?} não chegou ao registro: {rastro}"));
-            assert!(
-                linha.contains(marca),
-                "`{nivel:?}` saiu com outro nível, e o filtro do seele.log o trataria como \
-                 outra coisa: {linha}"
-            );
-        }
-    }
-
-    /// Nos quatro braços de `registrar_console_do_mod`, que são escritos à mão
-    /// um a um: só o do aviso tinha guarda, e o mais usado, `console.log`, cai
-    /// no da informação. Um braço que escrevesse o texto cru forjaria linha só
-    /// no nível dele, e um que esquecesse o id deixaria a linha sem dono — o
-    /// texto não o traz.
-    #[test]
-    fn uma_quebra_de_linha_do_mod_nao_forja_outra_linha_no_registro() {
-        for nivel in [
-            NivelDoConsole::Depuracao,
-            NivelDoConsole::Informacao,
-            NivelDoConsole::Aviso,
-            NivelDoConsole::Erro,
-        ] {
-            let (_, rastro, _) = assentar(
-                nivel,
-                "primeira\n WARN seele_app: linha que o produto não escreveu",
-            );
-            assert_eq!(
-                rastro.lines().count(),
-                1,
-                "um MOD escreveu uma segunda linha no seele.log ({nivel:?}), com a cara de uma \
-                 linha do produto: {rastro}"
-            );
-            assert!(
-                rastro.contains("mod_id=seele/perfis"),
-                "a linha {nivel:?} do console saiu sem o id do MOD, e uma busca por `mod_id=` \
-                 não a acha: {rastro}"
-            );
-        }
-    }
-}
+mod o_console_do_mod_chega_ao_registro;
 
 /// **A falha do próprio MOD chega ao `seele.log`, com o id dele.**
 ///
@@ -19314,581 +14727,9 @@ mod o_console_do_mod_chega_ao_registro {
 ///
 /// Pelo caminho real: um executor de verdade, e a mesma `assentar_fala` da
 /// bomba, chamada na thread do teste para o rastro ser capturável.
+#[path = "testes/a_falha_do_mod_chega_ao_registro.rs"]
 #[cfg(test)]
-mod a_falha_do_mod_chega_ao_registro {
-    use super::{assentar_fala, ModsNativos};
-    use crate::executor::{
-        ExecutorQuickJs, Fila, Limites, ParaOFora, LINHAS_DE_CONSOLE_POR_SEGUNDO,
-        RAJADA_DO_CONSOLE, REJEICOES_GUARDADAS,
-    };
-    use crate::rastro_de_teste::capturar;
-    use std::time::{Duration, Instant};
-
-    /// O id do MOD destes testes.
-    const ID: &str = "prova/falha";
-
-    /// O que um MOD de verdade deixou.
-    struct Deixou {
-        /// As falas que não são de console, em ordem.
-        falas: Vec<ParaOFora>,
-        /// O que a bomba escreveu no registro.
-        rastro: String,
-        /// Quantas linhas de console saíram do motor.
-        linhas: u32,
-        /// Quanto tempo passou desde antes de o motor subir.
-        levou: Duration,
-    }
-
-    /// Sobe `codigo` num executor de verdade, chama `depois` com ele de pé, e
-    /// assenta cada linha de console como a bomba assentaria — numa captura,
-    /// na thread do teste — até `basta` dizer que chega ou o `prazo` passar.
-    fn deixou(
-        codigo: &str,
-        depois: impl FnOnce(&ExecutorQuickJs),
-        basta: impl Fn(&[ParaOFora], u32) -> bool,
-        prazo: Duration,
-    ) -> Deixou {
-        let inicio = Instant::now();
-        let ((falas, linhas), rastro) = capturar(|| {
-            let executor = ExecutorQuickJs::novo(Limites::default()).expect("o motor");
-            executor.iniciar(codigo).expect("o código");
-            depois(&executor);
-            let mods = std::sync::Mutex::new(ModsNativos::default());
-            let fila = std::sync::Arc::new(Fila::default());
-            let mut falas = Vec::new();
-            let mut linhas = 0_u32;
-            while inicio.elapsed() < prazo && !basta(&falas, linhas) {
-                match executor.receber(Duration::from_millis(20)) {
-                    Some(fala @ ParaOFora::Console { .. }) => {
-                        linhas += 1;
-                        assentar_fala(&mods, &|| true, &fila, 1, fala, ID);
-                    }
-                    Some(fala) => falas.push(fala),
-                    None => {}
-                }
-            }
-            (falas, linhas)
-        });
-        Deixou {
-            falas,
-            rastro,
-            linhas,
-            levou: inicio.elapsed(),
-        }
-    }
-
-    /// O máximo de linhas que o balde do console deixa sair em `levou`: a
-    /// rajada, a recarga do tempo que passou e uma de folga pelo
-    /// arredondamento.
-    fn teto_do_balde(levou: Duration) -> u32 {
-        let recarga = (levou.as_secs_f64() * f64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO)).ceil();
-        RAJADA_DO_CONSOLE + recarga as u32 + 1
-    }
-
-    /// A linha de erro do console deste MOD que traz todos os `pedacos`.
-    fn linha_de_erro<'a>(rastro: &'a str, pedacos: &[&str]) -> Option<&'a str> {
-        rastro.lines().find(|linha| {
-            linha.contains("ERROR")
-                && linha.contains("console do MOD")
-                && linha.contains(&format!("mod_id={ID}"))
-                && pedacos.iter().all(|pedaco| linha.contains(pedaco))
-        })
-    }
-
-    /// Uma das falas é uma mensagem para a janela que contém `trecho`?
-    fn tem_mensagem(falas: &[ParaOFora], trecho: &str) -> bool {
-        falas
-            .iter()
-            .any(|fala| matches!(fala, ParaOFora::Mensagem(json) if json.contains(trecho)))
-    }
-
-    #[test]
-    fn uma_excecao_no_topo_do_mod_chega_ao_registro_com_o_texto() {
-        let lancou = |falas: &[ParaOFora]| {
-            falas
-                .iter()
-                .any(|fala| matches!(fala, ParaOFora::Falhou(texto) if texto == "o MOD lançou"))
-        };
-        let deixou = deixou(
-            "const avatar = null; avatar.largura;",
-            |_| {},
-            |falas, linhas| lancou(falas) && linhas > 0,
-            Duration::from_secs(5),
-        );
-        assert!(
-            lancou(&deixou.falas),
-            "a janela deixou de receber o `Falhou` da volta que lançou, e a gestão já não diz que \
-             o MOD falhou: {:?}",
-            deixou.falas
-        );
-        let linha =
-            linha_de_erro(&deixou.rastro, &["o MOD lançou", "TypeError"]).unwrap_or_else(|| {
-                panic!(
-                    "a exceção no topo do MOD não chegou ao seele.log com o id e o texto — quem \
-                     escreveu o MOD fica com «o MOD lançou» e nada mais: {}",
-                    deixou.rastro
-                )
-            });
-        assert!(
-            linha.contains(r"\n    at "),
-            "a linha da exceção perdeu a primeira linha da pilha, que diz onde o MOD lançou: \
-             {linha}"
-        );
-    }
-
-    /// **A falha dentro de uma promessa também chega ao registro.**
-    ///
-    /// Todo pedido de MOD é uma promessa, e o erro mais comum de quem escreve
-    /// MOD — ler de `null` — dentro de uma função `async` sem `catch` só
-    /// chegava à gestão: o `Falhou` saía, e o `seele.log` ficava com uma linha
-    /// DEBUG que o filtro de produção nem grava (I2 da revisão final do Plano 1).
-    #[test]
-    fn uma_promessa_rejeitada_sem_tratamento_chega_ao_registro_com_o_texto() {
-        let rejeitou = |falas: &[ParaOFora]| {
-            falas.iter().any(|fala| {
-                matches!(fala, ParaOFora::Falhou(texto)
-                    if texto.starts_with("promessa rejeitada sem tratamento:"))
-            })
-        };
-        let deixou = deixou(
-            "(async () => { await 0; null.x; })();",
-            |_| {},
-            |falas, linhas| rejeitou(falas) && linhas > 0,
-            Duration::from_secs(5),
-        );
-        assert!(
-            rejeitou(&deixou.falas),
-            "a janela deixou de receber o `Falhou` da promessa rejeitada, e a gestão já não diz \
-             que o MOD falhou: {:?}",
-            deixou.falas
-        );
-        let linha = linha_de_erro(
-            &deixou.rastro,
-            &["promessa rejeitada sem tratamento", "TypeError", "of null"],
-        )
-        .unwrap_or_else(|| {
-            panic!(
-                "a promessa rejeitada sem tratamento não chegou ao seele.log em ERROR, com o id e \
-                 o texto — quem escreveu o MOD só a vê na gestão: {}",
-                deixou.rastro
-            )
-        });
-        assert!(
-            linha.contains(r"\n    at "),
-            "a linha da promessa rejeitada perdeu a primeira linha da pilha, que diz onde o MOD \
-             lançou: {linha}"
-        );
-    }
-
-    /// **A rejeição que o MOD pega logo depois não vira linha de erro, nem
-    /// `Falhou` na janela.**
-    ///
-    /// `try { await f(); } catch {}`, com `f` uma função `async` que lança
-    /// antes do primeiro `await`: a promessa rejeita antes de o `await` prender
-    /// o tratamento, e o motor avisa a rejeição nessa hora. A linha do registro
-    /// e o `Falhou` da janela esperam o fim da volta, e saem só se ninguém a
-    /// pegou: dizer «sem tratamento» sobre uma rejeição tratada mandaria quem
-    /// escreveu o MOD procurar um defeito que não existe — no `seele.log`, em
-    /// ERROR, e na gestão, como «falhou». O `Falhou` saía na hora, de dentro
-    /// do rastreador (P51-01).
-    ///
-    /// O `fim` vem de um temporizador, numa volta seguinte: quando ele chega,
-    /// as linhas e os avisos da primeira volta já passaram pelo canal.
-    #[test]
-    fn uma_rejeicao_pega_logo_depois_nao_vira_linha_de_erro() {
-        let deixou = deixou(
-            "(async () => { try { await (async () => { throw new Error('pega logo depois'); })(); } \
-               catch (e) {} })();\
-             (async () => { await 0; null.x; })();\
-             setTimeout(() => seele.postar('fim'), 0);",
-            |_| {},
-            |falas, _| tem_mensagem(falas, "fim"),
-            Duration::from_secs(5),
-        );
-        assert!(
-            tem_mensagem(&deixou.falas, "fim"),
-            "o MOD não chegou ao fim, e o teste não mediu nada: {:?}",
-            deixou.falas
-        );
-        assert!(
-            linha_de_erro(
-                &deixou.rastro,
-                &["promessa rejeitada sem tratamento", "of null"]
-            )
-            .is_some(),
-            "a rejeição que ninguém pegou, na mesma volta, não chegou ao seele.log: {}",
-            deixou.rastro
-        );
-        assert!(
-            !deixou.rastro.contains("pega logo depois"),
-            "uma rejeição que o MOD pegou com `try`/`await` saiu no seele.log como «sem \
-             tratamento»: quem escreveu o MOD vai procurar um defeito que não existe: {}",
-            deixou.rastro
-        );
-        assert!(
-            !deixou.falas.iter().any(
-                |fala| matches!(fala, ParaOFora::Falhou(texto) if texto.contains("pega logo depois"))
-            ),
-            "uma rejeição que o MOD pegou com `try`/`await` chegou à janela como `Falhou`, e a \
-             gestão diz que o MOD falhou por uma promessa que ele tratou: {:?}",
-            deixou.falas
-        );
-    }
-
-    /// **A volta que um teto parou, sem microtarefa na fila, também termina
-    /// para as rejeições.**
-    ///
-    /// Nada mais vai rodar nela que possa pegá-las, e a linha sai logo depois
-    /// da do teto. Esperar a próxima volta deixaria a rejeição de um MOD sem
-    /// temporizador nem resposta calada até a instância parar.
-    #[test]
-    fn a_rejeicao_de_uma_volta_parada_sem_microtarefa_na_fila_e_dita_sem_esperar_a_parada() {
-        let deixou = deixou(
-            "Promise.reject(new Error('antes do laço'));\
-             (async () => { await 0; while (true) {} })();",
-            |_| {},
-            |_, linhas| linhas >= 2,
-            Duration::from_secs(5),
-        );
-        assert!(
-            linha_de_erro(&deixou.rastro, &["passou do"]).is_some(),
-            "a volta do laço não foi parada por um teto, e o teste não mediu nada: {}",
-            deixou.rastro
-        );
-        assert!(
-            linha_de_erro(
-                &deixou.rastro,
-                &["promessa rejeitada sem tratamento", "antes do laço"]
-            )
-            .is_some(),
-            "a volta parou por um teto sem microtarefa na fila, e a rejeição dela ficou \
-             esperando uma volta seguinte que um MOD sem temporizador nem resposta não tem: {}",
-            deixou.rastro
-        );
-    }
-
-    /// **A rejeição que ainda esperava quando a instância parou é dita.**
-    ///
-    /// Uma volta que um teto parou com microtarefas na fila deixa as rejeições
-    /// dela esperando a próxima volta, porque essas microtarefas ainda podiam
-    /// pegá-las. Se a instância para antes, ninguém mais as pega: a linha sai
-    /// na parada, antes do `Parou`. E a espera fica vazia antes de o runtime
-    /// ser desfeito, porque cada rejeição segura a promessa dela.
-    #[test]
-    fn a_rejeicao_que_esperava_quando_a_instancia_parou_e_dita() {
-        let (falas, rastro) = capturar(|| {
-            let executor = ExecutorQuickJs::novo(Limites::default()).expect("o motor");
-            executor
-                .iniciar(
-                    "Promise.reject(new Error('esperava quando parou'));\
-                     (async () => { await 0; while (true) {} })();\
-                     (async () => { await 0; })();",
-                )
-                .expect("o código");
-            let mods = std::sync::Mutex::new(ModsNativos::default());
-            let fila = std::sync::Arc::new(Fila::default());
-            let mut falas = Vec::new();
-            let mut pediu = false;
-            let inicio = Instant::now();
-            while inicio.elapsed() < Duration::from_secs(10) {
-                match executor.receber(Duration::from_millis(20)) {
-                    Some(fala @ ParaOFora::Console { .. }) => {
-                        assentar_fala(&mods, &|| true, &fila, 1, fala, ID);
-                    }
-                    Some(ParaOFora::Parou) => {
-                        falas.push(ParaOFora::Parou);
-                        break;
-                    }
-                    Some(fala) => falas.push(fala),
-                    None => {}
-                }
-                if !pediu
-                    && falas
-                        .iter()
-                        .any(|fala| matches!(fala, ParaOFora::Interrompido))
-                {
-                    executor.pedir_encerramento();
-                    pediu = true;
-                }
-            }
-            falas
-        });
-        assert!(
-            falas
-                .iter()
-                .any(|fala| matches!(fala, ParaOFora::Interrompido)),
-            "a volta do laço não foi parada por um teto, e o teste não mediu a espera: {falas:?}"
-        );
-        assert!(
-            falas.iter().any(|fala| matches!(fala, ParaOFora::Parou)),
-            "a instância não confirmou a parada: {falas:?}"
-        );
-        assert!(
-            linha_de_erro(
-                &rastro,
-                &["promessa rejeitada sem tratamento", "esperava quando parou"]
-            )
-            .is_some(),
-            "a rejeição que esperava o fim de uma volta parada por um teto sumiu quando a \
-             instância parou, sem chegar ao seele.log: {rastro}"
-        );
-    }
-
-    /// **A rejeição além do teto da espera não se perde: ela é contada, e a
-    /// conta sai no fim da volta.**
-    ///
-    /// Até `REJEICOES_GUARDADAS` rejeições esperam o fim da volta, cada uma com
-    /// a linha dela; as de depois só são contadas, e a conta sai numa linha
-    /// depois das guardadas: «e mais N rejeições sem tratamento além da
-    /// espera». A primeira linha, que costuma ser a causa, continua saindo.
-    /// Quarenta numa volta só: as guardadas e a conta cabem juntas na rajada
-    /// do balde, e a conta não é segurada atrás delas.
-    #[test]
-    fn a_rejeicao_alem_do_teto_da_espera_nao_se_perde() {
-        let deixou = deixou(
-            "for (let i = 0; i < 40; i++) Promise.reject(new Error('r' + i));\
-             setTimeout(() => seele.postar('fim'), 0);",
-            |_| {},
-            |falas, _| tem_mensagem(falas, "fim"),
-            Duration::from_secs(5),
-        );
-        assert!(
-            tem_mensagem(&deixou.falas, "fim"),
-            "o MOD não chegou ao fim, e o teste não mediu nada: {:?}",
-            deixou.falas
-        );
-        let ultima_guardada = format!("Error: r{}", REJEICOES_GUARDADAS - 1);
-        for primeira_e_ultima in ["Error: r0", ultima_guardada.as_str()] {
-            assert!(
-                linha_de_erro(
-                    &deixou.rastro,
-                    &["promessa rejeitada sem tratamento", primeira_e_ultima]
-                )
-                .is_some(),
-                "a rejeição «{primeira_e_ultima}», dentro do teto da espera, não chegou ao \
-                 seele.log com a linha dela: {}",
-                deixou.rastro
-            );
-        }
-        let alem = 40 - REJEICOES_GUARDADAS;
-        assert!(
-            linha_de_erro(
-                &deixou.rastro,
-                &[&format!(
-                    "e mais {alem} rejeições sem tratamento além da espera"
-                )]
-            )
-            .is_some(),
-            "as {alem} rejeições além do teto da espera não foram contadas no fim da volta — \
-             caladas, ou a conta segurada pelo balde atrás das guardadas: {}",
-            deixou.rastro
-        );
-        assert!(
-            !deixou.rastro.contains("Error: r39"),
-            "a quadragésima rejeição, além do teto da espera, saiu com a linha dela na hora, e \
-             não só na conta: uma que o MOD pegasse logo depois sairia em ERROR como «sem \
-             tratamento»: {}",
-            deixou.rastro
-        );
-        assert!(
-            deixou.linhas <= teto_do_balde(deixou.levou),
-            "{} linhas de console em {:?}: as rejeições passaram por fora do balde",
-            deixou.linhas,
-            deixou.levou
-        );
-    }
-
-    /// **Um `Promise.allSettled` de mais promessas que o teto da espera, que
-    /// lançam antes do primeiro `await`, não deixa linha de erro.**
-    ///
-    /// Cada função `async` rejeita a promessa dela antes de o `allSettled`
-    /// prender o tratamento, e o motor avisa cada rejeição nessa hora. As que
-    /// cabem na espera saem dela quando o tratamento chega; as de depois, que
-    /// só foram contadas, saem da conta. Ditas na hora, como antes, elas
-    /// saíam em ERROR como «sem tratamento» — oito linhas sobre rejeições que o
-    /// MOD tratou (F-Mods-m1 da revisão final do Plano 1).
-    #[test]
-    fn um_allsettled_alem_do_teto_da_espera_nao_vira_linha_de_erro() {
-        let deixou = deixou(
-            "const lanca = async (i) => { throw new Error('tratada ' + i); };\
-             Promise.allSettled(Array.from({ length: 40 }, (_, i) => lanca(i)))\
-               .then((r) => seele.postar('assentou ' + \
-                 r.filter((x) => x.status === 'rejected').length));\
-             setTimeout(() => seele.postar('fim'), 0);",
-            |_| {},
-            |falas, _| tem_mensagem(falas, "fim"),
-            Duration::from_secs(5),
-        );
-        assert!(
-            tem_mensagem(&deixou.falas, "assentou 40") && tem_mensagem(&deixou.falas, "fim"),
-            "o `allSettled` não assentou as quarenta rejeições, ou o MOD não chegou ao fim, e o \
-             teste não mediu nada: {:?}",
-            deixou.falas
-        );
-        assert!(
-            !deixou.rastro.contains("tratada "),
-            "uma rejeição que o `allSettled` tratou saiu no seele.log como «sem tratamento»: \
-             quem escreveu o MOD vai procurar um defeito que não existe: {}",
-            deixou.rastro
-        );
-        assert!(
-            !deixou.rastro.contains("além da espera"),
-            "as rejeições além do teto da espera foram tratadas pelo `allSettled`, e a conta \
-             delas saiu mesmo assim: {}",
-            deixou.rastro
-        );
-    }
-
-    /// **Pelo mesmo balde do `console`.** Um MOD que lança em toda resposta
-    /// lança tanto quanto a janela responde; sem o balde, cada volta seria uma
-    /// linha no `seele.log`, num arquivo que só gira na abertura do app.
-    #[test]
-    fn uma_excecao_em_cada_resposta_nao_passa_do_balde_do_console() {
-        let deixou = deixou(
-            "globalThis.aoResponder = () => { const a = null; a.x; };",
-            |executor| {
-                let fim = Instant::now() + Duration::from_millis(600);
-                while Instant::now() < fim {
-                    let _ = executor.entregar("{}");
-                    std::thread::yield_now();
-                }
-            },
-            |_, _| false,
-            Duration::from_millis(900),
-        );
-        assert!(
-            linha_de_erro(&deixou.rastro, &["o MOD lançou", "TypeError"]).is_some(),
-            "a exceção de uma resposta não chegou ao seele.log com o id e o texto: {}",
-            deixou.rastro
-        );
-        let teto = teto_do_balde(deixou.levou);
-        assert!(
-            deixou.linhas <= teto,
-            "{} linhas de console em {:?}, e o balde deixa {teto}: as exceções passaram por fora \
-             dele",
-            deixou.linhas,
-            deixou.levou
-        );
-        assert!(
-            deixou.rastro.contains("suprimidas="),
-            "o balde não segurou nada, e o teste não mediu o teto: {}",
-            deixou.rastro
-        );
-    }
-
-    /// **Um temporizador que lança deixa linhas com o texto, no teto do
-    /// balde.** O mesmo laço de 4 ms mandava 174 mensagens por segundo à
-    /// janela, que as descartava.
-    ///
-    /// **E com a pilha**, que diz onde no MOD: o `emTexto` do prelúdio a põe
-    /// numa linha abaixo de `nome: mensagem`, e no `seele.log` a quebra sai
-    /// escapada (`\n    at …`).
-    #[test]
-    fn um_temporizador_que_lanca_deixa_linhas_limitadas_pelo_balde() {
-        let deixou = deixou(
-            "setInterval(() => { const a = null; a.b; }, 4);",
-            |_| {},
-            |_, _| false,
-            Duration::from_secs(1),
-        );
-        let linha = linha_de_erro(&deixou.rastro, &["erro num temporizador", "TypeError"])
-            .unwrap_or_else(|| {
-                panic!(
-                    "a exceção de um temporizador não chegou ao seele.log com o id e o texto: {}",
-                    deixou.rastro
-                )
-            });
-        assert!(
-            linha.contains(r"\n    at "),
-            "a linha do erro de um temporizador perdeu a pilha, e quem escreveu o MOD não sabe \
-             em que ponto dele o temporizador lançou: {linha}"
-        );
-        assert!(
-            tem_mensagem(&deixou.falas, "erro-no-relogio"),
-            "a mensagem `erro-no-relogio` deixou de ir à janela, e ela é do outro lado: {:?}",
-            deixou.falas.first()
-        );
-        let teto = teto_do_balde(deixou.levou);
-        assert!(
-            deixou.linhas <= teto,
-            "{} linhas de console em {:?}, e o balde deixa {teto}: o laço do temporizador passou \
-             por fora dele",
-            deixou.linhas,
-            deixou.levou
-        );
-        assert!(
-            deixou.rastro.contains("suprimidas="),
-            "o balde não segurou nada, e o teste não mediu o teto: {}",
-            deixou.rastro
-        );
-    }
-
-    /// **Um ouvinte de evento que lança deixa a linha, com a pilha** — como o
-    /// temporizador, e pelo mesmo `emTexto`.
-    #[test]
-    fn um_ouvinte_de_evento_que_lanca_deixa_a_linha() {
-        let deixou = deixou(
-            "SeeleUI.aoEvento(() => { const a = null; a.b; });",
-            |executor| {
-                executor
-                    .entregar(r#"{"tipo":"evento","nome":"tecla"}"#)
-                    .expect("o evento");
-            },
-            |falas, linhas| tem_mensagem(falas, "erro-no-evento") && linhas > 0,
-            Duration::from_secs(5),
-        );
-        let linha = linha_de_erro(&deixou.rastro, &["erro num ouvinte de evento", "TypeError"])
-            .unwrap_or_else(|| {
-                panic!(
-                    "a exceção de um ouvinte de `SeeleUI.aoEvento` não chegou ao seele.log com o \
-                     id e o texto: {}",
-                    deixou.rastro
-                )
-            });
-        assert!(
-            linha.contains(r"\n    at "),
-            "a linha do erro de um ouvinte de evento perdeu a pilha, e quem escreveu o MOD não \
-             sabe em que ponto dele o ouvinte lançou: {linha}"
-        );
-        assert!(
-            tem_mensagem(&deixou.falas, "erro-no-evento"),
-            "a mensagem `erro-no-evento` deixou de ir à janela, e ela é do outro lado: {:?}",
-            deixou.falas
-        );
-    }
-
-    /// **A volta que o produto parou não vira «o MOD lançou» no registro.**
-    ///
-    /// O laço infinito é dos erros mais comuns de quem escreve MOD, e o
-    /// `seele.log` dizia `o MOD lançou: InternalError: interrupted` — quem
-    /// parou foi o produto, pelo prazo ou pelo teto de trabalho. Com os tetos
-    /// do produto, o que para primeiro depende da máquina, e por isso a frase
-    /// exigida é a que as duas paradas dizem.
-    #[test]
-    fn uma_volta_que_o_produto_parou_nao_vira_o_mod_lancou_no_registro() {
-        let deixou = deixou(
-            "while (true) {}",
-            |_| {},
-            |falas, linhas| !falas.is_empty() && linhas > 0,
-            Duration::from_secs(5),
-        );
-        assert!(
-            linha_de_erro(
-                &deixou.rastro,
-                &["o produto a interrompeu (o MOD continua de pé)"]
-            )
-            .is_some(),
-            "a volta que o produto parou não chegou ao seele.log com o id e dizendo que só ela \
-             foi interrompida — sem isso, quem lê entende que o MOD acabou: {}",
-            deixou.rastro
-        );
-        assert!(
-            !deixou.rastro.contains("lançou"),
-            "a volta que o produto parou foi dita no seele.log como se o MOD tivesse lançado: {}",
-            deixou.rastro
-        );
-    }
-}
+mod a_falha_do_mod_chega_ao_registro;
 
 /// **Um MOD que não carregou é dito no `seele.log`, uma vez por motivo.**
 ///
@@ -19896,1347 +14737,26 @@ mod a_falha_do_mod_chega_ao_registro {
 /// anotava «não carregou» sem o motivo, num mapa em memória, e tentava de novo
 /// a cada quatro segundos. Dita a cada tentativa, a recusa seria novecentas
 /// linhas iguais por hora; dita quando muda, é uma.
+#[path = "testes/a_carga_recusada_e_dita_uma_vez_por_motivo.rs"]
 #[cfg(test)]
-mod a_carga_recusada_e_dita_uma_vez_por_motivo {
-    use super::{carga_aceita, carga_dita, motivo_de, recusa_de_carga_dita, FalhaNoMod};
-    use crate::rastro_de_teste::capturar;
-
-    /// Uma recusa de carga pelo `motivo`, na `geracao`, dita com a memória
-    /// `ditas`.
-    fn recusar(
-        ditas: &std::sync::Mutex<std::collections::HashMap<String, (u64, String)>>,
-        geracao: u64,
-        id: &str,
-        motivo: &str,
-    ) -> FalhaNoMod {
-        recusa_de_carga_dita(
-            ditas,
-            geracao,
-            id,
-            FalhaNoMod::Recusado {
-                motivo: motivo.to_owned(),
-            },
-        )
-    }
-
-    /// As linhas de carga recusada no rastro.
-    fn ditas_no(rastro: &str) -> Vec<&str> {
-        rastro
-            .lines()
-            .filter(|linha| linha.contains("MOD não carregou"))
-            .collect()
-    }
-
-    #[test]
-    fn uma_carga_recusada_duas_vezes_pelo_mesmo_motivo_deixa_uma_linha_so() {
-        let ditas = std::sync::Mutex::default();
-        let (falha, rastro) = capturar(|| {
-            recusar(&ditas, 1, "prova/carga", "conteudo-de-outro-mod");
-            recusar(&ditas, 1, "prova/carga", "conteudo-de-outro-mod")
-        });
-        assert_eq!(
-            motivo_de(&falha),
-            "conteudo-de-outro-mod",
-            "a recusa que volta à janela foi mexida, e a gestão já não diz o motivo"
-        );
-        let linhas = ditas_no(&rastro);
-        assert_eq!(
-            linhas.len(),
-            1,
-            "a mesma recusa de carga, de novo a cada quatro segundos, saiu a cada tentativa — \
-             novecentas linhas iguais por hora: {rastro}"
-        );
-        for pedaco in ["WARN", "mod_id=prova/carga", "motivo=conteudo-de-outro-mod"] {
-            assert!(
-                linhas.iter().all(|linha| linha.contains(pedaco)),
-                "a linha da carga recusada não traz `{pedaco}`, e é por ela que quem lê o \
-                 registro acha o MOD e o motivo: {rastro}"
-            );
-        }
-    }
-
-    /// **O que muda é dito**: outro motivo, outro MOD, e o mesmo motivo de
-    /// novo depois de uma carga que deu certo.
-    #[test]
-    fn um_motivo_novo_outro_mod_ou_a_volta_depois_de_carregar_sao_ditos() {
-        let ditas = std::sync::Mutex::default();
-        let ((), rastro) = capturar(|| {
-            recusar(&ditas, 1, "prova/carga", "cliente-nao-servido");
-            recusar(&ditas, 1, "prova/carga", "executor-nao-subiu");
-            recusar(&ditas, 1, "prova/outro", "executor-nao-subiu");
-            carga_aceita(&ditas, "prova/carga");
-            recusar(&ditas, 1, "prova/carga", "executor-nao-subiu");
-        });
-        assert_eq!(
-            ditas_no(&rastro).len(),
-            4,
-            "uma recusa que mudou — de motivo, de MOD, ou depois de uma carga que deu certo — \
-             não foi dita: {rastro}"
-        );
-    }
-
-    /// **Uma sessão nova diz de novo a recusa que a anterior já tinha dito.**
-    ///
-    /// A memória segura a recusa repetida dentro de uma sessão. Atravessando a
-    /// saída, ela calava a mesma falha na sessão seguinte: a pessoa sai, entra
-    /// de novo, o MOD não carrega pelo mesmo motivo, e o `seele.log` desta
-    /// entrada não diz nada — a linha que existe é a de uma sessão que já
-    /// acabou.
-    #[test]
-    fn a_mesma_recusa_numa_sessao_nova_e_dita_de_novo() {
-        let sessao = super::Session::default();
-        let ((), rastro) = capturar(|| {
-            recusar(
-                &sessao.recusas_de_carga,
-                1,
-                "prova/carga",
-                "conteudo-de-outro-mod",
-            );
-            sessao.revogar();
-            recusar(
-                &sessao.recusas_de_carga,
-                2,
-                "prova/carga",
-                "conteudo-de-outro-mod",
-            );
-        });
-        assert_eq!(
-            ditas_no(&rastro).len(),
-            2,
-            "a recusa de carga dita numa sessão calou a mesma recusa na sessão seguinte, e o \
-             seele.log da entrada nova não diz por que o MOD não carregou: {rastro}"
-        );
-    }
-
-    /// **A recusa atrasada da sessão que acabou não cala a da seguinte.**
-    ///
-    /// A corrida que a limpeza de [`super::Session::revogar`] não fecha: uma
-    /// carga passou da conferência de geração antes da saída e falhou depois
-    /// dela. A recusa dela é dita — e guardada — depois da limpeza, e a mesma
-    /// recusa na sessão seguinte achava o motivo igual e ficava calada, com a
-    /// linha da sessão anterior segundos antes no arquivo. Guardada com a
-    /// geração, a da sessão seguinte é outra recusa.
-    #[test]
-    fn a_recusa_atrasada_da_sessao_que_acabou_nao_cala_a_da_seguinte() {
-        let sessao = super::Session::default();
-        // A sessão 1 de pé.
-        assert_eq!(
-            sessao.revogar(),
-            1,
-            "a primeira geração de uma sessão não é 1"
-        );
-        let ((), rastro) = capturar(|| {
-            assert_eq!(sessao.revogar(), 2, "a saída não fechou a geração 1");
-            recusar(
-                &sessao.recusas_de_carga,
-                1,
-                "prova/carga",
-                "conteudo-de-outro-mod",
-            );
-            recusar(
-                &sessao.recusas_de_carga,
-                2,
-                "prova/carga",
-                "conteudo-de-outro-mod",
-            );
-        });
-        let avisos = ditas_no(&rastro)
-            .into_iter()
-            .filter(|linha| linha.contains("WARN"))
-            .count();
-        assert_eq!(
-            avisos, 2,
-            "a recusa atrasada da sessão que acabou calou a mesma recusa na sessão seguinte, e \
-             o seele.log da entrada nova não diz por que o MOD não carregou: {rastro}"
-        );
-    }
-
-    /// **A sessão que acabou não é recusa a dizer**: é o desfecho certo de
-    /// uma carga atrasada, contada em `comandos_de_geracao_morta`.
-    #[test]
-    fn a_sessao_que_acabou_nao_vira_aviso_de_carga() {
-        let ditas = std::sync::Mutex::default();
-        let (_, rastro) = capturar(|| recusar(&ditas, 1, "prova/carga", "sessao-encerrada"));
-        assert!(
-            !rastro.contains("WARN") && rastro.contains("DEBUG"),
-            "uma carga que não subiu porque a pessoa saiu virou aviso — é o desfecho certo, e \
-             não um defeito: {rastro}"
-        );
-    }
-
-    /// **`carga_dita`, no braço que aceita**: o valor volta intacto, e o motivo
-    /// guardado é esquecido — a mesma recusa depois dela é dita de novo.
-    #[test]
-    fn a_carga_dita_que_deu_certo_esquece_o_motivo_e_devolve_o_valor() {
-        let ditas = std::sync::Mutex::default();
-        let (valor, rastro) = capturar(|| {
-            recusar(&ditas, 1, "prova/carga", "executor-nao-subiu");
-            let valor = carga_dita(&ditas, 1, "prova/carga", Ok::<u64, FalhaNoMod>(7));
-            recusar(&ditas, 1, "prova/carga", "executor-nao-subiu");
-            valor
-        });
-        assert!(
-            matches!(valor, Ok(7)),
-            "a carga que deu certo não voltou intacta, e a janela perde o número da instância: \
-             {valor:?}"
-        );
-        assert_eq!(
-            ditas_no(&rastro).len(),
-            2,
-            "a carga que deu certo não esqueceu o motivo, e a mesma recusa depois dela ficou \
-             calada — um MOD que subiu e caiu de novo pelo mesmo motivo some do registro: \
-             {rastro}"
-        );
-    }
-
-    /// **`carga_dita`, no braço que recusa**: passa pela recusa dita — uma
-    /// linha por motivo, e não uma por tentativa — e a recusa volta intacta.
-    #[test]
-    fn a_carga_dita_recusada_e_dita_uma_vez_e_volta_intacta() {
-        let ditas = std::sync::Mutex::default();
-        let (cargas, rastro) = capturar(|| {
-            (0..3)
-                .map(|_| {
-                    carga_dita(
-                        &ditas,
-                        1,
-                        "prova/carga",
-                        Err::<u64, _>(FalhaNoMod::Recusado {
-                            motivo: "conteudo-de-outro-mod".to_owned(),
-                        }),
-                    )
-                })
-                .collect::<Vec<_>>()
-        });
-        for carga in &cargas {
-            let falha = carga
-                .as_ref()
-                .expect_err("uma carga recusada voltou como aceita");
-            assert_eq!(
-                motivo_de(falha),
-                "conteudo-de-outro-mod",
-                "a recusa que volta à janela foi mexida, e a gestão já não diz o motivo"
-            );
-        }
-        assert_eq!(
-            ditas_no(&rastro).len(),
-            1,
-            "a recusa de carga não passou pela recusa dita uma vez por motivo: três tentativas \
-             deixaram outra conta de linhas: {rastro}"
-        );
-    }
-
-    /// O corpo de `comando` em `main.rs` — do `{` da assinatura ao `}` que a
-    /// fecha —, sem as linhas de comentário, sem espaço nenhum e sem a vírgula
-    /// que o `rustfmt` põe antes de um `)` quando quebra a chamada em linhas: o
-    /// que sobra é o código, e a formatação não muda a conta.
-    fn corpo_sem_espaco(fonte: &str, comando: &str) -> String {
-        let funcao = fonte
-            .split(comando)
-            .nth(1)
-            .and_then(|resto| resto.split("\n}\n").next())
-            .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
-        let corpo = funcao
-            .split_once("> {\n")
-            .map(|(_, corpo)| corpo)
-            .unwrap_or_else(|| panic!("o recorte não achou o corpo de `{comando}`: {funcao}"));
-        corpo
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .flat_map(str::chars)
-            .filter(|c| !c.is_whitespace())
-            .collect::<String>()
-            .replace(",)", ")")
-    }
-
-    /// **Os dois comandos de carga passam pela recusa dita**, cada um na forma
-    /// exata que lhe cabe, e só a reserva que deu certo esquece o motivo. Os
-    /// comandos precisam de um `AppHandle` e não sobem num teste; um que
-    /// devolvesse a recusa por fora seria o MOD sem carregar e o registro
-    /// calado de novo, com os testes acima verdes.
-    ///
-    /// **A reserva é a chamada única de [`carga_dita`]**, e não um `match` que
-    /// a imite. Conferir só que `carga_aceita(` e `recusa_de_carga_dita(`
-    /// aparecem no corpo deixava passar o `carga_aceita` no braço errado — a
-    /// recusa esquecida a cada tentativa, e de novo as novecentas linhas por
-    /// hora — sem nada reprovar. Os dois braços são provados nos testes de
-    /// `carga_dita`, acima; aqui se prova que a reserva é ela.
-    ///
-    /// **E o código é só a recusa dita**: `ler_codigo_do_mod(..)` com o
-    /// `map_err` de [`recusa_de_carga_dita`], e nada mais. Não é `carga_dita`:
-    /// a janela pede o código e depois a reserva, de novo a cada quatro
-    /// segundos enquanto o MOD não sobe, e o código lido esqueceria o motivo
-    /// antes de a reserva falhar — a mesma recusa dita a cada tentativa
-    /// (medido: dez linhas em dez tentativas, contra uma). Conferir só que
-    /// `recusa_de_carga_dita(` aparece no corpo deixava passar esse
-    /// esquecimento, num `match` com `carga_aceita` no `Ok` ou num `.inspect`
-    /// depois do `map_err`, sem nada reprovar.
-    #[test]
-    fn os_dois_comandos_de_carga_passam_pela_recusa_dita() {
-        let fonte = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
-        )
-        .expect("main.rs legível")
-        .replace("\r\n", "\n");
-        let codigo = corpo_sem_espaco(&fonte, "fn codigo_do_mod(");
-        assert_eq!(
-            codigo,
-            "ler_codigo_do_mod(&app,&session,geracao,&id,&hash).map_err(|falha|\
-             recusa_de_carga_dita(&session.recusas_de_carga,geracao,&id,falha))",
-            "`fn codigo_do_mod(` deixou de ser `ler_codigo_do_mod(..)` com o `map_err` de \
-             `recusa_de_carga_dita`, e nada mais: sem a recusa dita, a carga recusada volta à \
-             janela e não chega ao registro; com um `carga_aceita` (ou `carga_dita`), o código \
-             lido esquece o motivo antes de a reserva falhar, e a mesma recusa volta a sair a \
-             cada quatro segundos"
-        );
-        let reserva = corpo_sem_espaco(&fonte, "fn mod_nativo_reservar(");
-        assert_eq!(
-            reserva,
-            "carga_dita(&session.recusas_de_carga,geracao,&id,reservar_no_executor(&app,&session,\
-             geracao,&id,hash))",
-            "`fn mod_nativo_reservar(` deixou de ser a chamada única de `carga_dita` sobre \
-             `reservar_no_executor`: um `match` escrito à mão pode pôr o `carga_aceita` no braço \
-             errado, e a mesma recusa volta a sair a cada quatro segundos, ou a seguinte fica \
-             calada"
-        );
-    }
-}
+mod a_carga_recusada_e_dita_uma_vez_por_motivo;
 
 /// **O que a janela escreve no registro, com o id do MOD em campo próprio.**
 ///
 /// O comando é chamado direto: é uma função como outra qualquer, e o que se
 /// mede é a linha que ela deixa no `seele.log`.
+#[path = "testes/o_registro_da_janela.rs"]
 #[cfg(test)]
-mod o_registro_da_janela {
-    use crate::rastro_de_teste::capturar;
-    use crate::relogio_de_teste::origem;
-
-    #[test]
-    fn o_aviso_da_janela_sai_como_warn_com_o_id_do_mod_em_campo_proprio() {
-        let ((), rastro) = capturar(|| {
-            super::registrar_da_janela_em(
-                &super::BaldesDoRegistro::default(),
-                origem(),
-                "aviso".to_owned(),
-                "atender-mod".to_owned(),
-                "seele/perfis: «contribuir» falhou — a API de MODs não conhece o ponto «x»"
-                    .to_owned(),
-                Some("seele/perfis".to_owned()),
-            );
-        });
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("«contribuir» falhou"))
-            .unwrap_or_else(|| panic!("a recusa da janela não chegou ao registro: {rastro}"));
-        for pedaco in ["WARN", "mod_id=seele/perfis", "onde=atender-mod"] {
-            assert!(
-                linha.contains(pedaco),
-                "a linha da janela não traz `{pedaco}`, e `mod_id=` é o que junta numa busca \
-                 o que a janela e o Rust disseram do mesmo MOD: {linha}"
-            );
-        }
-        assert!(
-            linha.contains(
-                "frase=\"seele/perfis: «contribuir» falhou — a API de MODs não conhece o ponto \
-                 «x»\""
-            ),
-            "a frase da janela não saiu inteira no campo `frase=\"…\"`: solta na mensagem, um \
-             `mod_id=` escrito por um MOD dentro dela vem antes do verdadeiro na linha: {linha}"
-        );
-    }
-
-    /// **O id do MOD vem antes da frase, e um `mod_id=` escrito nela não se
-    /// passa pelo verdadeiro.**
-    ///
-    /// A frase carrega texto que um MOD escolheu. Escrita como a mensagem da
-    /// linha, ela vinha antes dos campos, e um MOD que pusesse
-    /// `mod_id=vitima/mod` nela tinha o primeiro `mod_id=` da linha: quem lê da
-    /// esquerda para a direita atribui a frase ao MOD errado. Num campo em `?`,
-    /// ela sai depois do id, entre aspas e escapada.
-    #[test]
-    fn um_mod_id_forjado_na_frase_nao_vem_antes_do_verdadeiro() {
-        let ((), rastro) = capturar(|| {
-            super::registrar_da_janela_em(
-                &super::BaldesDoRegistro::default(),
-                origem(),
-                "aviso".to_owned(),
-                "atender-mod".to_owned(),
-                "x onde=forjado mod_id=vitima/mod".to_owned(),
-                Some("a/b".to_owned()),
-            );
-        });
-        let primeiro = |nome: &str| -> String {
-            rastro
-                .split(&format!("{nome}="))
-                .nth(1)
-                .and_then(|resto| resto.split_whitespace().next())
-                .unwrap_or_else(|| panic!("a linha da janela não traz `{nome}=`: {rastro}"))
-                .to_owned()
-        };
-        assert_eq!(
-            primeiro("mod_id"),
-            "a/b",
-            "o primeiro `mod_id=` da linha da janela é o que um MOD escreveu na frase, e não o \
-             do campo: a linha se lê como sendo de outro MOD: {rastro}"
-        );
-        assert_eq!(
-            primeiro("onde"),
-            "atender-mod",
-            "o primeiro `onde=` da linha da janela é o que um MOD escreveu na frase, e não o do \
-             campo: {rastro}"
-        );
-        assert!(
-            rastro.contains(r#"frase="x onde=forjado mod_id=vitima/mod""#),
-            "a frase forjada não saiu entre aspas no campo `frase`: {rastro}"
-        );
-    }
-
-    /// A linha da janela no `nivel` dado, com o id `a/b`, e o rastro dela.
-    fn da_janela_no_nivel(nivel: &str) -> String {
-        let ((), rastro) = capturar(|| {
-            super::registrar_da_janela_em(
-                &super::BaldesDoRegistro::default(),
-                origem(),
-                nivel.to_owned(),
-                "atender-mod".to_owned(),
-                "uma frase da janela".to_owned(),
-                Some("a/b".to_owned()),
-            );
-        });
-        rastro
-    }
-
-    /// Os pedaços da linha, separados por espaço: um campo é um pedaço inteiro,
-    /// e `mod_id=a/b` não casa com `mod_id=a/bc`.
-    fn tem_o_campo(linha: &str, campo: &str) -> bool {
-        linha.split_whitespace().any(|pedaco| pedaco == campo)
-    }
-
-    /// **Os três braços levam o id, e não só o do aviso.** O teste de cima
-    /// prova o WARN; o ERROR e o DEBUG escrevem por chamadas próprias, e um
-    /// braço que esquecesse o `mod_id` deixava a linha fora da busca por
-    /// `mod_id=` sem que nenhum teste reclamasse (T3 M2). Pelos campos, e não
-    /// pela forma inteira da linha.
-    #[test]
-    fn o_erro_da_janela_sai_como_error_com_o_id_do_mod() {
-        let rastro = da_janela_no_nivel("erro");
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("uma frase da janela"))
-            .unwrap_or_else(|| panic!("o erro da janela não chegou ao registro: {rastro}"));
-        assert!(
-            tem_o_campo(linha, "ERROR"),
-            "o erro da janela não saiu em ERROR, e o filtro do seele.log o trata como outra \
-             coisa: {linha}"
-        );
-        assert!(
-            tem_o_campo(linha, "mod_id=a/b"),
-            "o erro da janela saiu sem `mod_id=`, e uma busca pelo MOD não junta o que a janela \
-             disse dele com o que o Rust disse: {linha}"
-        );
-    }
-
-    /// O mesmo para um nível que a janela não conhece, que sai em DEBUG.
-    #[test]
-    fn um_nivel_desconhecido_da_janela_sai_como_debug_com_o_id_do_mod() {
-        let rastro = da_janela_no_nivel("outro");
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("uma frase da janela"))
-            .unwrap_or_else(|| {
-                panic!(
-                    "a linha da janela num nível desconhecido não chegou ao registro, que captura \
-                     do TRACE para cima: {rastro}"
-                )
-            });
-        assert!(
-            tem_o_campo(linha, "DEBUG"),
-            "a linha da janela num nível desconhecido não saiu em DEBUG: {linha}"
-        );
-        assert!(
-            tem_o_campo(linha, "mod_id=a/b"),
-            "a linha DEBUG da janela saiu sem `mod_id=`, e com `RUST_LOG=debug` uma busca pelo \
-             MOD não a acha: {linha}"
-        );
-    }
-
-    #[test]
-    fn sem_id_a_linha_da_janela_continua_saindo() {
-        let ((), rastro) = capturar(|| {
-            super::registrar_da_janela_em(
-                &super::BaldesDoRegistro::default(),
-                origem(),
-                "aviso".to_owned(),
-                "geral".to_owned(),
-                "sem MOD".to_owned(),
-                None,
-            );
-        });
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("sem MOD"))
-            .unwrap_or_else(|| panic!("uma linha sem MOD deixou de sair: {rastro}"));
-        assert!(
-            linha.contains("WARN") && !linha.contains("mod_id"),
-            "uma linha sem MOD ganhou um `mod_id` que não é de ninguém: {linha}"
-        );
-    }
-
-    /// **O id vazio é o catálogo, e não um MOD.** `carregarMods` pede o
-    /// catálogo do servidor por `pedirAoServidor("", …)`, e as recusas de
-    /// `pedirAoServidor` passam o id adiante como está. Um `mod_id=` sem nome
-    /// é um campo que uma busca por `mod_id=` acha e que não é de MOD nenhum.
-    #[test]
-    fn o_id_vazio_do_catalogo_nao_vira_um_mod_id_sem_nome() {
-        let ((), rastro) = capturar(|| {
-            super::registrar_da_janela_em(
-                &super::BaldesDoRegistro::default(),
-                origem(),
-                "aviso".to_owned(),
-                "pedido-de-mod".to_owned(),
-                ": oito pedidos em voo, este não cabe".to_owned(),
-                Some(String::new()),
-            );
-        });
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("oito pedidos em voo"))
-            .unwrap_or_else(|| panic!("a recusa do catálogo deixou de sair: {rastro}"));
-        assert!(
-            linha.contains("WARN") && !linha.contains("mod_id"),
-            "o pedido do catálogo, que não é de MOD nenhum, saiu com um `mod_id` sem \
-             nome — e uma busca por `mod_id=` o acha: {linha}"
-        );
-    }
-
-    #[test]
-    fn uma_quebra_de_linha_da_janela_nao_forja_outra_linha_no_registro() {
-        let ((), rastro) = capturar(|| {
-            super::registrar_da_janela_em(
-                &super::BaldesDoRegistro::default(),
-                origem(),
-                "aviso".to_owned(),
-                "recusa-de-mod".to_owned(),
-                "a/b: ponto «x\nWARN seele_app: forjada»".to_owned(),
-                Some("a/b".to_owned()),
-            );
-        });
-        assert_eq!(
-            rastro.lines().count(),
-            1,
-            "texto de MOD atravessou a janela e escreveu uma segunda linha no seele.log: {rastro}"
-        );
-    }
-
-    /// **Os dois campos também, e não só a frase.** `onde` é, hoje, um literal
-    /// do produto, e o id vem de um manifesto já conferido; mas os dois chegam
-    /// pela mesma ponte que a frase, e o registro não pode depender de quem
-    /// chama ser bem-comportado. Um caso por campo, para que tirar o filtro de
-    /// um deles reprove sozinho.
-    #[test]
-    fn uma_quebra_de_linha_em_onde_ou_no_id_nao_forja_outra_linha_no_registro() {
-        for (campo, onde, mod_id) in [
-            ("onde", "atender-mod\nWARN seele_app: forjada", "a/b"),
-            ("mod_id", "atender-mod", "a/b\nWARN seele_app: forjada"),
-        ] {
-            let ((), rastro) = capturar(|| {
-                super::registrar_da_janela_em(
-                    &super::BaldesDoRegistro::default(),
-                    origem(),
-                    "aviso".to_owned(),
-                    onde.to_owned(),
-                    "a/b: uma frase de verdade".to_owned(),
-                    Some(mod_id.to_owned()),
-                );
-            });
-            assert_eq!(
-                rastro.lines().count(),
-                1,
-                "uma quebra de linha em `{campo}` escreveu uma segunda linha no seele.log, \
-                 com a cara de uma linha do produto: {rastro}"
-            );
-        }
-    }
-
-    /// **O que quebra ou inverte a linha num editor também não passa**, e não
-    /// só o caractere de controle.
-    ///
-    /// As portas do Rust escrevem pelo `Debug` de um `str` e saem com
-    /// `\u{2028}` e `\u{202e}`; a da janela escrevia a frase sem escape, e
-    /// deixava passar crus os separadores de linha e de parágrafo — que um
-    /// editor quebra como um `\n` — e os controles bidirecionais: um U+202E na
-    /// frase de um MOD inverte, num editor que segue o bidi, o `onde=` e o
-    /// `mod_id=` que vêm depois dela. Um caso por campo, para que tirar o
-    /// filtro de um deles reprove sozinho.
-    #[test]
-    fn a_janela_nao_deixa_passar_o_que_quebra_ou_inverte_a_linha() {
-        for c in [
-            '\u{0085}', '\u{2028}', '\u{2029}', '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}',
-            '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}',
-            '\u{2069}',
-        ] {
-            let com = |texto: &str| format!("{texto}{c}forjado");
-            for (campo, onde, o_que, mod_id) in [
-                (
-                    "frase",
-                    "recusa-de-mod".to_owned(),
-                    com("a/b: x"),
-                    "a/b".to_owned(),
-                ),
-                (
-                    "id",
-                    "recusa-de-mod".to_owned(),
-                    "a/b: x".to_owned(),
-                    com("a/b"),
-                ),
-                (
-                    "onde",
-                    com("recusa-de-mod"),
-                    "a/b: x".to_owned(),
-                    "a/b".to_owned(),
-                ),
-            ] {
-                let ((), rastro) = capturar(|| {
-                    super::registrar_da_janela_em(
-                        &super::BaldesDoRegistro::default(),
-                        origem(),
-                        "aviso".to_owned(),
-                        onde,
-                        o_que,
-                        Some(mod_id),
-                    );
-                });
-                assert!(
-                    rastro.contains("a/b: x") && !rastro.contains(c),
-                    "U+{:04X} no campo `{campo}` saiu cru no seele.log, e num editor ele quebra \
-                     a linha ou inverte o `onde=` e o `mod_id=` que vêm depois: {rastro:?}",
-                    u32::from(c)
-                );
-            }
-        }
-    }
-}
+mod o_registro_da_janela;
 
 /// **O teto de vazão de cada MOD no `seele.log`**, pelas portas que não são
 /// o `console`.
 ///
 /// Com o relógio fixo ([`relogio_de_teste`]): cada instante é a origem mais
 /// uma duração, e o balde é medido sem dormir.
+#[path = "testes/o_teto_de_vazao_do_registro.rs"]
 #[cfg(test)]
-mod o_teto_de_vazao_do_registro {
-    use std::time::{Duration, Instant};
-
-    use super::{
-        midia_servida_dita, midia_vinda_do_servidor_dita, recusa_de_midia_dita,
-        registrar_da_janela_em, som_servido_dito, BaldesDoRegistro, Classe, FalhaNoMod, Session,
-        BALDES_NO_REGISTRO,
-    };
-    use crate::executor::RAJADA_DO_CONSOLE;
-    use crate::rastro_de_teste::capturar;
-    use crate::relogio_de_teste::origem;
-
-    /// Um aviso da janela em nome de `id`, no instante `agora`.
-    fn da_janela(baldes: &BaldesDoRegistro, agora: Instant, id: &str) {
-        da_janela_no(baldes, agora, "aviso", id);
-    }
-
-    /// Uma linha da janela no `nivel` que a janela manda.
-    fn da_janela_no(baldes: &BaldesDoRegistro, agora: Instant, nivel: &str, id: &str) {
-        registrar_da_janela_em(
-            baldes,
-            agora,
-            nivel.to_owned(),
-            "atender-mod".to_owned(),
-            "uma frase".to_owned(),
-            Some(id.to_owned()),
-        );
-    }
-
-    /// Uma mídia de `id` não servida porque a sessão acabou: a linha DEBUG de
-    /// [`recusa_de_midia_dita`].
-    fn nao_servida(baldes: &BaldesDoRegistro, agora: Instant, id: &str) {
-        recusa_de_midia_dita(
-            baldes,
-            agora,
-            id,
-            "img/rosto.png",
-            FalhaNoMod::Recusado {
-                motivo: "sessao-encerrada".to_owned(),
-            },
-        );
-    }
-
-    /// Uma recusa de mídia de `id`, no instante `agora`.
-    fn recusa(baldes: &BaldesDoRegistro, agora: Instant, id: &str) {
-        recusa_de_midia_dita(
-            baldes,
-            agora,
-            id,
-            "img/rosto.png",
-            FalhaNoMod::Recusado {
-                motivo: "arquivo-nao-declarado".to_owned(),
-            },
-        );
-    }
-
-    /// As linhas do rastro com `mod_id=<id>` num campo.
-    fn de<'a>(rastro: &'a str, id: &str) -> Vec<&'a str> {
-        let campo = format!("mod_id={id}");
-        rastro
-            .lines()
-            .filter(|linha| linha.split_whitespace().any(|pedaco| pedaco == campo))
-            .collect()
-    }
-
-    /// Um quarto de segundo: a recarga de uma ficha do balde.
-    const UMA_FICHA: Duration = Duration::from_millis(250);
-
-    #[test]
-    fn duzentas_linhas_de_um_mod_no_mesmo_instante_deixam_so_a_rajada() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..200 {
-                da_janela(&baldes, agora, "a/b");
-            }
-        });
-        assert_eq!(
-            de(&rastro, "a/b").len(),
-            RAJADA_DO_CONSOLE as usize,
-            "duzentas linhas da janela no mesmo instante passaram de outro jeito que a rajada: \
-             um MOD num laço escreve sem teto no seele.log de quem hospeda"
-        );
-    }
-
-    /// **O que o balde segura é contado**, e a primeira linha que passa depois
-    /// leva a conta: o registro diz que houve mais do que ele mostra.
-    #[test]
-    fn a_linha_depois_do_aperto_diz_quantas_ficaram_para_tras() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..200 {
-                da_janela(&baldes, agora, "a/b");
-            }
-            da_janela(&baldes, agora + UMA_FICHA, "a/b");
-        });
-        let linhas = de(&rastro, "a/b");
-        let seguradas = 200 - RAJADA_DO_CONSOLE as usize;
-        assert_eq!(
-            linhas.len(),
-            RAJADA_DO_CONSOLE as usize + 1,
-            "um quarto de segundo depois da rajada, a linha seguinte não passou (ou passou mais \
-             de uma): {rastro}"
-        );
-        let ultima = linhas.last().copied().unwrap_or_default();
-        assert!(
-            ultima.contains(&format!("suprimidas={seguradas}")),
-            "a linha que passou depois do aperto não diz as {seguradas} que o balde segurou, e o \
-             registro mostra a rajada como se fosse tudo: {ultima}"
-        );
-        assert!(
-            linhas
-                .iter()
-                .take(RAJADA_DO_CONSOLE as usize)
-                .all(|linha| !linha.contains("suprimidas")),
-            "uma linha da rajada trouxe `suprimidas` sem nada ter sido segurado: {rastro}"
-        );
-    }
-
-    #[test]
-    fn um_mod_nao_segura_as_linhas_de_outro() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..200 {
-                da_janela(&baldes, agora, "a/b");
-            }
-            da_janela(&baldes, agora, "c/d");
-        });
-        assert_eq!(
-            de(&rastro, "c/d").len(),
-            1,
-            "a linha de `c/d` foi segurada pelo balde de `a/b`: um MOD num laço cala o \
-             diagnóstico de todos os outros"
-        );
-    }
-
-    /// **Com o mapa cheio, um id novo gasta do balde de transbordo da classe
-    /// dele**, e nunca passa sem teto: o mapa não cresce, e o balde é um só
-    /// para todos os ids da classe que chegaram depois. E é um por classe: as
-    /// linhas servidas que transbordam não gastam a ficha de um aviso que
-    /// transborda.
-    #[test]
-    fn com_o_mapa_cheio_um_id_novo_passa_pelo_transbordo() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            // Um aviso de um id novo por balde próprio que o mapa aceita — e
-            // não além: o que passasse disso gastaria do transbordo antes do
-            // id medido.
-            for n in 0..BALDES_NO_REGISTRO - Classe::TODAS.len() {
-                da_janela(&baldes, agora, &format!("cheio/{n}"));
-            }
-            for _ in 0..200 {
-                midia_servida_dita(&baldes, agora, "servida/x", 7, "img/a.png", "imagem", 8);
-            }
-            for _ in 0..200 {
-                da_janela(&baldes, agora, "novo/x");
-            }
-            da_janela(&baldes, agora, "novo/y");
-            for n in 0..BALDES_NO_REGISTRO {
-                da_janela(&baldes, agora, &format!("mais/{n}"));
-            }
-            da_janela_no(&baldes, agora, "depuracao", "depuracao/x");
-        });
-        for id in ["servida/x", "novo/x"] {
-            let do_novo = de(&rastro, id).len();
-            assert!(
-                (1..=RAJADA_DO_CONSOLE as usize).contains(&do_novo),
-                "com o mapa cheio, `{id}` deixou {do_novo} linhas em duzentas: zero cala um MOD \
-                 que nunca escreveu — ou outra classe secou o transbordo desta —, e mais que a \
-                 rajada é um id novo passando sem teto"
-            );
-        }
-        let depois: usize = std::iter::once("novo/y".to_owned())
-            .chain((0..BALDES_NO_REGISTRO).map(|n| format!("mais/{n}")))
-            .map(|id| de(&rastro, &id).len())
-            .sum();
-        assert_eq!(
-            depois, 0,
-            "os ids novos seguintes ganharam balde cheio, e não o transbordo que o primeiro \
-             secou: uma janela que muda de id a cada linha escreve sem teto: {rastro}"
-        );
-        let guardados = baldes.lock().expect("os baldes").len();
-        assert_eq!(
-            guardados, BALDES_NO_REGISTRO,
-            "o mapa dos baldes não ficou em {BALDES_NO_REGISTRO} entradas com as três classes \
-             transbordando: passar delas faz de uma janela que manda um id novo por linha \
-             memória sem teto"
-        );
-    }
-
-    /// **A sessão que fecha diz a conta que nenhuma linha levou**, uma linha
-    /// por balde — o do catálogo também —, e esvazia o mapa.
-    #[test]
-    fn revogar_diz_a_conta_que_nenhuma_linha_levou() {
-        let sessao = Session::default();
-        let agora = origem();
-        let a_mais = 8;
-        let ((), rastro) = capturar(|| {
-            for _ in 0..RAJADA_DO_CONSOLE as usize + a_mais {
-                da_janela(&sessao.baldes_do_registro, agora, "a/b");
-                registrar_da_janela_em(
-                    &sessao.baldes_do_registro,
-                    agora,
-                    "aviso".to_owned(),
-                    "pedido-de-mod".to_owned(),
-                    "o catálogo".to_owned(),
-                    None,
-                );
-            }
-            sessao.revogar();
-        });
-        let contas: Vec<&str> = rastro
-            .lines()
-            .filter(|linha| linha.contains("seguradas pelo teto de vazão"))
-            .collect();
-        assert_eq!(
-            contas.len(),
-            2,
-            "a sessão fechou com linhas seguradas em dois baldes e não disse uma conta por \
-             balde: {rastro}"
-        );
-        for pedaco in ["mod_id=a/b", "catalogo=true"] {
-            assert!(
-                contas.iter().any(|conta| conta.contains(pedaco)
-                    && conta.contains(&format!("suprimidas={a_mais}"))),
-                "a sessão fechou sem dizer as {a_mais} linhas seguradas de `{pedaco}`: a conta \
-                 caiu com o balde, e o seele.log mostra a rajada como se fosse tudo: {rastro}"
-            );
-        }
-        assert!(
-            sessao
-                .baldes_do_registro
-                .lock()
-                .expect("os baldes")
-                .is_empty(),
-            "os baldes atravessaram a sessão: a seguinte começa com o teto gasto pela anterior"
-        );
-    }
-
-    /// **A mídia vinda do servidor tem teto, na classe da depuração.** É o par
-    /// bem-sucedido da mídia recusada de `midia_em_bytes`, em DEBUG: com
-    /// `RUST_LOG=debug`, um MOD que pede a mesma mídia num laço escrevia uma
-    /// linha por pedido. Na depuração, e não nas servidas: o filtro padrão não
-    /// a escreve, e ela não pode gastar a ficha de uma linha que ele escreve.
-    #[test]
-    fn a_midia_vinda_do_servidor_tem_teto_na_classe_da_depuracao() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..200 {
-                midia_vinda_do_servidor_dita(&baldes, agora, "a/b", 7, "imagem", 8);
-            }
-            recusa(&baldes, agora, "a/b");
-            midia_servida_dita(&baldes, agora, "a/b", 7, "img/a.png", "imagem", 8);
-            midia_vinda_do_servidor_dita(&baldes, agora + UMA_FICHA, "a/b", 7, "imagem", 8);
-        });
-        let vindas: Vec<&str> = rastro
-            .lines()
-            .filter(|linha| linha.contains("mídia de MOD vinda do servidor"))
-            .collect();
-        assert_eq!(
-            vindas.len(),
-            RAJADA_DO_CONSOLE as usize + 1,
-            "duzentas mídias vindas do servidor no mesmo instante passaram de outro jeito que a \
-             rajada, e a seguinte um quarto de segundo depois: com RUST_LOG=debug, um MOD num \
-             laço escreve sem teto"
-        );
-        assert!(
-            vindas
-                .iter()
-                .all(|linha| linha.split_whitespace().next() == Some("DEBUG")),
-            "a mídia vinda do servidor deixou de sair em DEBUG: {rastro}"
-        );
-        let recusada = rastro
-            .lines()
-            .find(|linha| linha.contains("mídia de MOD recusada"));
-        assert!(
-            recusada
-                .is_some_and(|linha| linha.contains("mod_id=a/b") && !linha.contains("suprimidas")),
-            "as mídias vindas do servidor gastaram a ficha dos avisos do mesmo MOD, e a recusa \
-             sumiu — o defeito de 23/09 na direção oposta: {rastro}"
-        );
-        assert!(
-            rastro.contains("mídia de MOD servida"),
-            "as mídias vindas do servidor gastaram a ficha das servidas do mesmo MOD: {rastro}"
-        );
-        let seguradas = 200 - RAJADA_DO_CONSOLE as usize;
-        assert!(
-            vindas
-                .last()
-                .is_some_and(|linha| linha.contains(&format!("suprimidas={seguradas}"))),
-            "a mídia vinda do servidor que passou depois do aperto não diz as {seguradas} que o \
-             balde segurou: {rastro}"
-        );
-    }
-
-    /// **Os comandos passam às portas os baldes da sessão.**
-    ///
-    /// Os testes acima medem as portas com baldes que eles mesmos criam; os
-    /// comandos precisam de `AppHandle`, de conexão ou de sessão e não sobem
-    /// num teste. Um `&BaldesDoRegistro::default()` dentro de um comando
-    /// compila, deixa os testes acima verdes e tira o teto: cada chamada
-    /// ganharia um balde cheio. Aqui, toda chamada de porta nos cinco comandos
-    /// tem de levar `&session.baldes_do_registro` no primeiro argumento.
-    ///
-    /// Em `ler_imagem_mod` as duas são a conexão ausente
-    /// (`recusa_de_midia_dita`) e `imagem_lida_dita`, que leva as duas recusas
-    /// de depois do `await`.
-    #[test]
-    fn os_comandos_passam_os_baldes_da_sessao() {
-        const PORTAS: [&str; 9] = [
-            "registrar_da_janela_em(",
-            "midia_declarada_do_mod(",
-            "midia_servida_dita(",
-            "som_declarado_do_mod(",
-            "som_servido_dito(",
-            "midia_do_servidor_dita(",
-            "midia_vinda_do_servidor_dita(",
-            "recusa_de_midia_dita(",
-            "imagem_lida_dita(",
-        ];
-        let fonte = super::fonte_sem_comentarios();
-        for (comando, chamadas_minimas) in [
-            ("fn registrar_da_janela(", 1),
-            ("fn midia_do_mod(", 2),
-            ("fn som_do_mod(", 2),
-            ("fn midia_em_bytes(", 2),
-            ("async fn ler_imagem_mod(", 2),
-        ] {
-            let codigo: String = super::corpo_de(&fonte, comando)
-                .chars()
-                .filter(|c| !c.is_whitespace())
-                .collect();
-            let mut chamadas = 0;
-            for porta in PORTAS {
-                for depois in codigo.split(porta).skip(1) {
-                    chamadas += 1;
-                    assert!(
-                        depois.starts_with("&session.baldes_do_registro,"),
-                        "`{comando}` chama `{porta}` sem `&session.baldes_do_registro`: com \
-                         outros baldes, a porta perde o teto de vazão da sessão"
-                    );
-                }
-            }
-            assert!(
-                chamadas >= chamadas_minimas,
-                "`{comando}` chama {chamadas} das portas medidas, e chamava \
-                 {chamadas_minimas}: a linha dele saiu por fora delas, e do teto"
-            );
-        }
-    }
-
-    /// **A linha que passa pelo transbordo diz que passou.** A conta que ela
-    /// leva é do balde dividido — de todos os ids que caíram nele —, e sem o
-    /// campo ela se lia como sendo só do id da linha.
-    #[test]
-    fn a_linha_que_passa_pelo_transbordo_diz_que_passou() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for n in 0..BALDES_NO_REGISTRO - Classe::TODAS.len() {
-                da_janela(&baldes, agora, &format!("cheio/{n}"));
-            }
-            da_janela(&baldes, agora, "novo/x");
-            da_janela(&baldes, agora, "cheio/0");
-        });
-        assert!(
-            de(&rastro, "novo/x")
-                .iter()
-                .all(|linha| linha.contains("transbordo=true"))
-                && !de(&rastro, "novo/x").is_empty(),
-            "a linha que passou pelo balde dividido não diz `transbordo=true`, e a conta dela se \
-             lê como sendo só do id dela: {rastro}"
-        );
-        assert!(
-            de(&rastro, "cheio/0")
-                .iter()
-                .all(|linha| !linha.contains("transbordo")),
-            "uma linha do balde próprio do MOD saiu como transbordo: {rastro}"
-        );
-    }
-
-    /// **Um id que o filtro esvazia é ilegível, e não o catálogo**: o balde e
-    /// o rótulo dele são os de `mod_id_ilegivel`, como o terceiro braço do
-    /// pedido de MOD. No balde do catálogo, ele gastava as fichas do catálogo
-    /// e a conta dele saía como `catalogo=true`.
-    #[test]
-    fn um_id_que_o_filtro_esvazia_conta_como_ilegivel_e_nao_como_catalogo() {
-        let sessao = Session::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..RAJADA_DO_CONSOLE as usize + 2 {
-                da_janela(&sessao.baldes_do_registro, agora, "\u{202E}\n");
-            }
-            registrar_da_janela_em(
-                &sessao.baldes_do_registro,
-                agora,
-                "aviso".to_owned(),
-                "pedido-de-mod".to_owned(),
-                "o catálogo".to_owned(),
-                None,
-            );
-            sessao.revogar();
-        });
-        assert!(
-            rastro.contains("o catálogo"),
-            "a linha do catálogo foi segurada pelas linhas de um id ilegível: {rastro}"
-        );
-        let contas: Vec<&str> = rastro
-            .lines()
-            .filter(|linha| linha.contains(super::CONTA_DO_BALDE_DO_REGISTRO))
-            .collect();
-        assert!(
-            contas.len() == 1
-                && contas
-                    .iter()
-                    .all(|conta| conta.contains("mod_id_ilegivel=true")
-                        && conta.contains("suprimidas=2")
-                        && !conta.contains("catalogo")),
-            "a conta de um id que o filtro esvazia não saiu como `mod_id_ilegivel=true`: o \
-             rótulo `catalogo=true` é de um pedido que não é de MOD nenhum: {rastro}"
-        );
-    }
-
-    /// **A saída do app diz a conta que nenhuma linha levou.**
-    ///
-    /// Fechar a janela não passava por `Session::revogar`, e a conta pendente de
-    /// um balde caía com o processo: o `seele.log` da última sessão mostrava a
-    /// rajada como se fosse tudo. `despedir_da_sessao` revoga primeiro, e
-    /// revogar diz as contas.
-    #[test]
-    fn despedir_da_sessao_diz_a_conta_que_nenhuma_linha_levou() {
-        let sessao = Session::default();
-        let agora = origem();
-        let a_mais = 5;
-        let ((), rastro) = capturar(|| {
-            for _ in 0..RAJADA_DO_CONSOLE as usize + a_mais {
-                da_janela(&sessao.baldes_do_registro, agora, "a/b");
-            }
-            super::despedir_da_sessao(&sessao, Duration::from_millis(20));
-        });
-        assert!(
-            rastro
-                .lines()
-                .any(|linha| linha.contains(super::CONTA_DO_BALDE_DO_REGISTRO)
-                    && linha.contains("mod_id=a/b")
-                    && linha.contains(&format!("suprimidas={a_mais}"))),
-            "a saída do app não disse as {a_mais} linhas seguradas do balde de `a/b`: a conta \
-             caiu com o processo, e o seele.log mostra a rajada como se fosse tudo: {rastro}"
-        );
-    }
-
-    /// **A conta também é dita sem fechar a sessão**, por
-    /// `dizer_as_contas_do_registro`. Ela diz uma vez e esvazia os baldes: chamada de novo, não diz nada, e a
-    /// geração não anda.
-    #[test]
-    fn dizer_as_contas_do_registro_diz_uma_vez_e_esvazia() {
-        let sessao = Session::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..RAJADA_DO_CONSOLE as usize + 3 {
-                da_janela(&sessao.baldes_do_registro, agora, "a/b");
-            }
-            sessao.dizer_as_contas_do_registro();
-            sessao.dizer_as_contas_do_registro();
-        });
-        let contas: Vec<&str> = rastro
-            .lines()
-            .filter(|linha| linha.contains(super::CONTA_DO_BALDE_DO_REGISTRO))
-            .collect();
-        assert!(
-            contas.len() == 1 && contas.iter().all(|conta| conta.contains("suprimidas=3")),
-            "as contas não foram ditas uma vez, com as três linhas seguradas: a saída do app \
-             perde a conta, ou a diz duas vezes e o registro as soma: {rastro}"
-        );
-        assert!(
-            sessao
-                .baldes_do_registro
-                .lock()
-                .expect("os baldes")
-                .is_empty(),
-            "dizer as contas não esvaziou os baldes"
-        );
-        assert_eq!(
-            sessao.geracao(),
-            0,
-            "dizer as contas do registro fechou a sessão: ela só diz as contas, e quem revoga \
-             é `revogar`"
-        );
-    }
-
-    /// **A conta é dita com o cadeado dos baldes solto.**
-    ///
-    /// Escrita com ele na mão, uma linha que demora no disco segura toda porta
-    /// do registro de todo MOD, em toda thread, até terminar — e um assinante
-    /// que escrevesse pelo registro dentro do evento travaria no mesmo
-    /// cadeado. A camada abaixo tenta o cadeado a cada evento, na thread que
-    /// escreve: com a guarda na mão, o `try_lock` volta `WouldBlock`.
-    #[test]
-    fn a_conta_e_dita_com_o_cadeado_dos_baldes_solto() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        use tracing_subscriber::layer::SubscriberExt as _;
-
-        /// Conta os eventos que acharam o cadeado livre e os que o acharam
-        /// preso.
-        struct TentaOCadeado {
-            baldes: &'static BaldesDoRegistro,
-            livre: Arc<AtomicUsize>,
-            preso: Arc<AtomicUsize>,
-        }
-
-        /// A mensagem do evento é a da conta dos baldes?
-        struct EAConta(bool);
-
-        impl tracing::field::Visit for EAConta {
-            fn record_debug(&mut self, campo: &tracing::field::Field, valor: &dyn std::fmt::Debug) {
-                if campo.name() == "message"
-                    && format!("{valor:?}") == super::CONTA_DO_BALDE_DO_REGISTRO
-                {
-                    self.0 = true;
-                }
-            }
-        }
-
-        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for TentaOCadeado {
-            fn on_event(
-                &self,
-                evento: &tracing::Event<'_>,
-                _contexto: tracing_subscriber::layer::Context<'_, S>,
-            ) {
-                // Só a linha da conta: qualquer outra que o `revogar` passe a
-                // escrever não pode fazer as vezes dela.
-                let mut e_a_conta = EAConta(false);
-                evento.record(&mut e_a_conta);
-                if !e_a_conta.0 {
-                    return;
-                }
-                let contador = if self.baldes.try_lock().is_ok() {
-                    &self.livre
-                } else {
-                    &self.preso
-                };
-                contador.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        // Como em `capturar`: com um segundo despachante vivo, o interesse da
-        // linha da conta não fica preso ao de outra thread que passou por ela
-        // antes, sem assinante.
-        crate::rastro_de_teste::segundo_despachante();
-        // `'static`, porque o assinante é: a sessão de um teste só.
-        let sessao: &'static Session = Box::leak(Box::default());
-        let agora = origem();
-        for _ in 0..RAJADA_DO_CONSOLE as usize + 1 {
-            da_janela(&sessao.baldes_do_registro, agora, "a/b");
-        }
-        let livre = Arc::new(AtomicUsize::new(0));
-        let preso = Arc::new(AtomicUsize::new(0));
-        let assinante = tracing_subscriber::registry().with(TentaOCadeado {
-            baldes: &sessao.baldes_do_registro,
-            livre: Arc::clone(&livre),
-            preso: Arc::clone(&preso),
-        });
-        tracing::subscriber::with_default(assinante, || {
-            sessao.revogar();
-        });
-        assert_eq!(
-            preso.load(Ordering::Relaxed),
-            0,
-            "a conta dos baldes foi escrita com o cadeado deles na mão: uma linha lenta no disco \
-             segura o registro de todo MOD até terminar"
-        );
-        assert_eq!(
-            livre.load(Ordering::Relaxed),
-            1,
-            "a sessão fechou com um balde de linhas seguradas e não disse a conta dele uma vez"
-        );
-    }
-
-    /// **A recusa de mídia tem o mesmo teto**, e a mesma conta.
-    #[test]
-    fn a_recusa_de_midia_tem_o_mesmo_teto_e_a_mesma_conta() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..200 {
-                recusa(&baldes, agora, "a/b");
-            }
-            recusa(&baldes, agora + UMA_FICHA, "a/b");
-        });
-        let linhas = de(&rastro, "a/b");
-        assert_eq!(
-            linhas.len(),
-            RAJADA_DO_CONSOLE as usize + 1,
-            "duzentas recusas de mídia do mesmo MOD no mesmo instante passaram de outro jeito \
-             que a rajada, e a seguinte um quarto de segundo depois: {rastro}"
-        );
-        let seguradas = 200 - RAJADA_DO_CONSOLE as usize;
-        assert!(
-            linhas
-                .last()
-                .is_some_and(|linha| linha.contains(&format!("suprimidas={seguradas}"))),
-            "a recusa que passou depois do aperto não diz as {seguradas} que o balde segurou: \
-             {rastro}"
-        );
-    }
-
-    /// **Dentro de cada classe, as portas do mesmo MOD dividem o balde dele**:
-    /// é um teto por MOD e por classe, e não um por porta — senão um MOD teria
-    /// uma rajada por porta. Os avisos são a janela em aviso e a mídia
-    /// recusada; as servidas, a mídia e o som; a depuração, a janela em DEBUG e
-    /// a mídia não servida porque a sessão acabou.
-    #[test]
-    fn as_portas_do_mesmo_mod_dividem_o_balde() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let por_porta = RAJADA_DO_CONSOLE as usize / 2;
-        let ((), rastro) = capturar(|| {
-            for _ in 0..=por_porta {
-                da_janela(&baldes, agora, "a/b");
-                recusa(&baldes, agora, "a/b");
-                midia_servida_dita(&baldes, agora, "a/b", 7, "img/rosto.png", "imagem", 8);
-                som_servido_dito(&baldes, agora, "a/b", 7, "som/toque.wav", 16);
-                da_janela_no(&baldes, agora, "depuracao", "a/b");
-                nao_servida(&baldes, agora, "a/b");
-            }
-        });
-        let linhas = de(&rastro, "a/b");
-        for (classe, nivel) in [
-            ("aviso", "WARN"),
-            ("servida", "INFO"),
-            ("depuração", "DEBUG"),
-        ] {
-            let da_classe = linhas
-                .iter()
-                .filter(|linha| linha.split_whitespace().next() == Some(nivel))
-                .count();
-            assert_eq!(
-                da_classe, RAJADA_DO_CONSOLE as usize,
-                "as duas portas da classe {classe} do mesmo MOD não deixaram uma rajada só: ou \
-                 cada porta tem a dela, e o teto de um MOD é o dobro do escrito, ou outra classe \
-                 gastou as fichas desta: {rastro}"
-            );
-        }
-    }
-
-    /// **Um aviso não é segurado pelas linhas servidas do mesmo MOD.**
-    ///
-    /// Segurada, uma linha não atrasa: ela some, e só a conta segue, na
-    /// próxima linha do MOD — que pode ser outra «mídia de MOD servida». Um MOD
-    /// que monta mais de 32 mídias de uma vez gastava a rajada em INFO, e a
-    /// recusa da seguinte sumia: o defeito de 23/09, que o módulo da mídia
-    /// recusada conta, de volta pelo teto.
-    #[test]
-    fn uma_recusa_depois_de_quarenta_servidas_do_mesmo_mod_sai() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for n in 0..40 {
-                midia_servida_dita(
-                    &baldes,
-                    agora,
-                    "a/b",
-                    7,
-                    &format!("img/{n}.png"),
-                    "imagem",
-                    8,
-                );
-            }
-            recusa(&baldes, agora, "a/b");
-        });
-        let recusada = rastro
-            .lines()
-            .find(|linha| linha.contains("mídia de MOD recusada"));
-        assert!(
-            recusada.is_some_and(|linha| linha.contains("mod_id=a/b")),
-            "quarenta mídias servidas do mesmo MOD gastaram a ficha da recusa, e ela sumiu do \
-             seele.log — a mídia recusada em silêncio de novo: {rastro}"
-        );
-        assert!(
-            recusada.is_some_and(|linha| !linha.contains("suprimidas")),
-            "a recusa levou na conta as mídias servidas que o balde delas segurou, e quem lê \
-             acha que avisos sumiram: {rastro}"
-        );
-    }
-
-    /// **A depuração não gasta a ficha de um aviso, nem infla a conta dele.**
-    /// O DEBUG não está no `seele.log` com o filtro padrão: segurar um aviso
-    /// por causa dele era calar o que se lê pelo que não se lê.
-    #[test]
-    fn a_depuracao_nao_gasta_a_ficha_nem_infla_a_conta_de_um_aviso() {
-        let baldes = BaldesDoRegistro::default();
-        let agora = origem();
-        let ((), rastro) = capturar(|| {
-            for _ in 0..40 {
-                da_janela_no(&baldes, agora, "depuracao", "a/b");
-            }
-            da_janela(&baldes, agora, "a/b");
-        });
-        let aviso = rastro
-            .lines()
-            .find(|linha| linha.split_whitespace().next() == Some("WARN"));
-        assert!(
-            aviso
-                .is_some_and(|linha| linha.contains("mod_id=a/b") && !linha.contains("suprimidas")),
-            "quarenta linhas DEBUG da janela seguraram o aviso do mesmo MOD, ou entraram na \
-             conta dele: {rastro}"
-        );
-    }
-}
+mod o_teto_de_vazao_do_registro;
 
 /// **O id de um MOD que chega da janela sai escapado em toda linha do
 /// registro**, e não só nas recusas.
@@ -21245,152 +14765,9 @@ mod o_teto_de_vazao_do_registro {
 /// e só ANSI. As duas linhas de `mod_request` e as de `midia_em_bytes` e de
 /// `escolher_para_o_mod` escreviam o id que o comando recebe da janela como
 /// veio — e um `\n` nele escrevia uma segunda linha com a cara do produto.
+#[path = "testes/o_id_do_pedido_de_mod_no_registro.rs"]
 #[cfg(test)]
-mod o_id_do_pedido_de_mod_no_registro {
-    use super::{pedido_a_caminho_dito, pedido_recusado_na_saida_dito, ConnectionError};
-    use crate::rastro_de_teste::capturar;
-
-    /// As duas linhas de `mod_request`, cada uma com o rastro dela.
-    fn as_duas_linhas(id: &str) -> [(&'static str, String); 2] {
-        let ((), a_caminho) = capturar(|| pedido_a_caminho_dito(id, 7, 3, 1));
-        let ((), recusado) = capturar(|| {
-            pedido_recusado_na_saida_dito(id, 3, &ConnectionError::NotConnected);
-        });
-        [
-            ("pedido_a_caminho_dito", a_caminho),
-            ("pedido_recusado_na_saida_dito", recusado),
-        ]
-    }
-
-    #[test]
-    fn uma_quebra_de_linha_no_id_nao_forja_outra_linha() {
-        for (linha, rastro) in as_duas_linhas("a/b\nWARN seele_app: forjada") {
-            assert_eq!(
-                rastro.lines().count(),
-                1,
-                "o id que a janela manda escreveu, por `{linha}`, uma segunda linha no seele.log \
-                 com a cara do produto: {rastro}"
-            );
-            assert!(
-                rastro.contains("mod_id=a/bWARN seele_app: forjada"),
-                "`{linha}` perdeu o id, ou o escreveu de outro jeito que as recusas \
-                 (`id_no_registro`): {rastro}"
-            );
-        }
-    }
-
-    /// **O id vazio é o catálogo**, como na metade servidor (`executar`, em
-    /// `seele-server/src/mods/pedidos.rs`): `catalogo=true`, e nenhum
-    /// `mod_id=` em branco que uma busca por `mod_id=` ache.
-    #[test]
-    fn o_id_vazio_e_o_catalogo_e_nao_um_mod_id_em_branco() {
-        for (linha, rastro) in as_duas_linhas("") {
-            assert!(
-                rastro.contains("catalogo=true") && !rastro.contains("mod_id"),
-                "`{linha}` escreveu o pedido do catálogo, que não é de MOD nenhum, sem \
-                 `catalogo=true` ou com um `mod_id=` em branco: {rastro}"
-            );
-        }
-    }
-
-    /// **Um id que o filtro esvazia é ilegível**, e não um `mod_id=` em
-    /// branco: o terceiro braço da metade servidor.
-    #[test]
-    fn um_id_que_o_filtro_esvazia_e_ilegivel() {
-        for (linha, rastro) in as_duas_linhas("\n\u{202E} ") {
-            assert!(
-                rastro.contains("mod_id_ilegivel=true") && !rastro.contains("mod_id="),
-                "`{linha}` escreveu um id que o filtro esvazia como um `mod_id=` em branco, e \
-                 não como ilegível: {rastro}"
-            );
-        }
-    }
-
-    /// **A mídia vinda do servidor também**: a linha saiu de `midia_em_bytes`
-    /// para uma função medida, e o id que a janela manda continua passando por
-    /// `id_no_registro`.
-    #[test]
-    fn a_midia_vinda_do_servidor_nao_forja_linha() {
-        let ((), rastro) = capturar(|| {
-            super::midia_vinda_do_servidor_dita(
-                &super::BaldesDoRegistro::default(),
-                crate::relogio_de_teste::origem(),
-                "a/b\nWARN seele_app: forjada",
-                7,
-                "imagem",
-                8,
-            );
-        });
-        assert!(
-            rastro.lines().count() == 1 && rastro.contains("mod_id=a/bWARN seele_app: forjada"),
-            "o id que a janela manda escreveu, pela mídia vinda do servidor, uma segunda linha \
-             no seele.log, ou saiu de outro jeito que as recusas: {rastro}"
-        );
-    }
-
-    #[test]
-    fn um_id_de_verdade_sai_como_mod_id() {
-        for (linha, rastro) in as_duas_linhas("seele/perfis") {
-            assert!(
-                rastro
-                    .split_whitespace()
-                    .any(|pedaco| pedaco == "mod_id=seele/perfis"),
-                "`{linha}` deixou de escrever `mod_id=seele/perfis`, que é o que o guia manda \
-                 procurar: {rastro}"
-            );
-        }
-    }
-
-    /// O corpo de `funcao` neste arquivo, sem as linhas de comentário
-    /// ([`super::fonte_sem_comentarios`]) e sem espaço nenhum.
-    fn corpo_sem_espaco(fonte: &str, funcao: &str) -> String {
-        super::corpo_de(fonte, funcao)
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect()
-    }
-
-    /// **Nenhum `mod_id = %id` usa o id cru do comando**, nas três portas que
-    /// o escreviam assim e nas duas funções de `mod_request`. Os comandos não
-    /// sobem num teste — precisam de conexão, de `AppHandle` ou do seletor do
-    /// sistema —, e uma linha escrita à mão dentro de um deles deixaria os
-    /// testes acima verdes com o id cru no registro de novo.
-    #[test]
-    fn nenhum_mod_id_em_display_usa_o_id_cru_do_comando() {
-        let fonte = super::fonte_sem_comentarios();
-        // A função e o nome que o id cru tem nela.
-        for (funcao, cru) in [
-            ("fn mod_request(", "id"),
-            ("fn pedido_a_caminho_dito(", "id"),
-            ("fn pedido_recusado_na_saida_dito(", "id"),
-            ("fn midia_em_bytes(", "id"),
-            ("fn midia_vinda_do_servidor_dita(", "mod_id"),
-            ("async fn escolher_para_o_mod(", "id"),
-        ] {
-            let codigo = corpo_sem_espaco(&fonte, funcao);
-            for depois in codigo.split("mod_id=%").skip(1) {
-                let valor: String = depois
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-                assert_ne!(
-                    valor, cru,
-                    "`{funcao}` escreve `mod_id = %{cru}` com o id cru que a janela manda: em \
-                     `%` ele sai sem escape, e uma quebra de linha nele escreve uma segunda \
-                     linha no seele.log com a cara do produto"
-                );
-            }
-        }
-        let pedido = corpo_sem_espaco(&fonte, "fn mod_request(");
-        for funcao in ["pedido_a_caminho_dito(", "pedido_recusado_na_saida_dito("] {
-            assert!(
-                pedido.contains(funcao),
-                "`fn mod_request(` deixou de passar por `{funcao}`, e a linha escrita à mão no \
-                 comando escapa dos testes acima"
-            );
-        }
-    }
-}
+mod o_id_do_pedido_de_mod_no_registro;
 
 /// **Um pacote de MOD publicado numa pasta de teste**, como o instalador o
 /// deixa.
@@ -21398,1061 +14775,23 @@ mod o_id_do_pedido_de_mod_no_registro {
 /// Escrito numa pasta de obras, lido para saber o hash do conteúdo, e movido
 /// para `PACOTES/<hash>` — que é onde `ler_por_hash` e `mods::serve` o
 /// procuram. Os bytes de cada formato são os menores que o `sniff` reconhece.
+#[path = "testes/pacote_de_teste.rs"]
 #[cfg(test)]
-mod pacote_de_teste {
-    /// O menor WAV que o `sniff` aceita (`seele-proto/src/midia_de_mod.rs:73`).
-    pub(crate) const WAV: &[u8] = b"RIFF\0\0\0\0WAVEfmt ";
-    /// A assinatura de um PNG.
-    pub(crate) const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
-    /// Texto, que nenhum decodificador deste produto aceita.
-    pub(crate) const TEXTO: &[u8] = b"so texto";
-    /// O id do MOD de todo pacote daqui.
-    pub(crate) const ID: &str = "prova/midia";
-
-    /// Publica um pacote que declara `arquivos`, e devolve a pasta e o hash.
-    ///
-    /// A pasta é um `TempDir`: some quando o teste termina.
-    pub(crate) fn publicar(arquivos: &[(&str, &[u8])]) -> (tempfile::TempDir, String) {
-        let raiz = tempfile::tempdir().expect("a pasta de teste");
-        let obras = raiz.path().join("em-obras");
-        std::fs::create_dir_all(obras.join("cliente")).expect("a pasta de obras");
-        let declarados: Vec<String> = arquivos
-            .iter()
-            .map(|(caminho, _)| format!("\"{caminho}\""))
-            .collect();
-        let api = seele_ffi::mods::MOD_API_VERSION;
-        std::fs::write(
-            obras.join("mod.json"),
-            format!(
-                r#"{{"schema":1,"id":"{ID}","version":"1.0.0","api":{api},"repo":"https://example.invalid/x","reach":["dom"],"client":"cliente/main.js","arquivos":[{}]}}"#,
-                declarados.join(",")
-            ),
-        )
-        .expect("o manifesto");
-        std::fs::write(obras.join("cliente/main.js"), "/* nada */").expect("o cliente");
-        for (caminho, bytes) in arquivos {
-            let destino = obras.join(caminho);
-            std::fs::create_dir_all(destino.parent().expect("a pasta do arquivo"))
-                .expect("a pasta do arquivo");
-            std::fs::write(&destino, bytes).expect("o arquivo");
-        }
-        let hash = seele_ffi::mods::ler_pasta(&obras.to_string_lossy())
-            .expect("o pacote de teste é válido")
-            .hash;
-        let publicado = raiz.path().join(seele_ffi::mods::PACOTES).join(&hash);
-        std::fs::create_dir_all(publicado.parent().expect("a pasta dos pacotes"))
-            .expect("a pasta dos pacotes");
-        std::fs::rename(&obras, &publicado).expect("publicar o pacote");
-        (raiz, hash)
-    }
-
-    /// A pasta de configuração, como `config_dir` a devolveria.
-    pub(crate) fn pasta(raiz: &tempfile::TempDir) -> String {
-        raiz.path().to_string_lossy().into_owned()
-    }
-}
+mod pacote_de_teste;
 
 /// **A mídia de MOD recusada pelo Rust é dita no `seele.log`.**
 ///
 /// Em 23/09, descobrir que o avatar do PERFIS carregava levou uma hora de
 /// medição e um reinício com `RUST_LOG=debug`: o Rust recusava e devolvia a
 /// recusa à janela, e o registro não tinha uma palavra.
+#[path = "testes/a_midia_recusada_e_dita_no_registro.rs"]
 #[cfg(test)]
-mod a_midia_recusada_e_dita_no_registro {
-    use super::{
-        imagem_lida_dita, midia_declarada_do_mod, midia_do_servidor_dita, midia_servida_dita,
-        motivo_de, recusa_de_midia_dita, registrar_da_janela_em, BaldesDoRegistro, FalhaNoMod,
-        TETO_DA_FRASE_NO_REGISTRO, TETO_DO_ID_NO_REGISTRO,
-    };
-    use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
-    use crate::rastro_de_teste::capturar;
-    use crate::relogio_de_teste::origem;
-
-    /// A linha de recusa de mídia no rastro, se houver.
-    fn recusa(rastro: &str) -> Option<&str> {
-        rastro
-            .lines()
-            .find(|linha| linha.contains("mídia de MOD recusada"))
-    }
-
-    /// Confere os pedaços que fazem uma linha de recusa servir a quem lê.
-    fn traz(linha: &str, pedacos: &[&str]) {
-        for pedaco in pedacos {
-            assert!(
-                linha.contains(pedaco),
-                "a linha de recusa não traz `{pedaco}`, e é por ela que quem lê o registro \
-                 acha o MOD e o motivo: {linha}"
-            );
-        }
-    }
-
-    #[test]
-    fn um_arquivo_que_o_manifesto_nao_declara_sai_como_warn_com_o_id_e_o_motivo() {
-        let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
-        let (resultado, rastro) = capturar(|| {
-            midia_declarada_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                "img/escondido.png",
-            )
-        });
-        let falha = resultado
-            .err()
-            .expect("um arquivo que o manifesto não declara foi servido");
-        assert_eq!(
-            motivo_de(&falha),
-            "arquivo-nao-declarado",
-            "a recusa mudou de nome, e a frase da janela deixa de achá-la"
-        );
-        let linha = recusa(&rastro).unwrap_or_else(|| {
-            panic!(
-                "a recusa não chegou ao registro: o MOD fica sem imagem e o seele.log sem \
-                 uma palavra — {rastro}"
-            )
-        });
-        traz(
-            linha,
-            &[
-                "WARN",
-                "mod_id=prova/midia",
-                "motivo=arquivo-nao-declarado",
-                "origem=\"img/escondido.png\"",
-            ],
-        );
-    }
-
-    #[test]
-    fn um_arquivo_que_nao_e_midia_sai_como_warn_com_o_motivo() {
-        let (raiz, hash) = publicar(&[("doc/leia.txt", TEXTO)]);
-        let (resultado, rastro) = capturar(|| {
-            midia_declarada_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                "doc/leia.txt",
-            )
-        });
-        let falha = resultado.err().expect("texto foi servido como mídia");
-        assert_eq!(
-            motivo_de(&falha),
-            "formato-desconhecido",
-            "texto foi recusado por outro motivo, e o autor procuraria no lugar errado"
-        );
-        let linha =
-            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
-        traz(
-            linha,
-            &["WARN", "mod_id=prova/midia", "motivo=formato-desconhecido"],
-        );
-    }
-
-    #[test]
-    fn uma_imagem_aceita_nao_escreve_recusa() {
-        let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
-        let (resultado, rastro) = capturar(|| {
-            midia_declarada_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                "img/rosto.png",
-            )
-        });
-        let midia = resultado.expect("uma imagem declarada foi recusada");
-        assert_eq!(midia.papel, "imagem", "um PNG saiu com outro papel");
-        assert!(
-            recusa(&rastro).is_none(),
-            "uma mídia aceita escreveu uma recusa, e o registro ensinaria a ignorá-las: {rastro}"
-        );
-    }
-
-    /// **O nome da mídia servida não escreve uma segunda linha no registro.**
-    ///
-    /// O mesmo vetor da linha do som servido: o manifesto só confere que cada
-    /// pedaço do caminho é um nome (`inner_path`), e uma quebra de linha passa.
-    /// O caminho vem em texto, e não num pacote no disco, porque um nome de
-    /// arquivo com `\n` não existe no Windows.
-    #[test]
-    fn um_caminho_com_quebra_de_linha_nao_forja_linha_na_midia_servida() {
-        let ((), rastro) = capturar(|| {
-            midia_servida_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                7,
-                "img/a\nWARN seele_app: forjada.png",
-                "imagem",
-                8,
-            );
-        });
-        assert_eq!(
-            rastro.lines().count(),
-            1,
-            "o nome que o MOD declarou escreveu uma segunda linha no seele.log, com a cara do \
-             produto: {rastro}"
-        );
-        for pedaco in [
-            "INFO",
-            "mídia de MOD servida",
-            "mod_id=prova/midia",
-            r#"caminho="img/a\nWARN seele_app: forjada.png""#,
-            "papel=\"imagem\"",
-        ] {
-            assert!(
-                rastro.contains(pedaco),
-                "a linha da mídia servida não traz `{pedaco}`, e quem lê o registro já não acha \
-                 o que o Rust serviu: {rastro}"
-            );
-        }
-    }
-
-    /// **O nome da mídia servida tem o teto das outras portas de texto de
-    /// terceiro.** As aspas impedem a linha forjada, e não a linha sem fim.
-    #[test]
-    fn um_caminho_enorme_sai_cortado_no_teto_de_frase_na_midia_servida() {
-        let ((), rastro) = capturar(|| {
-            midia_servida_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                7,
-                &"i".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
-                "imagem",
-                8,
-            );
-        });
-        assert!(
-            rastro.contains(&format!(
-                "caminho=\"{}\"",
-                "i".repeat(TETO_DA_FRASE_NO_REGISTRO)
-            )),
-            "o nome que o MOD declarou entrou no registro sem o teto das outras portas de \
-             texto de terceiro: {} caracteres numa linha",
-            rastro.chars().count()
-        );
-    }
-
-    #[test]
-    fn a_sessao_que_acabou_nao_vira_aviso() {
-        let (falha, rastro) = capturar(|| {
-            recusa_de_midia_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                "img/rosto.png",
-                FalhaNoMod::Recusado {
-                    motivo: "sessao-encerrada".to_owned(),
-                },
-            )
-        });
-        assert_eq!(
-            motivo_de(&falha),
-            "sessao-encerrada",
-            "a recusa mudou no caminho"
-        );
-        assert!(
-            !rastro.contains("WARN") && rastro.contains("DEBUG"),
-            "uma mídia que não montou porque a pessoa saiu virou aviso — é o desfecho \
-             certo, e não um defeito: {rastro}"
-        );
-    }
-
-    #[test]
-    fn a_midia_do_servidor_recusada_leva_o_id_do_mod() {
-        let (resultado, rastro) = capturar(|| {
-            midia_do_servidor_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                "seele/perfis",
-                "data:image/png;base64,%%%",
-                None,
-            )
-        });
-        let falha = resultado.err().expect("base64 inválido virou mídia");
-        assert_eq!(
-            motivo_de(&falha),
-            "nao-e-base64",
-            "o base64 inválido foi recusado por outro motivo"
-        );
-        let linha =
-            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
-        traz(
-            linha,
-            &[
-                "WARN",
-                "mod_id=seele/perfis",
-                "motivo=nao-e-base64",
-                "origem=\"servidor\"",
-            ],
-        );
-    }
-
-    /// Uma recusa de imagem por volume, com o motivo que o servidor mandou.
-    ///
-    /// É o caminho de `ler_imagem_mod`, pela mesma função que o comando chama
-    /// ([`imagem_lida_dita`]): o `Err` da conexão é o texto do par remoto (o
-    /// `erro` da `RespostaDeImagem`, a razão com que a conexão fechou, o prazo
-    /// esgotado), e vai à recusa como veio. Chamar `recusa_de_midia_dita`
-    /// direto aqui mediria uma cópia do caminho, e os testes que passam por
-    /// este ajudante ficariam verdes com o comando calado.
-    fn recusa_do_servidor(motivo: &str) -> (FalhaNoMod, String) {
-        let (lida, rastro) = capturar(|| {
-            imagem_lida_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                Err(motivo.to_owned()),
-                None,
-            )
-        });
-        (
-            lida.err()
-                .expect("a recusa do servidor virou imagem, e não há recusa a medir"),
-            rastro,
-        )
-    }
-
-    #[test]
-    fn o_texto_do_servidor_no_motivo_nao_forja_linha() {
-        let forjado = "x\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pelo servidor";
-        let (falha, rastro) = recusa_do_servidor(forjado);
-        assert_eq!(
-            motivo_de(&falha),
-            forjado,
-            "a recusa que volta à janela foi mexida: quem se protege é a linha do registro, \
-             e a janela continua recebendo o que o servidor disse"
-        );
-        assert_eq!(
-            rastro.lines().count(),
-            1,
-            "texto do servidor no motivo escreveu no seele.log mais de uma linha, e a \
-             segunda tem a cara do produto: {rastro}"
-        );
-        assert!(
-            rastro.contains("linha forjada pelo servidor"),
-            "o que o servidor disse sumiu do registro, e era o dado da recusa: {rastro}"
-        );
-    }
-
-    #[test]
-    fn o_id_que_a_janela_manda_nao_forja_linha() {
-        let (_, rastro) = capturar(|| {
-            recusa_de_midia_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                "prova/midia\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pela janela",
-                "servidor",
-                FalhaNoMod::Recusado {
-                    motivo: "nao-e-base64".to_owned(),
-                },
-            )
-        });
-        assert_eq!(
-            rastro.lines().count(),
-            1,
-            "o id do MOD que a janela manda escreveu no seele.log mais de uma linha, e a \
-             segunda tem a cara do produto: {rastro}"
-        );
-    }
-
-    #[test]
-    fn o_motivo_em_texto_livre_sai_entre_aspas() {
-        let prazo = "Prazo da transferência esgotado. Confira a conexão e a versão do servidor.";
-        let (_, rastro) = recusa_do_servidor(prazo);
-        let linha =
-            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
-        traz(
-            linha,
-            &["WARN", "mod_id=prova/midia", &format!("motivo=\"{prazo}\"")],
-        );
-    }
-
-    /// **A imagem que o servidor recusou é dita**, com o id e o texto dele.
-    ///
-    /// É a primeira das duas recusas de `ler_imagem_mod` depois do `await`, e
-    /// a que vem com o que o servidor mandou — o prazo esgotado, o `erro` da
-    /// resposta, a razão com que a conexão fechou.
-    #[test]
-    fn a_imagem_recusada_pelo_servidor_sai_como_warn_com_o_id_e_o_motivo() {
-        let (resultado, rastro) = capturar(|| {
-            imagem_lida_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                Err("Prazo esgotado".to_owned()),
-                None,
-            )
-        });
-        let falha = resultado.err().expect("a recusa do servidor virou imagem");
-        assert_eq!(
-            motivo_de(&falha),
-            "Prazo esgotado",
-            "a recusa do servidor voltou à janela mexida, e a janela deixa de dizer o que ele \
-             disse"
-        );
-        let linha = recusa(&rastro).unwrap_or_else(|| {
-            panic!(
-                "a imagem que o servidor recusou não chegou ao registro: o MOD fica sem imagem \
-                 e o seele.log sem uma palavra — {rastro}"
-            )
-        });
-        traz(
-            linha,
-            &[
-                "WARN",
-                "mod_id=prova/midia",
-                "motivo=\"Prazo esgotado\"",
-                "origem=\"volume\"",
-            ],
-        );
-    }
-
-    /// **A imagem lida que não é mídia é dita**, pelo nome da recusa.
-    ///
-    /// A segunda recusa de `ler_imagem_mod` depois do `await`: o servidor
-    /// entregou, e os bytes não são de um formato que este produto decodifica.
-    #[test]
-    fn a_imagem_lida_que_nao_e_midia_sai_como_warn_com_o_motivo() {
-        let (resultado, rastro) = capturar(|| {
-            imagem_lida_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                Ok(TEXTO.to_vec()),
-                None,
-            )
-        });
-        let falha = resultado.err().expect("texto lido por volume virou imagem");
-        assert_eq!(
-            motivo_de(&falha),
-            "formato-desconhecido",
-            "texto lido por volume foi recusado por outro motivo, e o autor procuraria no lugar \
-             errado"
-        );
-        let linha = recusa(&rastro).unwrap_or_else(|| {
-            panic!(
-                "a imagem lida que não é mídia não chegou ao registro: o MOD fica sem imagem e \
-                 o seele.log sem uma palavra — {rastro}"
-            )
-        });
-        traz(
-            linha,
-            &[
-                "WARN",
-                "mod_id=prova/midia",
-                "motivo=formato-desconhecido",
-                "origem=\"volume\"",
-            ],
-        );
-    }
-
-    /// **A imagem lida que é mídia passa sem linha**: uma recusa só é dita
-    /// quando há recusa.
-    #[test]
-    fn a_imagem_lida_aceita_nao_escreve_linha() {
-        let (resultado, rastro) = capturar(|| {
-            imagem_lida_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                Ok(PNG.to_vec()),
-                None,
-            )
-        });
-        let midia = resultado.expect("um PNG lido por volume foi recusado");
-        assert_eq!(
-            midia.papel, "imagem",
-            "um PNG lido por volume saiu com outro papel"
-        );
-        assert!(
-            rastro.is_empty(),
-            "uma imagem lida e aceita escreveu no registro, e ele ensinaria a ignorar as \
-             recusas: {rastro}"
-        );
-    }
-
-    #[test]
-    fn o_motivo_do_servidor_tem_teto() {
-        let (_, rastro) = recusa_do_servidor(&"a".repeat(TETO_DA_FRASE_NO_REGISTRO * 4));
-        let linha =
-            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
-        assert!(
-            linha.contains(&"a".repeat(TETO_DA_FRASE_NO_REGISTRO))
-                && !linha.contains(&"a".repeat(TETO_DA_FRASE_NO_REGISTRO + 1)),
-            "o motivo que o servidor manda entrou no registro sem o teto das outras portas \
-             de texto de terceiro: {} caracteres numa linha",
-            linha.chars().count()
-        );
-    }
-
-    /// **A origem também tem teto.** É o caminho que a janela pede em
-    /// `midia_do_mod` e em `som_do_mod`: texto que chega pela ponte, e que ia
-    /// inteiro para a linha. As aspas impedem a linha forjada, e não a linha
-    /// sem fim.
-    #[test]
-    fn uma_origem_enorme_sai_cortada_no_teto_de_frase() {
-        let (_, rastro) = capturar(|| {
-            recusa_de_midia_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                &"c".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
-                FalhaNoMod::Recusado {
-                    motivo: "arquivo-nao-declarado".to_owned(),
-                },
-            )
-        });
-        let linha =
-            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
-        assert!(
-            linha.contains(&format!(
-                "origem=\"{}\"",
-                "c".repeat(TETO_DA_FRASE_NO_REGISTRO)
-            )),
-            "o caminho que a janela pede entrou no registro sem o teto das outras portas de \
-             texto de terceiro: {} caracteres numa linha",
-            linha.chars().count()
-        );
-    }
-
-    /// **O id do MOD sai igual pelas duas portas do registro.** A janela
-    /// (`registrar_da_janela`) e a recusa de mídia do Rust escrevem o mesmo
-    /// `mod_id=`, e é por ele que uma busca só junta o que as duas disseram do
-    /// mesmo MOD. Com o tratamento escrito à mão em cada porta, um teto que
-    /// mudasse numa e não na outra separaria as duas linhas sem que nada
-    /// reclamasse.
-    #[test]
-    fn o_id_do_mod_sai_igual_pelas_duas_portas_do_registro() {
-        let enorme = format!("prova/{}", "m".repeat(TETO_DO_ID_NO_REGISTRO * 4));
-        let esperado: String = enorme.chars().take(TETO_DO_ID_NO_REGISTRO).collect();
-        let ((), da_janela) = capturar(|| {
-            registrar_da_janela_em(
-                &BaldesDoRegistro::default(),
-                origem(),
-                "aviso".to_owned(),
-                "recusa-de-mod".to_owned(),
-                "uma frase da janela".to_owned(),
-                Some(enorme.clone()),
-            );
-        });
-        let (_, do_rust) = capturar(|| {
-            recusa_de_midia_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &enorme,
-                "volume",
-                FalhaNoMod::Recusado {
-                    motivo: "nao-e-base64".to_owned(),
-                },
-            )
-        });
-        for (porta, rastro) in [
-            ("registrar_da_janela", &da_janela),
-            ("recusa_de_midia_dita", &do_rust),
-        ] {
-            let id = rastro
-                .split("mod_id=")
-                .nth(1)
-                .and_then(|resto| resto.split_whitespace().next())
-                .unwrap_or_else(|| panic!("`{porta}` não escreveu `mod_id=`: {rastro}"));
-            assert_eq!(
-                id, esperado,
-                "`{porta}` escreveu o id do MOD com outro teto, e uma busca por `mod_id=` já \
-                 não junta o que a janela e o Rust disseram do mesmo MOD"
-            );
-        }
-    }
-
-    /// **O pior caso sai com o mesmo teto pelas três portas que escapam.**
-    ///
-    /// `\u{100000}` é o caractere que mais cresce no escape: um escrito, dez
-    /// no registro. O `console` do executor corta pelo tamanho escapado; o
-    /// motivo e o caminho de uma mídia de MOD cortavam em 512 caracteres
-    /// **antes** do escape, e quinhentos e doze deles viravam 5120 na linha —
-    /// dez vezes o teto, nas portas que não têm teto de vazão. Com uma regra só,
-    /// os campos saem do mesmo tamanho, e nenhum passa do teto.
-    ///
-    /// O `console` vai pelo caminho real: o executor corta, e a mesma
-    /// `assentar_fala` da bomba escreve.
-    ///
-    /// **E a frase da janela**, desde que ela vai em `?`: cortada antes do
-    /// escape, como era, quinhentos e doze `\u{100000}` eram 5120 caracteres
-    /// na linha. Ela é cortada pela mesma regra do `console`, com o mesmo aviso.
-    #[test]
-    fn o_pior_caso_sai_com_o_mesmo_teto_pelas_tres_portas() {
-        use crate::executor::{ExecutorQuickJs, Fila, Limites, ParaOFora};
-        let pior = "\u{100000}".repeat(TETO_DA_FRASE_NO_REGISTRO * 4);
-        // O que vai entre as aspas de `nome="…"`, como a linha o leva.
-        let campo = |rastro: &str, nome: &str| -> String {
-            rastro
-                .split(&format!("{nome}=\""))
-                .nth(1)
-                .and_then(|resto| resto.split('"').next())
-                .unwrap_or_else(|| panic!("a linha não traz `{nome}=\"…\"`: {rastro}"))
-                .to_owned()
-        };
-
-        let executor = ExecutorQuickJs::novo(Limites::default()).expect("o motor");
-        executor
-            .iniciar(r"console.log('\u{100000}'.repeat(2048));")
-            .expect("o código");
-        let fala = loop {
-            match executor.receber(std::time::Duration::from_secs(5)) {
-                Some(fala @ ParaOFora::Console { .. }) => break fala,
-                Some(_) => {}
-                None => panic!("a linha de console não saiu do motor"),
-            }
-        };
-        let mods = std::sync::Mutex::new(super::ModsNativos::default());
-        let fila = std::sync::Arc::new(Fila::default());
-        let (_, do_console) =
-            capturar(|| super::assentar_fala(&mods, &|| true, &fila, 1, fala, ID));
-        let do_console = campo(&do_console, "texto");
-        let do_console = do_console
-            .strip_suffix(" […cortado: 2048 caracteres]")
-            .unwrap_or_else(|| panic!("a linha de console não diz que foi cortada: {do_console}"));
-
-        let (_, do_motivo) = recusa_do_servidor(&pior);
-        let (_, da_origem) = capturar(|| {
-            recusa_de_midia_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                &pior,
-                FalhaNoMod::Recusado {
-                    motivo: "arquivo-nao-declarado".to_owned(),
-                },
-            )
-        });
-        let ((), do_caminho) = capturar(|| {
-            midia_servida_dita(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                7,
-                &pior,
-                "imagem",
-                8,
-            )
-        });
-        // A frase da janela é cortada pela mesma regra do `console`, com o
-        // mesmo aviso: os dois são texto de terceiro que chega inteiro, e o
-        // aviso diz o tamanho do que foi escrito.
-        let ((), da_janela) = capturar(|| {
-            registrar_da_janela_em(
-                &BaldesDoRegistro::default(),
-                origem(),
-                "aviso".to_owned(),
-                "recusa-de-mod".to_owned(),
-                pior.clone(),
-                Some(ID.to_owned()),
-            );
-        });
-        let da_janela = campo(&da_janela, "frase");
-        let da_janela = da_janela
-            .strip_suffix(" […cortado: 2048 caracteres]")
-            .unwrap_or_else(|| {
-                panic!(
-                    "a frase da janela não diz que foi cortada, e quem lê o registro toma o \
-                     pedaço pelo todo: {da_janela}"
-                )
-            });
-
-        let um_a_mais = r"\u{100000}".chars().count();
-        for (porta, escrito) in [
-            ("console", do_console.to_owned()),
-            ("janela", da_janela.to_owned()),
-            ("motivo", campo(&do_motivo, "motivo")),
-            ("origem", campo(&da_origem, "origem")),
-            ("caminho", campo(&do_caminho, "caminho")),
-        ] {
-            let tamanho = escrito.chars().count();
-            assert!(
-                tamanho <= TETO_DA_FRASE_NO_REGISTRO,
-                "`{porta}` levou {tamanho} caracteres ao registro, e o teto de uma frase de \
-                 terceiro é {TETO_DA_FRASE_NO_REGISTRO}: o corte foi contado antes do escape"
-            );
-            assert!(
-                tamanho + um_a_mais > TETO_DA_FRASE_NO_REGISTRO,
-                "`{porta}` cortou mais do que precisava ({tamanho} de \
-                 {TETO_DA_FRASE_NO_REGISTRO}): cabia mais um, e o registro perde o que o \
-                 terceiro escreveu sem razão"
-            );
-            assert_eq!(
-                escrito, do_console,
-                "`{porta}` cortou o pior caso noutro tamanho que o `console`, e as portas do \
-                 mesmo `seele.log` voltam a ter tetos diferentes"
-            );
-        }
-    }
-
-    /// **Os quatro comandos de mídia passam pela recusa dita.**
-    ///
-    /// Os testes acima (e os do som) medem as funções; este prende que os
-    /// comandos as chamam. `ler_imagem_mod` fala com a rede e não sobe num
-    /// teste sem servidor — e um comando que devolvesse a recusa por fora seria
-    /// a mídia recusada em silêncio de novo, com os testes verdes.
-    ///
-    /// Em `ler_imagem_mod` a chamada é `imagem_lida_dita`, que leva as duas
-    /// recusas de depois do `await`. Procurar `recusa_de_midia_dita` ali
-    /// passava com uma só delas: a outra saía calada, e o guarda verde. E a
-    /// conexão ausente de `ler_imagem_mod` vai ao registro sem ser contada.
-    ///
-    /// O fonte é normalizado para `\n`: num checkout com CRLF o corte em
-    /// `"\n}\n"` não acharia o fim da função, e o guarda passaria a ler o
-    /// arquivo inteiro — inclusive este teste, que cita as quatro chamadas.
-    #[test]
-    fn os_quatro_comandos_de_midia_passam_pela_recusa_dita() {
-        let fonte = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
-        )
-        .expect("main.rs legível")
-        .replace("\r\n", "\n");
-        for (comando, chamada) in [
-            ("fn midia_do_mod(", "midia_declarada_do_mod("),
-            ("fn midia_em_bytes(", "midia_do_servidor_dita("),
-            ("async fn ler_imagem_mod(", "imagem_lida_dita("),
-            ("fn som_do_mod(", "som_declarado_do_mod("),
-        ] {
-            let corpo = fonte
-                .split(comando)
-                .nth(1)
-                .and_then(|resto| resto.split("\n}\n").next())
-                .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
-            let codigo: Vec<&str> = corpo
-                .lines()
-                .filter(|linha| !linha.trim_start().starts_with("//"))
-                .collect();
-            assert!(
-                codigo.join("\n").contains(chamada),
-                "`{comando}` não passa por `{chamada}`: a recusa dele volta à janela e não \
-                 chega ao registro"
-            );
-        }
-
-        // **A conexão ausente de `ler_imagem_mod` é dita, e não contada.** A
-        // geração já foi conferida na entrada: com ela de pé, a conexão que
-        // falta não é comando de uma sessão encerrada. Os outros guardas não
-        // veem a diferença — um `recusar_se_morta` a mais ali sobe a conta da
-        // função e a do arquivo juntas.
-        let ler: String = fonte
-            .split("async fn ler_imagem_mod(")
-            .nth(1)
-            .and_then(|resto| resto.split("\n}\n").next())
-            .expect("`async fn ler_imagem_mod(` sumiu de main.rs")
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .flat_map(str::chars)
-            .filter(|c| !c.is_whitespace())
-            .collect();
-        let conexao = ler
-            .split_once("session.connection()")
-            .and_then(|(_, depois)| depois.split_once(")?;"))
-            .map(|(conexao, _)| conexao)
-            .expect(
-                "a conexão de `ler_imagem_mod` não sai mais por `session.connection()…?;`, e \
-                 este guarda já não acha a recusa dela",
-            );
-        for contar in [
-            "comandos_de_geracao_morta",
-            "confere_geracao(",
-            "recusar_se_morta(",
-        ] {
-            assert!(
-                !conexao.contains(contar),
-                "a conexão ausente de `ler_imagem_mod` passou por `{contar}`: com a geração de \
-                 pé, ela não é comando de uma sessão encerrada, e o contador diria que a sessão \
-                 anterior falou sem ela ter falado"
-            );
-        }
-        assert!(
-            conexao.contains("recusa_de_midia_dita("),
-            "a conexão ausente de `ler_imagem_mod` voltou à janela sem passar por \
-             `recusa_de_midia_dita`, e não chega ao registro"
-        );
-        assert!(
-            !ler.contains("comandos_de_geracao_morta"),
-            "`ler_imagem_mod` mexe em `comandos_de_geracao_morta` por fora de \
-             `recusar_se_morta`: uma conta à mão volta a conviver com a regra"
-        );
-    }
-}
+mod a_midia_recusada_e_dita_no_registro;
 
 /// **O som de um MOD sai em bytes, conferido como a imagem é conferida.**
+#[path = "testes/o_som_do_mod_sai_em_bytes.rs"]
 #[cfg(test)]
-mod o_som_do_mod_sai_em_bytes {
-    use super::{
-        midia_declarada_do_mod, motivo_de, som_declarado_do_mod, som_servido_dito,
-        BaldesDoRegistro, TETO_DA_FRASE_NO_REGISTRO,
-    };
-    use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO, WAV};
-    use crate::rastro_de_teste::capturar;
-    use crate::relogio_de_teste::origem;
-
-    /// **O nome do som servido não escreve uma segunda linha no registro.**
-    ///
-    /// Quando o som sai, o caminho já passou pelo manifesto, e o manifesto só
-    /// confere que cada pedaço dele é um nome (`inner_path`): uma quebra de
-    /// linha passa. Escrito cru, um MOD que declarasse
-    /// `som/a\nWARN seele_app: forjada.wav` escreveria, a cada som servido, uma
-    /// linha com a cara do produto. O caminho vem aqui em texto, e não num
-    /// pacote no disco, porque um nome de arquivo com `\n` não existe no
-    /// Windows.
-    #[test]
-    fn um_caminho_com_quebra_de_linha_nao_forja_linha_no_som_servido() {
-        let ((), rastro) = capturar(|| {
-            som_servido_dito(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                7,
-                "som/a\nWARN seele_app: forjada.wav",
-                16,
-            )
-        });
-        assert_eq!(
-            rastro.lines().count(),
-            1,
-            "o nome que o MOD declarou escreveu uma segunda linha no seele.log, com a cara do \
-             produto: {rastro}"
-        );
-        assert!(
-            rastro.contains("INFO")
-                && rastro.contains("som de MOD servido em bytes")
-                && rastro.contains("mod_id=prova/midia")
-                && rastro.contains(r#"caminho="som/a\nWARN seele_app: forjada.wav""#),
-            "a linha do som servido perdeu o id, a frase ou o caminho entre aspas, e quem lê o \
-             registro já não acha o que o Rust serviu: {rastro}"
-        );
-    }
-
-    /// **O nome do som servido tem o teto das outras portas de texto de
-    /// terceiro.** As aspas impedem a linha forjada, e não a linha sem fim.
-    #[test]
-    fn um_caminho_enorme_sai_cortado_no_teto_de_frase_no_som_servido() {
-        let ((), rastro) = capturar(|| {
-            som_servido_dito(
-                &BaldesDoRegistro::default(),
-                origem(),
-                ID,
-                7,
-                &"s".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
-                16,
-            );
-        });
-        assert!(
-            rastro.contains(&format!(
-                "caminho=\"{}\"",
-                "s".repeat(TETO_DA_FRASE_NO_REGISTRO)
-            )),
-            "o nome que o MOD declarou entrou no registro sem o teto das outras portas de \
-             texto de terceiro: {} caracteres numa linha",
-            rastro.chars().count()
-        );
-    }
-
-    /// **Os dois comandos que servem o pacote dizem o que serviram pela função
-    /// que os testes medem**: `som_do_mod` por `som_servido_dito` (acima), e
-    /// `midia_do_mod` por `midia_servida_dita` (no módulo da mídia recusada).
-    /// Uma linha escrita à mão dentro de um deles deixaria esses testes verdes
-    /// e o caminho cru no registro de novo.
-    #[test]
-    fn os_comandos_de_midia_dizem_o_que_serviram_pela_funcao_medida() {
-        let fonte = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
-        )
-        .expect("main.rs legível")
-        .replace("\r\n", "\n");
-        for (comando, funcao) in [
-            ("fn som_do_mod(", "som_servido_dito("),
-            ("fn midia_do_mod(", "midia_servida_dita("),
-        ] {
-            let corpo = fonte
-                .split(comando)
-                .nth(1)
-                .and_then(|resto| resto.split("\n}\n").next())
-                .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
-            let codigo: Vec<&str> = corpo
-                .lines()
-                .filter(|linha| !linha.trim_start().starts_with("//"))
-                .collect();
-            let codigo = codigo.join("\n");
-            assert!(
-                codigo.contains(funcao) && !codigo.contains("tracing::"),
-                "`{comando}` escreve o que serviu por fora de `{funcao}`, e o caminho que o MOD \
-                 declarou pode voltar cru ao registro"
-            );
-        }
-    }
-
-    #[test]
-    fn um_som_declarado_sai_com_os_bytes_exatos() {
-        let (raiz, hash) = publicar(&[("som/toque.wav", WAV)]);
-        let bytes = som_declarado_do_mod(
-            &BaldesDoRegistro::default(),
-            origem(),
-            &pasta(&raiz),
-            ID,
-            &hash,
-            "som/toque.wav",
-        )
-        .expect("um som declarado foi recusado");
-        assert_eq!(
-            bytes, WAV,
-            "os bytes do som mudaram no caminho, e a casca decodificaria outra coisa"
-        );
-    }
-
-    /// **O som do pacote atravessa a ponte uma vez só** (P49-7b).
-    ///
-    /// `montarMidia` pede `midia_do_mod` para saber o papel e os bytes a
-    /// contar, e o som em si vem cru por `som_do_mod`. O `data:` que
-    /// `midia_do_mod` montava para um som não tinha quem o lesse: o arquivo
-    /// era lido duas vezes, e uma delas atravessava a ponte em base64, um terço
-    /// maior, em JSON. A imagem continua com o `data:`, que é o que o `<img>`
-    /// mostra. O que se mede é o que atravessa a ponte: a resposta serializada.
-    #[test]
-    fn o_som_do_pacote_sai_sem_uri_e_a_imagem_com() {
-        let (raiz, hash) = publicar(&[("som/toque.wav", WAV), ("img/rosto.png", PNG)]);
-        let pela_ponte = |caminho: &str| {
-            let (resultado, _) = capturar(|| {
-                midia_declarada_do_mod(
-                    &BaldesDoRegistro::default(),
-                    origem(),
-                    &pasta(&raiz),
-                    ID,
-                    &hash,
-                    caminho,
-                )
-            });
-            let midia = resultado
-                .unwrap_or_else(|falha| panic!("`{caminho}` foi recusado: {}", motivo_de(&falha)));
-            match serde_json::to_value(&midia) {
-                Ok(serde_json::Value::Object(mapa)) => mapa,
-                outro => panic!("a mídia não atravessa a ponte como objeto: {outro:?}"),
-            }
-        };
-        let som = pela_ponte("som/toque.wav");
-        assert!(
-            !som.contains_key("uri"),
-            "o som do pacote voltou a atravessar a ponte em base64, no `uri` de `midia_do_mod`, \
-             além de cru por `som_do_mod`: o arquivo é lido duas vezes, e ninguém lê esse \
-             `data:` — {som:?}"
-        );
-        assert_eq!(
-            (som.get("papel"), som.get("bytes")),
-            (
-                Some(&serde_json::json!("som")),
-                Some(&serde_json::json!(WAV.len()))
-            ),
-            "o som do pacote saiu sem o papel ou sem os bytes, e `montarMidia` não sabe que \
-             elemento montar nem quanto contar no teto: {som:?}"
-        );
-        let imagem = pela_ponte("img/rosto.png");
-        assert!(
-            imagem
-                .get("uri")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|uri| uri.starts_with("data:image/png;base64,")),
-            "a imagem do pacote saiu sem o `data:` que os bytes provaram, e o `<img>` da \
-             região fica sem o que mostrar: {imagem:?}"
-        );
-    }
-
-    #[test]
-    fn uma_imagem_pedida_como_som_e_recusada_pelo_nome_e_dita() {
-        let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
-        let (resultado, rastro) = capturar(|| {
-            som_declarado_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                "img/rosto.png",
-            )
-        });
-        let falha = resultado.expect_err("uma imagem saiu pelo caminho do som");
-        assert_eq!(
-            motivo_de(&falha),
-            "nao-e-som",
-            "a recusa não diz que o arquivo não é som, e o autor procuraria no lugar errado"
-        );
-        assert!(
-            rastro.lines().any(|linha| linha.contains("WARN")
-                && linha.contains("mod_id=prova/midia")
-                && linha.contains("motivo=nao-e-som")),
-            "a recusa do som não chegou ao registro: {rastro}"
-        );
-    }
-
-    /// Dentro de `capturar`, como toda chamada de teste que passa por uma
-    /// linha que outro teste captura.
-    #[test]
-    fn um_som_que_o_manifesto_nao_declara_nao_sai() {
-        let (raiz, hash) = publicar(&[("som/toque.wav", WAV)]);
-        let (resultado, rastro) = capturar(|| {
-            som_declarado_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                "som/escondido.wav",
-            )
-        });
-        let falha = resultado.expect_err("um som que o manifesto não declara saiu");
-        assert_eq!(
-            motivo_de(&falha),
-            "arquivo-nao-declarado",
-            "o som fora do manifesto foi recusado por outro motivo"
-        );
-        assert!(
-            rastro.lines().any(|linha| linha.contains("WARN")
-                && linha.contains("mod_id=prova/midia")
-                && linha.contains("motivo=arquivo-nao-declarado")),
-            "a recusa do som fora do manifesto não chegou ao registro: {rastro}"
-        );
-    }
-
-    /// **Bytes que não são de formato nenhum, pedidos como som, são recusados
-    /// pelo nome e ditos.** É o braço `None` de `som_declarado_do_mod`: sem
-    /// ele, o texto sairia como som e viraria um `decodeAudioData` que falha
-    /// sem dizer por quê.
-    #[test]
-    fn um_texto_pedido_como_som_e_recusado_como_formato_desconhecido_e_dito() {
-        let (raiz, hash) = publicar(&[("som/x.wav", TEXTO)]);
-        let (resultado, rastro) = capturar(|| {
-            som_declarado_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                "som/x.wav",
-            )
-        });
-        let falha = resultado.expect_err("texto saiu pelo caminho do som");
-        assert_eq!(
-            motivo_de(&falha),
-            "formato-desconhecido",
-            "texto pedido como som foi recusado por outro motivo, e o autor procuraria no \
-             lugar errado"
-        );
-        assert!(
-            rastro.lines().any(|linha| linha.contains("WARN")
-                && linha.contains("mod_id=prova/midia")
-                && linha.contains("motivo=formato-desconhecido")),
-            "a recusa do som de formato desconhecido não chegou ao registro: {rastro}"
-        );
-    }
-}
+mod o_som_do_mod_sai_em_bytes;
 
 /// **O som grande demais decodificado é recusado antes de a janela o
 /// decodificar** (P49-7a).
@@ -22462,887 +14801,40 @@ mod o_som_do_mod_sai_em_bytes {
 /// cabeçalho e recusa antes de servir. Um teste por braço — WAV, Ogg, MP3 —,
 /// cada um com o caso grande que só ele recusa, com bytes montados aqui; e as
 /// duas portas do servidor, que entregam o som pelo mesmo `data:`.
+#[path = "testes/o_som_grande_demais_decodificado_e_recusado_antes.rs"]
 #[cfg(test)]
-mod o_som_grande_demais_decodificado_e_recusado_antes {
-    use super::{
-        imagem_lida_dita, ler_midia_do_servidor, motivo_de, som_declarado_do_mod, BaldesDoRegistro,
-        FalhaNoMod,
-    };
-    use crate::pacote_de_teste::{pasta, publicar, ID, WAV};
-    use crate::rastro_de_teste::capturar;
-    use crate::relogio_de_teste::origem;
-    use seele_ffi::mods::TETO_DE_MIDIA;
-    use seele_ffi::som::{
-        bytes_decodificados_minimos, TAXA_DA_DECODIFICACAO, TETO_DO_SOM_DECODIFICADO,
-    };
+mod o_som_grande_demais_decodificado_e_recusado_antes;
 
-    /// Um WAV PCM com `dados` bytes de silêncio.
-    fn wav(canais: u16, taxa: u32, bits: u16, dados: usize) -> Vec<u8> {
-        let por_quadro = canais * bits.div_ceil(8);
-        let tamanho = u32::try_from(dados).expect("o WAV de teste cabe em 32 bits");
-        let mut wav = b"RIFF".to_vec();
-        wav.extend_from_slice(&(36 + tamanho).to_le_bytes());
-        wav.extend_from_slice(b"WAVEfmt ");
-        wav.extend_from_slice(&16u32.to_le_bytes());
-        wav.extend_from_slice(&1u16.to_le_bytes());
-        wav.extend_from_slice(&canais.to_le_bytes());
-        wav.extend_from_slice(&taxa.to_le_bytes());
-        wav.extend_from_slice(&(taxa * u32::from(por_quadro)).to_le_bytes());
-        wav.extend_from_slice(&por_quadro.to_le_bytes());
-        wav.extend_from_slice(&bits.to_le_bytes());
-        wav.extend_from_slice(b"data");
-        wav.extend_from_slice(&tamanho.to_le_bytes());
-        wav.resize(44 + dados, 0);
-        wav
-    }
-
-    /// Uma página Ogg com um pacote só, de menos de 255 bytes. O CRC fica em
-    /// zero: a leitura segue as páginas pelo tamanho, e não o confere.
-    fn pagina_ogg(tipo: u8, granule: u64, sequencia: u32, pacote: &[u8]) -> Vec<u8> {
-        let mut pagina = b"OggS\0".to_vec();
-        pagina.push(tipo);
-        pagina.extend_from_slice(&granule.to_le_bytes());
-        pagina.extend_from_slice(&0x5EE1_E000_u32.to_le_bytes());
-        pagina.extend_from_slice(&sequencia.to_le_bytes());
-        pagina.extend_from_slice(&[0; 4]);
-        pagina.push(1);
-        pagina.push(u8::try_from(pacote.len()).expect("o pacote de teste cabe num segmento"));
-        pagina.extend_from_slice(pacote);
-        pagina
-    }
-
-    /// Um Ogg de três páginas: a da identificação, uma de dados logo no
-    /// começo, e a última, que diz até onde o som vai.
-    fn ogg(identificacao: &[u8], granule_final: u64) -> Vec<u8> {
-        [
-            pagina_ogg(0x02, 0, 0, identificacao),
-            pagina_ogg(0x00, 1024, 1, &[0; 16]),
-            pagina_ogg(0x04, granule_final, 2, &[0; 16]),
-        ]
-        .concat()
-    }
-
-    /// O cabeçalho de identificação do Vorbis.
-    fn vorbis(canais: u8, taxa: u32) -> Vec<u8> {
-        let mut id = b"\x01vorbis".to_vec();
-        id.extend_from_slice(&0u32.to_le_bytes());
-        id.push(canais);
-        id.extend_from_slice(&taxa.to_le_bytes());
-        id.extend_from_slice(&[0; 12]);
-        id.extend_from_slice(&[0xB8, 1]);
-        id
-    }
-
-    /// O cabeçalho de identificação do Opus.
-    fn opus(canais: u8, pre_skip: u16) -> Vec<u8> {
-        let mut id = b"OpusHead\x01".to_vec();
-        id.push(canais);
-        id.extend_from_slice(&pre_skip.to_le_bytes());
-        id.extend_from_slice(&44_100u32.to_le_bytes());
-        id.extend_from_slice(&[0; 3]);
-        id
-    }
-
-    /// Um quadro MPEG-1 camada III a 48 kHz e 320 kbps — 960 bytes e 1152
-    /// amostras —, com o quadro Xing quando `xing` diz quantos são.
-    fn quadro_mp3(canais: u8, xing: Option<u32>) -> Vec<u8> {
-        let modo = if canais == 1 { 0xC0 } else { 0x00 };
-        let mut quadro = vec![0xFF, 0xFB, 0xE4, modo];
-        if let Some(quadros) = xing {
-            quadro.resize(if canais == 1 { 4 + 17 } else { 4 + 32 }, 0);
-            quadro.extend_from_slice(b"Xing");
-            quadro.extend_from_slice(&1u32.to_be_bytes());
-            quadro.extend_from_slice(&quadros.to_be_bytes());
-        }
-        quadro.resize(960, 0);
-        quadro
-    }
-
-    /// Um MP3 de `tamanho` bytes, quadro depois de quadro; o último fica
-    /// cortado onde o tamanho acaba.
-    fn mp3(canais: u8, xing: Option<u32>, tamanho: usize) -> Vec<u8> {
-        let mut mp3 = quadro_mp3(canais, xing);
-        let quadro = quadro_mp3(canais, None);
-        while mp3.len() < tamanho {
-            mp3.extend_from_slice(&quadro);
-        }
-        mp3.truncate(tamanho);
-        mp3
-    }
-
-    /// Publica `bytes` em `caminho` e confere que o som é recusado pelo nome,
-    /// com os números, e dito no registro.
-    fn recusado(caminho: &str, bytes: &[u8]) {
-        let (raiz, hash) = publicar(&[(caminho, bytes)]);
-        let (resultado, rastro) = capturar(|| {
-            som_declarado_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                caminho,
-            )
-        });
-        let falha = resultado.err().unwrap_or_else(|| {
-            panic!(
-                "`{caminho}`, que decodificado passa do teto do som, foi servido: a janela o \
-                 decodifica inteiro antes de poder recusá-lo, e o pico que o teto existe para \
-                 evitar acontece — o piso foi {:?}",
-                bytes_decodificados_minimos(bytes)
-            )
-        });
-        recusado_pelo_teto(caminho, &falha);
-        assert!(
-            rastro.lines().any(|linha| linha.contains("WARN")
-                && linha.contains("mod_id=prova/midia")
-                && linha.contains("som-grande-demais-decodificado")),
-            "a recusa de `{caminho}` não chegou ao registro, e quem hospeda não sabe por que o \
-             som não tocou: {rastro}"
-        );
-    }
-
-    /// A recusa é a do som grande demais decodificado, com os números.
-    fn recusado_pelo_teto(caminho: &str, falha: &FalhaNoMod) {
-        let motivo = motivo_de(falha);
-        assert!(
-            motivo.starts_with("som-grande-demais-decodificado")
-                && motivo.contains(&TETO_DO_SOM_DECODIFICADO.to_string()),
-            "`{caminho}` foi recusado por outro motivo, ou sem o teto: a janela não o diz como o \
-             teto do som, e o MOD fica sem os números — {motivo}"
-        );
-    }
-
-    /// Publica `bytes` em `caminho` e confere que o som sai, intacto.
-    fn servido(caminho: &str, bytes: &[u8]) {
-        let (raiz, hash) = publicar(&[(caminho, bytes)]);
-        let (resultado, _) = capturar(|| {
-            som_declarado_do_mod(
-                &BaldesDoRegistro::default(),
-                origem(),
-                &pasta(&raiz),
-                ID,
-                &hash,
-                caminho,
-            )
-        });
-        let servido = resultado.unwrap_or_else(|falha| {
-            panic!(
-                "`{caminho}`, que cabe decodificado, foi recusado — {}",
-                motivo_de(&falha)
-            )
-        });
-        assert!(
-            servido == bytes,
-            "os bytes de `{caminho}` mudaram no caminho"
-        );
-    }
-
-    /// O piso em bytes de `segundos` de som a 48 kHz, com `canais`: o que a
-    /// janela segura, menos o quadro que a conversão de taxa pode arredondar.
-    fn segundos(segundos: u64, canais: u64) -> u64 {
-        (segundos * TAXA_DA_DECODIFICACAO - 1) * canais * 4
-    }
-
-    /// **WAV: exato, pelo `fmt ` e pelo `data`.** Oito bits, mono, 8 kHz, do
-    /// tamanho do teto de arquivo: cada byte vira seis quadros de quatro bytes,
-    /// e o arquivo de dez MiB, uns 250 MB decodificado.
-    #[test]
-    fn um_wav_que_passa_do_teto_decodificado_e_recusado_antes() {
-        let grande = wav(1, 8_000, 8, TETO_DE_MIDIA - 44);
-        assert_eq!(
-            grande.len(),
-            TETO_DE_MIDIA,
-            "o WAV grande não é do tamanho do teto"
-        );
-        recusado("som/grande.wav", &grande);
-        assert_eq!(
-            bytes_decodificados_minimos(&grande),
-            Some(((TETO_DE_MIDIA as u64 - 44) * 6 - 1) * 4),
-            "o piso do WAV não é o exato que o `fmt ` e o `data` dizem"
-        );
-
-        // Um segundo passa, com os bytes exatos.
-        let curto = wav(1, 8_000, 8, 8_000);
-        assert_eq!(
-            bytes_decodificados_minimos(&curto),
-            Some(segundos(1, 1)),
-            "o piso de um segundo de WAV não é um segundo a 48 kHz"
-        );
-        servido("som/curto.wav", &curto);
-
-        // **O `data` diz mais do que o arquivo tem**, como num WAV gravado
-        // aos poucos: o piso conta os bytes que estão lá.
-        let mut aos_poucos = wav(1, 8_000, 8, 8_000);
-        if let Some(tamanho) = aos_poucos.get_mut(40..44) {
-            tamanho.copy_from_slice(&u32::MAX.to_le_bytes());
-        }
-        assert_eq!(
-            bytes_decodificados_minimos(&aos_poucos),
-            Some(segundos(1, 1)),
-            "o piso do WAV contou o tamanho que o `data` alega, e não os bytes que estão no \
-             arquivo: um WAV gravado aos poucos seria recusado pelo que não tem"
-        );
-
-        // O WAV mínimo do pacote de teste não tem `fmt ` nem `data`
-        // completos: o piso não existe, e o som segue para a janela.
-        assert_eq!(
-            bytes_decodificados_minimos(WAV),
-            None,
-            "um WAV sem `fmt ` nem `data` ganhou um piso, que só pode ter sido inventado"
-        );
-    }
-
-    /// **Ogg: pela granule da última página.** Três minutos de Vorbis estéreo a
-    /// 44,1 kHz são uns 69 MB a 48 kHz; no Opus, a granule já está a 48 kHz,
-    /// menos o pre-skip.
-    #[test]
-    fn um_ogg_que_passa_do_teto_decodificado_e_recusado_antes() {
-        recusado("som/vorbis.ogg", &ogg(&vorbis(2, 44_100), 180 * 44_100));
-        recusado("som/opus.ogg", &ogg(&opus(2, 312), 180 * 48_000 + 312));
-
-        // Um minuto passa: pouco menos que um minuto a 48 kHz, estéreo.
-        let piso = bytes_decodificados_minimos(&ogg(&vorbis(2, 44_100), 60 * 44_100));
-        assert!(
-            piso.is_some_and(|piso| piso <= segundos(60, 2) && piso > segundos(59, 2)),
-            "o piso de um minuto de Vorbis não é um minuto: {piso:?}"
-        );
-        // O Opus mono conta um canal, e o pre-skip sai.
-        let piso = bytes_decodificados_minimos(&ogg(&opus(1, 312), 60 * 48_000 + 312));
-        assert!(
-            piso.is_some_and(|piso| piso <= segundos(60, 1) && piso > segundos(59, 1)),
-            "o piso de um minuto de Opus mono não é um minuto: {piso:?}"
-        );
-    }
-
-    /// **MP3: pelos quadros.** Um Xing de 7600 quadros estéreo são uns 70 MB
-    /// decodificado; sem Xing, a cadeia de quadros diz o mesmo. Um mono sem
-    /// Xing do tamanho do teto — a 320 kbps, a taxa mais alta do MPEG-1 camada
-    /// III, o mais curto que dez MiB podem ser — fica em uns 50 MB, e passa.
-    #[test]
-    fn um_mp3_que_passa_do_teto_decodificado_e_recusado_antes() {
-        recusado("som/xing.mp3", &mp3(2, Some(7_600), 7_600 * 960));
-        recusado("som/estereo.mp3", &mp3(2, None, TETO_DE_MIDIA));
-
-        let mono = bytes_decodificados_minimos(&mp3(1, None, TETO_DE_MIDIA));
-        assert!(
-            mono.is_some_and(|piso| piso > 45_000_000 && piso <= TETO_DO_SOM_DECODIFICADO),
-            "o MP3 mono do tamanho do teto não ficou abaixo do teto do som, e seria recusado \
-             por um piso que passa do real: {mono:?}"
-        );
-
-        // **O Xing de um arquivo cortado conta o que não está nele.** O piso
-        // fica nos quadros que estão: cem, e não 7600.
-        let cortado = bytes_decodificados_minimos(&mp3(2, Some(7_600), 100 * 960));
-        assert!(
-            cortado.is_some_and(|piso| piso < segundos(3, 2)),
-            "o piso do MP3 cortado contou os quadros que o Xing alega, e não os que estão no \
-             arquivo: um download interrompido seria recusado pelo que não tem — {cortado:?}"
-        );
-    }
-
-    /// **As margens que fazem do valor um piso**, uma por teste. Sem elas os
-    /// casos acima continuam verdes, e o piso passa do real: medido pela
-    /// revisão contra o `decodeAudioData` do Chromium e do WebKit — o motor do
-    /// produto no Mac —, um WAV com o bloco declarado menor dava quatro vezes
-    /// o real, um Opus com pre-skip de 3840 passava 23 032 bytes, e um MP3
-    /// comum, de 16 a 25 mil.
-    ///
-    /// O WAV: o bloco declarado (1) é menor que os canais vezes os bytes da
-    /// amostra (2 × 2). O quadro conta pelo maior: um segundo estéreo de
-    /// 16 bits a 8 kHz, e não quatro.
-    #[test]
-    fn o_bloco_menor_que_a_amostra_nao_multiplica_o_piso_do_wav() {
-        let mut wav = wav(2, 8_000, 16, 8_000 * 4);
-        if let Some(bloco) = wav.get_mut(32..34) {
-            bloco.copy_from_slice(&1u16.to_le_bytes());
-        }
-        assert_eq!(
-            bytes_decodificados_minimos(&wav),
-            Some(segundos(1, 2)),
-            "o piso do WAV contou os quadros pelo bloco que o cabeçalho declara, menor que a \
-             amostra: quatro vezes o real, e um som que cabe seria recusado"
-        );
-    }
-
-    /// **Um segundo `fmt ` deixa o WAV sem piso.** O Chromium decodifica pelo
-    /// primeiro, e o piso que lesse o último recusaria pelo formato que o
-    /// motor não usa: a revisão mediu 127 MB de piso contra 11,5 MB reais. Qual
-    /// dos dois vale é pergunta de motor, e um piso não escolhe.
-    #[test]
-    fn um_segundo_fmt_deixa_o_wav_sem_piso() {
-        let primeiro = wav(2, 48_000, 16, 48_000 * 4);
-        let segundo = wav(1, 8_000, 8, 0);
-        let mut dois = [
-            primeiro.get(..36).expect("o cabeçalho e o primeiro `fmt `"),
-            segundo.get(12..36).expect("o segundo `fmt `"),
-            primeiro.get(36..).expect("o `data`"),
-        ]
-        .concat();
-        let riff = u32::try_from(dois.len() - 8).expect("o WAV de teste cabe em 32 bits");
-        if let Some(tamanho) = dois.get_mut(4..8) {
-            tamanho.copy_from_slice(&riff.to_le_bytes());
-        }
-        assert_eq!(
-            bytes_decodificados_minimos(&dois),
-            None,
-            "um WAV com dois `fmt ` ganhou um piso por um deles, e o motor pode decodificar pelo \
-             outro: a revisão mediu a recusa de um som que cabia"
-        );
-    }
-
-    /// **O `data` não passa do tamanho do RIFF.** Um `data` gravado aos poucos
-    /// (`0xFFFFFFFF`) seguido de outro pedaço: o WebKit para onde o RIFF diz
-    /// que o arquivo acaba, e o piso que contasse até o fim do arquivo passaria
-    /// do real — a revisão mediu 2,28 MB a mais.
-    #[test]
-    fn o_data_do_wav_nao_passa_do_tamanho_do_riff() {
-        let mut wav = wav(1, 8_000, 8, 8_000);
-        if let Some(tamanho) = wav.get_mut(40..44) {
-            tamanho.copy_from_slice(&u32::MAX.to_le_bytes());
-        }
-        wav.extend_from_slice(b"LIST");
-        wav.extend_from_slice(&4_000u32.to_le_bytes());
-        wav.resize(wav.len() + 4_000, 0);
-        assert_eq!(
-            bytes_decodificados_minimos(&wav),
-            Some(segundos(1, 1)),
-            "o piso do WAV contou como som o pedaço que vem depois do fim que o RIFF declara, e \
-             o WebKit para ali: o piso passa do real"
-        );
-    }
-
-    /// O Opus: o pre-skip (3840) é maior que a granule da primeira página de
-    /// dados (1024, um pacote só). O que sai do começo é o maior dos dois: um
-    /// segundo depois do pre-skip, e não 2816 amostras a mais.
-    #[test]
-    fn o_pre_skip_maior_que_a_primeira_pagina_sai_do_piso_do_opus() {
-        let opus = ogg(&opus(2, 3_840), 48_000 + 3_840);
-        assert_eq!(
-            bytes_decodificados_minimos(&opus),
-            Some(segundos(1, 2)),
-            "o piso do Opus tirou do começo só a granule da primeira página, menor que o \
-             pre-skip: o decodificador corta o pre-skip inteiro, e o piso passa do real"
-        );
-    }
-
-    /// O MP3: cem quadros estéreo de 1152 amostras são 115 200; o corte do
-    /// decodificador — o quadro Xing/Info, o atraso e o enchimento do LAME, e o
-    /// atraso do decodificador — tira 1152 + 2 × 4095 + 529 = 9871, a
-    /// conversão de taxa tira um quadro, e o resto, vezes dois canais e quatro
-    /// bytes, é 842 624.
-    #[test]
-    fn o_corte_do_decodificador_sai_do_piso_do_mp3() {
-        assert_eq!(
-            bytes_decodificados_minimos(&mp3(2, None, 100 * 960)),
-            Some(842_624),
-            "o piso do MP3 contou as amostras que o decodificador corta — o quadro do Xing, o \
-             atraso e o enchimento —, e passa do real em todo MP3 comum"
-        );
-    }
-
-    /// **As duas portas do servidor recusam o mesmo som**: a resposta de
-    /// `midia_em_bytes` e a leitura por volume chegam à janela pelo `data:`, e
-    /// a janela o decodifica inteiro, como o do pacote.
-    #[test]
-    fn o_som_do_servidor_que_passa_do_teto_decodificado_e_recusado_antes_de_servir() {
-        let grande = wav(1, 8_000, 8, TETO_DE_MIDIA - 44);
-        let falha = ler_midia_do_servidor(&seele_ffi::base64_de(&grande), None)
-            .err()
-            .expect("o som do servidor que passa do teto decodificado foi servido no `data:`");
-        recusado_pelo_teto("o som do servidor", &falha);
-
-        let (resultado, rastro) = capturar(|| {
-            imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID, Ok(grande), None)
-        });
-        let falha = resultado
-            .err()
-            .expect("o som lido por volume que passa do teto decodificado foi servido");
-        recusado_pelo_teto("o som lido por volume", &falha);
-        assert!(
-            rastro.lines().any(|linha| linha.contains("WARN")
-                && linha.contains("origem=\"volume\"")
-                && linha.contains("som-grande-demais-decodificado")),
-            "a recusa do som lido por volume não chegou ao registro: {rastro}"
-        );
-
-        let curto = ler_midia_do_servidor(&seele_ffi::base64_de(&wav(1, 8_000, 8, 8_000)), None);
-        assert!(
-            curto.is_ok_and(|midia| midia.papel == "som" && midia.uri.is_some()),
-            "o som curto do servidor deixou de sair com o `data:`, que é o único caminho dele \
-             até a janela"
-        );
-    }
-
-    /// **Os números do som decodificado são os da janela.** O Rust repete o
-    /// teto e a taxa de `mods-regiao.js`: com um maior que o da janela, o Rust
-    /// serviria o som que a janela vai recusar depois do pico; com um menor,
-    /// recusaria o que cabe.
-    #[test]
-    fn os_numeros_do_som_decodificado_sao_os_da_janela() {
-        let regiao = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/mods-regiao.js"),
-        )
-        .expect("mods-regiao.js legível")
-        .replace("\r\n", "\n");
-        let taxa = regiao
-            .lines()
-            .find_map(|linha| linha.strip_prefix("const TAXA_DA_DECODIFICACAO = "))
-            .and_then(|valor| numero_em_js(valor.trim_end_matches(';')));
-        assert_eq!(
-            taxa,
-            Some(TAXA_DA_DECODIFICACAO),
-            "`TAXA_DA_DECODIFICACAO` de `mods-regiao.js` não é a do Rust: o piso conta os \
-             quadros numa taxa e a janela decodifica noutra"
-        );
-        for tabela in ["LIMITES_DA_REGIAO", "LIMITES_DO_CARTAO"] {
-            let teto = regiao
-                .split(&format!("const {tabela} = Object.freeze({{"))
-                .nth(1)
-                .and_then(|resto| resto.split("\n});").next())
-                .and_then(|corpo| {
-                    corpo
-                        .lines()
-                        .find_map(|linha| linha.trim().strip_prefix("bytesDeSomDecodificado:"))
-                })
-                .and_then(|valor| numero_em_js(valor.trim().trim_end_matches(',')));
-            assert_eq!(
-                teto,
-                Some(TETO_DO_SOM_DECODIFICADO),
-                "`{tabela}.bytesDeSomDecodificado` não é o teto do Rust: o Rust serve o som que a \
-                 janela recusa depois do pico, ou recusa o que cabe"
-            );
-        }
-    }
-
-    /// Um número de JavaScript escrito como produto de inteiros — `48000`,
-    /// `64 * 1024 * 1024` —, ou nada.
-    fn numero_em_js(texto: &str) -> Option<u64> {
-        texto.split('*').try_fold(1u64, |produto, fator| {
-            produto.checked_mul(fator.trim().replace('_', "").parse().ok()?)
-        })
-    }
-}
-
+#[path = "testes/a_abertura_pelo_launcher.rs"]
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "num teste, o pânico é o relatório"
 )]
-mod a_abertura_pelo_launcher {
-    use super::{atualizacao_permitida, Abertura, FalhaAoAtualizar};
-
-    #[test]
-    fn quem_foi_aberta_pelo_launcher_sabe_disso() {
-        assert!(Abertura::de(Vec::<String>::new(), Some("1")).pelo_lancador);
-        assert!(!Abertura::de(Vec::<String>::new(), None).pelo_lancador);
-        // Só o valor que o launcher põe. Uma variável esquecida no ambiente
-        // com outro valor não esconde o botão de ninguém.
-        assert!(!Abertura::de(Vec::<String>::new(), Some("0")).pelo_lancador);
-    }
-
-    /// Os argumentos continuam sendo lidos como antes, com a variável junto.
-    #[test]
-    fn os_argumentos_do_launcher_continuam_chegando() {
-        let aberta = Abertura::de(
-            ["--hospedar", "--nome-publico", "casa.exemplo.br"].map(str::to_owned),
-            Some("1"),
-        );
-        assert!(aberta.hospedar && aberta.pelo_lancador);
-        assert_eq!(aberta.nome_publico.as_deref(), Some("casa.exemplo.br"));
-    }
-
-    /// Spec 0.16, D-linha-1, valendo também para a 0.16: aberta pelo launcher
-    /// de uma linha mais nova (uma 2.0 abrindo a 1.x), o atualizador dela
-    /// trocaria o app do depósito pela versão do topo do manifesto — outra
-    /// linha. Esconder o botão não basta: o comando recusa.
-    #[test]
-    fn aberta_pelo_launcher_o_atualizador_recusa() {
-        assert!(matches!(
-            atualizacao_permitida(&Abertura::de(Vec::<String>::new(), Some("1"))),
-            Err(FalhaAoAtualizar::AbertaPeloLancador)
-        ));
-        assert!(atualizacao_permitida(&Abertura::de(Vec::<String>::new(), None)).is_ok());
-    }
-}
+mod a_abertura_pelo_launcher;
 
 /// O tipo de um arquivo escolhido para um MOD, ou a recusa com nome.
+#[path = "testes/o_tipo_do_arquivo_escolhido.rs"]
 #[cfg(test)]
-mod o_tipo_do_arquivo_escolhido {
-    use super::{tipo_do_escolhido, FalhaNoMod};
+mod o_tipo_do_arquivo_escolhido;
 
-    const HEIC: &[u8] = include_bytes!("../../../crates/seele-proto/tests/vetores/heic-8x8.heic");
-
-    fn motivo(falha: FalhaNoMod) -> String {
-        match falha {
-            FalhaNoMod::Recusado { motivo } => motivo,
-            outra => panic!("esperava uma recusa com nome, e veio {outra:?}"),
-        }
-    }
-
-    /// **O HEIC das Fotos é recusado pelo nome** (rascunho da API 6, §7.1; o
-    /// bloqueio G do PERFIS): `tipo-recusado:heic`, que o MOD da 6 recebe como
-    /// `tipo-recusado` com `detectado: 'heic'`. Antes ele caía em
-    /// `formato-desconhecido`, que manda procurar defeito num arquivo que não
-    /// tem defeito nenhum.
-    #[test]
-    fn um_heic_e_recusado_com_o_nome_dele() {
-        let falha = tipo_do_escolhido(HEIC).expect_err("o HEIC passou como imagem");
-        assert_eq!(motivo(falha), "tipo-recusado:heic");
-    }
-
-    #[test]
-    fn o_que_o_produto_nao_reconhece_continua_formato_desconhecido() {
-        let falha = tipo_do_escolhido(b"isto nao e imagem").expect_err("texto passou como imagem");
-        assert_eq!(motivo(falha), "formato-desconhecido");
-    }
-
-    #[test]
-    fn uma_imagem_aceita_passa() {
-        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
-        let lido = tipo_do_escolhido(&png).expect("o PNG foi recusado");
-        assert_eq!(lido.media_type, "image/png");
-    }
-}
-
+#[path = "testes/parar_de_hospedar_e_so_o_guardado.rs"]
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "num teste, o pânico é o relatório"
 )]
-mod parar_de_hospedar_e_so_o_guardado {
-    //! A 19 e a 20 da F7: sair não derruba nada, e o verbo que derruba é o
-    //! `parar_de_hospedar`, só para o guardado. O `meu_servidor` diz à entrada
-    //! para onde o VOLTAR AO MEU SERVIDOR leva.
+mod parar_de_hospedar_e_so_o_guardado;
 
-    use super::{meu_servidor_em, parar_de_hospedar_em, Hospedado, MeuServidor, Session};
-    use seele_server::hospedagem::Hospedagem;
-
-    /// Uma sala no lugar do guardado, com a porta dela: este arquivo só sobe
-    /// hospedagem pelo ponto padrão (o guarda
-    /// `o_ponto_de_encontro_de_quem_hospeda`), e um teste não pergunta à VPS de
-    /// produção. O que se prova aqui é o lugar do guardado na sessão.
-    async fn guardado_de_teste(sessao: &Session, servidor: Option<String>) -> u16 {
-        let hospedagem = Hospedagem::iniciar_sala(0, &[2; 32], "casa", None)
-            .await
-            .expect("o guardado de teste não subiu");
-        let porta = hospedagem.endereco().port();
-        sessao.hospedagens.lock().unwrap().guardado = Some(Hospedado::novo(hospedagem, servidor));
-        porta
-    }
-
-    #[tokio::test]
-    async fn parar_de_hospedar_derruba_o_guardado_devolve_a_porta_e_deixa_a_sala() {
-        let sessao = Session::default();
-        let porta = guardado_de_teste(&sessao, None).await;
-        let sala = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
-            .await
-            .expect("a sala não subiu");
-        sessao.hospedagens.lock().unwrap().pessoal = Some(Hospedado::novo(sala, None));
-
-        assert!(parar_de_hospedar_em(&sessao).await, "havia guardado no ar");
-
-        {
-            let hospedagens = sessao.hospedagens.lock().unwrap();
-            assert!(hospedagens.guardado.is_none(), "o guardado ficou no ar");
-            assert!(
-                hospedagens.pessoal.is_some(),
-                "PARAR DE HOSPEDAR derrubou a sala pessoal, que desce pelo «receber ligações»"
-            );
-        }
-        assert!(
-            std::net::UdpSocket::bind(("::", porta)).is_ok(),
-            "o guardado parou e a porta {porta} ficou presa: hospedar de novo não subiria"
-        );
-        assert!(
-            !parar_de_hospedar_em(&sessao).await,
-            "parar duas vezes disse que havia o que parar"
-        );
-
-        let sala = sessao.hospedagens.lock().unwrap().pessoal.take();
-        if let Some(sala) = sala {
-            sala.hospedagem.encerrar().await;
-        }
-    }
-
-    #[tokio::test]
-    async fn meu_servidor_diz_onde_voltar_e_o_nome_que_a_lista_mostra() {
-        let casa = tempfile::tempdir().unwrap();
-        let config = casa.path().to_str().unwrap();
-        let registrado = crate::servidores::criar(config, "Casa da Rafa", "0.16.0");
-        let sessao = Session::default();
-        let meu = |sessao: &Session| meu_servidor_em(&sessao.hospedagens.lock().unwrap(), config);
-        assert_eq!(
-            meu(&sessao),
-            None,
-            "sem guardado no ar, a entrada ofereceu VOLTAR a lugar nenhum"
-        );
-
-        let porta = guardado_de_teste(&sessao, Some(registrado.id.clone())).await;
-        assert_eq!(
-            meu(&sessao),
-            Some(MeuServidor {
-                alvo: format!("127.0.0.1:{porta}"),
-                nome: Some("Casa da Rafa".into()),
-            })
-        );
-
-        // O legado (o banco de sempre, sem registro) volta sem nome, e a frase
-        // diz «o seu servidor».
-        sessao
-            .hospedagens
-            .lock()
-            .unwrap()
-            .guardado
-            .as_mut()
-            .unwrap()
-            .servidor = None;
-        assert_eq!(meu(&sessao).and_then(|meu| meu.nome), None);
-        parar_de_hospedar_em(&sessao).await;
-    }
-}
-
+#[path = "testes/a_saida_despede_as_hospedagens.rs"]
 #[cfg(test)]
-mod a_saida_despede_as_hospedagens {
-    use super::{despedir_das_hospedagens, Hospedado, Session};
-    use seele_server::hospedagem::Hospedagem;
+mod a_saida_despede_as_hospedagens;
 
-    #[tokio::test]
-    async fn as_duas_saem_da_sessao_e_se_despedem() {
-        // O comportamento de cada despedida é da hospedagem (`quem_hospeda_fecha.rs`
-        // e `sala_pessoal.rs`, no `seele-conformance`). O que é deste arquivo:
-        // a saída leva as duas, e não só a que existia antes do Plano 2.
-        let sessao = Session::default();
-        // Duas salas, e não um servidor guardado e uma sala: este arquivo só
-        // sobe hospedagem pelo ponto padrão (o guarda
-        // `o_ponto_de_encontro_de_quem_hospeda`), e um teste não pergunta à VPS
-        // de produção. O que se prova aqui é o lugar de cada uma na sessão.
-        let guardado = Hospedagem::iniciar_sala(0, &[2; 32], "casa", None)
-            .await
-            .expect("a primeira não subiu");
-        let sala = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
-            .await
-            .expect("a sala não subiu");
-        {
-            let mut hospedagens = sessao.hospedagens.lock().expect("o cadeado");
-            hospedagens.guardado = Some(Hospedado::novo(guardado, None));
-            hospedagens.pessoal = Some(Hospedado::novo(sala, None));
-        }
-
-        despedir_das_hospedagens(&sessao, std::time::Duration::from_millis(400)).await;
-
-        let hospedagens = sessao.hospedagens.lock().expect("o cadeado");
-        assert!(hospedagens.guardado.is_none(), "o guardado ficou para trás");
-        assert!(hospedagens.pessoal.is_none(), "a sala ficou para trás");
-    }
-}
-
+#[path = "testes/a_resposta_a_estou_no_meu_servidor.rs"]
 #[cfg(test)]
-mod a_resposta_a_estou_no_meu_servidor {
-    use super::{
-        corpo_de, endereco_desta_maquina, fonte_sem_comentarios, onde_estou_em,
-        porta_desta_maquina, Hospedado, Hospedagens, OndeEstou,
-    };
-    use seele_server::hospedagem::Hospedagem;
-
-    /// A chave do guardado, a da sala e a de um servidor S qualquer.
-    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
-    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
-    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
-
-    #[test]
-    fn onde_estou_pela_chave_e_nao_pelo_endereco() {
-        assert_eq!(
-            onde_estou_em(None, None, Some(GUARDADO), Some(SALA)),
-            OndeEstou::Nenhum,
-            "sem sessão, não há onde estar"
-        );
-        // Os cinco endereços por onde se entra na mesma hospedagem: a chave é
-        // a mesma, e a resposta também. A impressão chega da conexão em
-        // maiúsculas aqui de propósito: a comparação não as diferencia.
-        let fora: Vec<&str> = [
-            "127.0.0.1:8383",
-            "localhost:8383",
-            "[::1]:8383",
-            "192.168.1.20:8383",
-            "casa.exemplo:8383",
-        ]
-        .into_iter()
-        .filter(|endereco| {
-            onde_estou_em(
-                Some(endereco),
-                Some(&GUARDADO.to_ascii_uppercase()),
-                Some(GUARDADO),
-                Some(SALA),
-            ) != OndeEstou::Guardado
-        })
-        .collect();
-        assert!(
-            fora.is_empty(),
-            "a sessão com a chave do guardado, aberta por {fora:?}, não foi dita no guardado: \
-             o próprio link e os outros nomes da mesma máquina deixam de ser o servidor daqui"
-        );
-        assert_eq!(
-            onde_estou_em(
-                Some("127.0.0.1:8385"),
-                Some(SALA),
-                Some(GUARDADO),
-                Some(SALA)
-            ),
-            OndeEstou::Pessoal,
-            "a sessão com a chave da sala não foi dita na sala"
-        );
-    }
-
-    #[test]
-    fn o_mesmo_endereco_com_outra_chave_e_outro_lugar() {
-        // Um servidor S no mesmo endereço do guardado, com outra chave: o
-        // HOSPEDAR COM ESTA da F6 pondo outra versão em 127.0.0.1, ou um
-        // endereço da rede local que hoje é de outra máquina.
-        for endereco in ["127.0.0.1:8383", "192.168.1.20:8383", "127.0.0.1:8385"] {
-            assert_eq!(
-                onde_estou_em(Some(endereco), Some(DE_S), Some(GUARDADO), Some(SALA)),
-                OndeEstou::Outro,
-                "um servidor com outra chave em {endereco} passou por uma das hospedagens desta \
-                 janela: o sim de quem hospeda iria a ele (ADR 0045)"
-            );
-        }
-        // Sem a hospedagem no ar, a chave dela não é de ninguém aqui.
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), Some(GUARDADO), None, Some(SALA)),
-            OndeEstou::Outro,
-            "sem guardado no ar, a sessão foi dita no guardado"
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8385"), Some(SALA), Some(GUARDADO), None),
-            OndeEstou::Outro,
-            "sem sala no ar, a sessão foi dita na sala"
-        );
-        // Com sessão e sem impressão, falha fechado.
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), None, Some(GUARDADO), Some(SALA)),
-            OndeEstou::Outro,
-            "uma sessão sem a chave conferida foi dita numa hospedagem desta janela"
-        );
-    }
-
-    #[test]
-    fn um_endereco_desta_maquina_como_a_pessoa_o_escreve() {
-        for (escrito, porta) in [
-            ("127.0.0.1:8383", Some(8383)),
-            ("127.0.0.1", Some(8383)),
-            ("localhost:8385", Some(8385)),
-            ("localhost", Some(8383)),
-            ("[::1]:8385", Some(8385)),
-            ("[::1]", Some(8383)),
-            ("  127.0.0.1:8383 ", Some(8383)),
-            ("192.168.0.7:8383", None),
-            ("casa.exemplo", None),
-            ("127.0.0.1.casa.exemplo:8383", None),
-        ] {
-            assert_eq!(porta_desta_maquina(escrito), porta, "{escrito:?}");
-        }
-    }
-
-    #[test]
-    fn a_lista_de_visitados_continua_sem_os_enderecos_desta_maquina() {
-        // A regra da lista é outra pergunta, e ela não mudou: um endereço desta
-        // máquina não é lugar aonde se volta (o `hospedado_aqui` de antes).
-        for desta in ["127.0.0.1:8383", "localhost", "[::1]:8385", "127.0.0.1"] {
-            assert!(endereco_desta_maquina(desta), "{desta:?}");
-        }
-        for de_fora in ["192.168.0.7:8383", "casa.exemplo:8383", "203.0.113.7"] {
-            assert!(!endereco_desta_maquina(de_fora), "{de_fora:?}");
-        }
-    }
-
-    /// **As impressões das duas hospedagens, cada uma no seu lugar** (lote X da
-    /// F5, a impressão, commit D). `onde_estou_em` recebe a do guardado em
-    /// terceiro e a da sala em quarto; o par trocado diria `Guardado` na sala e
-    /// gravaria nela o sim de quem hospeda.
-    ///
-    /// Duas salas, e não um servidor guardado e uma sala, pela razão que
-    /// `a_saida_despede_as_hospedagens` escreve: este arquivo só sobe
-    /// hospedagem pelo ponto padrão. Sementes diferentes, chaves diferentes.
-    #[tokio::test]
-    async fn as_impressoes_saem_na_ordem_do_guardado_e_da_sala() {
-        let guardado = Hospedagem::iniciar_sala(0, &[3; 32], "casa", None)
-            .await
-            .expect("o guardado não subiu");
-        let sala = Hospedagem::iniciar_sala(0, &[4; 32], "dona", None)
-            .await
-            .expect("a sala não subiu");
-        let do_guardado = guardado.impressao_digital().to_owned();
-        let da_sala = sala.impressao_digital().to_owned();
-        assert_ne!(
-            do_guardado, da_sala,
-            "as duas hospedagens saíram com a mesma chave, e este teste não mede a ordem"
-        );
-
-        let mut hospedagens = Hospedagens {
-            guardado: Some(Hospedado::novo(guardado, None)),
-            pessoal: Some(Hospedado::novo(sala, None)),
-        };
-        assert_eq!(
-            hospedagens.impressoes(),
-            (Some(do_guardado), Some(da_sala)),
-            "`Hospedagens::impressoes` não devolve a chave do guardado primeiro e a da sala \
-             depois: a sessão na sala passa por guardado, e o sim de quem hospeda vai a ela \
-             (ADR 0045)"
-        );
-
-        for hospedado in [hospedagens.guardado.take(), hospedagens.pessoal.take()]
-            .into_iter()
-            .flatten()
-        {
-            hospedado.hospedagem.encerrar().await;
-        }
-    }
-
-    /// **A ligação de `onde_estou_na`** (commit D). Os testes acima são puros:
-    /// recebem as impressões prontas. Este prende o que a função da sessão
-    /// passa a eles: a chave que a **conexão** conferiu em segundo, e as das
-    /// hospedagens, na ordem de `impressoes()`, em terceiro e quarto. Trocar a
-    /// chave da sessão pela do guardado diria `Guardado` em qualquer sessão
-    /// com o guardado de pé, e o sim de quem hospeda iria a S.
-    ///
-    /// Olha a chamada e as ligações que a alimentam, sem espaço e sem as
-    /// linhas de comentário, com as agulhas montadas por `concat!`.
-    #[test]
-    fn onde_estou_na_passa_a_chave_da_conexao_e_as_das_hospedagens() {
-        let fonte = fonte_sem_comentarios();
-        let corpo: String = corpo_de(&fonte, concat!("fn onde_estou_na", "(session"))
-            .chars()
-            .filter(|letra| !letra.is_whitespace())
-            .collect::<String>()
-            // A vírgula final que o rustfmt põe numa chamada partida em linhas.
-            .replace(",)", ")");
-        let ligacao = |nome: &str| {
-            corpo
-                .split_once(nome)
-                .and_then(|(_, depois)| depois.split_once(';'))
-                .map(|(ligacao, _)| ligacao.to_owned())
-                .unwrap_or_default()
-        };
-        let da_sessao = ligacao(concat!("let", "impressao="));
-        let das_hospedagens = ligacao(concat!("let(guardado,", "pessoal)="));
-        assert!(
-            da_sessao.starts_with(concat!("session.connection", "()"))
-                && da_sessao.contains(concat!(".impressao_do_", "servidor()"))
-                && das_hospedagens.contains(concat!(".impressoes", "()"))
-                && corpo.contains(concat!(
-                    "onde_estou_em(endereco.as_deref(),",
-                    "impressao.as_deref(),guardado.as_deref(),pessoal.as_deref())"
-                )),
-            "`onde_estou_na` deixou de passar a `onde_estou_em` a chave que a conexão conferiu \
-             em segundo e as das hospedagens, na ordem de `impressoes()`, em terceiro e \
-             quarto: a sessão em S ou na sala passa por guardado, e o sim de quem hospeda vai \
-             a ela (ADR 0045):\n{corpo}"
-        );
-    }
-}
+mod a_resposta_a_estou_no_meu_servidor;
 
 /// **A P7b: a API que o manifesto declara chega à coluna do banco** por quem a
 /// grava a partir da tela.
@@ -23352,140 +14844,9 @@ mod a_resposta_a_estou_no_meu_servidor {
 /// os dois comandos usam, até a linha que o banco devolve; o guarda de fonte
 /// prende os dois comandos na mesma construção, que é o que sobra entre a tela e
 /// este teste.
+#[path = "testes/a_api_do_mod_habilitado.rs"]
 #[cfg(test)]
-mod a_api_do_mod_habilitado {
-    use super::*;
-
-    /// Um pacote no cache de uma casa temporária, com a API que o manifesto
-    /// declara. Devolve a casa e o hash do pacote.
-    fn pacote_no_cache(api: u32) -> (std::path::PathBuf, String) {
-        // Uma pasta por chamada: os testes deste módulo rodam em paralelo no mesmo
-        // processo, e uma pasta só deixaria um apagar o pacote do outro.
-        static QUAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = QUAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let raiz = std::env::temp_dir().join(format!("seele-app-p7b-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&raiz);
-        let fonte = raiz.join("fonte");
-        std::fs::create_dir_all(fonte.join("servidor")).expect("temporário");
-        std::fs::write(
-            fonte.join("mod.json"),
-            format!(
-                r#"{{"schema":1,"id":"seele/p7b","version":"1.0.0","api":{api},"repo":"https://github.com/seele/p7b","reach":[],"server":"servidor/main.js"}}"#
-            ),
-        )
-        .expect("manifesto");
-        std::fs::write(
-            fonte.join("servidor/main.js"),
-            "globalThis.aoPedir = () => '';",
-        )
-        .expect("metade de servidor");
-        let lido =
-            seele_ffi::mods::ler_pasta(&fonte.to_string_lossy()).expect("pacote válido recusado");
-        let casa = raiz.join("casa");
-        let guardado = casa.join(seele_ffi::mods::PACOTES).join(&lido.hash);
-        std::fs::create_dir_all(guardado.join("servidor")).expect("cache");
-        for arquivo in ["mod.json", "servidor/main.js"] {
-            std::fs::copy(fonte.join(arquivo), guardado.join(arquivo)).expect("copiar");
-        }
-        (casa, lido.hash)
-    }
-
-    #[test]
-    fn exigir_um_mod_grava_no_banco_a_api_que_o_manifesto_declara() {
-        // **Na linha do corte, só a 6 lê** (`APIS_ACEITAS = [6]`): a 4 que este
-        // teste usava na versao/0.16 é recusada antes, com `api-too-old`. O
-        // caminho inteiro, do pacote em disco à linha do banco, vai com a 6, que
-        // não é o zero de «não preenchida»; e o «a do manifesto, e não a deste
-        // build» é conferido na construção, com outra API posta no pacote lido.
-        let declarada = seele_ffi::mods::MOD_API_VERSION;
-        let (casa, hash) = pacote_no_cache(declarada);
-        let instalado = seele_ffi::mods::ler_por_hash(&casa.to_string_lossy(), &hash)
-            .expect("o pacote não foi achado por hash");
-        let mut de_outra_api = instalado.clone();
-        de_outra_api.api = 5;
-        assert_eq!(
-            habilitado_de(de_outra_api).api,
-            5,
-            "a construção gravou a API deste build, e não a que o pacote lido declara"
-        );
-        // **E o `tema` também** (migração 16): o conjunto o gravava falso, à mão,
-        // para todo MOD, e a tela de aceite não diria que um MOD de tema pinta a
-        // aparência do servidor. Os dois comandos passam por esta construção.
-        let mut de_tema = instalado.clone();
-        de_tema.tema = true;
-        assert!(
-            habilitado_de(de_tema).tema,
-            "a construção não gravou o `tema` que o pacote lido declara"
-        );
-        let banco = seele_server::persistence::Persistence::open(
-            &seele_server::persistence::Location::Memory,
-        )
-        .expect("banco em memória");
-        seele_server::persistence::mods::enable(&banco, &habilitado_de(instalado))
-            .expect("exigir o MOD");
-        let gravada = seele_server::persistence::mods::enabled(&banco)
-            .expect("ler os exigidos")
-            .into_iter()
-            .find(|exigido| exigido.id == "seele/p7b")
-            .map(|exigido| exigido.api);
-        let _ = std::fs::remove_dir_all(casa.parent().unwrap_or(&casa));
-        assert_eq!(
-            gravada,
-            Some(declarada),
-            "a coluna `api` não recebeu a API que o manifesto declara: o anúncio diria outra"
-        );
-    }
-
-    /// A terceira escrita da API, a da lista do cache que a tela de MODs
-    /// desenha: o mesmo pacote, pelo mesmo `listar_por_conteudo` do comando.
-    #[test]
-    fn a_lista_do_cache_mostra_a_api_que_o_manifesto_declara() {
-        // A 6, pela razão do teste de cima; e a construção, com outra API.
-        let declarada = seele_ffi::mods::MOD_API_VERSION;
-        let (casa, hash) = pacote_no_cache(declarada);
-        let pasta = casa.to_string_lossy().into_owned();
-        let instalado = seele_ffi::mods::listar_por_conteudo(&pasta)
-            .into_iter()
-            .find(|instalado| instalado.hash == hash)
-            .expect("o pacote não está na lista do cache");
-        let mut de_outra_api = instalado.clone();
-        de_outra_api.api = 5;
-        assert_eq!(
-            pacote_no_cache_de(&pasta, de_outra_api, &[]).api,
-            5,
-            "a lista do cache mostra a API deste build, e não a que o pacote lido declara"
-        );
-        let na_tela = pacote_no_cache_de(&pasta, instalado, &[]);
-        let _ = std::fs::remove_dir_all(casa.parent().unwrap_or(&casa));
-        assert_eq!(
-            na_tela.api, declarada,
-            "a lista do cache mostra outra API que a do manifesto, e a tela e o banco discordam"
-        );
-    }
-
-    #[test]
-    fn os_dois_comandos_que_gravam_passam_pela_mesma_construcao() {
-        let fonte = fonte_sem_comentarios();
-        // Montada, e não escrita: escrita aqui, a própria agulha seria achada
-        // no texto deste teste.
-        let a_mao = concat!("EnabledMod", " {");
-        for comando in [
-            "async fn habilitar_mod(",
-            "async fn aplicar_conjunto_de_mods(",
-        ] {
-            let corpo = corpo_de(&fonte, comando);
-            assert!(
-                corpo.contains("habilitado_de(") && !corpo.contains(a_mao),
-                "`{comando}` deixou de gravar pela construção que leva a API do manifesto"
-            );
-        }
-        let lista = corpo_de(&fonte, "async fn pacotes_no_cache(");
-        assert!(
-            lista.contains("pacote_no_cache_de(") && !lista.contains(concat!("PacoteNoCache", " {")),
-            "`pacotes_no_cache` deixou de montar a lista pela construção que leva a API do manifesto"
-        );
-    }
-}
+mod a_api_do_mod_habilitado;
 
 /// **O comando `tunel_entrar` confere o que é do Rust** (API 8, parte 2): a
 /// geração, e que o MOD está de pé nela com o poder `porta` no manifesto que o
@@ -23494,135 +14855,10 @@ mod a_api_do_mod_habilitado {
 ///
 /// A recusa é sempre um nome da lista fechada, nunca a variante de um erro de
 /// conexão: é o que o MOD e a faixa leem.
+#[path = "testes/o_tunel_de_jogo_pelo_app.rs"]
 #[cfg(test)]
-mod o_tunel_de_jogo_pelo_app {
-    use super::{entrar_no_tunel_do_mod, EstadoNativo, FalhaNoMod, InstanciaNativa, Session};
-    use crate::executor::{ExecutorQuickJs, Limites};
+mod o_tunel_de_jogo_pelo_app;
 
-    const SEM_SESSAO: crate::sessoes::CarimboDaJanela = crate::sessoes::CarimboDaJanela {
-        sessao: 0,
-        geracao: 0,
-    };
-
-    fn motivo(falha: &FalhaNoMod) -> &str {
-        match falha {
-            FalhaNoMod::Recusado { motivo } => motivo,
-            outra => panic!("esperava `Recusado`, veio {outra:?}"),
-        }
-    }
-
-    /// Uma sessão viva (geração 1) com um MOD de pé que pode chamar `capacidades`.
-    fn sessao_com(id: &str, capacidades: Vec<&'static str>) -> (Session, u64) {
-        let sessao = Session::default();
-        let geracao = sessao.revogar();
-        let instancia = InstanciaNativa {
-            id: id.to_owned(),
-            geracao,
-            hash: "a".repeat(64),
-            capacidades,
-            estado: EstadoNativo::Ativa,
-            executor: ExecutorQuickJs::novo(Limites::default()).expect("motor"),
-            pendentes: std::collections::VecDeque::new(),
-            bytes_pendentes: 0,
-            avisos: std::collections::VecDeque::new(),
-            avisos_perdidos: 0,
-            parou: false,
-            codigo: None,
-            avisado: false,
-        };
-        sessao
-            .mods_nativos
-            .lock()
-            .expect("tabela")
-            .guardar(instancia);
-        (sessao, geracao)
-    }
-
-    fn rodar<T>(futuro: impl std::future::Future<Output = T>) -> T {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(futuro)
-    }
-
-    #[test]
-    fn a_sessao_que_acabou_e_recusada_antes_de_olhar_o_mod() {
-        let sessao = Session::default();
-        // Geração 0 nunca vale; e uma morta (1, depois revogada) também não.
-        let viva = sessao.revogar();
-        sessao.revogar();
-        for geracao in [0, viva] {
-            let falha = rodar(entrar_no_tunel_do_mod(
-                &sessao,
-                SEM_SESSAO,
-                geracao,
-                "x/jogo",
-                "n".into(),
-            ))
-            .expect_err("uma geração morta não entra");
-            assert_eq!(motivo(&falha), "sessao-encerrada", "geração {geracao}");
-        }
-    }
-
-    #[test]
-    fn um_mod_sem_o_poder_porta_e_recusado_com_o_nome() {
-        // De pé, na geração viva, mas com as capacidades da API e sem `tunel`.
-        let (sessao, geracao) = sessao_com(
-            "x/sem-porta",
-            seele_ffi::mods::capacidades_da_api(seele_ffi::mods::MOD_API_VERSION).to_vec(),
-        );
-        let falha = rodar(entrar_no_tunel_do_mod(
-            &sessao,
-            SEM_SESSAO,
-            geracao,
-            "x/sem-porta",
-            "n".into(),
-        ))
-        .expect_err("sem o poder porta não entra");
-        assert_eq!(motivo(&falha), "mod-sem-porta");
-        // Um MOD que não está de pé tampouco.
-        let falha = rodar(entrar_no_tunel_do_mod(
-            &sessao,
-            SEM_SESSAO,
-            geracao,
-            "x/ninguem",
-            "n".into(),
-        ))
-        .expect_err("quem não está de pé não entra");
-        assert_eq!(motivo(&falha), "mod-sem-porta");
-    }
-
-    #[test]
-    fn o_poder_porta_passa_o_portao_e_so_para_na_falta_de_sessao() {
-        // `tunel` nas capacidades: passa pelo portão do Rust, e a recusa que
-        // sobra é a da conexão — que esta sessão de teste não tem. A diferença
-        // para `mod-sem-porta` é o que prova que o portão deixou passar.
-        let (sessao, geracao) = sessao_com("x/jogo", vec!["tunel"]);
-        let falha = rodar(entrar_no_tunel_do_mod(
-            &sessao,
-            SEM_SESSAO,
-            geracao,
-            "x/jogo",
-            "n".into(),
-        ))
-        .expect_err("sem conexão não há porta");
-        assert_eq!(motivo(&falha), "sessao-encerrada");
-    }
-
-    #[test]
-    fn o_poder_de_outra_geracao_ou_de_outro_mod_nao_vale() {
-        let (sessao, geracao) = sessao_com("x/jogo", vec!["tunel"]);
-        let tabela = sessao.mods_nativos.lock().expect("tabela");
-        assert!(tabela.pode(geracao, "x/jogo", "tunel"));
-        assert!(
-            !tabela.pode(geracao + 1, "x/jogo", "tunel"),
-            "outra geração"
-        );
-        assert!(!tabela.pode(geracao, "x/outro", "tunel"), "outro MOD");
-        assert!(
-            !tabela.pode(geracao, "x/jogo", "retrato"),
-            "outra capacidade"
-        );
-    }
-}
+#[path = "testes/imagem_de_perfil_para_subir_testes.rs"]
+#[cfg(test)]
+mod imagem_de_perfil_para_subir_testes;

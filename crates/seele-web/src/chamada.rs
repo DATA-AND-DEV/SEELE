@@ -44,6 +44,9 @@ fn pedido_verificado(pedido: &Pedido, agora: u64) -> bool {
 struct Configuracao {
     origem_dos_links: String,
     url_do_encontro: String,
+    /// O ponto de encontro do produto, `máquina:porta`: é por ele que a página
+    /// acha a sala pessoal de um código (ADR 0068), com o STUN e o sinal dele.
+    ponto: String,
     ice_servers: [ServidorIce; 1],
 }
 
@@ -61,6 +64,7 @@ impl Configuracao {
         json!({
             "origem_dos_links": self.origem_dos_links,
             "url_do_encontro": self.url_do_encontro,
+            "ponto": self.ponto,
             "ice_servers": servidores,
         })
     }
@@ -69,6 +73,11 @@ impl Configuracao {
         Self {
             origem_dos_links: format!("https://{}", seele_proto::uri::ORIGEM_DO_NAVEGADOR),
             url_do_encontro: format!("https://{}/chamada/1", seele_proto::encontro::PONTO_PADRAO),
+            ponto: format!(
+                "{}:{}",
+                seele_proto::encontro::PONTO_PADRAO,
+                seele_proto::encontro::PORTA_PADRAO
+            ),
             ice_servers: [ServidorIce {
                 urls: format!(
                     "stun:{}:{}",
@@ -233,7 +242,15 @@ pub fn operar(texto: &str) -> Value {
             };
             match (medidas("largura"), medidas("altura")) {
                 (Some(largura), Some(altura)) => {
-                    match crate::tela::abertura(1, false, largura, altura) {
+                    // **Janela, também para a câmera.** A chamada pessoal não
+                    // negocia número de protocolo, e um par da 0.19 recusa a
+                    // fonte 2: a imagem vai com a fonte que todo par lê.
+                    match crate::tela::abertura(
+                        1,
+                        seele_proto::screen::ScreenSource::Window,
+                        largura,
+                        altura,
+                    ) {
                         Ok(bytes) => json!({"bytes":bytes}),
                         Err(_) => json!({"erro":"Invalido"}),
                     }
@@ -257,6 +274,7 @@ mod tests {
             json!({
                 "origem_dos_links": format!("https://{}", seele_proto::uri::ORIGEM_DO_NAVEGADOR),
                 "url_do_encontro": format!("https://{}/chamada/1", seele_proto::encontro::PONTO_PADRAO),
+                "ponto": format!("{}:{}", seele_proto::encontro::PONTO_PADRAO, seele_proto::encontro::PORTA_PADRAO),
                 "ice_servers": [{"urls": format!("stun:{}:{}", seele_proto::encontro::PONTO_PADRAO, seele_proto::encontro::PORTA_PADRAO)}],
             })
         );

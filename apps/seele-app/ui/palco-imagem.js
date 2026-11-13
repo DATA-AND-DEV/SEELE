@@ -667,6 +667,11 @@ function esquecerAberturas(sessao) {
  */
 function palcoDeFora(sessao, geracao, evento) {
   if (!evento || typeof evento !== "object") return;
+  // A transmissão desta pessoa que caiu numa sessão de fora: anotada, para a
+  // volta dizer o que houve (`camada-compartilhar.js`). Sem isto o evento era
+  // desviado com os outros, e a volta achava o botão em COMPARTILHAR sem
+  // explicação.
+  if (typeof anotarAQuedaDaTela === "function") anotarAQuedaDaTela(sessao, evento);
   if (evento.ScreenOpened) {
     const { screen, width, height } = evento.ScreenOpened;
     registrarAbertura(sessao, geracao, { tela: screen, largura: width, altura: height });
@@ -1003,10 +1008,18 @@ listen("seele://event", (evento) => {
   const carga = evento.payload;
   if (!carga || typeof carga !== "object") return;
   if (carga.ScreenOpened) {
-    const { screen, width, height } = carga.ScreenOpened;
-    abrirImagemDaTela(screen, width, height).catch((falha) =>
+    const { screen, width, height, source } = carga.ScreenOpened;
+    const abrir = () => abrirImagemDaTela(screen, width, height).catch((falha) =>
       console.warn("abrir a imagem da tela:", falha),
     );
+    // **A própria câmera não passa pelo decodificador.** Quem a ligou se vê
+    // pela mídia desta janela (`camera-previa`), e os quadros dela não voltam
+    // do núcleo: armar o palco aqui seria esperar uma imagem que não vem.
+    if (source === "camera") {
+      aAberturaEDaMinhaCamera(screen).then((minha) => { if (!minha) abrir(); });
+    } else {
+      abrir();
+    }
   } else if (carga.ScreenFrame) {
     const { screen, key, data } = carga.ScreenFrame;
     quadroDaTela(screen, key, data);
@@ -1086,9 +1099,9 @@ function desenharTransmissoes(snapshot) {
   // Quem transmite não assiste a si mesmo pelo servidor — o espelho dele é
   // local —, então a própria transmissão não entra na escolha.
   const alheias = lista.filter((transmissao) => !transmissao.e_minha);
-  onde.hidden = alheias.length === 0;
+  porOEscondido(onde, alheias.length === 0);
   if (onde.hidden) {
-    onde.replaceChildren();
+    if (onde.firstChild) onde.replaceChildren();
     return;
   }
 
@@ -1132,7 +1145,7 @@ function desenharTransmissoes(snapshot) {
       ? `pedido; a imagem começa no próximo quadro-chave de ${quem}`
       : noPalco
         ? `${quem} está no palco`
-        : `ver a tela de ${quem}`;
+        : palavrasDaTransmissao(transmissao.tela).ver(quem);
     botao.addEventListener("click", () => {
       trocarDeTransmissao(transmissao.tela).catch((falha) =>
         console.warn("trocar de transmissão:", falha),

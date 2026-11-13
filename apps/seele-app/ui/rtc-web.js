@@ -151,6 +151,12 @@ const FALHA_DO_ENLACE = Object.freeze({
   pontoRecusou: "PontoRecusou",
   /** O ponto não respondeu ao sinal (fora do ar, ou sem HTTPS). */
   sinalMudo: "SinalMudo",
+  /**
+   * O ponto achou a sala pessoal e não disse a impressão DTLS dela (ADR 0068):
+   * o ponto, ou o SEELE de quem hospeda, é de antes da 1.0. Sem ela o navegador
+   * não fecha a conexão segura com a sala.
+   */
+  salaSemImpressao: "SalaSemImpressao",
   /** Tudo respondeu, e o caminho direto não abriu: NAT simétrico, provavelmente. */
   caminhoNaoAbriu: "CaminhoNaoAbriu",
   /** O aperto passou do prazo por outro motivo. */
@@ -597,6 +603,60 @@ function criarAFilaDoVolume(limiar = LIMIAR_DO_VOLUME) {
   };
 }
 
+/**
+ * **Quanto a página espera o anfitrião fechar um "b"** depois de os dois fins
+ * passarem, antes de fechá-lo ela mesma. Não é espera de ninguém: a resposta já
+ * foi entregue a quem lia, e o prazo só existe para um canal não ficar aberto
+ * para sempre diante de um anfitrião que não fecha. Ver [`fechoDoB`].
+ */
+const PRAZO_DO_FECHO_DO_B_MS = 5000;
+
+/**
+ * **Quem fecha um "b" é o anfitrião, e não a página.** O anfitrião fecha o canal
+ * sozinho quando os dois fins passaram (`seele-enlace`, `ponta.rs`: «um "b"
+ * fecha quando os dois fins passaram»). A página também fechava, na mesma hora,
+ * e os dois fechos se cruzavam: o SCTP do anfitrião (`sctp-proto`) responde ao
+ * reset da página com um reset recíproco mesmo já tendo mandado o dele, e esse
+ * segundo reset chegava depois de o navegador dar o canal por fechado e soltar
+ * o número dele. O "b" SEGUINTE, aberto nesse instante, ganhava o mesmo número
+ * e morria com o reset do anterior, antes de abrir: `ler_imagem_mod` respondia
+ * `caiu` no lugar da imagem (ou da recusa do MOD). Medido em 12/11 na
+ * `sessao-no-navegador`, com pares de leituras em laço: 15 `caiu` em 1 400
+ * pares com a página fechando, 0 em 800 sem ela fechar.
+ *
+ * Por isso a página só anota os fins. Passados os dois, ela dá ao anfitrião
+ * [`PRAZO_DO_FECHO_DO_B_MS`]; se o canal ainda estiver aberto, fecha ela, e
+ * conta (`aoVencer`): um anfitrião que não fecha é um defeito que tem de aparecer.
+ */
+function fechoDoB(canal, { prazoMs = PRAZO_DO_FECHO_DO_B_MS, aoVencer = null } = {}) {
+  let dele = false;
+  let meu = false;
+  let relogio = null;
+  canal.addEventListener("close", () => {
+    if (relogio !== null) clearTimeout(relogio);
+  });
+  const ver = () => {
+    if (!dele || !meu || relogio !== null || canal.readyState !== "open") return;
+    relogio = setTimeout(() => {
+      if (canal.readyState !== "open") return;
+      aoVencer?.();
+      esvaziar(canal).then(() => canal.close());
+    }, prazoMs);
+  };
+  return {
+    /** O fim do anfitrião foi lido até o fim por quem lia. */
+    fimDele() {
+      dele = true;
+      ver();
+    },
+    /** O fim desta página saiu. */
+    fimMeu() {
+      meu = true;
+      ver();
+    },
+  };
+}
+
 /** Espera o canal esvaziar (para o fim não ser cortado pelo `close`). */
 function esvaziar(canal) {
   if (canal.readyState !== "open" || canal.bufferedAmount === 0) return Promise.resolve();
@@ -898,6 +958,12 @@ function resumirCaminhoRtc(estatisticas) {
  * - `alvos`: os endereços do convite, na ordem dele (`alvo` e `alt=`), todos
  *   no mesmo agente ICE;
  * - `impressao`: o `fp=` em hex, que vira o `a=fingerprint` do anfitrião;
+ * - `codigo`: o código de uma pessoa, no lugar dos `alvos` e da `impressao`
+ *   (ADR 0068): a sala pessoal dela não tem endereço nem impressão num convite.
+ *   O ponto diz onde ela mora e com que certificado DTLS atende, e só então a
+ *   descrição do anfitrião é escrita (`descreverASala`). **A impressão que o
+ *   ponto dá é pista**: quem a autentica é a apresentação, que a sessão confere
+ *   contra o código antes do `Hello` (`impressaoDoAnfitriao`);
  * - `certificado`: o de [`prepararCertificadoDtls`];
  * - `bilhete`: `{ ponto, aviso }` do `enc=`, ou `null`. Sem ele não há STUN
  *   nem sinal, e só o caminho direto é tentado;
@@ -910,6 +976,7 @@ function resumirCaminhoRtc(estatisticas) {
 function criarEnlaceRtc({
   alvos,
   impressao,
+  codigo = null,
   certificado,
   bilhete = null,
   sinal = null,
@@ -917,6 +984,7 @@ function criarEnlaceRtc({
   aoMudar = () => {},
   prazo = PRAZO_DO_ENLACE_MS,
   limiarDoVolume = LIMIAR_DO_VOLUME,
+  prazoDoFechoDoB = PRAZO_DO_FECHO_DO_B_MS,
   fetch: buscar = (...args) => globalThis.fetch(...args),
 }) {
   // O parâmetro com padrão, num nome declarado: o guarda das chamadas
@@ -924,6 +992,9 @@ function criarEnlaceRtc({
   // vê a desestruturação de várias linhas.
   const enderecoDoSinal = urlDoSinal;
   const credencial = sortearCredencialIce();
+  // A impressão com que o DTLS foi (ou vai ser) conferido: a do convite, ou, na
+  // sala pessoal, a que o ponto disse (`descreverASala`).
+  let impressaoDoAnfitriao = impressao ?? null;
   const pc = new RTCPeerConnection({
     iceServers: servidoresIce({ ponto: bilhete?.ponto ?? null }),
     certificates: [certificado.certificado],
@@ -943,6 +1014,9 @@ function criarEnlaceRtc({
     // Mensagens que chegaram num canal desta página antes de quem o lê se ligar
     // a ele (guardadas e entregues em ordem, e não perdidas).
     mensagensAntesDoOuvinte: 0,
+    // Os "b" que a página teve de fechar porque o anfitrião não fechou no
+    // prazo ([`fechoDoB`]). Fora de zero é um anfitrião que não fecha.
+    fechosPeloPrazo: 0,
     // O crédito (0x04): os anúncios desta página, os do anfitrião, e quantas
     // vezes um pedaço esperou crédito para sair.
     creditosAnunciados: 0,
@@ -1188,6 +1262,13 @@ function criarEnlaceRtc({
       }
     });
     await pc.setLocalDescription({ type: "offer", sdp });
+    // **A sala pessoal**: sem convite não há endereço nem impressão para a
+    // descrição do anfitrião. Ela só é escrita depois de o ponto dizer as duas
+    // coisas (`descreverASala`); até lá o agente só colhe os próprios candidatos.
+    if (codigo) {
+      aoMudar({ Discando: { candidatos: 0 } });
+      return mid;
+    }
     // Os endereços IP do convite vão na própria descrição, como no spike C; um
     // nome (DDNS) vai depois, pelo `addIceCandidate`, para um que o navegador
     // recuse não derrubar a descrição. Sem ponto, a lista acabou ali
@@ -1262,7 +1343,7 @@ function criarEnlaceRtc({
       visto.sinal = { semSinal: true };
       return;
     }
-    const montado = sinal.montar({ impressao, credencial, candidatos });
+    const montado = sinal.montar(codigo ? { codigo, credencial, candidatos } : { impressao, credencial, candidatos });
     if (!montado.corpo) {
       visto.sinal = { erro: montado.erro };
       return;
@@ -1301,7 +1382,33 @@ function criarEnlaceRtc({
     if (fechado) return;
     const lido = sinal.ler(texto);
     visto.sinal = lido;
-    if (lido.aqui) await somarCandidatos(mid, [lido.aqui.endereco, ...(lido.aqui.dicas ?? [])]);
+    if (!lido.aqui) return;
+    const achados = [lido.aqui.endereco, ...(lido.aqui.dicas ?? [])];
+    if (codigo && !pc.remoteDescription) await descreverASala(mid, lido.aqui, achados);
+    else await somarCandidatos(mid, achados);
+  }
+
+  /**
+   * **A descrição do anfitrião de uma sala pessoal**, escrita com o que o ponto
+   * disse: o endereço, as dicas e a impressão do certificado DTLS dela (ADR
+   * 0068). Um `AQUI` sem a impressão é o de um ponto, ou de uma sala, de antes
+   * da 1.0: a tentativa acaba com `SalaSemImpressao`, e nada é discado.
+   */
+  async function descreverASala(mid, aqui, enderecos) {
+    if (typeof aqui.impressao !== "string" || !/^[0-9a-f]{64}$/.test(aqui.impressao)) {
+      visto.sinal = { ...visto.sinal, semImpressao: true };
+      return;
+    }
+    impressaoDoAnfitriao = aqui.impressao;
+    const separados = enderecos
+      .map((alvo) => ({ alvo, separado: separarAlvo(alvo, 8383) }))
+      .filter(({ separado }) => separado && separado.familia !== 0);
+    contas.candidatosRecusados += enderecos.length - separados.length;
+    const linhas = separados.map(({ separado }, indice) => `a=${linhaDoCandidato(indice, separado)}`);
+    visto.candidatos.push(...separados.map(({ alvo }) => alvo));
+    const remota = descricaoDoAnfitriao({ mid, credencial, impressao: impressaoDoAnfitriao, candidatos: linhas, acabou: false });
+    await pc.setRemoteDescription({ type: "answer", sdp: remota });
+    pc.sctp?.transport?.addEventListener("statechange", olharOEstado);
   }
 
   async function chamarPeloPonto(mid) {
@@ -1334,7 +1441,7 @@ function criarEnlaceRtc({
         visto.chamadasAoPonto = chamadas;
         visto.candidatosAnunciados = anunciados.size;
         await anunciarPeloPonto(mid, url, candidatos);
-        if (visto.sinal?.ninguem || visto.sinal?.recusa || visto.sinal?.erro || visto.sinal?.semSinal) return;
+        if (visto.sinal?.ninguem || visto.sinal?.recusa || visto.sinal?.erro || visto.sinal?.semSinal || visto.sinal?.semImpressao) return;
       }
       if (fechado || performance.now() >= ate || anunciados.size >= LIMITE_DE_ANUNCIADOS) return;
       // Depois de complete ainda podemos ter recebido um candidato durante
@@ -1359,6 +1466,7 @@ function criarEnlaceRtc({
     if (s?.ninguem) return FALHA_DO_ENLACE.ninguemNoPonto;
     if (s?.calado) return FALHA_DO_ENLACE.anfitriaoCalado;
     if (s?.recusa) return FALHA_DO_ENLACE.pontoRecusou;
+    if (s?.semImpressao) return FALHA_DO_ENLACE.salaSemImpressao;
     if (!visto.refletido) return FALHA_DO_ENLACE.semRefletido;
     if (s?.mudo || s?.semSinal || s?.erro || s?.pendente) return FALHA_DO_ENLACE.sinalMudo;
     return FALHA_DO_ENLACE.caminhoNaoAbriu;
@@ -1385,7 +1493,9 @@ function criarEnlaceRtc({
       const tentativa = (async () => {
         const mid = await discar();
         if (bilhete) {
-          const direto = await Promise.race([
+          // Uma sala pessoal não tem caminho direto para esperar: sem o ponto
+          // não há endereço nem impressão, e a chamada sai na hora.
+          const direto = codigo ? false : await Promise.race([
             aberto.then(
               () => true,
               () => true,
@@ -1393,6 +1503,10 @@ function criarEnlaceRtc({
             new Promise((resolver) => setTimeout(() => resolver(false), ESPERA_DO_DIRETO_MS)),
           ]);
           if (!direto && !fechado) await chamarPeloPonto(mid);
+          // Sem a descrição da sala não há o que esperar abrir: o ponto não a
+          // achou, não respondeu, ou não disse a impressão. A falha sai agora,
+          // com o que o sinal disse (`classificar`), e não no fim do prazo.
+          if (codigo && !pc.remoteDescription) throw "sala-sem-descricao";
         }
         await aberto;
       })();
@@ -1454,6 +1568,14 @@ function criarEnlaceRtc({
     get apresentacao() {
       return apresentacao;
     },
+    /**
+     * A impressão (hex) com que o navegador conferiu o DTLS do anfitrião: a do
+     * convite, ou a que o ponto disse de uma sala pessoal. É sobre **ela** que a
+     * apresentação da sala tem de estar assinada.
+     */
+    get impressaoDoAnfitriao() {
+      return impressaoDoAnfitriao;
+    },
     /** O endereço do anfitrião pelo qual o ICE abriu, depois do `ready`. */
     get atendeuPor() {
       return visto.venceu;
@@ -1499,18 +1621,13 @@ function criarEnlaceRtc({
       });
       // Quem abre um "b" também o lê: anuncia a janela já aberto.
       janela.anunciar();
-      // No "b", cada lado manda o seu fim, e o canal fecha quando os dois
-      // passaram: quem escreve não fecha sozinho.
-      let fimDele = false;
-      let fimMeu = false;
-      const fecharSeAcabou = () => {
-        if (fimDele && fimMeu) esvaziar(canal).then(() => canal.close());
-      };
+      // No "b", cada lado manda o seu fim, e quem fecha o canal, passados os
+      // dois, é o anfitrião: a página só fecha se ele não fechar ([`fechoDoB`]).
+      const fecho = fechoDoB(canal, { prazoMs: prazoDoFechoDoB, aoVencer: () => (contas.fechosPeloPrazo += 1) });
       const leituraComFim = lado.leitura.pipeThrough(
         new TransformStream({
           flush() {
-            fimDele = true;
-            fecharSeAcabou();
+            fecho.fimDele();
           },
         }),
       );
@@ -1520,8 +1637,7 @@ function criarEnlaceRtc({
         write: (pedaco) => escritor.write(pedaco),
         async close() {
           await escritor.close();
-          fimMeu = true;
-          fecharSeAcabou();
+          fecho.fimMeu();
         },
         abort: (motivo) => escritor.abort(motivo),
       });

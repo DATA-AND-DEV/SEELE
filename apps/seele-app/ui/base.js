@@ -102,13 +102,40 @@ const COMANDOS_DA_SESSAO = new Set([
   // O perfil padrão (0.19, `perfil-padrao.js`): o registro do servidor da vista
   // e a subida da foto ou da capa guardadas nesta máquina.
   "seguimento_do_perfil_padrao", "enviar_imagem_do_perfil_padrao",
+  // A mesa de texto da 1.0: a edição, e a lista de banidos com o desbanir. A
+  // resposta que chega depois da troca de vista é de outro servidor.
+  "editar_mensagem", "desbanir_pessoa", "listar_banidos", "banidos",
+  // A câmera (1.0): o pedido é da sessão em que foi feito; uma resposta que
+  // chega depois da troca de vista é de outro servidor.
+  "compartilhar_camera", "codificacao_da_camera",
 ]);
+
+/**
+ * **O número de protocolo em que nasceram editar mensagem, desbanir e a lista
+ * de banidos** (a mesa de texto da 1.0).
+ *
+ * O retrato traz o número que a conexão negociou (`protocolo`), e a tela não
+ * oferece o que o servidor não conhece: num servidor da 0.19 o EDITAR e o
+ * BANIDOS não aparecem, em vez de aparecerem e responderem `ServidorAntigo`.
+ * O número é do `seele-proto` (`vocabulario::desde_do_cliente`), e o guarda
+ * `o_numero_da_mesa_de_texto_e_o_do_protocolo` cobra que este seja o mesmo.
+ */
+const PROTOCOLO_DA_MESA_DE_TEXTO = 13;
+
+/** Se o servidor deste retrato conhece editar, desbanir e a lista de banidos. */
+function servidorTemAMesaDeTexto(snapshot) {
+  return Number(snapshot?.protocolo ?? 0) >= PROTOCOLO_DA_MESA_DE_TEXTO;
+}
 
 /** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */
 // A máquina de jogo é do computador, e não da sessão que a janela mostra: o pedido
 // de um servidor que não está na vista também precisa ser respondido.
 const SEM_CARIMBO_DA_VISTA = new Set([
   "connect", "sessoes", "foco_de_voz",
+  // O teste de conexão é da máquina, e não de uma sessão: ele é oferecido na
+  // entrada e na tela de fim, onde a sessão da vista pode já ter acabado, e o
+  // carimbo dela faria a ponte recusar o aperto como `NotConnected`.
+  "abrir_o_teste_de_rede",
   "maquina_aceitar", "maquina_recusar", "maquina_desligar", "maquina_revogar", "maquinas_aceitas", "maquinas_sobras",
 ]);
 
@@ -398,9 +425,71 @@ function marcaSync(faixa) {
   return { Nominal: "█", Degraded: "▒", Critical: "░" }[faixa] ?? "░";
 }
 
-/** Substitui os filhos de um elemento por uma lista nova. */
+/**
+ * Substitui os filhos de um elemento por uma lista nova.
+ *
+ * **Os mesmos nós na mesma ordem não são trocados** — nem a lista vazia num pai
+ * vazio: o `replaceChildren` registra a troca do mesmo jeito, e o tique de
+ * 500 ms repovoa as regiões de MOD (quase sempre vazias) a cada quadro.
+ */
 function repovoar(pai, filhos) {
-  pai.replaceChildren(...filhos);
+  const lista = Array.isArray(filhos) ? filhos : [...filhos];
+  const atuais = pai.childNodes;
+  if (atuais.length === lista.length && lista.every((filho, i) => atuais[i] === filho)) return;
+  pai.replaceChildren(...lista);
+}
+
+// ------------------------------------------------- escrever só o que mudou
+//
+// **A tela parada não muda o DOM.** O retrato é redesenhado inteiro duas vezes
+// por segundo (`atualizar`, no tique de 500 ms do `tela-sessao.js`), e cada
+// `x.hidden = …`, `x.textContent = …`, `x.title = …`, `x.dataset.y = …`,
+// `setAttribute` e `classList.toggle` REGISTRA uma mutação mesmo quando o
+// valor é o que já estava lá (medido no Chromium e no WebKit em 11/11/2026: 67 a 75 mutações
+// por tique com o retrato igual, ~150 por segundo, numa sessão em que nada
+// acontecia; a `area-util.cjs` reprovava quando três tiques caíam na janela
+// de 1 s dela). Cada uma acorda os observadores da tela — a fileira estreita
+// e a bandeja da chamada (`composicao-0174.js`), os avisos do celular
+// (`celular-ajustes.js`) —, que reescreviam o que espelham, e assim por diante.
+// É a mesma família do roster refeito a cada meio segundo (`vestirComo`,
+// `pintarOFundo`): comparar antes de escrever.
+//
+// Estas seis são o `=` de sempre com a comparação na frente. Comparam pela
+// propriedade, como quem as chama escrevia, e por isso servem também aos
+// dublês de elemento dos guardas (`tests/frontend.rs`). Onde o nó de texto tem
+// de ser o MESMO de um quadro ao outro (a seleção, o leitor de tela), o texto
+// vai por `escreverOTexto` (`tela-sessao.js`), que muda o `nodeValue`.
+
+/** `nodo.hidden = escondido`, só quando muda. */
+function porOEscondido(nodo, escondido) {
+  if (nodo.hidden !== escondido) nodo.hidden = escondido;
+}
+
+/** `nodo.textContent = texto`, só quando muda. */
+function porOTexto(nodo, texto) {
+  if (nodo.textContent !== texto) nodo.textContent = texto;
+}
+
+/** `nodo.title = titulo`, só quando muda. */
+function porOTitulo(nodo, titulo) {
+  if (nodo.title !== titulo) nodo.title = titulo;
+}
+
+/** `nodo.setAttribute(nome, valor)`, só quando muda. */
+function porOAtributo(nodo, nome, valor) {
+  const texto = String(valor);
+  if (nodo.getAttribute(nome) !== texto) nodo.setAttribute(nome, texto);
+}
+
+/** `nodo.dataset[chave] = valor`, só quando muda. */
+function porODado(nodo, chave, valor) {
+  const texto = String(valor);
+  if (nodo.dataset[chave] !== texto) nodo.dataset[chave] = texto;
+}
+
+/** `nodo.classList.toggle(classe, presente)`, só quando muda. */
+function porAClasse(nodo, classe, presente) {
+  if (nodo.classList.contains(classe) !== presente) nodo.classList.toggle(classe, presente);
 }
 
 function elemento(tag, classe, texto) {
@@ -408,6 +497,75 @@ function elemento(tag, classe, texto) {
   if (classe) nodo.className = classe;
   if (texto !== undefined) nodo.textContent = texto;
   return nodo;
+}
+
+// ------------------------------------------------------ o teste de conexão
+//
+// A lacuna 8 da análise para a 1.0: a página de diagnóstico existia e nada
+// levava a ela. Quem não conectava por causa de rede lia uma frase e ficava
+// sem caminho. As frases e a lista das falhas que a oferecem moram em
+// `frases.js` (`FRASES_DO_TESTE_DE_CONEXAO`, `falhaDeRede`).
+
+/**
+ * **A oferta do teste de conexão para `erro`**, ou `null` quando `erro` não é
+ * uma falha de rede: um botão, a nota que diz o que ele faz, e o lugar onde a
+ * tela diz o que aconteceu com o aperto.
+ *
+ * O aperto pede `abrir_o_teste_de_rede` com o **nome** da falha, e mais nada:
+ * nem o endereço, nem o convite, nem o apelido saem daqui. No app o Rust monta
+ * o endereço da página publicada e abre o navegador do sistema; na página a
+ * ponte abre uma aba da mesma origem. Nos dois, se não abrir, a recusa traz o
+ * endereço, e a tela o diz: um botão que falha calado é o defeito que este
+ * repositório mais pagou.
+ *
+ * Sem `href`: nesta janela um clique do meio navegaria o SEELE para a página,
+ * sem caminho de volta (o mesmo motivo do link de uma mensagem).
+ */
+function ofertaDoTesteDeConexao(erro) {
+  const falha = falhaDeRede(erro);
+  if (falha === null) return null;
+  const frases = FRASES_DO_TESTE_DE_CONEXAO;
+  const onde = typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined" && PONTE_NO_LUGAR_DO_TAURI ? "naPagina" : "noApp";
+  const oferta = elemento("div", "teste-de-conexao");
+  oferta.dataset.falha = falha;
+  const botao = elemento("button", "botao-fantasma teste-de-conexao-abrir", frases.abrir);
+  botao.type = "button";
+  const nota = elemento("p", "teste-de-conexao-nota", frases.nota[onde]);
+  // Vazia e à vista: uma região viva anuncia o que entra nela, e não o que
+  // já estava escrito quando ela apareceu.
+  const estado = elemento("p", "teste-de-conexao-estado");
+  estado.setAttribute("role", "status");
+  botao.addEventListener("click", () => {
+    estado.textContent = "";
+    delete estado.dataset.tipo;
+    // Sem `await` antes do `invoke`: na página a aba só abre dentro do gesto.
+    invoke("abrir_o_teste_de_rede", { erro: falha }).then(
+      () => {
+        estado.textContent = frases.abriu[onde];
+      },
+      (recusa) => {
+        const endereco = recusa?.NavegadorNaoAbriu?.endereco;
+        estado.dataset.tipo = "erro";
+        estado.textContent = typeof endereco === "string" && endereco !== ""
+          ? frases.naoAbriu[onde](endereco)
+          : frases.naoAbriu.semEndereco;
+        if (!endereco) console.warn("o teste de conexão não abriu:", recusa);
+      },
+    );
+  });
+  oferta.append(botao, nota, estado);
+  return oferta;
+}
+
+/**
+ * Põe em `caixa` a oferta para `erro`, ou a esvazia e esconde quando `erro`
+ * não é uma falha de rede. Devolve se ofereceu.
+ */
+function oferecerOTesteDeConexao(caixa, erro) {
+  const oferta = ofertaDoTesteDeConexao(erro);
+  caixa.replaceChildren(...(oferta ? [oferta] : []));
+  caixa.hidden = oferta === null;
+  return oferta !== null;
 }
 
 // ----------------------------------------------- os tetos dos campos do fio
@@ -1485,8 +1643,15 @@ function donoDaRegiao(mod, instancia) {
       if (!meu()) return Promise.resolve();
       return invoke("soltar_escolhido", { geracao, id: mod.id, arquivo }).catch(() => {});
     },
-    /** Um arquivo que o manifesto deste MOD declarou. */
-    carregarMidia: async (caminho) => {
+    /**
+     * Um arquivo que o manifesto deste MOD declarou.
+     *
+     * `uso` nomeia o lugar em que a imagem vai aparecer (`"fundo"`), como em
+     * `carregarMidiaDoServidor`, e o Rust a reduz a ele; sem uso, ao teto
+     * geral da mídia de MOD. A imagem do pacote ia à janela do tamanho que o
+     * MOD a trouxe (a varredura do incidente da capa em 4K, 11/11/2026).
+     */
+    carregarMidia: async (caminho, uso) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
       const midia = await invoke("midia_do_mod", {
@@ -1494,6 +1659,7 @@ function donoDaRegiao(mod, instancia) {
         id: mod.id,
         hash: mod.hash,
         caminho,
+        uso,
       });
       // Depois do `await`: a sessão pode ter acabado enquanto os bytes vinham,
       // e montá-los seria tocar som de uma sessão que já não existe.
@@ -1665,7 +1831,8 @@ const LIMITES_DA_CAPA = Object.freeze({ bytesDecodificados: 128 * 1024 * 1024 })
 const IMAGENS_DE_PESSOA = Object.freeze({
   "pessoa.avatar": {
     chave: "avatar",
-    uso: undefined,
+    // Reduzido ao lugar em que aparece (`reducao::teto_do_uso`), como a capa.
+    uso: "avatar",
     teto: () => LIMITES_DO_CARTAO.bytesDeMidia,
     custo: (midia) => midia.bytes,
     redesenhar: () => redesenharAvatares(),

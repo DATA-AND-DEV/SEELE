@@ -88,6 +88,38 @@ async function abrirASessao(navegador, servidor) {
 }
 
 /**
+ * Abre a seção MODS da configuração **pelo caminho do produto**: `abrirServer`
+ * a partir da sessão, e `abrirSecao`.
+ *
+ * # A corrida que isto fecha
+ *
+ * Esta bancada mostrava a configuração à mão (`$("tela-server").hidden =
+ * false; $("painel-mods").hidden = false`), sem passar pelo `abrirServer`. A
+ * tela aberta assim não tem origem (`telaDeOrigem` fica `null`), e o
+ * `atualizarServer`, que roda a cada 500 ms com a tela à vista
+ * (`tela-server.js`, o `setInterval` do fim), lê isso como «sem sessão»: some
+ * com a seção MODS e troca o painel pelo de ÁUDIO. Um clique que caísse depois
+ * desse tique esperava trinta segundos por um botão escondido.
+ *
+ * Medido em 12/11/2026: 4 falhas em 10 rodadas, todas num `click` do modo de
+ * desenvolvedor, com «element is not visible»; e, com 700 ms de espera entre
+ * mostrar e clicar, o painel estava escondido em toda rodada (`painel-mods`
+ * `hidden`, origem `null`). O produto está certo: ele só abre esta tela pelo
+ * `abrirServer`. Quem a abria por fora era a bancada.
+ */
+async function abrirOsModsDaConfiguracao(pagina) {
+  await pagina.evaluate(async () => {
+    await abrirServer("tela-sessao");
+    abrirSecao("secao-mods");
+  });
+  assert.deepEqual(
+    await pagina.evaluate(() => ({ tela: $("tela-server").hidden, secao: $("secao-mods").hidden, painel: $("painel-mods").hidden })),
+    { tela: false, secao: false, painel: false },
+    "a seção MODS da configuração não abriu pelo caminho do produto",
+  );
+}
+
+/**
  * Espera a página chegar a um estado, e diz o que quebrou quando ela não chega.
  *
  * O prazo vencido do Playwright diz só «Timeout 30000ms exceeded»: quem lê o
@@ -359,9 +391,8 @@ async function quemPintaCadaLugar(navegador, servidor) {
       conteudo: [{ forma: "midia", chave: "selo", fonte: "img/selo.png" }],
     });
     desenhar(testTable.snapshot);
-    $("tela-server").hidden = false;
-    $("painel-mods").hidden = false;
   });
+  await abrirOsModsDaConfiguracao(pagina);
   await pagina.click("#mods-aba-diagnostico");
   const linha = (ponto) => pagina.textContent(`#lista-quem-pinta li[data-ponto="${ponto}"]`);
 
@@ -541,9 +572,8 @@ async function asPaginasDeCadaModAparecemNaAba(navegador, servidor) {
     conjunto.de("ficha").montar([{ forma: "midia", chave: "na-ficha", fonte: "img/ficha.png" }]);
     conjunto.criar({ id: "mesa", tipo: "pagina", titulo: "Mesa de X" });
     conjunto.de("mesa").montar([{ forma: "midia", chave: "na-pagina", fonte: "img/pagina.png" }]);
-    $("tela-server").hidden = false;
-    $("painel-mods").hidden = false;
   });
+  await abrirOsModsDaConfiguracao(pagina);
   await pagina.click("#mods-aba-diagnostico");
   const bloco = () => document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? "(sem bloco)";
   await esperarQue(
@@ -687,9 +717,8 @@ async function oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe(navegador, servidor) {
     contribuicoesDosMods.registrar({ id: "mod/b" }, b, avatar("1"));
     contribuicoesDosMods.registrar({ id: "mod/b" }, b, avatar("2"));
     desenhar(testTable.snapshot);
-    $("tela-server").hidden = false;
-    $("painel-mods").hidden = false;
   });
+  await abrirOsModsDaConfiguracao(pagina);
   await pagina.click("#mods-aba-diagnostico");
 
   // A herança: o cartão é de mod/a por escolha, e o avatar segue essa escolha.
@@ -923,15 +952,12 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
   );
 
   // Liga pela configuração, como quem usa liga.
-  await pagina.evaluate(() => {
-    $("tela-server").hidden = false;
-    $("painel-mods").hidden = false;
-  });
+  await abrirOsModsDaConfiguracao(pagina);
   await pagina.click("#mods-aba-diagnostico");
   await pagina.click("#mods-modo-desenvolvedor");
-  await pagina.evaluate(() => {
-    $("tela-server").hidden = true;
-  });
+  // E fecha como quem usa fecha, de volta à sessão.
+  await pagina.evaluate(() => fecharServer());
+  assert.equal(await pagina.evaluate(() => $("tela-server").hidden), true, "a configuração não fechou");
   await esperarQue(
     pagina,
     () => document.querySelectorAll('.contorno-de-ponto[data-ponto="canal.item"]').length === 2,
@@ -1279,10 +1305,7 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
   assert.equal(teto.notaDepois, "", `os retratos saíram, todos voltaram a caber, e a nota ficou: «${teto.notaDepois}»`);
 
   // E desligar tira tudo, e esquece.
-  await pagina.evaluate(() => {
-    $("tela-server").hidden = false;
-    $("painel-mods").hidden = false;
-  });
+  await abrirOsModsDaConfiguracao(pagina);
   await pagina.click("#mods-aba-diagnostico");
   await pagina.click("#mods-modo-desenvolvedor");
   const desligado = await pagina.evaluate(() => ({

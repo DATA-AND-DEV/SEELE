@@ -242,8 +242,45 @@ function contasDoPortao() {
   confere("reprodução", torto === 1, `um quadro que não é de f32 voltou ${torto}`);
 }
 
+// ------------------------------------------- a recepção medida (protocolo 13)
+// O que o worklet chama a cada volta da medida: o jitter e a perda de agora, e
+// o relato para o servidor na vez dele. Oito segundos de fala com um quadro
+// perdido em cada dez, e o som da tela (a alça que a página diz qual é)
+// perdendo um em cada dois, que não é voz e não entra na conta.
+{
+  const TELA = 0xffffffff;
+  const medir = (agora) => {
+    confere("recepção medida", e.voz_tocar_recepcao(agora, TELA) === 0, "a medida da recepção falhou");
+    return JSON.parse(new TextDecoder().decode(saida()));
+  };
+  e.voz_tocar();
+  const vazia = medir(0);
+  confere("recepção medida", vazia.jitter_ms === null && vazia.perda === null && vazia.relato === null, `sem voz nenhuma, a medida não é nula: ${JSON.stringify(vazia)}`);
+  const pcm = bytesDe(new Float32Array(QUADRO).fill(0.2));
+  const relatos = [];
+  let ultima = null;
+  for (let k = 0; k < 400; k++) {
+    if (k % 10 !== 5) comBytes(pcm, (p, n) => e.voz_tocar_chegou(1, k, k * 960, k * 20, p, n));
+    if (k % 2 === 0) comBytes(pcm, (p, n) => e.voz_tocar_chegou(TELA, k, k * 960, k * 20, p, n));
+    e.voz_tocar_quadro();
+    if ((k + 1) % 12 === 0) {
+      ultima = medir((k + 1) * 20);
+      if (ultima.relato) relatos.push({ quando: (k + 1) * 20, ...ultima.relato });
+    }
+  }
+  const relato = relatos.at(-1);
+  confere("recepção medida", relatos.length >= 4 && relatos.length <= 7, `${relatos.length} relatos em 8 s, e o compasso é de um por segundo`);
+  confere("recepção medida", relatos.every((r, i) => i === 0 || r.quando - relatos[i - 1].quando >= 1000), `relatos a menos de um segundo um do outro: ${JSON.stringify(relatos)}`);
+  confere("recepção medida", relato && Math.abs(relato.perda - 0.1) < 0.02, `um quadro perdido em dez não virou 10% no relato: ${JSON.stringify(relato)}`);
+  confere("recepção medida", relato && relato.jitter_ms >= 0 && relato.jitter_ms < 5, `o jitter do relato não é de milissegundos: ${JSON.stringify(relato)}`);
+  confere("recepção medida", ultima && Math.abs(ultima.perda - 0.1) < 0.02 && ultima.jitter_ms >= 0, `a medida de agora não é a da voz: ${JSON.stringify(ultima)}`);
+  e.voz_tocar();
+  const nova = medir(9000);
+  confere("recepção medida", nova.perda === null && nova.relato === null, `a reprodução nova herdou a medida da velha: ${JSON.stringify(nova)}`);
+}
+
 if (falhas.length) {
   for (const f of falhas) console.error(`FALHOU — ${f}`);
   process.exit(1);
 }
-console.log("voz: o envio, o portão, o teste do microfone, a recepção e a reprodução passam pela fronteira, dentro do .wasm");
+console.log("voz: o envio, o portão, o teste do microfone, a recepção, a reprodução e a recepção medida passam pela fronteira, dentro do .wasm");

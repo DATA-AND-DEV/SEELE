@@ -159,6 +159,16 @@ const MOTIVOS = {
     "A CHAVE DO SERVIDOR MUDOU DURANTE A SESSÃO.\n" +
     "Confirme por outro canal antes de entrar de novo.",
 
+  // ---- o motor deste app que morreu ----
+  //
+  // A thread que bombeia a sessão entrou em pânico (`subir_a_thread_da_conexao`,
+  // no `seele-ffi`). É defeito do app, e a frase diz isso para ninguém procurar
+  // a causa na rede nem em quem hospeda. Era silêncio: a tela seguia mostrando
+  // uma sessão de pé, muda. O que o pânico disse fica no `seele.log`.
+  MotorCaiu:
+    "O SEELE FALHOU POR DENTRO, E ESTA SESSÃO CAIU.\n" +
+    "Não é a sua rede nem o servidor. Entre de novo; o motivo está no seele.log.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 
@@ -268,6 +278,9 @@ const PEDIDOS_RECUSADOS = {
   // a pessoa acabou de tentar banir.
   BanPerson: "BANIR ESSA PESSOA",
   RemoveMessage: "REMOVER A MENSAGEM",
+  EditMessage: "EDITAR A MENSAGEM",
+  UnbanPerson: "DESBANIR A PESSOA",
+  ListBans: "LER A LISTA DE BANIDOS",
   DeleteVoiceRoom: "APAGAR A SALA DE VOZ",
   DeleteChannel: "APAGAR O CANAL",
   // O único chamador é o APAGAR (`peso_da_linha`): o verbo é o da caixa dele.
@@ -442,6 +455,14 @@ const ABERTURA_DO_AUDIO = {
     rodape: "SÓ OUVINDO",
     medidor: "— MICROFONE FECHADO",
     frase: FRASE_DO_SO_OUVINDO,
+  },
+  // **O sistema pausou o som da sala** (no celular, outro aplicativo que toca
+  // som toma o áudio do aparelho). O microfone pode seguir aberto; o que parou
+  // foi a escuta, e ela volta quando a pessoa volta para a página.
+  som_pausado: {
+    rodape: "SOM PAUSADO",
+    medidor: "— SOM PAUSADO PELO SISTEMA",
+    frase: "O SISTEMA PAUSOU O SOM DA SALA. Outro aplicativo está usando o áudio. O som volta quando você voltar para cá; se não voltar, saia da sala e entre de novo.",
   },
   // **A voz está noutra sessão** (E3 da 0.17; fronteiras.md §5). Um microfone
   // por máquina, e ele está com outro servidor: nada aqui abre aparelho, nada
@@ -628,6 +649,84 @@ const PARADAS = {
     "A TELA PAROU: O QUE SOBROU DA CONEXÃO NÃO SUSTENTA NEM A MENOR IMAGEM.\n" +
     "Ela volta sozinha quando o caminho abrir.",
 };
+
+/**
+ * Por que a transmissão **desta pessoa** caiu: acabou sem ela ter parado.
+ *
+ * Os nomes vêm de `seele_ffi::motivos_de_queda_da_tela`, no `reason` de um
+ * `ScreenShareFell`. É o contrário de `PARADAS`, e por isso é outro dicionário:
+ * uma parada volta sozinha e a frase diz para esperar; uma queda não volta, o
+ * núcleo já avisou o servidor e soltou a captura, e a frase diz que ninguém
+ * está vendo e que recomeçar é com a pessoa.
+ *
+ * Antes destas frases a queda era muda: o botão seguia em PARAR DE
+ * COMPARTILHAR sobre uma transmissão sem imagem, e a única linha que contava o
+ * que houve estava no `seele.log`.
+ */
+const QUEDAS = {
+  Codificador:
+    "A TRANSMISSÃO DA SUA TELA CAIU: O CODIFICADOR RECUSOU A IMAGEM.\n" +
+    "Ninguém está vendo a sua tela. Compartilhe de novo para recomeçar.",
+  Captura:
+    "A TRANSMISSÃO DA SUA TELA CAIU: A CAPTURA PAROU.\n" +
+    "Ninguém está vendo a sua tela. Confira se a janela continua aberta e compartilhe de novo.",
+  Fluxo:
+    "A TRANSMISSÃO DA SUA TELA CAIU: A CONEXÃO DELA FECHOU.\n" +
+    "Ninguém está vendo a sua tela; a voz continua. Compartilhe de novo para recomeçar.",
+};
+
+/** A queda cujo motivo esta janela não conhece: diz o que sabe, e não inventa a causa. */
+const QUEDA_DESCONHECIDA =
+  "A TRANSMISSÃO DA SUA TELA CAIU.\nNinguém está vendo a sua tela. Compartilhe de novo para recomeçar.";
+
+/**
+ * A frase de uma transmissão desta pessoa que caiu, pelo que ela mostrava
+ * (`source`) e pelo motivo (`reason`) do `ScreenShareFell`. A da câmera fala
+ * da câmera e manda ligá-la de novo (`FRASES_DA_CAMERA.quedas`).
+ */
+function fraseDaQuedaDaTransmissao(tipo, motivo) {
+  if (tipo === "camera") return FRASES_DA_CAMERA.quedas[motivo] ?? FRASES_DA_CAMERA.quedaDesconhecida;
+  return QUEDAS[motivo] ?? QUEDA_DESCONHECIDA;
+}
+
+/**
+ * Por que a transmissão de tela **desta pessoa** está pausada, dito a ela.
+ *
+ * Os nomes são os de `PARADAS` (`seele_ffi::motivos_de_parada_da_tela`), e
+ * chegam em `minha_transmissao.parada`. É outro dicionário porque quem lê é
+ * outro: `PARADAS` fala a quem assiste, no palco; estas falam a quem
+ * transmite, ao lado do COMPARTILHAR, e a primeira coisa que ela precisa saber
+ * é que **ninguém está vendo** — o espelho dela mostra o último quadro e o
+ * botão segue em PARAR DE COMPARTILHAR, como se estivesse tudo no ar.
+ *
+ * É o contrário de `QUEDAS`: a transmissão continua, o núcleo a retoma
+ * sozinho, e a frase diz para esperar. Não há o que apertar.
+ *
+ * Até a 1.0 esta pausa era muda para quem transmitia: o teto parava o vídeo
+ * para a voz não picotar, e o `parada` do retrato era sempre `null`.
+ */
+const PAUSAS_DA_MINHA_TELA = {
+  SinalCritico:
+    "A SUA TELA ESTÁ PAUSADA PARA A VOZ NÃO PICOTAR.\n" +
+    "Ninguém a está vendo agora. Ela volta sozinha quando o sinal melhorar.",
+  AbaixoDoPiso:
+    "A SUA TELA ESTÁ PAUSADA: O QUE SOBROU DA CONEXÃO NÃO SUSTENTA NEM A MENOR IMAGEM.\n" +
+    "Ninguém a está vendo agora. Ela volta sozinha quando o caminho abrir.",
+};
+
+/** A pausa cujo motivo esta janela não conhece: diz o que sabe, e não inventa a causa. */
+const PAUSA_DESCONHECIDA_DA_MINHA_TELA =
+  "A SUA TELA ESTÁ PAUSADA.\nNinguém a está vendo agora. Ela volta sozinha.";
+
+/**
+ * A frase da pausa da transmissão de tela desta pessoa, ou `""` sem pausa.
+ * `transmissao` é a `minha_transmissao` do retrato.
+ */
+function fraseDaPausaDaMinhaTela(transmissao) {
+  const motivo = transmissao?.parada;
+  if (!motivo) return "";
+  return PAUSAS_DA_MINHA_TELA[motivo] ?? PAUSA_DESCONHECIDA_DA_MINHA_TELA;
+}
 
 /**
  * O nome do caminho, ou nada.
@@ -831,9 +930,34 @@ function fraseDaLigacao(erro, nome, trilha) {
     );
   }
   if (localizar === "NinguemMora") {
-    return (
+    const frase =
       `${quem} NÃO ESTÁ DISPONÍVEL: o SEELE do outro lado está fechado ` +
-      "ou não está recebendo ligações"
+      "ou não está recebendo ligações";
+    // **O app não liga para quem só tem a página** (ADR 0068): essa pessoa não
+    // hospeda sala, e o app não tem mais a conversa direta. O caminho é ela
+    // ligar para o código de quem tem o app, e a frase orienta. Na página a
+    // conversa direta já foi tentada antes desta frase.
+    return PONTE_NO_LUGAR_DO_TAURI
+      ? frase
+      : `${frase}. Se a pessoa usa o SEELE pelo navegador ou pelo celular, peça para ela ligar para o seu código`;
+  }
+  // O ponto achou a sala, e ela não respondeu ao chamado dele a tempo.
+  if (localizar === "AnfitriaoCalado" || localizar === "SoAEscuta") {
+    return `${quem} ESTÁ NO AR, MAS NÃO RESPONDEU AO PONTO DE ENCONTRO: tente de novo em alguns segundos`;
+  }
+  if (localizar === "PontoRecusou") {
+    return "O PONTO DE ENCONTRO RECUSOU A CHAMADA POR EXCESSO: espere um pouco e ligue de novo";
+  }
+  if (localizar === "SemPonto") {
+    return "O PONTO DE ENCONTRO ESTÁ DESLIGADO NESTE COMPUTADOR: sem ele, código não funciona";
+  }
+  // Só na página (ADR 0068): o ponto achou a sala e não disse com que
+  // certificado ela atende, e sem isso o navegador não fecha a conexão segura.
+  if (localizar === "SemImpressao") {
+    return (
+      `${quem} ESTÁ NO AR, MAS ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO: ` +
+      "o SEELE do outro lado, ou o ponto de encontro, é de uma versão anterior. " +
+      "Peça para a pessoa atualizar o SEELE, ou ligue pelo app"
     );
   }
   if (erro?.CodigoNaoBate) return "QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO. Nada foi enviado.";
@@ -888,6 +1012,14 @@ function fraseDeErro(erro, apelido, deOnde) {
     if (erro.ForaDaVista) {
       return "ISTO FOI FEITO NOUTRO SERVIDOR.\nA resposta chegou depois da troca, e ficou com ele: volte a ele para ver.";
     }
+    // As duas falhas com campo da mesa de texto da 1.0 (`ConnectionError`): o
+    // servidor que negociou menos que o verbo pede, e o corpo de uma edição
+    // acima do teto. Sem estes dois ramos elas caíam na `desconhecida`.
+    if (erro.ServidorAntigo) return FRASES.ServidorAntigo;
+    if (erro.MensagemGrandeDemais) return FRASES.MensagemGrandeDemais;
+    // A fila da câmera cheia traz quantos quadros ficaram; a frase diz o que
+    // isso é para quem lê, e o número vai na tela ao lado dela (`camera.js`).
+    if (erro.CameraQueueFull) return FRASES.CameraQueueFull;
     if (erro.Recusado?.motivo) {
       const motivo = erro.Recusado.motivo;
       // Um formato que o produto reconhece e não aceita, pelo nome dele: as
@@ -1036,6 +1168,18 @@ function fraseDeErro(erro, apelido, deOnde) {
     // só com o `InviteMismatch` (idem). Pedido ao B em `pedidos.md`.
     if (erro.ConexaoSeguraNaoVerificada !== undefined) {
       return FRASES_DO_TRANSPORTE.falha.ImpressaoDiferente;
+    }
+    // **A falha do enlace da página** (`rtc-web.js`, pela `motivoDaFalhaDoEnlace`
+    // da `sessao-web.js`): cada motivo tem frase no bloco do transporte, e
+    // nenhuma tela larga a lia. O `connect` da casca larga no navegador rejeita
+    // com o objeto inteiro (`entrarPeloEndereco`, na ponte), e ele caía na
+    // `desconhecida`: «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ», com o
+    // JSON embaixo, para uma falha que o produto sabia nomear (medido em
+    // 12/11/2026). Um motivo novo sem frase continua indo à `desconhecida`, que
+    // diz o que era.
+    if (erro.FalhaDoEnlace) {
+      const frase = FRASES_DO_TRANSPORTE.falha[erro.FalhaDoEnlace.motivo];
+      if (typeof frase === "string") return frase;
     }
     if (erro.PinChanged) {
       return (
@@ -1431,6 +1575,45 @@ const FRASES = {
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",
     UnknownChannel: "NÃO CONHEÇO ESSE CANAL",
     LinkLost: "ENLACE PERDIDO",
+    UnknownMessage: "NÃO CONHEÇO ESSA MENSAGEM",
+    MensagemVazia: "A MENSAGEM FICOU VAZIA\nEscreva alguma coisa, ou apague a mensagem.",
+    // As duas falhas com campo da mesa de texto da 1.0 (`fraseDeErro` as lê
+    // pelo nome). Sem o número do teto (0.19, pedido do dono), como o aviso
+    // do campo de escrever; e sem o número do protocolo, que não é palavra de
+    // quem usa: o que a pessoa pode fazer é pedir a atualização a quem hospeda.
+    MensagemGrandeDemais: "A MENSAGEM FICOU LONGA DEMAIS\nCorte o texto e salve de novo.",
+    ServidorAntigo:
+        "ESTE SERVIDOR É DE ANTES DA 1.0 E AINDA NÃO FAZ ISSO\n" +
+        "Editar mensagem e desbanir chegam quando quem hospeda atualizar o SEELE.",
+
+    // **As falhas que chegavam à tela com o nome cru** (revisão de 09/11/2026):
+    // variantes unitárias de `ConnectionError` sem entrada aqui. O guarda
+    // `toda_falha_unitaria_da_conexao_tem_frase` lê o enum e cobra cada uma.
+    //
+    // O ponto de encontro levou o chamado e quem hospeda atendeu; o que não
+    // abriu foi o caminho direto entre as duas redes. A frase não manda
+    // insistir, porque insistir não muda um NAT, e diz as duas coisas que
+    // mudam: outra rede deste lado, ou a porta aberta do lado de quem hospeda.
+    NatNaoAbriu:
+        "O CAMINHO DIRETO ATÉ QUEM HOSPEDA NÃO ABRIU\n" +
+        "As duas redes não deixaram a conexão passar. " +
+        "Tente por outra rede, ou peça a quem hospeda que abra a porta UDP no roteador.",
+    LinhaLegada:
+        "ESTE É UM SERVIDOR 1.0\n" +
+        "Esta versão não conversa com ele. Abra o Servidor 1.0 pelo launcher para entrar.",
+    // Diferentes de `NoAudioDevice`: a máquina tem dispositivo, o que sumiu foi
+    // o escolhido, e há uma lista para escolher de novo.
+    CaptureDeviceGone:
+        "O MICROFONE ESCOLHIDO NÃO ESTÁ MAIS NESTA MÁQUINA\n" +
+        "Escolha outro em Configurações.",
+    PlaybackDeviceGone:
+        "A SAÍDA DE ÁUDIO ESCOLHIDA NÃO ESTÁ MAIS NESTA MÁQUINA\n" +
+        "Escolha outra em Configurações.",
+    // A mesma frase de `fraseDeIcone` (tela-server.js), para os caminhos que
+    // não passam por ela.
+    IconNotAPicture:
+        "ESTE ARQUIVO NÃO SERVE COMO IMAGEM.\n" +
+        "PNG, JPEG, WebP e GIF servem; o que o app não conseguir abrir como imagem, não.",
 
     // A recusa de quem apertou COMPARTILHAR com outra pessoa já transmitindo.
     // **Não** é permissão que falta, e a segunda linha é o que separa as duas:
@@ -1445,6 +1628,14 @@ const FRASES = {
     // para mudar a resposta. Dizer que não é a conexão nem permissão é o que
     // impede a caça ao defeito que não existe — foi o que a frase de
     // `NadaPublicado` aprendeu, dois recursos atrás.
+    // As três da câmera (protocolo 13). Quem codifica a câmera é esta janela,
+    // e as três chegam a ela pelo `quadro_da_camera` ou pelo `compartilhar_camera`.
+    CameraNotLive: "A CÂMERA NÃO ESTÁ MAIS INDO PARA A SALA.\nLigue a câmera de novo.",
+    CameraQueueFull:
+      "A CONEXÃO NÃO ESTÁ LEVANDO A CÂMERA NO RITMO DELA.\n" +
+      "Parte da imagem ficou para trás; ela se refaz sozinha no quadro seguinte.",
+    CameraBadSize: "ESTA CÂMERA ENTREGA UMA IMAGEM QUE O SEELE NÃO TRANSMITE.\nEscolha outra câmera no sistema e ligue de novo.",
+
     ScreenShareUnavailable: "NÃO FOI POSSÍVEL COMPARTILHAR A TELA.\nConfira a permissão de captura do SEELE e escolha novamente uma tela ou janela disponível.",
 
     // O arquivo veio e não ficou. É a única das três em que tentar de novo
@@ -2016,6 +2207,96 @@ const FRASES_DA_TELA_NO_NAVEGADOR = Object.freeze({
 });
 
 /**
+ * **A câmera** (1.0, protocolo 13): no lugar da tela, pelo mesmo caminho dela.
+ *
+ * Cada estado do controle tem a frase dele, e nenhum é mudo: pedindo a
+ * permissão, negada (com o que fazer), sem câmera, sem codificador nesta
+ * janela, no ar, parada pelo sinal, e o servidor que ainda não a conhece. O
+ * rótulo do que se assiste também sai daqui: «câmera» ou «tela» pelo que a
+ * abertura do fluxo declarou, e nenhum dos dois antes de ela chegar.
+ */
+const FRASES_DA_CAMERA = Object.freeze({
+  // O rótulo do controle, em palavras, para quem não vê o ícone.
+  ligar: "LIGAR A CÂMERA",
+  desligar: "DESLIGAR A CÂMERA",
+  // O `title` do controle, por estado.
+  dicaDeLigar: (sala) => `mostrar a sua câmera para quem está em ${sala}`,
+  dicaDeLigarNoLugarDaTela: "ligar a câmera: ela entra no lugar da tela que você está compartilhando",
+  dicaDeDesligar: "parar de mostrar a sua câmera",
+  // O estado, escrito ao lado do controle.
+  pedindo: "PEDINDO A CÂMERA AO SISTEMA…\nSe aparecer uma pergunta, responda que sim.",
+  ligando: "A CÂMERA ESTÁ ABRINDO…",
+  noAr: "SUA CÂMERA ESTÁ INDO PARA A SALA.",
+  noLugarDaTela: "A CÂMERA ENTROU NO LUGAR DA TELA.\nUma pessoa mostra uma imagem por vez: a tela que você compartilhava parou.",
+  negada:
+    "O SISTEMA NÃO DEU A CÂMERA AO SEELE.\n" +
+    "Libere a câmera para o SEELE nos ajustes de privacidade do sistema, ou nas permissões do navegador, e ligue de novo.",
+  semCamera: "NENHUMA CÂMERA FOI ENCONTRADA.\nLigue uma câmera ao computador e tente de novo.",
+  ocupada: "A CÂMERA NÃO ABRIU.\nOutro programa pode estar usando a câmera: feche o programa e ligue de novo.",
+  semCaptura: "ESTA JANELA NÃO TEM ACESSO A CÂMERAS.\nA sua câmera não vai para a sala por aqui; assistir às dos outros funciona.",
+  semCodificador:
+    "ESTA JANELA NÃO CODIFICA VÍDEO DE CÂMERA.\n" +
+    "Falta o codificador H.264 do sistema. A sua câmera não vai para a sala; assistir às dos outros funciona.",
+  servidorAntigo:
+    "ESTE SERVIDOR É DE ANTES DA 1.0 E AINDA NÃO TEM CÂMERA.\n" +
+    "A câmera chega quando quem hospeda atualizar o SEELE. Compartilhar a tela funciona.",
+  dicaDoServidorAntigo: "este servidor é de antes da 1.0 e ainda não tem câmera",
+  semConfirmacao: "O SERVIDOR NÃO CONFIRMOU A CÂMERA.\nEla foi desligada. Confira se você pode compartilhar nesta sala e ligue de novo.",
+  encerrada: "A CÂMERA FOI DESLIGADA.\nA transmissão acabou do lado do servidor, ou a conexão caiu. Ligue de novo quando quiser.",
+  filaCheia: (quantos) =>
+    `A CONEXÃO NÃO ESTÁ LEVANDO A CÂMERA NO RITMO DELA.\n${quantos} ${quantos === 1 ? "quadro ficou" : "quadros ficaram"} para trás; a imagem se refaz sozinha.`,
+  // As duas paradas do teto (`PARADAS`, da tela), ditas da câmera.
+  paradas: Object.freeze({
+    SinalCritico: "A CÂMERA PAROU PARA A VOZ NÃO PICOTAR.\nEla volta sozinha quando o sinal melhorar.",
+    AbaixoDoPiso: "A CÂMERA PAROU: O QUE SOBROU DA CONEXÃO NÃO SUSTENTA NEM A MENOR IMAGEM.\nEla volta sozinha quando o caminho abrir.",
+  }),
+  paradaDesconhecida: "A CÂMERA PAROU.\nEla volta sozinha.",
+  // As quedas (`QUEDAS`, da tela), ditas da câmera: ela não volta sozinha.
+  quedas: Object.freeze({
+    Codificador: "A TRANSMISSÃO DA SUA CÂMERA CAIU: O CODIFICADOR RECUSOU A IMAGEM.\nNinguém a está vendo. Ligue a câmera de novo para recomeçar.",
+    Captura: "A TRANSMISSÃO DA SUA CÂMERA CAIU: A CAPTURA PAROU.\nNinguém a está vendo. Ligue a câmera de novo para recomeçar.",
+    Fluxo: "A TRANSMISSÃO DA SUA CÂMERA CAIU: A CONEXÃO DELA FECHOU.\nNinguém a está vendo; a voz continua. Ligue a câmera de novo para recomeçar.",
+  }),
+  quedaDesconhecida: "A TRANSMISSÃO DA SUA CÂMERA CAIU.\nNinguém a está vendo. Ligue a câmera de novo para recomeçar.",
+  // A transmissão desta página que parou sozinha, pelo passo em que parou
+  // (`fraseDaTransmissaoQueParou`, em `compartilhar-web.js`).
+  parou: Object.freeze({
+    abrir: "Não foi possível abrir a transmissão da câmera. Ligue a câmera de novo.",
+    ler: "Não foi possível ler a imagem da câmera. Ligue a câmera de novo.",
+    codificar: "A imagem da câmera parou de ser codificada. Ligue a câmera de novo.",
+    escrever: "A conexão da transmissão parou. Ligue a câmera de novo.",
+    continuar: "Não foi possível continuar lendo a câmera. Ligue a câmera de novo.",
+    terminar: "A câmera parou de entregar imagem. Ligue a câmera de novo.",
+  }),
+  // O que se assiste: o tipo vem da abertura do fluxo, e antes dela não se sabe.
+  rotulos: Object.freeze({ camera: "CÂMERA", monitor: "TELA", window: "TELA" }),
+  rotuloSemTipo: "AO VIVO",
+  titulos: Object.freeze({ camera: "CÂMERA", monitor: "TELA COMPARTILHADA", window: "TELA COMPARTILHADA" }),
+  tituloSemTipo: "AO VIVO NESTA SALA",
+  sua: Object.freeze({ camera: "SUA CÂMERA", monitor: "SUA TELA", window: "SUA TELA" }),
+  suaSemTipo: "SUA TRANSMISSÃO",
+  verDe: Object.freeze({
+    camera: (quem) => `ver a câmera de ${quem}`,
+    monitor: (quem) => `ver a tela de ${quem}`,
+    window: (quem) => `ver a tela de ${quem}`,
+  }),
+  verSemTipo: (quem) => `ver o que ${quem} está mostrando`,
+  previa: "A sua câmera, como ela sai daqui",
+  // A conversa pessoal do navegador (`pessoal-web.js`).
+  pessoalLigar: "LIGAR CÂMERA",
+  pessoalDesligar: "DESLIGAR CÂMERA",
+  pessoalDica: "Mostrar a sua câmera; ela entra no lugar da tela compartilhada",
+});
+
+/** A frase de uma falha do `getUserMedia` da câmera, pelo nome dela. */
+function fraseDaFalhaDaCamera(falha) {
+  const nome = falha?.name;
+  if (nome === "NotAllowedError" || nome === "SecurityError") return FRASES_DA_CAMERA.negada;
+  if (nome === "NotFoundError" || nome === "OverconstrainedError") return FRASES_DA_CAMERA.semCamera;
+  return FRASES_DA_CAMERA.ocupada;
+}
+
+/**
  * **As várias sessões** (E3 da 0.17): a trilha, a voz e a volta pela entrada.
  * O estado vai em palavra no nome acessível e no `title` de cada placa; o
  * desenho (as marcas VOZ, AQUI, o número) é a metade que se vê de relance.
@@ -2043,6 +2324,17 @@ const FRASES_DAS_SESSOES = Object.freeze({
   // O que cada botão da barra faz, em duas frases (a barra da ligação pessoal).
   dicaDaBarra:
     "SAIR DA SALA para a sua voz e a ligação continua aberta. DESLIGAR encerra a ligação e sai só desta sessão.",
+  // CONVIDAR (ADR 0068): o grupo cresce com mais alguém ligando para o código
+  // de quem hospeda a ligação. A frase diz o que foi copiado, de quem é o
+  // código e quem atende, porque é essa pessoa que decide quem entra.
+  convidar: "CONVIDAR",
+  convidarCopiou: (link, meu) =>
+    meu
+      ? `COPIADO: ${link}. É o seu código: quem ligar para ele toca aqui, e entra nesta ligação quando você atender.`
+      : `COPIADO: ${link}. É o código de quem hospeda esta ligação: quem ligar para ele entra quando essa pessoa atender.`,
+  convidarNaoCopiou: (tecla) =>
+    `NÃO DEU PARA COPIAR SOZINHO: o link desta ligação está selecionado aqui embaixo. Copie com ${tecla}.`,
+  convidarSemCodigo: "NÃO DEU PARA LER O CÓDIGO DESTA LIGAÇÃO, e nada foi copiado.",
   estadoDaLigacao: Object.freeze({
     naSala: "NA SALA DE VOZ",
     fora: "FORA DA SALA DE VOZ",
@@ -2122,6 +2414,98 @@ function servidorDaLinha(linha) {
 }
 
 /** A faixa de avisos do pé da sessão no celular: os avisos recolhidos numa linha, e o botão que os abre. */
+/**
+ * A tecla de falar com outra janela na frente (`src/tecla_global.rs`).
+ *
+ * **Um estado do Rust, uma frase.** `estado` tem uma entrada por variante de
+ * `Estado`, com o mesmo nome, e o `tests/frontend.rs` confere as duas listas:
+ * um estado novo sem frase aqui seria o produto sabendo e não contando.
+ *
+ * As três falhas (`Indisponivel`, `SemAtalho`, `Recusada`) dizem o que não
+ * vale e o que fazer. `Recusada` não afirma o motivo: o sistema diz só que
+ * recusou, e outro programa com a mesma tecla é o caso comum, não o único.
+ */
+const FRASES_DA_TECLA_GLOBAL = Object.freeze({
+  estado: Object.freeze({
+    Desligada: () => "Desligada: a tecla de falar só vale com a janela do SEELE na frente.",
+    Indisponivel: () =>
+      "Este sistema não deixou o SEELE registrar atalhos. A tecla de falar só vale com a janela do SEELE na frente.",
+    SemAtalho: (tecla) =>
+      `${tecla} não serve de atalho do sistema sozinha, e fora da janela não abre o microfone. Troque a tecla de falar acima: letra, número ou F1 a F12 servem.`,
+    Recusada: (tecla) =>
+      `O sistema recusou ${tecla} como atalho, e fora da janela ela não abre o microfone. O comum é outro programa já usar a tecla: troque a tecla de falar acima.`,
+    ForaDeSala: (tecla) => `Ligada. ${tecla} passa a valer fora da janela quando você entrar numa sala de voz.`,
+    OutroModo: () =>
+      "Ligada, mas o microfone não abre por tecla. Escolha SEGURAR TECLA em MICROFONE E SOM para ela valer fora da janela.",
+    NaJanela: (tecla) => `Ligada. Quando outra janela estiver na frente, ${tecla} abre o microfone.`,
+    Valendo: (tecla) => `${tecla} está valendo fora da janela.`,
+  }),
+  /** O estado que o Rust mandar e esta lista não conhecer: dito, e não calado. */
+  desconhecido: "Não sei dizer se a tecla de falar vale fora da janela. Com a janela do SEELE na frente ela vale.",
+  naoGravou: "Não consegui gravar a escolha neste computador. A tecla de falar fora da janela continua como estava.",
+  /** A linha do operador, na sessão: curta, ao lado de «microfone abre enquanto segura F». */
+  linhaValendo: "vale fora da janela",
+  linhaFalhou: "fora da janela não vale: veja ATALHOS",
+});
+
+/**
+ * A notificação do sistema (`notificacao-do-sistema.js`, `src/notificacao.rs`).
+ *
+ * **`texto` é o que aparece fora do SEELE**, inclusive na tela bloqueada, e por
+ * isso diz só **o que foi e onde**: o nome do servidor, ou quem liga. Nunca o
+ * corpo de uma mensagem, que a pessoa não escolheu mostrar a quem estiver
+ * olhando a tela dela. A menção não diz quem chamou nem em que canal porque o
+ * aviso que o core levanta (`Mentioned`) não carrega nenhum dos dois.
+ *
+ * O nome do servidor e o apelido de quem liga são de outra pessoa: entram com
+ * teto e sem quebra de linha no Rust (`notificacao::limpar`) e na ponte.
+ *
+ * **`estado` tem uma frase por permissão** (`Permissao` no Rust, mais as que só
+ * a página de navegador sabe ler). `NaoSeSabe` é a do app, e é a honesta: o
+ * plugin não deixa ler o que o sistema decidiu, então a frase diz onde olhar em
+ * vez de afirmar «permitidas». Nenhuma delas diz que uma notificação saiu.
+ */
+const FRASES_DA_NOTIFICACAO = Object.freeze({
+  texto: Object.freeze({
+    mencao: ({ servidor } = {}) => ({
+      titulo: "Você foi chamado",
+      corpo: servidor ? `em ${servidor}` : "numa conversa do SEELE",
+    }),
+    porta: ({ quantos = 1, servidor } = {}) => ({
+      titulo: quantos > 1 ? `${quantos} pessoas estão batendo à porta` : "Alguém está batendo à porta",
+      corpo: servidor ? `do servidor ${servidor}` : "do servidor que você hospeda",
+    }),
+    ligacao: ({ nome, apelido } = {}) => {
+      const quem = nome || (apelido ? `«${apelido}»` : null);
+      return { titulo: "Ligação chegando", corpo: quem ? `${quem} está ligando` : "Alguém está ligando para você" };
+    },
+  }),
+  /** O caminho nos ajustes do sistema, pelo nome que `plataforma` responde. */
+  caminho: Object.freeze({
+    macos: "Ajustes do Sistema › Notificações › SEELE",
+    windows: "Configurações › Sistema › Notificações › SEELE",
+    outro: "os ajustes de notificação do sistema",
+  }),
+  estado: Object.freeze({
+    desligadas: () => "Desligadas: o SEELE só avisa dentro da janela.",
+    NaoSeSabe: (caminho) =>
+      `Ligadas. O SEELE não consegue ler daqui se o sistema deixa: se nenhuma notificação aparecer, veja em ${caminho}.`,
+    Concedida: () => "Ligadas. O navegador deixa esta página notificar.",
+    Negada: () =>
+      "O NAVEGADOR NÃO DEIXA ESTA PÁGINA NOTIFICAR, e nada vai aparecer. " +
+      "Libere as notificações deste site nas permissões do navegador (o cadeado ao lado do endereço) e ligue de novo.",
+    PorPedir: () =>
+      "O navegador ainda não respondeu se esta página pode notificar, e nada vai aparecer. Desligue e ligue de novo para ele perguntar.",
+    NaoHa: () =>
+      "Este navegador não tem notificações para esta página. No iPhone e no iPad, e no Chrome do Android, o SEELE só avisa com a página aberta.",
+  }),
+  /** A permissão que esta lista não conhecer: dita, e não calada. */
+  desconhecido: "Não sei dizer se o sistema deixa o SEELE notificar.",
+  naoGravou: "Não consegui gravar a escolha neste computador. As notificações continuam como estavam.",
+  /** A confirmação que a página de navegador mostra no gesto de ligar: é ela que prova que o navegador notifica. */
+  ligadasNaPagina: Object.freeze({ titulo: "Notificações do SEELE ligadas", corpo: "É assim que o SEELE avisa com esta página fora da frente." }),
+});
+
 const FRASES_AVISOS_DO_CELULAR = Object.freeze({
   faixa: (n) => `${n} ${n === 1 ? "AVISO" : "AVISOS"}`,
   abrir: "ABRIR",
@@ -2442,20 +2826,31 @@ function fraseDeNaoSalvo(recusa) {
 /**
  * Por que um arquivo não foi desenhado. ADR 0027.
  *
- * Quatro, e a primeira é a que este caminho inteiro existe para poder dizer.
+ * Seis, e a primeira é a que este caminho inteiro existe para poder dizer.
  * As `NOTAS-DE-RELEASE` deste projeto separam duas perguntas — «o arquivo
  * chegou inteiro?» e «como sei que ele é o que diz ser?» — e um anexo só
  * alcançava a primeira. O hash respondeu sim a ela; a segunda tem resposta
  * agora, e quando a resposta é não ela merece a frase própria em vez de virar
  * um silêncio que se lê como defeito.
  *
- * **Não desenhar não é esconder.** Em todas as quatro o arquivo continua na
+ * **Não desenhar não é esconder.** Em todas elas o arquivo continua na
  * tela, com nome, tamanho e o botão de salvar. O que ele perde é a figura.
+ *
+ * `TooManyPixels` é o teto que o de bytes não dá (11/11/2026): um arquivo de
+ * poucos megabytes pode declarar dezenas de milhares de pixels de lado, e
+ * aberto pediria gigabytes a esta janela. As medidas e o máximo entram no
+ * título, como o máximo do `TooBig` (`fraseDePrevia`).
  */
 const PREVIAS = {
   TooBig:
     "ESTE ARQUIVO É GRANDE DEMAIS PARA UMA PRÉVIA.\n" +
     "Salve-o e abra no seu sistema, fora daqui.",
+  TooManyPixels:
+    "ESTA IMAGEM TEM PIXELS DEMAIS PARA UMA PRÉVIA.\n" +
+    "Salve-a e abra no seu sistema, fora daqui.",
+  Unreadable:
+    "ESTA IMAGEM NÃO ABRIU.\n" +
+    "Os bytes dela começam como os de uma imagem e não formam uma. Ela continua aqui, para salvar.",
   NotAPicture:
     "ESTE ARQUIVO NÃO É UMA DAS IMAGENS QUE ESTA JANELA DESENHA.\n" +
     "Ele continua aqui, com nome e tamanho, para salvar.",
@@ -2489,6 +2884,15 @@ function fraseDePrevia(previa) {
   // qualifica o «grande demais» — ele pertence à frase que o diz.
   if (nome === "TooBig" && typeof razao.limit === "number") {
     return PREVIAS.TooBig.replace(".\n", `: O MÁXIMO É ${emBytes(razao.limit)}.\n`);
+  }
+  // As medidas e o máximo, pela mesma razão: «pixels demais» sem número não
+  // diz a ninguém quanto a imagem tem nem quanto caberia.
+  if (nome === "TooManyPixels" && [razao.width, razao.height, razao.limit].every((n) => typeof n === "number")) {
+    const megapixels = Math.round(razao.limit / 1e6);
+    return PREVIAS.TooManyPixels.replace(
+      ".\n",
+      `: ELA TEM ${razao.width} × ${razao.height}, E O MÁXIMO É ${megapixels} MEGAPIXELS.\n`,
+    );
   }
   return PREVIAS[nome] ?? `FALHA NÃO IDENTIFICADA (${nome})`;
 }
@@ -2664,6 +3068,23 @@ const SALA_PESSOAL = Object.freeze({
     const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
     return `${quem} · ${codigo} está ligando`;
   },
+  /**
+   * A mesma faixa com uma ligação em curso (ADR 0068): quem recebe já está na
+   * própria sala, e atender põe quem liga na mesma ligação.
+   */
+  ligandoNaConversa: ({ apelido, codigo, nome_na_agenda: nome }) => {
+    const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
+    return `${quem} · ${codigo} quer entrar na ligação em curso`;
+  },
+  atenderNaConversa: "ADICIONAR À LIGAÇÃO",
+  /**
+   * Atendido, e não coube: a ligação já tem o teto de pessoas, contando quem
+   * recebe (`TETO_DA_LIGACAO`, ADR 0059). Quem ligava lê «a ligação está cheia».
+   */
+  conversaCheia: ({ apelido, nome_na_agenda: nome }) => {
+    const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
+    return `A LIGAÇÃO ESTÁ CHEIA (6 PESSOAS): ${quem} não entrou. Alguém precisa sair antes.`;
+  },
   semSom: "SEM SOM: nenhuma saída de áudio abriu, e este aviso é o único.",
   atenderSaiDe: (daqui) => `ATENDER SAI DE ${daqui}`,
   naoEntrou: "VOCÊ ATENDEU, MAS NÃO CONSEGUIU ENTRAR NA SUA SALA",
@@ -2716,7 +3137,7 @@ const SALA_PESSOAL = Object.freeze({
     recusada: "LIGAÇÃO RECUSADA",
     ninguem_atendeu: "CHAMADA PERDIDA",
     caiu_antes: "QUEM LIGAVA DESISTIU",
-    cheia: "A LIGAÇÃO ESTÁ CHEIA",
+    cheia: "A LIGAÇÃO ESTÁ CHEIA (6 PESSOAS)",
     sala_fechou: "A SUA SALA FECHOU",
   }),
 });
@@ -2847,6 +3268,12 @@ function fraseDoLinkDoNavegador(link, data, hora, alcanceDoConvite = null) {
 const PAGINA_DO_APP = "https://get.seele.sh/#baixar";
 
 /**
+ * A página de apoio (GitHub Sponsors e Pix), no mesmo site. Lá e não no app:
+ * a chave Pix e o QR mudam sem que ninguém precise de uma versão nova.
+ */
+const PAGINA_DE_APOIO = "https://get.seele.sh/#apoie";
+
+/**
  * O aviso de fone no navegador (P9; matriz, achado E-6).
  *
  * O do desktop diz que o SEELE não cancela eco, o que no navegador conta só
@@ -2971,6 +3398,8 @@ const FRASES_DO_CELULAR = Object.freeze({
     fechar: "FECHAR",
     mensagemDe: (quem, hora) => `${quem} · ${hora}`,
     copiar: "COPIAR O TEXTO",
+    responder: "RESPONDER",
+    editarMinha: "EDITAR A MINHA MENSAGEM",
     apagarMinha: "APAGAR A MINHA MENSAGEM",
     remover: "REMOVER",
     foraRemover: "Remover a mensagem de outra pessoa é pelo SEELE no computador.",
@@ -2998,6 +3427,14 @@ const FRASES_DO_CELULAR = Object.freeze({
     foraDoCelularSub: "O que fica no app do SEELE, e o que é pelo SEELE no computador.",
     baixar: "BAIXAR O APP DO SEELE",
     grupos: Object.freeze([["SÓ NO APP DO SEELE", SO_NO_APP_DO_SEELE("este aparelho")], ["NO COMPUTADOR", NO_COMPUTADOR]]),
+    instalar: "PÔR NA TELA INICIAL",
+    instalarSub: "O SEELE com ícone próprio no celular, sem loja.",
+    instalarAgora: "INSTALAR",
+    instalarJaEsta: "O SEELE já está na tela inicial deste aparelho, e é por ela que você abriu.",
+    instalarFeito: "Pronto: o SEELE está na tela inicial.",
+    instalarDesistiu: "Nada foi instalado. Dá para tentar de novo quando quiser.",
+    instalarNoIos: "No Safari, toque em Compartilhar e depois em «Adicionar à Tela de Início». O ícone abre o SEELE no Safari, onde a voz segue com a tela bloqueada.",
+    instalarPeloMenu: "No menu do navegador, escolha «Instalar app» ou «Adicionar à tela inicial».",
     comoAbre: "COMO ESTA PÁGINA ABRE",
     comoAbreSub: "Como celular ou como computador, na próxima vez que ela abrir.",
     abrirComoComputador: "ABRIR COMO COMPUTADOR",
@@ -3235,6 +3672,13 @@ const FRASES_DO_TRANSPORTE = Object.freeze({
     SinalMudo:
       "O PONTO DE ENCONTRO NÃO RESPONDEU À PÁGINA.\n" +
       "Ele pode estar fora do ar. O caminho direto do link também não abriu.",
+    // A sala pessoal de um código (ADR 0068): o ponto a achou e não disse a
+    // impressão DTLS dela. A casca troca este motivo pelo `NaoLocalizou` de
+    // quem liga (`motivoDaLigacaoPeloCodigoWeb`); a frase fica para quem o ler
+    // cru.
+    SalaSemImpressao:
+      "ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO DESTA PESSOA.\n" +
+      "O SEELE do outro lado, ou o ponto de encontro, é de uma versão anterior.",
     CaminhoNaoAbriu:
       "AS DUAS REDES NÃO SE ALCANÇARAM.\n" +
       "Quem hospeda pode abrir a porta no roteador.",
@@ -3261,6 +3705,106 @@ const FRASES_DO_TRANSPORTE = Object.freeze({
   vozEmOutraSessao:
     "A VOZ ESTÁ EM OUTRO SERVIDOR.\n" + "Entre numa sala de voz aqui para trazer o microfone para cá.",
 });
+
+// --- o teste de conexão (lacuna 8 da análise para a 1.0) ---
+//
+// A página `diagnostico-rede.html` mede o caminho de um navegador até um
+// servidor, pelo convite dele, e dá um texto para copiar. Ela existia desde a
+// 0.18 e **nada na interface levava a ela**: quem não conectava lia uma frase
+// e ficava sem caminho. Este bloco é a ligação: quais falhas a oferecem, o
+// nome do botão e o que a tela diz quando ele abre e quando não abre.
+
+/**
+ * **As falhas de conexão que são da rede, e que o teste sabe medir.**
+ *
+ * Lista fechada, e do que **oferece**: uma falha nova nasce sem o botão até
+ * alguém decidir que ele serve a ela. O que está aqui:
+ *
+ *  - do app (`ConnectionError`): nada respondeu (`Unreachable`), os pacotes
+ *    saíram e nada voltou (`SemResposta`), o caminho direto não abriu
+ *    (`NatNaoAbriu`);
+ *  - do fim de uma sessão (`EndReason`, em `MOTIVOS`): o enlace que caiu e não
+ *    voltou (`LinkLost`, `Timeout`);
+ *  - do enlace da página (`FALHA_DO_ENLACE`, em `rtc-web.js`): a rede que
+ *    bloqueia UDP (`SemRefletido`), o ponto de encontro que não respondeu
+ *    (`SinalMudo`), as duas redes que não se alcançaram (`CaminhoNaoAbriu`).
+ *
+ * E o que fica de fora, de propósito:
+ *
+ *  - senha, convite, banimento, portaria e versão: não são da rede;
+ *  - `UnresolvableHost`: o que se conserta é o endereço digitado;
+ *  - `HandshakeTimeout`: o servidor recebeu e demorou, então o caminho abriu;
+ *  - `SemCaminho` e `NomeSemResposta`: o link não tem ponto de encontro, e o
+ *    teste só mede por ele (`diagnostico-rede.js` recusa os outros);
+ *  - `NinguemNoPonto`, `AnfitriaoCalado`: é o lado de quem hospeda;
+ *  - `PontoRecusou`: o ponto recusou por excesso, e testar é pedir de novo;
+ *  - `NaoLocalizou` (a ligação pelo código): não há convite para colar lá.
+ *
+ * A página tem a mesma lista (`ERROS_QUE_A_PAGINA_ANOTA`, em
+ * `diagnostico-rede.js`): o que ela não conhece, ela não escreve no texto
+ * copiado. A bancada `teste-de-conexao.cjs` confere as duas.
+ */
+const FALHAS_QUE_OFERECEM_O_TESTE_DE_CONEXAO = Object.freeze([
+  "Unreachable",
+  "SemResposta",
+  "NatNaoAbriu",
+  "LinkLost",
+  "Timeout",
+  "SemRefletido",
+  "SinalMudo",
+  "CaminhoNaoAbriu",
+]);
+
+/**
+ * O nome da falha de rede que `erro` é, ou `null` quando ele não é uma: o
+ * nome cru de uma variante unitária, ou o motivo de uma falha do enlace da
+ * página.
+ */
+function falhaDeRede(erro) {
+  const nome = typeof erro === "string" ? erro : (erro?.FalhaDoEnlace?.motivo ?? null);
+  return FALHAS_QUE_OFERECEM_O_TESTE_DE_CONEXAO.includes(nome) ? nome : null;
+}
+
+/**
+ * As frases da oferta. «TESTAR A CONEXÃO» e não «a rede»: é o nome que a
+ * página tem («Testar a conexão com um servidor»), e quem aperta um nome tem
+ * de chegar numa tela com o mesmo.
+ *
+ * `noApp` e `naPagina` porque o mesmo aperto faz duas coisas: no app abre o
+ * navegador do sistema, na página abre uma aba. A nota diz qual **antes** do
+ * aperto, e diz o que levar: a página pede o convite, e não o recebe daqui (o
+ * convite carrega um token, e token não viaja em endereço).
+ */
+const FRASES_DO_TESTE_DE_CONEXAO = Object.freeze({
+  abrir: "TESTAR A CONEXÃO",
+  nota: Object.freeze({
+    noApp:
+      "Abre no navegador um teste do caminho até o servidor. Leve o convite: ele pede para colar. " +
+      "O resultado sai num texto para copiar e mandar a quem hospeda.",
+    naPagina:
+      "Abre numa aba nova um teste do caminho até o servidor. Leve o link do servidor: ele pede para colar. " +
+      "O resultado sai num texto para copiar e mandar a quem hospeda.",
+  }),
+  abriu: Object.freeze({
+    noApp: "O teste abriu no navegador.",
+    naPagina: "O teste abriu numa aba nova.",
+  }),
+  /** Não abriu, e a tela diz onde ele fica: um botão que falha calado não deixa caminho. */
+  naoAbriu: Object.freeze({
+    noApp: (endereco) =>
+      "NÃO DEU PARA ABRIR O NAVEGADOR.\n" + `Abra à mão: ${enderecoSemEsquema(endereco)}`,
+    naPagina: (endereco) =>
+      "O NAVEGADOR NÃO DEIXOU ABRIR A ABA.\n" +
+      `Permita que esta página abra janelas, ou abra à mão: ${enderecoSemEsquema(endereco)}`,
+    // A falha veio sem o endereço: o comando não respondeu como combinado.
+    semEndereco: "NÃO DEU PARA ABRIR O TESTE DE CONEXÃO.",
+  }),
+});
+
+/** Um endereço como se dita: sem o `https://` na frente. */
+function enderecoSemEsquema(endereco) {
+  return String(endereco ?? "").replace(/^https?:\/\//i, "");
+}
 
 // --- cargos 0.17 (cargos-ui) ---
 //
@@ -3347,7 +3891,7 @@ const FRASES_DOS_CARGOS = Object.freeze({
     ManageVoiceRooms: ["GERIR SALAS E CANAIS", "Criar, renomear e configurar salas de voz e canais."],
     ManageRoles: ["GERIR CARGOS", "Criar, ordenar e editar os cargos abaixo do seu, e dá-los às pessoas."],
     AdministerServer: ["GERIR O SERVIDOR", "O nome e a imagem do servidor, e apagar salas e canais."],
-    ShareScreen: ["TRANSMITIR A TELA", "Mostrar a própria tela para a sala de voz em que está."],
+    ShareScreen: ["TRANSMITIR A TELA", "Mostrar a própria tela, ou a câmera, para a sala de voz em que está."],
     Administrator: [
       "ADMINISTRADOR",
       "Todas as permissões, inclusive as dos MODs. Não passa por uma restrição nem por quem está acima.",
@@ -3655,6 +4199,99 @@ const FRASES_DA_FICHA = Object.freeze({
   moderar: "MODERAR",
   moderarDe: (quem) => `Moderar ${quem}: expulsar, banir ou mover`,
   moderarFora: "Moderar é pelo SEELE no computador.",
+});
+
+/**
+ * **A mesa de texto da 1.0, na conversa**: responder, editar, ser chamado, o
+ * autocompletar do `@` e as não lidas de cada canal.
+ *
+ * Minúsculas onde a conversa já escreve em minúsculas (`remover`, `editada`):
+ * o que fica ao lado de uma mensagem não grita mais que ela. As frases que um
+ * leitor de tela anuncia dizem de quem é a mensagem e de que hora, porque
+ * «responder», sozinho e repetido em toda fileira, não diz a qual.
+ */
+const FRASES_DA_CONVERSA = Object.freeze({
+  responder: "responder",
+  responderA: (quem, hora) => `responder à mensagem de ${quem} das ${hora}`,
+  editar: "editar",
+  editarA: (hora) => `editar a sua mensagem das ${hora}`,
+  // A marca ao lado de quem escreveu, na mensagem que chama quem está logado:
+  // o destaque é cor, e a `specs/06` não deixa a cor dizer nada sozinha.
+  chamouVoce: "chamou você",
+  // A citação acima de uma resposta. A segunda é a da mensagem que não está
+  // na página carregada (é mais antiga, ou foi apagada): o fio só traz o
+  // número dela, e a tela não inventa o que ela dizia.
+  irParaACitada: (quem) => `ir para a mensagem de ${quem}, a que esta responde`,
+  citacaoAusente: "mensagem anterior",
+  citacaoSemTexto: "mensagem sem texto",
+  // A faixa acima do campo de escrever, nos dois modos.
+  respondendoA: (quem) => `Respondendo a ${quem}`,
+  editando: "Editando a sua mensagem",
+  cancelar: "cancelar",
+  entendi: "entendi",
+  // O fluxo que leva um arquivo ainda não leva a mensagem citada.
+  arquivoSemCitacao: "Com arquivo, a mensagem vai sem a citação.",
+  cancelarResposta: "cancelar a resposta (Esc)",
+  cancelarEdicao: "cancelar a edição (Esc)",
+  salvar: "SALVAR",
+  salvarEdicao: "Salvar a edição",
+  // O que o leitor de tela ouve ao entrar e ao sair de cada modo.
+  anuncioDeResposta: (quem) => `Respondendo a ${quem}. Escreva e envie; Esc cancela.`,
+  anuncioDeEdicao: "Editando a sua mensagem. Enter salva; Esc cancela e devolve o que você escrevia.",
+  respostaCancelada: "Resposta cancelada.",
+  edicaoCancelada: "Edição cancelada. A mensagem ficou como estava.",
+  // A edição que não saiu fica no campo, com o porquê ao lado.
+  edicaoNaoSaiu: (porque) => `A edição não foi salva. ${porque}`,
+  // A mensagem que se editava ou a que se respondia saiu da conversa.
+  editadaSumiu: "A mensagem saiu da conversa, e não há mais o que editar.",
+  citadaSumiu: "A mensagem a que você respondia saiu da conversa. O que você escreveu vai sem a citação.",
+  semMensagemParaEditar: "Não há mensagem sua neste canal para editar.",
+  // O autocompletar do `@`.
+  pessoasParaChamar: "Pessoas para chamar",
+  ninguemComEsseNome: "Ninguém neste servidor com esse nome.",
+  foraDoAr: "fora do ar",
+  // As não lidas de um canal, para quem escuta a tela: o número sozinho ao
+  // lado do nome não diz do que é a conta.
+  naoLidas: (n) => (n === 1 ? "1 mensagem não lida" : `${n} mensagens não lidas`),
+  naoLidasComMencao: (n, chamadas) =>
+    `${n === 1 ? "1 mensagem não lida" : `${n} mensagens não lidas`}, ` +
+    `${chamadas === 1 ? "1 chama você" : `${chamadas} chamam você`}`,
+});
+
+/**
+ * **A lista de banidos e o DESBANIR** (protocolo 13), em `camada-moderar.js`.
+ *
+ * Banir deixou de ser o ato que nenhuma tela desfaz: quem pode banir lê a
+ * lista e tira o banimento daqui. Num servidor de antes da 1.0 a lista não
+ * existe, e a frase do banimento continua dizendo o que valia antes.
+ */
+const FRASES_DOS_BANIDOS = Object.freeze({
+  abrir: "BANIDOS",
+  abrirDica: "ver quem está banido deste servidor, e tirar um banimento",
+  titulo: "Banidos deste servidor",
+  anuncio: "Banidos deste servidor. A lista é pedida ao servidor cada vez que esta caixa abre.",
+  lendo: "Lendo a lista de banidos…",
+  vazio: "Ninguém está banido deste servidor agora.",
+  // A lista não se atualiza sozinha quando outra pessoa bane: a frase diz de
+  // quando ela é, e como pedir outra.
+  nota: "A lista é a de quando esta caixa abriu. Feche e abra de novo para ler outra vez.",
+  naoChegou: "A lista de banidos não chegou.\nFeche e abra de novo; se repetir, confira a conexão com o servidor.",
+  permanente: "permanente",
+  ate: (quando) => `até ${quando}`,
+  semMotivo: "sem motivo escrito",
+  motivo: (texto) => `motivo: ${texto}`,
+  desbanir: "DESBANIR",
+  desbanirDe: (quem) => `Desbanir ${quem}`,
+  tituloDeDesbanir: (quem) => `Desbanir ${quem}?`,
+  // A consequência, com o nome dentro: o que acontece, o que não acontece, e
+  // que o ato tem volta — banir de novo continua sendo possível.
+  consequenciaDeDesbanir: (quem) =>
+    `${quem} volta a poder entrar neste servidor, e reaparece entre as pessoas como fora do ar.\n` +
+    "Ninguém a avisa: ela entra quando tentar. Dá para banir de novo.",
+  // O fim da frase de BANIR para sempre, num servidor que tem a lista.
+  banirTemVolta:
+    "É para sempre, até alguém que pode banir tirar o banimento: a lista fica em BANIDOS, " +
+    "abaixo da lista de pessoas.",
 });
 
 /** A frase de um `ErroDoPerfil` (ou de um `PerfilRecusado`) para uma imagem. */

@@ -1,5 +1,17 @@
 # 01 — Arquitetura
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original, com emendas parciais da 0.17.
+>
+> - **Continua valendo:** toda a lógica no núcleo e nenhuma na interface; a topologia SFU (o servidor encaminha e não decodifica); o callback de áudio fora do async; SQLite com migrações no boot; Rust 2021 com MSRV fixado (`Cargo.toml`: 1.97).
+> - **Mudou:**
+>   - **uma casca, e não três.** A TUI saiu ([ADR 0039](../docs/adr/0039-o-produto-passa-a-ter-uma-casca-so.md)); `apps/desktop` é `apps/seele-app`; `apps/mobile` nunca existiu, e o celular entra pelo navegador (`crates/seele-web`, ADR 0057). O `quinn` não está mais no `Cargo.lock`; o `ratatui` sobra só como dev-dependency do `seele-conformance`;
+>   - **o workspace é outro.** Os membros de hoje estão no `Cargo.toml` da raiz: além dos listados abaixo, `seele-enlace` (transporte), `seele-voz` (portão, jitter buffer, mixer), `seele-sessao`, `seele-video`, `seele-encontro`, `seele-lancador`, `seele-motor`, `seele-motor-web`, `seele-web`, `seele-conformance`, `apps/seele-instalador` e `xtask`. A regra de dependência que vale é a que `xtask/src/check_deps.rs` impõe, e o cabeçalho dele diz onde ela se afasta do texto abaixo;
+>   - **o anfitrião é ICE completo e controlado, e não ICE-lite.** A seção «Transporte» abaixo ainda diz ICE-lite: vale a emenda de 26/10/2026 ao [ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md) e o cabeçalho de `crates/seele-enlace/src/ponta.rs`;
+>   - **não há TURN.** A seção abaixo fala em «TURN opcional de quem usa»: a mesma emenda o tirou, e o produto não oferece relay. O que o caminho direto não atravessa fica sem caminho;
+>   - **não há RTP.** O `str0m` serve de ICE, DTLS e SCTP, e tudo vai em canais de dados (`crates/seele-enlace/src/conexao.rs:103`). Além de `ctl`, `voz`, `u` e `b`, existem os canais de túnel `t` (confiável) e `j` (sem ordem e sem retransmissão), em `crates/seele-proto/src/transport.rs`;
+>   - **as três decisões em aberto do fim foram tomadas:** TOFU (ADR 0003), `postcard` (ADR 0001) e a escada de alcance com IPv6, UPnP e furo de NAT (ADR 0022). A porta 8383 é `DEFAULT_PORT` em `crates/seele-proto/src/transport.rs`.
+> - **Manda agora:** ADR 0063 com as emendas, `crates/seele-enlace` e `xtask/src/check_deps.rs`.
+
 ## Princípio central
 
 **Um núcleo, três cascas.** Toda lógica de sessão, protocolo, áudio e estado vive em `seele-core`, que é headless e testável sem interface. TUI, desktop e mobile são camadas de apresentação sobre a mesma máquina de estados. Nenhuma delas contém regra de negócio.

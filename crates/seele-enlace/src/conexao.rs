@@ -109,6 +109,11 @@ pub struct Leitura {
     /// A fração de perda na saída que o str0m calcula (`PeerStats::egress_loss_fraction`).
     /// Vem dos relatórios RTCP, então sem mídia RTP fica em `None`.
     pub fracao_de_perda_na_saida: Option<f32>,
+    /// A fração de perda na **entrada** (`PeerStats::ingress_loss_fraction`): do
+    /// que o par mandou por RTP, quanto não chegou aqui, desde a estatística
+    /// anterior. É a perda **antes** da retransmissão — o que o caminho tirou, e
+    /// não o que faltou no quadro. Sem mídia RTP chegando fica em `None`.
+    pub fracao_de_perda_na_entrada: Option<f32>,
 }
 
 /// Os contadores de uma conexão: o que foi recusado ou descartado, para quem investiga.
@@ -125,6 +130,12 @@ pub struct Contadores {
     pub voz_descartada: u64,
     /// Datagramas de voz que não saíram (SCTP sem espaço).
     pub voz_nao_saiu: u64,
+    /// Quadros de mídia que o `Rtc` não aceitou (a mídia não estava ligada,
+    /// ou a conexão não estava pronta).
+    pub midia_nao_saiu: u64,
+    /// Pacotes ou quadros de mídia que o `str0m` recusou ao empacotar ou
+    /// desempacotar: largados, sem derrubar a conexão.
+    pub midia_malformada: u64,
     /// O maior volume (canais "u" e "b") que o escalonador já deixou no SCTP na
     /// frente da voz, em bytes. Fica abaixo de `LIMIAR_DE_VOLUME` mais uma
     /// mensagem: é a garantia do R4, medida.
@@ -145,6 +156,8 @@ pub(crate) struct ContadoresVivos {
     pub(crate) violacoes: AtomicU64,
     pub(crate) voz_descartada: AtomicU64,
     pub(crate) voz_nao_saiu: AtomicU64,
+    pub(crate) midia_nao_saiu: AtomicU64,
+    pub(crate) midia_malformada: AtomicU64,
     pub(crate) maior_volume_no_sctp: AtomicU64,
     pub(crate) tunel_descartado: AtomicU64,
     pub(crate) tunel_grande_demais: AtomicU64,
@@ -164,7 +177,12 @@ pub(crate) struct Compartilhado {
     pub(crate) bytes_recebidos: AtomicU64,
     pub(crate) rtt_us: AtomicU64,
     pub(crate) perda_na_saida: Mutex<Option<f32>>,
+    pub(crate) perda_na_entrada: Mutex<Option<f32>>,
     pub(crate) voz_na_fila: AtomicUsize,
+    /// Os quadros de mídia que esperam a tarefa ([`crate::FILA_DE_MIDIA`]).
+    pub(crate) midia_na_fila: AtomicUsize,
+    /// A estimativa de banda do RTP na saída, em bps. Zero: nenhuma ainda.
+    pub(crate) estimativa_bps: AtomicU64,
     /// As filas de entrada vivas (cada `Recebe` que ainda não chegou ao fim nem
     /// foi largado). Um canal que o par terminou sai do SCTP e de `canais`, mas a
     /// fila dele (até [`crate::MAX_FILA_DE_ENTRADA`]) continua guardada até quem
@@ -206,6 +224,34 @@ pub(crate) enum Comando {
         par: usize,
         canal: ChannelId,
         codigo: u32,
+    },
+    /// Declara a mídia RTP do par (`Conexao::ligar_midia`).
+    LigarMidia {
+        par: usize,
+        fila: mpsc::Sender<crate::EventoDeMidia>,
+    },
+    /// Um quadro de mídia: sai sem esperar.
+    Midia {
+        par: usize,
+        faixa: u8,
+        trilha: crate::Trilha,
+        tempo: u64,
+        bytes: Arc<[u8]>,
+    },
+    /// Pede um quadro-chave ao par.
+    PedirChave {
+        par: usize,
+        faixa: u8,
+    },
+    /// Recomeça a estimativa de banda de um valor.
+    SemearEstimativa {
+        par: usize,
+        bps: u64,
+    },
+    /// Até onde a estimativa de banda deve procurar.
+    TaxaDaMidia {
+        par: usize,
+        desejada_bps: u64,
     },
     /// Quem lê liberou janela: o novo limite absoluto de dados do canal.
     /// Quem lê consumiu (ou largou) parte de uma fila: a tarefa revê o
@@ -573,6 +619,26 @@ impl Conexao {
             .map_err(|_| Recusa::Fechada)
     }
 
+    /// Liga a mídia RTP desta conexão (vídeo e som, ADR 0067) e devolve o
+    /// punho dela. **As duas pontas têm de ligar**: quem liga sozinho manda
+    /// pacotes que o par não espera. Chamar de novo troca a fila de recepção:
+    /// o punho anterior para de receber.
+    #[must_use]
+    pub fn ligar_midia(&self) -> crate::Midia {
+        let (tx, rx) = mpsc::channel(crate::FILA_DE_RECEPCAO);
+        let _ = self.cmd.send(Comando::LigarMidia {
+            par: self.comp.id,
+            fila: tx,
+        });
+        crate::Midia {
+            remetente: crate::RemetenteDeMidia {
+                comp: Arc::clone(&self.comp),
+                cmd: self.cmd.clone(),
+            },
+            fila: rx,
+        }
+    }
+
     /// O endereço do par, como o ICE o escolheu.
     #[must_use]
     pub fn remote_address(&self) -> SocketAddr {
@@ -601,6 +667,7 @@ impl Conexao {
             pacotes_perdidos: None,
             eventos_de_congestionamento: None,
             fracao_de_perda_na_saida: self.comp.perda_na_saida.lock().ok().and_then(|p| *p),
+            fracao_de_perda_na_entrada: self.comp.perda_na_entrada.lock().ok().and_then(|p| *p),
         }
     }
 
@@ -693,6 +760,8 @@ impl Conexao {
             violacoes: c.violacoes.load(Ordering::Relaxed),
             voz_descartada: c.voz_descartada.load(Ordering::Relaxed),
             voz_nao_saiu: c.voz_nao_saiu.load(Ordering::Relaxed),
+            midia_nao_saiu: c.midia_nao_saiu.load(Ordering::Relaxed),
+            midia_malformada: c.midia_malformada.load(Ordering::Relaxed),
             maior_volume_no_sctp: c.maior_volume_no_sctp.load(Ordering::Relaxed),
             tunel_descartado: c.tunel_descartado.load(Ordering::Relaxed),
             tunel_grande_demais: c.tunel_grande_demais.load(Ordering::Relaxed),

@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # ADR 0002 and specs/06: the desktop shell sees `seele-ffi`, which sees
 # `seele-core`. Nothing here may reach past it — a Tauri command that names an
@@ -32,7 +33,7 @@ seele-lancador = { path = "../../crates/seele-lancador" }
 # da 0.16, antes de copiá-los para a linha legada (`versoes::esquema_do_banco`).
 # Não pelo `seele-server`: o caminho dele abre o banco migrando. A mesma versão
 # e a mesma feature do `seele-server`, para não acrescentar crate ao grafo.
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 # Abrir o pacote de uma versão baixada do catálogo — ADR 0046. As mesmas duas
 # que o `seele-instalador` usa, e pelo mesmo motivo: é o formato que o
 # atualizador já publica.
@@ -59,6 +60,40 @@ seele-motor = { path = "../../crates/seele-motor" }
 # nenhum dos três: o `rfd` fala com a API do sistema em cada um deles, e as três
 # APIs já estavam na árvore por causa do próprio Tauri.
 tauri-plugin-dialog = "2.7"
+# A tecla de falar com outra janela na frente (`src/tecla_global.rs`). O plugin
+# oficial; traz o `global-hotkey`, que fala com a API de atalho de cada sistema
+# (Carbon no macOS, `RegisterHotKey` no Windows, X11 no Linux). Usado só daqui
+# de dentro: não há permissão de `global-shortcut` em `capabilities/janela.json`,
+# e a página não registra tecla nenhuma.
+#
+# **`~2.3`, e não `2`**: a 2.4 pede o `tauri` 2.12, e declará-la trocava o Tauri
+# inteiro do produto (2.11 → 2.12, oitocentas linhas de `Cargo.lock`) por causa
+# de uma tecla. Quando o Tauri subir por decisão própria, este til sai junto.
+tauri-plugin-global-shortcut = "~2.3"
+# A notificação do sistema: o toque no ombro com a janela fora da frente
+# (`src/notificacao.rs`) — a menção, a batida na porta de quem hospeda e a
+# ligação que chega. O plugin oficial, autorizado pelo dono em 12/11/2026; era
+# «o que sobrou da pendência 23, item 1».
+#
+# No desktop ele é uma casca fina sobre o `notify-rust`, que fala com a API de
+# cada sistema: `mac-notification-sys` no macOS (o `NSUserNotificationCenter`),
+# `tauri-winrt-notification` no Windows (o toast do WinRT) e o D-Bus pelo
+# `zbus` no Linux.
+#
+# Usado só daqui de dentro, pelo comando `notificar_no_sistema`: a página não
+# recebe `notification:allow-notify` em `capabilities/janela.json`. Quem decide
+# se sai um aviso é a regra da casca e as duas conferências deste lado (a
+# preferência no disco e a janela na frente), e não uma linha de JavaScript com
+# o título que quiser. A única permissão do plugin na capacidade é
+# `allow-is-permission-granted`, e por um motivo que não é o produto: o script
+# que o plugin injeta em toda página faz essa pergunta ao carregar, sem
+# `catch`, e recusada ela viraria uma «promise recusada sem catch» no registro
+# de toda abertura.
+#
+# **`~2.4`, pelo mesmo motivo do til acima**: a 2.4.0 pede o `tauri` 2.10, que é
+# o que o produto tem, e um minor novo de plugin já trocou o Tauri inteiro uma
+# vez.
+tauri-plugin-notification = "~2.4"
 # Atualização pelo próprio app. ADR 0026.
 #
 # Fixado no minor porque o plugin expõe o `reqwest` dele na API pública

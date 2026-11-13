@@ -42,6 +42,10 @@
 //! **Câmera.** §0: conteúdo diferente, ajuste de encoder diferente, permissão
 //! diferente. Não é subproduto barato de compartilhar tela.
 
+/// O fim que ninguém pediu — a janela fechou, o sistema parou o fluxo —, que
+/// é a mesma decisão nos dois sistemas e tem teste em qualquer um.
+pub mod fim;
+
 /// A ScreenCaptureKit, que é a única porta desde que o `CGDisplayStream` foi
 /// depreciado.
 #[cfg(target_os = "macos")]

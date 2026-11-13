@@ -128,12 +128,16 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "ajustar_limites_da_tela",
     "assistir",
     "atribuir_cargo",
+    "banidos",
     "banir_pessoa",
     "busca_andar",
     "busca_limpar",
     "buscar",
     "codec_da_tela",
     "codificacao_da_tela",
+    // A câmera (protocolo 13): o mesmo `StartScreenShare` da tela, com o
+    // portão de versão feito à mão (`tela::portao_da_fonte`).
+    "compartilhar_camera",
     "compartilhar_tela",
     // Os três dos anexos que a ponte chama por dentro: o cabeçalho do envio,
     // o destino (com as regras do nome) e o pedido de um anexo ao servidor.
@@ -141,6 +145,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "criar_cargo",
     "criar_linha",
     "criar_voice_room",
+    "desbanir_pessoa",
     "descartar_mensagem",
     // As duas regras da prévia de um link que a ponte pergunta sem sessão:
     // aonde a prévia não vai, e que mídia uma página de GIF declara.
@@ -148,6 +153,10 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "destino_do_anexo",
     "dispensar_aviso",
     "editar_cargo",
+    // A mesa mínima de texto da 1.0 (protocolo 13): editar a própria
+    // mensagem, desbanir e a lista de banidos. O portão de versão é o de
+    // toda mensagem (`Ligacao::atender`).
+    "editar_mensagem",
     "enter_voice_room",
     "escolher_apelido",
     // O perfil público (0.19, protocolo 12). Os bytes das imagens não passam
@@ -158,7 +167,10 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "icone_do_server",
     "imagem_da_pessoa",
     "leave_voice_room",
+    "listar_banidos",
     "membros_fora_do_ar",
+    // A regra pura da menção, para o autocompletar: sem sessão.
+    "menciona",
     "messages",
     "midia_da_pagina",
     "minha_imagem",
@@ -177,6 +189,9 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     // bateria e a repetição das pendentes.
     "ping_de_rotina",
     "reenviar_mensagem",
+    // O relato de recepção (protocolo 13), que a ponte chama por dentro, uma
+    // vez por segundo, com o que a voz que toca mediu.
+    "relatar_recepcao",
     "remover_mensagem",
     "renomear_linha",
     "renomear_server",
@@ -245,6 +260,21 @@ pub fn atender(
                     .map(|host| feito(json!(seele_sessao::preview::host_de_previa(&host)))),
             );
         }
+        // A regra da menção, a mesma que a sessão usa para marcar
+        // `mentions_me`: a casca a pergunta no autocompletar e no realce.
+        "menciona" => {
+            let a = Args { comando, args };
+            return Some((|| {
+                let corpo = a.texto("body")?;
+                let apelido = a.texto("nickname")?;
+                let marca = a.texto_opcional("tag")?;
+                Ok(feito(json!(seele_sessao::mencao::menciona(
+                    &corpo,
+                    &apelido,
+                    marca.as_deref()
+                ))))
+            })());
+        }
         "midia_da_pagina" => {
             let a = Args { comando, args };
             return Some(a.texto("html").map(|html| {
@@ -287,6 +317,14 @@ fn estado_vazio() -> Value {
     json!({ "casamentos": [], "atual": null, "ordinal": null, "posicao": 0, "total": 0 })
 }
 
+/// Se este comando pede ou abre uma **câmera**: o `compartilhar_camera`, e a
+/// abertura ou a codificação de um fluxo com a fonte `"camera"`.
+fn pede_a_camera(comando: &str, args: &Value) -> bool {
+    comando == "compartilhar_camera"
+        || (matches!(comando, "abertura_da_tela" | "codificacao_da_tela")
+            && args.get("fonte").and_then(Value::as_str) == Some("camera"))
+}
+
 impl Ligacao {
     /// Atende um comando da sessão desta ligação. `None` quando o comando não
     /// é desta camada.
@@ -299,6 +337,32 @@ impl Ligacao {
     ) -> Option<Atendido> {
         if !COMANDOS_DA_SESSAO.contains(&comando) {
             return None;
+        }
+        // **O portão da câmera, antes de qualquer coisa**: nem o pedido nem a
+        // abertura de uma câmera saem para um servidor que negociou menos que
+        // o protocolo dela. Ver `tela::portao_da_fonte`.
+        if self.carimbo() != 0 && pede_a_camera(comando, args) {
+            if let Err(erro) = crate::tela::portao_da_fonte(
+                seele_proto::screen::ScreenSource::Camera,
+                self.carimbo(),
+            ) {
+                return Some(Err(json!(erro)));
+            }
+        }
+        // **O relato de recepção não é erro quando não sai**, como o
+        // `Enlace::relatar_recepcao` do desktop: um servidor que negociou
+        // menos que o 13 não conhece a mensagem, e na bateria não há fio. A
+        // resposta diz `false`, nada é escrito, e o sinal desta pessoa segue,
+        // lá, como sempre foi. Sem este braço o portão geral de baixo
+        // devolveria `ServidorAntigo` uma vez por segundo.
+        if comando == "relatar_recepcao"
+            && (self.sessao_mut().is_none() || !o_servidor_ouve_o_relato(self.carimbo()))
+        {
+            return Some(Ok(Feito {
+                resposta: json!(false),
+                eventos: Vec::new(),
+                nao_saiu: None,
+            }));
         }
         let mut saida = Saida::default();
         if self.sessao_mut().is_none() {
@@ -347,6 +411,18 @@ impl Ligacao {
     }
 }
 
+/// Se um servidor que negociou `negociado` conhece o relato de recepção
+/// (`ClientMessage::RelatoDeRecepcao`): a mesma pergunta, pela mesma tabela,
+/// do `o_servidor_ouve_o_relato` do `seele-core`. Zero, o «ainda sem aperto de
+/// mão», também não ouve.
+fn o_servidor_ouve_o_relato(negociado: u8) -> bool {
+    let relato = ClientMessage::RelatoDeRecepcao(seele_proto::signal::Recepcao {
+        perda: None,
+        jitter_ms: None,
+    });
+    seele_sessao::perfil::portao_do_cliente(&relato, negociado).is_ok()
+}
+
 /// A frase do registro para uma mensagem que o fio não levou.
 fn recusado_aqui(mensagem: &ClientMessage, erro: &ControlError) -> String {
     let nome = serde_json::to_value(mensagem)
@@ -376,12 +452,23 @@ fn atender_na_sessao(
             let channel = ChannelId(a.u32("channel")?);
             saida.mensagens.push(ClientMessage::JoinChannel { channel });
             sessao.room.open_channel(channel);
+            // A página, e logo atrás a cerca dela: o `Pong` deste `Ping` diz à
+            // sessão onde o histórico acaba e a conversa ao vivo começa — sem
+            // ele, uma menção de ontem levantaria o aviso de agora. O mesmo
+            // que o desktop manda (`Room::esperar_historico`).
+            let cerca = sessao.room.esperar_historico(channel);
             saida.mensagens.push(ClientMessage::FetchHistory {
                 channel,
                 cursor: None,
                 limit: PAGINA_DO_HISTORICO,
             });
+            saida
+                .mensagens
+                .push(ClientMessage::Ping { timestamp: cerca });
             sessao.a_conversa_mudou(&mut saida.eventos);
+            // As não lidas do canal que abriu zeraram, e moram na lista de
+            // canais.
+            saida.eventos.push(json!("ChannelsChanged"));
             Ok(Value::Null)
         }
         "send_message" => {
@@ -390,10 +477,17 @@ fn atender_na_sessao(
             if corpo.is_empty() {
                 return Ok(json!(""));
             }
+            // `repliesTo`, opcional: a mensagem a que esta responde (o
+            // `send_reply` do desktop). Zero não é mensagem nenhuma: uma
+            // pendente não tem id de servidor.
+            let replies_to = match a.u64_opcional("repliesTo")? {
+                Some(0) => return Err(json!("UnknownMessage")),
+                outro => outro.map(MessageId),
+            };
             let chave = pagina.chaves.tirar();
             sessao
                 .room
-                .anotar_envio(channel, chave, corpo.clone(), agora_s);
+                .anotar_resposta(channel, chave, corpo.clone(), replies_to, agora_s);
             sessao.a_conversa_mudou(&mut saida.eventos);
             if let Some(recusa) = grande_demais(&corpo) {
                 if sessao.room.recusar_envio(chave, recusa) {
@@ -404,7 +498,7 @@ fn atender_na_sessao(
             saida.mensagens.push(ClientMessage::SendMessage {
                 channel,
                 body: corpo,
-                replies_to: None,
+                replies_to,
                 client_message_id: chave,
             });
             Ok(json!(chave.get().to_string()))
@@ -414,12 +508,12 @@ fn atender_na_sessao(
                 return Ok(json!(false));
             };
             let chave = ClientMessageId(chave);
-            let Some((channel, corpo)) = sessao
+            let Some((channel, corpo, replies_to)) = sessao
                 .room
                 .pendentes
                 .iter()
                 .find(|pendente| pendente.client_message_id == chave)
-                .map(|pendente| (pendente.channel, pendente.body.clone()))
+                .map(|pendente| (pendente.channel, pendente.body.clone(), pendente.replies_to))
             else {
                 return Ok(json!(false));
             };
@@ -433,10 +527,11 @@ fn atender_na_sessao(
                 .room
                 .anotar_envio(channel, chave, corpo.clone(), agora_s);
             sessao.a_conversa_mudou(&mut saida.eventos);
+            // A resposta anotada no primeiro envio vai junto.
             saida.mensagens.push(ClientMessage::SendMessage {
                 channel,
                 body: corpo,
-                replies_to: None,
+                replies_to,
                 client_message_id: chave,
             });
             Ok(json!(true))
@@ -462,6 +557,42 @@ fn atender_na_sessao(
             });
             Ok(Value::Null)
         }
+        // **Editar a própria mensagem** (protocolo 13): as mesmas quatro
+        // recusas locais do desktop (`Connection::edit_message`), com os
+        // mesmos nomes, e o portão de versão é o de toda mensagem.
+        "editar_mensagem" => {
+            let message = a.u64("message")?;
+            if message == 0 {
+                return Err(json!("UnknownMessage"));
+            }
+            let corpo = a.texto("body")?.trim().to_owned();
+            if corpo.is_empty() {
+                return Err(json!("MensagemVazia"));
+            }
+            if grande_demais(&corpo).is_some() {
+                return Err(json!({ "MensagemGrandeDemais": {
+                    "limite_bytes": seele_proto::control::MAX_BODY_LEN,
+                } }));
+            }
+            saida.mensagens.push(ClientMessage::EditMessage {
+                id: MessageId(message),
+                body: corpo,
+            });
+            Ok(Value::Null)
+        }
+        "desbanir_pessoa" => {
+            saida.mensagens.push(ClientMessage::UnbanPerson {
+                person: PersonId(a.u64("person")?),
+            });
+            Ok(Value::Null)
+        }
+        // Pede, e não espera: a lista chega pelo `BanidosChanged`, e é lida
+        // em `banidos`.
+        "listar_banidos" => {
+            saida.mensagens.push(ClientMessage::ListBans);
+            Ok(Value::Null)
+        }
+        "banidos" => Ok(json!(seele_sessao::retrato::banidos_de(&sessao.room))),
         "messages" => Ok(Value::Array(conversa_de(&sessao.room))),
         // Sobre os corpos que o `messages` devolve, crus e com as pendentes,
         // como o `buscar` do desktop; o cursor atravessa a reconstrução
@@ -849,6 +980,16 @@ fn atender_na_sessao(
             saida.mensagens.push(ClientMessage::StartScreenShare);
             Ok(Value::Null)
         }
+        // **A câmera, no lugar da tela** (protocolo 13): o mesmo pedido e o
+        // mesmo `StartScreenShare`, com os limites dela. O que a distingue é a
+        // fonte na abertura do fluxo, e o portão de versão já passou
+        // (`Ligacao::atender`).
+        "compartilhar_camera" => {
+            let limites = crate::tela::limites_da_camera(&a.limites("limites")?);
+            sessao.pedir(Some(limites));
+            saida.mensagens.push(ClientMessage::StartScreenShare);
+            Ok(Value::Null)
+        }
         // Idempotente: o pedido sai, e o servidor fica sabendo.
         "parar_de_compartilhar" => {
             sessao.pedir(None);
@@ -863,16 +1004,25 @@ fn atender_na_sessao(
             }
             Ok(Value::Null)
         }
-        "codificacao_da_tela" => Ok(crate::tela::codificacao(
-            &a.limites("limites")?,
-            a.u32("largura")?,
-            a.u32("altura")?,
-        )),
+        "codificacao_da_tela" => {
+            let limites = a.limites("limites")?;
+            // Uma câmera tem o teto dela, peça a página o que pedir.
+            let limites = if a.fonte("fonte")? == seele_proto::screen::ScreenSource::Camera {
+                crate::tela::limites_da_camera(&limites)
+            } else {
+                limites
+            };
+            Ok(crate::tela::codificacao(
+                &limites,
+                a.u32("largura")?,
+                a.u32("altura")?,
+            ))
+        }
         "abertura_da_tela" => {
             let lado = |nome: &str| -> Result<u16, Value> { a.u16(nome) };
             crate::tela::abertura(
                 a.u32("tela")?,
-                a.booleano("monitor")?,
+                a.fonte("fonte")?,
                 lado("largura")?,
                 lado("altura")?,
             )
@@ -886,6 +1036,28 @@ fn atender_na_sessao(
                 timestamp: sessao.pings,
             });
             Ok(Value::Null)
+        }
+        // **O relato de recepção** (protocolo 13): o que a voz que toca mediu
+        // na janela, com as unidades do desktop — a perda de 0 a 1 e o jitter
+        // em milissegundos. `null` ou ausente é «não medido». A forma é a do
+        // `Recepcao::medida`, a mesma porta do desktop: o que não é medida
+        // (não finito, negativo) vira «não medido», e sem nenhum dos dois não
+        // há relato — a resposta diz se saiu.
+        "relatar_recepcao" => {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "uma fração e milissegundos; f32 é o que o fio carrega"
+            )]
+            let numero = |nome: &str| a.campo(nome).and_then(Value::as_f64).map(|n| n as f32);
+            match seele_proto::signal::Recepcao::medida(numero("perda"), numero("jitter_ms")) {
+                Some(relato) => {
+                    saida
+                        .mensagens
+                        .push(ClientMessage::RelatoDeRecepcao(relato));
+                    Ok(json!(true))
+                }
+                None => Ok(json!(false)),
+            }
         }
         "pedir_quadro_chave" => {
             saida.mensagens.push(ClientMessage::RequestKeyFrame {
@@ -1054,6 +1226,10 @@ impl Args<'_> {
         u16::try_from(self.u64(nome)?).map_err(|_| self.invalido(nome, "um u16"))
     }
 
+    fn u64_opcional(&self, nome: &str) -> Result<Option<u64>, Value> {
+        self.campo(nome).map(|_| self.u64(nome)).transpose()
+    }
+
     fn u32_opcional(&self, nome: &str) -> Result<Option<u32>, Value> {
         self.campo(nome).map(|_| self.u32(nome)).transpose()
     }
@@ -1068,6 +1244,14 @@ impl Args<'_> {
         self.campo(nome)
             .and_then(Value::as_bool)
             .ok_or_else(|| self.invalido(nome, "um booleano"))
+    }
+
+    /// A fonte de uma transmissão, pelo nome (`tela::nome_da_fonte`).
+    fn fonte(&self, nome: &str) -> Result<seele_proto::screen::ScreenSource, Value> {
+        self.campo(nome)
+            .and_then(Value::as_str)
+            .and_then(crate::tela::fonte_de)
+            .ok_or_else(|| self.invalido(nome, "monitor, window ou camera"))
     }
 
     fn texto(&self, nome: &str) -> Result<String, Value> {
@@ -1160,7 +1344,7 @@ mod tests {
         let do_servidor =
             |mensagem: &ServerMessage| enquadrar(&encode_em(numero, mensagem).unwrap()).unwrap();
         let mut ligacao = Ligacao::abrir(Pedido {
-            sala_pessoal: false,
+            codigo: None,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -1430,7 +1614,7 @@ mod tests {
     #[test]
     fn sem_sessao_e_not_connected_e_o_que_nao_e_da_sessao_nao_e_atendido() {
         let mut ligacao = Ligacao::abrir(Pedido {
-            sala_pessoal: false,
+            codigo: None,
             apelido: "a".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -1461,7 +1645,13 @@ mod tests {
             json!({ "channel": 1 }),
         );
         assert_eq!(feito.resposta, Value::Null);
-        assert_eq!(feito.eventos, vec![json!("MessagesChanged")]);
+        // A conversa trocou, e as não lidas do canal que abriu zeraram.
+        assert_eq!(
+            feito.eventos,
+            vec![json!("MessagesChanged"), json!("ChannelsChanged")]
+        );
+        // O pedido, e logo atrás a cerca da página: é o `Pong` dela que diz à
+        // sessão onde o histórico acaba (`Room::esperar_historico`).
         assert_eq!(
             escritos(&mut ligacao),
             vec![
@@ -1472,6 +1662,9 @@ mod tests {
                     channel: ChannelId(1),
                     cursor: None,
                     limit: 50
+                },
+                ClientMessage::Ping {
+                    timestamp: seele_sessao::volta::carimbo_do_historico(ChannelId(1))
                 },
             ]
         );
@@ -2107,7 +2300,7 @@ mod tests {
         escolhas: crate::sessao::Escolhas,
     ) -> Vec<crate::ligacao::Passo> {
         let pedido = crate::ligacao::Pedido {
-            sala_pessoal: false,
+            codigo: None,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -2459,6 +2652,488 @@ mod tests {
             "{recusa}"
         );
         assert!(escritos(&mut ligacao).is_empty(), "um perfil ruim saiu");
+    }
+
+    // ---------------------------------------- a mesa mínima de texto da 1.0
+
+    fn dita(id: u64, autor: u64, canal: u32, corpo: &str) -> ServerMessage {
+        ServerMessage::MessageReceived {
+            channel: ChannelId(canal),
+            id: MessageId(id),
+            author: PersonId(autor),
+            at_seconds: 1_700_000_000,
+            author_nickname: format!("pessoa {autor}"),
+            body: corpo.into(),
+            replies_to: None,
+            client_message_id: None,
+            attachment: None,
+        }
+    }
+
+    /// **A câmera não é pedida nem aberta num servidor 12**, e o erro volta
+    /// tipado, com os dois números — o mesmo `ServidorAntigo` dos verbos do 13.
+    ///
+    /// O `StartScreenShare` da câmera é um verbo que o 12 conhece: o portão de
+    /// toda mensagem (`portao_do_cliente`) o deixaria passar, e o servidor
+    /// anunciaria à sala uma transmissão cujo fluxo ele recusa. O portão da
+    /// câmera é feito à mão, em `Ligacao::atender`; tirá-lo de lá faz o pedido
+    /// chegar ao fio. A tela, que o 12 conhece, continua saindo.
+    #[test]
+    fn um_servidor_doze_nao_recebe_o_pedido_nem_a_abertura_da_camera() {
+        let limites = json!({ "banda_bps": null, "altura_maxima": 720, "quadros_maximos": 30 });
+        let antigo = json!({ "ServidorAntigo": { "negociado": 12, "exige": 13 } });
+        let mut chaves = DaPagina::nova(SEMENTE);
+
+        let mut ligacao = dentro_em(12);
+        for (comando, args) in [
+            ("compartilhar_camera", json!({ "limites": limites })),
+            (
+                "abertura_da_tela",
+                json!({ "tela": 7, "fonte": "camera", "largura": 1280, "altura": 720 }),
+            ),
+            (
+                "codificacao_da_tela",
+                json!({ "limites": limites, "fonte": "camera", "largura": 1280, "altura": 720 }),
+            ),
+        ] {
+            assert_eq!(
+                ligacao.atender(comando, &args, &mut chaves, 0),
+                Some(Err(antigo.clone())),
+                "{comando}"
+            );
+        }
+        assert!(
+            escritos(&mut ligacao).is_empty(),
+            "o pedido da câmera foi ao fio de um servidor do 12"
+        );
+        // A tela é do 9, e sai no 12: o pedido e a abertura.
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "compartilhar_tela",
+            json!({ "limites": limites }),
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![ClientMessage::StartScreenShare]
+        );
+        let abertura = atender(
+            &mut ligacao,
+            &mut chaves,
+            "abertura_da_tela",
+            json!({ "tela": 7, "fonte": "window", "largura": 1280, "altura": 720 }),
+        );
+        assert_eq!(
+            abertura.resposta[1 + 5],
+            1,
+            "a janela não saiu como a fonte 1"
+        );
+
+        // Num servidor 13 a câmera é pedida, abre com a fonte dela, e nunca
+        // passa de 720p a 30 — peça a página o que pedir.
+        let mut ligacao = dentro();
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "compartilhar_camera",
+            json!({ "limites": { "banda_bps": null, "altura_maxima": 1080, "quadros_maximos": 60 } }),
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![ClientMessage::StartScreenShare]
+        );
+        let abertura = atender(
+            &mut ligacao,
+            &mut chaves,
+            "abertura_da_tela",
+            json!({ "tela": 7, "fonte": "camera", "largura": 1280, "altura": 720 }),
+        );
+        assert_eq!(
+            abertura.resposta[1 + 5],
+            2,
+            "a câmera não saiu como a fonte 2"
+        );
+        let codificacao = atender(
+            &mut ligacao,
+            &mut chaves,
+            "codificacao_da_tela",
+            json!({
+                "limites": { "banda_bps": null, "altura_maxima": 1080, "quadros_maximos": 60 },
+                "fonte": "camera", "largura": 1920, "altura": 1080
+            }),
+        );
+        assert_eq!(
+            (
+                &codificacao.resposta["altura"],
+                &codificacao.resposta["quadros"]
+            ),
+            (&json!(720), &json!(30)),
+            "a câmera passou do teto dela: {}",
+            codificacao.resposta
+        );
+        // Uma fonte que não existe não é adivinhada.
+        assert!(matches!(
+            ligacao.atender(
+                "abertura_da_tela",
+                &json!({ "tela": 7, "fonte": "tela", "largura": 1280, "altura": 720 }),
+                &mut chaves,
+                0
+            ),
+            Some(Err(_))
+        ));
+    }
+
+    /// **Nenhum verbo do protocolo 13 sai para um servidor 12**, e o erro
+    /// volta tipado, com os dois números. Tirar o portão de `Ligacao::atender`
+    /// faz o `EditMessage` chegar ao fio de um servidor que o pularia calado.
+    #[test]
+    fn um_servidor_doze_nao_recebe_os_verbos_do_treze() {
+        let mut ligacao = dentro_em(12);
+        assert_eq!(ligacao.carimbo(), 12);
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let antigo = json!({ "ServidorAntigo": { "negociado": 12, "exige": 13 } });
+        for (comando, args) in [
+            ("editar_mensagem", json!({ "message": 5, "body": "outra" })),
+            ("desbanir_pessoa", json!({ "person": 9 })),
+            ("listar_banidos", json!({})),
+        ] {
+            assert_eq!(
+                ligacao.atender(comando, &args, &mut chaves, 0),
+                Some(Err(antigo.clone())),
+                "{comando}"
+            );
+        }
+        assert!(escritos(&mut ligacao).is_empty());
+        // Responder é do 9, e sai no 12.
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "send_message",
+            json!({ "channel": 1, "body": "respondo", "repliesTo": 5 }),
+        );
+        assert!(matches!(
+            escritos(&mut ligacao).as_slice(),
+            [ClientMessage::SendMessage {
+                replies_to: Some(MessageId(5)),
+                ..
+            }]
+        ));
+
+        // Os mesmos três, num servidor 13, saem.
+        let mut ligacao = dentro();
+        for (comando, args) in [
+            (
+                "editar_mensagem",
+                json!({ "message": 5, "body": "  outra  " }),
+            ),
+            ("desbanir_pessoa", json!({ "person": 9 })),
+            ("listar_banidos", json!({})),
+        ] {
+            let _ = atender(&mut ligacao, &mut chaves, comando, args);
+        }
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![
+                ClientMessage::EditMessage {
+                    id: MessageId(5),
+                    body: "outra".into()
+                },
+                ClientMessage::UnbanPerson {
+                    person: PersonId(9)
+                },
+                ClientMessage::ListBans,
+            ]
+        );
+    }
+
+    /// **O relato de recepção sai com as unidades do desktop** — a perda de 0
+    /// a 1, o jitter em milissegundos —, pela forma do `Recepcao::medida`: o
+    /// que não é medida vira «não medido», e sem medida nenhuma não há relato.
+    #[test]
+    fn o_relato_de_recepcao_sai_como_o_do_desktop() {
+        use seele_proto::signal::Recepcao;
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        for (args, saiu) in [
+            (json!({ "perda": 0.125, "jitter_ms": 3.5 }), true),
+            // Só o jitter foi medido: o `null` é «não medido», e não zero.
+            (json!({ "perda": null, "jitter_ms": 7.0 }), true),
+            // Nada medido: não há o que dizer.
+            (json!({ "perda": null, "jitter_ms": null }), false),
+            (json!({}), false),
+            // Fora da faixa: a perda é aparada, o negativo não é medida.
+            (json!({ "perda": 1.5, "jitter_ms": -2.0 }), true),
+        ] {
+            let feito = atender(&mut ligacao, &mut chaves, "relatar_recepcao", args.clone());
+            assert_eq!(feito.resposta, json!(saiu), "{args}");
+            assert!(feito.eventos.is_empty() && feito.nao_saiu.is_none());
+        }
+        let escritos = escritos(&mut ligacao);
+        assert_eq!(
+            escritos,
+            vec![
+                ClientMessage::RelatoDeRecepcao(Recepcao {
+                    perda: Some(0.125),
+                    jitter_ms: Some(3.5)
+                }),
+                ClientMessage::RelatoDeRecepcao(Recepcao {
+                    perda: None,
+                    jitter_ms: Some(7.0)
+                }),
+                ClientMessage::RelatoDeRecepcao(Recepcao {
+                    perda: Some(1.0),
+                    jitter_ms: None
+                }),
+            ]
+        );
+        for mensagem in &escritos {
+            let ClientMessage::RelatoDeRecepcao(relato) = mensagem else {
+                panic!("outra mensagem");
+            };
+            assert_eq!(relato.confere(), Ok(()), "o servidor recusaria {relato:?}");
+        }
+    }
+
+    /// **Um servidor 12 não recebe o relato, e isso não é erro**: a página
+    /// relata uma vez por segundo, e um `ServidorAntigo` por segundo seria um
+    /// defeito. A resposta diz `false`, como o `Enlace::relatar_recepcao`.
+    #[test]
+    fn um_servidor_doze_nao_recebe_o_relato_e_nao_e_erro() {
+        let mut ligacao = dentro_em(12);
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let feito = atender(
+            &mut ligacao,
+            &mut chaves,
+            "relatar_recepcao",
+            json!({ "perda": 0.1, "jitter_ms": 3.0 }),
+        );
+        assert_eq!(feito.resposta, json!(false));
+        assert!(escritos(&mut ligacao).is_empty());
+        assert!(!o_servidor_ouve_o_relato(0));
+        assert!(o_servidor_ouve_o_relato(13));
+    }
+
+    /// O que a edição recusa aqui, com os nomes do `ConnectionError` do
+    /// desktop: a pendente, o corpo vazio e o corpo acima do teto.
+    #[test]
+    fn a_edicao_recusa_aqui_o_que_o_desktop_recusa() {
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        for (args, erro) in [
+            (
+                json!({ "message": 0, "body": "x" }),
+                json!("UnknownMessage"),
+            ),
+            (
+                json!({ "message": 5, "body": "  \n " }),
+                json!("MensagemVazia"),
+            ),
+            (
+                json!({ "message": 5, "body": "á".repeat(3_000) }),
+                json!({ "MensagemGrandeDemais": { "limite_bytes": 4096 } }),
+            ),
+        ] {
+            assert_eq!(
+                ligacao.atender("editar_mensagem", &args, &mut chaves, 0),
+                Some(Err(erro))
+            );
+        }
+        assert_eq!(
+            ligacao.atender(
+                "send_message",
+                &json!({ "channel": 1, "body": "x", "repliesTo": 0 }),
+                &mut chaves,
+                0
+            ),
+            Some(Err(json!("UnknownMessage")))
+        );
+        assert!(escritos(&mut ligacao).is_empty());
+    }
+
+    /// **Responder**: a pendente nasce com o `replies_to`, tentar de novo o
+    /// mantém, e a conversa o leva no JSON — com o `mentions_me` ao lado.
+    #[test]
+    fn a_resposta_fica_na_pendente_e_o_tentar_de_novo_a_mantem() {
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "open_channel",
+            json!({ "channel": 1 }),
+        );
+        let _ = escritos(&mut ligacao);
+        let chave = atender(
+            &mut ligacao,
+            &mut chaves,
+            "send_message",
+            json!({ "channel": 1, "body": "concordo", "repliesTo": 9 }),
+        )
+        .resposta;
+        let _ = escritos(&mut ligacao);
+        let conversa = atender(&mut ligacao, &mut chaves, "messages", json!({})).resposta;
+        assert_eq!(conversa[0]["id"], 0);
+        assert_eq!(conversa[0]["replies_to"], 9);
+        assert_eq!(conversa[0]["mentions_me"], false);
+
+        let de_novo = atender(
+            &mut ligacao,
+            &mut chaves,
+            "reenviar_mensagem",
+            json!({ "clientMessageId": chave }),
+        );
+        assert_eq!(de_novo.resposta, json!(true));
+        assert!(
+            matches!(
+                escritos(&mut ligacao).as_slice(),
+                [ClientMessage::SendMessage {
+                    replies_to: Some(MessageId(9)),
+                    ..
+                }]
+            ),
+            "tentar de novo mandou a resposta solta"
+        );
+        // Sem `repliesTo`, como sempre.
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "send_message",
+            json!({ "channel": 1, "body": "solta" }),
+        );
+        assert!(matches!(
+            escritos(&mut ligacao).as_slice(),
+            [ClientMessage::SendMessage {
+                replies_to: None,
+                ..
+            }]
+        ));
+    }
+
+    /// **A menção, as não lidas e o histórico, no navegador**: a página do
+    /// canal recém-aberto marca e não avisa; depois da cerca, a menção avisa;
+    /// e o que chega num canal fechado conta no retrato dele.
+    #[test]
+    fn a_mencao_avisa_fora_do_historico_e_conta_no_canal_fechado() {
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "open_channel",
+            json!({ "channel": 1 }),
+        );
+        let _ = escritos(&mut ligacao);
+        let cerca = seele_sessao::volta::carimbo_do_historico(ChannelId(1));
+        let sessao = ligacao.sessao_mut().unwrap();
+        // A sessão desta ligação é a da `marcela`.
+        sessao.dobrar_com_eventos(&ServerMessage::PersonRenamed {
+            person: PersonId(7),
+            nickname: "marcela".into(),
+        });
+
+        let do_historico = sessao.dobrar_com_eventos(&dita(1, 3, 1, "ontem, @marcela"));
+        assert!(
+            !do_historico.iter().any(|e| e.get("NoticeRaised").is_some()),
+            "uma menção do histórico levantou o aviso: {do_historico:?}"
+        );
+        sessao.dobrar_com_eventos(&ServerMessage::Pong { timestamp: cerca });
+        let ao_vivo = sessao.dobrar_com_eventos(&dita(2, 3, 1, "agora, @marcela"));
+        assert!(
+            ao_vivo
+                .iter()
+                .any(|e| e["NoticeRaised"]["notice"]["reason"] == json!("Mentioned")),
+            "a menção ao vivo não avisou: {ao_vivo:?}"
+        );
+        // Num canal fechado: conta, e a lista de canais é avisada.
+        let no_fechado = sessao.dobrar_com_eventos(&dita(3, 3, 2, "@marcela, no outro"));
+        assert!(no_fechado.contains(&json!("ChannelsChanged")));
+        assert_eq!(sessao.room.nao_lidas(ChannelId(2)), 1);
+        assert_eq!(sessao.room.mencoes_nao_lidas(ChannelId(2)), 1);
+        let retrato = serde_json::to_value(sessao.retrato().channels).unwrap();
+        assert_eq!(
+            retrato,
+            json!([{ "id": 1, "name": "geral", "open": true, "nao_lidas": 0, "mencoes": 0 }])
+        );
+
+        let conversa = atender(&mut ligacao, &mut chaves, "messages", json!({})).resposta;
+        assert_eq!(
+            conversa
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["mentions_me"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!(true), json!(true)]
+        );
+    }
+
+    /// A regra pura da menção responde sem sessão, com a marca opcional.
+    #[test]
+    fn a_regra_da_mencao_responde_sem_sessao() {
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let pergunta = |chaves: &mut DaPagina, args: Value| {
+            super::atender(None, "menciona", &args, chaves, 0)
+                .expect("da camada")
+                .expect("atendido")
+                .resposta
+        };
+        assert_eq!(
+            pergunta(
+                &mut chaves,
+                json!({ "body": "oi @Ana!", "nickname": "ana" })
+            ),
+            json!(true)
+        );
+        assert_eq!(
+            pergunta(
+                &mut chaves,
+                json!({ "body": "oi @anabela", "nickname": "ana" })
+            ),
+            json!(false)
+        );
+        assert_eq!(
+            pergunta(
+                &mut chaves,
+                json!({ "body": "@ana#ZZZ9", "nickname": "ana", "tag": "K7Q2" })
+            ),
+            json!(false)
+        );
+        assert!(matches!(
+            super::atender(None, "menciona", &json!({ "body": "x" }), &mut chaves, 0),
+            Some(Err(Value::String(_)))
+        ));
+    }
+
+    /// `banidos` lê o `Room`, e o fold avisa com `BanidosChanged` quando a
+    /// lista fecha.
+    #[test]
+    fn os_banidos_do_room_chegam_a_casca_e_o_fold_avisa() {
+        use seele_proto::control::Banido;
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        assert_eq!(
+            atender(&mut ligacao, &mut chaves, "banidos", json!({})).resposta,
+            json!([])
+        );
+        let sessao = ligacao.sessao_mut().unwrap();
+        let eventos = sessao.dobrar_com_eventos(&ServerMessage::Banidos {
+            banidos: vec![Banido {
+                person: PersonId(3),
+                nickname: "kaworu#A001".into(),
+                reason: Some("spam".into()),
+                expires_at: None,
+                issued_by: Some(PersonId(7)),
+            }],
+            ultima: true,
+        });
+        assert_eq!(eventos, vec![json!("BanidosChanged")]);
+        assert_eq!(
+            atender(&mut ligacao, &mut chaves, "banidos", json!({})).resposta,
+            json!([{
+                "person": 3, "nickname": "kaworu#A001", "reason": "spam",
+                "expires_at": null, "issued_by": 7,
+            }])
+        );
     }
 
     /// **Nada do protocolo 12 sai para um servidor 11**, e o erro volta tipado.

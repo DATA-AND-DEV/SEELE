@@ -35,6 +35,14 @@ let atendimentoFalho = null;
 /** A falha dupla encerrou a ligação: a faixa diz isso até alguém fechá-la. */
 let ligacaoEncerrada = false;
 
+/**
+ * Quem foi atendido e não coube: `null`, ou o que a faixa sabia de quem ligava.
+ * A ligação tem um teto de pessoas (ADR 0059), e o ATENDER que passa dele não
+ * põe ninguém dentro: a faixa diz isso até alguém fechá-la, em vez de sumir
+ * como se a pessoa tivesse entrado (ADR 0068).
+ */
+let naoCoube = null;
+
 /** Um ATENDER em curso: os botões não disparam outro por cima. */
 let atendendo = false;
 
@@ -86,6 +94,8 @@ async function desenharToque() {
   // O som segue a faixa: toca enquanto alguém ainda chama e a ligação não foi
   // atendida, e para quando a faixa esvazia, o ATENDER entra ou ela vira falha.
   globalThis.alertasSonoros?.manter("ligacao-chegando", Boolean(tocando) && !atendendo && !atendimentoFalho && !ligacaoEncerrada, "toque");
+  // Quem toca agora vem antes de quem não coube: a pergunta é a que espera.
+  if (tocando) naoCoube = null;
 
   let frase;
   let rotuloDoAtender = "ATENDER";
@@ -107,7 +117,17 @@ async function desenharToque() {
     const onde = await invoke("onde_estou").catch(() => null);
     if (onde === "Guardado" || onde === "Outro") {
       rotuloDoAtender = SALA_PESSOAL.atenderSaiDe(nomeDesteServidor());
+    } else if (onde === "Pessoal") {
+      // **Uma ligação em curso** (ADR 0068): quem recebe já está na própria
+      // sala, com alguém. Atender não sai de lugar nenhum nem começa outra
+      // ligação: põe quem liga nesta, e a faixa e o botão dizem isso.
+      frase = SALA_PESSOAL.ligandoNaConversa(tocando);
+      rotuloDoAtender = SALA_PESSOAL.atenderNaConversa;
     }
+  } else if (naoCoube) {
+    frase = SALA_PESSOAL.conversaCheia(naoCoube);
+    rotuloDoAtender = null;
+    rotuloDoRecusar = "FECHAR";
   } else {
     notaDoToque = null;
     faixa.hidden = true;
@@ -223,6 +243,12 @@ async function recusarOToque() {
     await desenharToque();
     return;
   }
+  // FECHAR, na faixa de quem não coube.
+  if (naoCoube && !atendimentoFalho && !quemNaFaixa()) {
+    naoCoube = null;
+    await desenharToque();
+    return;
+  }
   if (atendimentoFalho) {
     await encerrarALigacao();
     await desenharToque();
@@ -246,10 +272,15 @@ $("toque-recusar").addEventListener("click", () => {
 });
 
 listen("seele://toque", ({ payload }) => {
+  // O toque no ombro com a janela fora da frente: a regra é de lá, e este é o
+  // único ponto do toque da sala que a chama.
+  globalThis.notificacaoDoSistema?.notarToque(payload);
   if (payload?.evento === "Tocou") {
     tocandoNaFaixa.set(payload.quem, payload);
     ligacaoEncerrada = false;
   } else if (payload?.evento === "Parou") {
+    // Atendido com a ligação no teto: ninguém entrou, e a faixa o diz.
+    if (payload.desfecho === "cheia") naoCoube = tocandoNaFaixa.get(payload.quem) ?? naoCoube;
     tocandoNaFaixa.delete(payload.quem);
     if (tocandoNaFaixa.size === 0 && !atendimentoFalho && !ligacaoEncerrada) {
       const frase = SALA_PESSOAL.desfecho[payload.desfecho];

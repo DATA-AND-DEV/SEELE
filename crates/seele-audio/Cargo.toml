@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # specs/01-arquitetura.md, dependency rule: `audio` depends only on `proto`.
 # Enforced by `cargo xtask check-deps`.
@@ -29,6 +30,12 @@ rubato = "4.0.0"
 # modelo, uma licença e um arquivo a empacotar — a troca está escrita no
 # cabeçalho de `supressao.rs`.
 realfft = "3.5.0"
+# A supressão de ruído por rede neural (`supressao_neural.rs`): a porta em Rust
+# puro do RNNoise da Xiph, BSD-3-Clause, com o modelo dentro do crate. Nenhuma
+# ligação em C (ADR 0007) e nenhum arquivo a empacotar. Sem as features padrão,
+# que trazem um binário e conversores de formato. A medida que a trouxe:
+# `docs/medidas/2026-11-11-teclado-na-supressao.md`.
+nnnoiseless = { version = "=0.5.2", default-features = false }
 # `source-build` em toda plataforma: compila o libopus do código-fonte em vez
 # de baixar o pré-compilado do crate. Não é preferência, é que o pré-compilado
 # não serve para nós em três frentes, todas verificadas:

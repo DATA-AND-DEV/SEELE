@@ -119,6 +119,7 @@ async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
             .send_message(
                 ChannelId(LINE),
                 &corpo,
+                None,
                 ClientMessageId(u64::try_from(numero).expect("cabe") + 1),
             )
             .await?;

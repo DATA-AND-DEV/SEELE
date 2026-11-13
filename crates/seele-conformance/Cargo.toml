@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # This crate exists because an end-to-end protocol test needs a server and a
 # client at once, and ADR 0002 forbids either of them depending on the other —
@@ -28,7 +29,9 @@ seele-proto = { path = "../seele-proto" }
 seele-audio = { path = "../seele-audio", features = ["aparelho-de-mentira"] }
 # Com o gêmeo do guarda, do lado de quem liga (`encontro::recusar_a_producao`):
 # um teste que ia perguntar à VPS de produção reprova antes do primeiro pacote.
-seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao"] }
+# E com a costura dos candidatos do `CHAMA` (`encontro::costura_de_teste`), para
+# o furo IPv6 de ponta a ponta em `[::1]` (`tests/furo_ipv6.rs`).
+seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao", "costura-de-teste"] }
 # Com o guarda que faz um teste reprovar quando ia falar com o ponto de
 # encontro de produção (`alcance::encontro::recusar_a_producao`). Só aqui, numa
 # dependência de teste: o binário do produto não a leva.

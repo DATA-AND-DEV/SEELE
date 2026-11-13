@@ -205,3 +205,23 @@ fn o_toque_nao_aloca() {
     });
     assert!(bloco.iter().any(|a| *a != 0.0), "o toque não escreveu nada");
 }
+
+/// A supressão de ruído por rede neural roda no laço de voz, a cada quadro:
+/// depois de construída, ela não aloca (o `para` já tem o tamanho de um quadro).
+#[test]
+fn a_supressao_neural_nao_aloca_ao_processar() {
+    use seele_audio::supressao_neural::SupressaoNeural;
+
+    let mut supressao = SupressaoNeural::nova(1.0);
+    let quadro = vec![0.1_f32; seele_audio::FRAME_SAMPLES];
+    let mut para = Vec::with_capacity(seele_audio::FRAME_SAMPLES);
+    // O primeiro quadro fora da conferência: é ele que aquece o que houver.
+    supressao.processar(&quadro, &mut para);
+
+    assert_no_alloc(|| {
+        for _ in 0..50 {
+            supressao.processar(&quadro, &mut para);
+        }
+    });
+    assert_eq!(para.len(), seele_audio::FRAME_SAMPLES);
+}

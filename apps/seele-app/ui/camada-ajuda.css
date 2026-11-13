@@ -208,6 +208,60 @@
   white-space: nowrap;
 }
 
+/* O apoio: uma linha e um botão embaixo de tudo, fora da parte que rola. A
+   régua de cima é a mesma das linhas da lista. */
+.ajuda-apoio {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--seele-vidro-borda);
+}
+
+.ajuda-apoio-diz {
+  flex: 1 1 320px;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+}
+
+.ajuda-apoiar {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 20px;
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+}
+
+.ajuda-apoiar:hover,
+.ajuda-apoiar:focus-visible {
+  color: var(--seele-laranja-hover);
+  background: var(--seele-controle-hover);
+}
+
+.ajuda-apoiar:focus-visible {
+  outline: var(--seele-b-forte) solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
+.ajuda-apoio-estado {
+  flex: 1 1 100%;
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  color: var(--seele-osso);
+}
+
 /* Em janela baixa a caixa encolhe pelo corpo, que rola. O cabeçalho e a linha
    de fechar continuam onde estão: são eles que dizem como sair daqui. */
 @media (max-height: 560px) {

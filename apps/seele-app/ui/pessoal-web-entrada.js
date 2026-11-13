@@ -1,9 +1,14 @@
 // Integra a conversa por link sem criar uma sessão fictícia de servidor.
+//
+// **Só na página** (ADR 0068). A conversa direta é o caminho entre duas
+// páginas, a dois: o celular da 1.0 é só a página, e duas pessoas sem o app
+// precisam conversar. No app a conversa pessoal é a sala pessoal, com o motor
+// nativo, e este arquivo não se instala nele: o app não registra caixa de
+// chamada direta, não a disca e não a atende (o guarda
+// `a_casca_nativa_nao_registra_caixa_de_chamada_direta`).
 "use strict";
 
 function instalarConversasPessoaisWeb() {
-  const navegador = PONTE_NO_LUGAR_DO_TAURI;
-  const chamarNativo = (comando, args = {}) => window.__TAURI__.core.invoke(comando, args);
   const entrada = document.getElementById("boot-conversa-pessoal");
   if (!entrada) return;
   let servico = null, preparando = null, voz = null, preparandoVoz = null, tela = null, par = null;
@@ -72,7 +77,7 @@ function instalarConversasPessoaisWeb() {
         // As duas operações têm dono desde o início, inclusive se o IPC falhar
         // enquanto o seletor de microfone ainda estiver aberto.
         void captura.catch(() => {});
-        await Promise.all([captura, navegador ? invocarNaPonte("focar_voz", {}) : chamarNativo("focar_voz", {})]);
+        await Promise.all([captura, invocarNaPonte("focar_voz", {})]);
         if (vez !== geracaoDaMidia || par !== estePar || voz !== estaVoz || fase !== "dentro") {
           if (voz !== estaVoz) await estaVoz.desligar();
           return;
@@ -92,8 +97,22 @@ function instalarConversasPessoaisWeb() {
     },
     compartilhar: () => {
       if (!tela || fase !== "dentro") throw new Error("Tela ainda está abrindo");
-      return tela.noAr ? tela.parar() : tela.compartilhar();
+      // A câmera no ar não é a tela: COMPARTILHAR TELA a troca pela tela.
+      return tela.noAr && !tela.camera ? tela.parar() : tela.compartilhar();
     },
+    // A câmera, no lugar da tela. As recusas do sistema saem com a frase
+    // delas (negada, sem câmera, ocupada), e não com a genérica.
+    camera: async () => {
+      if (!tela || fase !== "dentro") throw new Error("Tela ainda está abrindo");
+      if (tela.noAr && tela.camera) return tela.parar();
+      try { await tela.ligarCamera(); }
+      catch (erro) {
+        const dita = new Error((erro?.name && erro.name !== "Error" ? fraseDaFalhaDaCamera(erro) : erro.message).replace("\n", " "));
+        dita.capacidadeAusente = true;
+        throw dita;
+      }
+    },
+    podeLigarCamera: () => typeof temCameraParaCodificar === "function" && temCameraParaCodificar(),
     trocarTela: () => {
       if (!tela || fase !== "dentro") throw new Error("Conversa encerrada");
       return tela.compartilhar();
@@ -181,7 +200,7 @@ function instalarConversasPessoaisWeb() {
     const atual = servico, vez = geracaoDaMidia;
     par = { enlace, meta };
     // Aceitar a conversa cede a voz do servidor, sem fechar sua sessão/chat.
-    await (navegador ? invocarNaPonte("focar_voz", {}) : chamarNativo("focar_voz", {}));
+    await invocarNaPonte("focar_voz", {});
     if (minhaGeracao !== geracao || vez !== geracaoDaMidia || servico !== atual || par?.enlace !== enlace) return;
     const preparada = await prepararVoz(atual);
     if (!preparada || vez !== geracaoDaMidia || par?.enlace !== enlace) return;
@@ -191,9 +210,11 @@ function instalarConversasPessoaisWeb() {
     void ligarMicrofoneDoGesto(preparada, enlace, meta, vez);
     tela = criarCompartilhamentoPessoalWeb({ servico: atual, transporte: enlace.tela,
       palco: vista.palco, enviarControle: controle => atual.enviarControle(controle),
-      telaCheiaNativa: navegador ? null : ligada => chamarNativo("tela_cheia", { ligada }),
+      telaCheiaNativa: null,
       aoEstado: (estado, detalhe) => {
-        if (estado === "transmitindo" || estado === "parada") vista.compartilhando(estado === "transmitindo");
+        if (estado === "transmitindo" || estado === "parada") {
+          vista.compartilhando(estado === "transmitindo", { camera: Boolean(tela?.camera), midia: tela?.midia ?? null });
+        }
         if (estado === "erro") vista.falha(detalhe || "Não foi possível abrir o compartilhamento.");
       } });
   }
@@ -229,12 +250,7 @@ function instalarConversasPessoaisWeb() {
         const erro = new Error(`Este navegador do sistema não oferece ${faltam.join(", ")}. Atualize o sistema ou o componente de navegação para conversar com voz.`);
         erro.capacidadeAusente = true; throw erro;
       }
-      const opcoes = navegador ? {} : {
-        identidade: { ...(await chamarNativo("pessoal_identidade")), assinar: intencao => chamarNativo("pessoal_assinar", { intencao }) },
-        conferirPar: (codigo, publica, apelido = null, direcao = null) => chamarNativo("pessoal_conferir_par", { codigo, publica, apelido, direcao }),
-        reservarChamada: (id, ativo = true) => chamarNativo("pessoal_reservar", { id, ativo }),
-      };
-      return criarServicoDeChamadasWeb({ ...opcoes,
+      return criarServicoDeChamadasWeb({
       aoDiagnostico(diagnostico) {
         if (vez === geracao) diagnosticoDaConexao = JSON.parse(JSON.stringify(diagnostico));
       },
@@ -242,7 +258,7 @@ function instalarConversasPessoaisWeb() {
       async obterPerfil(apelido) {
         let retrato = null;
         try {
-          const local = await (navegador ? invocarNaPonte("meu_retrato", {}) : chamarNativo("meu_retrato", {}));
+          const local = await invocarNaPonte("meu_retrato", {});
           if (typeof retratoParaChamadaPessoal === "function") retrato = await retratoParaChamadaPessoal(local);
         } catch { /* O retrato é opcional. */ }
         return { apelido, retrato };
@@ -262,6 +278,8 @@ function instalarConversasPessoaisWeb() {
         if (vez !== geracao || (estado.estado === "recebendo" && !criandoLink)) return;
         if (fase === "encerrada" && ["tocando", "chamando"].includes(estado.estado)) vista.limpar();
         globalThis.alertasSonoros?.notarFase(fase, estado.estado);
+        // A notificação do sistema da ligação que chega: o único ponto da conversa por link que a chama.
+        globalThis.notificacaoDoSistema?.notarFase(fase, estado);
         fase = estado.estado; vista.estado(estado);
         if (fase === "tocando") vista.abrir({ apelido: nomeLocal() });
         entrada.textContent = viva() ? "VOLTAR À CONVERSA" : "CONVERSAR POR LINK";
@@ -321,10 +339,8 @@ function instalarConversasPessoaisWeb() {
   function anunciarSala(estado) {
     estadoDoCodigoDireto = estado;
     document.dispatchEvent(new CustomEvent("seele:estado-pessoal-direto", { detail: estado }));
-    if (navegador) {
-      estadoPessoalDaPonte = estado;
-      emitirNaPonte("seele://sala", estado);
-    }
+    estadoPessoalDaPonte = estado;
+    emitirNaPonte("seele://sala", estado);
   }
   window.seelePessoalWeb = Object.freeze({
     diagnostico: () => diagnosticoDaConexao && JSON.parse(JSON.stringify(diagnosticoDaConexao)),
@@ -335,8 +351,10 @@ function instalarConversasPessoaisWeb() {
       vista.abrir({ apelido: apelido || nomeLocal() }); vista.limpar();
       try { return await (await obterServico()).chamarCodigo({ codigo, apelido: apelido || nomeLocal() }); }
       catch (erro) {
-        // Só ausência explícita permite ao desktop tentar a sala da 0.17.3.
-        if (!navegador && (erro.capacidadeAusente || erro.status === 404 || String(erro.message).endsWith("SemRegistro"))) {
+        // **Ninguém atende por este código** (a caixa não existe no ponto):
+        // quem chamou decide o que dizer. É o recuo de um código sem sala
+        // (`recuarParaAConversaDireta`), e a frase que orienta é a da sala.
+        if (erro.status === 404 || String(erro.message).endsWith("SemRegistro")) {
           vista.fechar(); return { ausente: true };
         }
         vista.falha(String(erro.message || erro)); throw erro;
@@ -351,7 +369,7 @@ function instalarConversasPessoaisWeb() {
       void revogacao?.catch(() => {});
       anunciarSala({ estado: receber ? "Subindo" : "Desligada" });
       try {
-        if (navegador) await preferenciaDeReceberPessoalWeb(receber);
+        await preferenciaDeReceberPessoalWeb(receber);
         if (vez !== geracaoDaRecepcao) return;
         if (!receber) {
           await revogacao;
@@ -369,16 +387,11 @@ function instalarConversasPessoaisWeb() {
       }
     },
   });
-  const preferenciaInicial = navegador ? preferenciaDeReceberPessoalWeb() : chamarNativo("pessoal_identidade").then(i => i.receber);
+  const preferenciaInicial = preferenciaDeReceberPessoalWeb();
   void preferenciaInicial.then(receber => window.seelePessoalWeb.receber(receber))
     .catch(erro => { anunciarSala({ estado: "Falhou", motivo: "NaoSubiu" }); entrada.title = String(erro.message || erro); console.warn("receber pelo código:", erro); });
-  if (!navegador) window.__TAURI__.event.listen("seele://preferencia-pessoal", ({ payload }) => {
-    void window.seelePessoalWeb.receber(Boolean(payload)).catch(erro => vista.falha(String(erro.message || erro)));
-  });
-
   const cederAudio = () => { fecharMicrofone(); void voz?.desligar().catch(() => {}); };
   document.addEventListener("seele:foco-servidor", cederAudio);
-  if (!navegador) window.__TAURI__.event.listen("seele://foco-pessoal", cederAudio);
   entrada.hidden = false;
   entrada.addEventListener("click", () => void abrir());
   if (typeof CELULAR === "object" && CELULAR) CELULAR.registrar("conversaPessoal", { abrir });
@@ -387,7 +400,7 @@ function instalarConversasPessoaisWeb() {
   document.addEventListener("freeze", () => { ++geracaoDaRecepcao; recebendoCodigo = false; terminar(); });
   const retomarRecepcao = () => {
     if (servico || preparando) return;
-    void (navegador ? preferenciaDeReceberPessoalWeb() : chamarNativo("pessoal_identidade").then(i => i.receber))
+    void preferenciaDeReceberPessoalWeb()
       .then(receber => window.seelePessoalWeb.receber(receber)).catch(erro => vista.falha(String(erro.message || erro)));
   };
   window.addEventListener("pageshow", retomarRecepcao);
@@ -395,7 +408,8 @@ function instalarConversasPessoaisWeb() {
   tomarFragmento();
 }
 
-if (typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined") {
+// Só onde a ponte está no lugar do Tauri: a página. Ver o cabeçalho.
+if (typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined" && PONTE_NO_LUGAR_DO_TAURI) {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", instalarConversasPessoaisWeb, { once: true });
   else instalarConversasPessoaisWeb();
 }

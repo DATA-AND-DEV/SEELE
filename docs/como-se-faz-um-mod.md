@@ -872,6 +872,7 @@ caminho: a janela confere a lista na fronteira.
 | superfícies de pé | 12 por MOD; avisos, 4; folhas à vista, 3 |
 | numa superfície | 4096 nós, 16 de fundura, 128 campos, 4 telas, 24 mídias |
 | mídia numa superfície | um bolso de 24 MiB que a `midia`, o `retrato` e o `fundoDeMidia` dividem; a `midia`, até 10 MiB dele. Numa região, 10 MiB |
+| os pixels de uma imagem | ela chega à tela **reduzida ao lugar em que aparece**: até 1920 × 1080 na `midia`, no `retrato` e no fundo de uma `tela`; até 1280 × 720 no `fundoDeMidia`. A que já cabe não é tocada; a animação **maior** que o lugar fica com até 60 quadros e 10 s. Acima de 36 megapixels (largura × altura) ela é recusada sem ser aberta, e o `midia` diz `imagem-grande-demais-decodificada`, com as medidas e o teto |
 | figuras numa tela | 256, até o teto da mensagem |
 | contribuições | 128 sem alvo de pé; 256 alvos por ponto |
 
@@ -1772,7 +1773,7 @@ sabe dela por `retrato.onde`, `retrato.regioes` e o evento `lugar`.
   rodam coisa no computador, e o navegador (o celular com ele) não faz nenhum
   dos dois; um MOD assim pula nele, e `SeeleUI.tunel.entrar` rejeita com
   `so-no-app` se algum dia o chamarem lá. Para o que os MODs oficiais fazem no navegador hoje, ver
-  [`docs/evidencias/api-8/mods-oficiais-no-navegador.md`](evidencias/api-8/mods-oficiais-no-navegador.md).
+  `docs/evidencias/api-8/mods-oficiais-no-navegador.md` (`evidencias/api-8/mods-oficiais-no-navegador.md`, no histórico do git).
 
 ## Testar antes de publicar
 

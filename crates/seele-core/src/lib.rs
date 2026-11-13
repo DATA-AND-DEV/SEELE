@@ -53,6 +53,9 @@ pub use seele_sessao::catalogo;
 /// Os arquivos que uma pessoa escolheu para um MOD: as regras do seletor e o
 /// guarda, de onde o desktop e o navegador os leem.
 pub use seele_sessao::escolhidos;
+/// A regra da menção (`@apelido`), a mesma que a sessão usa para marcar uma
+/// mensagem: reexportada para a casca usá-la no autocompletar.
+pub use seele_sessao::mencao;
 /// A mídia que um MOD recebe do servidor, pronta, com a feature `reducao`.
 #[cfg(feature = "reducao")]
 pub use seele_sessao::midia_de_mod;
@@ -75,11 +78,11 @@ pub use seele_sessao::volta;
 pub mod arquivo_local;
 pub mod bomba;
 pub mod caminho;
-pub mod chamada_pessoal;
 pub mod chegada;
 pub mod client;
 pub mod confere_codigo;
 pub mod conhecidos;
+pub mod de_fora;
 pub use seele_sessao::despedida;
 pub mod encontro;
 pub mod enlace;
@@ -90,6 +93,7 @@ pub mod mods;
 pub mod par;
 pub mod preferences;
 pub mod programa;
+pub mod recepcao;
 /// O juiz das prévias mora no `seele-sessao` desde a Tarefa 2.6 da F4, como a
 /// busca: é a mesma regra no desktop e no navegador.
 pub use seele_sessao::preview;
@@ -112,7 +116,7 @@ pub mod voice;
 pub use battery::{Battery, Link};
 pub use bomba::{
     escoar, ligar, Arranjo, Bomba, Contagem, Escoadouro, EventoDaBomba, Ordem, QuadroParaOFio,
-    NOME_DA_THREAD,
+    QuedaDaBomba, NOME_DA_THREAD,
 };
 /// A medida do caminho de subida de quem compartilha.
 ///
@@ -135,7 +139,7 @@ pub use state::{
 };
 pub use tela::{
     menor_resolucao, resolucao_estimada_para, Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada,
-    PernaQueAperta, QuadroRecebido, Recepcao, Teto, TetoDeVideo, Transmissao,
+    MotivoDeQueda, PernaQueAperta, QuadroRecebido, Recepcao, Teto, TetoDeVideo, Transmissao,
 };
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 /// A tela: o trait, quem o cumpre nesta máquina, e o que se escolhe.
@@ -145,10 +149,11 @@ pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 /// sabe»: uma casca não pode implementar o trait — não vê `seele-video` — e não
 /// tinha o que passar para a bomba.
 pub use video::{
-    fontes_de_tela, pedir_permissao_de_tela, permissao_de_tela, Ajuste, Captura, CapturaDoSistema,
-    CapturaEmCaixa, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, ErroDeFontes,
-    FonteDeQuadros, FonteDeTela, LimitesDeTela, Passo as PassoDeVideo, PedidoDeTela,
-    PermissaoDeTela,
+    colher_previas, fontes_de_tela, pedir_permissao_de_tela, permissao_de_tela, previa_do_quadro,
+    Ajuste, Captura, CapturaDoSistema, CapturaEmCaixa, CapturaRecusou, Compartilhamento,
+    ErroDeCompartilhamento, ErroDeFontes, FonteDeQuadros, FonteDeTela, LimitesDeTela, Olhada,
+    Passo as PassoDeVideo, PedidoDeTela, PermissaoDeTela, PreviaDeTela, PreviaEmCurso,
+    LADO_DA_PREVIA, PRAZO_DA_PREVIA,
 };
 
 pub use seele_audio::device::{consentimento_do_microfone, ConsentimentoDoMicrofone};
@@ -218,6 +223,9 @@ pub use seele_proto::control::{
     AttachmentInfo,
     AttachmentRefusal,
     AttachmentState,
+    // Reexportado com a lista de banidos (`ServerMessage::Banidos`, protocolo
+    // 13), que a ponte dobra e entrega à casca.
+    Banido,
     CausaDaRecusa,
     ChannelInfo,
     // Reexportado porque a casca declara o consentimento do caminho entre pares
@@ -298,7 +306,9 @@ pub use seele_proto::maquina;
 /// **não** está aqui: quadros por segundo. §5, e é decisão e não esquecimento —
 /// a tela não promete a escolha, e um número que a casca pudesse escrever no
 /// cabeçalho seria a casca prometendo.
-pub use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
+pub use seele_proto::screen::{
+    ScreenCodec, ScreenHeader, ScreenSource, PROTOCOLO_DA_CAMERA, SCREEN_HEADER_VERSION,
+};
 pub use seele_proto::signal::{Signal, SignalBand, SyncInputs};
 pub use seele_proto::transport::DEFAULT_PORT;
 pub use seele_proto::uri;

@@ -179,6 +179,21 @@ class ReproducaoDaVoz extends AudioWorkletProcessor {
           this.port.postMessage({ tipo: "contas", pedido: m.pedido, contas: JSON.parse(this.saidaEmTexto()), ...this.andamento() });
         }
         break;
+      case "recepcao":
+        // Uma volta da medida da recepção: a conta é do `.wasm`, que também
+        // decide a vez do relato. A hora é a da página (`m.agora`): este
+        // escopo não tem relógio de parede. `m.fora` é a alça do som da tela.
+        // Um `.wasm` de antes desta medida (o cache de uma página que
+        // atualizou pela metade) não a tem: a resposta é «nada medido».
+        this.port.postMessage({
+          tipo: "recepcao",
+          pedido: m.pedido,
+          medida:
+            typeof e.voz_tocar_recepcao === "function" && e.voz_tocar_recepcao(m.agora, m.fora >>> 0) === 0
+              ? JSON.parse(this.saidaEmTexto())
+              : null,
+        });
+        break;
       default:
         this.port.postMessage({ tipo: "falha", onde: "reprodução", texto: `uma mensagem sem tipo conhecido: ${m && m.tipo}` });
     }

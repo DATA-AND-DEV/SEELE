@@ -317,7 +317,15 @@ pub fn preencher_do_pacote(
 ///
 /// Fails if the table cannot be read.
 pub fn ler_quintal(persistence: &Persistence, mod_id: &str) -> Result<BTreeMap<String, String>> {
-    let connection = persistence.connection();
+    ler_quintal_na(persistence.connection(), mod_id)
+}
+
+/// O [`ler_quintal`] numa conexão dada: a do banco, ou a de uma transação já
+/// aberta ([`mudar_quintal`]).
+fn ler_quintal_na(
+    connection: &rusqlite::Connection,
+    mod_id: &str,
+) -> Result<BTreeMap<String, String>> {
     let mut statement =
         connection.prepare("SELECT key, value FROM mod_data WHERE mod_id = ?1 ORDER BY key")?;
     let linhas = statement.query_map([mod_id], |row| {
@@ -352,14 +360,69 @@ pub fn gravar_quintal(
     quintal: &BTreeMap<String, String>,
 ) -> Result<()> {
     let transacao = persistence.connection_mut().transaction()?;
+    substituir_quintal_na(&transacao, mod_id, quintal)?;
+    transacao.commit()?;
+    Ok(())
+}
+
+/// A troca do quintal inteiro, dentro da transação de quem chama.
+fn substituir_quintal_na(
+    transacao: &rusqlite::Transaction<'_>,
+    mod_id: &str,
+    quintal: &BTreeMap<String, String>,
+) -> Result<()> {
     transacao.execute("DELETE FROM mod_data WHERE mod_id = ?1", [mod_id])?;
-    {
-        let mut inserir =
-            transacao.prepare("INSERT INTO mod_data (mod_id, key, value) VALUES (?1, ?2, ?3)")?;
-        for (chave, valor) in quintal {
-            inserir.execute(params![mod_id, chave, valor.as_bytes()])?;
-        }
+    let mut inserir =
+        transacao.prepare("INSERT INTO mod_data (mod_id, key, value) VALUES (?1, ?2, ?3)")?;
+    for (chave, valor) in quintal {
+        inserir.execute(params![mod_id, chave, valor.as_bytes()])?;
     }
+    Ok(())
+}
+
+/// **Muda o quintal de um MOD sobre o que está no banco agora**: lê, aplica
+/// `mudar` e grava, tudo dentro de uma transação que toma a escrita **antes**
+/// de ler.
+///
+/// # O defeito que isto conserta
+///
+/// O caminho de eventos relia o quintal e o gravava em dois passos
+/// ([`ler_quintal`], depois [`gravar_quintal`]), sob o cadeado do banco. O
+/// cadeado é **de um servidor**, e o banco é um arquivo: outra conexão no
+/// mesmo arquivo grava entre os dois passos, e a gravação de cá passa por
+/// cima com o retrato de antes. Há outra conexão sempre que um servidor sobe
+/// com o de antes ainda descendo, que é hospedar de novo logo depois de sair:
+/// as sessões do servidor velho ainda estão dizendo `MaquinaParou` à metade
+/// de servidor dele enquanto o novo diz `MetadeSubiu` à dele.
+///
+/// Foi o que reprovou `o_servidor_que_reinicia_chama_as_maquinas_sozinho` no
+/// CI (macOS, 13/11/2026): o quintal lido no fim tinha os `MaquinaRecusou`
+/// dos pedidos que o `MetadeSubiu` fez, e não tinha nada do que o mesmo
+/// `MetadeSubiu` escreveu — nem `religar`, nem a segunda linha de `subiu`. O
+/// servidor velho releu antes dessa gravação e gravou depois dela.
+///
+/// A janela é a transação do outro inteira, e não um instante: no WAL, quem
+/// lê durante a escrita alheia vê o estado de antes, e o `DELETE` seguinte
+/// espera o cadeado do arquivo (o `busy_timeout`) e grava o que tinha lido.
+///
+/// `Immediate` é o que fecha: a escrita é tomada no `BEGIN`, a leitura vem
+/// depois, e ninguém grava no meio.
+///
+/// # Errors
+///
+/// Falha se a transação não abrir (o banco ocupado por mais que o
+/// `busy_timeout`), não ler ou não gravar. Nada é escrito quando falha.
+pub fn mudar_quintal(
+    persistence: &mut Persistence,
+    mod_id: &str,
+    mudar: impl FnOnce(&mut BTreeMap<String, String>),
+) -> Result<()> {
+    let transacao = persistence
+        .connection_mut()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let mut quintal = ler_quintal_na(&transacao, mod_id)?;
+    mudar(&mut quintal);
+    substituir_quintal_na(&transacao, mod_id, &quintal)?;
     transacao.commit()?;
     Ok(())
 }
@@ -409,6 +472,57 @@ mod tests {
         let lido = ler_quintal(&persistence, "seele/x").expect("ler");
         assert_eq!(lido.len(), 1);
         assert!(!lido.contains_key("b"), "a chave apagada sobreviveu");
+    }
+
+    /// **Duas conexões no mesmo arquivo não apagam a escrita uma da outra.**
+    ///
+    /// São dois servidores no mesmo banco: o que está descendo e o que subiu
+    /// no lugar dele. `A` começa a mudar o quintal, e no meio da mudança `B`
+    /// grava outra chave.
+    ///
+    /// Com a leitura fora da transação (como era: `ler_quintal`, depois
+    /// `gravar_quintal`), `B` grava na hora, `A` grava por cima o que tinha
+    /// lido, e a chave de `B` some. Com [`mudar_quintal`], `B` espera `A`
+    /// terminar, lê o que `A` gravou e grava as duas.
+    ///
+    /// A espera de `A` por `B` tem teto, e o teto só dá os dentes: com o
+    /// conserto `B` não tem como terminar antes de `A`, o teto vence e o
+    /// teste passa; sem o conserto `B` termina em milissegundos e o teste
+    /// reprova. Em nenhum dos dois o resultado depende de quanto a máquina
+    /// demora.
+    #[test]
+    fn duas_conexoes_no_mesmo_banco_nao_perdem_a_escrita_uma_da_outra() {
+        let pasta = tempfile::tempdir().expect("pasta temporária");
+        let arquivo = Location::File(pasta.path().join("seele.db"));
+        let mut a = Persistence::open(&arquivo).expect("abrir A");
+        enable(&a, &ligado("seele/x", "1.0.0", "h")).expect("habilitar");
+        let mut b = Persistence::open(&arquivo).expect("abrir B");
+
+        let (b_gravou, a_espera) = std::sync::mpsc::channel::<()>();
+        let (a_leu, b_espera) = std::sync::mpsc::channel::<()>();
+        let de_b = std::thread::spawn(move || {
+            b_espera.recv().expect("A não chegou a ler");
+            mudar_quintal(&mut b, "seele/x", |quintal| {
+                quintal.insert("de-b".to_owned(), "1".to_owned());
+            })
+            .expect("B não gravou");
+            let _ = b_gravou.send(());
+        });
+
+        mudar_quintal(&mut a, "seele/x", |quintal| {
+            quintal.insert("de-a".to_owned(), "1".to_owned());
+            a_leu.send(()).expect("B não está esperando");
+            let _ = a_espera.recv_timeout(std::time::Duration::from_millis(500));
+        })
+        .expect("A não gravou");
+        de_b.join().expect("a thread de B entrou em pânico");
+
+        let lido = ler_quintal(&a, "seele/x").expect("ler");
+        assert_eq!(
+            lido.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["de-a", "de-b"],
+            "uma das duas conexões gravou por cima da outra"
+        );
     }
 
     /// Dois MODs não leem o quintal um do outro.

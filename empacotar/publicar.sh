@@ -1363,6 +1363,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/ajustes-v013.cjs
     uma_bancada node apps/seele-app/bancada/escolha-de-versao-de-mod.cjs
     uma_bancada node apps/seele-app/bancada/gif-na-conversa.cjs
+    uma_bancada node apps/seele-app/bancada/teto-das-previas.cjs
     uma_bancada node apps/seele-app/bancada/tema-claro-legivel.cjs
     uma_bancada node apps/seele-app/bancada/regioes-do-produto.cjs
     uma_bancada node apps/seele-app/bancada/capa.cjs
@@ -1371,6 +1372,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
     uma_bancada node apps/seele-app/bancada/link-do-navegador.cjs
     uma_bancada node apps/seele-app/bancada/nucleo.cjs
+    uma_bancada node apps/seele-app/bancada/codificador-no-rodape.cjs
     uma_bancada node apps/seele-app/bancada/tema-do-servidor.cjs
     uma_bancada node apps/seele-app/bancada/gestao-do-tema.cjs
     uma_bancada node apps/seele-app/bancada/palco-da-chamada.cjs
@@ -1378,6 +1380,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/linhas-pelo-id.cjs
     uma_bancada node apps/seele-app/bancada/executor-no-navegador.cjs target/wasm32-wasip1/release/seele_motor_web.wasm
     uma_bancada node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+    uma_bancada node apps/seele-app/bancada/recepcao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
     uma_bancada node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
     # O servidor de verdade da bancada da sessão pelo navegador (Tarefa 2.6 da F4).
     cargo build --quiet --package seele-server --example servidor_da_bancada ||
@@ -1398,6 +1401,8 @@ todas_as_bancadas_de_navegador() {
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS portaria-da-bancada"
     cargo build --quiet --package seele-enlace --example eco --package seele-encontro ||
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS eco-e-encontro"
+    cargo build --quiet --package seele-server --example sala_da_bancada ||
+        BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS sala-da-bancada"
     cargo test --package xtask pacote_web::tests || BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS cache-web-fixture"
     cargo xtask pacote-web || BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS pacote-web"
     uma_bancada node apps/seele-app/bancada/entrada-celular-sem-marca.cjs
@@ -1436,6 +1441,8 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/saida-hospedagem-navegacao.cjs
     uma_bancada node apps/seele-app/bancada/multi-sessao-na-ponte.cjs
     uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs
+    uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1600x919
+    uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1280x720
     uma_bancada node apps/seele-app/bancada/palco-depois-de-reconectar.cjs
     uma_bancada node apps/seele-app/bancada/ciclo-de-reconectar-o-servidor.cjs
     uma_bancada node apps/seele-app/bancada/queda-que-volta-sozinha.cjs
@@ -1450,6 +1457,15 @@ todas_as_bancadas_de_navegador() {
     # prazo da etapa, `PRAZO_DA_ETAPA_S`, 40 min). Pede o Playwright de Node com o Chromium e o WebKit.
     uma_bancada node apps/seele-app/bancada/pos-release-ui.cjs
     uma_bancada node apps/seele-app/bancada/desktop-estreito.cjs
+    uma_bancada node apps/seele-app/bancada/mesa-de-texto.cjs
+    uma_bancada node apps/seele-app/bancada/camera.cjs
+    uma_bancada node apps/seele-app/bancada/transmissao-que-cai.cjs
+    uma_bancada node apps/seele-app/bancada/previas-de-tela.cjs
+    uma_bancada node apps/seele-app/bancada/apoio-na-ajuda.cjs
+    uma_bancada node apps/seele-app/bancada/teste-de-conexao.cjs
+    uma_bancada node apps/seele-app/bancada/instalavel.cjs
+    uma_bancada node apps/seele-app/bancada/conversa-longa.cjs
+    uma_bancada node apps/seele-app/bancada/notificacao-do-sistema.cjs
     uma_bancada node apps/seele-app/bancada/hotfix-0195.cjs
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
     uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
@@ -1470,6 +1486,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-credito.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright
+    uma_bancada node apps/seele-app/bancada/sala-pelo-codigo.cjs target/debug/seele-encontro target/debug/examples/sala_da_bancada target/wasm32-unknown-unknown/release/seele_web.wasm
     uma_bancada python3 tools/bancada-do-celular.py "$TEMPORARIO/bancada-do-celular"
     if [ -n "$BANCADAS_VERMELHAS" ]; then
         printf 'bancadas que reprovaram:%s\n' "$BANCADAS_VERMELHAS"
@@ -1773,7 +1790,10 @@ print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || csp_or
         aviso "o sinal conferido foi $csp_url, e não o de produção (https://$PONTO_DO_PORTAO/sinal/1)." \
             "O corpo do release vai dizer que o sinal de produção não foi conferido."
     fi
-    csp_dir=$(mktemp -d -t seele-sinal) || morrer "sinal: sem pasta temporária."
+    # O molde vai inteiro e com os `XXXXXX`, como o do TEMPORARIO lá em cima:
+    # `mktemp -d -t nome` é a forma do BSD, e o `mktemp` do GNU (Linux, e o
+    # `sh.exe` do Git no Windows) responde «too few X's in template» e sai com 1.
+    csp_dir=$(mktemp -d "${TMPDIR:-/tmp}/seele-sinal.XXXXXX") || morrer "sinal: sem pasta temporária."
     csp_corpo=$(cargo run --manifest-path "$RAIZ/Cargo.toml" -q -p seele-encontro --example sondar -- --corpo-do-sinal) \
         || { rm -rf "$csp_dir"; morrer "sinal: o sondar não montou o corpo do POST."; }
     # Sem --location: o sinal responde ali mesmo, e um redirecionamento é um proxy errado.
@@ -1813,6 +1833,16 @@ print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || csp_or
     done
     rm -rf "$csp_dir"
     passo "sinal ($csp_url): POST responde SEELE-SINAL/1 NINGUEM, com o CORS só de https://$csp_origem"
+}
+
+# **Nada vai a público com um marcador no lugar de um dado de verdade.** A
+# chave Pix do README entra pela mão do dono; enquanto o marcador estiver lá, a
+# seção «Apoie» mandaria quem quer apoiar para lugar nenhum.
+conferir_marcadores() {
+    if grep -q 'PIX-A-PREENCHER' "${RAIZ}/README.md"; then
+        morrer "o README ainda tem o marcador «PIX-A-PREENCHER» na seção «Apoie»." \
+            "Troque-o pela chave Pix aleatória (ou tire a linha do Pix) e publique de novo."
+    fi
 }
 
 conferir_arvore() {
@@ -2580,7 +2610,8 @@ print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || pda_or
     # basta: o Pages devolve o index.html da SPA com 200 para qualquer caminho, um domínio estacionado também responde 200, e um
     # catálogo copiado sem a assinatura certa responde 200. Cada página tem a marca do que ela é; o catálogo e as revogações são
     # conferidos pela assinatura, com o código e a chave do app (crates/seele-sessao/examples/conferir_catalogo.rs).
-    pda_dir=$(mktemp -d -t seele-preflight) || morrer "preflight de ativação: sem pasta temporária."
+    # Molde inteiro e com os `XXXXXX`: `mktemp -d -t nome` só existe assim no BSD (veja em conferir_sinal_do_ponto).
+    pda_dir=$(mktemp -d "${TMPDIR:-/tmp}/seele-preflight.XXXXXX") || morrer "preflight de ativação: sem pasta temporária."
     pda_baixar() { # url arquivo [--sem-redirecionar]
         pda_seguir=--location
         [ "${3:-}" = "--sem-redirecionar" ] && pda_seguir=""
@@ -2654,6 +2685,7 @@ printf -- '--- conferindo antes de compilar ---\n'
 conferir_versao
 conferir_ferramentas
 conferir_condicoes_das_notas
+conferir_marcadores
 conferir_arvore
 conferir_validacao
 conferir_config_tauri

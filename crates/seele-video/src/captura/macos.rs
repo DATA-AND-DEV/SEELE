@@ -74,8 +74,50 @@ use screencapturekit::prelude::{
     PixelFormat, SCContentFilter, SCDisplay, SCShareableContent, SCStream, SCStreamConfiguration,
     SCStreamOutputTrait, SCStreamOutputType, SCWindow,
 };
+use screencapturekit::stream::delegate_trait::SCStreamDelegateTrait;
+
+use super::fim::SinalDeFim;
 
 use crate::codec::{Cadencia, QuadroI420, Resolucao};
+
+/// **Uma foto parada de uma fonte**, em RGBA, já do tamanho pedido: a prévia
+/// da caixa de compartilhar.
+///
+/// Pela foto do sistema (`SCScreenshotManager`, macOS 14 em diante), e não por
+/// uma captura: uma janela que não muda não entrega quadro a uma captura, e a
+/// prévia dela nunca chegaria (medido em 11/11/2026: WhatsApp, Docker e um
+/// navegador parados ficaram sem quadro em 1,2 s cada).
+///
+/// # Errors
+///
+/// O que o sistema disse: sem permissão, um macOS que não tem a foto, ou uma
+/// fonte que sumiu. Quem chama cai para a captura.
+pub fn foto(
+    fonte: &Fonte,
+    largura: usize,
+    altura: usize,
+) -> Result<(usize, usize, Vec<u8>), String> {
+    use screencapturekit::screenshot_manager::{CGImageExt, SCScreenshotManager};
+
+    if !permissao().concedida() {
+        return Err(ErroDeCaptura::SemPermissaoDeTela.to_string());
+    }
+    let filtro = match fonte {
+        Fonte::Monitor { alvo, .. } => SCContentFilter::create()
+            .with_display(alvo)
+            .with_excluding_windows(&[])
+            .build(),
+        Fonte::Janela { alvo, .. } => SCContentFilter::create().with_window(alvo).build(),
+    };
+    let config = SCStreamConfiguration::new()
+        .with_width(u32::try_from(largura.max(1)).unwrap_or(u32::MAX))
+        .with_height(u32::try_from(altura.max(1)).unwrap_or(u32::MAX));
+    let imagem =
+        SCScreenshotManager::capture_image(&filtro, &config).map_err(|erro| erro.to_string())?;
+    let rgba = imagem.rgba_data().map_err(|erro| erro.to_string())?;
+    Ok((imagem.width(), imagem.height(), rgba))
+}
+
 use crate::erro::ErroDeVideo;
 
 /// Por que a tela não foi capturada, sempre com um nome.
@@ -501,7 +543,30 @@ struct Entregador {
     largura: usize,
     altura: usize,
     som: Arc<FilaDeSom>,
+    fim: Arc<SinalDeFim>,
 }
+
+/// Quem ouve o sistema dizer que o fluxo parou sem ninguém mandar.
+///
+/// O `SCStream` nascia **sem delegado**: a janela transmitida fechava, a
+/// ScreenCaptureKit chamava `stream(_:didStopWithError:)`, e a biblioteca
+/// escrevia a frase no `stderr` e seguia. Para quem lê a [`Vaga`], isso é
+/// igual a uma tela parada — e a transmissão ficava no ar, congelada.
+///
+/// Um `stop_capture` pedido por nós **não** passa por aqui: a parada limpa
+/// volta pelo retorno dele.
+struct Vigia {
+    fim: Arc<SinalDeFim>,
+}
+
+impl SCStreamDelegateTrait for Vigia {
+    fn did_stop_with_error(&self, erro: screencapturekit::error::SCError) {
+        self.fim.marcar(erro.to_string());
+    }
+}
+
+/// O que se diz quando o fim veio pelo estado do quadro, e não pelo delegado.
+const O_FLUXO_PAROU: &str = "the system stopped the capture stream (frame status: stopped)";
 
 impl Entregador {
     /// Tira as amostras de um `CMSampleBuffer` de áudio e as põe na fila.
@@ -558,6 +623,12 @@ impl SCStreamOutputTrait for Entregador {
             Destino::SemConteudo => {
                 self.vaga.sem_conteudo.fetch_add(1, Ordering::Relaxed);
             }
+            Destino::Acabou => {
+                // Continua sendo uma amostra sem pixels, e é contada como tal;
+                // a marca é o que a distingue de uma tela parada.
+                self.vaga.sem_conteudo.fetch_add(1, Ordering::Relaxed);
+                self.fim.marcar(O_FLUXO_PAROU);
+            }
             Destino::Converter(imagem) => match converter(&imagem, self.largura, self.altura) {
                 Ok(quadro) => self.vaga.por(QuadroDaTela {
                     quadro,
@@ -581,6 +652,12 @@ enum Destino<I> {
     /// Nada a converter: conta em [`Vaga::sem_conteudo`] e o quadro anterior
     /// continua valendo.
     SemConteudo,
+    /// O sistema parou o fluxo: não há pixels, e **não vai haver mais**.
+    ///
+    /// Separado de [`Destino::SemConteudo`] porque os dois pedem coisas
+    /// opostas de quem transmite: a tela parada pede paciência, e o fluxo
+    /// parado pede que a transmissão acabe e diga por quê.
+    Acabou,
     /// Há pixels, e esta é a imagem que os tem.
     Converter(I),
 }
@@ -594,9 +671,15 @@ enum Destino<I> {
 /// genérica e não um `bool` para que o «converter» já traga o que converter —
 /// sem um segundo lugar que confira de novo se ela existe.
 ///
-/// `Idle`, `Blank`, `Suspended` e `Stopped` são a tela dizendo que nada mudou,
-/// que está em branco, que o sistema suspendeu a captura ou que ela acabou.
-/// Uma amostra sem imagem também não tem o que converter.
+/// `Idle`, `Blank` e `Suspended` são a tela dizendo que nada mudou, que está
+/// em branco ou que o sistema suspendeu a captura. Uma amostra sem imagem
+/// também não tem o que converter.
+///
+/// `Stopped` é outra coisa: o sistema parou o fluxo, e é o fim
+/// ([`Destino::Acabou`]). Vale mesmo que a amostra traga uma imagem — o que
+/// ela diz é que não vem mais nenhuma. **Não é o único aviso, nem o
+/// principal**: nas versões medidas abaixo o estado vem `None` em toda
+/// amostra, e quem ouve o fim é o delegado ([`Vigia`]).
 ///
 /// **O desconhecido não conta como «sem conteúdo», e isso é medido.** Em
 /// `screencapturekit` 8.0.1 sobre macOS 26.5 o acessor do anexo
@@ -609,6 +692,9 @@ enum Destino<I> {
 /// monitores, e a tela parada chegando como amostra sem imagem. Quem confere se
 /// há pixels é a imagem, e não o estado.
 fn classificar<I>(estado: Option<SCFrameStatus>, imagem: Option<I>) -> Destino<I> {
+    if estado == Some(SCFrameStatus::Stopped) {
+        return Destino::Acabou;
+    }
     if estado.is_some_and(|estado| !estado.has_content()) {
         return Destino::SemConteudo;
     }
@@ -625,6 +711,7 @@ pub struct CapturaDaTela {
     largura: usize,
     altura: usize,
     som: Arc<FilaDeSom>,
+    fim: Arc<SinalDeFim>,
 }
 
 impl CapturaDaTela {
@@ -756,13 +843,24 @@ impl CapturaDaTela {
 
         let vaga = Arc::new(Vaga::default());
         let som = Arc::new(FilaDeSom::default());
-        let mut fluxo = SCStream::new(&filtro, &config);
+        let fim = Arc::new(SinalDeFim::default());
+        // **Com delegado**: é por ele que o sistema diz que o fluxo parou sem
+        // ninguém mandar — a janela fechou, a permissão foi tirada, a pessoa
+        // parou pelo menu do sistema. Ver [`Vigia`].
+        let mut fluxo = SCStream::new_with_delegate(
+            &filtro,
+            &config,
+            Vigia {
+                fim: Arc::clone(&fim),
+            },
+        );
         fluxo.add_output_handler(
             Entregador {
                 vaga: Arc::clone(&vaga),
                 largura,
                 altura,
                 som: Arc::clone(&som),
+                fim: Arc::clone(&fim),
             },
             SCStreamOutputType::Screen,
         );
@@ -774,6 +872,7 @@ impl CapturaDaTela {
                 largura,
                 altura,
                 som: Arc::clone(&som),
+                fim: Arc::clone(&fim),
             },
             SCStreamOutputType::Audio,
         );
@@ -790,7 +889,22 @@ impl CapturaDaTela {
             som,
             largura,
             altura,
+            fim,
         })
+    }
+
+    /// Se a captura acabou sem ninguém mandar, e o que o sistema disse.
+    ///
+    /// `None` enquanto ela vive — inclusive quando não entrega quadro porque a
+    /// tela não muda. `Some` quando a ScreenCaptureKit parou o fluxo: a janela
+    /// transmitida fechou, a permissão foi tirada no meio, ou a pessoa parou
+    /// pelo indicador do sistema.
+    ///
+    /// É o que distingue as duas coisas que, lidas só pela [`Vaga`], são
+    /// iguais: `None` atrás de `None`.
+    #[must_use]
+    pub fn acabou(&self) -> Option<String> {
+        super::fim::fim_da_captura(self.fim.acabou(), true)
     }
 
     /// A posição onde os quadros aparecem.
@@ -1075,7 +1189,6 @@ mod testes {
             SCFrameStatus::Idle,
             SCFrameStatus::Blank,
             SCFrameStatus::Suspended,
-            SCFrameStatus::Stopped,
         ] {
             assert_eq!(
                 classificar(Some(estado), Some("imagem")),
@@ -1085,6 +1198,52 @@ mod testes {
                  disse que não é"
             );
         }
+    }
+
+    /// **O fluxo parado não é uma tela parada.**
+    ///
+    /// Os dois chegam sem pixels, e até a 1.0 os dois eram contados como «sem
+    /// conteúdo»: fechar a janela transmitida deixava a transmissão no ar,
+    /// congelada no último quadro, porque nada dizia a quem transmite que não
+    /// viria mais quadro nenhum.
+    #[test]
+    fn o_fluxo_parado_e_o_fim_e_nao_uma_tela_parada() {
+        for imagem in [None, Some("imagem")] {
+            assert_eq!(
+                classificar(Some(SCFrameStatus::Stopped), imagem),
+                Destino::Acabou,
+                "o sistema disse que o fluxo parou (imagem: {imagem:?}) e a amostra foi \
+                 contada como outra coisa: quem transmite esperaria para sempre por um \
+                 quadro que não vem"
+            );
+        }
+        // E o que a amostra marca é o que `acabou` devolve.
+        let fim = SinalDeFim::default();
+        assert_eq!(super::super::fim::fim_da_captura(fim.acabou(), true), None);
+        fim.marcar(O_FLUXO_PAROU);
+        assert_eq!(
+            super::super::fim::fim_da_captura(fim.acabou(), true).as_deref(),
+            Some(O_FLUXO_PAROU)
+        );
+    }
+
+    /// O delegado é a porta principal: é por ele que a ScreenCaptureKit diz
+    /// que a janela fechou, e o que ele ouve tem de chegar a `acabou`.
+    #[test]
+    fn o_que_o_delegado_ouve_vira_o_recado_do_fim() {
+        let fim = Arc::new(SinalDeFim::default());
+        let vigia = Vigia {
+            fim: Arc::clone(&fim),
+        };
+        assert_eq!(fim.acabou(), None);
+        vigia.did_stop_with_error(screencapturekit::error::SCError::StreamError(
+            "a janela fechou".to_owned(),
+        ));
+        let recado = fim.acabou().expect("o delegado ouviu o fim e não o marcou");
+        assert!(
+            recado.contains("a janela fechou"),
+            "o recado perdeu o que o sistema disse: {recado}"
+        );
     }
 
     #[test]
@@ -1837,6 +1996,96 @@ mod medicao_do_som_por_janela {
              aplicativo da janela. Se isto reprova, aquele comportamento mudou, \
              e compartilhar uma janela no macOS voltou a mandar o som do \
              computador inteiro."
+        );
+    }
+}
+
+#[cfg(test)]
+mod a_janela_que_fecha {
+    use super::{fontes, Cadencia, CapturaDaTela, Fonte, Resolucao};
+    use std::time::{Duration, Instant};
+
+    /// O texto do aviso que este teste abre, e pelo qual ele acha a janela.
+    const AVISO: &str = "SEELE: medindo a janela que fecha";
+
+    /// **Prova de campo: fechar a janela transmitida faz a captura dizer que
+    /// acabou.**
+    ///
+    /// Abre uma janela de verdade — um aviso do `osascript`, que some sozinho
+    /// em quatro segundos —, captura **só ela**, e espera o sistema contar que
+    /// o fluxo parou. É a metade que os testes sem tela não alcançam: eles
+    /// provam que o recado do delegado chega a `acabou`, e não que a
+    /// ScreenCaptureKit chama o delegado quando a janela fecha.
+    ///
+    /// Ignorado por padrão porque põe uma janela na tela de quem roda.
+    #[test]
+    #[ignore = "prova de campo: abre um aviso na tela por quatro segundos e precisa de TCC"]
+    fn fechar_a_janela_transmitida_faz_a_captura_dizer_que_acabou() {
+        if !super::permissao().concedida() {
+            eprintln!("PULADO: o TCC não concedeu gravação de tela a este processo.");
+            return;
+        }
+        let mut aviso = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(format!(
+                "display dialog \"{AVISO}\" buttons {{\"OK\"}} giving up after 4"
+            ))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("abrir o aviso com o osascript");
+        let processo = i32::try_from(aviso.id()).expect("o pid cabe num i32");
+
+        // A janela leva um instante para existir.
+        let comeco = Instant::now();
+        let janela = loop {
+            let achada = fontes().ok().and_then(|lista| {
+                lista.into_iter().find(|fonte| match fonte {
+                    Fonte::Janela { alvo, .. } => alvo
+                        .owning_application()
+                        .is_some_and(|app| app.process_id() == processo),
+                    Fonte::Monitor { .. } => false,
+                })
+            });
+            if let Some(janela) = achada {
+                break janela;
+            }
+            assert!(
+                comeco.elapsed() < Duration::from_secs(3),
+                "o aviso não apareceu na lista de janelas em três segundos"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
+
+        // Num binário de teste ninguém iniciou o CoreGraphics, e o filtro por
+        // janela aborta sem ele (`CGS_REQUIRE_INIT`). No app quem o inicia é
+        // o `NSApplication`; aqui, perguntar pelo monitor principal basta.
+        let _ = core_graphics::display::CGDisplay::main();
+        let captura = CapturaDaTela::iniciar(&janela, Resolucao::P720, Cadencia::Q30)
+            .expect("a captura da janela começa");
+        assert_eq!(
+            captura.acabou(),
+            None,
+            "a janela está aberta e a captura já disse que acabou"
+        );
+
+        let _ = aviso.wait();
+        let fechou = Instant::now();
+        let recado = loop {
+            if let Some(recado) = captura.acabou() {
+                break recado;
+            }
+            assert!(
+                fechou.elapsed() < Duration::from_secs(10),
+                "a janela fechou há dez segundos e a captura segue dizendo que vive: a \
+                 transmissão ficaria no ar, congelada no último quadro (quadros escritos: {})",
+                captura.vaga().escritos()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        eprintln!(
+            "MEDIDO: a captura disse que acabou {:?} depois de a janela fechar — «{recado}»",
+            fechou.elapsed()
         );
     }
 }

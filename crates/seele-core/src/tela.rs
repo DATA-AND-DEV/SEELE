@@ -133,6 +133,34 @@ pub enum MotivoDeParada {
     AbaixoDoPiso,
 }
 
+/// Por que uma transmissão desta pessoa **caiu**: acabou sem ninguém mandar.
+///
+/// # Não é uma parada
+///
+/// [`MotivoDeParada`] é o produto decidindo — o sinal apertou, o teto ficou
+/// abaixo do piso —, e volta sozinho. Isto é o que sobra quando quem produz a
+/// imagem morre: não volta, e a pessoa só recomeça apertando de novo. Por isso
+/// são dois enums, e não um com mais variantes: a casca escreve frases opostas
+/// para os dois («ela volta sozinha» e «compartilhe de novo»).
+///
+/// Enumerado pelo mesmo motivo do irmão: quem recebe escreve a frase na língua
+/// da pessoa. O que o sistema disse, cru, vai ao `seele.log` e não atravessa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MotivoDeQueda {
+    /// O codificador recusou: ao armar, num quadro, ou na troca de degrau.
+    Codificador,
+    /// A captura recusou entregar a imagem — ao começar, ou ao recomeçar noutro
+    /// degrau.
+    Captura,
+    /// O fluxo da transmissão não abriu ou morreu no meio, com a sessão de pé.
+    Fluxo,
+}
+
+impl MotivoDeQueda {
+    /// Todos, para quem prende uma lista de nomes a este enum.
+    pub const TODOS: [Self; 3] = [Self::Codificador, Self::Captura, Self::Fluxo];
+}
+
 /// O teto de banda do vídeo neste instante.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Teto {
@@ -981,6 +1009,34 @@ pub enum ErroDeTela {
     /// A conexão, o fluxo ou a leitura acabaram.
     #[error("screen stream: {0}")]
     Fluxo(String),
+    /// Quem produzia a imagem morreu: a captura ou o codificador recusaram.
+    ///
+    /// Separado de [`Self::Fluxo`] porque a frase é outra — «a conexão da
+    /// transmissão fechou» manda olhar a rede, e isto manda olhar a máquina. O
+    /// `motivo` é o que atravessa até a casca; o `detalhe` é o que o sistema
+    /// disse, para o registro.
+    #[error("screen producer died ({motivo:?}): {detalhe}")]
+    Produtor {
+        /// A captura ou o codificador.
+        motivo: MotivoDeQueda,
+        /// O que o sistema disse, cru. Serve a quem depura e não a quem usa.
+        detalhe: String,
+    },
+}
+
+impl ErroDeTela {
+    /// O motivo da queda que este erro é, para quem avisa a casca.
+    ///
+    /// Tudo o que não é quem produz é o fluxo: o cabeçalho que a abertura
+    /// recusou, o quadro que o fio recusou e a escrita que morreu deixam a
+    /// transmissão no mesmo lugar — anunciada, e sem imagem saindo.
+    #[must_use]
+    pub const fn motivo_de_queda(&self) -> MotivoDeQueda {
+        match self {
+            Self::Produtor { motivo, .. } => *motivo,
+            Self::Cabecalho(_) | Self::Quadro(_) | Self::Fluxo(_) => MotivoDeQueda::Fluxo,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,6 +1081,11 @@ pub enum MotivoDeDescarte {
     /// O quadro estava vazio.
     #[error("there was no picture")]
     Vazio,
+    /// A mídia RTP da conexão não aceitou o quadro: a fila dela está cheia.
+    /// Só existe numa transmissão por RTP (ADR 0067). Como todo descarte,
+    /// quebra a cadeia: o próximo quadro que sai tem de ser um quadro-chave.
+    #[error("the connection's media queue is full")]
+    MidiaCheia,
 }
 
 /// O que falta escrever de um quadro-chave espalhado.
@@ -1041,7 +1102,11 @@ struct ChaveEmVoo {
 /// conexão QUIC que já existe (§3.1 e §3.6).
 #[derive(Debug)]
 pub struct Transmissao {
-    fluxo: crate::transporte::Envio,
+    /// O canal `u`. `None` numa transmissão por RTP.
+    fluxo: Option<crate::transporte::Envio>,
+    /// A mídia RTP da conexão e o instante em que a transmissão abriu (o
+    /// zero do relógio dos quadros). `None` numa transmissão pelo canal.
+    midia: Option<(crate::transporte::RemetenteDeMidia, Instant)>,
     cabecalho: ScreenHeader,
     balde: Balde,
     em_voo: Option<ChaveEmVoo>,
@@ -1103,7 +1168,8 @@ impl Transmissao {
 
         Ok(Self {
             som_pendente: std::collections::VecDeque::new(),
-            fluxo,
+            fluxo: Some(fluxo),
+            midia: None,
             cabecalho,
             balde: Balde::novo(teto_bps, agora),
             em_voo: None,
@@ -1111,6 +1177,81 @@ impl Transmissao {
             descartados: 0,
             bytes_enviados: 0,
         })
+    }
+
+    /// Abre uma transmissão **pela mídia RTP** da conexão (ADR 0067), e
+    /// devolve com ela a abertura que tem de ir ao servidor pelo controle
+    /// (`ClientMessage::TelaPorMidia`) antes do primeiro quadro.
+    ///
+    /// Não abre canal nenhum. O teto vale igual: o balde decide o que sai, e
+    /// o RTP cuida do resto (o ritmo dos pacotes, a retransmissão). Um
+    /// quadro-chave sai inteiro de uma vez — quem o espalha é o ritmo de
+    /// saída do RTP, e não quatro escritas.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeTela::Cabecalho`] se o cabeçalho não passa em
+    /// `ScreenHeader::check`.
+    pub fn abrir_por_midia(
+        remetente: crate::transporte::RemetenteDeMidia,
+        cabecalho: ScreenHeader,
+        teto_bps: u32,
+        agora: Instant,
+    ) -> Result<(Self, [u8; SCREEN_HEADER_LEN]), ErroDeTela> {
+        let mut abertura = [0_u8; SCREEN_HEADER_LEN];
+        cabecalho.encode(&mut abertura)?;
+        let transmissao = Self {
+            som_pendente: std::collections::VecDeque::new(),
+            fluxo: None,
+            midia: Some((remetente, agora)),
+            cabecalho,
+            balde: Balde::novo(teto_bps, agora),
+            em_voo: None,
+            enviados: 0,
+            descartados: 0,
+            bytes_enviados: 0,
+        };
+        Ok((transmissao, abertura))
+    }
+
+    /// Um quadro ou um pacote de som pela mídia. O relógio é o tempo desde a
+    /// abertura, na frequência da trilha.
+    fn mandar_pela_midia(
+        &self,
+        trilha: crate::transporte::Trilha,
+        bytes: &[u8],
+        agora: Instant,
+    ) -> Result<Envio, ErroDeTela> {
+        let Some((remetente, comeco)) = &self.midia else {
+            return Err(ErroDeTela::Fluxo("a transmissão não é por mídia".into()));
+        };
+        // **O relógio é do processo, e não desta transmissão.** A segunda
+        // transmissão da mesma conexão sai pela mesma trilha RTP: recomeçar o
+        // tempo do zero faria os carimbos andarem para trás.
+        let _ = comeco;
+        let micros = u64::try_from(
+            agora
+                .saturating_duration_since(inicio_do_relogio_de_midia())
+                .as_micros(),
+        )
+        .unwrap_or(u64::MAX);
+        let por_milissegundo = match trilha {
+            crate::transporte::Trilha::Video => 90,
+            crate::transporte::Trilha::Som => 48,
+        };
+        let tempo = micros.saturating_mul(por_milissegundo) / 1000;
+        match remetente.mandar(FAIXA_DE_SAIDA, trilha, tempo, bytes.into()) {
+            Ok(()) => Ok(Envio::Enviado),
+            Err(crate::transporte::Recusa::Cheia) => {
+                Ok(Envio::Descartado(MotivoDeDescarte::MidiaCheia))
+            }
+            Err(crate::transporte::Recusa::Grande) => {
+                Ok(Envio::Descartado(MotivoDeDescarte::GrandeDemais))
+            }
+            Err(crate::transporte::Recusa::Fechada) => {
+                Err(ErroDeTela::Fluxo("a conexão acabou".into()))
+            }
+        }
     }
 
     /// O cabeçalho com que esta transmissão abriu.
@@ -1190,6 +1331,11 @@ impl Transmissao {
         }
         if bytes.len() > MAX_QUADRO_LEN {
             return Ok(Envio::Descartado(MotivoDeDescarte::GrandeDemais));
+        }
+        if self.midia.is_some() {
+            // Pela mídia o som tem a trilha dele: não há quadro-chave no meio
+            // do caminho para esperar.
+            return self.mandar_pela_midia(crate::transporte::Trilha::Som, bytes, Instant::now());
         }
 
         while self.som_pendente.len() >= TETO_DA_FILA {
@@ -1298,9 +1444,27 @@ impl Transmissao {
         }
 
         let total = CABECALHO_DE_QUADRO_LEN.saturating_add(bytes.len());
-        if !self.balde.gastar(total, agora) {
+        // **Pela mídia, o balde não decide.** Ele existe para o canal: lá o
+        // vídeo divide o SCTP com a voz, e um quadro acima do teto atrasaria
+        // tudo. No RTP quem dosa a saída é o próprio transporte (o ritmo de
+        // saída e a estimativa de banda), e o balde só atrapalhava: com ele
+        // baixo, recusava o **quadro-chave**; a recusa pedia outro, recusado de
+        // novo, e a imagem ficava parada até o balde encher. Medido em
+        // 11/11/2026: 40 quadros-chave recusados em 20 s sem perda nenhuma, e
+        // era isso o «defeito de partida» do RTP.
+        if self.midia.is_none() && !self.balde.gastar(total, agora) {
             self.descartados += 1;
             return Ok(Envio::Descartado(MotivoDeDescarte::AcimaDoTeto));
+        }
+        if self.midia.is_some() {
+            let envio = self.mandar_pela_midia(crate::transporte::Trilha::Video, bytes, agora)?;
+            if matches!(envio, Envio::Enviado) {
+                self.enviados += 1;
+                self.bytes_enviados += total as u64;
+            } else {
+                self.descartados += 1;
+            }
+            return Ok(envio);
         }
 
         // `u32` cabe: `MAX_QUADRO_LEN` é 4 MiB e já foi conferido acima.
@@ -1355,7 +1519,11 @@ impl Transmissao {
     }
 
     async fn escrever(&mut self, bytes: &[u8]) -> Result<(), ErroDeTela> {
-        self.fluxo
+        let Some(fluxo) = self.fluxo.as_mut() else {
+            // Uma transmissão por mídia nunca chega aqui: ela não tem canal.
+            return Err(ErroDeTela::Fluxo("a transmissão não tem canal".into()));
+        };
+        fluxo
             .write_all(bytes)
             .await
             .map_err(|erro| ErroDeTela::Fluxo(erro.to_string()))
@@ -1374,14 +1542,108 @@ impl Transmissao {
     /// uma delas — esta — também acontece quando a máquina simplesmente some, e
     /// o §3.6 quer que a sala consiga distinguir «ela parou de compartilhar» de
     /// «o enlace dela caiu».
+    ///
+    /// Numa transmissão por mídia não há fluxo para fechar: quem diz que
+    /// acabou é o controle, sempre.
     pub fn encerrar(mut self) {
-        let _ = self.fluxo.finish();
+        if let Some(fluxo) = self.fluxo.as_mut() {
+            let _ = fluxo.finish();
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
 // O lado de quem assiste
 // ---------------------------------------------------------------------------
+
+/// O zero do relógio dos quadros que saem pela mídia: o mesmo para toda
+/// transmissão deste processo, para os carimbos do RTP só andarem para frente.
+fn inicio_do_relogio_de_midia() -> Instant {
+    static INICIO: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *INICIO.get_or_init(Instant::now)
+}
+
+/// A faixa da mídia por onde a transmissão desta pessoa sobe, e por onde
+/// desce a que ela assiste. O servidor usa a mesma (`seele-server/src/midia.rs`).
+pub const FAIXA_DE_SAIDA: u8 = 0;
+
+/// Uma transmissão alheia que desce **pela mídia RTP** (ADR 0067): a abertura
+/// veio pelo controle (`ServerMessage::TelaPorMidia`), e os quadros chegam
+/// por uma fila que quem lê a mídia da conexão enche.
+///
+/// O fim é a fila fechar: quem a enche a larga quando o servidor diz que a
+/// cópia acabou, quando outra transmissão toma a faixa, ou quando a conexão
+/// cai.
+#[derive(Debug)]
+pub struct RecepcaoPorMidia {
+    cabecalho: ScreenHeader,
+    abertura: [u8; SCREEN_HEADER_LEN],
+    quadros: tokio::sync::mpsc::UnboundedReceiver<QuadroRecebido>,
+}
+
+impl RecepcaoPorMidia {
+    /// Lê a abertura e devolve a recepção e o lado que a enche.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeTela::Cabecalho`] para uma abertura que esta versão não lê.
+    pub fn nova(
+        abertura: [u8; SCREEN_HEADER_LEN],
+    ) -> Result<(Self, tokio::sync::mpsc::UnboundedSender<QuadroRecebido>), ErroDeTela> {
+        let (cabecalho, _) = ScreenHeader::decode(&abertura)?;
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        Ok((
+            Self {
+                cabecalho,
+                abertura,
+                quadros: rx,
+            },
+            tx,
+        ))
+    }
+}
+
+/// De onde uma transmissão alheia é lida: do canal `u`, ou da mídia RTP.
+#[derive(Debug)]
+pub enum LeituraDeTela {
+    /// Do canal, como sempre.
+    Canal(Recepcao),
+    /// Da mídia da conexão.
+    Midia(RecepcaoPorMidia),
+}
+
+impl LeituraDeTela {
+    /// O cabeçalho com que a transmissão abriu.
+    #[must_use]
+    pub const fn cabecalho(&self) -> &ScreenHeader {
+        match self {
+            Self::Canal(recepcao) => recepcao.cabecalho(),
+            Self::Midia(recepcao) => &recepcao.cabecalho,
+        }
+    }
+
+    /// Os onze bytes da abertura, como vieram.
+    #[must_use]
+    pub fn abertura(&self) -> &[u8] {
+        match self {
+            Self::Canal(recepcao) => recepcao.abertura(),
+            Self::Midia(recepcao) => &recepcao.abertura,
+        }
+    }
+
+    /// O próximo quadro. `Ok(None)` é o fim.
+    ///
+    /// # Errors
+    ///
+    /// O que [`Recepcao::proximo_quadro`] devolve; a mídia não tem erro de
+    /// leitura (um quadro que se perdeu não chega aqui).
+    pub async fn proximo_quadro(&mut self) -> Result<Option<QuadroRecebido>, ErroDeTela> {
+        match self {
+            Self::Canal(recepcao) => recepcao.proximo_quadro().await,
+            Self::Midia(recepcao) => Ok(recepcao.quadros.recv().await),
+        }
+    }
+}
 
 /// Um quadro codificado que chegou inteiro.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2414,6 +2676,44 @@ pub(crate) mod tests {
             "o quadro-chave não chegou igual ao que saiu"
         );
         assert_eq!(depois.bytes, comum);
+    }
+
+    /// **Pela mídia, o balde não recusa quadro nenhum, e muito menos o
+    /// quadro-chave.** Com o balde baixo ele recusava a chave; a recusa pedia
+    /// outra, recusada de novo, e a imagem ficava parada (medido em
+    /// 11/11/2026: 40 quadros-chave recusados em 20 s sem perda nenhuma). O
+    /// mesmo teto que descarta no canal (o teste abaixo) deixa passar aqui.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pela_midia_o_balde_nao_recusa_o_quadro_chave() {
+        let (saida, entrada) = par().await;
+        let remetente = saida.ligar_midia().remetente();
+        let _do_outro_lado = entrada.ligar_midia();
+        let agora = Instant::now();
+        // 80 kbps: 10 000 bytes por segundo de orçamento, e um quadro-chave de 50 000.
+        let (mut transmissao, _abertura) =
+            Transmissao::abrir_por_midia(remetente, cabecalho(), 80_000, agora).expect("abrir");
+        let mut chave = vec![0, 0, 0, 1, 0x65];
+        chave.resize(50_000, 0x5A);
+        let mut comum = vec![0, 0, 0, 1, 0x41];
+        comum.resize(9_000, 0x5A);
+        assert_eq!(
+            transmissao
+                .enviar_quadro(&chave, true, agora)
+                .await
+                .expect("enviar"),
+            Envio::Enviado,
+            "o quadro-chave foi recusado pelo balde numa transmissão por mídia"
+        );
+        for _ in 0..5 {
+            assert_eq!(
+                transmissao
+                    .enviar_quadro(&comum, false, agora)
+                    .await
+                    .expect("enviar"),
+                Envio::Enviado
+            );
+        }
+        assert_eq!(transmissao.contagem().1, 0, "algum quadro foi descartado");
     }
 
     #[tokio::test(flavor = "multi_thread")]

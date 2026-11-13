@@ -35,9 +35,11 @@ pub mod alcance;
 pub mod autorizacao;
 pub mod campainha;
 pub mod cargos;
+pub mod copia;
 pub mod frame;
 pub mod hospedagem;
 pub mod maquinas;
+pub mod midia;
 pub mod mods;
 pub mod pares;
 pub mod perda_de_subida;
@@ -50,6 +52,7 @@ pub(crate) mod rastro_de_teste;
 pub mod recepcao;
 pub mod server;
 pub mod session;
+pub mod sinal;
 pub mod taxa;
 pub mod tela;
 pub mod tls;
@@ -578,6 +581,8 @@ pub struct Daemon {
     /// O que chega ao socket e não é WebRTC: o ENC/3 do degrau 4.
     enc: Option<CaixaDoEnc>,
     fingerprint: String,
+    /// A impressão do certificado DTLS efêmero, só numa sala pessoal.
+    dtls_da_sala: Option<[u8; 32]>,
     registry: Arc<session::Registry>,
     server: Arc<server::Server>,
     voice_rooms: Arc<voice_room::VoiceRooms>,
@@ -642,6 +647,9 @@ impl Daemon {
         // é P-256 para aqui, com a frase, e nada é regerado (R1).
         let no_enlace = identity.no_enlace(dada)?;
         let sala = !no_enlace.apresentacao.is_empty();
+        // A impressão do DTLS efêmero da sala, que ela diz ao ponto de encontro
+        // no `ATENDE` (ADR 0068): o navegador a escreve antes de fechar o DTLS.
+        let dtls_da_sala = sala.then(|| no_enlace.certificado.impressao());
         let impressao = no_enlace.impressao;
         let fingerprint = if sala {
             // A impressão da sala é a da chave, e não a do DTLS efêmero.
@@ -952,6 +960,7 @@ impl Daemon {
             pilha,
             enc,
             fingerprint,
+            dtls_da_sala,
             registry: Arc::new(session::Registry::new()),
             server,
             voice_rooms,
@@ -976,6 +985,20 @@ impl Daemon {
     #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+
+    /// **A impressão do certificado DTLS desta sala pessoal** (o SHA-256 do
+    /// DER), ou `None` num servidor guardado.
+    ///
+    /// O DTLS da sala é efêmero (ADR 0063): [`Self::fingerprint`] é a da chave
+    /// da pessoa, e não a dele. O nativo vê o certificado e confere a
+    /// apresentação depois; o navegador só fecha o DTLS com a impressão escrita
+    /// antes, e por isso a sala a diz ao ponto de encontro no `ATENDE` (ADR
+    /// 0068). É pista: quem autentica a sala é a apresentação `0x03`, que a
+    /// chave dela assina sobre esta mesma impressão.
+    #[must_use]
+    pub const fn impressao_dtls_da_sala(&self) -> Option<[u8; 32]> {
+        self.dtls_da_sala
     }
 
     /// A ponta do enlace: o socket do servidor, para o degrau 4 do ADR 0022

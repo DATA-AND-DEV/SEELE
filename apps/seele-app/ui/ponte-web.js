@@ -99,14 +99,15 @@ const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica �
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
 // A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
 const RECUSA_SALA = "este comando controla a sala nativa; no navegador a conversa pessoal usa a conexão direta";
-const RECUSA_ASSINADOR_NATIVO = "a identidade do navegador assina localmente; este comando pertence ao aplicativo";
+// A tecla de falar com outra janela na frente (`tecla_global.rs`): é um atalho
+// do sistema, e a página não registra um. Ligá-la é recusado pelo nome; a
+// pergunta pelo estado (`estado_da_tecla_global`) é atendida com `null`, que a
+// tela lê como «aqui não há», e a opção não aparece. A casca larga diz por quê
+// no alto de ATALHOS (`FRASES_DA_LARGA.tecla`).
+const RECUSA_ATALHO = "o navegador não tem atalho para o computador inteiro: a tecla de falar fora da janela é do app do SEELE";
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
-  ["pessoal_identidade", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_assinar", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_conferir_par", RECUSA_ASSINADOR_NATIVO],
-  ["pessoal_reservar", RECUSA_ASSINADOR_NATIVO],
   ["abrir_a_porta_no_firewall", RECUSA_REDE],
   ["abrir_ajustes_de_acessibilidade", RECUSA_SISTEMA],
   ["abrir_ajustes_do_microfone", RECUSA_SISTEMA],
@@ -126,6 +127,7 @@ const RECUSAS_NOMEADAS = new Map([
   ["consentir_no_caminho_entre_pares", RECUSA_REDE],
   ["criar_convite_do_server", RECUSA_PORTARIA],
   ["criar_servidor", RECUSA_HOSPEDAR],
+  ["ligar_tecla_global", RECUSA_ATALHO],
   ["decidir_pedido", RECUSA_PORTARIA],
   // Desfazer a escolha de MOD de um servidor guardado desta máquina (P1).
   ["desfazer_escolha_de_mod", RECUSA_HOSPEDAR],
@@ -173,6 +175,7 @@ const SO_NO_PC_RUIDO = "o celular usa a supressão de ruído do navegador";
 const SO_NO_PC_SAIDA = "o celular toca pela saída de som do sistema";
 const SO_NO_PC_ARRASTAR = "no celular o arquivo vem do seletor, e não do arraste";
 const SO_NO_PC_COMPARTILHAR = "compartilhar a tela é pelo PC";
+const SO_NO_PC_CAMERA = "mostrar a câmera é pelo PC, por enquanto: no celular dá para ver a dos outros";
 const SO_NO_PC_TESTE = "no celular o microfone abre só na sala";
 
 /**
@@ -186,10 +189,14 @@ const SO_NA_CASCA_LARGA = new Map([
   ["apagar_linha", SO_NO_PC_MODERAR],
   ["apagar_voice_room", SO_NO_PC_MODERAR],
   ["aplicar_icone_do_server", SO_NO_PC_MODERAR],
+  ["banidos", SO_NO_PC_MODERAR],
   ["banir_pessoa", SO_NO_PC_MODERAR],
+  ["codificacao_da_camera", SO_NO_PC_CAMERA],
+  ["compartilhar_camera", SO_NO_PC_CAMERA],
   ["compartilhar_tela", SO_NO_PC_COMPARTILHAR],
   ["criar_linha", SO_NO_PC_MODERAR],
   ["criar_voice_room", SO_NO_PC_MODERAR],
+  ["desbanir_pessoa", SO_NO_PC_MODERAR],
   ["descrever_arquivo", SO_NO_PC_ARRASTAR],
   ["escolher_icone_do_server", SO_NO_PC_MODERAR],
   ["escolher_saida", SO_NO_PC_SAIDA],
@@ -197,6 +204,7 @@ const SO_NA_CASCA_LARGA = new Map([
   ["estado_do_teste_de_microfone", SO_NO_PC_TESTE],
   ["exclusao_do_som_da_captura", SO_NO_PC_COMPARTILHAR],
   ["expulsar_pessoa", SO_NO_PC_MODERAR],
+  ["listar_banidos", SO_NO_PC_MODERAR],
   ["fontes_de_tela", SO_NO_PC_COMPARTILHAR],
   ["modulo_de_video_a_baixar", SO_NO_PC_COMPARTILHAR],
   ["monitorar_o_microfone", SO_NO_PC_TESTE],
@@ -206,6 +214,7 @@ const SO_NA_CASCA_LARGA = new Map([
   ["permissao_de_tela", SO_NO_PC_COMPARTILHAR],
   ["peso_da_linha", SO_NO_PC_MODERAR],
   ["preparar_icone_do_server", SO_NO_PC_MODERAR],
+  ["previas_de_tela", SO_NO_PC_COMPARTILHAR],
   ["renomear_linha", SO_NO_PC_MODERAR],
   ["renomear_server", SO_NO_PC_MODERAR],
   ["renomear_voice_room", SO_NO_PC_MODERAR],
@@ -220,13 +229,13 @@ const COMANDOS_DA_PONTE = new Set([
   "meu_codigo", "amigos", "contatos_da_agenda", "adicionar_amigo", "tirar_dos_amigos",
   "dar_nome_na_agenda", "bloquear", "estado_da_sala", "receber_ligacoes", "atender", "recusar", "encerrar_a_ligacao",
   "tela_cheia",
-  "abertura", "abrir_no_navegador", "aceitar_mods", "aceite_de_mods",
+  "abertura", "abrir_no_navegador", "abrir_o_teste_de_rede", "aceitar_mods", "aceite_de_mods",
   "aceites_de_mods", "ajustar_sensibilidade_da_voz", "ajustar_volume_da_tela",
   "analisar_convite", "apelido_local", "apis_de_mod_aceitas", "assistir",
   "atualizacao_que_nao_pegou", "busca_andar", "busca_limpar", "buscar",
   "calar_a_tela", "cancelar_ligacao", "codigo_do_mod", "conferir_esta_versao", "conhecidos",
   "connect", "consentir_previa", "controles_da_voz", "descartar_mensagem",
-  "destino_do_anexo", "disconnect", "dispensar_aviso", "encerrar_sessao",
+  "destino_do_anexo", "disconnect", "dispensar_aviso", "editar_mensagem", "encerrar_sessao",
   "focar_voz", "sessoes", "ver_sessao",
   "pedir_cargos", "explicar_permissoes", "prever_cargo", "criar_cargo", "editar_cargo",
   "mover_cargo", "apagar_cargo", "atribuir_cargo", "revogar_cargo",
@@ -250,7 +259,10 @@ const COMANDOS_DA_PONTE = new Set([
   "regras_do_icone_do_server", "remover_mensagem", "salvar_anexo",
   "send_message", "set_muted", "set_talking", "set_total_isolation",
   "set_voice_mode", "set_volume", "snapshot", "soltar_a_entrada", "soltar_escolhido",
-  "som_da_tela", "som_do_mod", "tecla_de_falar", "tirar_minha_imagem",
+  "som_da_tela", "som_do_mod", "tecla_de_falar", "estado_da_tecla_global", "tirar_minha_imagem",
+  // A notificação do sistema (`notificacao-do-sistema.js`): aqui, a do
+  // navegador, pela API `Notification`, com a permissão pedida no gesto.
+  "estado_das_notificacoes", "ligar_notificacoes", "notificar_no_sistema",
   "versoes_instaladas", "volumes_locais",
   // O túnel de jogo é do aplicativo: aqui a entrada é recusada pelo nome, a
   // saída não tem o que fechar e a lista é vazia.
@@ -379,6 +391,33 @@ const CONSTANTES_DO_DESKTOP = Object.freeze({
     "abertura_maxima_dbfs": -24
   }
 });
+
+// ------------------------------------------------------- a página instalada
+
+/**
+ * Se este navegador é o de um iPhone ou iPad. O iPad se apresenta como Mac, e
+ * o que o separa de um é a tela de toque.
+ */
+function eDoIos() {
+  const agente = navigator.userAgent ?? "";
+  return /iPhone|iPad|iPod/.test(agente) || (/Macintosh/.test(agente) && navigator.maxTouchPoints > 1);
+}
+
+/** Se a página já roda instalada, na janela própria. */
+function jaEstaInstalada() {
+  return navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+}
+
+/**
+ * **No iOS, o ícone da tela inicial abre a aba do Safari, e não uma janela
+ * própria.** Na janela própria o WebKit encerra a captura do microfone quando
+ * a página sai da frente (relatado desde o iOS 15.4, sem conserto); na aba ele
+ * segue com a tela bloqueada. Ninguém mediu isto num iPhone com esta página:
+ * é a escolha que não piora o que já funciona. No Android a janela própria é
+ * o Chrome por baixo, e fica como o manifesto diz.
+ */
+const MANIFESTO_NA_ABA = "seele-na-aba.webmanifest";
+if (eDoIos()) document.querySelector('link[rel="manifest"]')?.setAttribute("href", MANIFESTO_NA_ABA);
 
 // ------------------------------------------------------------------- a casca
 
@@ -514,8 +553,8 @@ function sessoesNaPonte() {
       foco_de_voz: sessao.idDaPonte === focoDaPonte,
       na_sala_de_voz: naSala,
       onde: sessao.onde ?? "Outro",
-      // O navegador não liga por código: aqui é sempre `null`. Só a costura das
-      // bancadas põe `ligacao` numa sessão de mentira, para provar a vista.
+      // O código da sala pessoal em que a página entrou (ADR 0068), ou `null`
+      // num servidor.
       ligacao: sessao.ligacao ?? null,
       enlace: sessao.acabou ? "encerrada" : sessao.voltando ? "reconectando" : "online",
       encerrada: sessao.motivoDoFim ?? null,
@@ -673,6 +712,15 @@ async function lerOLink(texto) {
  * que confere quem atendeu, e é recusado com a frase.
  */
 async function entrarPeloEndereco({ server, nickname } = {}) {
+  // **Uma pessoa, e não um servidor** (ADR 0068): `@CÓDIGO` entra na sala
+  // pessoal de quem tem o app, como convidada. O alvo e o vocabulário da falha
+  // são da identidade pessoal (`identidade-web.js`).
+  if (typeof server === "string" && server.startsWith("@")) {
+    const alvo = await alvoDaSalaPessoalWeb(server);
+    const apelido = (nickname ?? "").trim() || guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido) || "pessoa";
+    return abrirASessaoPelaPonte({ alvo, nickname: apelido })
+      .catch((erro) => Promise.reject(motivoDaLigacaoPeloCodigoWeb(erro, alvo.codigo)));
+  }
   const identidade = await identidadeDaPagina();
   if (identidade.ler()?.estado === "armazenamento-indisponivel") await identidade.reler();
   const apelido = (nickname ?? "").trim() || guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido) || "pessoa";
@@ -739,6 +787,7 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
   // **Várias sessões** (E3): uma entrada nova soma, e não recusa. Só duas
   // entradas no MESMO servidor ao mesmo tempo são recusadas, como no desktop.
   if ([...sessoesDaPonte.values()].some((s) => !s.acabou && s.alvo?.impressao === alvo.impressao)) {
+    // (Uma ligação pelo código registra `@CÓDIGO` como a impressão do alvo.)
     return Promise.reject("AlreadyConnected");
   }
   geracaoDaPonte += 1;
@@ -828,6 +877,12 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
   sessao.idDaPonte = id;
   sessao.geracao = geracao;
   sessao.alvo = alvo;
+  // Uma ligação pelo código (ADR 0068): a vista é a da ligação, e a chave de
+  // quem atendeu fica fixada para a próxima.
+  if (alvo.codigo) {
+    sessao.ligacao = alvo.codigo;
+    if (sessao.chaveDeQuemAtendeu) void fixarQuemAtendeuPeloCodigoWeb(alvo.codigo, sessao.chaveDeQuemAtendeu);
+  }
   sessao.snapshot = () => retratoDaSessao(sessao);
   sessao.transmissao = criarATransmissaoDoNavegador({
     sessao,
@@ -855,7 +910,16 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
   };
   sessao.aCadaVolta = () => {
     seguirOsVolumes().catch((falha) => console.warn("volumes na mistura:", falha));
+    // A recepção é medida na mistura, que toca só a sessão da voz: é ela que
+    // pede, a cada volta, e é ela que relata (`aRecepcaoMediu`).
+    if (vozDaSessao.dentro && aSessaoDaVoz() === sessao) vozDaPonte.atual?.pedirARecepcao();
   };
+  // O que a voz desta página mede do que ouve: zero fora da sala de voz, e
+  // nas sessões sem a voz (E3).
+  sessao.medidas = () =>
+    vozDaSessao.dentro && aSessaoDaVoz() === sessao
+      ? { jitterMs: vozDaSessao.recepcao.jitterMs, perda: vozDaSessao.recepcao.perda }
+      : { jitterMs: 0, perda: 0 };
   // **A queda e a volta**, como no desktop: a voz fica de pé na bateria (os
   // datagramas não saem, e ela segue no transporte novo), a tela que estava no
   // ar fecha com o transporte, e a volta repete o mudo e o isolamento. A sala
@@ -884,7 +948,7 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
     carimbo: carimboDaPonte(sessao),
     vista: geracao,
     snapshot: sessao.snapshot(),
-    veredito: alvo.conhecido ? "Known" : { FirstContactVerified: { fingerprint: alvo.impressao } },
+    veredito: alvo.conhecido ? "Known" : { FirstContactVerified: { fingerprint: sessao.impressaoDeQuemAtendeu ?? alvo.impressao } },
     geracao,
     origem_da_impressao: alvo.conhecido ? "Lista" : "Link",
     a_lista_guardou: false,
@@ -909,6 +973,10 @@ function retratoDaSessao(sessao) {
   return {
     // O carimbo junto, achatado, como o `RetratoNaSessao` do app.
     carimbo: sessao.idDaPonte ? carimboDaPonte(sessao) : undefined,
+    // O número que a ligação negociou, como o `protocolo` do app: a tela não
+    // oferece editar, desbanir nem a lista de banidos a um servidor que não
+    // os conhece.
+    protocolo: lido.protocolo ?? 0,
     caminho: null,
     link: sessao.enlace(),
     // A WebTransport só abre com um dos hashes que o link trouxe: quem atendeu
@@ -986,6 +1054,10 @@ const vozDaSessao = {
   /** O número da voz com que ela entrou: a volta traz outro. */
   numero: null,
   ligando: null,
+  /** A abertura guardada em `ligando` falhou: a próxima entrada tenta outra. */
+  aberturaFalhou: false,
+  /** O que a abertura dizia antes de o sistema pausar o som (`som_pausado`). */
+  aberturaAntesDaPausa: null,
   /**
    * O PEDIDO mais novo de entrar ou sair da sala (cada ENTRAR e cada SAIR toma um número). Uma resposta (a rejeição de uma entrada, a resposta de um
    * sair) só age sobre a captura se o pedido dela ainda é o mais novo: a resposta velha de um pedido não solta nem desliga a captura de um pedido novo.
@@ -1000,6 +1072,21 @@ const vozDaSessao = {
   geracao: 0,
   abertura: "fora_de_sala",
   falando: false,
+  /**
+   * **A recepção desta página**: o jitter e a perda da voz que ela ouve, que o
+   * `.wasm` do worklet mede nos buffers de jitter (o evento `recepcao` da
+   * `voz-web.js`). Antes disto a página dizia zero nos dois, e o sinal dela
+   * refletia só o atraso.
+   *
+   * - `jitterMs` e `perda` vão ao retrato e ao sinal desta ponta, pela volta
+   *   da medida (`sessao.medidas`, no `ligacao_medir`). Sem fonte nenhuma o
+   *   jitter fica no último medido, como no desktop, e a perda volta a zero;
+   * - `relatos` conta os `RelatoDeRecepcao` que saíram para o servidor, e
+   *   `ultimoRelato` é o último: o `.wasm` do worklet decide a vez (uma por
+   *   segundo, e só com medida), e o da sessão decide se o servidor o ouve (o
+   *   protocolo 13).
+   */
+  recepcao: { jitterMs: 0, perda: 0, relatos: 0, ultimoRelato: null },
   /** Se o microfone desta abertura só abriu sem o cancelamento de eco (`semEcoPorque` do motor). */
   semEco: false,
   /** O volume (0 a 4) e o mudo do som da tela, como o desktop os guarda. */
@@ -1019,20 +1106,33 @@ const BYTE_DO_MODO = Object.freeze({ PushToTalk: 0, VoiceActivated: 1, Open: 2 }
  * nada espera antes do `ligar`.
  */
 function ligarOAudioNoGesto() {
-  const voz = vozDaPonte.atual;
-  if (!voz || vozDaSessao.ligando) return;
-  // **A abertura é dona do próprio `ligando`**: uma abertura antiga que falha
-  // depois de uma nova ter nascido (o `pagehide`, a sessão que acabou) não zera
-  // o da nova.
+  // Uma abertura de pé, ou a caminho, não se repete. A que **falhou** dá lugar
+  // a outra: é assim que sair e entrar de novo tenta de novo.
+  if (vozDaSessao.ligando && !vozDaSessao.aberturaFalhou) return;
   vozDaSessao.geracao += 1;
-  const esta = voz
-    .ligar({ microfone: guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone), saida: guardadoNaOrigem(CHAVES_DA_ORIGEM.saida) })
-    .catch((falha) => {
-      if (vozDaSessao.ligando === esta) vozDaSessao.ligando = null;
-      throw falha;
-    });
+  vozDaSessao.aberturaFalhou = false;
+  const pedido = { microfone: guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone), saida: guardadoNaOrigem(CHAVES_DA_ORIGEM.saida) };
+  // **A voz da página pode ainda estar nascendo** (o `.wasm` dela carrega com
+  // a sessão): espera-se por ela em vez de voltar calado. Voltar calado deixava
+  // a sala «SEM ÁUDIO» sem nada ter sido tentado.
+  // **Com a voz já de pé, o `ligar` é chamado aqui mesmo, dentro do gesto**: o
+  // `AudioContext` e o `play()` do iOS só valem nele. Só a voz que ainda não
+  // nasceu é esperada.
+  const voz = vozDaPonte.atual;
+  const esta = voz ? voz.ligar(pedido) : aVozDaPonte().then((nascida) => nascida.ligar(pedido));
   vozDaSessao.ligando = esta;
-  esta.catch(() => {});
+  // **A abertura que falha continua guardada, com o erro dentro.** Ela era
+  // trocada por `null` e o erro, engolido: se o microfone falhasse antes de o
+  // servidor confirmar a entrada (o Chrome do Android sem a permissão do
+  // sistema recusa na hora, sem perguntar), quem confirmava a sala achava que
+  // nada tinha sido aberto, dizia «SEM ÁUDIO» e deixava a pessoa sem ouvir —
+  // com a saída já tocando. Guardada, `conferirAVozDaSessao` lê a etapa do
+  // erro e mantém a escuta. Só a própria abertura marca a própria falha.
+  esta.catch((falha) => {
+    if (vozDaSessao.ligando !== esta) return;
+    vozDaSessao.aberturaFalhou = true;
+    console.warn(`ponte: o áudio da sala não abriu (etapa: ${falha?.etapaDaVoz ?? "?"}):`, falha);
+  });
 }
 
 /**
@@ -1060,7 +1160,7 @@ function conferirAVozDaSessao(sessao) {
   // A conexão nova da volta tem outro número de voz: a voz sai e entra com ele, e o microfone FICA (outra captura pediria a permissão de novo).
   if (vozDaSessao.dentro && vozDaSessao.numero !== lido.resposta.voz) sairDaVozMantendoOMicrofone();
   if (vozDaSessao.dentro) return;
-  if (!voz || !vozDaSessao.ligando) {
+  if (!vozDaSessao.ligando) {
     mudarAAbertura("sem_aparelho");
     return;
   }
@@ -1070,6 +1170,14 @@ function conferirAVozDaSessao(sessao) {
   vozDaSessao.numero = numero;
   const geracao = vozDaSessao.geracao;
   const entrarNaVoz = (comMicrofone) => {
+    // A voz de agora, e não a de quando a sala foi conferida: ela pode ter
+    // acabado de nascer (ver `ligarOAudioNoGesto`).
+    const voz = vozDaPonte.atual;
+    if (!voz) {
+      vozDaSessao.dentro = false;
+      mudarAAbertura("nao_abriu_no_prazo");
+      return;
+    }
     voz.mudo(comMicrofone ? vozDaSessao.mudo : true);
     voz.isolar(vozDaSessao.isolado);
     voz.modo(BYTE_DO_MODO[modoDeVozGuardado()] ?? 1);
@@ -1081,6 +1189,8 @@ function conferirAVozDaSessao(sessao) {
     voz.entrar(sessao.transporteDaVoz, numero);
     // A recepção recomeça as alças: os ganhos se aplicam de novo.
     ganhosAplicados.clear();
+    // E a medida recomeça com ela: o jitter da sala de antes não é o desta.
+    Object.assign(vozDaSessao.recepcao, { jitterMs: 0, perda: 0 });
     mudarAAbertura(comMicrofone ? "aberto" : "so_ouvindo");
   };
   vozDaSessao.ligando.then(
@@ -1095,7 +1205,6 @@ function conferirAVozDaSessao(sessao) {
       // Só a recusa do MICROFONE conta como recusa: o `play()` da saída que o
       // navegador barra também se chama `NotAllowedError`.
       if (doMicrofone && falha.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
-      console.warn(`ponte: a voz da sala não abriu (etapa: ${falha?.etapaDaVoz ?? "?"}):`, falha);
       // **O microfone que não abriu não tira a escuta** (0.19): a saída do
       // motor segue de pé, e a pessoa ouve a sala, com a tela dizendo que
       // ninguém a ouve, em vez de ficar sem nada e sem saber por quê.
@@ -1103,8 +1212,11 @@ function conferirAVozDaSessao(sessao) {
         entrarNaVoz(false);
         return;
       }
+      // **A saída não abriu, e a tela diz** (o `nao_abriu_no_prazo` tem a
+      // frase; o `sem_aparelho` não tem nenhuma, e num celular não há console
+      // para ler o porquê).
       vozDaSessao.dentro = false;
-      mudarAAbertura("sem_aparelho");
+      mudarAAbertura("nao_abriu_no_prazo");
     },
   );
 }
@@ -1173,9 +1285,33 @@ const ganhosAplicados = new Map();
  * cada volta, o ganho de quem tem volume escolhido, pela alça de agora (quem
  * voltou com outra voz ganha outra alça, e o mesmo ganho).
  */
+/** A sessão que tem a voz da página: a do foco (E3), ou a única. */
+const aSessaoDaVoz = () => sessoesDaPonte.get(focoDaPonte) ?? sessaoDaPonte.atual;
+
+/**
+ * Uma volta da medida da recepção chegou do worklet (`vozDaSessao.recepcao`):
+ * o de agora fica para o retrato, e o relato, quando é a vez dele, sai pelo
+ * fio da sessão que tem a voz.
+ */
+function aRecepcaoMediu(medida) {
+  const sessao = aSessaoDaVoz();
+  if (!sessao || !vozDaSessao.dentro || !medida) return;
+  const recepcao = vozDaSessao.recepcao;
+  if (Number.isFinite(medida.jitter_ms)) recepcao.jitterMs = medida.jitter_ms;
+  recepcao.perda = Number.isFinite(medida.perda) ? medida.perda : 0;
+  // Na bateria não há fio: o relato fica para a volta, e o servidor deixa o
+  // último envelhecer.
+  if (!medida.relato || sessao.acabou || sessao.voltando) return;
+  const lido = sessao.atender("relatar_recepcao", medida.relato);
+  if (lido?.resposta === true) {
+    recepcao.relatos += 1;
+    recepcao.ultimoRelato = medida.relato;
+  }
+}
+
 async function seguirOsVolumes() {
   // Os ganhos são da mistura, que toca só a sessão com o foco (E3).
-  const sessao = sessoesDaPonte.get(focoDaPonte) ?? sessaoDaPonte.atual;
+  const sessao = aSessaoDaVoz();
   const voz = vozDaPonte.atual;
   if (!sessao || !voz || !vozDaSessao.dentro) return;
   // **Os volumes estão na instância da SESSÃO, e as alças da mistura na da
@@ -1459,10 +1595,22 @@ async function buscarComTeto(endereco) {
   return { alegado, bytes };
 }
 
-/** O `data:` de uns bytes que o juiz do desktop desenha, ou `null`. */
+/**
+ * O `data:` de uns bytes que o juiz do desktop desenha, ou `null`.
+ *
+ * **Reduzido ao lugar em que aparece**, pelo mesmo caminho da prévia de um
+ * anexo. A imagem que declara pixels demais rejeita com as medidas e o teto,
+ * no formato do desktop (`FalhaNaPrevia::PixelsDemais`): a conversa a diz no
+ * lugar da imagem, em vez de mostrar só o link.
+ */
 async function desenhavel({ alegado, bytes }) {
   const { instancia } = await carregarOWasmDaPagina();
-  return fronteiraDaLigacao(instancia.exports).previa({ attachment: 0, claimed: alegado, chegada: "bytes" }, bytes).image;
+  const previa = fronteiraDaLigacao(instancia.exports).previa({ attachment: 0, claimed: alegado, chegada: "bytes" }, bytes);
+  const recusa = previa.refusal;
+  if (recusa?.kind === "TooManyPixels") {
+    return Promise.reject({ PixelsDemais: { largura: recusa.width, altura: recusa.height, teto: recusa.limit } });
+  }
+  return previa.image;
 }
 
 /** Se o endereço é de um domínio de GIF desta máquina, ou de um subdomínio dele. */
@@ -1601,6 +1749,8 @@ const CHAVES_DA_ORIGEM = Object.freeze({
   sensibilidade: "seele.sensibilidade-da-voz",
   reducao: "seele.reducao-de-ruido",
   tecla: "seele.tecla-de-falar",
+  // As notificações do navegador (`sim` ou `nao`); sem valor, desligadas.
+  notificacoes: "seele.notificacoes",
 });
 
 /**
@@ -1628,10 +1778,27 @@ const vozDaPonte = { atual: null, nascendo: null };
  * na sala de novo, com um gesto (`ligarOAudioNoGesto`).
  */
 function aoEventoDaVoz(evento) {
+  if (evento && evento.tipo === "recepcao") {
+    aRecepcaoMediu(evento.medida);
+    return;
+  }
   // O microfone que só abriu sem o cancelamento de eco (o motor tentou com ele,
   // e a faixa chegou encerrada): a sala diz isso a quem fala, em uma frase.
   if (evento && evento.tipo === "audio-ligado") {
     vozDaSessao.semEco = Boolean(evento.semEcoPorque);
+    return;
+  }
+  // **O sistema pausou o som da sala** (no celular, outro aplicativo que toca
+  // som toma o áudio): a tela diz, em vez de a pessoa voltar e achar que a sala
+  // está em silêncio. Quando a saída volta a tocar, a tela volta ao que era.
+  if (evento && evento.tipo === "saida") {
+    const tocando = evento.estado === "tocando";
+    if (!tocando && (vozDaSessao.abertura === "aberto" || vozDaSessao.abertura === "so_ouvindo")) {
+      vozDaSessao.aberturaAntesDaPausa = vozDaSessao.abertura;
+      mudarAAbertura("som_pausado");
+    } else if (tocando && vozDaSessao.abertura === "som_pausado") {
+      mudarAAbertura(vozDaSessao.aberturaAntesDaPausa ?? "aberto");
+    }
     return;
   }
   if (!evento || evento.tipo !== "audio-fechado") return;
@@ -1811,6 +1978,25 @@ function enderecoQuePodeSair(bruto) {
   if (/[\s\p{Cc}]/u.test(url)) return { recusa: "endereço com espaço ou caractere de controle" };
   if (url.length <= "https://".length) return { recusa: "endereço vazio" };
   return { alvo: url };
+}
+
+/** O arquivo do teste de conexão, ao lado desta página, na mesma origem. */
+const PAGINA_DO_TESTE_DE_REDE = "diagnostico-rede.html";
+
+/**
+ * **O endereço do teste de conexão desta origem**, com o nome da falha que a
+ * tela mostrou, quando ele é um nome: o `endereco_do_teste_de_rede` do desktop.
+ *
+ * Relativo à página, e sem escrever origem nenhuma: a página fala com a origem
+ * dela pelo caminho. Só letras e números entram na consulta, que chega ao
+ * registro de acesso de quem serve a página: um identificador de falha cabe
+ * ali, e um endereço, um apelido ou um link, não.
+ */
+function enderecoDoTesteDeRede(falha) {
+  const endereco = new URL(PAGINA_DO_TESTE_DE_REDE, location.href);
+  const nome = typeof falha === "string" ? falha.trim() : "";
+  if (/^[A-Za-z0-9]{1,40}$/.test(nome)) endereco.searchParams.set("erro", nome);
+  return endereco.href;
 }
 
 // ------------------------------------------------------------ os MODs da sessão
@@ -2097,6 +2283,10 @@ async function enviarAImagemDoPerfil(lado) {
   } catch {
     throw "ArquivoIlegivel";
   }
+  // **Sobe do tamanho em que aparece**, e não do que a pessoa escolheu: quem
+  // recebe uma capa em 4K paga por ela, e os clientes de antes desta regra não
+  // a reduzem ao mostrar.
+  bytes = await reduzirAImagemDoPerfil(lado, bytes);
   const montado = sessao.perfil.enviar(lado, bytes);
   if (montado.falha) throw montado.falha;
   await transferirAImagemDoPerfil(sessao, montado.pedido, bytes, "");
@@ -2202,6 +2392,13 @@ async function regraDoPadrao() {
       const codigo = com(bytes, (p, n) => w.perfil_conferir(p, n));
       return codigo === 0 ? { tipo: saida() } : { falha: JSON.parse(saida()) };
     },
+    /** A imagem reduzida ao lugar em que aparece (a mesma conta do desktop), sem sessão. */
+    paraAJanela(capa, bytes) {
+      const codigo = com(bytes, (p, n) => w.perfil_para_a_janela(capa ? 1 : 0, p, n));
+      return codigo === 0
+        ? { bytes: memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()) }
+        : { falha: JSON.parse(saida()) };
+    },
   };
 }
 
@@ -2217,16 +2414,52 @@ function dataUriDe(bytes, tipo) {
   return `data:${tipo};base64,${btoa(binario)}`;
 }
 
-/** `perfil_padrao`: os textos, a revisão e as imagens em `data:`. */
+/**
+ * **A imagem de um perfil reduzida ao lugar em que aparece**, pela conta do
+ * desktop (`reducao::imagem_do_perfil_para_a_janela`): a capa em até 1280 × 720
+ * e a foto em até 512. Uma imagem grande ia à tela e ao servidor do tamanho que
+ * a pessoa escolheu, e uma capa em 4K deixava tudo lento (relato de 10/11/2026).
+ * Lança `TipoRecusado` para o que não decodifica ou tem pixels demais.
+ */
+async function reduzirAImagemDoPerfil(lado, bytes) {
+  const capa = lado === "capa" || lado === "Capa";
+  const reduzida = (await regraDoPadrao()).paraAJanela(capa, bytes);
+  if (reduzida.falha) throw reduzida.falha;
+  return reduzida.bytes;
+}
+
+/** As imagens do padrão já prontas para a tela, pelo hash: reduzir é decodificar, e a tela pede o padrão a cada gravação. */
+const IMAGENS_DO_PADRAO_NA_TELA = new Map();
+
+/** `perfil_padrao`: os textos, a revisão e as imagens em `data:`, reduzidas ao lugar em que aparecem. */
 async function perfilPadraoNaOrigem() {
   const padrao = await padraoGuardado();
   const naTela = { ...padrao };
+  const vivas = new Set();
   for (const lado of ["foto", "capa"]) {
     const imagem = padrao[lado];
     if (!imagem) continue;
-    const guardada = await noBancoDoPadrao(["imagens"], "readonly", (loja) => loja.get(imagem.hash));
-    if (!guardada) console.warn(`ponte: a ${lado} do perfil padrão sumiu do armazém desta origem`);
-    naTela[lado] = { ...imagem, url: guardada ? dataUriDe(guardada, imagem.tipo) : "" };
+    vivas.add(imagem.hash);
+    let url = IMAGENS_DO_PADRAO_NA_TELA.get(imagem.hash);
+    if (url === undefined) {
+      const guardada = await noBancoDoPadrao(["imagens"], "readonly", (loja) => loja.get(imagem.hash));
+      if (!guardada) console.warn(`ponte: a ${lado} do perfil padrão sumiu do armazém desta origem`);
+      url = "";
+      if (guardada) {
+        try {
+          const reduzida = await reduzirAImagemDoPerfil(lado, guardada);
+          url = dataUriDe(reduzida, tipoDaImagemDoPerfil(reduzida));
+        } catch (falha) {
+          // O que foi guardado antes desta regra e não reduz não vai à tela, e fica dito.
+          console.warn(`ponte: a ${lado} do perfil padrão não pôde ser reduzida para a tela:`, falha);
+        }
+      }
+      IMAGENS_DO_PADRAO_NA_TELA.set(imagem.hash, url);
+    }
+    naTela[lado] = { ...imagem, url };
+  }
+  for (const hash of IMAGENS_DO_PADRAO_NA_TELA.keys()) {
+    if (!vivas.has(hash)) IMAGENS_DO_PADRAO_NA_TELA.delete(hash);
   }
   return naTela;
 }
@@ -2289,6 +2522,12 @@ async function escolherAImagemDoPadrao(lado) {
   } catch {
     throw "ArquivoIlegivel";
   }
+  const original = (await regraDoPadrao()).conferir(bytes);
+  if (original.falha) throw original.falha;
+  // **Guardada do tamanho em que aparece.** O que fica guardado é o que sobe
+  // a cada servidor, e o hash dele é o que diz se o servidor já tem esta
+  // imagem: reduzir só na hora de enviar faria os dois nunca baterem.
+  bytes = await reduzirAImagemDoPerfil(lado, bytes);
   const conferido = (await regraDoPadrao()).conferir(bytes);
   if (conferido.falha) throw conferido.falha;
   const imagem = { hash: await hashDaImagemDoPadrao(bytes), tipo: conferido.tipo, bytes: bytes.length };
@@ -2336,7 +2575,13 @@ async function lerAImagemDoPerfil({ pessoa, lado, hash }) {
   if (!sessao) throw "NotConnected";
   const montado = sessao.perfil.ler({ pessoa, lado, hash });
   if (montado.falha) throw montado.falha;
-  const bytes = await transferirAImagemDoPerfil(sessao, montado.pedido, null, hash);
+  const lidos = await transferirAImagemDoPerfil(sessao, montado.pedido, null, hash);
+  // **Reduzida ao lugar em que aparece**, pela mesma conta do desktop: a
+  // imagem chega do tamanho que subiu, e uma capa em 4K virava um `data:` de
+  // megabytes que deixava a página inteira lenta (relato de 10/11/2026).
+  const reduzida = sessao.perfil.paraAJanela(lado === "Capa", lidos);
+  if (reduzida.falha) throw reduzida.falha;
+  const bytes = reduzida.bytes;
   const url = `data:${tipoDaImagemDoPerfil(bytes)};base64,${(await osModsDaPagina()).base64De(bytes)}`;
   guardarAImagemDoPerfil(hash, url, bytes.length);
   return url;
@@ -2464,7 +2709,151 @@ function pessoalWebNaPonte() {
   if (!window.seelePessoalWeb) throw new Error("Conversa pessoal ainda está preparando");
   return window.seelePessoalWeb;
 }
+
+// ------------------------------------------------ a notificação do navegador
+//
+// O que `notificar_no_sistema` é no app (`src/notificacao.rs`), aqui é a API
+// `Notification` do navegador. A regra — o que notifica, a repetição, o texto —
+// é da casca (`notificacao-do-sistema.js`), a mesma do app; a ponte guarda a
+// escolha na origem, lê a permissão e confere o que o Rust confere do lado
+// dele: a preferência, a página na frente e o texto com teto.
+//
+// **Onde não há, a ponte diz que não há** (`NaoHa`), em vez de fingir uma
+// opção: o Safari do iPhone e do iPad não tem `Notification` fora de página
+// instalada, e o Chrome do Android tem o nome e recusa o construtor (lá a
+// notificação é só a de um service worker, que esta página não tem). O
+// segundo caso só se descobre tentando, e a tentativa é a confirmação que sai
+// no gesto de ligar.
+
+/** A API do navegador, ou `null` onde ela não existe. */
+function notificacaoDoNavegador() {
+  const api = globalThis.Notification;
+  return typeof api === "function" ? api : null;
+}
+
+/** O construtor já recusou nesta página (o Chrome do Android): não há. */
+let notificacaoSemConstrutor = false;
+
+/** A permissão, pelos nomes que a casca lê (`FRASES_DA_NOTIFICACAO.estado`). */
+function permissaoDeNotificar() {
+  const api = notificacaoDoNavegador();
+  if (!api || notificacaoSemConstrutor) return "NaoHa";
+  if (api.permission === "granted") return "Concedida";
+  return api.permission === "denied" ? "Negada" : "PorPedir";
+}
+
+/** O que a casca desenha em CONFIGURAÇÕES: a escolha guardada e a permissão de agora. */
+function retratoDasNotificacoes() {
+  const permissao = permissaoDeNotificar();
+  return {
+    ligadas: permissao !== "NaoHa" && guardadoNaOrigem(CHAVES_DA_ORIGEM.notificacoes) === "sim",
+    permissao,
+  };
+}
+
+/** Os tetos de `notificacao.rs` (`TETO_DO_TITULO`, `TETO_DO_CORPO`), em caracteres. */
+const TETOS_DA_NOTIFICACAO = Object.freeze({ titulo: 80, corpo: 200 });
+
+/** Uma linha, sem caractere de controle, com teto: o `limpar` do Rust. */
+function limparTextoDaNotificacao(texto, teto) {
+  const limpo = Array.from(String(texto ?? "").replace(/[\p{Cc}\s]+/gu, " ").trim());
+  return limpo.length <= teto ? limpo.join("") : `${limpo.slice(0, teto - 1).join("")}…`;
+}
+
+/** A página está à vista e com o foco: o aviso de dentro basta. */
+function paginaNaFrente() {
+  try {
+    if (document.visibilityState === "hidden") return false;
+    return typeof document.hasFocus === "function" ? document.hasFocus() : false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mostra uma notificação. Lança se o navegador recusar o construtor.
+ *
+ * O clique traz a página à frente e devolve o `lugar` à casca
+ * (`seele://notificacao-clicada`), que decide para onde ir. A `marca` é a
+ * `tag` do navegador: duas com a mesma marca são uma, a segunda no lugar da
+ * primeira.
+ */
+function mostrarNotificacaoDoNavegador(titulo, corpo, { marca, lugar = null } = {}) {
+  const api = notificacaoDoNavegador();
+  const notificacao = new api(titulo, { body: corpo, tag: marca, icon: "icone-192.png" });
+  notificacao.onclick = () => {
+    try {
+      globalThis.focus?.();
+    } catch {
+      /* O navegador decide se a página vem à frente. */
+    }
+    notificacao.close?.();
+    emitirNaPonte("seele://notificacao-clicada", lugar);
+  };
+  return notificacao;
+}
+
 const ATENDIMENTOS_DA_PONTE = Object.freeze({
+  // Chamado sem gesto (CONFIGURAÇÕES aberta, e a cada acontecimento que pode
+  // notificar): só lê.
+  estado_das_notificacoes: () => retratoDasNotificacoes(),
+  // **Dentro do gesto**: o `requestPermission` é a primeira coisa que espera, e
+  // nada espera antes dele. O navegador pergunta uma vez; uma recusa antiga
+  // volta na hora, sem pergunta, e a escolha fica guardada mesmo assim — a
+  // tela diz «o navegador não deixa» e o caminho para mudar, e liberar depois
+  // não pede outro gesto.
+  ligar_notificacoes: async ({ ligadas, confirmacao } = {}) => {
+    const api = notificacaoDoNavegador();
+    if (!ligadas || !api || notificacaoSemConstrutor) {
+      if (!gravarNaOrigem(CHAVES_DA_ORIGEM.notificacoes, "nao")) return Promise.reject("NaoGravei");
+      return retratoDasNotificacoes();
+    }
+    if (api.permission === "default") {
+      try {
+        await api.requestPermission();
+      } catch (falha) {
+        console.warn("ponte: o navegador não perguntou pela notificação:", falha);
+      }
+    }
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.notificacoes, "sim")) return Promise.reject("NaoGravei");
+    // A confirmação: é ela que prova que este navegador notifica. Onde o
+    // construtor é recusado, a opção volta a desligada e a tela diz que não há.
+    if (api.permission === "granted" && confirmacao?.titulo) {
+      try {
+        mostrarNotificacaoDoNavegador(
+          limparTextoDaNotificacao(confirmacao.titulo, TETOS_DA_NOTIFICACAO.titulo),
+          limparTextoDaNotificacao(confirmacao.corpo, TETOS_DA_NOTIFICACAO.corpo),
+          { marca: "seele:ligadas" },
+        );
+      } catch (falha) {
+        console.warn("ponte: este navegador recusa a notificação da página:", falha);
+        notificacaoSemConstrutor = true;
+        gravarNaOrigem(CHAVES_DA_ORIGEM.notificacoes, "nao");
+      }
+    }
+    return retratoDasNotificacoes();
+  },
+  // As recusas levam os nomes das do Rust (`RecusaDeNotificar`), e mais uma que
+  // só a página sabe dar: `SemPermissao`.
+  notificar_no_sistema: ({ motivo, titulo, corpo, lugar } = {}) => {
+    const retrato = retratoDasNotificacoes();
+    if (!retrato.ligadas) return Promise.reject("Desligadas");
+    if (retrato.permissao !== "Concedida") return Promise.reject("SemPermissao");
+    if (paginaNaFrente()) return Promise.reject("JanelaNaFrente");
+    const limpo = limparTextoDaNotificacao(titulo, TETOS_DA_NOTIFICACAO.titulo);
+    if (!limpo) return Promise.reject("SemTexto");
+    try {
+      mostrarNotificacaoDoNavegador(limpo, limparTextoDaNotificacao(corpo, TETOS_DA_NOTIFICACAO.corpo), {
+        marca: `seele:${motivo}:${lugar?.sessao ?? ""}`,
+        lugar: lugar ?? null,
+      });
+    } catch (falha) {
+      console.warn("ponte: a notificação não saiu:", falha);
+      notificacaoSemConstrutor = true;
+      return Promise.reject("NaoSaiu");
+    }
+    return null;
+  },
   meu_codigo: () => meuCodigoPessoalWeb(),
   amigos: () => contatosPessoaisWeb(true),
   contatos_da_agenda: () => contatosPessoaisWeb(),
@@ -2501,6 +2890,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // (a casca) nomeia. No celular não há tecla: falar apertando é o SEGURAR
   // PARA FALAR da faixa de voz.
   tecla_de_falar: () => (CASCA_DA_PONTE === "larga" ? guardadoNaOrigem(CHAVES_DA_ORIGEM.tecla) : null),
+  // Chamado sem gesto (ao carregar, e a cada meio segundo com CONFIGURAÇÕES
+  // aberta): uma recusa seria um aviso no console de toda página. `null` é «o
+  // navegador não tem atalho para o computador inteiro», e a opção não aparece.
+  estado_da_tecla_global: () => null,
   limite_da_mensagem: () => structuredClone(CONSTANTES_DO_DESKTOP.limite_da_mensagem),
   limites_dos_campos: () => structuredClone(CONSTANTES_DO_DESKTOP.limites_dos_campos),
   regras_de_previa: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_de_previa),
@@ -2796,6 +3189,13 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   reenviar_mensagem: pelaSessao("reenviar_mensagem"),
   descartar_mensagem: pelaSessao("descartar_mensagem"),
   remover_mensagem: pelaSessao("remover_mensagem"),
+  // A mesa de texto da 1.0: a edição nas duas cascas, e a lista de banidos
+  // com o desbanir na larga (`SO_NA_CASCA_LARGA`). Responder é o
+  // `send_message` de cima, com `repliesTo`.
+  editar_mensagem: pelaSessao("editar_mensagem"),
+  desbanir_pessoa: pelaSessao("desbanir_pessoa"),
+  listar_banidos: pelaSessao("listar_banidos"),
+  banidos: pelaSessao("banidos"),
   dispensar_aviso: pelaSessao("dispensar_aviso"),
   escolher_apelido: pelaSessao("escolher_apelido"),
   membros_fora_do_ar: pelaSessao("membros_fora_do_ar"),
@@ -2861,9 +3261,11 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   // A mídia declarada do pacote: o som volta sem `data:`, e os bytes dele
   // pelo `som_do_mod`.
-  midia_do_mod: async ({ geracao, id, hash, caminho } = {}) => {
+  // A imagem chega reduzida ao `uso` que a região nomeia, ou ao teto geral
+  // da mídia de MOD, pela mesma conta do desktop.
+  midia_do_mod: async ({ geracao, id, hash, caminho, uso } = {}) => {
     recusarSeMorta(geracao);
-    const lido = (await osModsDaPagina()).midia(await pacoteDoArmazem(hash), { id, hash, caminho });
+    const lido = (await osModsDaPagina()).midia(await pacoteDoArmazem(hash), { id, hash, caminho, uso: String(uso ?? "") });
     if (lido.falha) throw lido.falha;
     return lido.ok;
   },
@@ -3113,6 +3515,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
       if (!(await sondarATela(await pelaPagina("codec_da_tela")({})))) return Promise.reject("ScreenShareUnavailable");
       return [{ id: 1, nome: FONTE_DO_NAVEGADOR, monitor: true, largura: Math.round(screen.width * devicePixelRatio), altura: Math.round(screen.height * devicePixelRatio) }];
     }),
+  // **As prévias das fontes**: nesta casca a única fonte é o seletor do
+  // navegador, e é ele quem mostra a prévia de cada tela e janela. Não há o
+  // que mandar à caixa, e o cartão fica só com o nome.
+  previas_de_tela: () => Promise.resolve(null),
   permissao_de_tela: () => comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
   pedir_permissao_de_tela: () =>
     comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
@@ -3158,6 +3564,42 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
                 : "ScreenShareUnavailable",
             ),
         );
+    }),
+  // **A câmera pelo PC** (1.0, protocolo 13; no celular, recusada com a
+  // frase): quem pede a câmera ao navegador é a casca (`camera.js`, dentro do
+  // gesto), e a mídia é a dela (`midiaDaCameraDaJanela`) — é com ela que a
+  // casca mostra a quem a ligou a própria imagem. Daqui em diante é a transmissão da tela, com a
+  // fonte da câmera. O servidor de antes do 13 recusa no `.wasm`, com o
+  // `ServidorAntigo`, antes de qualquer coisa sair.
+  // As medidas, a cadência e o codec da câmera, pelos degraus do `.wasm` e
+  // com o teto dela (720p a 30): a mesma resposta que o núcleo dá ao aplicativo.
+  codificacao_da_camera: ({ largura, altura, limites } = {}) =>
+    pelaSessao("codificacao_da_tela")({ limites, fonte: "camera", largura, altura }),
+  compartilhar_camera: ({ limites } = {}) =>
+    comASessao(async (sessao) => {
+      const midia = typeof midiaDaCameraDaJanela === "function" ? midiaDaCameraDaJanela() : null;
+      const soltar = () => { for (const trilha of midia?.getTracks?.() ?? []) trilha.stop(); };
+      if (!sessao.transmissao || !midia?.getVideoTracks?.().length) {
+        soltar();
+        return Promise.reject("ScreenShareUnavailable");
+      }
+      sessao.pedidoDeCaptura = (sessao.pedidoDeCaptura ?? 0) + 1;
+      const tentativa = sessao.pedidoDeCaptura;
+      // Um quadro de verdade saindo do codificador, antes de a sala ouvir que
+      // há uma câmera: o `isConfigSupported` do Safari diz que codifica e não
+      // codifica.
+      if (!(await sondarOCodificadorDeVideo(await pelaPagina("codec_da_tela")({})))) {
+        soltar();
+        return Promise.reject({ RecusaDaPonte: { comando: "compartilhar_camera", frase: FRASES_DA_CAMERA.semCodificador } });
+      }
+      if (sessao.pedidoDeCaptura !== tentativa || sessaoDaPonte.atual !== sessao) {
+        soltar();
+        return Promise.reject("NotConnected");
+      }
+      // **No lugar da tela**: o `comecar` fecha a que estava no ar, e o
+      // servidor troca a vaga e anuncia o fim dela à sala.
+      sessao.transmissao.comecar(midia, { ...limites, com_som: false }, { camera: true });
+      return null;
     }),
   parar_de_compartilhar: () =>
     comASessao(async (sessao) => {
@@ -3328,6 +3770,26 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     const { alvo, recusa } = enderecoQuePodeSair(String(url ?? ""));
     if (recusa) return Promise.reject(recusa);
     window.open(alvo, "_blank", "noopener,noreferrer");
+    return null;
+  },
+  // **O teste de conexão, numa aba nova da mesma origem**, que não leva esta
+  // página junto: a tentativa aberta e as sessões continuam aqui. Sem `await`
+  // antes do `open`, pela razão de cima.
+  //
+  // **Sem `noopener` na abertura, e com ele logo depois.** Com `noopener` o
+  // `open` devolve `null` sempre, e a aba que o navegador bloqueou seria igual
+  // à que abriu: o botão falharia calado. Sem ele, `null` é a recusa do
+  // navegador, e a tela diz o endereço. A aba que abriu perde o `opener` na
+  // linha seguinte, antes de a página dela carregar.
+  abrir_o_teste_de_rede: ({ erro } = {}) => {
+    const endereco = enderecoDoTesteDeRede(erro);
+    const aba = window.open(endereco, "_blank");
+    if (!aba) return Promise.reject({ NavegadorNaoAbriu: { endereco } });
+    try {
+      aba.opener = null;
+    } catch {
+      // Um navegador que já a pôs noutro grupo não deixa escrever: já está solta.
+    }
     return null;
   },
 });

@@ -1,0 +1,28 @@
+{
+  "name": "SEELE",
+  "short_name": "SEELE",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "description": "Voz, texto e tela entre pessoas, sem conta e sem serviço no meio.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050403",
+  "theme_color": "#050403",
+  "icons": [
+    {
+      "src": "icone-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icone-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

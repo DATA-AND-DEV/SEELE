@@ -11,6 +11,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SEELE</title>
 <!--
+  **A página instalável** (o celular da 1.0 é web, sem loja). O manifesto dá o
+  nome, o ícone e a janela própria a quem a põe na tela inicial; a ponte, logo
+  abaixo, troca-o pelo `seele-na-aba.webmanifest` no iOS, onde a janela própria
+  perde o microfone ao sair da frente e a aba do Safari não. Antes da ponte de
+  propósito: ela precisa achar esta linha. No app do computador é inerte.
+-->
+<link rel="manifest" href="seele.webmanifest">
+<link rel="apple-touch-icon" href="icone-180.png">
+<!--
   A ponte do navegador, antes de tudo e síncrona (ADR 0057, F4). No app ela só
   declara; no navegador ela põe a marca da casca (`data-casca`) antes da
   primeira pintura e o `window.__TAURI__` que o `base.js` lê.
@@ -485,6 +494,13 @@
     <!-- O CANCELAR de quem está chamando alguém (tarefa 28 da F7). -->
     <button id="boot-cancelar-ligacao" type="button" class="botao" hidden>CANCELAR</button>
     <p id="boot-erro" class="erro" role="alert" hidden></p>
+    <!--
+      O caminho de quem não conectou por causa de rede (lacuna 8 da análise
+      para a 1.0): o TESTAR A CONEXÃO, que abre a página de diagnóstico. Vazia e
+      escondida até a frase de cima ser a de uma falha de rede, e esvaziada
+      quando a frase muda: ver `ofertaDoTesteDeConexao`, em `base.js`.
+    -->
+    <div id="boot-teste-de-conexao" hidden></div>
     <!--
       As saídas de quem hospeda com um MOD de API antiga moravam aqui, debaixo
       da frase vermelha. Foram para a tela ANTES DE HOSPEDAR (E2 da 0.17), no
@@ -1546,6 +1562,24 @@
         -->
         <p id="sala-estado" class="operador-frase sala-estado" role="status" data-sala-pessoal hidden></p>
         <!--
+          O estado da câmera, por extenso: pedindo ao sistema, negada (com o que
+          fazer), sem câmera, no ar, parada pelo sinal, a fila que não acompanha,
+          o servidor de antes da 1.0. Escrito por `camera.js`, e por mais
+          ninguém. Vazio é escondido: uma linha em branco aqui empurraria os
+          controles.
+        -->
+        <p id="camera-estado" class="operador-frase camera-estado" role="status" data-estado="desligada" hidden></p>
+        <!--
+          **A transmissão de tela que caiu sozinha** (`ScreenShareFell`): o
+          codificador recusou, a captura parou, a conexão dela fechou. O núcleo
+          já a encerrou e o botão ao lado voltou a COMPARTILHAR; esta linha é o
+          que o botão não diz — que não foi a pessoa quem parou, e por quê.
+          Escrita por `desenharAQuedaDaTela`, em `camada-compartilhar.js`, e
+          por mais ninguém. Some quando a pessoa compartilha de novo ou sai da
+          sala.
+        -->
+        <p id="tela-estado" class="operador-frase tela-estado" role="status" hidden></p>
+        <!--
           **O seletor de modo saiu daqui.** A comp da 0.9.0 não o desenha no
           operador: ela o põe na configuração, sob `MODO DE VOZ`, e no operador
           deixa só a frase — «microfone aberto · ouvindo · sempre aberto». Os
@@ -1592,6 +1626,18 @@
                   aria-label="COMPARTILHAR" data-glifo="tela"
                   title="mostrar um monitor ou uma janela sua para quem está na sala"></button>
           <!--
+            **A câmera** (1.0, protocolo 13), ao lado do COMPARTILHAR e no lugar
+            dele: uma pessoa mostra uma imagem por vez, e ligar a câmera com a
+            tela no ar troca uma pela outra — o `title` e o `camera-estado`
+            dizem isso antes e depois. O estado mora no botão (`data-estado`,
+            `aria-pressed`), e quem o escreve é `desenharACamera`, em
+            `camera.js`. Num servidor de antes da 1.0 ele fica à vista, apagado,
+            com o porquê.
+          -->
+          <button id="operador-camera" class="operador-glifo" type="button" hidden
+                  aria-label="LIGAR A CÂMERA" aria-pressed="false" data-glifo="camera" data-estado="desligada"
+                  title="mostrar a sua câmera para quem está na sala"></button>
+          <!--
             Só na vista da ligação pessoal (0.17), onde esta fileira vira a
             barra da chamada: o CHAT abre a conversa num painel sobreposto, e
             DESLIGAR sai SÓ desta sessão (não é sair da sala de voz). Escondidos
@@ -1599,6 +1645,14 @@
           -->
           <button id="ligacao-chat" class="botao-fantasma ligacao-chat" type="button"
                   aria-haspopup="dialog" aria-expanded="false">CHAT</button>
+          <!--
+            CONVIDAR (1.0, ADR 0068): o grupo cresce com a terceira pessoa
+            ligando para o código de quem hospeda a ligação. O botão copia o
+            link desse código (`seele://@CÓDIGO`), e a linha de baixo diz o que
+            foi copiado, de quem é o código e quem atende; se a cópia falhar, o
+            link fica selecionado num campo, para copiar pelo teclado.
+          -->
+          <button id="ligacao-convidar" class="botao-fantasma ligacao-convidar" type="button">CONVIDAR</button>
           <button id="ligacao-desligar" class="ligacao-desligar" type="button">DESLIGAR</button>
           <!--
             **`DESCONECTAR` saiu, e a saída não sumiu com ele.**
@@ -1618,6 +1672,9 @@
           -->
         </div>
         <p id="ligacao-barra-dica" class="nota ligacao-barra-dica"></p>
+        <p id="ligacao-convidar-dito" class="nota ligacao-convidar-dito" role="status" hidden></p>
+        <input id="ligacao-convidar-link" class="ligacao-convidar-link" readonly spellcheck="false"
+               autocomplete="off" aria-label="Link desta ligação, para copiar" hidden>
       </div>
     </section>
 
@@ -1682,7 +1739,7 @@
                  aria-labelledby="palco-titulo">
           <div class="chamada-palco-cabeca">
             <h2 id="palco-titulo" class="chamada-titulo">
-              <span>TELA COMPARTILHADA</span>
+              <span id="palco-titulo-tipo">AO VIVO NESTA SALA</span>
             </h2>
             <!--
               A razão, ao lado da medida, e ela é literal do §5.1 da spec:
@@ -1727,7 +1784,16 @@
               destino dele é um canvas.
             -->
             <canvas id="palco-imagem" class="chamada-palco-imagem" hidden></canvas>
-            <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>
+            <!--
+              A câmera de quem a ligou, como ela sai daqui. `<video>` e não o
+              canvas de cima: a imagem vem da própria mídia desta janela, antes
+              de ser comprimida, e não dos quadros que atravessam a ponte —
+              mandá-la ao núcleo para trazê-la de volta seria decodificar o que
+              esta janela acabou de codificar. Sem som: a câmera não leva som.
+            -->
+            <video id="camera-previa" class="chamada-palco-imagem chamada-palco-previa" muted playsinline hidden
+                   aria-label="A sua câmera, como ela sai daqui"></video>
+            <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ MOSTRANDO NADA</p>
             <!--
               As transmissões da sala, quando há mais de uma.
 
@@ -1991,7 +2057,34 @@
           <progress id="anexo-barra" class="anexo-barra" value="0" max="1" hidden></progress>
           <span id="anexo-estado" class="anexo-estado"></span>
         </div>
+        <!--
+          **A faixa do modo de escrever** (a mesa de texto da 1.0): respondendo
+          a uma mensagem, ou editando uma mensagem própria. Acima do campo, e
+          não dentro dele: ela diz o que o ENVIAR vai fazer com o que está
+          escrito, e o que se escreve continua sendo só o texto.
+
+          Sempre com a saída à vista, o botão e o Esc. `role="status"` na
+          frase, para quem escuta saber em que modo entrou; `role="alert"` no
+          erro, porque uma edição que não foi salva pede atenção agora.
+          As frases são do `frases.js` (`FRASES_DA_CONVERSA`).
+        -->
+        <div id="compor-modo" class="compor-modo" hidden>
+          <span class="compor-modo-texto">
+            <span id="compor-modo-frase" class="compor-modo-frase" role="status"></span>
+            <span id="compor-modo-citacao" class="compor-modo-citacao"></span>
+          </span>
+          <button id="compor-modo-cancelar" class="botao-fantasma compor-modo-cancelar" type="button"></button>
+          <p id="compor-modo-erro" class="erro compor-modo-erro" role="alert" hidden></p>
+        </div>
         <form id="form-mensagem" class="compor" autocomplete="off">
+          <!--
+            **A lista de quem chamar com `@`.** Filha do formulário para se
+            ancorar nele (acima do campo, sem empurrar a conversa), e `listbox`
+            com uma `option` por pessoa: o campo a aponta com `aria-controls` e
+            diz qual opção está acesa com `aria-activedescendant`, sem tirar o
+            foco de quem escreve. Vazia e escondida até alguém digitar `@`.
+          -->
+          <ul id="mencoes-lista" class="mencoes" role="listbox" hidden></ul>
           <label for="campo-mensagem" class="compor-rotulo">Sua mensagem em <span id="compor-rotulo-canal" class="compor-rotulo-canal"></span></label>
           <!--
             O sinal de maior, e não o triângulo desenhado: o comp escreve `>` aqui,
@@ -2041,6 +2134,7 @@
             -->
             <textarea id="campo-mensagem" name="mensagem" rows="1"
                       placeholder="transmitir no canal — Enter envia"
+                      aria-autocomplete="list" aria-controls="mencoes-lista"
                       autocomplete="off"></textarea>
             <!--
               O aviso de tamanho. `role="status"` porque ele aparece enquanto se
@@ -2187,6 +2281,18 @@
       <div id="roster-mods" class="roster-mods" hidden></div>
       <ul id="lista-roster" class="roster"></ul>
       <!--
+        **A porta da lista de banidos** (a mesa de texto da 1.0). Embaixo da
+        lista de pessoas, porque é uma lista de pessoas — as que não podem
+        entrar — e porque a caixa de moderar só se alcança pelo nome de alguém
+        que está aqui: quem foi banido não está, e sem uma porta própria não
+        haveria como chegar ao DESBANIR num servidor vazio.
+
+        Nasce escondida e quem a mostra é o retrato (`atualizarPortaDosBanidos`,
+        em `camada-moderar.js`): só para quem pode banir, e só num servidor que
+        tem a lista. No celular ela não aparece — moderar é pelo computador.
+      -->
+      <button id="abrir-banidos" class="roster-banidos" type="button" hidden></button>
+      <!--
         O perfil de outra pessoa (0.19, §5.3): uma folha à direita, no lugar do
         painel PESSOAS, com a capa, a foto, o nome exibido, o apelido#tag, os
         pronomes, o status e a bio. FECHAR ou Escape devolvem a lista.
@@ -2293,6 +2399,15 @@
     <span class="metrica"><b class="rotulo">JITTER</b> <span id="tel-jit">·</span></span>
     <span class="metrica"><b class="rotulo">DISTÚRBIO</b> <span id="tel-loss">·</span></span>
     <span class="metrica"><b class="rotulo">VOZ</b> <span id="tel-codec">·</span></span>
+    <!--
+      Qual codificador de vídeo está produzindo a transmissão desta pessoa
+      (`minha_transmissao.codificador`): o do sistema, pelo nome que o sistema
+      dá, ou «OpenH264 (software)». O motor sabia e só o seele.log contava; é o
+      que explica a CPU de quem transmite. Escondida fora de uma transmissão
+      própria e enquanto o motor não disse o nome: não há medida a mostrar, e
+      um travessão permanente seria uma célula a mais sem dizer nada.
+    -->
+    <span class="metrica" id="tel-video-celula" hidden><b class="rotulo">VÍDEO</b> <span id="tel-video">·</span></span>
     <span class="metrica"><b class="rotulo">UPTIME</b> <span id="tel-uptime">·</span></span>
     <span class="metrica"><b class="rotulo">SALA</b> <span id="tel-voice_room">·</span></span>
     <!--
@@ -3425,6 +3540,41 @@
             </div>
           </div>
 
+          <!--
+            **NOTIFICAÇÕES DO SISTEMA** (1.0). O toque no ombro com a janela fora
+            da frente: a do sistema operacional no app, a do navegador na página.
+            Ao lado dos alertas sonoros, e não numa seção própria: são as duas
+            respostas à mesma pergunta («e se eu não estiver olhando?»), e no
+            celular as duas ficam em ÁUDIO sem uma linha a mais no índice.
+
+            Sem `checked`: desligadas é o padrão, e é o que se lê se o script não
+            chegar a escrever. Ligar é um gesto porque o sistema (o navegador, na
+            página) pergunta uma vez se o programa pode notificar, e uma
+            pergunta que ninguém pediu ensina a responder não.
+
+            A frase do estado não está aqui: ela vem de `FRASES_DA_NOTIFICACAO`
+            (`notificacao-do-sistema.js`, `fraseDoEstado`), uma por permissão. No
+            app ela diz onde olhar nos ajustes do sistema, e **não** afirma que o
+            sistema deixa: o plugin não deixa ler isso (`src/notificacao.rs`). Na
+            página a permissão é legível, e a recusa do navegador fica dita.
+          -->
+          <div class="server-bloco" id="notificacoes-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">NOTIFICAÇÕES DO SISTEMA</h3>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <h4 class="rotulo">NOTIFICAÇÕES</h4>
+                <label class="server-marcar alertas-chave" for="notificacoes-ligadas">
+                  <input id="notificacoes-ligadas" type="checkbox" role="switch">
+                  <span>avisar pelo sistema com a janela fora da frente</span>
+                </label>
+                <p class="nota">Quando alguém chama você, bate à porta do servidor que você hospeda ou liga para você. A notificação diz o que foi e onde, e nunca o texto de uma mensagem: ela aparece também na tela bloqueada. Vale só neste aparelho.</p>
+                <p class="nota" id="notificacoes-estado" role="status"></p>
+              </div>
+            </div>
+          </div>
+
         </section>
 
         <!-- ------------------------------------------------------- ATALHOS -->
@@ -3541,6 +3691,15 @@
               </li>
               <li class="server-atalho">
                 <span class="server-atalho-texto">
+                  <span class="server-atalho-acao">Editar a sua última mensagem</span>
+                  <span class="server-atalho-desc">com o campo de escrever
+                    vazio, num servidor da 1.0 em diante; Enter salva e Esc
+                    cancela</span>
+                </span>
+                <kbd class="server-atalho-tecla" data-tecla="ArrowUp">↑</kbd>
+              </li>
+              <li class="server-atalho">
+                <span class="server-atalho-texto">
                   <span class="server-atalho-acao">Colar uma imagem</span>
                   <span class="server-atalho-desc">cai na prévia acima do
                     campo, pronta para enviar com Enter</span>
@@ -3566,11 +3725,41 @@
                 <span class="server-atalho-texto">
                   <span class="server-atalho-acao">Fechar o que está por cima</span>
                   <span class="server-atalho-desc">a busca, a chamada, ou esta
-                    tela</span>
+                    tela; no campo de escrever, cancela a resposta ou a edição
+                    em andamento</span>
                 </span>
                 <kbd class="server-atalho-tecla" data-tecla="Escape">ESC</kbd>
               </li>
             </ul>
+            <!--
+              **A tecla de falar com outra janela na frente** (lista da 1.0).
+
+              Ao lado da tecla de falar, e não em MICROFONE E SOM: é a mesma
+              tecla, e quem a troca logo acima precisa ler aqui se a nova serve
+              de atalho do sistema.
+
+              Nasce escondido. Quem o mostra é `desenharTeclaGlobal`
+              (`tela-server.js`), quando o comando `estado_da_tecla_global`
+              responde um estado, e só o app responde: no navegador a ponte
+              responde `null`, o bloco fica escondido, e a casca larga já diz
+              por quê, no alto deste painel.
+
+              Sem `checked`: desligada é o padrão, e é o que se lê se o script
+              não chegar a escrever. A frase do estado não está aqui: ela vem de
+              `FRASES_DA_TECLA_GLOBAL`, um estado por frase, e uma escrita na
+              marcação seria uma afirmação que ninguém conferiu.
+            -->
+            <div class="server-bloco-corpo" id="tecla-global-bloco" hidden>
+              <div class="server-campo">
+                <h4 class="rotulo">FORA DA JANELA</h4>
+                <label class="server-marcar" for="server-tecla-global">
+                  <input id="server-tecla-global" type="checkbox" role="switch">
+                  <span>falar com a tecla também com outra janela na frente</span>
+                </label>
+                <p class="nota">Vale numa sala de voz, com o microfone em SEGURAR TECLA. Enquanto vale, a tecla não chega ao outro programa: escolha uma que o jogo não use.</p>
+                <p class="nota" id="server-tecla-global-estado" role="status"></p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -4347,6 +4536,12 @@
     <h1 class="fim-titulo">ENLACE ENCERRADO</h1>
     <p id="fim-motivo" class="fim-motivo"></p>
     <button id="botao-voltar" class="botao" type="button">VOLTAR À ENTRADA</button>
+    <!--
+      O TESTAR A CONEXÃO, para o enlace que caiu e não voltou (`mostrarFim`).
+      Depois das saídas: voltar é o caminho principal, e o SAIR entra logo
+      depois do botão de cima (`desenharSaidas`), antes desta caixa.
+    -->
+    <div id="fim-teste-de-conexao" hidden></div>
   </div>
 </section>
 
@@ -4810,7 +5005,7 @@
         <h3 class="ajuda-secao-nome">AS TECLAS</h3>
         <dl class="ajuda-lista">
           <dt class="ajuda-termo"><span id="ajuda-tecla-falar" class="ajuda-tecla">ESPAÇO</span></dt>
-          <dd class="ajuda-diz">Segure para falar, no modo tecla. Vale com a janela do SEELE na frente e fora da caixa de mensagem.</dd>
+          <dd class="ajuda-diz">Segure para falar, no modo tecla. Vale com a janela do SEELE na frente e fora da caixa de mensagem. Com outra janela na frente, só ligando em CONFIGURAÇÕES · ATALHOS.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">/</span></dt>
           <dd class="ajuda-diz">Procurar no que já foi dito neste canal.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">ENTER</span></dt>
@@ -4821,6 +5016,18 @@
           <dd class="ajuda-diz">Fecha o que estiver por cima.</dd>
         </dl>
       </section>
+    </div>
+
+    <!--
+      O apoio, no único lugar do app que fala do SEELE em si. Uma linha e um
+      botão, embaixo de tudo: sem contador, sem meta, e nada que apareça sem a
+      pessoa ter aberto a ajuda. O botão abre a página no navegador do sistema
+      (`abrir_no_navegador`); se não abrir, a linha ao lado diz o endereço.
+    -->
+    <div class="ajuda-apoio">
+      <p class="ajuda-apoio-diz">O SEELE é feito por uma pessoa, sem anúncio, cadastro nem serviço no meio. Se ele é útil para você, dá para pagar um café.</p>
+      <button id="ajuda-apoiar" class="ajuda-apoiar" type="button">Apoie o SEELE</button>
+      <p id="ajuda-apoio-estado" class="ajuda-apoio-estado" role="status" hidden></p>
     </div>
   </div>
 </div>
@@ -5333,6 +5540,21 @@
         em vez de dizer «OK»: um botão chamado OK ao lado de um parágrafo é um
         botão que se aperta sem ler o parágrafo.
       -->
+      <!--
+        **A lista de banidos** (protocolo 13): quem está barrado agora, por
+        quê, até quando, e o DESBANIR de cada um — que passa pela mesma
+        confirmação dos outros atos desta caixa, com a consequência escrita.
+
+        `role="status"` na frase de estado: «lendo», «ninguém está banido» e
+        «a lista não chegou» são três coisas diferentes, e nenhuma é uma lista
+        vazia sem explicação. A lista rola por dentro, e a caixa não cresce
+        com o número de banidos.
+      -->
+      <div id="moderar-banidos" class="moderar-corpo moderar-banidos" hidden>
+        <p id="moderar-banidos-estado" class="moderar-vazio" role="status"></p>
+        <ul id="moderar-banidos-lista" class="moderar-banidos-lista"></ul>
+        <span id="moderar-banidos-nota" class="nota"></span>
+      </div>
       <div id="moderar-confirmacao" class="moderar-confirmacao" hidden>
         <p id="moderar-consequencia" class="moderar-consequencia"></p>
         <!--
@@ -5543,6 +5765,13 @@
 -->
 <script src="alertas-sonoros.js"></script>
 <!--
+  A notificação do sistema: a menção, a batida na porta e a ligação que chega,
+  com a janela fora da frente. Depois do `base.js`, de quem usa o `invoke` e o
+  ouvinte cru dos eventos; antes de quem a chama (a portaria, o toque, a
+  conversa por link, CONFIGURAÇÕES). Na carga ela só declara e passa a ouvir.
+-->
+<script src="notificacao-do-sistema.js"></script>
+<!--
   O enlace WebRTC da página (0.17, D1–D9; do browser-signaling): o
   `RTCPeerConnection` contra o anfitrião ICE-lite, o certificado DTLS efêmero e
   os canais. Antes da sessão, que usa o `criarEnlaceRtc` e o
@@ -5614,6 +5843,7 @@
   topo deste arquivo não os toca, então a ordem só importa para quem vier depois
   mexer nele.
 -->
+<script src="camera.js"></script>
 <script src="tela-chamada.js"></script>
 <script src="camada-sessoes.js"></script>
 <!--

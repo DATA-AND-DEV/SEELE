@@ -157,7 +157,7 @@ async fn rodada(
                         .take(tamanho)
                         .collect::<String>();
                     if cliente
-                        .send_message(LINHA, &corpo, ClientMessageId(chave))
+                        .send_message(LINHA, &corpo, None, ClientMessageId(chave))
                         .await
                         .is_err()
                     {
@@ -331,7 +331,7 @@ async fn a_pessoa_pela_ffi(falantes: usize, atraso: Duration, quantas: usize) ->
             for chave in 1..=58_u64 {
                 let corpo = format!("{indice:02}-{chave:04}");
                 if cliente
-                    .send_message(outra, &corpo, ClientMessageId(chave))
+                    .send_message(outra, &corpo, None, ClientMessageId(chave))
                     .await
                     .is_err()
                 {
@@ -472,7 +472,7 @@ async fn a_mesma_chave_duas_vezes_grava_uma() -> Result<()> {
     let mut cliente = entrar(endereco, 0).await?;
     for _ in 0..2 {
         cliente
-            .send_message(LINHA, "a mesma", ClientMessageId(7))
+            .send_message(LINHA, "a mesma", None, ClientMessageId(7))
             .await?;
         tokio::time::sleep(Duration::from_millis(400)).await;
     }

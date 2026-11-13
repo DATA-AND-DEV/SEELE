@@ -101,22 +101,87 @@ pub fn codificacao(limites: &LimitesDeTela, fonte_largura: u32, fonte_altura: u3
     })
 }
 
+/// O nome com que a fonte de uma transmissão atravessa para a casca, no
+/// `source` do `ScreenOpened`: o mesmo texto do `seele_ffi::ScreenKind`, que a
+/// conformidade (`dois_produtores_da_tela.rs`) prende ao do desktop.
+#[must_use]
+pub const fn nome_da_fonte(fonte: ScreenSource) -> &'static str {
+    match fonte {
+        ScreenSource::Monitor => "monitor",
+        ScreenSource::Window => "window",
+        ScreenSource::Camera => "camera",
+    }
+}
+
+/// A fonte que a página declara, pelo nome de [`nome_da_fonte`]. `None` para
+/// um nome que não existe: a abertura não sai com uma fonte adivinhada.
+#[must_use]
+pub fn fonte_de(nome: &str) -> Option<ScreenSource> {
+    [
+        ScreenSource::Monitor,
+        ScreenSource::Window,
+        ScreenSource::Camera,
+    ]
+    .into_iter()
+    .find(|fonte| nome_da_fonte(*fonte) == nome)
+}
+
+/// **O teto da câmera**: 720p a 30 quadros. Uma câmera é um rosto, e não um
+/// texto a ler; acima disso o custo é de banda, e quem paga é a voz da sala.
+pub const TETO_DA_CAMERA: (u32, u32) = (720, 30);
+
+/// Os limites de uma câmera: os pedidos, nunca acima do [`TETO_DA_CAMERA`], e
+/// sem som — a voz de quem fala já vai pela voz.
+#[must_use]
+pub fn limites_da_camera(limites: &LimitesDeTela) -> LimitesDeTela {
+    LimitesDeTela {
+        altura_maxima: limites.altura_maxima.min(TETO_DA_CAMERA.0),
+        quadros_maximos: limites.quadros_maximos.min(TETO_DA_CAMERA.1),
+        prioridade: seele_sessao::retrato::Prioridade::Movimento,
+        com_som: false,
+        banda_bps: limites.banda_bps,
+    }
+}
+
+/// **O portão da câmera**, feito à mão: a fonte 2 nasceu no protocolo 13, e
+/// as tabelas `desde` do `seele-proto` cobrem mensagens de controle, e não um
+/// byte de cabeçalho de fluxo. Um servidor do 12 anunciaria a transmissão à
+/// sala e recusaria a abertura dela; aqui o pedido não chega a sair, e o erro
+/// é o mesmo `ServidorAntigo` dos verbos do 13.
+///
+/// # Errors
+///
+/// [`seele_sessao::perfil::ErroDoPerfil::ServidorAntigo`], com os dois números.
+pub fn portao_da_fonte(
+    fonte: ScreenSource,
+    negociado: u8,
+) -> Result<(), seele_sessao::perfil::ErroDoPerfil> {
+    if negociado < fonte.desde() {
+        return Err(seele_sessao::perfil::ErroDoPerfil::ServidorAntigo {
+            negociado,
+            exige: fonte.desde(),
+        });
+    }
+    Ok(())
+}
+
 /// O começo do fluxo da tela: o byte do tipo e a abertura (o H.264 Baseline
 /// que o navegador codifica).
 ///
 /// # Errors
 ///
 /// A abertura que o `seele-proto` recusa (uma medida fora da faixa).
-pub fn abertura(tela: u32, monitor: bool, largura: u16, altura: u16) -> Result<Vec<u8>, String> {
+pub fn abertura(
+    tela: u32,
+    fonte: ScreenSource,
+    largura: u16,
+    altura: u16,
+) -> Result<Vec<u8>, String> {
     let mut abertura = [0_u8; SCREEN_HEADER_LEN];
     ScreenHeader {
         version: 1,
         screen: ScreenId(tela),
-        source: if monitor {
-            ScreenSource::Monitor
-        } else {
-            ScreenSource::Window
-        },
+        source: fonte,
         codec: ScreenCodec::H264Baseline,
         width: largura,
         height: altura,
@@ -179,7 +244,7 @@ mod tests {
 
     #[test]
     fn o_fluxo_que_sai_e_o_que_o_leitor_le() {
-        let mut fluxo = abertura(7, true, 1280, 720).unwrap();
+        let mut fluxo = abertura(7, ScreenSource::Monitor, 1280, 720).unwrap();
         for (tipo, corpo) in [(1_u32, &b"chave"[..]), (2, b"som"), (0, b"comum")] {
             fluxo.extend(cabecalho(tipo, u32::try_from(corpo.len()).unwrap()).unwrap());
             fluxo.extend(corpo);
@@ -192,5 +257,65 @@ mod tests {
         assert!(matches!(&passos[2], Passo::SomDaTela { tela: 7, .. }));
         assert_eq!(passos.len(), 4);
         assert_eq!(cabecalho(9, 1), None);
+    }
+
+    /// **A câmera sai com a fonte 2 e é lida como câmera**, e o portão a
+    /// recusa para um servidor do 12 — a tela e a janela, que ele conhece,
+    /// continuam passando.
+    #[test]
+    fn a_camera_abre_com_a_fonte_dela_e_o_portao_a_recusa_no_doze() {
+        let fluxo = abertura(7, ScreenSource::Camera, 1280, 720).unwrap();
+        assert_eq!(fluxo[1 + 5], 2, "a câmera não saiu como a fonte 2");
+        let passos = FluxoQueChega::novo().chegou(&fluxo);
+        assert!(
+            matches!(&passos[0], Passo::Evento(evento) if evento["ScreenOpened"]["source"] == "camera")
+        );
+
+        assert_eq!(
+            portao_da_fonte(ScreenSource::Camera, 12),
+            Err(seele_sessao::perfil::ErroDoPerfil::ServidorAntigo {
+                negociado: 12,
+                exige: 13
+            })
+        );
+        assert_eq!(portao_da_fonte(ScreenSource::Camera, 13), Ok(()));
+        assert_eq!(portao_da_fonte(ScreenSource::Window, 12), Ok(()));
+        assert_eq!(portao_da_fonte(ScreenSource::Monitor, 10), Ok(()));
+    }
+
+    /// Os nomes vão e voltam, e um nome que não existe não vira fonte nenhuma.
+    #[test]
+    fn a_fonte_atravessa_pelo_nome_e_um_nome_estranho_nao_e_adivinhado() {
+        for fonte in [
+            ScreenSource::Monitor,
+            ScreenSource::Window,
+            ScreenSource::Camera,
+        ] {
+            assert_eq!(fonte_de(nome_da_fonte(fonte)), Some(fonte));
+        }
+        assert_eq!(fonte_de("tela"), None);
+    }
+
+    /// **A câmera nunca passa de 720p a 30, e vai sem som**, peça a casca o
+    /// que pedir.
+    #[test]
+    fn os_limites_da_camera_tem_teto_e_nao_levam_som() {
+        let pedidos = limites(1080, 60, Some(900_000));
+        let da_camera = limites_da_camera(&pedidos);
+        assert_eq!(
+            (da_camera.altura_maxima, da_camera.quadros_maximos),
+            TETO_DA_CAMERA
+        );
+        assert!(!da_camera.com_som);
+        assert_eq!(da_camera.banda_bps, Some(900_000));
+        assert_eq!(
+            limites_da_camera(&limites(540, 15, None)).altura_maxima,
+            540
+        );
+        assert_eq!(
+            codificacao(&da_camera, 1280, 720)["quadros"],
+            30,
+            "a cadência da câmera não saiu pelos degraus"
+        );
     }
 }

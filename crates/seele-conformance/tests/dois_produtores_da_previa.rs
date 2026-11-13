@@ -9,8 +9,13 @@
 use seele_core::enlace::Previa;
 use seele_web::previa::{previa_do_anexo, Chegada};
 
-const PNG: &[u8] =
+/// Um PNG de verdade, de 1 × 1: as medidas da prévia saem do cabeçalho.
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0dIDAT\x78\xda\x63\xd0\x08\xa8\xf8\x0f\x00\x03\x84\x01\xf0\xb6\x34\x04\x4b\x00\x00\x00\x00IEND\xae\x42\x60\x82";
+/// Só o começo de um PNG: a assinatura e um IHDR sem fim.
+const PNG_CORTADO: &[u8] =
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00";
+/// Um PNG de 69 bytes cujo cabeçalho declara 30 000 × 30 000.
+const BOMBA: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x75\x30\x00\x00\x75\x30\x08\x06\x00\x00\x00\x66\x27\xf8\xba\x00\x00\x00\x0cIDAT\x78\xda\x63\x60\xa0\x0c\x00\x00\x00\x40\x00\x01\x89\xc9\xaf\x43\x00\x00\x00\x00IEND\xae\x42\x60\x82";
 const JPEG: &[u8] = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00";
 
 #[test]
@@ -54,6 +59,19 @@ fn cada_caso_da_previa_e_o_mesmo_nas_duas_pontas() {
             Chegada::Bytes(PNG),
         ),
         ("", Some(Previa::Bytes(PNG.to_vec())), Chegada::Bytes(PNG)),
+        // Cabe no teto de bytes e declara pixels demais: recusada pelo
+        // cabeçalho, com as medidas, nas duas pontas.
+        (
+            "image/png",
+            Some(Previa::Bytes(BOMBA.to_vec())),
+            Chegada::Bytes(BOMBA),
+        ),
+        // Começa como imagem e não tem cabeçalho legível.
+        (
+            "image/png",
+            Some(Previa::Bytes(PNG_CORTADO.to_vec())),
+            Chegada::Bytes(PNG_CORTADO),
+        ),
     ];
     let mut motivos = std::collections::BTreeSet::new();
     for (alegado, do_desktop, do_navegador) in casos {
@@ -76,6 +94,8 @@ fn cada_caso_da_previa_e_o_mesmo_nas_duas_pontas() {
             "Disagrees",
             "NotAPicture",
             "TooBig",
+            "TooManyPixels",
+            "Unreadable",
             "desenha"
         ]
     );

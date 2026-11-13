@@ -702,12 +702,53 @@
   bottom: 16px;
   z-index: 2;
 }
+/* O estado da câmera, numa linha própria da bandeja, sob os comandos: pedindo
+   ao sistema, negada, parada pelo sinal. `width: 0` com `min-width: 100%` para
+   a frase caber na largura dos comandos em vez de alargar a bandeja; duas
+   linhas de sentido (`pre-line`), a que diz o que houve e a que diz o que
+   fazer. A cor é a do aviso quando a câmera não está indo. */
+.chamada-camera-estado {
+  flex: 0 0 100%;
+  width: 0;
+  min-width: 100%;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  white-space: pre-line;
+  color: var(--seele-rotulo-painel);
+  /* A bandeja é de vidro e fica por cima do que rola — na janela baixa, por
+     cima da própria imagem da câmera. A frase leva o fundo do painel para se
+     ler sobre qualquer coisa. */
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--seele-negro-painel);
+}
+.chamada-camera-estado:is([data-estado="desligada"], [data-estado="parada"]) { color: var(--seele-laranja-claro); }
+/* Com a frase à vista a bandeja alarga até onde a frase precisa, em vez de a
+   frase quebrar em cinco linhas na largura dos seis comandos: na janela mínima
+   (720×480) cada linha a mais é uma linha de bandeja por cima dos cartões. */
+.chamada-controles:has(> .chamada-camera-estado:not([hidden])) { width: min(600px, calc(100% - 44px)); row-gap: 6px; }
 /* **Na ligação pessoal a barra é a do operador** (`camada-sala.css`: «os
    mesmos controles e handlers, sem cópia»). Esta cópia é da vista da chamada
    do servidor, onde a coluna do operador sai de cena; na ligação ela punha um
    segundo microfone, fone e SAIR DA SALA logo acima dos de verdade
    (`bancada/vista-pessoal-0-17.cjs`, passo 4). */
 #tela-sessao[data-vista="ligacao"] #chamada-controles { display: none; }
+/* **Na janela baixa o cartão deita.** A barra fica grudada no pé por cima do
+   que rola, e na janela mínima (720×480 no `tauri.conf.json`) sobram ~290px
+   para o cabeçalho, a grade e ela: o cartão de 200px não cabia, e a barra
+   pousava em cima dos nomes de duas pessoas, com a vista em repouso
+   (`bancada/desktop-estreito.cjs`, os extremos da janela). Abaixo de 600px de
+   altura o retrato e o nome ficam lado a lado e a fileira desce para a altura
+   do retrato; nada muda de tamanho, de cor nem de lugar acima disso. */
+@media (max-height: 600px) {
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) #chamada-grade { grid-auto-rows: minmax(96px, auto); }
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) #chamada-grade .chamada-cartao-abrir { flex-direction: row; padding: 12px 16px; }
+  :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) #chamada-grade .chamada-cartao-nome { min-width: 0; }
+}
 .chamada-controle {
   display: inline-flex;
   align-items: center;
@@ -802,9 +843,18 @@
 
 /* A gaveta de canais (janela estreita) nunca passa da janela: em 320px ela
    tinha 268px a partir dos 60px da trilha, e a página rolava de lado — agora
-   que as entradas dos MODs moram nela, é ela que se abre para chegar a elas. */
+   que as entradas dos MODs moram nela, é ela que se abre para chegar a elas.
+
+   O teto se mede contra a caixa em que a gaveta se posiciona, e essa caixa é a
+   área `linha` da grade — não `.paineis`, nem a janela: um filho `absolute` da
+   grade que tem `grid-area` se mede pela área dele, e o `left: 60px` dela conta
+   a partir de onde a conversa começa. O teto antigo (`100vw - 88px`) supunha
+   essa área começando a 16px da janela; quando a trilha voltou a aparecer
+   abaixo de 700px a área passou a começar em 76px, a gaveta foi parar em 136px
+   e saía 14px de uma janela de 390px (48px de uma de 320px) — e a página rolava
+   de lado atrás do foco. Em `%` o teto acompanha a grade, mude ela como mudar. */
 @media (max-width: 900px) {
-  :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"] .paineis > .painel-canais { min-width: 0; width: min(268px, calc(100vw - 88px)); max-width: calc(100vw - 88px); box-sizing: border-box; }
+  :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"] .paineis > .painel-canais { min-width: 0; width: min(268px, calc(100% - 60px)); max-width: calc(100% - 60px); box-sizing: border-box; }
 }
 
 /* ---------------------------------------- o ritmo da coluna de canais (0.19)
@@ -823,6 +873,17 @@
 :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"]:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .paineis > .painel-canais {
   display: flex; position: absolute; z-index: 4; top: 0; bottom: 0; left: 76px;
   width: min(268px, calc(100% - 84px)); max-width: calc(100% - 84px); min-width: 0;
+}
+/* Abaixo de 700px não sobra largura para recuar a gaveta para dentro da
+   conversa: ela começa onde a conversa começa (`left: 0` na área `linha`, logo
+   depois da trilha) e nunca é mais larga que essa área. Vale para a do chat e
+   para a da chamada, que recuava 76px e ficava com 152px numa janela de 320px.
+   Depois das duas regras de cima de propósito: a ordem é o que decide. */
+@media (max-width: 700px) {
+  :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"] .paineis > .painel-canais,
+  :root:not([data-casca="celular"]) #tela-sessao[data-canais="abertos"]:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .paineis > .painel-canais {
+    left: 0; width: min(268px, 100%); max-width: 100%;
+  }
 }
 :root:not([data-casca="celular"]) #tela-sessao[data-pessoas="abertas"] .painel-pessoas {
   background: var(--seele-negro-painel);

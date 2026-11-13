@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # O executor AB do spike `mods-no-navegador`: este `.wasm` roda num Worker que a
 # página cria de dentro de um `iframe` opaco. O `.wasm` importa só a WASI mínima

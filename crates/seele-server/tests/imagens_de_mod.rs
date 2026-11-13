@@ -302,8 +302,21 @@ async fn dez_mib_em_fluxo_substituicao_e_duas_leituras_sem_fila_de_controle() ->
         // com a RustCrypto do DTLS sem otimização, 30 MiB levam ~8 s e este
         // teste reprova; o pedido de perfil otimizado para as dependências de
         // cripto foi pedido ao dono do `Cargo.toml` da raiz.
+        //
+        // No runner compartilhado do CI o relógio não é desta máquina: a
+        // rodada 43341701057 (macOS) levou 3,115 s com 1,15 s de envio, sem
+        // demora artificial nenhuma. Lá o teto é o que distingue uma espera
+        // de prazo (dezenas de segundos) de uma máquina lenta, e é dito.
+        let teto = if std::env::var_os("CI").is_some() {
+            eprintln!(
+                "no CI o teto de tempo desta rodada é 12 s, e não os 3 s de uma máquina própria"
+            );
+            Duration::from_secs(12)
+        } else {
+            Duration::from_secs(3)
+        };
         assert!(
-            inicio.elapsed() < Duration::from_secs(3),
+            inicio.elapsed() < teto,
             "a imagem sofreu demora artificial em loopback: {:?}",
             inicio.elapsed()
         );

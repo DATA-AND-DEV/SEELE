@@ -7,8 +7,8 @@
 //
 // - o Return quebra a fileira, e só o ENVIAR envia: o teclado do aparelho não
 //   tem Shift+Enter (P8, `CASCA.enterEnvia`);
-// - as ações sobre uma mensagem saem do `remover` ao lado da hora e vão para a
-//   folha dela, aberta por um toque;
+// - as ações sobre uma mensagem (responder, editar, remover) saem do lado da
+//   hora e vão para a folha dela, aberta por um toque;
 // - o `+` abre a folha ANEXAR;
 // - o nome do canal é texto: renomear é pelo SEELE no computador.
 
@@ -64,6 +64,12 @@
       // seguinte; mas a mensagem pode ter saído da conversa enquanto a folha
       // estava aberta, e aí não há o que apertar.
       remover: () => doDesktop("lista-mensagens").querySelector(`button[data-moderar-mensagem="${id}"]`)?.click(),
+      // RESPONDER e EDITAR (a mesa de texto da 1.0) pelos mesmos botões do
+      // desktop, que a folha esconde da fileira e deixa no documento: quem
+      // decide se há o que oferecer é o tela-sessao.js (`botaoDeResponder`,
+      // `botaoDeEditar`), e uma mensagem sem o botão não ganha a ação.
+      responder: item.querySelector("button[data-responder]") ? () => item.querySelector("button[data-responder]")?.click() : null,
+      editar: item.querySelector("button[data-editar]") ? () => item.querySelector("button[data-editar]")?.click() : null,
     });
   });
 
@@ -82,6 +88,7 @@
   CASCA.depoisDeDesenhar.push(() => {
     if (campo.placeholder !== EXEMPLO_DO_DESKTOP && campo.placeholder !== exemploDoCelular) return;
     exemploDoCelular = PALAVRAS.escrever(doDesktop("linha-nome").textContent);
-    campo.placeholder = exemploDoCelular;
+    // Depois de cada quadro, e o canal quase nunca mudou: só o que mudou.
+    if (campo.placeholder !== exemploDoCelular) campo.placeholder = exemploDoCelular;
   });
 })();

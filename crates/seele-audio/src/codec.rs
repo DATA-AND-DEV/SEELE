@@ -53,6 +53,30 @@ pub const MIN_BITRATE_BPS: u32 = 16_000;
 /// survives is the one both sides can see. See ADR 0038.
 pub use seele_proto::transport::MAX_BITRATE_BPS;
 
+/// O bitrate do som de uma transmissão de tela.
+///
+/// Fora da faixa de voz de `specs/03-audio.md` de propósito: aquilo é fala, e
+/// isto é o que a máquina toca, música e jogo. A 96 kbps o Opus em modo
+/// `Audio` é transparente para quase todo material mono; são 240 bytes por
+/// pacote de 20 ms, e 8% do teto de vídeo.
+pub const BITRATE_DO_SOM_DE_TELA_BPS: u32 = 96_000;
+
+/// Para que o codificador vai ser usado, que é o que decide como o Opus trata
+/// o sinal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Perfil {
+    /// Fala: modelo de voz e DTX, que cala o fio quando ninguém fala.
+    Voz,
+    /// O som que a máquina toca numa transmissão de tela.
+    ///
+    /// **Em modo `Audio` e sem DTX.** O modo `Voip` realça a faixa da fala e
+    /// é o certo para um microfone; aqui o sinal é música e jogo. O DTX é
+    /// desligado porque quem decide o que é silêncio nele é um detector de
+    /// voz. (Medido em 10/11/2026: a 48 kbps ele não chegou a calar ruído
+    /// baixo, então o ganho que se ouve vem do modo e do bitrate.)
+    SomDeTela,
+}
+
 /// Why the codec refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodecError {
@@ -88,6 +112,7 @@ impl std::error::Error for CodecError {}
 pub struct VoiceEncoder {
     inner: Encoder,
     bitrate_bps: u32,
+    perfil: Perfil,
 }
 
 impl VoiceEncoder {
@@ -99,8 +124,9 @@ impl VoiceEncoder {
     pub fn new(bitrate_bps: u32) -> Result<Self, CodecError> {
         let bitrate_bps = bitrate_bps.clamp(MIN_BITRATE_BPS, MAX_BITRATE_BPS);
         Ok(Self {
-            inner: build(bitrate_bps)?,
+            inner: build(bitrate_bps, Perfil::Voz)?,
             bitrate_bps,
+            perfil: Perfil::Voz,
         })
     }
 
@@ -111,6 +137,23 @@ impl VoiceEncoder {
     /// [`CodecError::Unavailable`] if libopus refuses the configuration.
     pub fn with_defaults() -> Result<Self, CodecError> {
         Self::new(DEFAULT_BITRATE_BPS)
+    }
+
+    /// O codificador do som de uma transmissão de tela: modo `Audio`, sem DTX,
+    /// a [`BITRATE_DO_SOM_DE_TELA_BPS`]. Ver [`Perfil::SomDeTela`].
+    ///
+    /// O que sai continua sendo Opus mono a 48 kHz em quadros de 20 ms, que o
+    /// [`VoiceDecoder`] de qualquer versão decodifica: nada muda no fio.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError::Unavailable`] if libopus refuses the configuration.
+    pub fn para_som_de_tela() -> Result<Self, CodecError> {
+        Ok(Self {
+            inner: build(BITRATE_DO_SOM_DE_TELA_BPS, Perfil::SomDeTela)?,
+            bitrate_bps: BITRATE_DO_SOM_DE_TELA_BPS,
+            perfil: Perfil::SomDeTela,
+        })
     }
 
     /// The bitrate in use.
@@ -139,11 +182,16 @@ impl VoiceEncoder {
     /// [`CodecError::Unavailable`] if the rebuild fails. The old encoder is
     /// kept in that case, so a refused change leaves a working stream.
     pub fn set_bitrate(&mut self, bitrate_bps: u32) -> Result<bool, CodecError> {
+        // O som de tela tem um bitrate só: o teto de voz não é o dele, e
+        // prendê-lo aqui o rebaixaria calado para a metade.
+        if self.perfil == Perfil::SomDeTela {
+            return Ok(false);
+        }
         let wanted = bitrate_bps.clamp(MIN_BITRATE_BPS, MAX_BITRATE_BPS);
         if wanted == self.bitrate_bps {
             return Ok(false);
         }
-        self.inner = build(wanted)?;
+        self.inner = build(wanted, self.perfil)?;
         self.bitrate_bps = wanted;
         Ok(true)
     }
@@ -228,14 +276,17 @@ impl VoiceDecoder {
     }
 }
 
-fn build(bitrate_bps: u32) -> Result<Encoder, CodecError> {
+fn build(bitrate_bps: u32, perfil: Perfil) -> Result<Encoder, CodecError> {
     let mut config = EncoderConfig::new(SAMPLE_RATE_HZ, 1);
-    config.application = Some(Application::Voip);
+    config.application = Some(match perfil {
+        Perfil::Voz => Application::Voip,
+        Perfil::SomDeTela => Application::Audio,
+    });
     config.frame_duration = Some(FrameDuration::Ms20);
     config.bitrate = Some(bitrate_bps);
     // ADR 0010: measured, and it bought nothing at the loss rates M1.6 produces.
     config.inband_fec = Some(InbandFec::Disabled);
-    config.dtx = Some(true);
+    config.dtx = Some(perfil == Perfil::Voz);
 
     Encoder::new(config).map_err(|error| {
         tracing::warn!(%error, bitrate_bps, "could not create an opus encoder");
@@ -428,5 +479,78 @@ mod tests {
             maior * 3 < PISO_DE_DATAGRAMA_DO_QUIC,
             "a folga contra o piso do QUIC encolheu para menos de 3x: {maior} bytes"
         );
+    }
+
+    /// Ruído de banda larga: o pior caso para um codificador, e o material em
+    /// que o bitrate pedido é o bitrate gasto. Determinístico, para o teste
+    /// dizer sempre a mesma coisa.
+    fn banda_larga(quadro: u32, amplitude: f32) -> Vec<f32> {
+        let mut estado = 0x9e37_79b9_u32.wrapping_add(quadro.wrapping_mul(0x85eb_ca6b));
+        (0..FRAME_SAMPLES)
+            .map(|_| {
+                estado = estado.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let unidade = f32::from((estado >> 16) as u16) / 65_535.0 - 0.5;
+                unidade * amplitude
+            })
+            .collect()
+    }
+
+    /// O tamanho médio do pacote depois de dois segundos do mesmo material, e
+    /// quantos pacotes saíram como «silêncio» (até 2 bytes).
+    fn media_e_calados(mut encoder: VoiceEncoder, amplitude: f32) -> (usize, usize) {
+        let tamanhos: Vec<usize> = (0..200)
+            .map(|quadro| {
+                encoder
+                    .encode(&banda_larga(quadro, amplitude))
+                    .expect("encode")
+                    .len()
+            })
+            .skip(100)
+            .collect();
+        (
+            tamanhos.iter().sum::<usize>() / tamanhos.len(),
+            tamanhos.iter().filter(|tamanho| **tamanho <= 2).count(),
+        )
+    }
+
+    /// **O som de tela gasta o bitrate dele, e não o de voz**, no alto e no
+    /// baixo. Medido em 10/11/2026 com este material: o codificador de voz
+    /// faz 109 bytes por pacote a volume cheio e cai para 51 numa passagem
+    /// quase muda; o de tela faz 241 nos dois. É a diferença que se ouve em
+    /// música e jogo.
+    #[test]
+    fn o_som_de_tela_gasta_o_dobro_da_voz_e_nao_encolhe_no_baixo() {
+        let (voz, _) = media_e_calados(VoiceEncoder::with_defaults().expect("voz"), 0.5);
+        for amplitude in [0.5, 0.000_005] {
+            let (tela, calados) = media_e_calados(
+                VoiceEncoder::para_som_de_tela().expect("som de tela"),
+                amplitude,
+            );
+            assert_eq!(calados, 0, "o som de tela saiu calado a {amplitude}");
+            assert!(
+                tela >= voz * 2 && tela <= 250,
+                "a {amplitude}, o som de tela fez {tela} bytes por pacote; a voz faz {voz}, e \
+                 96 kbps em 20 ms são 240"
+            );
+        }
+    }
+
+    /// O teto de voz não é o do som de tela: um pedido de ajuste de bitrate
+    /// não o rebaixa, e o que ele produz cabe num datagrama de mídia.
+    #[test]
+    fn o_som_de_tela_fica_no_bitrate_dele() {
+        let mut encoder = VoiceEncoder::para_som_de_tela().expect("som de tela");
+        assert_eq!(encoder.bitrate_bps(), BITRATE_DO_SOM_DE_TELA_BPS);
+        assert_eq!(encoder.set_bitrate(MIN_BITRATE_BPS), Ok(false));
+        assert_eq!(encoder.bitrate_bps(), BITRATE_DO_SOM_DE_TELA_BPS);
+        let mut decoder = VoiceDecoder::new().expect("decoder");
+        for _ in 0..10 {
+            let pacote = encoder.encode(&tone(0.5)).expect("encode");
+            assert!(pacote.len() <= seele_proto::media::MAX_PAYLOAD_LEN);
+            assert_eq!(
+                decoder.decode(&pacote).expect("decode").len(),
+                FRAME_SAMPLES
+            );
+        }
     }
 }

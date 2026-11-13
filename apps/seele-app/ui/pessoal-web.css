@@ -454,22 +454,36 @@
     background: color-mix(in srgb, var(--seele-laranja-fraco) 55%, transparent);
   }
   .pessoal-web-texto { border-radius: 28px; padding: 14px 18px; height: 52px; min-height: 52px; max-height: 52px; }
-  /* A barra: ícone redondo com a palavra embaixo; SAIR é o laranja cheio. */
-  .pessoal-web-rodape { border: 0; border-top: 1px solid var(--seele-vidro-borda); border-radius: 0; background: none; max-width: none; width: 100%; margin: 0; padding: 10px 12px 12px; justify-content: space-around; }
+  /* A barra: ícone redondo com a palavra embaixo; SAIR é o laranja cheio.
+     **Com a câmera (1.0) são cinco controles, e seis enquanto a tela está no ar.**
+     A barra da 0.19 dava a cada um a largura do próprio conteúdo no mínimo, e a
+     320px o quinto saía da janela (o SAIR terminava em 336) com «LIGAR CÂMERA»
+     maior que o botão. Agora todo controle é uma casa igual (a saída de áudio
+     também, com a palavra dela), cada casa é o contêiner do que tem dentro, e é
+     a largura **da casa** que decide: o círculo encolhe até os 44px do toque, e
+     abaixo de 68px — onde «MICROFONE» e «PARAR TELA», de 67px, já não cabem — a
+     palavra some das cinco de uma vez e fica o círculo (o `aria-label` e a dica
+     seguem inteiros). `bancada/saida-pessoal-web.cjs` mede as três larguras. */
+  .pessoal-web-rodape { border: 0; border-top: 1px solid var(--seele-vidro-borda); border-radius: 0; background: none; max-width: none; width: 100%; margin: 0; padding: 10px 8px 12px; gap: 4px; justify-content: space-around; }
   .pessoal-web .pessoal-web-rodape > button {
-    flex: 1 1 0; flex-direction: column; gap: 6px; min-height: 44px; padding: 0;
+    flex: 1 1 0; flex-direction: column; gap: 6px; min-width: 44px; min-height: 44px; width: auto; padding: 0;
     border: 0; background: none; font-size: 10px; letter-spacing: 0.06em; color: var(--seele-osso-apagado);
+    container-type: inline-size;
   }
   .pessoal-web .pessoal-web-rodape > button:hover { background: none; }
+  .pessoal-web-saida .pessoal-web-botao-texto { display: inline; }
+  @container (max-width: 68px) {
+    .pessoal-web-rodape > button .pessoal-web-botao-texto { display: none; }
+  }
   .pessoal-web-rodape > button .glifo {
-    box-sizing: content-box; width: 20px; height: 20px; padding: 16px;
+    box-sizing: content-box; width: 20px; height: 20px; padding: min(16px, calc((100cqw - 22px) / 2));
     border: 1px solid var(--seele-controle-borda); border-radius: var(--seele-raio-pilula); background: var(--seele-controle);
     color: var(--seele-osso);
   }
   .pessoal-web-rodape > button[aria-pressed="true"] .glifo { border-color: var(--seele-laranja-nerv); }
   .pessoal-web-rodape > button:last-child .glifo { background: var(--seele-laranja-nerv); border-color: var(--seele-laranja-nerv); color: var(--seele-tinta-no-acento); }
   .pessoal-web .pessoal-web-rodape > button:last-child { background: none; border: 0; color: var(--seele-osso-apagado); }
-  .pessoal-web .pessoal-web-rodape > .pessoal-web-saida { order: 1; }
+  .pessoal-web .pessoal-web-rodape > .pessoal-web-saida { order: 1; flex: 1 1 0; width: auto; padding: 0; }
   .pessoal-web .pessoal-web-rodape > button:nth-child(2) { order: 2; }
   .pessoal-web .pessoal-web-rodape > button:last-child { order: 3; }
 }
@@ -514,3 +528,19 @@
 .pessoal-web .pessoal-web-texto { border: 0; }
 .pessoal-web .pessoal-web-texto:focus { outline: none; box-shadow: none; }
 .pessoal-web-chat:has(textarea:focus-visible) .pessoal-web-chat-titulo { text-decoration: underline; }
+
+/* A câmera de quem a ligou (1.0), como ela sai: um quadro pequeno sobre o
+   canto do palco, espelhado como um espelho. Só enquanto a câmera está no ar. */
+.pessoal-web-previa {
+  position: absolute;
+  right: var(--seele-e3);
+  bottom: calc(var(--seele-e3) + 72px);
+  width: min(28vw, 220px);
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--seele-negro-absoluto);
+  border: var(--seele-b) solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio);
+  transform: scaleX(-1);
+  z-index: 2;
+}

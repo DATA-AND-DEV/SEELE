@@ -31,8 +31,10 @@
 mod conexao;
 mod credencial;
 mod cripto;
+mod despertador;
 mod dtls;
 pub mod envelope;
+mod midia;
 mod ponta;
 pub mod teste;
 
@@ -42,6 +44,11 @@ pub use conexao::{
 };
 pub use credencial::{credencial_valida, sortear_credencial, CREDENCIAL_LEN};
 pub use dtls::CertificadoDtls;
+pub use midia::{
+    annex_b_valido, mid_do_som, mid_do_video, ssrc_da_faixa, EventoDeMidia, Midia,
+    RemetenteDeMidia, Trilha, ESPERA_PELA_RETRANSMISSAO, ESTIMATIVA_INICIAL_BPS, FAIXAS,
+    FILA_DE_MIDIA, FILA_DE_RECEPCAO, MAX_QUADRO, RELOGIO_DO_SOM, RELOGIO_DO_VIDEO,
+};
 pub use ponta::{
     ConfigDoAnfitriao, ContadoresDaPonta, Discagem, FalhaAoDiscar, Pino, Ponta, BUFFER_DE_ENVIO,
     BUFFER_DE_RECEPCAO, CANDIDATOS_POR_FURO, CRIACOES_POR_IP, ESPERA_MAXIMA, ESPERA_PELO_DTLS,

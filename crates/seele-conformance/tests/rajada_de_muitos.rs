@@ -117,7 +117,7 @@ async fn rodada(falantes: usize, tamanho: usize) -> Result<()> {
                     .collect::<String>();
                 let chave = ClientMessageId(u64::try_from(chave).expect("cabe"));
                 cliente
-                    .send_message(LINHA, &corpo, chave)
+                    .send_message(LINHA, &corpo, None, chave)
                     .await
                     .expect("o enlace caiu no envio");
             }

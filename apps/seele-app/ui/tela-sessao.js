@@ -434,7 +434,7 @@ let geracaoDoAvisoDeFone = 0;
  * no instante em que o texto muda não é anunciado.
  */
 function desenharAvisoDeFone(snapshot) {
-  if (!CASCA.avisoDeFone()) { $("aviso-fone").hidden = true; return; }
+  if (!CASCA.avisoDeFone()) { porOEscondido($("aviso-fone"), true); return; }
   if (!$("aviso-fone").hidden && geracaoDoAvisoDeFone !== geracaoDaSessao) {
     $("aviso-fone").hidden = true;
   }
@@ -464,7 +464,7 @@ function desenharAberturaDoAudio(snapshot) {
   // Com ela de pé, a faixa fala do microfone calado pelo sistema, se for o caso.
   const frase =
     ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.frase ?? fraseDoMicrofoneCalado(snapshot);
-  $("aviso-audio").hidden = frase === null;
+  porOEscondido($("aviso-audio"), frase === null);
   if (frase !== null && $("aviso-audio-texto").textContent !== frase) {
     $("aviso-audio-texto").textContent = frase;
   }
@@ -515,6 +515,11 @@ function pintarVeredito(frase) {
 // ------------------------------------------------------------------- desenho
 
 let identidadesApresentadas = Object.create(null);
+/**
+ * Se o servidor desta sessão conhece editar mensagem (protocolo 13), como o
+ * último retrato disse. `false` até o primeiro retrato com o número.
+ */
+let mesaDeTextoNoServidor = false;
 function apelidoApresentado(id, legado, mapa = identidadesApresentadas) {
   return apelidoNoRetrato(id, legado, mapa);
 }
@@ -546,6 +551,15 @@ function desenhar(snapshot) {
   // servidor como `may_remove_message` — resolvida no PERMISSIONS a partir das
   // permissões desta conexão, e não decidida aqui.
   podeRemoverMensagem = snapshot.may_remove_message === true;
+  // E se o servidor conhece a edição (`servidorTemAMesaDeTexto`, em `base.js`).
+  // O retrato da entrada não traz o número negociado, e uma reconexão pode
+  // trazer outro: quando a resposta muda, a conversa é redesenhada, ou o
+  // EDITAR ficaria como estava até alguém escrever.
+  const temAMesa = servidorTemAMesaDeTexto(snapshot);
+  if (temAMesa !== mesaDeTextoNoServidor) {
+    mesaDeTextoNoServidor = temAMesa;
+    mensagensPorDesenhar = true;
+  }
 
   // A linha «ficou para trás · reconectando» some quando a geração nova está
   // no ar (`camada-sessoes.js`).
@@ -696,10 +710,10 @@ function desenharCabecaDoServidor(snapshot) {
   if (!nome) return;
   const escrever = (no, texto) => { if (no.textContent !== texto) no.textContent = texto; };
   escrever(nome, snapshot.server || "");
-  nome.title = snapshot.server || "";
+  porOTitulo(nome, snapshot.server || "");
   const chip = $("canais-servidor-chip");
-  chip.dataset.padrao = snapshot.link_state;
-  chip.hidden = !snapshot.link_state || snapshot.link_state === "Verified";
+  porODado(chip, "padrao", snapshot.link_state);
+  porOEscondido(chip, !snapshot.link_state || snapshot.link_state === "Verified");
   escrever($("canais-servidor-chip-texto"), {
     Offline: "SEM CONEXÃO",
     Unverified: "NÃO VERIFICADA",
@@ -1282,11 +1296,22 @@ function desenharCanais(snapshot) {
     // marcador, como os pontos da lista de pessoas (`noDeMod`).
     botao.append(...nosDeMod(conteudoDasContribuicoes("canal.item", String(linha.id))));
 
-    // A contagem de pendências do comp não entra. `Channel` é `{id, name, open}` —
-    // não há contagem de não-lidas nem marca d'água de leitura em lugar nenhum
-    // do core —, e um travessão explicado ao lado de cada Linha seria meia
-    // dúzia de perguntas que ninguém fez, numa tela que existe para ser
-    // simples. Ver o cabeçalho de `tela-sessao.css`.
+    // **As não lidas do canal** (a mesa de texto da 1.0). `Channel` traz
+    // `nao_lidas` — quantas mensagens de outras pessoas chegaram com o canal
+    // fechado — e `mencoes`, quantas delas chamam quem está logado. O core as
+    // zera quando o canal abre, e o canal aberto vem sempre com zero: a conta
+    // some ao abrir sem esta tela lembrar de nada.
+    //
+    // **A conta é desta sessão, e do que chegou**: fechar o app a zera, e o
+    // que foi dito enquanto se estava fora não entra nela. Num servidor de
+    // antes da 1.0 ela só anda nos canais já abertos nesta conexão (ele só
+    // manda a conversa de um canal a quem o abriu).
+    //
+    // O número é o que se vê; a frase inteira é o que se ouve, porque «3» ao
+    // lado de um nome não diz do que é a conta. E quem foi chamado lê um `@`
+    // antes do número, e não só outra cor (`specs/06`).
+    const marca = marcaDeNaoLidas(linha);
+    if (marca) botao.append(marca);
 
     item.append(botao);
     // Irmãos do botão, e não filhos: um `<button>` dentro de outro não é
@@ -1318,8 +1343,8 @@ function desenharCanais(snapshot) {
   // não ia funcionar.
   const pode = snapshot.may_manage_voice_rooms === true;
   // Os dois `+` dos cabeçalhos, no lugar dos formulários que a comp tirou.
-  $("nova-voice_room").hidden = !pode;
-  $("nova-linha").hidden = !pode;
+  porOEscondido($("nova-voice_room"), !pode);
+  porOEscondido($("nova-linha"), !pode);
 
   // O tamanho padrão da sala nova vem de uma sala que já existe, e não de um
   // número escrito no JavaScript: quem hospeda já disse que tamanho quer
@@ -1333,6 +1358,31 @@ function desenharCanais(snapshot) {
   if (snapshot.voice_rooms.length > 0) {
     lugaresDeUmaSalaNova = snapshot.voice_rooms[0].limit;
   }
+}
+
+/**
+ * A marca de não lidas de um canal, ou `null` quando não há o que contar.
+ *
+ * Dois nós: o que se vê (`@` quando alguma chama quem está logado, e o
+ * número, com teto de «99+» para a fileira não crescer) e a frase que o leitor
+ * de tela anuncia junto com o nome do canal.
+ */
+function marcaDeNaoLidas(linha) {
+  const quantas = Number(linha.nao_lidas ?? 0);
+  if (linha.open || !(quantas > 0)) return null;
+  const chamadas = Number(linha.mencoes ?? 0);
+  const marca = elemento("span", chamadas > 0 ? "linha-nao-lidas com-chamada" : "linha-nao-lidas");
+  const visto = elemento("span", "linha-nao-lidas-conta", `${chamadas > 0 ? "@ " : ""}${quantas > 99 ? "99+" : quantas}`);
+  visto.setAttribute("aria-hidden", "true");
+  const dito = elemento(
+    "span",
+    "linha-nao-lidas-frase",
+    chamadas > 0
+      ? FRASES_DA_CONVERSA.naoLidasComMencao(quantas, chamadas)
+      : FRASES_DA_CONVERSA.naoLidas(quantas),
+  );
+  marca.append(visto, dito);
+  return marca;
 }
 
 /**
@@ -1367,16 +1417,39 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
   return item;
 }
 
+/**
+ * O glifo de um botão do operador (microfone, fone), **trocado só quando o
+ * desenho muda**. O tique refazia o `<svg>` e o punha no lugar do anterior
+ * duas vezes por segundo: uma troca de nó debaixo do ponteiro (no WebKit, o
+ * clique que começa num nó e termina noutro se perde), e um registro que
+ * acordava os espelhos do botão (`composicao-0174.js`).
+ *
+ * O que foi posto fica anotado no próprio botão (`glifoPosto`), e não num
+ * mapa deste arquivo: não é estado de sessão nenhuma. Se outro código trocou
+ * os filhos do botão, a anotação não casa e o glifo é posto de novo.
+ */
+function porOGlifoComEstado(botao, nome, cortado, rotulo) {
+  const posto = botao.glifoPosto;
+  const chave = `${nome}\n${cortado ? "cortado" : "inteiro"}\n${rotulo}`;
+  if (posto && posto.chave === chave && botao.firstChild === posto.no && botao.lastChild === posto.no) return;
+  const no = glifoComEstado(nome, cortado, rotulo);
+  botao.replaceChildren(no);
+  botao.glifoPosto = { chave, no };
+}
+
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
   aplicarARegiao("operador.barra", $("operador-mods"));
   // Um nome só (0.19): o exibido do perfil oficial, ou o apelido.
   const exibidoDoOperador = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
-  $("operador-nome").textContent = exibidoDoOperador || apelidoApresentado(snapshot.me, snapshot.nickname);
+  // Tudo daqui para baixo escreve só o que mudou (`porOTexto` e as irmãs, em
+  // `base.js`): este desenho roda a cada tique, com o retrato quase sempre
+  // igual ao de antes.
+  porOTexto($("operador-nome"), exibidoDoOperador || apelidoApresentado(snapshot.me, snapshot.nickname));
   // **Embaixo do nome, nada** (0.19, pedido do dono): nem «operador» nem «a voz
   // está aqui · sala». A sala em que se está já vem marcada na lista de salas
   // (VOCÊ ESTÁ AQUI) e no rodapé (sala …); o cartão é só quem você é.
-  document.querySelector("#tela-sessao .operador-rotulo").hidden = true;
+  porOEscondido(document.querySelector("#tela-sessao .operador-rotulo"), true);
   // O apelido também abre a linha de escrever, como no canvas: `alex ❯`.
   const prompt = document.querySelector("#form-mensagem .prompt");
   const fraseDoPrompt = `${apelidoApresentado(snapshot.me, snapshot.nickname)} \u276f`;
@@ -1386,8 +1459,9 @@ function desenharOperador(snapshot) {
   // A inicial ao lado do nome, como a comp a desenha — e é a mesma que a prévia
   // do perfil mostra para quem não pôs imagem, para que as duas contem a mesma
   // coisa sobre a mesma pessoa.
-  $("operador-inicial").textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
-  vestirAvatar($("operador-inicial"), snapshot.me);
+  // A inicial vai a `vestirAvatar` como argumento, e não escrita antes: com
+  // retrato, escrevê-la e apagá-la em seguida eram duas trocas por tique.
+  vestirAvatar($("operador-inicial"), snapshot.me, (snapshot.nickname || "?").trim().charAt(0).toUpperCase());
   // E a capa de quem usa, **no fundo da barra do operador inteira** (rascunho
   // §4; o pedido do dono, reafirmado em 08/10). O microfone, o fone e o SAIR
   // são do núcleo (§10): ficam sobre placas opacas da cor do fundo nativo, com
@@ -1429,15 +1503,18 @@ function desenharOperador(snapshot) {
   }[snapshot.voice_mode] ?? "microfone disponível";
   const estadoDoMicrofone = snapshot.muted ? "microfone mudo" : comoAbre;
   const mudoRotulo = (estadoDoMicrofone + (!snapshot.muted && snapshot.speaking ? " · no ar" : "")).toUpperCase();
-  mudo.replaceChildren(glifoComEstado("microfone", snapshot.muted, mudoRotulo));
-  mudo.setAttribute("aria-label", mudoRotulo);
-  mudo.title = `${estadoDoMicrofone} · ${snapshot.muted ? "reativar" : "silenciar"}`;
-  mudo.dataset.ativo = snapshot.muted ? "sim" : "nao";
+  // **Com a voz noutra sessão** (E3 da 0.17), o `title` diz de qual: lido
+  // aqui, antes de escrevê-lo, para ele ser escrito uma vez só por quadro.
+  const vozNoutra = typeof vozNoutraSessao === "function" ? vozNoutraSessao() : null;
+  porOGlifoComEstado(mudo, "microfone", snapshot.muted, mudoRotulo);
+  porOAtributo(mudo, "aria-label", mudoRotulo);
+  porOTitulo(mudo, `${estadoDoMicrofone}${vozNoutra ? ` em ${vozNoutra}` : ""} · ${snapshot.muted ? "reativar" : "silenciar"}`);
+  porODado(mudo, "ativo", snapshot.muted ? "sim" : "nao");
 
   const surdo = $("botao-surdo");
   const surdoRotulo = snapshot.total_isolation ? "ISOLAMENTO TOTAL" : "OUVINDO";
-  surdo.replaceChildren(glifoComEstado("fone", snapshot.total_isolation, surdoRotulo));
-  surdo.setAttribute("aria-label", surdoRotulo);
+  porOGlifoComEstado(surdo, "fone", snapshot.total_isolation, surdoRotulo);
+  porOAtributo(surdo, "aria-label", surdoRotulo);
   // **«ninguém» dizia gente, e ele cala a tela também.**
   //
   // O isolamento total silencia todas as fontes de uma vez — é o `set_master` do
@@ -1448,10 +1525,10 @@ function desenharOperador(snapshot) {
   // dois logs, medir cadeia por cadeia e provar que o som saía, chegava e era
   // misturado — para no fim ser «tava com o áudio mutado, não sabia que mutava a
   // live também».
-  surdo.title = snapshot.total_isolation
+  porOTitulo(surdo, snapshot.total_isolation
     ? "voltar a ouvir"
-    : "não ouvir ninguém, nem o som de uma tela compartilhada";
-  surdo.dataset.ativo = snapshot.total_isolation ? "sim" : "nao";
+    : "não ouvir ninguém, nem o som de uma tela compartilhada");
+  porODado(surdo, "ativo", snapshot.total_isolation ? "sim" : "nao");
 
   // A linha que substituiu o botão de falar: o que o microfone e o som estão
   // fazendo, nas palavras da comp — «microfone aberto · ouvindo».
@@ -1478,7 +1555,6 @@ function desenharOperador(snapshot) {
   // ouve. Dizer «microfone abre enquanto segura ESPAÇO · ouvindo» nesta vista
   // afirmaria sobre esta conversa o que é da outra. A tecla nunca traz a voz
   // para cá: só o TRAZER A VOZ PARA CÁ, ou entrar numa sala daqui.
-  const vozNoutra = typeof vozNoutraSessao === "function" ? vozNoutraSessao() : null;
   if (vozNoutra) {
     escreverOTexto($("voz-estado"), [
       snapshot.voice_mode === "PushToTalk"
@@ -1486,11 +1562,14 @@ function desenharOperador(snapshot) {
         : FRASES_DAS_SESSOES.microfoneDe(vozNoutra),
       FRASES_DAS_SESSOES.aquiSemVoz,
     ].join(" · "));
-    mudo.title = `${estadoDoMicrofone} em ${vozNoutra} · ${snapshot.muted ? "reativar" : "silenciar"}`;
     return;
   }
   escreverOTexto($("voz-estado"), [
     estadoDoMicrofone,
+    // A tecla fora da janela, quando ela vale ou quando está ligada e não
+    // vale: só no modo tecla e com o microfone vivo, que é quando «segura F»
+    // está escrito logo antes.
+    !snapshot.muted && snapshot.voice_mode === "PushToTalk" ? teclaGlobalNaLinha() : null,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
     // «ninguém está falando comigo», e não «o som da tela também está calado».
     snapshot.total_isolation ? "não está ouvindo nada, nem a tela" : "ouvindo",
@@ -1529,14 +1608,16 @@ function desenharLinha(snapshot) {
   const pode = aberta !== undefined && snapshot.may_manage_voice_rooms === true;
   const nome = trocarONomeDaLinha(pode);
 
-  nome.textContent = aberta ? aberta.name : "nenhum canal aberto";
-  nome.classList.toggle("linha-nome-vazio", !aberta);
+  // Só o que mudou, como o resto do quadro (`base.js`): o nome do canal é um
+  // botão, e o texto dele trocado a cada tique trocava o nó debaixo do ponteiro.
+  porOTexto(nome, aberta ? aberta.name : "nenhum canal aberto");
+  porAClasse(nome, "linha-nome-vazio", !aberta);
   // O rótulo da caixa de escrever diz em que canal a mensagem vai.
   const rotuloDoCanal = $("compor-rotulo-canal");
-  if (rotuloDoCanal) rotuloDoCanal.textContent = aberta ? `#${aberta.name}` : "";
+  if (rotuloDoCanal) porOTexto(rotuloDoCanal, aberta ? `#${aberta.name}` : "");
   if (pode) {
-    nome.title = `renomear #${aberta.name}`;
-    nome.setAttribute("aria-label", `Renomear o canal ${aberta.name}`);
+    porOTitulo(nome, `renomear #${aberta.name}`);
+    porOAtributo(nome, "aria-label", `Renomear o canal ${aberta.name}`);
   }
 
   // **`canal.cabecalho`** — o que um MOD acrescenta à barra do canal aberto.
@@ -1560,7 +1641,7 @@ function desenharLinha(snapshot) {
       : null;
     const desenho = escolhida ? montarContribuicao(escolhida, String(aberta.id)) : null;
     repovoar(miolo, desenho ? [desenho] : []);
-    miolo.hidden = !desenho;
+    porOEscondido(miolo, !desenho);
   }
 
   const noCabecalho = $("canal-cabecalho-mods");
@@ -1737,6 +1818,7 @@ async function sincronizarMensagens(revisao) {
     if (geracao !== geracaoDaSessao) return;
     mensagens = lidas;
     revisaoDesenhada = revisao;
+    conferirOModoDeCompor();
     desenharMensagens();
   } catch (erro) {
     if (erro !== "NotConnected") console.warn("messages:", erro);
@@ -1857,6 +1939,15 @@ function itemDeMensagem(mensagem, indice, segue) {
   // erro nenhum. O guarda é literal e está certo em ser; quem desvia é esta
   // linha.
   item.setAttribute("data-mensagem", String(indice));
+  // O `id` que o servidor deu, para a citação de uma resposta achar a
+  // original e rolar até ela. Uma pendente ainda não tem.
+  if (mensagem.id) item.setAttribute("data-mensagem-id", String(mensagem.id));
+  // **A mensagem que chama quem está logado** (`mentions_me`, decidido no
+  // core pela regra de `seele-sessao/src/mencao.rs`): destacada, e dita — a
+  // marca «chamou você» vai na cabeça, porque o destaque é cor.
+  if (mensagem.mentions_me) item.classList.add("mensagem-chamou");
+  // A original para a qual uma citação acabou de rolar: acesa por um instante.
+  if (mensagem.id && mensagem.id === mensagemApontada) item.classList.add("mensagem-apontada");
 
   if (segue) {
     // A calha de 34px do avatar recebe a hora quando o avatar não vem. É o que
@@ -1890,6 +1981,7 @@ function itemDeMensagem(mensagem, indice, segue) {
     cabeca.append(autor);
     cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
   }
+  if (mensagem.mentions_me) cabeca.append(elemento("span", "mensagem-chamou-marca", FRASES_DA_CONVERSA.chamouVoce));
   if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
   // Tirar a mensagem do canal, quando esta sessão pode tirar esta mensagem.
   // Desenhado e nunca revelado pelo ponteiro: um controle que só existe no
@@ -1900,8 +1992,26 @@ function itemDeMensagem(mensagem, indice, segue) {
   // Numa continuação sem edição e sem botão o cabeçalho não tem o que dizer, e
   // aí ele não é escrito: uma linha vazia por mensagem devolveria o espaço que
   // agrupar acabou de poupar.
+  //
+  // **Responder e editar moram ao lado dele** (a mesa de texto da 1.0), num
+  // grupo só: responder em toda mensagem gravada, editar só na própria — e só
+  // num servidor que conhece a edição. Os três são revelados juntos, pelo
+  // ponteiro e pelo teclado, e nenhum ocupa fileira: o grupo flutua à direita.
+  const acoes = elemento("span", "mensagem-acoes");
+  const responder = botaoDeResponder(mensagem);
+  if (responder) acoes.append(responder);
+  const editar = botaoDeEditar(mensagem);
+  if (editar) acoes.append(editar);
   const remover = botaoDeRemoverMensagem(mensagem, podeRemoverMensagem);
-  if (remover) cabeca.append(remover);
+  if (remover) acoes.append(remover);
+  if (acoes.childElementCount > 0) cabeca.append(acoes);
+
+  // **A citação de uma resposta**, acima de tudo o que a mensagem diz: quem
+  // escreveu a original e o começo do que ela dizia. O fio traz só o número
+  // (`replies_to`), e a original é procurada na página carregada — ver
+  // `citacaoDaResposta`.
+  const citacao = citacaoDaResposta(mensagem);
+  if (citacao) conteudo.append(citacao);
   if (cabeca.childElementCount > 0) conteudo.append(cabeca);
 
   // O corpo **cru**, e isto não é detalhe de pintura. `.mensagens .corpo` é
@@ -1954,6 +2064,120 @@ function itemDeMensagem(mensagem, indice, segue) {
 
   item.append(conteudo);
   return item;
+}
+
+/**
+ * O `id` da mensagem para a qual uma citação acabou de rolar, ou `null`.
+ * `itemDeMensagem` a acende, e `irParaACitada` a apaga depois de um instante.
+ */
+let mensagemApontada = null;
+
+/**
+ * Se uma mensagem já foi gravada pelo servidor: tem `id`, e o envio dela não
+ * está pendente. Só uma gravada pode ser respondida ou editada — uma pendente
+ * não tem número que o servidor conheça.
+ */
+function mensagemGravada(mensagem) {
+  return Boolean(mensagem?.id) && (!mensagem.estado || mensagem.estado === "Confirmada");
+}
+
+/** O botão de responder a uma mensagem, ou `null` numa que ainda não foi gravada. */
+function botaoDeResponder(mensagem) {
+  if (!mensagemGravada(mensagem)) return null;
+  const botao = elemento("button", "mensagem-acao", FRASES_DA_CONVERSA.responder);
+  botao.type = "button";
+  botao.dataset.responder = String(mensagem.id);
+  botao.setAttribute(
+    "aria-label",
+    FRASES_DA_CONVERSA.responderA(
+      apelidoApresentado(mensagem.author, mensagem.author_nickname),
+      relogio(mensagem.at_seconds),
+    ),
+  );
+  return botao;
+}
+
+/**
+ * Se esta sessão pode editar esta mensagem: é dela, está gravada, e o
+ * servidor conhece a edição (protocolo 13). Num servidor da 0.19 o controle
+ * não aparece — um botão que responde «o servidor é antigo» é pior que a
+ * ausência dele. Quem confere de verdade é o servidor.
+ */
+function podeEditarMensagem(mensagem) {
+  return Boolean(mensagem?.own) && mensagemGravada(mensagem) && mesaDeTextoNoServidor;
+}
+
+/** O botão de editar a própria mensagem, ou `null`. */
+function botaoDeEditar(mensagem) {
+  if (!podeEditarMensagem(mensagem)) return null;
+  const botao = elemento("button", "mensagem-acao", FRASES_DA_CONVERSA.editar);
+  botao.type = "button";
+  botao.dataset.editar = String(mensagem.id);
+  botao.setAttribute("aria-label", FRASES_DA_CONVERSA.editarA(relogio(mensagem.at_seconds)));
+  return botao;
+}
+
+/**
+ * A citação que uma resposta mostra acima do corpo, ou `null` para quem não
+ * responde a nada.
+ *
+ * **Com a original carregada**, é um botão: o autor e o começo do corpo, numa
+ * fileira só (o corte é da folha), e o clique rola até ela. **Sem ela** — é
+ * mais antiga que a página, ou foi apagada —, é texto: «mensagem anterior». O
+ * fio só traz o número, e esta tela não inventa o que a outra dizia.
+ */
+function citacaoDaResposta(mensagem) {
+  if (!mensagem.replies_to) return null;
+  const original = mensagens.find((outra) => outra.id === mensagem.replies_to);
+  if (!original) {
+    return elemento("span", "mensagem-citacao-ausente", FRASES_DA_CONVERSA.citacaoAusente);
+  }
+  const autor = apelidoApresentado(original.author, original.author_nickname);
+  const botao = elemento("button", "mensagem-citacao");
+  botao.type = "button";
+  botao.dataset.citada = String(original.id);
+  botao.setAttribute("aria-label", FRASES_DA_CONVERSA.irParaACitada(autor));
+  botao.append(
+    elemento("span", "mensagem-citacao-autor", autor),
+    elemento("span", "mensagem-citacao-corpo", resumoDoCorpo(original)),
+  );
+  return botao;
+}
+
+/**
+ * O começo do corpo de uma mensagem, numa fileira: as quebras viram espaço, e
+ * o corte em 140 caracteres é só para o nó não carregar um corpo de 4 KiB — o
+ * que se vê quem corta é a folha, pela largura. Uma mensagem só com arquivo
+ * diz o nome dele.
+ */
+function resumoDoCorpo(mensagem) {
+  const texto = String(mensagem.body ?? "").replace(/\s+/g, " ").trim();
+  if (texto) return [...texto].slice(0, 140).join("");
+  return mensagem.attachment?.file_name ?? FRASES_DA_CONVERSA.citacaoSemTexto;
+}
+
+/**
+ * Rola até a mensagem citada e a acende por um instante.
+ *
+ * Pelo `id`, na hora do clique: a conversa é reconciliada, e o nó é o mesmo de
+ * um quadro ao seguinte, mas a original pode ter saído da página entre o
+ * desenho e o clique — e aí a citação passa a dizer «mensagem anterior» no
+ * próximo desenho, que é pedido aqui.
+ */
+function irParaACitada(id) {
+  const alvo = $("lista-mensagens").querySelector(`li[data-mensagem-id="${id}"]`);
+  if (!alvo) {
+    desenharMensagens();
+    return;
+  }
+  mensagemApontada = id;
+  desenharMensagens();
+  alvo.scrollIntoView({ block: "center", behavior: "auto" });
+  setTimeout(() => {
+    if (mensagemApontada !== id) return;
+    mensagemApontada = null;
+    desenharMensagens();
+  }, 1600);
 }
 
 /** A frase de cada recusa, por motivo. */
@@ -2264,7 +2488,13 @@ function comLinks(texto) {
         img.setAttribute("title", url);
         pedacos.push(img);
       } else if (pronta && typeof pronta === "object" && pronta.dominio) {
-        pedacos.push(convitePrevia(url, pronta.dominio));
+        pedacos.push(convitePrevia(url, pronta.dominio, pronta.recolhida === true));
+      } else if (pronta && typeof pronta === "object" && pronta.recusada) {
+        // A imagem que não coube numa prévia é dita no lugar dela: só o link,
+        // sem uma palavra, lia-se como «a prévia não funciona».
+        const recusa = elemento("span", "previa-convite");
+        recusa.append(elemento("span", "previa-convite-frase", pronta.recusada));
+        pedacos.push(recusa);
       }
     }
     cursor = comeco + url.length;
@@ -2276,12 +2506,139 @@ function comLinks(texto) {
 }
 
 /**
+ * **Quanto as prévias guardadas desta janela podem ocupar**, por bolso (o dos
+ * anexos e o dos links): quantas imagens, e quanto texto de `data:` somado.
+ *
+ * 48 imagens e 24 MiB de texto: uma prévia reduzida ao lugar dela pesa umas
+ * centenas de KiB, e um GIF no teto de bytes da prévia, 5,6 MiB — cabem quatro
+ * desses, ou dezenas das outras.
+ *
+ * **Por que existe** (11/11/2026, a varredura do incidente da capa em 4K): os
+ * dois mapas só cresciam até o fim da sessão. Cada prévia aberta numa sessão
+ * longa ficava na memória da janela para sempre, como um `data:` de megabytes.
+ */
+const TETO_DAS_PREVIAS = Object.freeze({ imagens: 48, texto: 24 * 1024 * 1024 });
+
+/**
+ * **Um bolso de prévias: um mapa com teto, que despeja a menos usada.**
+ *
+ * Tem a cara de um `Map` (`get`, `has`, `set`, `delete`, `clear`) porque é o
+ * que os dois caminhos de prévia já usavam. O que ele acrescenta:
+ *
+ * - **Conta só o que pesa.** Uma recusa, ou «não deu», é uma entrada de
+ *   poucos bytes; o que ocupa a janela é a imagem (`imagemDe` a acha no valor).
+ * - **`get` é uso.** A conversa pergunta por toda prévia que desenha a cada
+ *   redesenho, e é isso que deixa por último na fila as que estão à vista.
+ * - **Despeja a que foi usada há mais tempo**, nunca a que acabou de entrar,
+ *   até caber de novo. `aoDespejar` decide o que fica no lugar — e **diz**: uma
+ *   imagem que some da conversa sem uma palavra é a pergunta que volta depois.
+ */
+class BolsoDePrevias {
+  /**
+   * @param {(valor: unknown) => (string | null | undefined)} imagemDe O `data:` de um valor, quando ele tem.
+   * @param {(chave: unknown, valor: unknown, bolso: BolsoDePrevias) => void} aoDespejar Chamado depois de a entrada sair.
+   * @param {{ imagens: number, texto: number }} [teto]
+   */
+  constructor(imagemDe, aoDespejar, teto = TETO_DAS_PREVIAS) {
+    this.imagemDe = imagemDe;
+    this.aoDespejar = aoDespejar;
+    this.teto = teto;
+    this.mapa = new Map();
+    /** Quantas entradas têm imagem, e quanto texto de `data:` elas somam. */
+    this.imagens = 0;
+    this.texto = 0;
+  }
+
+  pesoDe(valor) {
+    const imagem = this.imagemDe(valor);
+    return typeof imagem === "string" ? imagem.length : 0;
+  }
+
+  /** Quantas entradas há, com imagem ou sem: o `size` de um `Map`. */
+  get size() {
+    return this.mapa.size;
+  }
+
+  has(chave) {
+    return this.mapa.has(chave);
+  }
+
+  get(chave) {
+    const valor = this.mapa.get(chave);
+    // Usada agora: vai para o fim da fila do despejo.
+    if (valor !== undefined && this.pesoDe(valor) > 0) {
+      this.mapa.delete(chave);
+      this.mapa.set(chave, valor);
+    }
+    return valor;
+  }
+
+  set(chave, valor) {
+    this.delete(chave);
+    this.mapa.set(chave, valor);
+    const peso = this.pesoDe(valor);
+    if (peso > 0) {
+      this.imagens += 1;
+      this.texto += peso;
+      this.despejarAteCaber(chave);
+    }
+    return this;
+  }
+
+  delete(chave) {
+    if (!this.mapa.has(chave)) return false;
+    const peso = this.pesoDe(this.mapa.get(chave));
+    if (peso > 0) {
+      this.imagens -= 1;
+      this.texto -= peso;
+    }
+    return this.mapa.delete(chave);
+  }
+
+  clear() {
+    this.mapa.clear();
+    this.imagens = 0;
+    this.texto = 0;
+  }
+
+  /** Tira as imagens usadas há mais tempo até o bolso caber, poupando `poupada`. */
+  despejarAteCaber(poupada) {
+    if (this.imagens <= this.teto.imagens && this.texto <= this.teto.texto) return;
+    // Uma cópia das chaves: `aoDespejar` pode pôr uma marca no lugar da que saiu.
+    for (const [chave, valor] of [...this.mapa]) {
+      if (this.imagens <= this.teto.imagens && this.texto <= this.teto.texto) return;
+      if (chave === poupada || this.pesoDe(valor) === 0) continue;
+      this.delete(chave);
+      this.aoDespejar(chave, valor, this);
+    }
+  }
+}
+
+/**
  * O que já se sabe de cada link de imagem: a imagem, ou que não deu.
  *
  * Uma busca por endereço e por sessão. Sem isto, a conversa redesenha e busca
  * de novo — e cada busca é a janela aparecendo para quem controla o endereço.
+ *
+ * **Com teto** (`BolsoDePrevias`). A imagem despejada **não é buscada de novo
+ * sozinha**: no lugar dela fica o convite com o domínio (`recolhida`), e quem
+ * manda buscar é o clique. Apagar a entrada faria o próximo desenho buscá-la,
+ * que despejaria outra, que seria buscada no desenho seguinte — uma batida
+ * sem fim na porta de quem controla os endereços.
  */
-const previasDeLink = new Map();
+const previasDeLink = new BolsoDePrevias(
+  (valor) => (typeof valor === "string" ? valor : null),
+  (url, _valor, bolso) => {
+    let dominio = "";
+    try {
+      dominio = new URL(url).hostname.toLowerCase();
+    } catch {
+      dominio = "";
+    }
+    // Sem domínio não há convite a fazer: fica «não deu», que também não busca.
+    bolso.set(url, dominio ? { dominio, recolhida: true } : false);
+  },
+);
 
 /**
  * Só o que **parece** imagem é buscado, e isso é a metade que protege.
@@ -2351,7 +2708,18 @@ function considerarAPrevia(url) {
       // novo a cada desenho, e um endereço que não responde viraria uma batida
       // constante na porta de alguém.
       const dominioPendente = falha?.SemConsentimento?.dominio;
-      previasDeLink.set(url, dominioPendente ? { dominio: dominioPendente } : false);
+      // **Pixels demais é dito na conversa, com os números** (`PixelsDemais`,
+      // do Rust e da página): a imagem cabe no teto de bytes e, aberta,
+      // pediria memória demais a esta janela. Só a primeira linha da frase: o
+      // «salve-a» da segunda é do anexo, e um link não tem o que salvar.
+      const pixels = falha?.PixelsDemais;
+      const recusada = pixels
+        ? fraseDePrevia({
+            refusal: { kind: "TooManyPixels", width: pixels.largura, height: pixels.altura, limit: pixels.teto },
+          }).split("\n")[0]
+        : "";
+      const guardado = dominioPendente ? { dominio: dominioPendente } : false;
+      previasDeLink.set(url, recusada ? { recusada } : guardado);
       if (!dominioPendente) console.warn("prévia de link:", falha);
       desenharMensagens();
     });
@@ -2371,9 +2739,16 @@ function considerarAPrevia(url) {
  * Consentir vale para o **domínio**, uma vez, e fica gravado — e a configuração
  * lista o que foi liberado, para poder desfazer.
  */
-function convitePrevia(url, dominio) {
+function convitePrevia(url, dominio, recolhida = false) {
   const convite = elemento("span", "previa-convite");
-  convite.append(elemento("span", "previa-convite-frase", `imagem de ${dominio}`));
+  // **A recolhida diz que foi recolhida** (`BolsoDePrevias`): a imagem estava
+  // na conversa e saiu da memória para dar lugar a outras. Buscá-la de novo
+  // custa o mesmo que da primeira vez, e por isso volta a ser um clique.
+  convite.append(elemento(
+    "span",
+    "previa-convite-frase",
+    recolhida ? `imagem de ${dominio}, recolhida para dar lugar a outras` : `imagem de ${dominio}`,
+  ));
   const botao = elemento("button", "previa-convite-acao", "MOSTRAR IMAGEM");
   botao.type = "button";
   botao.dataset.previa = url;
@@ -2625,6 +3000,8 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
       }
     }
     const no = velho ?? novo;
+    // Um nó novo que não tem par na tela vai entrar nela: é pintado antes.
+    if (!velho) assentarOsFundosDe(novo);
     contexto.usados.add(no);
     desejados.push(no);
     pares.push([no, novo]);
@@ -2773,12 +3150,21 @@ function vestirComo(velho, novo) {
     return;
   }
   const detalhe = velho.localName === "details";
+  // Um dos dois tem imagem de fundo: o `style` deles não se compara pelo
+  // atributo (ver `vestirOEstiloComFundo`). O novo com a imagem já escrita (não
+  // foi montado solto) segue o caminho de sempre.
+  const { pintados, pedidos } = fundos();
+  const comFundo = !pintados.has(novo) && (pedidos.has(novo) || pintados.has(velho));
   for (const nome of velho.getAttributeNames()) {
     if (detalhe && nome === "open") continue;
+    if (comFundo && nome === "style") continue;
     if (!novo.hasAttribute(nome)) velho.removeAttribute(nome);
   }
+  if (comFundo) vestirOEstiloComFundo(velho, novo);
   for (const nome of novo.getAttributeNames()) {
     if (detalhe && nome === "open") continue;
+    // A marca do pedido é do elemento solto, e não vai para o que está na tela.
+    if (nome === "data-fundo-pendente" || (comFundo && nome === "style")) continue;
     const valor = novo.getAttribute(nome);
     if (velho.getAttribute(nome) === valor) continue;
     if (nome === "style") velho.style.cssText = novo.style.cssText;
@@ -3714,6 +4100,25 @@ function redesenharAsEntradasDeMod() {
 
 // ---------------------------------------------------------------- telemetria
 
+/**
+ * A célula VÍDEO do rodapé: qual codificador produz a transmissão desta pessoa.
+ *
+ * O nome vem do motor (`TelaEmCurso::codificador`): «VideoToolbox», o do Media
+ * Foundation com o fabricante, ou «OpenH264 (software)», que é a queda. Escrito
+ * como texto, nunca como HTML: no Windows é o sistema quem dá o nome.
+ *
+ * Sem transmissão própria, ou sem nome (a câmera, que a janela codifica; o
+ * navegador; antes de o primeiro fluxo abrir), a célula some. E só muta
+ * quando muda: o retrato chega duas vezes por segundo.
+ */
+function desenharOCodificadorDeVideo(minha) {
+  const celula = $("tel-video-celula");
+  if (!celula) return;
+  const nome = typeof minha?.codificador === "string" && minha.codificador.trim() !== "" ? minha.codificador : null;
+  if (celula.hidden !== (nome === null)) celula.hidden = nome === null;
+  if (nome !== null && $("tel-video").textContent !== nome) medido($("tel-video"), nome);
+}
+
 function desenharTelemetria(snapshot) {
   // **Sem o rodapé** (o celular o tira desde a 0.18, `celular-voz.js`), o que
   // não é medida continua: a faixa da queda (`desenharEnlace`) e o aviso ao
@@ -3747,6 +4152,8 @@ function desenharTelemetria(snapshot) {
       ? `${Math.round(tel.bitrate_bps / 1000)}k`
       : (ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.rodape ?? SEM_MEDIDA),
   );
+
+  desenharOCodificadorDeVideo(snapshot.minha_transmissao);
 
   medido($("tel-uptime"), duracao(comecoDaSessao));
 
@@ -3864,8 +4271,14 @@ function desenharAviso(snapshot) {
   // motivo no `title`. Fora do `if` de propósito — o estado dele tem que estar
   // certo no instante em que a caixa aparecer, e não no quadro seguinte.
   atualizarPortaDoAlerta(snapshot);
-  if (!snapshot.notice) {
-    banner.hidden = true;
+  // **Ser chamado não abre a caixa de ALERTA.** A caixa é modal, cobre a
+  // conversa com um véu e oferece MODERAR UMA PESSOA: é de um problema, e uma
+  // menção não é um. Quem foi chamado já é avisado de três jeitos que dizem
+  // onde: o som de mensagem, a mensagem destacada com «chamou você», e o
+  // «@ N» ao lado do canal (`marcaDeNaoLidas`). A caixa só dizia «VOCÊ FOI
+  // CHAMADO», sem o canal, e pedia um clique para sair da frente.
+  if (!snapshot.notice || snapshot.notice.reason === "Mentioned") {
+    porOEscondido(banner, true);
     return;
   }
   const aviso = snapshot.notice;
@@ -3939,8 +4352,8 @@ function fraseDoAviso(motivo) {
 function desenharEnlace(link) {
   const faixa = $("bateria");
   if (!link || link === "Online") {
-    faixa.hidden = true;
-    document.body.classList.remove("na-bateria");
+    porOEscondido(faixa, true);
+    porAClasse(document.body, "na-bateria", false);
     return;
   }
 
@@ -3990,6 +4403,10 @@ const rascunhos = new Map();
 /** Guarda o que está escrito no campo, para o canal aberto. */
 function guardarRascunho() {
   if (linhaAberta === null) return;
+  // Editando, o campo traz o corpo de uma mensagem que já existe, e não o
+  // rascunho do canal: o rascunho é o que estava escrito antes (`modoDeCompor`),
+  // e é ele que volta quando a edição acaba.
+  if (modoDeCompor?.tipo === "editar") return;
   const campo = $("campo-mensagem");
   if (campo.value === "") rascunhos.delete(linhaAberta);
   else rascunhos.set(linhaAberta, campo.value);
@@ -4053,6 +4470,18 @@ async function enviar(evento) {
   const corpo = campo.value.trim();
   if (linhaAberta === null) return;
 
+  // **Editando, o ENVIAR salva a edição** (a mesa de texto da 1.0), e nada
+  // novo é publicado. Antes do anexo e antes do «vazio não manda»: um corpo
+  // vazio aqui é uma edição que o core recusa com frase (`MensagemVazia`), e
+  // não um Enter que não faz nada.
+  if (modoDeCompor?.tipo === "editar") {
+    await salvarAEdicao(corpo);
+    return;
+  }
+  // A mensagem a que esta responde, lida antes de qualquer espera: o modo sai
+  // junto com o texto, e a resposta é desta mensagem, e não da seguinte.
+  const citada = modoDeCompor?.tipo === "responder" ? modoDeCompor.id : null;
+
   // Com arquivo escolhido, o caminho é outro: o corpo viaja **junto** com o
   // arquivo, num fluxo só deles, e a mensagem só aparece na Linha quando os
   // bytes chegam inteiros. Um `send_message` separado publicaria o texto
@@ -4063,6 +4492,9 @@ async function enviar(evento) {
     rascunhos.delete(linhaAberta);
     cresceOCampo();
     medirOCorpo();
+    // O fluxo do arquivo ainda não leva a citação: a faixa do modo já disse
+    // isso enquanto os dois estavam à vista (`desenharOModoDeCompor`).
+    largarOModoDeCompor();
     await subirAnexo(corpo);
     return;
   }
@@ -4080,8 +4512,16 @@ async function enviar(evento) {
   rascunhos.delete(linhaAberta);
   cresceOCampo();
   medirOCorpo();
+  largarOModoDeCompor();
+  fecharAsMencoes();
   try {
-    await invoke("send_message", { channel: linhaAberta, body: corpo });
+    // `repliesTo` só quando há a quem responder: sem a chave, é a mensagem de
+    // sempre, nas duas pontes. Dois `invoke` com o objeto escrito em cada um,
+    // e não um objeto montado antes: é pelo literal que o guarda dos
+    // argumentos (`todo_argumento_que_o_frontend_manda_existe_no_comando`)
+    // confere que `repliesTo` é o nome que o comando procura.
+    if (citada === null) await invoke("send_message", { channel: linhaAberta, body: corpo });
+    else await invoke("send_message", { channel: linhaAberta, body: corpo, repliesTo: citada });
   } catch (falha) {
     // **O rascunho não é sobrescrito.** Este `catch` devolvia `campo.value =
     // corpo`, e era ele que trocava o que a pessoa estava escrevendo agora pelo
@@ -4129,6 +4569,410 @@ async function agirNaPendente(evento) {
   await atualizar();
 }
 
+// ------------------------------------------- responder e editar (a 1.0)
+//
+// O compositor tem dois modos além de escrever uma mensagem nova, e os dois
+// moram numa faixa acima do campo (`#compor-modo`): **respondendo** a uma
+// mensagem, e **editando** uma mensagem própria. A faixa diz qual, a quem, e
+// como sair — o botão dela e o Esc.
+//
+// Um modo por vez, e ele é do canal aberto: trocar de canal, sair do servidor
+// ou trocar de sessão o larga (`largarOModoDeCompor`), e uma edição largada
+// devolve ao campo o rascunho que estava nele antes.
+
+/**
+ * O que o compositor está fazendo além de escrever uma mensagem nova, ou
+ * `null`: `{ tipo: "responder" | "editar", id, quem, resumo, antes }`.
+ *
+ * `id` é o da mensagem respondida ou editada; `antes` é o rascunho que estava
+ * no campo quando a edição começou, para voltar a ele.
+ */
+let modoDeCompor = null;
+
+/** O nome acessível do ENVIAR fora da edição, lido da marcação uma vez. */
+const ROTULO_DO_ENVIAR = $("botao-enviar").getAttribute("aria-label") ?? "";
+
+/**
+ * Desenha a faixa do modo, ou a esconde. `erro` é a frase de uma edição que
+ * não saiu, e fica na faixa até a pessoa tentar de novo ou cancelar.
+ */
+function desenharOModoDeCompor(erro = null) {
+  const faixa = $("compor-modo");
+  const aviso = $("compor-modo-erro");
+  aviso.hidden = !erro;
+  aviso.textContent = erro ?? "";
+  const enviar = $("botao-enviar");
+  if (!modoDeCompor) {
+    faixa.hidden = true;
+    delete faixa.dataset.modo;
+    enviar.setAttribute("aria-label", ROTULO_DO_ENVIAR);
+    return;
+  }
+  const editando = modoDeCompor.tipo === "editar";
+  faixa.hidden = false;
+  faixa.dataset.modo = modoDeCompor.tipo;
+  $("compor-modo-frase").textContent = editando
+    ? FRASES_DA_CONVERSA.editando
+    : FRASES_DA_CONVERSA.respondendoA(modoDeCompor.quem);
+  // O começo do que a mensagem dizia, para a pessoa conferir que é aquela. Com
+  // um arquivo escolhido numa resposta, o lugar diz o que o envio não leva.
+  $("compor-modo-citacao").textContent =
+    !editando && anexoPendente ? FRASES_DA_CONVERSA.arquivoSemCitacao : modoDeCompor.resumo;
+  const cancelar = $("compor-modo-cancelar");
+  cancelar.textContent = FRASES_DA_CONVERSA.cancelar;
+  cancelar.title = editando ? FRASES_DA_CONVERSA.cancelarEdicao : FRASES_DA_CONVERSA.cancelarResposta;
+  cancelar.setAttribute("aria-label", cancelar.title);
+  enviar.setAttribute("aria-label", editando ? FRASES_DA_CONVERSA.salvarEdicao : ROTULO_DO_ENVIAR);
+}
+
+/**
+ * Sai do modo, sem anunciar nada: é o caminho de quem troca de canal, de
+ * sessão ou de servidor, e de quem acabou de enviar. Uma edição devolve ao
+ * campo o rascunho que estava nele.
+ */
+function largarOModoDeCompor() {
+  if (!modoDeCompor) return;
+  const era = modoDeCompor;
+  modoDeCompor = null;
+  if (era.tipo === "editar") {
+    const campo = $("campo-mensagem");
+    campo.value = era.antes ?? "";
+    cresceOCampo();
+    medirOCorpo();
+  }
+  desenharOModoDeCompor();
+}
+
+/** Cancela o modo a pedido da pessoa (o botão da faixa, ou o Esc), e diz. */
+function cancelarOModoDeCompor() {
+  if (!modoDeCompor) return;
+  const editando = modoDeCompor.tipo === "editar";
+  largarOModoDeCompor();
+  anunciar(editando ? FRASES_DA_CONVERSA.edicaoCancelada : FRASES_DA_CONVERSA.respostaCancelada);
+  $("campo-mensagem").focus();
+}
+
+/** Passa a responder a esta mensagem. O que estava escrito fica no campo. */
+function responderA(mensagem) {
+  if (!mensagemGravada(mensagem) || linhaAberta === null) return;
+  largarOModoDeCompor();
+  const quem = apelidoApresentado(mensagem.author, mensagem.author_nickname);
+  modoDeCompor = { tipo: "responder", id: mensagem.id, quem, resumo: resumoDoCorpo(mensagem), antes: null };
+  desenharOModoDeCompor();
+  anunciar(FRASES_DA_CONVERSA.anuncioDeResposta(quem));
+  $("campo-mensagem").focus();
+}
+
+/**
+ * Passa a editar esta mensagem: o corpo dela vai para o campo, e o que estava
+ * escrito ali fica guardado para voltar.
+ */
+function editarA(mensagem) {
+  if (!podeEditarMensagem(mensagem) || linhaAberta === null) return;
+  largarOModoDeCompor();
+  const campo = $("campo-mensagem");
+  modoDeCompor = {
+    tipo: "editar",
+    id: mensagem.id,
+    quem: null,
+    resumo: resumoDoCorpo(mensagem),
+    antes: campo.value,
+  };
+  campo.value = mensagem.body ?? "";
+  cresceOCampo();
+  medirOCorpo();
+  fecharAsMencoes();
+  desenharOModoDeCompor();
+  anunciar(FRASES_DA_CONVERSA.anuncioDeEdicao);
+  campo.focus();
+  campo.setSelectionRange(campo.value.length, campo.value.length);
+}
+
+/** A mensagem carregada com este `id`, ou `undefined`. */
+function mensagemDeId(id) {
+  return mensagens.find((mensagem) => mensagem.id === Number(id));
+}
+
+/**
+ * Edita a última mensagem própria do canal aberto (a seta para cima no campo
+ * vazio). Devolve se havia o que editar.
+ */
+function editarAUltimaPropria() {
+  const ultima = mensagens.findLast((mensagem) => podeEditarMensagem(mensagem));
+  if (!ultima) return false;
+  editarA(ultima);
+  return true;
+}
+
+/**
+ * Manda a edição. **A falha fica à vista, com o texto no campo**: o core
+ * recusa o corpo vazio e o grande demais antes de qualquer coisa sair, e um
+ * servidor antigo não conhece o verbo — cada um com a frase dele, na faixa.
+ * Quando sai, a confirmação é a mensagem mudar na conversa, com «editada».
+ */
+async function salvarAEdicao(corpo) {
+  const modo = modoDeCompor;
+  if (!modo || modo.tipo !== "editar") return;
+  // Nada mudou: não há o que pedir ao servidor, e a mensagem não ganha a
+  // marca de editada por um Enter.
+  if (corpo !== "" && corpo === String(mensagemDeId(modo.id)?.body ?? "").trim()) {
+    cancelarOModoDeCompor();
+    return;
+  }
+  try {
+    await invoke("editar_mensagem", { message: modo.id, body: corpo });
+  } catch (falha) {
+    // Outra coisa pode ter tirado o modo durante a espera (a troca de canal).
+    if (modoDeCompor !== modo) return;
+    const frase = FRASES_DA_CONVERSA.edicaoNaoSaiu(fraseDeErro(falha));
+    desenharOModoDeCompor(frase);
+    $("campo-mensagem").focus();
+    return;
+  }
+  if (modoDeCompor === modo) largarOModoDeCompor();
+  $("campo-mensagem").focus();
+  await atualizar();
+}
+
+/**
+ * Confere o modo contra a conversa que acabou de ser lida: a mensagem que se
+ * editava, ou a que se respondia, pode ter saído dela (removida por quem
+ * modera, ou pela retenção). Calar seria deixar a pessoa escrevendo uma
+ * edição sem alvo, ou uma resposta que o servidor recusaria sem dizer por quê.
+ */
+function conferirOModoDeCompor() {
+  if (!modoDeCompor || mensagemDeId(modoDeCompor.id)) return;
+  const editando = modoDeCompor.tipo === "editar";
+  largarOModoDeCompor();
+  anunciar(editando ? FRASES_DA_CONVERSA.editadaSumiu : FRASES_DA_CONVERSA.citadaSumiu);
+  const aviso = $("compor-modo-erro");
+  $("compor-modo").hidden = false;
+  $("compor-modo").dataset.modo = "aviso";
+  $("compor-modo-frase").textContent = "";
+  $("compor-modo-citacao").textContent = "";
+  $("compor-modo-cancelar").textContent = FRASES_DA_CONVERSA.entendi;
+  $("compor-modo-cancelar").removeAttribute("title");
+  $("compor-modo-cancelar").removeAttribute("aria-label");
+  aviso.hidden = false;
+  aviso.textContent = editando ? FRASES_DA_CONVERSA.editadaSumiu : FRASES_DA_CONVERSA.citadaSumiu;
+}
+
+// ------------------------------------------------- chamar alguém com `@`
+//
+// Ao digitar `@`, a lista das pessoas deste servidor aparece acima do campo,
+// filtrada pelo que se escreve depois dele. O que ela insere é `@apelido`, e
+// `@apelido#MARCA` quando há duas pessoas com o mesmo apelido — a regra de
+// quem é chamado por quê está em `seele-sessao/src/mencao.rs`, e é o core que
+// a aplica do outro lado (`mentions_me`); aqui só se escreve o texto.
+
+/** Quantas pessoas a lista mostra de uma vez. */
+const TETO_DE_MENCOES = 8;
+
+/**
+ * A lista aberta, ou `null`: `{ arroba, pessoas, escolhida }`. `arroba` é a
+ * posição do `@` no campo; `escolhida` é o índice da opção acesa.
+ */
+let mencoesAbertas = null;
+
+/** A posição do `@` cuja lista a pessoa fechou com Esc, para não reabrir nele. */
+let mencaoDispensada = null;
+
+/**
+ * O apelido pelo qual uma pessoa é chamada, e a marca dela: a base da
+ * identidade apresentada, que é o nome que a tela mostra. Sem ela (um servidor
+ * de antes do 11), o apelido interno, partido em `base#MARCA` quando tem essa
+ * forma — a mesma leitura de `Room::apelido_mencionavel`.
+ */
+function nomeParaChamar(id, legado) {
+  const par = identidadesApresentadas?.[String(id)];
+  if (Array.isArray(par) && par[0]) return { base: String(par[0]), marca: par[1] ? String(par[1]) : "" };
+  const texto = String(legado ?? "");
+  const corte = texto.lastIndexOf("#");
+  if (corte > 0 && /^[0-9A-Z]{4}$/.test(texto.slice(corte + 1))) {
+    return { base: texto.slice(0, corte), marca: texto.slice(corte + 1) };
+  }
+  return { base: texto, marca: "" };
+}
+
+/**
+ * As pessoas deste servidor que casam com `termo`, como a lista as mostra.
+ *
+ * Quem está aqui primeiro, depois o FORA DO AR; dentro de cada grupo, quem
+ * começa pelo termo antes de quem só o contém. `texto` é o que entra no campo:
+ * a base, e a marca junto quando outra pessoa do servidor tem a mesma base
+ * (sem diferenciar maiúsculas, como a regra compara). Nunca a própria pessoa:
+ * escrever o próprio nome não chama ninguém.
+ */
+function pessoasParaChamar(termo) {
+  const todas = [];
+  const vistas = new Set();
+  const juntar = (id, legado, fora) => {
+    if (vistas.has(id)) return;
+    vistas.add(id);
+    const { base, marca } = nomeParaChamar(id, legado);
+    if (base.trim()) todas.push({ id, base, marca, fora });
+  };
+  for (const pessoa of desenhado?.presentes ?? []) {
+    if (!pessoa.is_self) juntar(pessoa.id, pessoa.nickname, false);
+  }
+  for (const membro of foraDoAr) {
+    if (membro.id !== desenhado?.me) juntar(membro.id, membro.nickname, true);
+  }
+  const quantasCom = new Map();
+  for (const pessoa of todas) {
+    const chave = pessoa.base.toLocaleLowerCase();
+    quantasCom.set(chave, (quantasCom.get(chave) ?? 0) + 1);
+  }
+  const procurado = termo.toLocaleLowerCase();
+  const posto = (pessoa) => {
+    const onde = pessoa.base.toLocaleLowerCase().indexOf(procurado);
+    return onde < 0 ? -1 : (pessoa.fora ? 2 : 0) + (onde === 0 ? 0 : 1);
+  };
+  return todas
+    .map((pessoa) => ({ pessoa, posto: posto(pessoa) }))
+    .filter((par) => par.posto >= 0)
+    .sort((a, b) => a.posto - b.posto || a.pessoa.base.localeCompare(b.pessoa.base))
+    .slice(0, TETO_DE_MENCOES)
+    .map(({ pessoa }) => ({
+      ...pessoa,
+      texto: pessoa.marca && quantasCom.get(pessoa.base.toLocaleLowerCase()) > 1
+        ? `${pessoa.base}#${pessoa.marca}`
+        : pessoa.base,
+    }));
+}
+
+/**
+ * O `@` que a pessoa está escrevendo agora, ou `null`: `{ arroba, termo }`.
+ *
+ * O `@` vale no começo do texto ou depois de algo que não é letra, número nem
+ * `_` (a regra 1 de `mencao.rs`: em `x@ana.com` não é menção), e o termo vai
+ * dele até o cursor, numa fileira só. Um apelido pode ter espaço, então o
+ * espaço não fecha o termo: quem fecha é não haver ninguém que case.
+ */
+function mencaoEmCurso(campo) {
+  const cursor = campo.selectionStart;
+  if (cursor !== campo.selectionEnd) return null;
+  const antes = campo.value.slice(0, cursor);
+  const arroba = antes.lastIndexOf("@");
+  if (arroba < 0) return null;
+  const anterior = [...antes.slice(0, arroba)].at(-1);
+  if (anterior !== undefined && /[\p{L}\p{N}_]/u.test(anterior)) return null;
+  const termo = antes.slice(arroba + 1);
+  if (termo.length > 32 || termo.includes("\n")) return null;
+  return { arroba, termo };
+}
+
+/** Fecha a lista, se estava aberta. */
+function fecharAsMencoes() {
+  mencoesAbertas = null;
+  const lista = $("mencoes-lista");
+  lista.hidden = true;
+  lista.replaceChildren();
+  $("campo-mensagem").removeAttribute("aria-activedescendant");
+}
+
+/** Abre, atualiza ou fecha a lista conforme o que está escrito até o cursor. */
+function atualizarAsMencoes() {
+  const campo = $("campo-mensagem");
+  const curso = mencaoEmCurso(campo);
+  if (!curso) {
+    mencaoDispensada = null;
+    fecharAsMencoes();
+    return;
+  }
+  if (mencaoDispensada === curso.arroba) return;
+  mencaoDispensada = null;
+  const pessoas = pessoasParaChamar(curso.termo);
+  // Ninguém casa. Com um termo de uma palavra só, a lista diz isso; com
+  // espaço, a pessoa já está escrevendo a frase, e a lista sai da frente.
+  if (pessoas.length === 0 && (curso.termo === "" || /\s/.test(curso.termo))) {
+    fecharAsMencoes();
+    return;
+  }
+  const antes = mencoesAbertas;
+  const mesma = antes && antes.arroba === curso.arroba ? antes.pessoas[antes.escolhida]?.id : undefined;
+  const escolhida = Math.max(0, pessoas.findIndex((pessoa) => pessoa.id === mesma));
+  mencoesAbertas = { arroba: curso.arroba, pessoas, escolhida };
+  desenharAsMencoes();
+}
+
+/** Escreve a lista: uma opção por pessoa, ou a frase de que ninguém casa. */
+function desenharAsMencoes() {
+  const lista = $("mencoes-lista");
+  const campo = $("campo-mensagem");
+  const { pessoas, escolhida } = mencoesAbertas;
+  lista.setAttribute("aria-label", FRASES_DA_CONVERSA.pessoasParaChamar);
+  if (pessoas.length === 0) {
+    const vazio = elemento("li", "mencoes-vazio", FRASES_DA_CONVERSA.ninguemComEsseNome);
+    vazio.setAttribute("role", "option");
+    vazio.setAttribute("aria-disabled", "true");
+    vazio.setAttribute("aria-selected", "false");
+    lista.replaceChildren(vazio);
+    lista.hidden = false;
+    campo.removeAttribute("aria-activedescendant");
+    return;
+  }
+  lista.replaceChildren(...pessoas.map((pessoa, indice) => {
+    const opcao = elemento("li", indice === escolhida ? "mencoes-opcao escolhida" : "mencoes-opcao");
+    opcao.id = `mencao-${indice}`;
+    opcao.setAttribute("role", "option");
+    opcao.setAttribute("aria-selected", indice === escolhida ? "true" : "false");
+    opcao.dataset.mencao = String(indice);
+    opcao.append(elemento("span", "mencoes-nome", `@${pessoa.texto}`));
+    // O nome exibido do perfil, quando é outro: é por ele que a pessoa é
+    // reconhecida na lista ao lado, e é pelo apelido que ela é chamada.
+    const exibido = typeof perfilOficial === "function" ? perfilOficial(pessoa.id)?.nome_exibido?.trim() : "";
+    if (exibido && exibido !== pessoa.base) opcao.append(elemento("span", "mencoes-exibido", exibido));
+    if (pessoa.fora) opcao.append(elemento("span", "mencoes-fora", FRASES_DA_CONVERSA.foraDoAr));
+    return opcao;
+  }));
+  lista.hidden = false;
+  campo.setAttribute("aria-activedescendant", `mencao-${escolhida}`);
+  lista.children[escolhida]?.scrollIntoView({ block: "nearest" });
+}
+
+/** Põe no campo a pessoa escolhida, no lugar do que se escrevia desde o `@`. */
+function escolherAMencao(indice) {
+  const aberta = mencoesAbertas;
+  const pessoa = aberta?.pessoas[indice];
+  if (!pessoa) return;
+  const campo = $("campo-mensagem");
+  // Um espaço depois: é o que fecha o apelido para a regra, e é o que a
+  // pessoa digitaria a seguir.
+  campo.setRangeText(`@${pessoa.texto} `, aberta.arroba, campo.selectionStart, "end");
+  fecharAsMencoes();
+  cresceOCampo();
+  guardarRascunho();
+  medirOCorpo();
+  campo.focus();
+}
+
+/**
+ * As teclas da lista, com ela aberta. Devolve se a tecla era dela — e aí o
+ * Enter não envia, e o Esc não fecha mais nada.
+ */
+function teclaNasMencoes(evento) {
+  const aberta = mencoesAbertas;
+  if (!aberta || evento.isComposing) return false;
+  if (evento.key === "Escape") {
+    mencaoDispensada = aberta.arroba;
+    fecharAsMencoes();
+    return true;
+  }
+  if (aberta.pessoas.length === 0) return false;
+  if (evento.key === "ArrowDown" || evento.key === "ArrowUp") {
+    const passo = evento.key === "ArrowDown" ? 1 : -1;
+    aberta.escolhida = (aberta.escolhida + passo + aberta.pessoas.length) % aberta.pessoas.length;
+    desenharAsMencoes();
+    return true;
+  }
+  if ((evento.key === "Enter" && !evento.shiftKey) || evento.key === "Tab") {
+    escolherAMencao(aberta.escolhida);
+    return true;
+  }
+  return false;
+}
+
 // ------------------------------------------------------------------ anexos
 //
 // ADR 0027. Três coisas moram aqui e nenhuma quarta: escolher um arquivo,
@@ -4162,8 +5006,25 @@ let regrasDePrevia = null;
  *
  * Recusa também entra aqui. Um arquivo cujos bytes discordaram do nome não
  * discorda menos na segunda tentativa.
+ *
+ * **Com teto** (`BolsoDePrevias`, `TETO_DAS_PREVIAS`): só crescia até o fim da
+ * sessão. A prévia despejada volta a ser o botão PRÉVIA, que diz que ela foi
+ * recolhida (`previasRecolhidas`); apertar baixa de novo.
  */
-const previas = new Map();
+const previas = new BolsoDePrevias(
+  (previa) => previa?.image,
+  (anexo) => {
+    previasRecolhidas.add(anexo);
+    previasFechadas.delete(anexo);
+  },
+);
+
+/**
+ * Quais prévias saíram da memória para dar lugar a outras, por id de anexo.
+ * É o que o botão PRÉVIA lê para dizer que reabrir **custa o arquivo de
+ * novo** — o contrário do que ele diz de uma prévia só fechada.
+ */
+const previasRecolhidas = new Set();
 
 /**
  * Quais prévias a pessoa **fechou**, por id de anexo.
@@ -4330,6 +5191,8 @@ function guardarAnexo(arquivo) {
   $("anexo-barra").hidden = true;
   $("anexo-estado").textContent = "";
   $("anexo-pendente").hidden = false;
+  // Numa resposta, a faixa do modo passa a dizer que o arquivo vai sem a citação.
+  if (modoDeCompor) desenharOModoDeCompor();
   $("campo-mensagem").focus();
 }
 
@@ -4361,6 +5224,7 @@ function tirarAnexo() {
   $("anexo-pendente").hidden = true;
   $("anexo-barra").hidden = true;
   $("anexo-estado").textContent = "";
+  if (modoDeCompor) desenharOModoDeCompor();
 }
 
 /**
@@ -4548,7 +5412,10 @@ function blocoDeAnexo(anexo) {
       // no `previas`. O aviso só vale para a primeira vez.
       ver.title = buscada
         ? "mostra de novo o que já foi baixado"
-        : "baixa o arquivo e desenha, se os bytes forem de imagem";
+        : previasRecolhidas.has(anexo.id)
+          ? "esta prévia foi recolhida para dar lugar a outras; apertar baixa o arquivo de novo"
+          : "baixa o arquivo e desenha, se os bytes forem de imagem";
+      if (!buscada && previasRecolhidas.has(anexo.id)) ver.dataset.recolhida = "sim";
       bloco.append(ver);
     }
   }
@@ -4648,12 +5515,22 @@ async function verPrevia(anexo) {
     previa = { attachment: anexo, image: null, claimed: "", found: null,
                refusal: { kind: "DidNotArrive" } };
   }
+  previasRecolhidas.delete(anexo);
+  const antes = previasRecolhidas.size;
   previas.set(anexo, previa);
   const nomeDoArquivo = botao?.closest(".anexo")?.querySelector(".anexo-arquivo")
     ?.textContent ?? "";
   const desenho = desenhoDaPrevia(previa, nomeDoArquivo, anexo);
   if (botao) botao.replaceWith(desenho);
   if (!previa.image) anunciar(fraseDePrevia(previa));
+  // **Guardar esta despejou outra**: a conversa é redesenhada agora, para a
+  // figura recolhida virar o botão que diz isso (e soltar a memória dela), e o
+  // leitor de tela ouve que uma saiu. Sem o redesenho ela ficaria na tela até
+  // a próxima mensagem, e sumiria então sem motivo à vista.
+  if (previasRecolhidas.size > antes) {
+    desenharMensagens();
+    if (previa.image) anunciar("Uma prévia mais antiga foi recolhida para dar lugar a esta.");
+  }
 }
 
 /**
@@ -4761,6 +5638,10 @@ async function alternarCanal(evento) {
     } else if (item.dataset.linha) {
       // O que está escrito fica **com o canal em que foi escrito**, e o do canal
       // novo volta ao campo. Sem isto, escolher outro canal apagava o texto.
+      // O modo é do canal: uma edição em andamento devolve o rascunho ao
+      // campo antes de ele ser guardado, e a resposta não segue para o outro.
+      largarOModoDeCompor();
+      fecharAsMencoes();
       guardarRascunho();
       linhaAberta = Number(item.dataset.linha);
       restaurarRascunho();
@@ -4838,6 +5719,75 @@ async function recarregarTeclaDeFalar() {
 }
 
 recarregarTeclaDeFalar();
+
+// ------------------------------------------ a tecla de falar fora da janela
+//
+// Quem pede a tecla ao sistema, e decide quando, é o Rust (`tecla_global.rs`):
+// só com a opção ligada, numa sala de voz, no modo tecla e com esta janela
+// atrás de outra. Aqui só se lê o que ele conta e se diz por extenso — em
+// CONFIGURAÇÕES · ATALHOS (`tela-server.js`), na linha do operador, e em voz
+// alta quando o sistema recusa a tecla.
+
+/**
+ * O que o Rust disse por último da tecla fora da janela.
+ *
+ * `null` é «não há o que dizer»: no navegador, onde a ponte responde `null`, e
+ * antes da primeira resposta. Com `null` a opção não aparece e a linha do
+ * operador não ganha nada.
+ */
+let teclaGlobal = null;
+
+/** Os estados em que a tecla está ligada e não vale fora da janela. */
+const FALHAS_DA_TECLA_GLOBAL = Object.freeze(["Indisponivel", "SemAtalho", "Recusada"]);
+
+/** A frase de um retrato da tecla fora da janela. Um estado sem frase é dito, e não calado. */
+function fraseDaTeclaGlobal(retrato) {
+  const frase = FRASES_DA_TECLA_GLOBAL.estado[retrato.estado];
+  return frase ? frase(nomeDaTecla(retrato.tecla)) : FRASES_DA_TECLA_GLOBAL.desconhecido;
+}
+
+/**
+ * O pedaço da linha do operador que fala da tecla fora da janela, ou `null`.
+ *
+ * Só as duas coisas que mudam o que a tecla faz **agora**: ela vale com esta
+ * janela atrás (a janela pode estar à vista noutro monitor), ou está ligada e
+ * não vale. Desligada, ou esperando sala, a linha fica como sempre foi.
+ */
+function teclaGlobalNaLinha() {
+  if (!teclaGlobal) return null;
+  if (teclaGlobal.estado === "Valendo") return FRASES_DA_TECLA_GLOBAL.linhaValendo;
+  if (FALHAS_DA_TECLA_GLOBAL.includes(teclaGlobal.estado)) return FRASES_DA_TECLA_GLOBAL.linhaFalhou;
+  return null;
+}
+
+/**
+ * Guarda o retrato novo, e diz a falha quando ela chega.
+ *
+ * A recusa do sistema acontece com esta janela atrás de outra — é só então que
+ * a tecla é pedida —, e quem volta precisa ficar sabendo sem ter de abrir a
+ * configuração: a frase inteira vai ao anúncio, uma vez por falha, e a linha do
+ * operador a mantém à vista.
+ */
+function anotarTeclaGlobal(retrato) {
+  const antes = teclaGlobal?.estado ?? null;
+  teclaGlobal = retrato;
+  if (retrato && retrato.estado !== antes && FALHAS_DA_TECLA_GLOBAL.includes(retrato.estado)) {
+    anunciar(fraseDaTeclaGlobal(retrato));
+  }
+}
+
+/** Pergunta ao Rust como está a tecla fora da janela. No navegador a ponte responde `null`. */
+async function recarregarTeclaGlobal() {
+  try {
+    anotarTeclaGlobal(await invoke("estado_da_tecla_global"));
+  } catch {
+    teclaGlobal = null;
+  }
+  return teclaGlobal;
+}
+
+recarregarTeclaGlobal();
+listen("seele://tecla-global", (evento) => anotarTeclaGlobal(evento.payload));
 
 /**
  * Qual tecla abriu o microfone, ou `null` se ele não está segurado.
@@ -5110,9 +6060,18 @@ function esquecerOEstadoDaSessao() {
   modDoMarcador = new WeakMap();
   nosDeModNaLista = new WeakSet();
   abertoPedido = new WeakMap();
+  // A resposta ou a edição em andamento é de uma mensagem do servidor que
+  // ficou para trás, e a lista do `@` é das pessoas dele.
+  modoDeCompor = null;
+  desenharOModoDeCompor();
+  fecharAsMencoes();
+  mencaoDispensada = null;
+  mensagemApontada = null;
+  mesaDeTextoNoServidor = false;
   rascunhos.clear();
   previas.clear();
   previasFechadas.clear();
+  previasRecolhidas.clear();
   previasDeLink.clear();
   // Os volumes lidos, e a leitura deles que ainda estiver em voo (M-3).
   esquecerVolumes();
@@ -5561,11 +6520,89 @@ window.addEventListener("paste", (evento) => {
 // `CASCA.enterEnvia` (P8, em `base.js`): no celular o Return quebra a fileira, e
 // só o ENVIAR envia. O teclado do aparelho não tem Shift+Enter, e uma mensagem
 // de duas fileiras não teria como ser escrita.
+//
+// **Antes do Enter, as teclas da mesa de texto da 1.0**, na ordem do que está
+// mais por cima: a lista do `@` (setas, Enter ou Tab escolhe, Esc fecha); o
+// Esc que cancela a resposta ou a edição; e a seta para cima no campo vazio,
+// que edita a última mensagem própria. Cada uma para a tecla aqui
+// (`stopPropagation`): o Esc que fecha a lista não fecha também a gaveta de
+// canais, que é o ouvinte da janela.
 $("campo-mensagem").addEventListener("keydown", (evento) => {
+  if (teclaNasMencoes(evento)) {
+    evento.preventDefault();
+    evento.stopPropagation();
+    return;
+  }
+  if (evento.key === "Escape" && modoDeCompor && !evento.isComposing) {
+    evento.preventDefault();
+    evento.stopPropagation();
+    cancelarOModoDeCompor();
+    return;
+  }
+  if (
+    evento.key === "ArrowUp" && !evento.isComposing && !evento.shiftKey && !evento.altKey &&
+    !evento.ctrlKey && !evento.metaKey && !modoDeCompor && $("campo-mensagem").value === "" &&
+    mesaDeTextoNoServidor
+  ) {
+    evento.preventDefault();
+    if (!editarAUltimaPropria()) anunciar(FRASES_DA_CONVERSA.semMensagemParaEditar);
+    return;
+  }
   if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;
   if (!CASCA.enterEnvia) return;
   evento.preventDefault();
   enviar(evento);
+});
+
+// A lista do `@` acompanha o cursor, e não só o que se digita: andar com a
+// seta para dentro de um `@apelido` já escrito a reabre, e sair dele a fecha.
+for (const quando of ["keyup", "click"]) {
+  $("campo-mensagem").addEventListener(quando, (evento) => {
+    if (quando === "keyup" && ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(evento.key)) return;
+    atualizarAsMencoes();
+  });
+}
+// O campo perde o foco e a lista sai: uma lista aberta sobre a conversa sem
+// ninguém escrevendo é uma lista esquecida. O clique numa opção não tira o
+// foco (o `mousedown` dela é impedido, abaixo). **Um instante depois, e só se
+// o foco não voltou**: num navegador de toque que tire o foco antes do clique,
+// fechar na hora apagaria a opção debaixo do dedo, e o toque não escolheria
+// ninguém — `escolherAMencao` devolve o foco ao campo, e a lista já fechou.
+$("campo-mensagem").addEventListener("blur", () => {
+  setTimeout(() => {
+    if (document.activeElement !== $("campo-mensagem")) fecharAsMencoes();
+  }, 150);
+});
+$("mencoes-lista").addEventListener("mousedown", (evento) => evento.preventDefault());
+$("mencoes-lista").addEventListener("click", (evento) => {
+  const opcao = evento.target.closest?.("li[data-mencao]");
+  if (opcao) escolherAMencao(Number(opcao.dataset.mencao));
+});
+
+$("compor-modo-cancelar").addEventListener("click", () => {
+  if (modoDeCompor) {
+    cancelarOModoDeCompor();
+    return;
+  }
+  // A faixa só com um aviso (a mensagem saiu da conversa): o botão a dispensa.
+  desenharOModoDeCompor();
+  $("campo-mensagem").focus();
+});
+
+// Responder, editar e ir para a citada, por delegação: a conversa é
+// reconciliada, o botão é o mesmo nó de um quadro ao seguinte, e quem diz de
+// qual mensagem se trata é o `data-*` de agora.
+$("lista-mensagens").addEventListener("click", (evento) => {
+  const alvo = evento.target.closest?.("button[data-responder], button[data-editar], button[data-citada]");
+  if (!alvo) return;
+  if (alvo.dataset.citada) {
+    irParaACitada(Number(alvo.dataset.citada));
+    return;
+  }
+  const original = mensagemDeId(alvo.dataset.responder ?? alvo.dataset.editar);
+  if (!original) return;
+  if (alvo.dataset.editar) editarA(original);
+  else responderA(original);
 });
 
 /**
@@ -5608,6 +6645,7 @@ if (typeof ResizeObserver !== "undefined") {
 }
 
 $("campo-mensagem").addEventListener("input", () => {
+  atualizarAsMencoes();
   cresceOCampo();
   // O rascunho é guardado a cada tecla, por canal: trocar de canal com algo
   // escrito apagava o que estava escrito. Ver `rascunhos`.
@@ -6070,6 +7108,22 @@ listen("seele://event", (evento) => {
     return;
   }
 
+  // **Ser chamado toca o som de mensagem** (`alertas-sonoros.js`), uma vez por
+  // aviso: o core levanta `Mentioned` só para o que é dito ao vivo, nunca para
+  // o histórico. As preferências (o grupo «mensagens», o volume) e o intervalo
+  // mínimo entre dois toques são do módulo. O aviso escrito sobe pelo retrato,
+  // como todo aviso (`desenharAviso`).
+  //
+  // **Pelo nome, e não por `globalThis.alertasSonoros`.** O módulo é um
+  // `const` do topo de um script clássico, e um `const` assim não vira
+  // propriedade do objeto global: `globalThis.alertasSonoros` é `undefined` no
+  // Chromium e no WebKit (medido em 10/11/2026, `bancada/mesa-de-texto.cjs`),
+  // e um `?.` em cima dele é um som que nunca toca, calado. O `typeof` cobre a
+  // página que não carrega o módulo.
+  if (payload && typeof payload === "object" && payload.NoticeRaised?.notice?.reason === "Mentioned") {
+    if (typeof alertasSonoros === "object") alertasSonoros.tocar("mensagem");
+  }
+
   if (payload === "MessagesChanged" && buscaAtiva()) {
     soltarCasamentos();
     atualizar()
@@ -6200,9 +7254,12 @@ async function sincronizarRetratos(snapshot) {
  * de conviver com elas — texto por cima de foto é o que nenhuma das duas coisas
  * queria ser.
  */
-function vestirAvatar(quadrado, pessoaId) {
-  quadrado.dataset.pessoaDoAvatar = pessoaId == null ? "" : String(pessoaId);
-  quadrado.dataset.iniciaisDoAvatar = quadrado.textContent;
+function vestirAvatar(quadrado, pessoaId, iniciais = quadrado.textContent) {
+  // As iniciais são o texto que o quadrado traz, ou as que quem chama diz: um
+  // quadrado que fica na tela de um quadro ao outro (o do operador) já pode
+  // estar com o retrato, e sem texto nenhum.
+  porODado(quadrado, "pessoaDoAvatar", pessoaId == null ? "" : String(pessoaId));
+  porODado(quadrado, "iniciaisDoAvatar", iniciais);
   return aplicarAvatar(quadrado);
 }
 
@@ -6214,7 +7271,7 @@ function vestirAvatar(quadrado, pessoaId) {
  * todo o conteúdo: o halo de quem fala, as pastilhas e o texto ficam por cima.
  */
 function vestirCapa(quadro, pessoaId) {
-  quadro.dataset.pessoaDaCapa = pessoaId == null ? "" : String(pessoaId);
+  porODado(quadro, "pessoaDaCapa", pessoaId == null ? "" : String(pessoaId));
   agendarAsCapas();
   return aplicarCapa(quadro);
 }
@@ -6254,7 +7311,7 @@ function escolherAsCapasAnimadas() {
   const falou = (quadro) => falouPorUltimo.get(quadro.dataset.pessoaDaCapa) ?? 0;
   // `sort` é estável: no empate, fica a ordem da tela.
   const escolhidos = new Set(naVista.sort((a, b) => falou(b) - falou(a)).slice(0, TETO_DE_CAPAS_ANIMADAS));
-  for (const quadro of quadros) quadro.dataset.capaAnimada = escolhidos.has(quadro) ? "sim" : "nao";
+  for (const quadro of quadros) porODado(quadro, "capaAnimada", escolhidos.has(quadro) ? "sim" : "nao");
 }
 
 /** Uma escolha por quadro de animação, por mais capas que se vistam nele. */
@@ -6313,15 +7370,135 @@ function aplicarCapa(quadro) {
   }
   quadro.dataset.comCapa = "sim";
   if (url) {
-    camada.style.backgroundImage = `url(${url})`;
+    pintarOFundo(camada, url);
     delete quadro.dataset.capaDeCor;
     quadro.style.removeProperty("--cor-do-perfil");
   } else {
-    camada.style.removeProperty("background-image");
+    pintarOFundo(camada, null);
     quadro.dataset.capaDeCor = "sim";
     quadro.style.setProperty("--cor-do-perfil", cor);
   }
   return quadro;
+}
+
+/**
+ * O que se sabe do fundo de cada elemento: o que **esta casca** pintou nele
+ * (`pintados`), o que foi pedido para um elemento ainda solto (`pedidos`), e o
+ * resto do estilo em linha que a lista vestiu nele (`restos`). Um lugar só,
+ * criado na primeira vez.
+ */
+function fundos() {
+  return (globalThis.fundosDoSeele ??= {
+    pintados: new WeakMap(),
+    pedidos: new WeakMap(),
+    restos: new WeakMap(),
+  });
+}
+
+/**
+ * **Põe uma imagem de fundo num elemento, e só quando é preciso.** A imagem é
+ * um `data:`, e escrevê-la no estilo faz a janela reler o texto inteiro: 37 ms
+ * por elemento com 10 MB, 3,7 ms com 1 MB (medido em 10/11/2026). Uma capa em
+ * 4K, repintada a cada redesenho em cada lugar em que aparece, deixou o
+ * aplicativo inteiro lento (relato do dono).
+ *
+ * - **A mesma imagem não é escrita de novo.** A comparação é com o que esta
+ *   função pôs, guardado ao lado do elemento: ler o estilo de volta devolveria
+ *   o mesmo texto enorme.
+ * - **Num elemento solto, o pedido fica anotado e nada é escrito.** A lista de
+ *   pessoas é refeita a cada meio segundo com elementos novos, que quase
+ *   sempre só servem para comparar com os que já estão na tela
+ *   (`vestirComo`). Quem entra na tela de verdade é pintado ao entrar
+ *   (`assentarOFundo`).
+ */
+function pintarOFundo(alvo, url, agora = false) {
+  const { pintados, pedidos } = fundos();
+  if (alvo.isConnected === false && !agora) {
+    if (url) {
+      pedidos.set(alvo, url);
+      alvo.setAttribute("data-fundo-pendente", "sim");
+    } else {
+      pedidos.delete(alvo);
+      alvo.removeAttribute?.("data-fundo-pendente");
+    }
+    return;
+  }
+  if ((pintados.get(alvo) ?? null) === url) return;
+  if (url) {
+    alvo.style.backgroundImage = `url(${url})`;
+    pintados.set(alvo, url);
+  } else {
+    alvo.style.removeProperty("background-image");
+    pintados.delete(alvo);
+  }
+}
+
+/** A imagem de fundo que um elemento tem, ou vai ter ao entrar na tela. */
+function fundoDe(alvo) {
+  const { pintados, pedidos } = fundos();
+  return pedidos.get(alvo) ?? pintados.get(alvo) ?? null;
+}
+
+/** Um elemento que entrou na tela com o fundo pedido: é agora que ele é pintado. */
+function assentarOFundo(alvo) {
+  const { pedidos, restos } = fundos();
+  const pedido = pedidos.get(alvo);
+  if (pedido === undefined) return;
+  pedidos.delete(alvo);
+  alvo.removeAttribute("data-fundo-pendente");
+  // O resto do estilo, lido antes da imagem: é curto, e é o que `vestirComo`
+  // compara depois sem precisar reler o `data:`.
+  restos.set(alvo, alvo.getAttribute("style") ?? "");
+  pintarOFundo(alvo, pedido, true);
+}
+
+/**
+ * Pinta os fundos pedidos de uma árvore que **vai entrar na tela agora**. Quem
+ * a põe no documento chama isto antes: o elemento entra já pintado, e ninguém
+ * que observe a lista vê uma mudança depois da entrada. O observador abaixo
+ * fica para quem entra sem avisar.
+ */
+function assentarOsFundosDe(raiz) {
+  if (raiz.nodeType !== 1) return;
+  if (raiz.hasAttribute("data-fundo-pendente")) assentarOFundo(raiz);
+  raiz.querySelectorAll("[data-fundo-pendente]").forEach(assentarOFundo);
+}
+
+// Todo elemento que entra no documento com um fundo pedido é pintado ali.
+if (typeof MutationObserver === "function" && typeof document !== "undefined" && document.documentElement) {
+  new MutationObserver((mudancas) => {
+    for (const mudanca of mudancas) {
+      for (const no of mudanca.addedNodes) {
+        assentarOsFundosDe(no);
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+}
+
+/**
+ * **O estilo em linha de um elemento com fundo, vestido sem reler a imagem.**
+ * O novo foi montado solto e nunca levou a imagem; o velho a tem. Comparar os
+ * dois atributos `style` era ler megabytes duas vezes por linha, a cada meio
+ * segundo. Aqui se compara o resto (curto) com o que foi vestido da última
+ * vez, e a imagem, pela anotação.
+ */
+function vestirOEstiloComFundo(velho, novo) {
+  const { pintados, restos } = fundos();
+  const resto = novo.getAttribute("style") ?? "";
+  // A primeira vez diante de um elemento que foi pintado já na tela: se ele
+  // só tem a imagem no estilo e o novo não traz mais nada, o resto já está
+  // certo, e nada se escreve. `style.length` conta as propriedades sem ler o
+  // texto delas.
+  if (!restos.has(velho) && resto === "" && velho.style.length === (pintados.has(velho) ? 1 : 0)) {
+    restos.set(velho, "");
+  }
+  if (restos.get(velho) !== resto) {
+    velho.style.cssText = resto;
+    restos.set(velho, resto);
+    // O `cssText` levou a imagem embora junto com o resto.
+    pintados.delete(velho);
+  }
+  pintarOFundo(velho, fundoDe(novo));
 }
 
 /** A cor do perfil oficial de uma pessoa (`#rrggbb`), ou `null` sem perfil. */
@@ -6358,13 +7535,13 @@ function aplicarAvatar(quadrado) {
       || (typeof fotoOficial === "function" ? fotoOficial(id) : null)
       || retratos.get(Number(id)) || retratos.get(id);
   if (uri) {
-    quadrado.style.backgroundImage = `url(${uri})`;
-    quadrado.dataset.comRetrato = "sim";
-    quadrado.textContent = "";
+    pintarOFundo(quadrado, uri);
+    porODado(quadrado, "comRetrato", "sim");
+    porOTexto(quadrado, "");
   } else {
-    quadrado.style.removeProperty("background-image");
+    pintarOFundo(quadrado, null);
     delete quadrado.dataset.comRetrato;
-    quadrado.textContent = quadrado.dataset.iniciaisDoAvatar ?? "";
+    porOTexto(quadrado, quadrado.dataset.iniciaisDoAvatar ?? "");
   }
   return quadrado;
 }

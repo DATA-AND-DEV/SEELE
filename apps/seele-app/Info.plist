@@ -85,6 +85,18 @@
 	<string>O SEELE procura o servidor na sua própria rede quando ele está na mesma casa que você — é o caminho mais curto e o de melhor qualidade. Sem esta permissão a conversa ainda funciona, mas dá a volta pela internet.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>O SEELE mostra a sua tela para as outras pessoas da sala de voz, e só enquanto você estiver compartilhando. Nada é gravado.</string>
+	<!--
+	  A câmera (1.0), e o mesmo defeito pela quarta vez se a chave faltar: sem
+	  `NSCameraUsageDescription` o macOS **não pergunta nada** — um aplicativo
+	  que abre a câmera sem ter dito para quê é encerrado pelo sistema, e na
+	  janela o `getUserMedia` volta recusado sem alerta. Quem captura a câmera
+	  é a janela (o WKWebView), e a permissão é do aplicativo que a contém.
+
+	  O par no `Entitlements.plist` existe (`com.apple.security.device.camera`),
+	  ao contrário do da gravação de tela.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>O SEELE mostra a sua câmera para as outras pessoas da sala de voz, e só enquanto você a deixar ligada. Nada é gravado.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>O SEELE usa o microfone para transmitir a sua voz às outras pessoas da sala de voz. Nada é gravado, e nada sai da sua máquina para além do servidor ao qual você se conectou.</string>
 </dict>

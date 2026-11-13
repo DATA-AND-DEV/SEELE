@@ -36,6 +36,20 @@ custo que o ADR 0022 nomeia em voz alta, e não há como ter o degrau 4 sem ele.
 eles se visse, porque o que passa por ali são linhas curtas de texto com marcas
 e endereços.
 
+**O IPv6 de quem liga, quando o IPv4 não abre** (desde 12/11/2026). O ponto
+sempre viu o endereço de onde o `CHAMA` chega, e é um endereço só, da família do
+caminho até ele: IPv4, quando o anfitrião se registrou por IPv4. Quando o
+anfitrião atende e o caminho IPv4 não abre (duas casas atrás de CGNAT), quem
+liga pelo app e tem IPv6 global **chama de novo**, e esse segundo `CHAMA` leva o
+IPv6 dele e a porta da sessão, para o anfitrião furar também o firewall IPv6 do
+roteador dele. O ponto lê esse endereço e o repassa à escuta do anfitrião, e a
+mais ninguém; não o guarda, como não guarda o outro. É o endereço de saída que o
+sistema escolhe: com endereços temporários de privacidade ligados, o temporário,
+e nunca o estável. Quem entra pelo IPv4 não manda o segundo `CHAMA`, e o ponto
+não fica sabendo do IPv6 dele. A página já mandava os candidatos dela pelo
+`/sinal/1`. Quem não quer que o ponto saiba nem isso usa `SEELE_ENCONTRO=nao`,
+como sempre.
+
 **Quase nada guardado.** Não há banco nem arquivo. A resposta a `ONDE` e a `LEVE`
 continua sendo uma função que recebe um datagrama e devolve outro
 (`seele_proto::encontro::responder`, sem `self` e sem estado). `MORO` e `QUEM`
@@ -237,6 +251,61 @@ Libere a porta no firewall da máquina:
 sudo ufw allow 8384/udp
 ```
 
+#### Testar a prévia de uma branch, sem publicar
+
+A página de produção sai da `main`; cada outra branch enviada ganha uma prévia
+no Cloudflare Pages (a da `entrega/1.0` é
+`https://entrega-1-0.seele-web-git.pages.dev`). A prévia abre, mas não conecta a
+servidor nenhum enquanto o ponto só aceitar a origem do produto: o navegador
+recusa a resposta do `/sinal/1` e do `/chamada/1`.
+
+**No ponto oficial, quem libera uma prévia é o proxy, e não o serviço.** O
+Caddy que termina o TLS (`/opt/seele-017-homologacao/Caddyfile`) ganha um
+bloco por origem de prévia, antes do bloco geral, que repassa ao ponto e põe o
+cabeçalho na resposta. O ponto não é reiniciado, e os registros dos anfitriões,
+que ele guarda só em memória, ficam:
+
+```
+ @previa_entrega {
+  path /sinal/1 /chamada/1
+  header Origin https://entrega-1-0.seele-web-git.pages.dev
+ }
+ handle @previa_entrega {
+  reverse_proxy 127.0.0.1:8385 {
+   header_down Access-Control-Allow-Origin https://entrega-1-0.seele-web-git.pages.dev
+  }
+ }
+```
+
+Valida-se antes de aplicar (`caddy validate --config <arquivo> --adapter
+caddyfile`), e o proxy é reiniciado (`systemctl restart seele-017-caddy`; o
+`admin off` do arquivo não deixa recarregar). Aplicado em 12/11/2026, com a
+cópia de antes ao lado (`Caddyfile.2026-11-12.antes-da-previa-entrega.bak`).
+
+Num ponto sem proxy que faça isso, o mesmo se consegue no próprio serviço,
+nomeando **as duas** origens (com um `--origem` na linha, o padrão deixa de
+valer sozinho), ao custo de reiniciá-lo:
+
+```ini
+ExecStart=/opt/seele/seele-encontro --sinal 127.0.0.1:8385 --origem https://seele.sh --origem https://entrega-1-0.seele-web-git.pages.dev
+```
+
+A conferência é uma pergunta de cada origem; a resposta traz o
+`access-control-allow-origin` da origem que perguntou, e nada para as outras:
+
+```sh
+curl -sS -X OPTIONS -D - -o /dev/null \
+  -H 'Origin: https://entrega-1-0.seele-web-git.pages.dev' \
+  -H 'Access-Control-Request-Method: POST' https://rendzvous.seele.sh/sinal/1
+```
+
+**A origem da prévia sai quando o teste acabar**: ela é a de uma branch, e o
+que essa branch publicar passa a poder perguntar ao ponto. O CORS não protege
+o ponto (qualquer programa fala com ele); protege quem usa o navegador de uma
+página alheia lendo a resposta em nome dela. O arquivo do proxy ainda guarda
+três origens de prévias antigas (`21d72547`, `43f546e9`, `0fcd23f1`), das
+homologações da 0.17, que ninguém tirou.
+
 E, para ele subir junto com a máquina, um serviço de systemd de nove linhas:
 
 ```ini
@@ -364,6 +433,65 @@ Na ordem:
 Reiniciar o ponto esvazia os dois quartos por uns quinze segundos: cada
 anfitrião e cada sala voltam no reavivamento seguinte.
 
+### Antes de publicar a 1.0: a impressão DTLS da sala no sinal
+
+Na 1.0 a página do navegador e do celular entra na sala pessoal de quem tem o
+app, pelo código (ADR 0068). Para isso o ponto passa a repassar uma coisa a
+mais, **só no sinal HTTP**: a impressão do certificado DTLS que a sala disse.
+
+**O fio, e por que nada antigo quebra:**
+
+| quem fala | o que mudou | o que o antigo faz com isso |
+|---|---|---|
+| a sala (app 1.0), no `ATENDE` | uma segunda linha no mesmo datagrama: `DTLS <impressão em base64url>` | o ponto antigo lê só a primeira linha (toda leitura do fio para na primeira quebra de linha) e responde como sempre |
+| o ponto novo, no `AQUI` do **sinal** | um terceiro campo, a impressão, só quando a marca chamada é de sala e a sala a disse | uma página antiga só chama servidores guardados, e nunca recebe o terceiro campo |
+| o ponto novo, no `AQUI` do ENC/3 (UDP) | nada | — |
+
+O ponto não guarda nada novo: a impressão chega com o `ATENDE` e sai com a
+resposta daquele pedido. Ela é pista, e não prova: quem autentica a sala é a
+apresentação que a chave dela assina (`specs/08-seguranca.md`).
+
+**A ordem, e o que acontece no meio:**
+
+1. **Reimplantar o ponto**, como em «Subir o seu» (`cargo build --release -p
+   seele-encontro`, da versão que vai sair, e o `systemctl restart`). Nada muda
+   para quem já usa: um app 0.19.6 continua se registrando e sendo achado, e
+   um app 1.0 também.
+2. **Conferir** com o roteiro da seção de cima (`sondar --exige-enc2
+   --exige-enc3` e o `curl` do sinal). **Esse roteiro não confere a impressão**:
+   ele prova que o ponto fala o ENC/3 e o sinal, e um ponto de antes da 1.0
+   também passa nele. A conferência da impressão é de ponta a ponta, com uma
+   sala de verdade: a bancada `apps/seele-app/bancada/sala-pelo-codigo.cjs`
+   contra um ponto local, ou uma ligação de uma página para um app 1.0 pelo
+   ponto reimplantado.
+3. **Publicar a 1.0** (o app e a página).
+
+**Feito no ponto oficial em 12/11/2026.** O `seele-encontro` do commit
+`d287e2cd` foi compilado na própria VPS (`/root/SEELE`, `cargo build --release
+--locked -p seele-encontro`, Rust 1.97.1), ensaiado numa porta à parte e posto
+no lugar do de 28/10 (que era o do commit `5dfe9c59`, da 0.18). O binário
+anterior ficou ao lado, em `/opt/seele/seele-encontro.2026-11-12.bak`; voltar é
+copiá-lo de volta e `systemctl restart seele-encontro`. O reinício derrubou os
+registros em memória, que os anfitriões refazem sozinhos.
+
+**Reimplantado em 13/11/2026**, do commit `7ef9a3e3` (sha256 `719b94e0…`; o anterior ficou em
+`/opt/seele/seele-encontro.2026-11-13.bak`), pelo conserto da recusa cortada: o ponto engole a
+sobra do pedido antes de fechar. Conferido de fora: o `sondar` com `--exige-enc2 --exige-enc3`
+passou, e três pedidos de 30 kB ao `/sinal/1` voltaram `413` inteiros.
+
+Conferido de fora depois da troca: `sondar --exige-enc2 --exige-enc3` nas duas
+famílias, o sinal com o CORS de `https://seele.sh`, e a conferência prévia do
+`publicar.sh`. **A impressão DTLS no sinal não foi exercitada no ponto
+oficial**: as bancadas recusam o ponto de produção de propósito, e a
+conferência de ponta a ponta de lá é uma ligação de uma página para um app
+1.0, que ainda não foi feita.
+
+**Enquanto o ponto antigo estiver no ar com a 1.0 publicada**: de app para app
+tudo funciona. A página 1.0 que liga para um app 1.0 acha a sala e não recebe
+a impressão: ela diz que a pessoa está no ar e que não consegue entrar na
+ligação, e não entra. A página que liga para um app 0.19.6 cai na conversa
+direta, que a 0.19.6 ainda atende. Página com página não depende disto.
+
 ## O que ele **não** resolve
 
 **NAT simétrico dos dois lados não fura.** Nesse caso o mapeamento do roteador
@@ -394,8 +522,10 @@ Duas propriedades que o código guarda de propósito, e que valem ser mantidas s
 alguém mexer:
 
 - **O ponto de encontro nunca copia bytes de um pedido para uma resposta.** A
-  resposta é montada campo a campo. O único pedaço do pedido que reaparece é a
-  marca, que é alfanumérica e curta justamente por isso.
+  resposta é montada campo a campo. O que reaparece é lido e escrito de novo,
+  na forma canônica: a marca, que é alfanumérica e curta justamente por isso;
+  o endereço e as dicas do `ATENDE`; e, só no sinal, a impressão DTLS de uma
+  sala (32 bytes, ADR 0068).
 - **Todo datagrama do ENC/1 tem 96 bytes, e todo do ENC/2 e do ENC/3 tem 384:
   pedido e resposta, sempre do mesmo tamanho.** Um refletor que responde mais
   do que recebe é uma arma apontada para quem nunca ouviu falar deste

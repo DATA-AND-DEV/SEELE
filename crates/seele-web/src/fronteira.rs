@@ -23,13 +23,15 @@
 //! |---|---|---|
 //! | `ligacao_abrir(pedido)` | 0 | nada: o `Hello` espera em `ligacao_para_o_fio` |
 //! | | 1 | `{"recusa": ConnectionError}` ou `{"erro": "json", "texto": …}` |
+//! | `ligacao_apresentada(visto)` | 0 | `{"chave": hex64, "impressao": hex64}`: a apresentação da sala conferiu, e o `Hello` espera em `ligacao_para_o_fio` |
+//! | | 1 | `{"recusa": ConnectionError}`: quem atendeu não é o dono do código, e nada sai |
 //! | `ligacao_chegou(bytes)` | 0 | `{"passos": […]}` |
 //! | | 1 | `{"erro": "sem-ligacao"}` |
 //! | `ligacao_assinado(assinatura)` | 0 | `{"passos": […]}` |
 //! | `ligacao_fluxo_acabou()` | 0 | `{"passos": […]}` |
 //! | `ligacao_fluxo_acabou_com(codigo)` | 0 | `{"passos": […]}`: com o `CODIGO_FICOU_PARA_TRAS`, antes a despedida `FellBehind` |
 //! | `ligacao_para_o_fio()` | 0 | os bytes enquadrados (talvez nenhum) |
-//! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}, "telemetria": {…}}` |
+//! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}, "telemetria": {…}, "protocolo": n}` |
 //! | | 1 | `{"erro": "sem-sessao"}` |
 //! | `ligacao_medir(rtt_micros, jitter_ms, perda)` | 1 se mudou, 0 se não | — |
 //! | `ligacao_semente(semente)` | — | — |
@@ -100,6 +102,8 @@
 //! | | 1 | o `ErroDoPerfil` |
 //! | `perfil_icone(bytes)` | 0 | o PNG do ícone nativo (até 256 px e 8 KiB) |
 //! | | 1 | `"IconNotAPicture"` |
+//! | `perfil_para_a_janela(capa, bytes)` | 0 | a imagem do perfil reduzida ao lugar em que aparece |
+//! | | 1 | `"TipoRecusado"` |
 //! | `catalogo_endereco()` | 0 | o endereço do catálogo |
 //! | `catalogo_ler(catalogo, assinatura)` | 0 | nada: conferido e lido |
 //! | | 1 | a `FalhaNoCatalogo` do desktop |
@@ -159,6 +163,7 @@
 //! | `voz_tocar_isolado(isolado)` | — | — |
 //! | `voz_tocar_esquecer(alca)` | — | — |
 //! | `voz_tocar_contas()` | 0 | `{"fontes": {alça: …}, "fades", "mistura", …}` |
+//! | `voz_tocar_recepcao(agora_ms, fora)` | 0 | `{"jitter_ms", "perda", "relato": {"perda", "jitter_ms"} \| null}` |
 //! | | 1 | `{"erro": …}` |
 //!
 //! O som atravessa como bytes de `f32` em little-endian, e não como um
@@ -581,6 +586,72 @@ pub unsafe extern "C" fn ligacao_abrir(ptr: *const u8, len: usize) -> u32 {
     }
 }
 
+/// **Quem atendeu uma ligação pelo código, conferido antes do `Hello`** (ADR
+/// 0068; [`Ligacao::apresentada`]): `{"apresentacao": hex, "impressao_dtls":
+/// hex64, "pino": hex64 | null}`. A apresentação é a mensagem `0x03` do
+/// anfitrião, a impressão é a que o navegador exigiu do DTLS, e o pino é a
+/// chave de uma ligação completa anterior.
+///
+/// Devolve 0 com `{"chave": hex64, "impressao": hex64}` (a chave provada, e a
+/// impressão dela: a do veredito da casca, a mesma que o desktop mostra), ou 1
+/// com `{"recusa": ConnectionError}` (ou `{"erro": "sem-ligacao"}`). **Tudo o que não se lê é recusa**: um campo
+/// que falta ou um hex torto chega à conferência como uma apresentação que não
+/// prova nada, e a entrada acaba como a de quem não é o dono do código.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_apresentada(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let lido: serde_json::Value = serde_json::from_slice(bytes).unwrap_or_default();
+    let texto = |campo: &str| lido.get(campo).and_then(serde_json::Value::as_str);
+    let apresentacao = texto("apresentacao")
+        .and_then(bytes_de_hex)
+        .unwrap_or_default();
+    let impressao = texto("impressao_dtls").and_then(crate::ligacao::bytes_do_hex);
+    let pino = texto("pino").and_then(crate::ligacao::bytes_do_hex);
+    com_a_ligacao(|ligacao| {
+        // Sem a impressão não há sobre o que conferir a assinatura: a
+        // apresentação vazia leva à mesma recusa, e fecha a entrada.
+        let visto = match impressao {
+            Some(impressao) => ligacao.apresentada(&apresentacao, &impressao, pino.as_ref()),
+            None => ligacao.apresentada(&[], &[0; 32], None),
+        };
+        match visto {
+            Ok(chave) => dizer(
+                serde_json::json!({
+                    "chave": crate::ligacao::hex_de(&chave),
+                    "impressao": crate::ligacao::hex_de(
+                        &seele_proto::transport::certificate_digest(&chave),
+                    ),
+                })
+                .to_string()
+                .into_bytes(),
+                0,
+            ),
+            Err(recusa) => dizer(
+                serde_json::json!({ "recusa": recusa })
+                    .to_string()
+                    .into_bytes(),
+                1,
+            ),
+        }
+    })
+}
+
+/// Bytes em hex, de qualquer comprimento par. `None` para o que não é hex.
+fn bytes_de_hex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.is_ascii() || !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    hex.as_bytes()
+        .chunks(2)
+        .map(|par| u8::from_str_radix(std::str::from_utf8(par).ok()?, 16).ok())
+        .collect()
+}
+
 /// Bytes do fluxo de controle. Devolve 0 com `{"passos": […]}`
 /// ([`Passo::em_json`]), ou 1 com `{"erro": "sem-ligacao"}`.
 ///
@@ -631,6 +702,11 @@ pub extern "C" fn ligacao_para_o_fio() -> u32 {
 /// O que sai do `Room` para o retrato: 0 com `{"sala": RetratoDaSala,
 /// "contados": {…}}`, ou 1 com `{"erro": "sem-sessao"}` antes da entrada (e
 /// `"sem-ligacao"` sem ligação).
+///
+/// `"protocolo"` é o número que esta ligação negociou (o
+/// `Connection::protocolo_negociado` do desktop): a casca o lê para não
+/// oferecer o que o servidor não conhece — editar mensagem, desbanir e a
+/// lista de banidos são do 13 —, em vez de oferecer e receber `ServidorAntigo`.
 #[no_mangle]
 pub extern "C" fn ligacao_retrato() -> u32 {
     com_a_ligacao(|ligacao| match ligacao.sessao() {
@@ -642,6 +718,7 @@ pub extern "C" fn ligacao_retrato() -> u32 {
                         "sala": sala,
                         "contados": sessao.contados().em_json(),
                         "telemetria": ligacao.telemetria(perda),
+                        "protocolo": ligacao.carimbo(),
                     })
                     .to_string()
                     .into_bytes(),
@@ -1059,6 +1136,7 @@ fn campos_do_pedido<const N: usize>(bytes: &[u8], nomes: [&str; N]) -> [String; 
 }
 
 /// **O `midia_do_mod`** ([`crate::mods::midia`]): `{"id", "hash", "caminho"}`
+/// e, quando a página o nomeia, `"uso"` (o lugar em que a imagem aparece),
 /// sobre o último pacote entregue. Devolve 0 com o `MidiaDoMod` do desktop
 /// (sem `uri` para o som), ou 1 com `{"Recusado": {"motivo"}}`.
 ///
@@ -1068,9 +1146,12 @@ fn campos_do_pedido<const N: usize>(bytes: &[u8], nomes: [&str; N]) -> [String; 
 #[no_mangle]
 pub unsafe extern "C" fn mod_midia(ptr: *const u8, len: usize) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `entrada`.
-    let [id, hash, caminho] =
-        campos_do_pedido(unsafe { entrada(ptr, len) }, ["id", "hash", "caminho"]);
-    match crate::mods::midia(&mut o_pacote(), &id, &hash, &caminho) {
+    let [id, hash, caminho, uso] = campos_do_pedido(
+        unsafe { entrada(ptr, len) },
+        ["id", "hash", "caminho", "uso"],
+    );
+    let uso = (!uso.is_empty()).then_some(uso.as_str());
+    match crate::mods::midia(&mut o_pacote(), &id, &hash, &caminho, uso) {
         Ok(midia) => dizer(midia.to_string().into_bytes(), 0),
         Err(motivo) => recusa_de_mod(&motivo),
     }
@@ -1597,6 +1678,25 @@ pub unsafe extern "C" fn perfil_icone(ptr: *const u8, len: usize) -> u32 {
     match crate::perfil::icone_nativo(bytes) {
         Some(png) => dizer(png, 0),
         None => dizer(b"\"IconNotAPicture\"".to_vec(), 1),
+    }
+}
+
+/// **A imagem de um perfil como ela vai à página**: reduzida ao lugar em que
+/// aparece (`seele_sessao::reducao::imagem_do_perfil_para_a_janela`), pelo
+/// mesmo código do desktop. `capa` diferente de zero é a capa; zero, a foto.
+/// Devolve 0 com os bytes (os mesmos, quando já cabiam), ou 1 com
+/// `"TipoRecusado"`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_para_a_janela(capa: u32, ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    match seele_sessao::reducao::imagem_do_perfil_para_a_janela(bytes, capa != 0) {
+        Ok(reduzida) => dizer(reduzida, 0),
+        Err(_) => dizer(b"\"TipoRecusado\"".to_vec(), 1),
     }
 }
 
@@ -2298,6 +2398,24 @@ pub extern "C" fn voz_tocar_contas() -> u32 {
     com_a_reproducao(|reproducao| dizer(reproducao.contas().to_string().into_bytes(), 0))
 }
 
+/// Uma volta da medida da recepção ([`Reproducao::recepcao`]): o jitter e a
+/// perda de agora, e o relato para o servidor quando é a vez dele. `null` é
+/// «não medido». `fora` é a alça que não é voz (o som da tela), e não entra
+/// na conta.
+#[no_mangle]
+pub extern "C" fn voz_tocar_recepcao(agora_ms: f64, fora: u32) -> u32 {
+    com_a_reproducao(|reproducao| {
+        dizer(
+            reproducao
+                .recepcao(agora_ms, Some(fora))
+                .em_json()
+                .to_string()
+                .into_bytes(),
+            0,
+        )
+    })
+}
+
 /// As funções só de teste: o `cargo xtask web` confere com elas os bytes-ouro
 /// e o relógio de mídia dentro do `.wasm`. O `.wasm` da página sai sem a
 /// feature.
@@ -2586,7 +2704,7 @@ mod a_tela_ligada_pelo_servidor {
     /// transmite a tela 9 e a 4 a tela 11; guardada em `LIGACAO`.
     fn dentro() {
         let mut ligacao = Ligacao::abrir(Pedido {
-            sala_pessoal: false,
+            codigo: None,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -2760,7 +2878,7 @@ mod a_tela_ligada_pelo_servidor {
             // A volta: a sessão guardada, readotada.
             let _ = ligacao.retomar(
                 Pedido {
-                    sala_pessoal: false,
+                    codigo: None,
                     apelido: "marcela".into(),
                     chave_publica: [5; 32],
                     impressao: [7; 32],

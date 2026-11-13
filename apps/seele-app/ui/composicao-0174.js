@@ -137,11 +137,13 @@
       const botao = document.createElement("button"); botao.type = "button"; botao.className = "botao-fantasma";
       botao.textContent = nome;
       botao.addEventListener("click", () => original.click());
+      // O espelho escreve só o que mudou no original (`base.js`): este
+      // observador acorda a cada atributo escrito nele, mude ou não.
       const atualizar = () => {
-        botao.disabled = original.disabled;
-        botao.setAttribute("aria-label", original.getAttribute("aria-label") || original.title || nome);
+        if (botao.disabled !== original.disabled) botao.disabled = original.disabled;
+        porOAtributo(botao, "aria-label", original.getAttribute("aria-label") || original.title || nome);
         const pressionado = original.getAttribute("aria-pressed");
-        if (pressionado !== null) botao.setAttribute("aria-pressed", pressionado);
+        if (pressionado !== null) porOAtributo(botao, "aria-pressed", pressionado);
       };
       atualizar(); new MutationObserver(atualizar).observe(original, { attributes: true });
       acoes.append(botao);
@@ -182,13 +184,14 @@
     controles.setAttribute("aria-label", "Controles da chamada");
     const espelhar = (botao, original, { icone = false, rotulo = null, mostrar = () => !original.hidden } = {}) => {
       const atualizar = () => {
-        botao.hidden = !mostrar();
-        botao.disabled = original.disabled;
+        // Só o que mudou, como a fileira estreita de cima.
+        porOEscondido(botao, !mostrar());
+        if (botao.disabled !== original.disabled) botao.disabled = original.disabled;
         const desligado = original.getAttribute("aria-disabled");
-        if (desligado !== null) botao.setAttribute("aria-disabled", desligado);
+        if (desligado !== null) porOAtributo(botao, "aria-disabled", desligado);
         const pressionado = original.getAttribute("aria-pressed");
-        if (pressionado !== null) botao.setAttribute("aria-pressed", pressionado);
-        if (original.title) botao.title = original.title;
+        if (pressionado !== null) porOAtributo(botao, "aria-pressed", pressionado);
+        if (original.title) porOTitulo(botao, original.title);
         if (icone) {
           // O desenho do original (o glifo com ou sem o corte) e o nome dele.
           // Snapshots chegam durante pointerdown/up: preservar o alvo mantém o clique no WebKit.
@@ -196,11 +199,12 @@
               [...botao.childNodes].some((no, i) => !no.isEqualNode(original.childNodes[i]))) {
             botao.replaceChildren(...[...original.childNodes].map((no) => no.cloneNode(true)));
           }
-          botao.setAttribute("aria-label", original.getAttribute("aria-label") || original.title || "");
+          porOAtributo(botao, "aria-label", original.getAttribute("aria-label") || original.title || "");
         } else if (rotulo) {
           const texto = rotulo();
-          if (botao.lastChild?.nodeType === Node.TEXT_NODE) botao.lastChild.textContent = texto;
-          else botao.append(texto);
+          if (botao.lastChild?.nodeType === Node.TEXT_NODE) {
+            if (botao.lastChild.nodeValue !== texto) botao.lastChild.nodeValue = texto;
+          } else botao.append(texto);
         }
       };
       atualizar();
@@ -231,6 +235,14 @@
       const bVista = comGlifo(null); bVista.className = "chamada-controle";
       bVista.addEventListener("click", () => vista.click());
       espelhar(bVista, vista, { icone: true });
+      // A CÂMERA, ao lado do COMPARTILHAR: o mesmo espelho do botão do operador,
+      // com o estado, o indisponível e o porquê dele.
+      const camera = document.getElementById("operador-camera");
+      const bCamera = comGlifo(null); bCamera.className = "chamada-controle";
+      if (camera) {
+        bCamera.addEventListener("click", () => camera.click());
+        espelhar(bCamera, camera, { icone: true, mostrar: () => !camera.hidden });
+      }
       const troca = document.getElementById("operador-trocar-tela");
       const bTroca = comGlifo(null); bTroca.className = "chamada-controle";
       bTroca.addEventListener("click", () => troca.click());
@@ -246,7 +258,30 @@
       const bSala = comGlifo(null); bSala.className = "chamada-controle chamada-controle-sair";
       bSala.addEventListener("click", () => sair.click());
       espelhar(bSala, sair, { icone: true, mostrar: () => sair.dataset.alvo === "sala" });
-      controles.append(bMudo, bSurdo, bVista, bTroca, bServidor, bSala);
+      controles.append(bMudo, bSurdo, bVista, ...(camera ? [bCamera] : []), bTroca, bServidor, bSala);
+      // O estado da câmera, por extenso, na própria bandeja: nesta vista a
+      // coluna do operador sai de cena, e a frase que mora nela
+      // (`camera-estado`) sairia junto — a câmera negada ou parada ficaria só
+      // com um ícone a dizer isso. Quem a escreve é `desenharACamera`.
+      const estadoDaCamera = document.createElement("p");
+      estadoDaCamera.id = "chamada-camera-estado";
+      estadoDaCamera.className = "chamada-camera-estado";
+      estadoDaCamera.setAttribute("role", "status");
+      estadoDaCamera.hidden = true;
+      controles.append(estadoDaCamera);
+      if (typeof desenharACamera === "function") desenharACamera();
+      // E a queda da transmissão de tela, pelo mesmo motivo: a linha que a
+      // diz mora no operador (`tela-estado`), que nesta vista sai de cena. A
+      // mesma letra do estado da câmera, na cor do aviso. Quem a escreve é
+      // `desenharAQuedaDaTela`, em `camada-compartilhar.js`.
+      const estadoDaTela = document.createElement("p");
+      estadoDaTela.id = "chamada-tela-estado";
+      estadoDaTela.className = "chamada-camera-estado";
+      estadoDaTela.dataset.estado = "desligada";
+      estadoDaTela.setAttribute("role", "status");
+      estadoDaTela.hidden = true;
+      controles.append(estadoDaTela);
+      if (typeof desenharAQuedaDaTela === "function") desenharAQuedaDaTela();
       chamada.append(controles);
     }
 
@@ -275,8 +310,14 @@
       const redesenharMini = () => {
         if (sessao?.dataset.pessoasRecolhidas !== "sim" || !roster) return;
         const linhas = [...roster.querySelectorAll("li.pessoa[data-pessoa-id]")];
+        // **Um quadrado por pessoa, reaproveitado.** A faixa é refeita a cada
+        // mudança da lista (várias por segundo com alguém falando), e um
+        // quadrado novo a cada vez pagaria a leitura da imagem inteira de novo
+        // (ver `pintarOFundo`).
+        const antigos = new Map([...mini.children].map((item) => [item.dataset.pessoaId, item]));
         mini.replaceChildren(...linhas.map((linha) => {
-          const item = document.createElement("li");
+          const item = antigos.get(linha.dataset.pessoaId) ?? document.createElement("li");
+          item.dataset.pessoaId = linha.dataset.pessoaId;
           const quadro = linha.querySelector("[data-pessoa-do-avatar]");
           const nome = (linha.querySelector(".pessoa-nome")?.textContent || "").trim();
           const falando = linha.classList.contains("falando");
@@ -284,13 +325,16 @@
           item.dataset.fala = falando ? "sim" : "nao";
           item.title = falando ? `${nome} · falando` : nome;
           item.setAttribute("aria-label", item.title);
-          const imagem = quadro?.style.backgroundImage;
-          if (imagem && imagem !== "none") item.style.backgroundImage = imagem;
-          else item.textContent = (quadro?.dataset.iniciaisDoAvatar || nome).slice(0, 1).toUpperCase();
+          // A imagem vem da anotação, e não do estilo: ler o estilo de volta
+          // devolveria o `data:` inteiro, por pessoa, a cada mudança.
+          const imagem = quadro && typeof fundoDe === "function" ? fundoDe(quadro) : null;
+          const iniciais = imagem ? "" : (quadro?.dataset.iniciaisDoAvatar || nome).slice(0, 1).toUpperCase();
+          if (typeof pintarOFundo === "function") pintarOFundo(item, imagem);
+          if (item.textContent !== iniciais) item.textContent = iniciais;
           return item;
         }));
       };
-      if (roster) new MutationObserver(redesenharMini).observe(roster, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+      if (roster) new MutationObserver(redesenharMini).observe(roster, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-fundo-pendente"] });
       alternar.addEventListener("click", () => {
         if (!sessao) return;
         if (sessao.dataset.pessoasRecolhidas === "sim") delete sessao.dataset.pessoasRecolhidas;

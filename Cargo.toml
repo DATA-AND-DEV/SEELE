@@ -30,6 +30,9 @@ version = "0.0.0"
 edition = "2021"
 rust-version = "1.97"
 publish = false
+# AGPL-3.0, e só ela: «only», e não «or-later». O código é de um dono só, que
+# pode relicenciar; uma versão futura da AGPL não passa a valer sozinha.
+license = "AGPL-3.0-only"
 
 # Rules from specs/10-convencoes.md and specs/08-seguranca.md, applied in one place.
 # Crates needing an exception (seele-ffi, audio bindings) declare their own `[lints]`

@@ -38,6 +38,7 @@ const FILA_DA_TELA = 8;
 const QUADRO_DO_SOM_DA_TELA_US = 20_000;
 
 let sondaDaTela = null;
+let sondaDoCodificador = null;
 
 /** O leitor nativo de quadros, ou o leitor de vídeo do WebKit. */
 function temLeituraDeVideoDaTela() {
@@ -122,10 +123,23 @@ function leitorDeVideoSemProcessador(trilha) {
  */
 function sondarATela(codec) {
   if (!sondaDaTela) {
-    sondaDaTela = (async () => {
-      // A sonda usa a mesma condição do transmissor, incluindo o leitor de
-      // vídeo do WebKit quando ele não oferece TrackProcessor.
-      if (!temCapturaParaCodificar()) return false;
+    // A sonda usa a mesma condição do transmissor, incluindo o leitor de
+    // vídeo do WebKit quando ele não oferece TrackProcessor.
+    sondaDaTela = temCapturaParaCodificar() ? sondarOCodificadorDeVideo(codec) : Promise.resolve(false);
+  }
+  return sondaDaTela;
+}
+
+/**
+ * **Se o `VideoEncoder` desta janela codifica de verdade** no `codec` pedido:
+ * um quadro saindo dele dentro do prazo. É a metade da sonda que não depende
+ * de onde a imagem vem — a tela a usa (`sondarATela`), e a câmera também, que
+ * não tem `getDisplayMedia` a conferir. Feita uma vez por carga.
+ */
+function sondarOCodificadorDeVideo(codec) {
+  if (!sondaDoCodificador) {
+    sondaDoCodificador = (async () => {
+      if (typeof VideoEncoder !== "function" || typeof VideoFrame !== "function") return false;
       let codificador, timer;
       const saiu = new Promise((resolver) => {
         try {
@@ -149,7 +163,24 @@ function sondarATela(codec) {
       }
     })();
   }
-  return sondaDaTela;
+  return sondaDoCodificador;
+}
+
+/**
+ * A frase de uma transmissão desta página que parou sozinha, pelo passo em que
+ * parou: a da tela manda compartilhar de novo, e a da câmera manda ligá-la de
+ * novo (`FRASES_DA_CAMERA.parou`, em `frases.js`).
+ */
+function fraseDaTransmissaoQueParou(estaVez, passo) {
+  if (estaVez?.camera) return FRASES_DA_CAMERA.parou[passo];
+  return {
+    abrir: "Não foi possível abrir a transmissão. Compartilhe a tela novamente.",
+    ler: "Não foi possível ler a captura. Compartilhe a tela novamente.",
+    codificar: "A imagem compartilhada parou. Compartilhe a tela novamente.",
+    escrever: "A conexão da transmissão parou. Compartilhe a tela novamente.",
+    continuar: "Não foi possível continuar lendo a captura. Compartilhe a tela novamente.",
+    terminar: "A captura da imagem terminou. Compartilhe a tela novamente.",
+  }[passo];
 }
 
 /** Os bytes de um pedaço codificado. */
@@ -185,10 +216,17 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     return feito.resposta;
   }
 
-  /** Começa: a mídia que o seletor deu, e o pedido ao servidor. */
-  function comecar(midia, limites) {
+  /**
+   * Começa: a mídia que o seletor deu, e o pedido ao servidor.
+   *
+   * `camera` diz que a mídia é a câmera (o `getUserMedia`), e não a tela: o
+   * pedido é o `compartilhar_camera`, a abertura declara a fonte dela, a
+   * trilha é tratada como movimento, e o espelho dos quadros não sai — quem
+   * liga a câmera se vê pela própria mídia, sem decodificar o que codificou.
+   */
+  function comecar(midia, limites, { camera = false } = {}) {
     if (viva) fechar({ avisar: false });
-    viva = { midia, limites, tela: null, fluxo: null };
+    viva = { midia, limites, tela: null, fluxo: null, camera };
     const estaVez = viva;
     for (const trilha of midia.getVideoTracks()) {
       // Só o vídeo encerra a transmissão; áudio pode acabar separadamente.
@@ -196,7 +234,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     }
     try {
       if (!midia.getVideoTracks().some(trilha => trilha.readyState === "live")) throw "ScreenShareUnavailable";
-      pedir("compartilhar_tela", { limites });
+      pedir(camera ? "compartilhar_camera" : "compartilhar_tela", { limites });
     } catch (falha) {
       fechar();
       throw falha;
@@ -212,7 +250,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       const estaVez = viva;
       abrir().catch((falha) => {
         console.warn("tela: o fluxo da transmissão não abriu:", falha);
-        if (viva === estaVez) parar("Não foi possível abrir a transmissão. Compartilhe a tela novamente.");
+        if (viva === estaVez) parar(fraseDaTransmissaoQueParou(estaVez, "abrir"));
       });
     }
     const chave = mensagem.KeyFrameRequested;
@@ -226,14 +264,19 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     const estaVez = viva;
     const trilha = estaVez.midia.getVideoTracks()[0];
     const ajustes = trilha.getSettings();
+    // A fonte, pelo nome que o `.wasm` lê (`seele_web::tela::nome_da_fonte`).
+    const fonte = estaVez.camera ? "camera" : ajustes.displaySurface === "window" ? "window" : "monitor";
+    // Uma câmera é movimento: o navegador cede a nitidez antes do quadro.
+    if (estaVez.camera && "contentHint" in trilha) trilha.contentHint = "motion";
     const medidas = pedir("codificacao_da_tela", {
       limites: estaVez.limites,
+      fonte,
       largura: ajustes.width ?? 0,
       altura: ajustes.height ?? 0,
     });
     const abertura = pedir("abertura_da_tela", {
       tela: estaVez.tela,
-      monitor: ajustes.displaySurface !== "window",
+      fonte,
       largura: medidas.largura,
       altura: medidas.altura,
     });
@@ -245,7 +288,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     const fluxo = { escritor, escrita: Promise.resolve(), naFila: 0, chave: true, medidas, codificadores: [], leitores: [] };
     estaVez.fluxo = fluxo;
     escrever(fluxo, new Uint8Array(abertura));
-    emitir({ ScreenOpened: { screen: estaVez.tela, width: medidas.largura, height: medidas.altura } });
+    emitir({ ScreenOpened: { screen: estaVez.tela, width: medidas.largura, height: medidas.altura, source: fonte } });
 
     // A imagem.
     fluxo.configuracaoVideo = {
@@ -261,7 +304,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     criarCodificadorDaImagem(estaVez, fluxo);
     lerAImagem(estaVez, trilha).catch(falha => {
       console.warn("tela: falha ao ler a imagem:", falha);
-      if (viva === estaVez && estaVez.fluxo === fluxo) parar("Não foi possível ler a captura. Compartilhe a tela novamente.");
+      if (viva === estaVez && estaVez.fluxo === fluxo) parar(fraseDaTransmissaoQueParou(estaVez, "ler"));
     });
 
     // O som, no mesmo fluxo.
@@ -295,7 +338,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       catch (erro) { console.warn("tela: não foi possível recuperar o codificador:", erro); }
     }
     console.warn("tela: o codificador da imagem parou:", falha);
-    parar("A imagem compartilhada parou. Compartilhe a tela novamente.");
+    parar(fraseDaTransmissaoQueParou(estaVez, "codificar"));
   }
 
   function escrever(fluxo, bytes) {
@@ -305,7 +348,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       .catch((falha) => {
         if (!fluxo.caiu) console.warn("tela: a escrita do fluxo falhou:", falha);
         fluxo.caiu = true;
-        if (viva?.fluxo === fluxo) parar("A conexão da transmissão parou. Compartilhe a tela novamente.");
+        if (viva?.fluxo === fluxo) parar(fraseDaTransmissaoQueParou(viva, "escrever"));
       })
       .finally(() => {
         fluxo.naFila -= 1;
@@ -322,7 +365,8 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     junto.set(cabecalho);
     junto.set(bytes, cabecalho.length);
     escrever(fluxo, junto);
-    if (tipo !== 2) emitir({ ScreenFrame: { screen: estaVez.tela, key: tipo === 1, data: base64DosBytes(bytes) } });
+    // O espelho é da tela. Quem liga a câmera se vê pela própria mídia.
+    if (tipo !== 2 && !estaVez.camera) emitir({ ScreenFrame: { screen: estaVez.tela, key: tipo === 1, data: base64DosBytes(bytes) } });
   }
 
   /** A imagem da captura, na cadência e nas medidas do degrau. */
@@ -343,12 +387,12 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
         lido = await leitor.read();
       } catch (erro) {
         console.warn("tela: a leitura da captura parou:", erro);
-        if (viva === estaVez && estaVez.fluxo === fluxo) parar("Não foi possível continuar lendo a captura. Compartilhe a tela novamente.");
+        if (viva === estaVez && estaVez.fluxo === fluxo) parar(fraseDaTransmissaoQueParou(estaVez, "continuar"));
         break;
       }
       if (lido.done || viva !== estaVez || estaVez.fluxo !== fluxo) {
         lido.value?.close();
-        if (lido.done && viva === estaVez && estaVez.fluxo === fluxo) parar("A captura da imagem terminou. Compartilhe a tela novamente.");
+        if (lido.done && viva === estaVez && estaVez.fluxo === fluxo) parar(fraseDaTransmissaoQueParou(estaVez, "terminar"));
         break;
       }
       const original = lido.value;
@@ -446,7 +490,12 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       fluxo.escrita.finally(() => fluxo.escritor.close().catch(() => {}));
     }
     for (const trilha of estaVez.midia.getTracks()) trilha.stop();
-    if (estaVez.tela !== null && (avisar || fluxo)) emitir({ ScreenClosed: { screen: estaVez.tela, ...(erro ? { erro } : {}) } });
+    // Com o erro vai o que a transmissão mostrava: a queda da tela é dita ao
+    // lado do COMPARTILHAR (`camada-compartilhar.js`), e a da câmera, no
+    // controle dela (`camera.js`).
+    if (estaVez.tela !== null && (avisar || fluxo)) {
+      emitir({ ScreenClosed: { screen: estaVez.tela, ...(erro ? { erro, camera: estaVez.camera } : {}) } });
+    }
   }
 
   /** Para: o fluxo fecha, a captura solta, e o servidor fica sabendo. Idempotente. */
@@ -500,6 +549,14 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     fechar,
     get noAr() {
       return viva !== null;
+    },
+    /** Se o que está no ar é a câmera. */
+    get camera() {
+      return viva !== null && viva.camera;
+    },
+    /** A mídia do que está no ar, para quem a mostra a quem transmite. */
+    get midia() {
+      return viva?.midia ?? null;
     },
   };
 }

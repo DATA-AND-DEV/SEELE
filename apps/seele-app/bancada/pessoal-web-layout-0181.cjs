@@ -20,7 +20,7 @@ const motores = require('./playwright.cjs');
         await page.evaluate(() => {
           document.documentElement.dataset.casca = 'celular';
           const noop = () => {};
-          window.vista = criarVistaDaConversaPessoal({ acoes: { voltar: noop, criar: noop, chamar: noop, copiar: noop, atender: noop, recusar: noop, encerrar: noop, enviarTexto: noop, microfone: noop, compartilhar: noop, podeCompartilhar: () => true } });
+          window.vista = criarVistaDaConversaPessoal({ acoes: { voltar: noop, criar: noop, chamar: noop, copiar: noop, atender: noop, recusar: noop, encerrar: noop, enviarTexto: noop, microfone: noop, compartilhar: noop, podeCompartilhar: () => true, podeLigarCamera: () => true } });
           document.body.append(vista.elemento);
           vista.abrir({ apelido: 'Alex' });
         });

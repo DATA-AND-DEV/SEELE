@@ -47,6 +47,7 @@ use seele_voz::fontes::TabelaDeFontes;
 use seele_voz::gate::{GateConfig, GateMetrics, GateMode, VoiceGate};
 use seele_voz::jitter::{Decision, JitterBuffer, JitterConfig};
 use seele_voz::mixer::Mixer;
+use seele_voz::recepcao::{ContagemDaFonte, JanelaDeRecepcao};
 use seele_voz::relogio::{carimbo_do_quadro, RelogioDeMidia};
 use seele_voz::FRAME_SAMPLES;
 
@@ -388,7 +389,59 @@ pub struct Reproducao {
     /// Quantos quadros chegaram com outro tamanho que não 20 ms, e foram
     /// acertados com silêncio ou cortados.
     fora_do_quadro: u64,
+    /// A janela do relato de recepção, sobre os buffers destas fontes.
+    janela: JanelaDeRecepcao,
+    /// Quando é a próxima vez do relato, na hora da página. `None` até a
+    /// primeira volta, que só marca a partida.
+    proximo_relato_ms: Option<f64>,
 }
+
+/// O que a voz que toca mede da própria recepção, numa volta da medida.
+///
+/// São duas contas, com destinos diferentes, como no desktop:
+///
+/// - `jitter_ms` e `perda` são **o de agora**, para a tela e o sinal desta
+///   ponta (`Ligacao::medir`): o pior jitter de chegada (RFC 3550) e a pior
+///   perda entre as fontes, a perda contada desde que cada buffer nasceu — as
+///   mesmas do `worst_arrival_jitter_ms` e do `worst_loss_fraction` do
+///   desktop;
+/// - `relato` é **o da janela**, para o servidor
+///   (`ClientMessage::RelatoDeRecepcao`): a conta do
+///   [`seele_voz::recepcao`], a mesma do desktop, e só na vez dele.
+///
+/// `None` é «não medido», e nunca zero.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RecepcaoDaVoz {
+    /// O pior jitter de chegada entre as fontes, em milissegundos.
+    pub jitter_ms: Option<f32>,
+    /// A pior perda entre as fontes que já tiveram lugar para tocar, de 0 a 1.
+    pub perda: Option<f32>,
+    /// O relato desta volta, se é a vez dele e a janela mediu alguma coisa.
+    pub relato: Option<seele_proto::signal::Recepcao>,
+}
+
+impl RecepcaoDaVoz {
+    /// Como a página a lê: `null` no que não foi medido.
+    #[must_use]
+    pub fn em_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "jitter_ms": self.jitter_ms,
+            "perda": self.perda,
+            "relato": self.relato.map(|relato| serde_json::json!({
+                "perda": relato.perda,
+                "jitter_ms": relato.jitter_ms,
+            })),
+        })
+    }
+}
+
+/// De quanto em quanto tempo a voz que toca solta um relato, em milissegundos:
+/// o compasso do protocolo.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "mil milissegundos cabem exatos num f64"
+)]
+const INTERVALO_DO_RELATO_MS: f64 = seele_proto::signal::INTERVALO_DO_RELATO_MS as f64;
 
 impl Default for Reproducao {
     fn default() -> Self {
@@ -406,7 +459,68 @@ impl Reproducao {
             misturado: vec![0.0; FRAME_SAMPLES],
             fades: 0,
             fora_do_quadro: 0,
+            janela: JanelaDeRecepcao::nova(),
+            proximo_relato_ms: None,
         }
+    }
+
+    /// Uma volta da medida da recepção, na hora da página (`agora_ms`).
+    ///
+    /// O de agora sai a cada chamada. O relato segue a regra do `Relator` do
+    /// desktop (`seele-core`, `recepcao`): a primeira vez é um intervalo
+    /// depois da primeira chamada, a janela só anda na vez, e a vez seguinte
+    /// conta **de agora** — uma página que atrasou não relata em rajada. Sem
+    /// voz chegando a janela não mede, e não há relato: nem zero.
+    ///
+    /// Uma hora que não é número não anda a janela nem solta relato.
+    ///
+    /// `fora` é a alça que **não é voz** e não entra em nenhuma das contas: o
+    /// som da tela, que a página põe na mesma mistura. Ele chega pelo fluxo da
+    /// tela, sem número nem carimbo do fio — um fluxo que engasga deixaria
+    /// lugares sem quadro, e isso não é perda da voz que se ouve. No desktop
+    /// ele também não é fonte da telemetria da voz.
+    pub fn recepcao(&mut self, agora_ms: f64, fora: Option<u32>) -> RecepcaoDaVoz {
+        let mut medida = RecepcaoDaVoz::default();
+        let vozes = || self.fontes.iter().filter(|(alca, _)| Some(**alca) != fora);
+        for (_, fonte) in vozes() {
+            let m = fonte.buffer.metrics();
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "milissegundos e uma fração; f32 é o que o sinal carrega"
+            )]
+            {
+                if m.jitter_ms.is_finite() && m.jitter_ms >= 0.0 {
+                    let jitter = m.jitter_ms as f32;
+                    medida.jitter_ms =
+                        Some(medida.jitter_ms.map_or(jitter, |pior| pior.max(jitter)));
+                }
+                // Sem lugar nenhum não há fração: é «não medido», e não zero.
+                if m.frames_played + m.frames_concealed + m.frames_silenced > 0 {
+                    let perda = m.loss_fraction() as f32;
+                    medida.perda = Some(medida.perda.map_or(perda, |pior| pior.max(perda)));
+                }
+            }
+        }
+        if !agora_ms.is_finite() {
+            return medida;
+        }
+        match self.proximo_relato_ms {
+            Some(proximo) if agora_ms >= proximo => {}
+            Some(_) => return medida,
+            None => {
+                self.proximo_relato_ms = Some(agora_ms + INTERVALO_DO_RELATO_MS);
+                return medida;
+            }
+        }
+        self.proximo_relato_ms = Some(agora_ms + INTERVALO_DO_RELATO_MS);
+        // A alça no lugar do SSRC: é o nome que esta instância tem da fonte, e
+        // a janela só precisa que ele seja um por fonte.
+        let contagens: Vec<ContagemDaFonte> = vozes()
+            .map(|(alca, fonte)| ContagemDaFonte::do_buffer(*alca, &fonte.buffer.metrics()))
+            .collect();
+        let janela = self.janela.observar(agora_ms, &contagens);
+        medida.relato = seele_proto::signal::Recepcao::medida(janela.perda, janela.jitter_ms);
+        medida
     }
 
     /// Um quadro decodificado da fonte `alca`, com o cabeçalho que ele trouxe
@@ -886,6 +1000,254 @@ mod testes {
                 centesimos
             })
             .collect()
+    }
+
+    // ------------------------------------------------ a recepção medida
+
+    /// Uma pessoa falando pela alça 1 por `segundos`, um tique de 20 ms por
+    /// quadro como o worklet, com a medida pedida a cada `volta_ms` como a
+    /// página a pede. `chega(k)` diz em que tique o quadro `k` chega, ou
+    /// `None` se ele se perdeu. Devolve cada volta da medida, com a hora dela.
+    fn ouvir(
+        reproducao: &mut Reproducao,
+        de_ms: f64,
+        segundos: u16,
+        volta_ms: u16,
+        chega: impl Fn(u16) -> Option<u16>,
+    ) -> Vec<(f64, RecepcaoDaVoz)> {
+        let quadros = segundos * 50;
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a hora de um teste, em quadros"
+        )]
+        let primeiro = (de_ms / 20.0) as u16;
+        let mut voltas = Vec::new();
+        for tique in 0..quadros {
+            // Os quadros que chegam neste tique, na ordem em que chegam: o de
+            // número maior primeiro, que é a reordenação.
+            for k in (0..quadros).rev() {
+                if chega(k) == Some(tique) {
+                    let seq = primeiro.wrapping_add(k);
+                    reproducao.chegou(
+                        1,
+                        seq,
+                        u32::from(seq) * 960,
+                        de_ms + f64::from(tique) * 20.0,
+                        quadro_numero(k % 50),
+                    );
+                }
+            }
+            let _ = reproducao.quadro();
+            let agora = de_ms + f64::from(tique + 1) * 20.0;
+            if (tique + 1) % (volta_ms / 20) == 0 {
+                voltas.push((agora, reproducao.recepcao(agora, None)));
+            }
+        }
+        voltas
+    }
+
+    fn relatos(voltas: &[(f64, RecepcaoDaVoz)]) -> Vec<(f64, seele_proto::signal::Recepcao)> {
+        voltas
+            .iter()
+            .filter_map(|(quando, volta)| volta.relato.map(|relato| (*quando, relato)))
+            .collect()
+    }
+
+    /// **Sem nada chegando, nada é medido — e nada é dividido por zero**: nem a
+    /// voz sem fonte, nem a fonte cujo primeiro quadro acabou de chegar e
+    /// ainda não teve lugar para tocar. O que sai é «não medido», e o JSON da
+    /// página leva `null`, nunca `0` nem `NaN`.
+    #[test]
+    fn sem_nada_chegando_nada_e_medido_nem_dividido_por_zero() {
+        let mut reproducao = Reproducao::nova();
+        for segundo in 0..8_u16 {
+            let volta = reproducao.recepcao(f64::from(segundo) * 1000.0, None);
+            assert_eq!(volta, RecepcaoDaVoz::default(), "no segundo {segundo}");
+        }
+        assert_eq!(
+            reproducao.recepcao(9_000.0, None).em_json().to_string(),
+            r#"{"jitter_ms":null,"perda":null,"relato":null}"#
+        );
+        // Uma fonte que chegou e ainda não teve tique nenhum: zero lugares.
+        reproducao.chegou(1, 0, 0, 10_000.0, quadro_numero(0));
+        let volta = reproducao.recepcao(10_000.0, None);
+        assert_eq!(volta.perda, None, "zero lugares não é zero de perda");
+        assert_eq!(volta.relato, None);
+        assert!(volta.jitter_ms.is_some_and(f32::is_finite));
+    }
+
+    /// **A perda relatada é a do que faltou**: um quadro perdido em cada dez
+    /// vira dez por cento, na unidade do protocolo (uma fração de 0 a 1), com
+    /// o jitter em milissegundos, e o relato passa na conferência que o
+    /// servidor faz.
+    #[test]
+    fn um_quadro_perdido_em_dez_vira_dez_por_cento_no_relato() {
+        let mut reproducao = Reproducao::nova();
+        let voltas = ouvir(&mut reproducao, 0.0, 8, 250, |k| (k % 10 != 5).then_some(k));
+        let relatos = relatos(&voltas);
+        let (_, ultimo) = relatos
+            .last()
+            .copied()
+            .expect("com fala bastante há relato");
+        assert_eq!(ultimo.confere(), Ok(()));
+        let perda = ultimo.perda.expect("a perda da janela");
+        assert!(
+            (perda - 0.1).abs() < 0.02,
+            "relatou {perda}, e faltaram 10%"
+        );
+        let jitter = ultimo.jitter_ms.expect("o jitter da janela");
+        assert!((0.0..5.0).contains(&jitter), "jitter de {jitter} ms");
+        // O de agora, para a tela, mede a mesma voz.
+        let (_, volta) = voltas.last().copied().expect("a última volta");
+        assert!(
+            volta.perda.is_some_and(|p| (p - 0.1).abs() < 0.02),
+            "{volta:?}"
+        );
+        assert!(
+            volta.jitter_ms.is_some_and(|j| (0.0..5.0).contains(&j)),
+            "{volta:?}"
+        );
+    }
+
+    /// **Reordenação não é perda**: os quadros chegam aos pares trocados (o de
+    /// número maior antes), nenhum falta, e o relato diz zero de perda — e um
+    /// jitter que deixou de ser zero, porque a chegada oscilou.
+    #[test]
+    fn quadros_fora_de_ordem_nao_contam_como_perda() {
+        let mut reproducao = Reproducao::nova();
+        // O par (2n, 2n+1) chega junto, no tique do segundo, com o segundo na
+        // frente.
+        let voltas = ouvir(&mut reproducao, 0.0, 8, 250, |k| Some(k | 1));
+        let (_, ultimo) = relatos(&voltas)
+            .last()
+            .copied()
+            .expect("com fala bastante há relato");
+        let perda = ultimo.perda.expect("a perda da janela");
+        assert!(perda < 0.01, "a reordenação virou {perda} de perda");
+        assert!(
+            ultimo.jitter_ms.is_some_and(|j| j > 1.0),
+            "os pares chegam juntos, e o jitter ficou em {:?}",
+            ultimo.jitter_ms
+        );
+    }
+
+    /// **A janela desliza**: quatro segundos ruins no começo saem do relato
+    /// depois de cinco segundos limpos. A perda de agora, que entra no sinal
+    /// desta ponta como no desktop, é a contada desde que o buffer nasceu, e
+    /// não esquece.
+    #[test]
+    fn a_perda_velha_sai_da_janela_do_relato() {
+        let mut reproducao = Reproducao::nova();
+        let ruins = ouvir(&mut reproducao, 0.0, 4, 250, |k| (k % 5 != 2).then_some(k));
+        let (_, no_ruim) = relatos(&ruins).last().copied().expect("o relato do começo");
+        assert!(
+            no_ruim.perda.is_some_and(|p| (p - 0.2).abs() < 0.04),
+            "{no_ruim:?}"
+        );
+        let limpos = ouvir(&mut reproducao, 4_000.0, 8, 250, Some);
+        let (_, depois) = relatos(&limpos).last().copied().expect("o relato do fim");
+        assert_eq!(
+            depois.perda,
+            Some(0.0),
+            "a perda de 8 s atrás ficou na janela"
+        );
+        let (_, volta) = limpos.last().copied().expect("a última volta");
+        assert!(volta.perda.is_some_and(|p| p > 0.03), "{volta:?}");
+    }
+
+    /// **Um relato por segundo, e nunca em rajada**: a página pede a medida
+    /// quatro vezes por segundo, e o relato sai uma. A primeira volta só marca
+    /// a partida; uma página que atrasou dez segundos não manda dois seguidos;
+    /// uma hora que não é número não solta nada.
+    #[test]
+    fn o_relato_sai_uma_vez_por_segundo_e_nunca_em_rajada() {
+        let mut reproducao = Reproducao::nova();
+        let voltas = ouvir(&mut reproducao, 0.0, 8, 250, Some);
+        let relatos = relatos(&voltas);
+        // A janela pede dois segundos de fala; daí em diante, um por segundo.
+        assert!(
+            (4..=6).contains(&relatos.len()),
+            "{} relatos em 8 s",
+            relatos.len()
+        );
+        for par in relatos.windows(2) {
+            let [(antes, _), (depois, _)] = par else {
+                continue;
+            };
+            assert!(
+                depois - antes >= 1000.0,
+                "relatos a {} ms um do outro",
+                depois - antes
+            );
+        }
+        // Dez segundos sem pedir, com a voz tocando: uma volta, um relato.
+        for _ in 0..500 {
+            let _ = reproducao.quadro();
+        }
+        let tarde = reproducao.recepcao(18_000.0, None);
+        let logo = reproducao.recepcao(18_010.0, None);
+        assert_eq!(logo.relato, None, "depois de {:?}", tarde.relato);
+        assert_eq!(reproducao.recepcao(f64::NAN, None).relato, None);
+        assert_eq!(reproducao.recepcao(f64::INFINITY, None).relato, None);
+    }
+
+    /// **O som da tela não é voz**: a alça dele, que a página diz qual é, fica
+    /// fora das duas contas, por pior que chegue.
+    #[test]
+    fn o_som_da_tela_nao_entra_na_medida() {
+        const TELA: u32 = u32::MAX;
+        let mut reproducao = Reproducao::nova();
+        let mut ultima = RecepcaoDaVoz::default();
+        let mut com_a_tela = None;
+        for k in 0..400_u16 {
+            reproducao.chegou(
+                1,
+                k,
+                u32::from(k) * 960,
+                f64::from(k) * 20.0,
+                quadro_numero(k % 50),
+            );
+            // O som da tela perde um quadro em cada dois.
+            if k % 2 == 0 {
+                reproducao.chegou(
+                    TELA,
+                    k,
+                    u32::from(k) * 960,
+                    f64::from(k) * 20.0,
+                    quadro_numero(k % 50),
+                );
+            }
+            let _ = reproducao.quadro();
+            if (k + 1) % 50 == 0 {
+                let agora = f64::from(k + 1) * 20.0;
+                ultima = reproducao.recepcao(agora, Some(TELA));
+                if ultima.relato.is_some() {
+                    com_a_tela = ultima.relato;
+                }
+            }
+        }
+        assert_eq!(ultima.perda, Some(0.0), "{ultima:?}");
+        assert_eq!(com_a_tela.and_then(|relato| relato.perda), Some(0.0));
+        // Sem dizer qual é a alça da tela, a perda dela entraria.
+        let mut tudo = reproducao.recepcao(9_000.0, None);
+        assert!(tudo.perda.is_some_and(|p| p > 0.3), "{tudo:?}");
+        tudo.relato = None;
+        assert_ne!(tudo, ultima);
+    }
+
+    /// **Sem voz, o relato para**: a fonte esquecida sai da janela com o que
+    /// tinha, e nada é relatado no lugar dela — nem zero.
+    #[test]
+    fn a_fonte_esquecida_nao_e_mais_relatada() {
+        let mut reproducao = Reproducao::nova();
+        let voltas = ouvir(&mut reproducao, 0.0, 4, 250, Some);
+        assert!(!relatos(&voltas).is_empty());
+        reproducao.esquecer(1);
+        for segundo in 5..10_u16 {
+            let volta = reproducao.recepcao(f64::from(segundo) * 1000.0, None);
+            assert_eq!(volta, RecepcaoDaVoz::default(), "no segundo {segundo}");
+        }
     }
 
     /// **Os quadros saem em ordem**, depois da espera do buffer, e sem fade no

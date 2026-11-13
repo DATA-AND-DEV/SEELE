@@ -1263,6 +1263,13 @@ button.linha-nome:hover { text-decoration: underline; }
 
 .mensagem:not(.mensagem-segue) { margin-top: 10px; }
 .mensagens > li:first-child { margin-top: 0; }
+/* **Nenhuma linha encolhe.** A lista é uma coluna flexível que rola, e um item
+   de coluna flexível cede (`flex-shrink: 1`) antes de a lista rolar. Quem o
+   segura é o `min-height: auto`, e a linha do desktop troca esse `auto` por
+   24px: na janela mínima (720×480, onde sobram ~100px para a conversa) cada
+   mensagem encolhia para 24px e o texto dela saía por cima da seguinte
+   (`bancada/desktop-estreito.cjs`, os extremos da janela). */
+.mensagens > li { flex-shrink: 0; }
 
 /* A grade do comp v3: 34px de avatar, o resto para autor, hora e corpo, com uma
    marca de 2px à esquerda. A marca é onde o comp separa mensagem de sistema e
@@ -1468,6 +1475,9 @@ button.linha-nome:hover { text-decoration: underline; }
   flex: 1;
   min-width: 0;
   display: flex;
+  /* Quebra, para o aviso de tamanho descer para a fileira de baixo em vez de
+     tomar a largura do campo: ver `.compor-caixa > .campo-tamanho`, no fim. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 9px;
   padding: 0 14px;
@@ -2603,7 +2613,33 @@ button.linha-nome:hover { text-decoration: underline; }
 /* As portas das gavetas não existem fora da largura em que as gavetas existem.
    Este é o estado normal delas, e os `@media` de baixo são a exceção. */
 .linha-canais,
-.linha-pessoas { display: none; }
+.linha-pessoas {
+  display: none;
+  /* **A aparência mora aqui, fora dos `@media`.** Ela morava dentro deles — a
+     de `.linha-canais` no de 900px —, e a vista da chamada mostra essa porta em
+     toda largura (a coluna de canais sai de cena): acima de 900px o «SALAS E
+     CANAIS» aparecia como botão nativo, branco, sem estilo nenhum. Os `@media`
+     de baixo decidem só QUANDO a porta existe (`bancada/desktop-estreito.cjs`
+     compara o estilo dela a 800, 1100, 1280 e 1920px). */
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+.linha-canais:hover,
+.linha-canais[aria-expanded="true"],
+.linha-pessoas:hover,
+.linha-pessoas[aria-expanded="true"] {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
 
 
 
@@ -2760,13 +2796,13 @@ button.linha-nome:hover { text-decoration: underline; }
   border-color: var(--nucleo-rotulo);
 }
 
-.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):not([data-ativo="sim"]):not(.ativo) {
+.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista, #operador-camera):not([data-ativo="sim"]):not(.ativo) {
   background-color: transparent;
   color: var(--nucleo-texto);
   border-color: var(--nucleo-rotulo);
 }
 
-.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):is(:hover, :focus-visible) {
+.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista, #operador-camera):is(:hover, :focus-visible) {
   border-color: var(--nucleo-acento);
 }
 
@@ -3267,26 +3303,7 @@ button.linha-nome:hover { text-decoration: underline; }
     border-left: 1px solid var(--seele-linha-forte);
   }
 
-  .linha-pessoas {
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
-    flex: 0 0 auto;
-    font: inherit;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    color: var(--seele-osso-apagado);
-    background: none;
-    border: 1px solid var(--seele-linha-forte);
-    cursor: pointer;
-  }
-
-  .linha-pessoas:hover,
-  .linha-pessoas[aria-expanded="true"] {
-    color: var(--seele-laranja-nerv);
-    border-color: var(--seele-laranja-nerv);
-  }
+  .linha-pessoas { display: flex; }
   /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
      colada na borda da janela. */
   .painel-linha { border-right: none; }
@@ -3337,26 +3354,7 @@ button.linha-nome:hover { text-decoration: underline; }
   /* A porta da gaveta. Ela existe só aqui — acima deste ponto a coluna está na
      tela, e um botão que abre o que já está aberto é um botão que não faz
      nada. */
-  .linha-canais {
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
-    flex: 0 0 auto;
-    font: inherit;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    color: var(--seele-osso-apagado);
-    background: none;
-    border: 1px solid var(--seele-linha-forte);
-    cursor: pointer;
-  }
-
-  .linha-canais:hover,
-  .linha-canais[aria-expanded="true"] {
-    color: var(--seele-laranja-nerv);
-    border-color: var(--seele-laranja-nerv);
-  }
+  .linha-canais { display: flex; }
 }
 
 @media (max-width: 700px) {
@@ -3549,6 +3547,35 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) #botao-server-sessao { order: 3; }
 :root:not([data-casca="celular"]) #operador-sair { order: 4; }
 :root:not([data-casca="celular"]) #operador-vista { order: 5; }
+/* A câmera (1.0), ao lado do COMPARTILHAR: o mesmo desenho, a mesma pílula. */
+:root:not([data-casca="celular"]) #operador-camera { order: 6; }
+/* O estado dela por extenso, numa linha própria sob os controles, com a mesma
+   letra do estado da sala. `pre-line`: as frases têm duas linhas, a que diz o
+   que houve e a que diz o que fazer. */
+:root:not([data-casca="celular"]) .operador > #camera-estado {
+  order: 8;
+  flex: 1 0 100%;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-line;
+  color: var(--seele-rotulo-painel);
+}
+:root:not([data-casca="celular"]) .operador > #camera-estado[data-estado="desligada"],
+:root:not([data-casca="celular"]) .operador > #camera-estado[data-estado="parada"] { color: var(--seele-laranja-claro); }
+/* A queda da transmissão de tela, na mesma linha e com a mesma letra do
+   estado da câmera, e sempre na cor do aviso: só aparece quando algo caiu. */
+:root:not([data-casca="celular"]) .operador > #tela-estado {
+  order: 8;
+  flex: 1 0 100%;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-line;
+  color: var(--seele-laranja-claro);
+}
 :root:not([data-casca="celular"]) .operador > #sala-estado { order: 8; flex: 1 0 100%; margin: 0; font-size: 11px; color: var(--seele-rotulo-painel); }
 /* **«microfone aberto · ouvindo» sai da vista** (0.19, pedido do dono): os
    ícones do microfone e do fone já dizem o estado, com a barra quando
@@ -3577,10 +3604,14 @@ button.linha-nome:hover { text-decoration: underline; }
    compartilhar: colunas iguais, cada controle esticado em pílula de 44px. Fora
    da vista da ligação, que tem a barra dela (`camada-sala.css`). */
 #tela-sessao:not([data-vista="ligacao"]) .operador > .operador-topo > :is(#botao-mudo, #botao-surdo, #botao-server-sessao),
-#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-fileira > :is(#operador-sair, #operador-vista) {
+#tela-sessao:not([data-vista="ligacao"]) .operador > .operador-fileira > :is(#operador-sair, #operador-vista, #operador-camera) {
   flex: 1 1 0;
   width: auto;
-  min-width: 44px;
+  /* 40px, e não 44: com a câmera (1.0) são seis comandos numa sala, e a 44 o
+     sexto caía sozinho na linha de baixo, esticado na largura do cartão. A
+     altura continua 44, e a largura real de cada um é a sexta parte do cartão
+     (40,7px no cartão de 290). */
+  min-width: 40px;
   height: 44px;
   min-height: 44px;
   padding: 0;
@@ -3589,7 +3620,7 @@ button.linha-nome:hover { text-decoration: underline; }
   justify-content: center;
   border-radius: var(--seele-raio-pilula);
 }
-#tela-sessao:not([data-vista="ligacao"]) .operador :is(#operador-sair, #operador-vista, #botao-server-sessao) .glifo { width: 1.15em; height: 1.15em; }
+#tela-sessao:not([data-vista="ligacao"]) .operador :is(#operador-sair, #operador-vista, #operador-camera, #botao-server-sessao) .glifo { width: 1.15em; height: 1.15em; }
 
 /* ---------- a conversa: cabeçalho ---------- */
 :root:not([data-casca="celular"]) .linha-barra { flex-wrap: wrap; }
@@ -3614,7 +3645,13 @@ button.linha-nome:hover { text-decoration: underline; }
   min-height: 24px;
 }
 :root:not([data-casca="celular"]) .mensagem-avatar { display: none; }
-:root:not([data-casca="celular"]) .mensagem-conteudo { display: block; }
+/* **O teto da linha.** O `max-width: 76ch` do `.corpo` (mais acima) não vale
+   aqui: nesta casca o corpo é `inline`, para correr na mesma linha do autor, e
+   largura máxima não se aplica a caixa em linha. A 2560×1440 a mensagem
+   atravessava o painel inteiro (~198 caracteres por linha). O teto passa para
+   o bloco que contém autor e corpo — a mesma medida, 76 caracteres —, e a
+   coluna continua à esquerda, colada na calha da hora. */
+:root:not([data-casca="celular"]) .mensagem-conteudo { display: block; max-width: 76ch; }
 :root:not([data-casca="celular"]) .mensagem-cabeca { display: inline; }
 :root:not([data-casca="celular"]) .mensagem-hora,
 :root:not([data-casca="celular"]) .mensagem-hora-calha {
@@ -3839,4 +3876,371 @@ button.linha-nome:hover { text-decoration: underline; }
   }
   :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .paineis > .trilha { display: flex; }
   :root:not([data-casca="celular"]) .sessao-navegacao { padding: 4px 8px; flex-wrap: wrap; }
+}
+
+/* ==========================================================================
+   A mesa de texto da 1.0: as não lidas de cada canal, a mensagem que chama,
+   a citação de uma resposta, as ações de uma mensagem, a faixa do modo de
+   escrever e a lista de quem chamar com `@`.
+
+   No fim da folha de propósito: as regras da conversa e do compositor foram
+   reescritas três vezes mais acima (o v3, a 0.9.0 e a 0.19), e a ordem é o
+   que decide quem vence. Só tokens — nenhuma cor nova.
+   ========================================================================== */
+
+/* ---------- as não lidas de um canal ----------
+   Uma pastilha na ponta da fileira: o número, e um `@` antes dele quando
+   alguma das não lidas chama quem está logado. A que chama troca de fundo
+   **e** de texto (`@`): a cor nunca diz isso sozinha. */
+.linha-nao-lidas {
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 24px;
+  padding: 2px 8px;
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-osso);
+  background: var(--seele-linha-forte);
+}
+.linha-nao-lidas.com-chamada {
+  font-weight: 700;
+  color: var(--seele-tinta-no-acento);
+  background: var(--seele-laranja-nerv);
+}
+.linha-nao-lidas-conta { white-space: nowrap; }
+/* O canal com coisa por ler sobe do apagado para o osso, como o aberto. */
+.linha:has(.linha-nao-lidas) { color: var(--seele-osso); }
+/* A frase é para quem escuta: fora da vista, e nunca fora da árvore. */
+.linha-nao-lidas-frase {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- a mensagem que chama quem está logado ----------
+   Um fundo no tom do acento e uma barra à esquerda — forma, e não só cor — e
+   a marca escrita «chamou você» na cabeça. */
+.mensagem.mensagem-chamou {
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 9%, transparent);
+  box-shadow: inset 3px 0 0 var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio-miudo);
+}
+/* No computador a hora mora na calha da esquerda, colada na borda da fileira:
+   a barra vai para fora dela, na margem da lista, e o fundo a acompanha. */
+:root:not([data-casca="celular"]) .mensagem.mensagem-chamou {
+  box-shadow: -10px 0 0 color-mix(in srgb, var(--seele-laranja-nerv) 9%, transparent);
+  border-radius: 0 var(--seele-raio-miudo) var(--seele-raio-miudo) 0;
+}
+:root:not([data-casca="celular"]) .mensagem.mensagem-chamou::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--seele-laranja-nerv);
+}
+/* A marca «editada» corre na mesma fileira do corpo, no computador: sem um
+   vão, ela encostava na primeira palavra. Só a edição pelo app a faz aparecer
+   com frequência, e é a mesa de texto da 1.0 que a traz. */
+:root:not([data-casca="celular"]) .mensagem .editada { margin-right: 8px; }
+.mensagem-chamou-marca {
+  display: inline-block;
+  margin: 0 8px 0 0;
+  padding: 0 7px;
+  border: 1px solid var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio-pilula);
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  color: var(--seele-laranja-nerv);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+/* A original para a qual uma citação acabou de rolar. */
+.mensagem.mensagem-apontada {
+  outline: 1px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+  border-radius: var(--seele-raio-miudo);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 6%, transparent);
+}
+
+/* ---------- a citação de uma resposta ----------
+   Uma fileira só, acima do que a mensagem diz: uma barra, o autor e o começo
+   do corpo, cortado pela largura. Botão quando a original está na página (o
+   clique rola até ela), texto quando não está. */
+:is(.mensagem-citacao, .mensagem-citacao-ausente) {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 2px;
+  padding: 0 0 0 8px;
+  border: 0;
+  border-left: 2px solid var(--seele-linha-forte);
+  border-radius: 0;
+  background: none;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--seele-rotulo-painel);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+button.mensagem-citacao { cursor: pointer; }
+.mensagem-citacao:hover { border-left-color: var(--seele-laranja-nerv); color: var(--seele-osso); }
+.mensagem-citacao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+.mensagem-citacao-autor { flex: 0 0 auto; font-weight: 600; color: var(--seele-osso); }
+.mensagem-citacao-corpo { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mensagem-citacao-ausente { font-style: italic; }
+
+/* ---------- responder, editar e remover ----------
+   O grupo flutua à direita da cabeça e não ocupa fileira: uma continuação de
+   rajada sem cabeça continua sem fileira a mais. Revelado pelo ponteiro e pelo
+   teclado, os três juntos.
+
+   **Apagados com `opacity`, e não com `visibility`.** Um botão com
+   `visibility: hidden` não recebe o foco: o Tab pula por cima dele, e o
+   `:focus-visible` que deveria revelá-lo nunca acontece — o controle fica só
+   para quem tem ponteiro (medido em `bancada/mesa-de-texto.cjs`: `focus()` num
+   botão assim não pega). Transparente, ele continua na ordem do Tab, e o foco
+   em qualquer um dos três acende o grupo inteiro. O `remover`, que mora neste
+   grupo, entra na mesma regra. */
+.mensagem-acoes {
+  float: right;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-left: 12px;
+}
+/* **No computador o grupo sai do fluxo**: flutuando, ele encurtava a primeira
+   fileira de toda mensagem mesmo invisível (o texto quebrava 170px antes da
+   borda, em toda a conversa). Pousado no canto da fileira, ele não ocupa
+   nada; revelado, cobre o fim da primeira fileira com fundo próprio, como uma
+   barra de ferramentas que aparece sobre o que se aponta. */
+:root:not([data-casca="celular"]) .mensagem .mensagem-acoes {
+  float: none;
+  position: absolute;
+  top: 1px;
+  right: 0;
+  margin: 0;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--seele-raio-pilula);
+}
+:root:not([data-casca="celular"]) .mensagem:hover .mensagem-acoes,
+:root:not([data-casca="celular"]) .mensagem .mensagem-acoes:focus-within {
+  background: var(--seele-negro-absoluto);
+  border-color: var(--seele-linha-forte);
+}
+.mensagem-acoes .moderar-remover { float: none; margin-left: 0; visibility: visible; }
+.mensagem-acao {
+  font: inherit;
+  font-size: 11px;
+  color: var(--seele-osso);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.mensagem-acoes :is(.mensagem-acao, .moderar-remover) { opacity: 0; }
+.mensagem:hover .mensagem-acoes :is(.mensagem-acao, .moderar-remover),
+.mensagem-acoes:focus-within :is(.mensagem-acao, .moderar-remover) {
+  opacity: 1;
+}
+.mensagem-acao:hover { color: var(--seele-laranja-nerv); }
+.mensagem-acao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+/* Sem ponteiro que paire (uma tela de toque na casca do computador), não há
+   como revelar: os três ficam à vista, numa fileira própria embaixo da
+   mensagem, e não por cima do texto. */
+@media (hover: none) {
+  .mensagem-acoes :is(.mensagem-acao, .moderar-remover) { opacity: 1; }
+  :root:not([data-casca="celular"]) .mensagem .mensagem-acoes {
+    position: static;
+    display: flex;
+    justify-content: flex-end;
+    padding: 2px 0;
+  }
+}
+
+/* ---------- a faixa do modo de escrever ----------
+   Acima do campo: respondendo a alguém, ou editando a própria mensagem. A
+   frase diz qual; a barra à esquerda só acompanha. */
+.compor-modo {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 12px 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--seele-controle-borda);
+  border-left: 3px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  background: color-mix(in srgb, var(--seele-tinta-do-vidro, var(--seele-osso)) 6%, transparent);
+  font-family: var(--seele-ui);
+  font-size: 13px;
+}
+.compor-modo[hidden] { display: none; }
+.compor-modo[data-modo="editar"] { border-left-color: var(--seele-laranja-nerv); }
+.compor-modo[data-modo="responder"] { border-left-color: var(--seele-padrao-azul); }
+.compor-modo-texto { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.compor-modo-frase { flex: 0 0 auto; font-weight: 600; color: var(--seele-osso); }
+.compor-modo-citacao {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--seele-osso-apagado);
+}
+.compor-modo-cancelar { flex: 0 0 auto; min-height: 32px; }
+.compor-modo-erro { flex: 1 1 100%; margin: 0; white-space: pre-line; }
+/* **Na janela baixa a faixa não pode custar a conversa.** A 720×480 (a mínima
+   do `tauri.conf.json`) sobram uns 95px para a lista de mensagens, e a faixa
+   de 50px deixava a pessoa respondendo a uma mensagem que não via mais. Ali
+   ela encolhe para uma fileira justa, e o rótulo «Sua mensagem em #canal» sai
+   da vista enquanto ela está de pé — fora da vista, e não da árvore: ele é o
+   nome acessível do campo. A faixa já diz o que o campo está fazendo. */
+@media (max-height: 560px) {
+  .compor-modo { margin-bottom: 4px; padding: 2px 4px 2px 12px; font-size: 12px; }
+  .compor-modo-cancelar { min-height: 28px; padding: 0 12px; font-size: 12px; }
+  :root:not([data-casca="celular"]) .compor-modo:not([hidden]) + #form-mensagem > .compor-rotulo {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* ---------- a lista de quem chamar com `@` ----------
+   Ancorada no formulário e aberta para cima, sobre o fim da conversa: não
+   empurra nada. Rola por dentro, com teto. A opção acesa tem contorno além do
+   fundo, e `aria-selected` diz o mesmo a quem escuta. */
+#form-mensagem { position: relative; }
+.mencoes {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  width: min(360px, calc(100% - 16px));
+  max-height: 248px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio);
+  background: var(--seele-negro-absoluto);
+}
+.mencoes[hidden] { display: none; }
+.mencoes-opcao {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--seele-raio-miudo);
+  cursor: pointer;
+}
+.mencoes-opcao:hover { background: var(--seele-linha); }
+.mencoes-opcao.escolhida { background: var(--seele-linha); border-color: var(--seele-laranja-nerv); }
+.mencoes-nome { font-family: var(--seele-mono); font-size: 14px; color: var(--seele-osso); overflow-wrap: anywhere; }
+.mencoes-exibido { font-family: var(--seele-ui); font-size: 12px; color: var(--seele-osso-apagado); }
+.mencoes-fora {
+  margin-left: auto;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+}
+.mencoes-vazio { padding: 8px 10px; font-family: var(--seele-ui); font-size: 13px; color: var(--seele-osso-apagado); }
+
+/* ---------- a porta da lista de banidos ----------
+   Embaixo da lista de pessoas, quieta: é um lugar aonde se vai raramente. */
+.roster-banidos {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-height: 40px;
+  margin: 8px 16px 16px;
+  padding: 0 16px;
+  font-family: var(--seele-ui);
+  font-size: 12px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+  border-radius: var(--seele-raio-pilula);
+  cursor: pointer;
+}
+.roster-banidos[hidden] { display: none; }
+.roster-banidos:hover { background: var(--seele-controle-hover); }
+.roster-banidos:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+/* ---------- o aviso de tamanho não toma o lugar do campo ----------
+   O aviso «Mensagem longa demais» era um irmão do campo na mesma fileira
+   flexível: o campo nasce de largura zero e só cresce com o que sobra, e a
+   frase do aviso não deixava sobrar — o campo ficava com 0px, e o texto
+   grande demais que ele pedia para cortar não podia mais ser tocado (medido
+   em 10/11/2026 a 1280px: campo 0×160, aviso 326px). O aviso desce para a
+   fileira de baixo, e o campo fica com a dele. */
+.compor-caixa > .campo-tamanho { flex: 1 1 100%; padding: 0 0 8px; }
+
+/* ---------- a ligação pessoal na casca larga ---------- */
+/* **A casca larga do 0.19 fixava cinco colunas** em `.paineis` com um seletor
+   mais forte que o da ligação em `camada-sala.css` (a regra de `min-width:
+   1241px`, acima). As áreas
+   continuavam as três da ligação, e a chamada inteira caía na segunda coluna,
+   de 316 px, com o resto da janela vazio. Esta regra repete as três colunas
+   com a força daquela; abaixo de 701 px manda a regra estreita, no fim. */
+@media (min-width: 701px) {
+  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .paineis {
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+  }
+  /* O cabeçalho do servidor (`.canais-servidor`) é filho da coluna que virou
+     `display: contents`: sem isto o nome dele ia sozinho para a coluna do
+     painel de MOD, cortado na borda direita. O nome já está no cabeçalho da
+     ligação. E o CHAT da barra de cima é o da chamada de servidor (volta à
+     conversa do canal): aqui o chat é o da barra de baixo. */
+  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] :is(.canais-servidor, #chamada-chat) {
+    display: none;
+  }
+
+  /* A barra tem mais de uma fileira (o aviso de voz, os botões, a dica): com o
+     raio de pílula as pontas cortavam o aviso. E o microfone vem antes: o
+     DESLIGAR fecha a fileira. */
+  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .operador {
+    border-radius: 24px;
+    padding: 12px 20px;
+    margin: 8px 0 0;
+  }
+
+  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .operador-fileira {
+    order: 5;
+  }
+
+  /* Numa janela baixa a barra toma a altura e a grade fica com pouco: ela
+     rola dentro do centro, em vez de sumir cortada atrás da barra. */
+  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] .painel-linha { min-height: 0; overflow: hidden; }
+  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] #vista-chamada { min-height: 0; overflow-y: auto; }
+  :root:not([data-casca="celular"]) #tela-sessao[data-vista="ligacao"] #chamada-grade { flex: 0 0 auto; }
 }

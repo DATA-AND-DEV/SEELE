@@ -219,6 +219,58 @@
       pelaTela),
     estadoDaEscolha);
 
+  // ------------------------------------------------ pôr na tela inicial
+  //
+  // O celular da 1.0 é esta página, instalada pelo navegador. Onde o navegador
+  // oferece o convite (Chromium), o botão o abre; onde não oferece (o Safari
+  // do iOS, que só instala pelo menu de compartilhar), a seção diz o caminho.
+  // O que aconteceu fica escrito: instalar em silêncio e não instalar em
+  // silêncio têm a mesma cara.
+  //
+  // A oferta de instalação do navegador é guardada **aqui**, e não na ponte: a
+  // ponte não ouve evento nenhum da janela (`bancada/ponte-web.cjs`, «a
+  // marca»). O navegador só a faz depois de a página carregar e de ler o
+  // manifesto, e este arquivo já rodou a essa altura.
+  const instalacaoDaPagina = { oferta: null, instalada: jaEstaInstalada() };
+  window.addEventListener("beforeinstallprompt", (evento) => {
+    evento.preventDefault();
+    instalacaoDaPagina.oferta = evento;
+    desenharAInstalacao();
+  });
+  window.addEventListener("appinstalled", () => {
+    instalacaoDaPagina.oferta = null;
+    instalacaoDaPagina.instalada = true;
+    desenharAInstalacao();
+  });
+  const estadoDaInstalacao = h("p", { class: "casca-estado", role: "status" });
+  const botaoDeInstalar = h("button", {
+    class: "botao",
+    type: "button",
+    onclick: async () => {
+      const oferta = instalacaoDaPagina.oferta;
+      if (!oferta) return;
+      instalacaoDaPagina.oferta = null;
+      botaoDeInstalar.hidden = true;
+      try {
+        await oferta.prompt();
+        const { outcome } = await oferta.userChoice;
+        estadoDaInstalacao.textContent = outcome === "accepted" ? PALAVRAS.instalarFeito : PALAVRAS.instalarDesistiu;
+      } catch {
+        estadoDaInstalacao.textContent = PALAVRAS.instalarPeloMenu;
+      }
+    },
+  }, PALAVRAS.instalarAgora);
+  function desenharAInstalacao() {
+    botaoDeInstalar.hidden = instalacaoDaPagina.instalada || !instalacaoDaPagina.oferta;
+    if (instalacaoDaPagina.instalada) estadoDaInstalacao.textContent = PALAVRAS.instalarJaEsta;
+    else if (instalacaoDaPagina.oferta) estadoDaInstalacao.textContent = "";
+    else if (!estadoDaInstalacao.textContent) estadoDaInstalacao.textContent = eDoIos() ? PALAVRAS.instalarNoIos : PALAVRAS.instalarPeloMenu;
+  }
+  desenharAInstalacao();
+  const instalar = secaoNova("cel-secao-instalar", PALAVRAS.instalar, PALAVRAS.instalarSub, "peca",
+    h("div", { class: "cel-folha-acoes" }, botaoDeInstalar),
+    estadoDaInstalacao);
+
   // --------------------------------------------------- a lista do celular
   //
   // As seções do desktop que o celular tem, na ordem do spec, com os nomes do
@@ -246,6 +298,7 @@
     doDesktop("secao-identidade")),
   h("ul", { class: "cel-ajustes-lista" },
     fora,
+    instalar,
     comoAbre,
     // Ações, e não seções: o `abrirSecao` do desktop passa por toda
     // `.server-secao` escondendo o painel dela, e estas não têm painel.
@@ -298,10 +351,11 @@
   CASCA.depoisDeDesenhar.push((snapshot) => {
     // O nome exibido do perfil oficial, quando há; o apelido segue o do operador.
     const exibido = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
-    apelido.textContent = exibido || document.getElementById("operador-nome").textContent;
-    iniciais.textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
-    // A foto e a capa pela mesma precedência da tela inteira (§5.2).
-    vestirAvatar(iniciais, snapshot.me);
+    porOTexto(apelido, exibido || document.getElementById("operador-nome").textContent);
+    // A foto e a capa pela mesma precedência da tela inteira (§5.2). A inicial
+    // vai como argumento: escrita antes, ela era apagada em seguida por quem
+    // tem foto, duas trocas a cada quadro.
+    vestirAvatar(iniciais, snapshot.me, (snapshot.nickname || "?").trim().charAt(0).toUpperCase());
     vestirCapa(placa, snapshot.me);
     const entrada = coluna.querySelector(".cel-perfis-item");
     if (entrada) entrada.hidden = !(typeof perfisOficiaisDisponiveis === "function" && perfisOficiaisDisponiveis());
@@ -402,7 +456,9 @@
       const e = document.getElementById(id);
       if (!e) continue;
       if (id === "cel-aviso-persistencia" && e.dataset.resposta === "concedida" && !e.hidden) e.hidden = true;
-      e.classList.remove("cel-aviso-recolhido");
+      // `classList.remove` de uma classe que não está reescreve o `class` do
+      // mesmo jeito: uma mutação por aviso a cada `hidden` escrito na sessão.
+      if (e.classList.contains("cel-aviso-recolhido")) e.classList.remove("cel-aviso-recolhido");
     }
 
   }

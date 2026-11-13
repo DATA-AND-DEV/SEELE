@@ -38,6 +38,7 @@ pub mod resample;
 pub mod rt;
 pub mod supervisor;
 pub mod supressao;
+pub mod supressao_neural;
 pub mod telemetry;
 pub mod toque;
 
@@ -46,5 +47,5 @@ pub mod toque;
 /// lá o navegador os compila. Reexportados aqui, quem os chamava pelo
 /// `seele_audio` não mudou.
 pub use seele_voz::{
-    fontes, gate, jitter, mixer, netsim, relogio, FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ,
+    fontes, gate, jitter, mixer, netsim, recepcao, relogio, FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ,
 };

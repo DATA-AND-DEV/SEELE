@@ -40,14 +40,12 @@ async fn motor() -> Motor {
     let cru = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     cru.set_nonblocking(true).unwrap();
     let local = cru.local_addr().unwrap();
-    let saida = Arc::new(cru.try_clone().unwrap());
     let socket = Arc::new(UdpSocket::from_std(cru).unwrap());
     let (cmd, _comandos) = mpsc::unbounded_channel();
     let (chegadas, _recebidas) = mpsc::channel(64);
     let (enc, _encontros) = mpsc::channel(64);
     Motor {
         socket,
-        saida,
         local,
         anfitriao: Some(ConfigDoAnfitriao::novo(CertificadoDtls::efemero().unwrap())),
         pares: HashMap::new(),

@@ -144,6 +144,39 @@ impl Politica {
         persistence: &Persistence,
         segredo: Option<&str>,
     ) -> Result<Result<Passe, Recusa>> {
+        self.avaliar_com_a_senha_conferida(persistence, segredo, self.senha_confere(segredo))
+    }
+
+    /// Se `segredo` é a senha deste servidor.
+    ///
+    /// **Pesada quando há senha** (Argon2id), e é a única parte de
+    /// [`Self::avaliar`] que é: não toca o banco, para que quem chama de dentro
+    /// de uma tarefa assíncrona a ponha em `spawn_blocking` **sem** o banco na
+    /// mão, e entregue a resposta a [`Self::avaliar_com_a_senha_conferida`].
+    /// Sem senha configurada, ou sem segredo, responde `false` sem calcular.
+    #[must_use]
+    pub fn senha_confere(&self, segredo: Option<&str>) -> bool {
+        match (&self.senha_hash, segredo.filter(|s| !s.is_empty())) {
+            (Some(hash), Some(segredo)) => verificar_senha(segredo, hash),
+            _ => false,
+        }
+    }
+
+    /// [`Self::avaliar`] com a senha já conferida por [`Self::senha_confere`]:
+    /// a metade que precisa do banco, e que não calcula Argon2 nenhum.
+    ///
+    /// `senha_confere` tem de ser a resposta de [`Self::senha_confere`] para
+    /// **este** segredo e **esta** política.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o banco não responder. Recusa é `Ok(Err(_))`, não erro.
+    pub fn avaliar_com_a_senha_conferida(
+        &self,
+        persistence: &Persistence,
+        segredo: Option<&str>,
+        senha_confere: bool,
+    ) -> Result<Result<Passe, Recusa>> {
         if self.aberto() {
             return Ok(Ok(Passe::livre()));
         }
@@ -152,10 +185,8 @@ impl Politica {
             return Ok(Err(Recusa::SegredoAusente));
         };
 
-        if let Some(hash) = &self.senha_hash {
-            if verificar_senha(segredo, hash) {
-                return Ok(Ok(Passe::livre()));
-            }
+        if self.senha_hash.is_some() && senha_confere {
+            return Ok(Ok(Passe::livre()));
         }
 
         if self.aceita_convites {
@@ -374,6 +405,44 @@ pub fn senha_abre(fechadura: &Fechadura, senha: Option<&str>) -> bool {
         Fechadura::Aberta => true,
         Fechadura::ComSenha(hash) => senha.is_some_and(|senha| verificar_senha(senha, hash)),
     }
+}
+
+/// Quantos Argon2 de conferência de senha rodam ao mesmo tempo, no processo.
+///
+/// Cada um pede uns 19 MiB e uma thread do pool de bloqueio. A senha do
+/// servidor é conferida **antes** de qualquer autenticação: sem teto, quem tem
+/// muitos endereços (um `/48` são 65 mil baldes da [`crate::taxa::Portaria`])
+/// punha centenas deles em pé de uma vez, e trocava o banco parado de antes
+/// por memória esgotada. Com o teto, o excesso espera na fila, e o
+/// `HANDSHAKE_TIMEOUT` de quem chamou é o que o manda embora.
+pub const ARGON2_SIMULTANEOS: usize = 4;
+
+static VAGAS_DE_ARGON2: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(ARGON2_SIMULTANEOS);
+
+/// Roda uma conferência de senha fora do executor, sob o teto de
+/// [`ARGON2_SIMULTANEOS`]. É por aqui que toda conferência feita de dentro de
+/// uma tarefa assíncrona passa: a do aperto de mão e a da sala de voz.
+///
+/// A vaga vai **com a conta**, e não com quem espera por ela: se quem chamou
+/// desistir (o aperto de mão estourou o prazo), o Argon2 que já começou segue
+/// ocupando a vaga até acabar, que é quando a memória dele volta.
+///
+/// Uma tarefa que morre é uma senha que não conferiu: falha fechada.
+pub async fn conferir_fora_do_executor<F>(conta: F) -> bool
+where
+    F: FnOnce() -> bool + Send + 'static,
+{
+    // O semáforo nunca é fechado; se um dia for, é senha que não conferiu.
+    let Ok(vaga) = VAGAS_DE_ARGON2.acquire().await else {
+        return false;
+    };
+    tokio::task::spawn_blocking(move || {
+        let _vaga = vaga;
+        conta()
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Grava a senha de uma sala de voz, ou a remove.
@@ -909,6 +978,38 @@ mod tests {
                 .admitir(&mut persistence, Some("lixo"))
                 .expect("admitir"),
             Err(Recusa::SegredoInvalido)
+        );
+    }
+
+    /// O teto de Argon2 simultâneos vale de verdade: dezesseis conferências
+    /// pedidas juntas nunca põem mais que [`ARGON2_SIMULTANEOS`] em pé. Sem
+    /// ele, um aperto de mão por endereço punha um Argon2 de 19 MiB em pé
+    /// cada, antes de qualquer autenticação.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn as_conferencias_de_senha_tem_teto_de_simultaneas() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let em_pe = Arc::new(AtomicUsize::new(0));
+        let maior = Arc::new(AtomicUsize::new(0));
+        let pedidas: Vec<_> = (0..16)
+            .map(|_| {
+                let (em_pe, maior) = (Arc::clone(&em_pe), Arc::clone(&maior));
+                tokio::spawn(conferir_fora_do_executor(move || {
+                    let agora = em_pe.fetch_add(1, Ordering::SeqCst) + 1;
+                    maior.fetch_max(agora, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                    em_pe.fetch_sub(1, Ordering::SeqCst);
+                    true
+                }))
+            })
+            .collect();
+        for pedida in pedidas {
+            assert!(pedida.await.unwrap(), "a conferência perdeu a resposta");
+        }
+        let maior = maior.load(Ordering::SeqCst);
+        assert!(
+            (1..=ARGON2_SIMULTANEOS).contains(&maior),
+            "{maior} conferências em pé ao mesmo tempo; o teto é {ARGON2_SIMULTANEOS}"
         );
     }
 }

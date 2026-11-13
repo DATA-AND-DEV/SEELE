@@ -1,6 +1,0 @@
-    Checking seele-enlace v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-enlace)
-    Checking seele-core v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-core)
-    Checking seele-server v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-server)
-    Checking seele-ffi v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/crates/seele-ffi)
-    Checking seele-app v0.0.0 (/Users/dev-alexandre/.codex/worktrees/e595/SEELE/apps/seele-app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.16s

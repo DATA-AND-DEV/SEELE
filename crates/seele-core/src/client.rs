@@ -21,6 +21,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ConsentimentoDePar, Lido, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
+use seele_proto::signal::Recepcao;
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 
 use crate::frame;
@@ -495,6 +496,8 @@ pub struct Client {
     ultimo_ping_da_sonda: Option<std::time::Instant>,
     /// A última ida e volta da sonda, e quantas já voltaram.
     ida_e_volta_da_sonda: Option<(std::time::Duration, u64)>,
+    /// A mídia RTP desta conexão (ADR 0067), quando o servidor a fala.
+    midia: Option<MidiaDoCliente>,
     /// Fluxos de tela, já aceitos e classificados pelo roteador.
     ///
     /// Atrás de um `Mutex` embora só um lugar o leia: quem o lê é um braço de
@@ -875,7 +878,31 @@ impl Client {
             }
         });
 
+        // **O vídeo por RTP (ADR 0067).** Com um servidor que fala o protocolo
+        // dele, a mídia da conexão é ligada aqui e dita ao servidor, que só
+        // então liga a dele. Daí em diante a tela sobe e desce por ela, e o
+        // canal `u` fica para os servidores antigos.
+        let midia = if carimbo >= seele_proto::screen::PROTOCOLO_DA_MIDIA
+            && std::env::var_os(VIDEO_PELO_CANAL).is_none()
+        {
+            let leitura = connection.ligar_midia();
+            match frame::write_em(&mut send, carimbo, &ClientMessage::MidiaLigada).await {
+                Ok(()) => Some(MidiaDoCliente::ligar(leitura)),
+                Err(erro) => {
+                    // O controle não aceitou a escrita: a conexão está caindo,
+                    // e quem diz isso à casca é a leitura dela. Sem o
+                    // `MidiaLigada` o servidor não liga a mídia, então este
+                    // lado também fica no canal.
+                    tracing::warn!(%erro, "o aviso de mídia ligada não saiu; o vídeo fica no canal");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
+            midia,
             connection,
             send,
             carimbo,
@@ -1040,6 +1067,10 @@ impl Client {
     /// `client_message_id` makes the send idempotent (`specs/02-protocolo.md`,
     /// gap G9): resending after a lost acknowledgement does not post twice.
     ///
+    /// `replies_to` é a mensagem a que esta responde, ou `None`. O servidor
+    /// confere que ela existe e é do mesmo canal; a que não é volta como
+    /// `MessageRejected { PermissionDenied }`, com esta chave.
+    ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
@@ -1047,6 +1078,7 @@ impl Client {
         &mut self,
         channel: ChannelId,
         body: &str,
+        replies_to: Option<MessageId>,
         client_message_id: ClientMessageId,
     ) -> Result<()> {
         frame::write_em(
@@ -1055,11 +1087,73 @@ impl Client {
             &ClientMessage::SendMessage {
                 channel,
                 body: body.to_owned(),
-                replies_to: None,
+                replies_to,
                 client_message_id,
             },
         )
         .await
+    }
+
+    /// Reescreve o corpo de uma mensagem **própria** (protocolo 13). O
+    /// servidor recusa a de outra pessoa; a resposta é o `MessageEdited`
+    /// difundido a quem lê o canal.
+    ///
+    /// # Errors
+    ///
+    /// [`ServidorAntigo`] (e nada é escrito) quando a conexão negociou menos
+    /// que o 13: um servidor 12 pularia o verbo calado, e a pessoa editaria
+    /// sem nada acontecer. Fora isso, falha se o fluxo de controle fechou.
+    pub async fn edit_message(&mut self, id: MessageId, body: &str) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::EditMessage {
+            id,
+            body: body.to_owned(),
+        })
+        .await
+    }
+
+    /// Pede ao servidor que tire todo banimento de uma conta (protocolo 13).
+    /// A resposta é a lista de banidos como ficou.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::edit_message`].
+    pub async fn unban_person(&mut self, person: PersonId) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::UnbanPerson { person })
+            .await
+    }
+
+    /// Pede a lista de banidos (protocolo 13). Só responde a quem pode banir.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::edit_message`].
+    pub async fn list_bans(&mut self) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::ListBans).await
+    }
+
+    /// Relata ao servidor o que esta ponta mede da voz que ouve (protocolo
+    /// 13): é o que dá perda e jitter ao sinal de quem está calado e sem
+    /// vídeo. Sem resposta.
+    ///
+    /// Um relato que o servidor recusaria ([`Recepcao::confere`]) não é
+    /// escrito: quem o monta por [`Recepcao::medida`] nunca chega a isso, e o
+    /// registro diz se alguém chegar.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::edit_message`]: [`ServidorAntigo`] (e nada é escrito)
+    /// quando a conexão negociou menos que o 13.
+    pub async fn relatar_recepcao(&mut self, relato: Recepcao) -> Result<()> {
+        if let Err(motivo) = relato.confere() {
+            tracing::warn!(
+                ?motivo,
+                ?relato,
+                "um relato de recepção fora da faixa foi montado deste lado, e não saiu"
+            );
+            return Ok(());
+        }
+        self.escrever_com_portao(&ClientMessage::RelatoDeRecepcao(relato))
+            .await
     }
 
     // ---- attachments, ADR 0027 ----
@@ -2054,7 +2148,277 @@ impl Client {
     /// `&self` não atravessaria o `tokio::spawn`.
     #[must_use]
     pub fn escoadouro_de_tela(&self) -> crate::bomba::Escoadouro {
-        crate::bomba::Escoadouro::nova(self.connection.clone())
+        let escoadouro = crate::bomba::Escoadouro::nova(self.connection.clone());
+        match &self.midia {
+            // Com a mídia ligada, a transmissão sobe por ela: o escoadouro
+            // leva o remetente e por onde dizer a abertura de cada geração.
+            Some(midia) => escoadouro.pela_midia(crate::bomba::SaidaDeMidia {
+                remetente: midia.remetente.clone(),
+                avisos: midia.avisos.clone(),
+            }),
+            None => escoadouro,
+        }
+    }
+
+    /// O remetente da mídia RTP desta conexão, se ela está ligada.
+    #[must_use]
+    pub fn remetente_de_midia(&self) -> Option<crate::transporte::RemetenteDeMidia> {
+        self.midia.as_ref().map(|midia| midia.remetente.clone())
+    }
+
+    /// Por onde chega o que a mídia tem a dizer ao motor: a abertura de uma
+    /// geração que tem de ir ao servidor, e o pedido de quadro-chave do par.
+    /// `None` sem mídia. Um punho, pelo mesmo motivo de [`Self::fila_de_telas`].
+    #[must_use]
+    pub fn fila_da_midia(&self) -> Option<FilaDaMidia> {
+        self.midia
+            .as_ref()
+            .map(|midia| std::sync::Arc::clone(&midia.fila))
+    }
+
+    /// Diz ao servidor que a transmissão desta pessoa sobe pela mídia, com a
+    /// abertura dela (`ClientMessage::TelaPorMidia`).
+    ///
+    /// # Errors
+    ///
+    /// Se o fluxo de controle fechou.
+    pub async fn tela_por_midia(
+        &mut self,
+        abertura: [u8; seele_proto::screen::SCREEN_HEADER_LEN],
+    ) -> Result<()> {
+        self.escrever_com_portao(&ClientMessage::TelaPorMidia { abertura })
+            .await
+    }
+
+    /// Uma transmissão alheia passa a descer pela faixa da mídia
+    /// (`ServerMessage::TelaPorMidia`): devolve por onde lê-la. A que descia
+    /// antes pela mesma faixa vê o fim.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::tela::ErroDeTela`] para uma abertura que esta versão não lê.
+    /// `Ok(None)` sem mídia ligada.
+    pub fn receber_tela_por_midia(
+        &self,
+        abertura: [u8; seele_proto::screen::SCREEN_HEADER_LEN],
+    ) -> Result<Option<crate::tela::RecepcaoPorMidia>, crate::tela::ErroDeTela> {
+        let Some(midia) = &self.midia else {
+            return Ok(None);
+        };
+        let (recepcao, destino) = crate::tela::RecepcaoPorMidia::nova(abertura)?;
+        if let Ok(mut faixa) = midia.descendo.lock() {
+            let geracao = faixa.as_ref().map_or(1, |(antes, _)| antes.wrapping_add(1));
+            *faixa = Some((geracao, destino));
+        }
+        Ok(Some(recepcao))
+    }
+
+    /// A cópia que descia pela faixa acabou (`ServerMessage::FimDaTelaPorMidia`).
+    pub fn fim_da_tela_por_midia(&self) {
+        if let Some(midia) = &self.midia {
+            if let Ok(mut faixa) = midia.descendo.lock() {
+                *faixa = None;
+            }
+        }
+    }
+}
+
+/// A variável de ambiente que mantém o vídeo no canal `u` mesmo com um
+/// servidor que fala RTP (ADR 0067). Com qualquer valor.
+///
+/// Existe para quem opera ter por onde voltar, e para a medida comparar os
+/// dois transportes com o mesmo binário
+/// (`docs/medidas/2026-11-10-tela-do-produto-sob-perda.md`).
+pub const VIDEO_PELO_CANAL: &str = "SEELE_VIDEO_PELO_CANAL";
+
+/// O que a mídia tem a dizer ao motor do enlace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaMidia {
+    /// A abertura de uma geração da transmissão desta pessoa: tem de ir ao
+    /// servidor pelo controle, e só o motor escreve nele.
+    Abertura([u8; seele_proto::screen::SCREEN_HEADER_LEN]),
+    /// O par pediu um quadro-chave da transmissão desta pessoa (PLI).
+    PediramChave,
+}
+
+/// A fila do que a mídia diz ao motor.
+pub type FilaDaMidia =
+    std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<DaMidia>>>;
+
+/// De quanto em quanto quem assiste repete o pedido de quadro-chave (PLI)
+/// enquanto a cadeia está quebrada.
+///
+/// Um segundo, e não 300 ms: um quadro-chave leva de 300 ms a um segundo para
+/// atravessar o caminho, e pedir de novo antes de ele chegar custava outro
+/// (`docs/medidas/2026-11-10-rtp-no-produto.md`).
+const ENTRE_PEDIDOS_DE_CHAVE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Quantos quadros ficam guardados enquanto a abertura não chegou, e por
+/// quanto tempo eles servem. A abertura de uma transmissão vem pelo controle
+/// e os quadros, pela mídia: os primeiros chegam antes dela, e o primeiro é o
+/// quadro-chave. Largá-los era começar toda transmissão pedindo outro.
+const QUADROS_GUARDADOS: usize = 64;
+const VALIDADE_DOS_GUARDADOS: std::time::Duration = std::time::Duration::from_secs(2);
+
+type DestinoDaFaixa = std::sync::Arc<
+    std::sync::Mutex<
+        Option<(
+            u64,
+            tokio::sync::mpsc::UnboundedSender<crate::tela::QuadroRecebido>,
+        )>,
+    >,
+>;
+
+/// A mídia RTP de uma conexão, do lado do cliente.
+struct MidiaDoCliente {
+    remetente: crate::transporte::RemetenteDeMidia,
+    avisos: tokio::sync::mpsc::UnboundedSender<DaMidia>,
+    fila: FilaDaMidia,
+    /// Para onde vão os quadros da transmissão que desce pela faixa agora, e
+    /// qual transmissão é (um número que muda a cada uma).
+    ///
+    /// **Só este mapa segura o remetente.** O fim da recepção é a fila
+    /// fechar, e uma cópia guardada em outro lugar a manteria aberta para
+    /// sempre: quem assiste nunca veria a transmissão acabar.
+    descendo: DestinoDaFaixa,
+    /// A tarefa que lê a mídia. Morre com o cliente.
+    leitora: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for MidiaDoCliente {
+    fn drop(&mut self) {
+        self.leitora.abort();
+    }
+}
+
+impl MidiaDoCliente {
+    fn ligar(mut leitura: crate::transporte::Midia) -> Self {
+        use crate::tela::{QuadroRecebido, TipoDeQuadro, FAIXA_DE_SAIDA};
+        use crate::transporte::{EventoDeMidia, Trilha};
+
+        let remetente = leitura.remetente();
+        let (avisos, fila) = tokio::sync::mpsc::unbounded_channel();
+        let descendo = DestinoDaFaixa::default();
+        let leitora = tokio::spawn({
+            let avisos = avisos.clone();
+            let descendo = std::sync::Arc::clone(&descendo);
+            let remetente = remetente.clone();
+            async move {
+                // A cadeia do vídeo que desce está quebrada: os comuns são
+                // largados até o próximo quadro-chave, que é pedido ao par.
+                let mut espera_chave = false;
+                let mut ultimo_pedido: Option<std::time::Instant> = None;
+                // Para quem os quadros iam, da última vez: uma transmissão
+                // nova na faixa recomeça numa chave.
+                let mut geracao_anterior = 0_u64;
+                // Os quadros que chegaram sem destino, desde o último
+                // quadro-chave, e quando ele chegou.
+                let mut guardados: Vec<QuadroRecebido> = Vec::new();
+                let mut guardados_desde: Option<std::time::Instant> = None;
+                while let Some(evento) = leitura.receber().await {
+                    match evento {
+                        EventoDeMidia::PediramChave {
+                            faixa: FAIXA_DE_SAIDA,
+                        } => {
+                            let _ = avisos.send(DaMidia::PediramChave);
+                        }
+                        EventoDeMidia::Quadro {
+                            faixa: FAIXA_DE_SAIDA,
+                            trilha,
+                            contiguo,
+                            bytes,
+                            ..
+                        } => {
+                            let destino = descendo.lock().ok().and_then(|d| d.clone());
+                            let Some((geracao, destino)) = destino else {
+                                // A abertura ainda não chegou pelo controle:
+                                // a cadeia desde o último quadro-chave espera.
+                                let chave = trilha == Trilha::Video
+                                    && seele_proto::screen::e_quadro_chave_h264(&bytes);
+                                if chave {
+                                    guardados.clear();
+                                    guardados_desde = Some(std::time::Instant::now());
+                                } else if guardados.is_empty()
+                                    || !contiguo
+                                    || guardados.len() >= QUADROS_GUARDADOS
+                                {
+                                    guardados.clear();
+                                    guardados_desde = None;
+                                    continue;
+                                }
+                                guardados.push(QuadroRecebido {
+                                    tipo: match trilha {
+                                        Trilha::Som => TipoDeQuadro::Som,
+                                        Trilha::Video if chave => TipoDeQuadro::Chave,
+                                        Trilha::Video => TipoDeQuadro::Comum,
+                                    },
+                                    bytes: bytes.to_vec(),
+                                });
+                                continue;
+                            };
+                            if geracao != geracao_anterior {
+                                espera_chave = true;
+                                geracao_anterior = geracao;
+                                // O que esperava pela abertura vai na frente,
+                                // e a cadeia segue dele: não se pede chave.
+                                let valem = guardados_desde
+                                    .take()
+                                    .is_some_and(|desde| desde.elapsed() <= VALIDADE_DOS_GUARDADOS);
+                                let esperavam = std::mem::take(&mut guardados);
+                                if valem && !esperavam.is_empty() {
+                                    for quadro in esperavam {
+                                        let _ = destino.send(quadro);
+                                    }
+                                    espera_chave = false;
+                                }
+                            }
+                            let tipo = match trilha {
+                                Trilha::Som => TipoDeQuadro::Som,
+                                Trilha::Video => {
+                                    let chave = seele_proto::screen::e_quadro_chave_h264(&bytes);
+                                    if !contiguo && !chave {
+                                        espera_chave = true;
+                                    }
+                                    if espera_chave && !chave {
+                                        // **Um quadro comum sem a cadeia
+                                        // inteira não vai ao decodificador**:
+                                        // ele desenharia lixo. Pede-se a chave.
+                                        let agora = std::time::Instant::now();
+                                        if !ultimo_pedido.is_some_and(|antes| {
+                                            agora.saturating_duration_since(antes)
+                                                < ENTRE_PEDIDOS_DE_CHAVE
+                                        }) {
+                                            ultimo_pedido = Some(agora);
+                                            remetente.pedir_chave(FAIXA_DE_SAIDA);
+                                        }
+                                        continue;
+                                    }
+                                    espera_chave = false;
+                                    if chave {
+                                        TipoDeQuadro::Chave
+                                    } else {
+                                        TipoDeQuadro::Comum
+                                    }
+                                }
+                            };
+                            let _ = destino.send(QuadroRecebido {
+                                tipo,
+                                bytes: bytes.to_vec(),
+                            });
+                        }
+                        // As outras faixas não levam nada ainda.
+                        EventoDeMidia::Quadro { .. } | EventoDeMidia::PediramChave { .. } => {}
+                    }
+                }
+            }
+        });
+        Self {
+            remetente,
+            avisos,
+            fila: std::sync::Arc::new(tokio::sync::Mutex::new(fila)),
+            descendo,
+            leitora,
+        }
     }
 }
 
@@ -2414,6 +2778,24 @@ thread_local! {
     > = const { std::cell::RefCell::new(None) };
 }
 
+/// O que a discagem que segue um `AQUI` herda do `CHAMA` que o pediu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PeloChama {
+    /// O U que foi no `CHAMA`: é por ele que o anfitrião reconhece quem furou.
+    pub(crate) credencial: String,
+    /// Se esta discagem aceita a checagem IPv6 do anfitrião sem ter alvo IPv6
+    /// (`Discagem::espera_checagem_ipv6`, no enlace).
+    ///
+    /// É a discagem que segue a segunda chamada
+    /// (`encontro::Chamada::chamar_pelo_ipv6`): o `CHAMA` levou o IPv6 desta
+    /// máquina, o anfitrião o checa do IPv6 dele, e o `AQUI` não diz que IPv6
+    /// é esse (o `ATENDE` só leva o endereço que o ponto viu e as dicas de
+    /// rede local). Aceitar a checagem é como este lado o aprende: o
+    /// peer-reflexive do ICE. A discagem da primeira chamada não a aceita, e
+    /// continua a de sempre.
+    pub(crate) espera_checagem_ipv6: bool,
+}
+
 /// Disca um anfitrião pela ponta desta sessão: todos os `alvos` num agente ICE
 /// só (D2 da 0.17).
 ///
@@ -2424,7 +2806,8 @@ thread_local! {
 /// (`Verdict::InviteDisagrees`), que um pino no DTLS recusaria. O que sai para
 /// quem atendeu antes disso é o DTLS e nada do protocolo.
 ///
-/// `credencial` é o U do `CHAMA` do degrau 4, quando houve; `None` sorteia.
+/// `pelo_chama` é o que a discagem herda do `CHAMA` do degrau 4, quando houve
+/// ([`PeloChama`]); `None` sorteia um U.
 ///
 /// # Errors
 ///
@@ -2433,12 +2816,15 @@ thread_local! {
 pub(crate) async fn discar(
     ponta: &crate::transporte::Ponta,
     alvos: Vec<SocketAddr>,
-    credencial: Option<String>,
+    pelo_chama: Option<PeloChama>,
     prazo: std::time::Duration,
 ) -> Result<crate::transporte::Conexao, ConnectError> {
     let quantos = alvos.len();
     let mut discagem = crate::transporte::Discagem::nova(alvos, crate::transporte::Pino::Qualquer);
-    discagem.credencial = credencial;
+    if let Some(pelo_chama) = pelo_chama {
+        discagem.credencial = Some(pelo_chama.credencial);
+        discagem.espera_checagem_ipv6 = pelo_chama.espera_checagem_ipv6;
+    }
     discagem.prazo = prazo;
     ponta.discar(discagem).await.map_err(|falha| {
         let erro = classificar_a_discagem(&falha);

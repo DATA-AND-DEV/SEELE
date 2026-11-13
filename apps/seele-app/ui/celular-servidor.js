@@ -38,13 +38,14 @@
   sessao.append(topo);
 
   function desenharTopo() {
-    selo.textContent = subDoDesktop.dataset.frase ?? subDoDesktop.textContent;
-    selo.dataset.padrao = subDoDesktop.dataset.padrao ?? "";
+    // Depois de cada quadro, e quase sempre com o mesmo a dizer: só o que mudou.
+    porOTexto(selo, subDoDesktop.dataset.frase ?? subDoDesktop.textContent);
+    porODado(selo, "padrao", subDoDesktop.dataset.padrao ?? "");
     // O título é da aba. CONVERSA e PESSOAS ainda trazem o cabeçalho do
     // desktop, e um segundo título ali seria o mesmo dito duas vezes.
     const aba = sessao.dataset.aba;
-    titulo.textContent = aba === "servidor" ? nomeDoDesktop.textContent : aba === "ajustes" ? PALAVRAS.ajustes : "";
-    titulo.title = aba === "servidor" ? nomeDoDesktop.title : "";
+    porOTexto(titulo, aba === "servidor" ? nomeDoDesktop.textContent : aba === "ajustes" ? PALAVRAS.ajustes : "");
+    porOTitulo(titulo, aba === "servidor" ? nomeDoDesktop.title : "");
   }
   new MutationObserver(desenharTopo).observe(sessao, { attributes: true, attributeFilter: ["data-aba"] });
 
@@ -66,8 +67,8 @@
   topo.querySelector(".cel-topo-sobre").append(ondeEstou);
   aoMudaremAsSessoes.push(() => {
     const rotulo = rotuloDaSessaoNaVista();
-    ondeEstou.hidden = !rotulo;
-    ondeEstou.textContent = rotulo ?? "";
+    porOEscondido(ondeEstou, !rotulo);
+    porOTexto(ondeEstou, rotulo ?? "");
   });
 
   // ------------------------------------------------------------- a trilha

@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # specs/01-arquitetura.md, dependency rule: `proto` depends on nobody.
 # Enforced by `cargo xtask check-deps`.

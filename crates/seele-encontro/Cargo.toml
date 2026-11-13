@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # O formato do que passa pelo fio é `seele-proto` — o mesmo motivo pelo qual
 # ele existe. Nada de tokio, nada de rede assíncrona: este processo trata um

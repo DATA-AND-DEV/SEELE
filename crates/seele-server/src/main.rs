@@ -35,6 +35,8 @@ async fn main() -> Result<()> {
             "convite" => return criar_convite(&argumentos),
             "senha" => return definir_senha(&argumentos),
             "anexos" => return teto_de_anexos(&argumentos),
+            "backup" => return guardar_copia(&argumentos),
+            "restore" => return restaurar_copia(&argumentos),
             "--ajuda" | "--help" | "-h" => {
                 uso();
                 return Ok(());
@@ -129,7 +131,56 @@ async fn main() -> Result<()> {
         println!("  Ou por convite:  seeled convite <para quem>");
     }
 
-    server.run().await
+    // **Um sinal encerra, e não mata.** Até a 1.0 o `seeled` não ouvia sinal
+    // nenhum: um `systemctl stop`, um `docker stop` ou um Ctrl+C derrubavam o
+    // processo no meio, e quem estava dentro lia uma queda de transporte e
+    // ficava batendo numa porta fechada. Agora cada sessão recebe o
+    // `ServerShuttingDown`, e o banco fecha por conta própria.
+    tokio::select! {
+        resultado = server.run() => resultado,
+        sinal = sinal_de_encerrar() => {
+            println!("seeled: {sinal} recebido, avisando quem está dentro");
+            server
+                .encerrar_avisando(
+                    seele_proto::control::DisconnectReason::ServerShuttingDown,
+                    PRAZO_DA_DESPEDIDA,
+                )
+                .await;
+            println!("seeled: encerrado");
+            Ok(())
+        }
+    }
+}
+
+/// Quanto o `seeled` espera as sessões se despedirem antes de fechar a porta.
+/// Abaixo dos 10 s que o `docker stop` e os 90 s que o systemd dão antes do
+/// `SIGKILL`.
+const PRAZO_DA_DESPEDIDA: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Volta quando chega um pedido de encerrar, com o nome dele: `SIGINT`
+/// (Ctrl+C) em todo sistema, e `SIGTERM` no Unix, que é o que o systemd e o
+/// Docker mandam.
+async fn sinal_de_encerrar() -> &'static str {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut termino) => tokio::select! {
+                _ = tokio::signal::ctrl_c() => "SIGINT",
+                _ = termino.recv() => "SIGTERM",
+            },
+            Err(erro) => {
+                tracing::warn!(%erro, "não consegui ouvir o SIGTERM; só o Ctrl+C encerra limpo");
+                let _ = tokio::signal::ctrl_c().await;
+                "SIGINT"
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        "Ctrl+C"
+    }
 }
 
 /// O IPv6 global, só quando o socket atende em IPv6.
@@ -231,6 +282,8 @@ fn uso() {
     println!("  seeled convite [para quem]     gera um convite de uso único");
     println!("  seeled anexos                  mostra o teto de disco dos anexos");
     println!("  seeled anexos <tamanho>        escolhe o teto (ex.: 2G, 500M)");
+    println!("  seeled backup <pasta>          guarda banco, anexos e perfis numa pasta nova");
+    println!("  seeled restore <pasta>         traz uma cópia de volta (com o seeled parado)");
     println!("  seeled --versao                diz qual build é este");
     println!();
     println!("  O convite sai como link seele://, pronto para mandar. Ele já");
@@ -308,6 +361,68 @@ fn definir_senha(argumentos: &[String]) -> anyhow::Result<()> {
         _ => {
             uso();
             anyhow::bail!("`seeled senha` precisa da senha, ou de --remover");
+        }
+    }
+    Ok(())
+}
+
+/// O caminho do banco em disco, que é onde as cópias leem e escrevem.
+fn caminho_do_banco() -> std::path::PathBuf {
+    match banco() {
+        seele_server::persistence::Location::File(caminho) => caminho,
+        // `banco()` só devolve arquivo; o braço existe porque o tipo tem dois.
+        seele_server::persistence::Location::Memory => std::path::PathBuf::from("seele.db"),
+    }
+}
+
+fn dizer_o_que_foi(relatorio: &seele_server::copia::Relatorio) {
+    println!(
+        "  banco:   {} (esquema {})",
+        tamanho(relatorio.bytes_do_banco),
+        relatorio.esquema
+    );
+    for (pasta, arquivos) in &relatorio.arquivos {
+        println!("  {pasta}/:  {arquivos} arquivo(s)");
+    }
+}
+
+/// `seeled backup <pasta>`: guarda tudo numa pasta nova. Ver
+/// [`seele_server::copia`]. Funciona com o servidor de pé.
+fn guardar_copia(argumentos: &[String]) -> anyhow::Result<()> {
+    let Some(destino) = argumentos.get(1) else {
+        uso();
+        anyhow::bail!("`seeled backup` precisa da pasta onde guardar");
+    };
+    let destino = std::path::Path::new(destino);
+    let relatorio = seele_server::copia::guardar(&caminho_do_banco(), destino)?;
+    println!("cópia guardada em {}", destino.display());
+    dizer_o_que_foi(&relatorio);
+    println!();
+    println!("  Ela tem a chave do certificado e os convites: guarde-a como");
+    println!("  guardaria uma senha. Para trazer de volta:");
+    println!("    seeled restore {}", destino.display());
+    Ok(())
+}
+
+/// `seeled restore <pasta>`: traz uma cópia de volta, pondo de lado o que
+/// está no lugar. Com o servidor parado.
+fn restaurar_copia(argumentos: &[String]) -> anyhow::Result<()> {
+    let Some(origem) = argumentos.get(1) else {
+        uso();
+        anyhow::bail!("`seeled restore` precisa da pasta da cópia");
+    };
+    let agora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |desde| desde.as_secs());
+    let banco = caminho_do_banco();
+    let relatorio = seele_server::copia::restaurar(std::path::Path::new(origem), &banco, agora)?;
+    println!("cópia restaurada em {}", banco.display());
+    dizer_o_que_foi(&relatorio);
+    if !relatorio.posto_de_lado.is_empty() {
+        println!();
+        println!("  O que estava no lugar não foi apagado. Ficou em:");
+        for caminho in &relatorio.posto_de_lado {
+            println!("    {}", caminho.display());
         }
     }
     Ok(())

@@ -140,7 +140,12 @@ pub fn link_do_navegador(texto: &str, origem: &str) -> serde_json::Value {
 /// anfitrião as registra. **A página não escreve linha do protocolo**: ela
 /// passa `{"impressao": hex64, "credencial": U, "candidatos": ["ip:porta", …]}`.
 ///
-/// `{"corpo": …}`, ou `{"erro": "impressao" | "credencial" | "candidato" | "json"}`.
+/// **Para a sala pessoal de um código** (ADR 0068), `{"codigo": "XXXX-…"}` no
+/// lugar da impressão: as marcas saem do código (`Marcas::da_sala`), como a
+/// sala as registra, e nenhum convite é preciso.
+///
+/// `{"corpo": …}`, ou `{"erro": "impressao" | "codigo" | "credencial" |
+/// "candidato" | "json"}`.
 /// Um candidato que o fio não leva (porta baixa, «qualquer», multicast, escopo)
 /// é recusado aqui, e não mandado.
 #[must_use]
@@ -152,13 +157,24 @@ pub fn sinal_chama(pedido: &str) -> serde_json::Value {
     let Ok(lido) = serde_json::from_str::<serde_json::Value>(pedido) else {
         return erro("json");
     };
-    let Some(marcas) = lido
-        .get("impressao")
-        .and_then(serde_json::Value::as_str)
-        .filter(|impressao| impressao.len() == 64)
-        .and_then(Marcas::do_servidor)
-    else {
-        return erro("impressao");
+    let marcas = if let Some(codigo) = lido.get("codigo") {
+        let Some(codigo) = codigo
+            .as_str()
+            .and_then(|texto| seele_proto::codigo::Codigo::ler(texto).ok())
+        else {
+            return erro("codigo");
+        };
+        Marcas::da_sala(&codigo)
+    } else {
+        let Some(marcas) = lido
+            .get("impressao")
+            .and_then(serde_json::Value::as_str)
+            .filter(|impressao| impressao.len() == 64)
+            .and_then(Marcas::do_servidor)
+        else {
+            return erro("impressao");
+        };
+        marcas
     };
     let Some(credencial) = lido
         .get("credencial")
@@ -198,16 +214,32 @@ pub fn sinal_chama(pedido: &str) -> serde_json::Value {
 /// `{"aqui": {"endereco", "dicas"}}`, `{"ninguem": true}`,
 /// `{"recusa": {"motivo", "agora"}}`, `{"calado": true}`, ou
 /// `{"erro": "ilegivel"}` para o que não é uma das quatro linhas.
+///
+/// O `aqui` de uma sala pessoal traz também `"impressao"` (hex64), a do
+/// certificado DTLS que ela disse no `ATENDE` (ADR 0068). **É pista**: a página
+/// a escreve como o `a=fingerprint`, e quem autentica a sala é a apresentação,
+/// conferida contra o código em [`ligacao::Ligacao::apresentada`].
 #[must_use]
 pub fn sinal_resposta(corpo: &str) -> serde_json::Value {
     use seele_proto::encontro::{ler_resposta_do_sinal, RespostaDoSinal};
     match ler_resposta_do_sinal(corpo) {
-        Some(RespostaDoSinal::Aqui { endereco, dicas }) => serde_json::json!({
-            "aqui": {
+        Some(RespostaDoSinal::Aqui {
+            endereco,
+            dicas,
+            impressao,
+        }) => {
+            let mut aqui = serde_json::json!({
                 "endereco": endereco.to_string(),
                 "dicas": dicas.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            });
+            if let (Some(impressao), Some(campos)) = (impressao, aqui.as_object_mut()) {
+                campos.insert(
+                    "impressao".to_owned(),
+                    serde_json::Value::String(ligacao::hex_de(&impressao)),
+                );
             }
-        }),
+            serde_json::json!({ "aqui": aqui })
+        }
         Some(RespostaDoSinal::Ninguem) => serde_json::json!({ "ninguem": true }),
         Some(RespostaDoSinal::Recusa { motivo, agora }) => {
             serde_json::json!({ "recusa": { "motivo": motivo.texto(), "agora": agora } })
@@ -284,6 +316,58 @@ mod o_sinal {
         assert_eq!(
             sinal_resposta("<html>"),
             serde_json::json!({ "erro": "ilegivel" })
+        );
+    }
+
+    /// **A página chama a sala pessoal de um código** (ADR 0068): as marcas
+    /// saem do código, como a sala as registra, e o `AQUI` traz a impressão
+    /// DTLS que ela disse.
+    #[test]
+    fn a_pagina_chama_a_sala_de_um_codigo_e_le_a_impressao_dtls_dela() {
+        let codigo = seele_proto::codigo::Codigo::da_chave(&[7; 32]);
+        let marcas = seele_proto::encontro::Marcas::da_sala(&codigo);
+        let pedido = serde_json::json!({
+            "codigo": codigo.to_string(),
+            "credencial": "AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+            "candidatos": ["198.51.100.7:51000"],
+        });
+        assert_eq!(
+            sinal_chama(&pedido.to_string())["corpo"],
+            format!(
+                "SEELE-SINAL/1 CHAMA {} {} AbCdEfGhIjKlMnOpQrStUvWxYz012345 198.51.100.7:51000",
+                marcas.servidor(),
+                marcas.escuta()
+            ),
+            "as marcas do `CHAMA` não são as que a sala registra"
+        );
+        // O código como a pessoa o escreve também serve; um torto, não.
+        let mut escrito = pedido.clone();
+        escrito["codigo"] = serde_json::json!(codigo.to_string().replace('-', "").to_lowercase());
+        assert_eq!(
+            sinal_chama(&escrito.to_string())["corpo"],
+            sinal_chama(&pedido.to_string())["corpo"]
+        );
+        let mut torto = pedido.clone();
+        torto["codigo"] = serde_json::json!("AAAA-AAAA-AAAA-AAAA");
+        assert_eq!(
+            sinal_chama(&torto.to_string()),
+            serde_json::json!({ "erro": "codigo" })
+        );
+
+        assert_eq!(
+            sinal_resposta(
+                "SEELE-SINAL/1 AQUI 203.0.113.7:8385 - WlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlo"
+            ),
+            serde_json::json!({ "aqui": {
+                "endereco": "203.0.113.7:8385",
+                "dicas": [],
+                "impressao": "5a".repeat(32),
+            } })
+        );
+        // Sem ela (um ponto ou uma sala de antes da 1.0), o `aqui` de sempre.
+        assert_eq!(
+            sinal_resposta("SEELE-SINAL/1 AQUI 203.0.113.7:8385 -"),
+            serde_json::json!({ "aqui": { "endereco": "203.0.113.7:8385", "dicas": [] } })
         );
     }
 }

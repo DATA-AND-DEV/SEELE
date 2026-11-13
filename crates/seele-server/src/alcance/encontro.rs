@@ -244,6 +244,10 @@ pub struct Convocacao {
     /// Quem assina o registro: só a sala pessoal tem (`MORO3`). Um servidor
     /// guardado registra pelo `MORA3`, sem assinatura.
     pub assinante: Option<Assinante>,
+    /// A impressão do certificado DTLS com que a sala atende, que vai no
+    /// `ATENDE` (ADR 0068). `None` num servidor guardado: a dele é a do
+    /// convite. Ver [`Self::com_a_impressao_dtls`].
+    pub impressao_dtls: Option<[u8; 32]>,
 }
 
 impl Convocacao {
@@ -263,7 +267,22 @@ impl Convocacao {
             ponto: ponto.into(),
             escuta,
             assinante: Some(assinante),
+            impressao_dtls: None,
         }
+    }
+
+    /// **A impressão DTLS que esta sala diz ao atender um chamado** (ADR
+    /// 0068). O DTLS da sala é efêmero, e o navegador só o fecha com a
+    /// impressão escrita antes: ela vai no `ATENDE`, e o ponto a repassa a quem
+    /// ligou pelo sinal. **Só a sala a diz**: numa convocação que não é
+    /// assinada isto não muda nada, porque a impressão de um servidor guardado
+    /// já está no convite.
+    #[must_use]
+    pub fn com_a_impressao_dtls(mut self, impressao: Option<[u8; 32]>) -> Self {
+        if self.assinada() {
+            self.impressao_dtls = impressao;
+        }
+        self
     }
 
     /// Se o registro sai assinado: a sala pessoal.
@@ -294,6 +313,7 @@ impl Convocacao {
             ponto: ponto.into(),
             escuta,
             assinante: None,
+            impressao_dtls: None,
         })
     }
 
@@ -409,6 +429,8 @@ struct Registro {
     marcas: Marcas,
     escuta: super::Escuta,
     assinante: Option<Assinante>,
+    /// A impressão DTLS que a sala diz no `ATENDE` (ADR 0068).
+    impressao_dtls: Option<[u8; 32]>,
     /// O estado que a casca lê, só na sala.
     estado: Option<tokio::sync::watch::Sender<EstadoDoRegistro>>,
     /// O cookie que o ponto deu a este IP, pelo `DESAFIO` ou pelo `MOROU`.
@@ -439,6 +461,7 @@ impl Registro {
             marcas: convocacao.marcas.clone(),
             escuta: convocacao.escuta,
             assinante: convocacao.assinante.clone(),
+            impressao_dtls: convocacao.impressao_dtls,
             estado: None,
             cookie: None,
             ultimo_carimbo: 0,
@@ -1071,6 +1094,9 @@ fn atender_chamado(
         id: chamado.id,
         endereco: publico,
         dicas: registro.dicas(),
+        // Só a sala a tem (ADR 0068). Vai numa segunda linha do datagrama, que
+        // um ponto de antes da 1.0 não lê: para ele, é o `ATENDE` de sempre.
+        impressao: registro.impressao_dtls,
     };
     if let Err(erro) = ponta.enviar_bruto(origem, &encontro::atende(&atende)) {
         tracing::debug!(%erro, "encontro: o ATENDE não saiu");
@@ -1511,6 +1537,71 @@ mod testes {
                 .iter()
                 .all(|(p, _)| !matches!(p, Pedido3::Mora3 { .. })),
             "a sala registrou sem assinatura"
+        );
+    }
+
+    /// **A sala diz a impressão DTLS dela no `ATENDE`, e um servidor guardado
+    /// não** (ADR 0068). É por ela que o navegador fecha o DTLS com a sala,
+    /// cujo certificado é efêmero; a de um servidor guardado já vai no convite.
+    #[tokio::test]
+    async fn a_sala_diz_a_impressao_dtls_no_atende_e_o_servidor_guardado_nao() {
+        const DTLS: [u8; 32] = [0x5A; 32];
+        let alvo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let candidato = alvo.local_addr().unwrap();
+
+        // A sala, com a impressão que a hospedagem lhe dá.
+        let pelo_da_sala = pelo().await;
+        let (ponto, onde, caderno) = ponto_de_teste(None).await;
+        let chave = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        let convocacao = Convocacao::para_sala(
+            pelo_da_sala.clone(),
+            escuta(&pelo_da_sala),
+            chave,
+            onde.to_string(),
+        )
+        .com_a_impressao_dtls(Some(DTLS));
+        let marcas = convocacao.marcas.clone();
+        let aberto = abrir(&convocacao).await.unwrap();
+        chamar(
+            &ponto,
+            aberto.publico(),
+            &chamado(marcas.escuta(), 1, vec![candidato]),
+        )
+        .await;
+        let _ = contar_indicacoes(&alvo, Duration::from_millis(1500)).await;
+        let da_sala = atendes(&caderno);
+        assert_eq!(da_sala.len(), 1, "{da_sala:?}");
+        assert_eq!(
+            da_sala[0].impressao,
+            Some(DTLS),
+            "a sala atendeu sem dizer a impressão DTLS: o navegador não fecha o DTLS com ela"
+        );
+
+        // O servidor guardado, mesmo que alguém lhe dê uma: ele não a diz.
+        let pelo_do_guardado = pelo().await;
+        let (ponto, onde, caderno) = ponto_de_teste(None).await;
+        let convocacao = Convocacao::para_servidor(
+            pelo_do_guardado.clone(),
+            IMPRESSAO,
+            escuta(&pelo_do_guardado),
+            onde.to_string(),
+        )
+        .unwrap()
+        .com_a_impressao_dtls(Some(DTLS));
+        let aberto = abrir(&convocacao).await.unwrap();
+        let marcas = Marcas::do_servidor(IMPRESSAO).unwrap();
+        chamar(
+            &ponto,
+            aberto.publico(),
+            &chamado(marcas.escuta(), 2, vec![candidato]),
+        )
+        .await;
+        let _ = contar_indicacoes(&alvo, Duration::from_millis(1500)).await;
+        let do_guardado = atendes(&caderno);
+        assert_eq!(do_guardado.len(), 1, "{do_guardado:?}");
+        assert_eq!(
+            do_guardado[0].impressao, None,
+            "um servidor guardado disse uma impressão DTLS no ATENDE"
         );
     }
 

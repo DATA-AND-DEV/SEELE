@@ -1,5 +1,21 @@
 # 02 — Protocolo
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original, com emendas parciais da 0.17.
+>
+> - **Continua valendo:** os três papéis (controle, fluxos, voz) na tabela da linha 2; o envelope; o cabeçalho de 11 bytes da voz (`crates/seele-proto/src/media.rs`); o servidor encaminhar a voz sem tocar no payload; os motivos de erro enumerados; os tempos do enlace (20 s ocioso, 5 s de keepalive, 10 s de aperto, em `crates/seele-proto/src/transport.rs`).
+> - **Mudou:**
+>   - **a serialização está decidida:** `postcard` (ADR 0001, `crates/seele-proto/Cargo.toml`);
+>   - **o anfitrião é ICE completo e controlado.** As duas menções a «ICE-lite» abaixo estão vencidas: emenda de 26/10/2026 ao [ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md), `crates/seele-enlace/src/ponta.rs`;
+>   - **a faixa de versões não é `[10, 10]`.** O piso continua 10 e o topo é 13 (`VERSAO_MINIMA` e `PROTOCOL_VERSION` em `crates/seele-proto/src/version.rs`). Depois do `Hello` cada lado carimba com o número negociado (`control::encode_em`);
+>   - **o 13 é a mesa de texto da 1.0.** Traz `EditMessage`, `UnbanPerson` e `ListBans` do cliente e `Banidos` do servidor, todos no fim dos enums (ADR 0058), e uma mudança que não é do fio: a quem negociou o 13 o servidor manda a conversa de todo canal de texto que a pessoa pode ler, sem `JoinChannel` (`ASSINA_O_QUE_LE_DESDE`, em `crates/seele-server/src/session.rs`). É o que deixa as não lidas e as menções contarem em canal que ainda não foi aberto. A um par 12 continua chegando só o que ele assinou;
+>   - **o 13 também é a câmera.** A fonte da abertura de um fluxo de tela ganhou o código 2 (`ScreenSource::Camera`, `crates/seele-proto/src/screen.rs`), no fim como manda o ADR 0058, e nenhum verbo: a câmera começa e para por `StartScreenShare` e `StopScreenShare`, com a mesma permissão (`ShareScreen`), e **no lugar** da tela — uma pessoa manda um fluxo de imagem por vez. Um byte de cabeçalho não está nas tabelas `desde`, então o portão é feito à mão, pelo `PROTOCOLO_DA_CAMERA`: quem transmite não escreve o código 2 para um servidor que negociou menos que 13 (a recusa é `ServidorAntigo`, e nada sai), e o servidor o reescreve como monitor na cópia de quem assiste pelo 12 (`abertura_para`; `VoiceRoom::ligar`, em `crates/seele-server/src/voice_room.rs`). Uma câmera também não vai por par a quem negociou o 12, nem por um par do 12;
+>   - **o 13 também é o relato de recepção.** `RelatoDeRecepcao` do cliente, no fim do enum (ADR 0058), sem resposta: `perda` (fração de 0.0 a 1.0) e `jitter_ms` (milissegundos, até 10 000), cada um `Option<f32>` em que `None` é «não medido». É o que o cliente mede da voz que **ouve** — a pior perda entre as pessoas ouvidas, o menor jitter de chegada entre elas, sobre uma janela de 5 s —, mandado uma vez por segundo enquanto há o que medir, e válido por 5 s (`Recepcao`, `INTERVALO_DO_RELATO_MS` e `VALIDADE_DO_RELATO_MS`, em `crates/seele-proto/src/signal.rs`). O servidor o põe na conta do sinal de quem relatou e de mais ninguém (`crates/seele-server/src/sinal.rs`); um relato fora da faixa é ignorado sem derrubar a sessão (`Recepcao::confere`, que de propósito não é o `Validate`), e a frequência é a do limitador de controle. Um cliente não o escreve para um servidor que negociou menos que 13 (`desde_do_cliente`), e de um cliente 12 o servidor não espera relato nenhum: o sinal dele segue como antes;
+  - **o byte `ver` da voz é o número do cabeçalho de voz**, e não o do protocolo (`MEDIA_HEADER_VERSION`, `media.rs`);
+>   - **há dois canais a mais:** `t` (túnel, confiável) e `j` (jogo, sem ordem e sem retransmissão), em `crates/seele-proto/src/transport.rs`;
+>   - **os nomes das mensagens nas tabelas são os do desenho** (`Ola`, `InserirPlug`, `DefinirATField`). Os de hoje estão em `crates/seele-proto/src/control.rs` (`Hello` e seguintes), depois do ADR 0035;
+>   - a tela viaja em canal confiável `u`, encaminhada pelo servidor (`crates/seele-server/src/tela.rs`). Este documento não a descreve.
+> - **Manda agora:** `crates/seele-proto` (o fio), `crates/seele-enlace` (os canais) e o ADR 0063.
+
 ## Camadas
 
 **Desde a 0.17 (linha 2, ADR 0063), a conexão é WebRTC**, e as três coisas abaixo viajam em canais de dados:
@@ -155,6 +171,14 @@ sync = 100
 ```
 
 Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: ≥ 85 nominal · 60–84 degradado · < 60 crítico. Cada faixa tem cor própria — ver `07`.
+
+**De onde vem cada parcela, na 1.0** (`crates/seele-server/src/sinal.rs`). Quem anuncia o sinal de cada pessoa é o servidor, e cada parcela entra com o que foi medido; a que ninguém mediu não penaliza:
+
+- **`rtt_ms`**: a ida e volta do ICE, que o servidor mede de todo par;
+- **`perda`**: a maior entre as que o servidor mede do caminho da pessoa (a de saída e a de entrada do RTP, a de subida da voz) e a que **ela mesma relata** da voz que ouve (`RelatoDeRecepcao`, protocolo 13). É o relato que dá perda a quem está calado e sem vídeo, de quem o servidor não mede nenhuma;
+- **`jitter_ms`**: só o do relato. O jitter existe no receptor, e o servidor não o mede.
+
+A perda que um cliente relata é de ponta a ponta: nela está também o que a subida de quem **fala** perdeu, porque o servidor encaminha a voz com o `seq` de quem fala e o receptor não separa um buraco do outro. Quem separa é o servidor, que mede a subida de cada pessoa que fala: da perda relatada ele desconta a pior subida entre as pessoas que falam na mesma sala — `(1 − relatada) = (1 − subida) × (1 − descida)` —, e o que entra na conta de quem relatou é a descida (`descontar`, em `sinal.rs`). Sem isso, uma pessoa com a subida ruim derrubaria o sinal de todos que a ouvem. Do jitter o servidor não tem com o que descontar; por isso o cliente relata o **menor** entre as pessoas que ouve, que é o que mais se aproxima do caminho dele, e com uma pessoa só falando o número ainda carrega a subida dela.
 
 ## Keepalive e queda
 

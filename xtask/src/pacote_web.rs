@@ -10,7 +10,7 @@
 //!   bancadas usam, que é o com a `prova`;
 //! - o `seele_motor_web.wasm`, com o wasi-sdk já conferido. Este passo **nunca
 //!   baixa** o SDK ([`crate::wasi_sdk::caminho_sem_baixar`]);
-//! - o `_headers` de `apps/seele-app/web/`.
+//! - o `_headers` e o `404.html` de `apps/seele-app/web/` ([`DA_ORIGEM`]).
 //!
 //! E confere ([`conferir`]) antes de dizer que ele sai:
 //! 1. **os tokens da cópia são os congelados** (`design/seele-tokens.css`). O
@@ -26,6 +26,10 @@
 //!    `fronteira.rs` do `seele-web`, e o motor com cara de `.wasm`;
 //! 6. **o `.wasm` da página com o perfil dela** (D-web-5, [`PERFIL_DA_PAGINA`]):
 //!    sem a seção `name`, e abaixo de [`TETO_DO_WASM_DA_PAGINA`].
+//!
+//! 7. **o `404.html`**, sem script. Com ele o Pages responde 404 a um caminho
+//!    que não existe; sem ele, trata o pacote como SPA e responde 200 com o
+//!    `index.html`, que por esse caminho sai sem a CSP da página.
 //!
 //! Sai com 1 se o pacote não sai, e diz por quê. Desde a Tarefa 2.6 a ponte
 //! atende todos os comandos, e ele sai. Nada aqui publica: quem leva o pacote
@@ -197,6 +201,17 @@ fn ainda_a_fazer(ponte: &str) -> Option<Vec<(String, String)>> {
     )
 }
 
+/// O que só a origem tem, em `apps/seele-app/web/`: não é da `ui/`, que o
+/// desktop também empacota.
+///
+/// O `404.html` está aqui pelo que a presença dele faz no Cloudflare Pages:
+/// desliga o fallback de SPA. As regras do `_headers` casam com o caminho
+/// **pedido**, então o `index.html` servido em `/qualquer-coisa` saía sem a
+/// CSP e sem o `frame-ancestors` (medido em produção em 09/11/2026). A CSP não
+/// foi para `/*` porque regras que casam se somam, e o `frame-ancestors
+/// 'none'` dela quebraria o `iframe` dos executores.
+const DA_ORIGEM: [&str; 2] = ["_headers", "404.html"];
+
 /// As fontes de cada `Content-Security-Policy` do `_headers`.
 fn politicas(cabecalhos: &str) -> Vec<String> {
     cabecalhos
@@ -367,6 +382,21 @@ pub(crate) fn conferir(pasta: &Path, congelados: &str, da_prova: &[String]) -> V
         Ok(_) => motivos.push("o `seele_motor_web.wasm` não é um `.wasm`".to_owned()),
         Err(_) => motivos.push("o pacote não tem o `seele_motor_web.wasm`".to_owned()),
     }
+    // 7.
+    match ler("404.html") {
+        Err(_) => motivos.push(
+            "o pacote não tem `404.html`: sem ele a origem responde a qualquer caminho com o \
+             `index.html`, sem a CSP da página"
+                .to_owned(),
+        ),
+        // Ele é servido em caminhos que nenhuma regra de CSP do `_headers`
+        // cobre: tem de ser inerte.
+        Ok(pagina) if pagina.to_ascii_lowercase().contains("<script") => motivos.push(
+            "o `404.html` leva script, e é servido sem a CSP da página: ele tem de ser inerte"
+                .to_owned(),
+        ),
+        Ok(_) => {}
+    }
     motivos
 }
 
@@ -449,9 +479,19 @@ pub(crate) const PERFIL_DA_PAGINA: [&str; 4] = [
 ///   teto deixa os mesmos ~2% sobre a medida, e não autoriza o próximo
 ///   crescimento sem nova medida.
 ///
+/// - **10/11/2026 (1.0, protocolo 13), medido de novo antes de subir:** a
+///   v0.19.6 (`f7ea590e9`) estava sob o teto de 2 455 000, e esta linha dá
+///   2 466 861 bytes no mesmo perfil; gzip -9 local, 720 771. Nenhum crate
+///   novo no grafo. O que cresceu é o protocolo 13 que a página lê e escreve:
+///   a mesa de texto (editar, responder, menções, não lidas, banidos; a quase
+///   totalidade do crescimento, medido em 2 465 442 antes da câmera) e a
+///   câmera como fonte de vídeo (+1 419). Brotli não medido, nem o download
+///   no aparelho. O teto deixa os mesmos ~2% sobre a medida, e não autoriza
+///   o próximo crescimento sem nova medida.
+///
 /// Passar dele é a hora de medir de novo o que chega ao celular, e não de
 /// subir o número calado.
-pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_455_000;
+pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_515_000;
 
 /// Os nomes das seções próprias (`custom`) de um `.wasm`, lidas do formato:
 /// o cabeçalho, e cada seção com o id e o tamanho em LEB128.
@@ -550,9 +590,12 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
             raiz.join("target/wasm32-wasip1/release/seele_motor_web.wasm"),
             "seele_motor_web.wasm",
         ),
-        (raiz.join("apps/seele-app/web/_headers"), "_headers"),
     ] {
         std::fs::copy(&de, pasta.join(para)).map_err(|e| format!("{}: {e}", de.display()))?;
+    }
+    for nome in DA_ORIGEM {
+        let de = raiz.join("apps/seele-app/web").join(nome);
+        std::fs::copy(&de, pasta.join(nome)).map_err(|e| format!("{}: {e}", de.display()))?;
     }
 
     let congelados = std::fs::read_to_string(raiz.join("design/seele-tokens.css"))
@@ -707,6 +750,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(pasta.join("seele_motor_web.wasm"), b"\0asm\x01\0\0\0").unwrap();
+        std::fs::write(pasta.join("404.html"), "<!doctype html><p>não existe</p>").unwrap();
         pasta
     }
 
@@ -726,7 +770,7 @@ mod tests {
     /// Cada regra, estragada sozinha, reprova com a frase dela.
     #[test]
     fn cada_regra_reprova_o_que_ela_guarda() {
-        let casos: [Estrago<'_>; 8] = [
+        let casos: [Estrago<'_>; 10] = [
             (
                 "tokens",
                 &|p| std::fs::write(p.join("tokens.css"), ":root { --cor: #fff; }\n").unwrap(),
@@ -790,6 +834,21 @@ mod tests {
                 &|p| std::fs::remove_file(p.join("seele_motor_web.wasm")).unwrap(),
                 "seele_motor_web.wasm",
             ),
+            // Sem o `404.html` o Pages trata o pacote como SPA e responde a
+            // qualquer caminho com o `index.html` e 200, sem a CSP da página
+            // (as regras do `_headers` casam com o caminho pedido).
+            (
+                "sem-404",
+                &|p| std::fs::remove_file(p.join("404.html")).unwrap(),
+                "não tem `404.html`",
+            ),
+            (
+                "404-com-script",
+                &|p| {
+                    std::fs::write(p.join("404.html"), "<script src=\"base.js\"></script>").unwrap()
+                },
+                "o `404.html` leva script",
+            ),
         ];
         for (nome, estragar, frase) in casos {
             let pasta = pacote_bom(nome);
@@ -834,11 +893,9 @@ mod tests {
         let raiz = raiz();
         let pasta = pasta_nova("hoje");
         copiar_pasta(&raiz.join("apps/seele-app/ui"), &pasta).unwrap();
-        std::fs::copy(
-            raiz.join("apps/seele-app/web/_headers"),
-            pasta.join("_headers"),
-        )
-        .unwrap();
+        for nome in DA_ORIGEM {
+            std::fs::copy(raiz.join("apps/seele-app/web").join(nome), pasta.join(nome)).unwrap();
+        }
         std::fs::write(pasta.join("seele_web.wasm"), b"\0asm\x01\0\0\0").unwrap();
         std::fs::write(pasta.join("seele_motor_web.wasm"), b"\0asm\x01\0\0\0").unwrap();
         let congelados = std::fs::read_to_string(raiz.join("design/seele-tokens.css")).unwrap();

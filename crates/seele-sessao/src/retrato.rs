@@ -328,6 +328,14 @@ pub enum EndReason {
     /// app», que é o que a pessoa faz com qualquer API que falte; quem precisa
     /// dos números é o launcher, na sessão do Plano 3.
     ModsDeOutraApi,
+    /// A thread que bombeia a sessão nesta máquina entrou em pânico.
+    ///
+    /// Local, como [`Self::ServidorTrocouNaVolta`]: nenhum servidor disse isto e
+    /// nada disto atravessa o fio. É defeito do app, e não da rede nem de quem
+    /// hospeda. Era silêncio: a thread morria, e a tela seguia mostrando uma
+    /// sessão de pé que não recebia nem mandava nada. O que o pânico disse fica
+    /// no `seele.log`; este enum é `Copy` e chega à tela só pelo nome.
+    MotorCaiu,
     /// The link died without the server saying why.
     LinkLost,
 }
@@ -457,6 +465,24 @@ pub struct Channel {
     pub name: String,
     /// Whether this is the Channel being read.
     pub open: bool,
+    /// Quantas mensagens de outras pessoas chegaram neste canal sem ele estar
+    /// aberto ([`Room::nao_lidas`]). Zero no canal aberto.
+    ///
+    /// **Só desta sessão, e só do que chegou.** A conta não é gravada em
+    /// lugar nenhum — nem no servidor, nem nesta máquina —, então fechar o
+    /// app a zera, e o que foi dito enquanto se estava fora não entra nela.
+    ///
+    /// **De que canais chega depende do servidor.** Desde o protocolo 13 ele
+    /// manda a conversa de todo canal que a pessoa pode ler, aberto ou não, e
+    /// de novo depois de uma reconexão, sem o cliente pedir
+    /// (`ASSINA_O_QUE_LE_DESDE`, em `seele-server/src/session.rs`): a conta
+    /// vale para o canal que nunca foi aberto. Um servidor de antes do 13 só
+    /// manda a de quem abriu o canal nesta conexão (`JoinChannel`), e ali um
+    /// canal ainda não aberto fica em zero, haja o que houver nele.
+    pub nao_lidas: u32,
+    /// Quantas dessas chamam quem está logado (`@apelido`,
+    /// [`Room::mencoes_nao_lidas`]). Com os mesmos dois limites.
+    pub mencoes: u32,
 }
 
 /// Something worth surfacing.
@@ -622,6 +648,20 @@ pub struct TelaEmCurso {
     /// - **uma transmissão própria que este processo não começou** — a sessão
     ///   caiu e voltou, ou o servidor reanunciou uma tela de antes.
     pub pedido: Option<LimitesDeTela>,
+    /// **Qual codificador de vídeo está produzindo esta transmissão**, quando
+    /// ela é desta pessoa e esta máquina a codifica: o nome que o motor dá
+    /// («VideoToolbox», o do Media Foundation com o fabricante, «OpenH264
+    /// (software)»).
+    ///
+    /// O motor sabia e a tela não contava: a escolha entre o codificador do
+    /// sistema e a queda para software só ia ao `seele.log`, e é ela que
+    /// explica a CPU de quem transmite.
+    ///
+    /// Dado desta máquina, como [`Self::pedido`]: não atravessa o fio, e é
+    /// `None` para quem só assiste, na câmera (que a janela codifica), antes
+    /// de o primeiro fluxo abrir, e no produtor de retrato do navegador, que
+    /// não tem codificador deste lado.
+    pub codificador: Option<String>,
 }
 
 /// O tema do servidor, como a casca o recebe: quem o declarou e o JSON dos
@@ -720,6 +760,44 @@ pub fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
         .collect()
 }
 
+/// Um banimento que vale agora, como a tela de banidos o lê (protocolo 13).
+///
+/// `nickname` é o apelido **como o servidor o guarda** — o alias, com a marca
+/// (`ana#K7Q2`) —, como o de um membro do FORA DO AR. A base que a tela
+/// mostra sai de `identidades_apresentadas`, no
+/// retrato, pela conta `person`: o servidor manda a identidade apresentada de
+/// cada banido atrás da lista.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Banido {
+    /// A conta banida.
+    pub person: u64,
+    /// O apelido dela, como o servidor o guarda.
+    pub nickname: String,
+    /// O que quem baniu escreveu, se escreveu.
+    pub reason: Option<String>,
+    /// Quando o banimento acaba, em **segundos** desde a época. `None` é
+    /// permanente.
+    pub expires_at: Option<i64>,
+    /// Quem baniu.
+    pub issued_by: Option<u64>,
+}
+
+/// A lista de banidos desta sessão, como chegou da última vez que foi pedida
+/// ([`Room::banidos`]): vazia até alguém pedir.
+#[must_use]
+pub fn banidos_de(room: &Room) -> Vec<Banido> {
+    room.banidos
+        .iter()
+        .map(|banido| Banido {
+            person: banido.person.0,
+            nickname: banido.nickname.clone(),
+            reason: banido.reason.clone(),
+            expires_at: banido.expires_at,
+            issued_by: banido.issued_by.map(|quem| quem.0),
+        })
+        .collect()
+}
+
 /// As linhas de texto, com a que está aberta marcada.
 pub fn lines_of(room: &Room) -> Vec<Channel> {
     room.channels
@@ -728,6 +806,8 @@ pub fn lines_of(room: &Room) -> Vec<Channel> {
             id: channel.id.0,
             name: channel.name.clone(),
             open: room.current_channel == Some(channel.id),
+            nao_lidas: u32::try_from(room.nao_lidas(channel.id)).unwrap_or(u32::MAX),
+            mencoes: u32::try_from(room.mencoes_nao_lidas(channel.id)).unwrap_or(u32::MAX),
         })
         .collect()
 }
@@ -804,6 +884,9 @@ pub fn tela_por_id(
         // lado da tela de outra pessoa seria a coluna «pedido» exibindo o que
         // um terceiro pediu na vez passada.
         pedido: if e_minha { pedido } else { None },
+        // Quem sabe é a ponte de cada casca, e não o `Room`: ver
+        // `seele_ffi::Shared::vestir_o_codificador`.
+        codificador: None,
     })
 }
 
@@ -1175,5 +1258,193 @@ pub fn assistida_no_retrato(
     match escolhida {
         Some(escolha) => escolha,
         None => ligada,
+    }
+}
+
+/// **A pausa da transmissão desta pessoa**: qual tela, e o nome do motivo.
+///
+/// # Por que não mora no `Room`
+///
+/// Pelo mesmo motivo de [`TelaEmCurso::pedido`]: o `Room` é o que o servidor
+/// contou, e o servidor não sabe desta pausa. Quem decide parar o vídeo é o
+/// teto **desta máquina** (o §3.2: quando o sinal aperta, quem cede é a
+/// imagem, e a voz fica), e só o motor desta ponta sabe que parou e por quê.
+///
+/// # O defeito que isto fecha
+///
+/// [`TelaEmCurso::parada`] existia, a casca já tinha a frase e o lugar dela
+/// (`#palco-parada`), e o campo era **sempre** `None`: nada do que o motor
+/// decidia chegava ao retrato. Quem transmitia via o próprio espelho
+/// congelado e o botão em PARAR DE COMPARTILHAR, como se a sala estivesse
+/// vendo.
+///
+/// # Presa à tela, e não solta
+///
+/// O nome do motivo anda junto do [`ScreenId`] de propósito: uma pausa
+/// guardada sem dono vazaria para a próxima transmissão desta pessoa, que
+/// nasceria «pausada» sem nunca ter parado.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ParadaDaMinhaTela(Option<(ScreenId, &'static str)>);
+
+impl ParadaDaMinhaTela {
+    /// O teto parou o vídeo desta transmissão. `motivo` é o nome estável.
+    ///
+    /// Devolve se algo mudou, para quem avisa a casca não avisar à toa.
+    pub fn parou(&mut self, tela: ScreenId, motivo: &'static str) -> bool {
+        let nova = Some((tela, motivo));
+        let mudou = self.0 != nova;
+        self.0 = nova;
+        mudou
+    }
+
+    /// O fluxo desta transmissão abriu de novo: a pausa acabou.
+    ///
+    /// Só apaga a pausa **desta** tela — a abertura da tela de outra pessoa
+    /// não diz nada sobre a desta. Devolve se algo mudou.
+    pub fn voltou(&mut self, tela: ScreenId) -> bool {
+        let era_dela = self.0.is_some_and(|(pausada, _)| pausada == tela);
+        if era_dela {
+            self.0 = None;
+        }
+        era_dela
+    }
+
+    /// A transmissão acabou — a pessoa parou, ela caiu, a sessão acabou.
+    pub fn esquecer(&mut self) {
+        self.0 = None;
+    }
+
+    /// O nome do motivo, se **esta** tela está pausada.
+    #[must_use]
+    pub fn de(&self, tela: ScreenId) -> Option<&'static str> {
+        self.0
+            .and_then(|(pausada, motivo)| (pausada == tela).then_some(motivo))
+    }
+}
+
+impl FotoDaSala {
+    /// A mesma foto, dizendo que a transmissão **desta pessoa** está pausada.
+    ///
+    /// Escreve [`TelaEmCurso::parada`] em [`Self::minha_transmissao`] e, quando
+    /// a tela assistida é a própria, em [`Self::tela`] também — é a mesma
+    /// transmissão vista por dois campos, e as duas frases da casca
+    /// (`#tela-estado` e `#palco-parada`) leem um de cada.
+    ///
+    /// **Nunca na tela de outra pessoa**: a pausa é decisão do teto desta
+    /// máquina sobre o que ela manda, e não diz nada sobre o que ela recebe.
+    #[must_use]
+    pub fn com_a_parada_da_minha_tela(mut self, parada: ParadaDaMinhaTela) -> Self {
+        for tela in [self.minha_transmissao.as_mut(), self.tela.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            if tela.e_minha {
+                tela.parada = parada.de(ScreenId(tela.tela)).map(str::to_owned);
+            }
+        }
+        self
+    }
+}
+
+#[cfg(test)]
+mod a_parada_da_minha_tela {
+    use super::*;
+    use seele_proto::control::{ServerMessage, VoiceRoomInfo};
+    use seele_proto::ids::{SessionId, Ssrc, VoiceRoomId};
+
+    /// Somos a pessoa 7, na sala 1, onde a 7 transmite a tela 9 e a 3 a 11.
+    fn sala() -> Room {
+        let mut room = Room::new();
+        room.apply(&ServerMessage::Session {
+            id: SessionId(1),
+            person: PersonId(7),
+            ssrc: Ssrc(700),
+            server: "Casa".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VoiceRoomId(1),
+                name: "SALA-01".into(),
+                limit: 20,
+                password_required: false,
+                channel: None,
+            }],
+            channels: Vec::new(),
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        });
+        room.enter_voice_room(VoiceRoomId(1));
+        for (pessoa, tela) in [(7, 9), (3, 11)] {
+            room.apply(&ServerMessage::ScreenShareStarted {
+                voice_room: VoiceRoomId(1),
+                person: PersonId(pessoa),
+                screen: ScreenId(tela),
+            });
+        }
+        room
+    }
+
+    /// **O retrato carrega a pausa da transmissão desta pessoa — e só dela.**
+    #[test]
+    fn o_retrato_carrega_a_parada_da_propria_transmissao_e_so_dela() {
+        let room = sala();
+        let mut parada = ParadaDaMinhaTela::default();
+
+        // Sem pausa, nada: é o estado de sempre.
+        let foto = foto_da_sala(&room, Some(ScreenId(9)), None).com_a_parada_da_minha_tela(parada);
+        assert_eq!(foto.minha_transmissao.and_then(|tela| tela.parada), None);
+
+        assert!(parada.parou(ScreenId(9), "SinalCritico"));
+        // Assistindo a própria: os dois campos são a mesma transmissão.
+        let foto = foto_da_sala(&room, Some(ScreenId(9)), None).com_a_parada_da_minha_tela(parada);
+        assert_eq!(
+            foto.minha_transmissao
+                .and_then(|tela| tela.parada)
+                .as_deref(),
+            Some("SinalCritico"),
+            "o motor pausou a transmissão desta pessoa e o retrato não diz: ela ficaria \
+             olhando o espelho congelado, com o botão em PARAR DE COMPARTILHAR, como se a sala \
+             estivesse vendo"
+        );
+        assert_eq!(
+            foto.tela.and_then(|tela| tela.parada).as_deref(),
+            Some("SinalCritico"),
+            "a tela assistida é a própria e o palco não diz que ela parou"
+        );
+
+        // Assistindo a de outra pessoa: a dela não está pausada, a nossa está.
+        let foto = foto_da_sala(&room, Some(ScreenId(11)), None).com_a_parada_da_minha_tela(parada);
+        assert_eq!(
+            foto.tela.and_then(|tela| tela.parada),
+            None,
+            "a pausa do que esta máquina manda foi escrita na tela de outra pessoa"
+        );
+        assert_eq!(
+            foto.minha_transmissao
+                .and_then(|tela| tela.parada)
+                .as_deref(),
+            Some("SinalCritico")
+        );
+    }
+
+    #[test]
+    fn a_volta_apaga_a_parada_e_so_a_da_propria_tela() {
+        let mut parada = ParadaDaMinhaTela::default();
+        assert!(parada.parou(ScreenId(9), "AbaixoDoPiso"));
+        assert!(
+            !parada.parou(ScreenId(9), "AbaixoDoPiso"),
+            "a mesma pausa dita duas vezes contou como mudança"
+        );
+
+        // A abertura da tela de outra pessoa não é a volta da nossa.
+        assert!(!parada.voltou(ScreenId(11)));
+        assert_eq!(parada.de(ScreenId(9)), Some("AbaixoDoPiso"));
+
+        assert!(parada.voltou(ScreenId(9)));
+        assert_eq!(parada.de(ScreenId(9)), None);
+
+        // E a pausa não vaza para a transmissão seguinte, de outro nome.
+        assert!(parada.parou(ScreenId(9), "SinalCritico"));
+        assert_eq!(parada.de(ScreenId(10)), None);
+        parada.esquecer();
+        assert_eq!(parada.de(ScreenId(9)), None);
     }
 }

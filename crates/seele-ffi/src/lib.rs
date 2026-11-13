@@ -36,7 +36,6 @@
 /// O foco de voz: no máximo uma conexão desta máquina tem o microfone (E3 da
 /// 0.17, multi-sessão).
 pub mod cargos;
-pub mod chamada_pessoal;
 pub mod foco;
 pub mod mods;
 pub mod perfis;
@@ -80,9 +79,9 @@ pub use types::{
     Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason, OfertaDeMaquinaFfi,
     PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, PortaDeTunel, Preview,
     PreviewRefusal, PreviewRules, QuedaDeTunel, RelatorioDeTunel, SaveDestination, SaveRefused,
-    Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao,
-    TermoOferecidoFfi, Transfer, TransmissaoNaSala, Trust, TunelOferecidoFfi, VoiceMode, VoiceRoom,
-    VoiceRoomSync, VolumeRefusal,
+    ScreenKind, Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry,
+    TemaDaSessao, TermoOferecidoFfi, Transfer, TransmissaoNaSala, Trust, TunelOferecidoFfi,
+    VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// Diz que este processo tem tela para pedidos de máquina de jogo: toda
@@ -90,6 +89,24 @@ pub use types::{
 /// [`seele_core::enlace::este_processo_tem_tela`] — é o que fecha a corrida com
 /// os pedidos que o servidor manda na chegada. Só o `main` do app chama.
 pub use seele_core::enlace::este_processo_tem_tela;
+pub use seele_core::PreviaDeTela;
+
+/// Quantas fontes ganham prévia numa abertura da caixa de compartilhar.
+pub const MAX_PREVIAS_DE_TELA: usize = 24;
+
+/// Quantas capturas de prévia ficam abertas ao mesmo tempo. Abertas juntas,
+/// uma fonte que não entrega quadro não segura as outras; em lotes, a caixa
+/// não abre vinte e quatro capturas de uma vez.
+const LOTE_DE_PREVIAS: usize = 8;
+
+/// **A regra da menção**, pura: se `corpo` chama a pessoa de apelido `base` e
+/// marca `tag`. É a função que a sessão usa para marcar
+/// [`Message::mentions_me`]; a casca a usa no autocompletar e no realce, para
+/// as duas concordarem. A regra inteira está no doc de
+/// [`seele_core::mencao`].
+pub use seele_core::mencao::menciona;
+/// Um banimento que vale agora, como [`Connection::banidos`] o entrega.
+pub use seele_core::retrato::Banido;
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
 ///
@@ -137,6 +154,13 @@ pub use seele_core::{agenda, arquivo_local, entrada, Codigo};
 /// confere o manifesto do launcher contra esta build. Pelo `seele-core`, e não
 /// direto do `seele-proto`: o ADR 0002 deixa este crate ver só o núcleo.
 pub use seele_core::{linha_do_protocolo, PROTOCOL_VERSION, VERSAO_DO_SERVIDOR};
+
+/// A origem do web app (a D-web-2), para a casca montar o endereço de uma
+/// página publicada nela — o teste de rede que a tela de «não conectou»
+/// oferece (`abrir_o_teste_de_rede`, no app). Pelo `seele-core`, pela mesma
+/// razão das de cima, e daqui e não copiada: o nome mora num lugar só
+/// (`a_origem_do_web_app_e_escrita_num_lugar_so`).
+pub use seele_core::uri::ORIGEM_DO_NAVEGADOR;
 
 /// Every microphone this machine is offering, right now.
 ///
@@ -1126,6 +1150,8 @@ enum Command {
     Send {
         channel: ChannelId,
         body: String,
+        /// A mensagem a que esta responde, se responde a alguma.
+        replies_to: Option<MessageId>,
         /// A chave escolhida por quem pediu o envio.
         ///
         /// Escolhida **antes** do comando e carregada nele, e não sorteada no
@@ -1189,6 +1215,16 @@ enum Command {
     RemoveMessage {
         message: MessageId,
     },
+    /// Os três verbos do protocolo 13: o portão de versão já passou em
+    /// `Connection`, antes de o comando entrar na fila.
+    EditMessage {
+        message: MessageId,
+        body: String,
+    },
+    UnbanPerson {
+        person: PersonId,
+    },
+    ListBans,
     MovePerson {
         person: PersonId,
         voice_room: VoiceRoomId,
@@ -1494,6 +1530,22 @@ struct Shared {
     /// casca já escrevia do lado dela: guardá-lo faria o painel da próxima
     /// comparar o que está saindo agora com um teto de outra vez.
     limites_da_tela: Mutex<Option<LimitesDeTela>>,
+    /// Se o teto pausou a transmissão **desta pessoa**, e por quê.
+    ///
+    /// Ao lado do pedido porque é a mesma espécie de coisa: algo que só esta
+    /// ponta sabe sobre a própria transmissão, e que o `Room` — o que o
+    /// servidor contou — nunca viu. Escrita pelo `Aviso::TelaParou`, apagada
+    /// pelo `Aviso::TelaAbriu` da mesma tela (a volta) e pelo fim da
+    /// transmissão. Ver [`seele_core::retrato::ParadaDaMinhaTela`].
+    parada_da_tela: Mutex<seele_core::retrato::ParadaDaMinhaTela>,
+    /// Qual codificador de vídeo abriu a transmissão desta pessoa, e de qual
+    /// tela: o que o último `Aviso::TelaAbriu` com nome disse.
+    ///
+    /// Com a tela junto porque o nome só descreve **aquela** transmissão: o
+    /// retrato o veste só na tela de mesmo número
+    /// ([`Self::vestir_o_codificador`]). Limpo quando a transmissão desta
+    /// pessoa acaba, como o pedido acima.
+    codificador_da_tela: Mutex<Option<(seele_core::ScreenId, String)>>,
     /// Qual transmissão esta sessão escolheu assistir, e em que estado a escolha
     /// está. ADR 0054.
     ///
@@ -1526,6 +1578,15 @@ struct Shared {
     /// tamanho, e o `SCWindow` — que é o que a captura precisa — fica deste
     /// lado, esperando a escolha.
     fontes_de_tela: Mutex<Vec<seele_core::FonteDeTela>>,
+    /// Por onde os quadros da câmera entram, enquanto há uma câmera pedida ou
+    /// no ar.
+    ///
+    /// `None` é «esta sessão não está mandando câmera», e é o que
+    /// [`Connection::quadro_da_camera`] responde com
+    /// [`ConnectionError::CameraNotLive`]. Trocada a cada
+    /// [`Connection::compartilhar_camera`] e esvaziada por
+    /// [`Connection::parar_de_compartilhar`].
+    camera: Mutex<Option<seele_core::de_fora::EntradaDeFora>>,
 }
 
 impl Shared {
@@ -1562,6 +1623,13 @@ impl Shared {
         }
     }
 
+    /// Fecha a porta por onde os quadros da câmera entravam.
+    fn largar_a_camera(&self) {
+        if let Ok(mut camera) = self.camera.lock() {
+            *camera = None;
+        }
+    }
+
     /// Guarda o que esta pessoa pediu para a tela dela, ou esquece.
     ///
     /// `None` esquece, e é o que acontece quando a transmissão acaba: um teto
@@ -1570,6 +1638,71 @@ impl Shared {
     fn gravar_pedido_da_tela(&self, limites: Option<LimitesDeTela>) {
         if let Ok(mut guardado) = self.limites_da_tela.lock() {
             *guardado = limites;
+        }
+    }
+
+    /// O teto pausou a transmissão desta pessoa. Devolve se o retrato mudou.
+    fn a_tela_parou(&self, tela: seele_core::ScreenId, motivo: seele_core::MotivoDeParada) -> bool {
+        self.parada_da_tela
+            .lock()
+            .is_ok_and(|mut parada| parada.parou(tela, nome_da_parada(motivo)))
+    }
+
+    /// O fluxo de uma tela abriu: se era a pausada, a pausa acabou. Devolve se
+    /// o retrato mudou.
+    fn a_tela_voltou(&self, tela: seele_core::ScreenId) -> bool {
+        self.parada_da_tela
+            .lock()
+            .is_ok_and(|mut parada| parada.voltou(tela))
+    }
+
+    /// A transmissão desta pessoa acabou, e a pausa dela com ela.
+    fn esquecer_a_parada_da_tela(&self) {
+        if let Ok(mut parada) = self.parada_da_tela.lock() {
+            parada.esquecer();
+        }
+    }
+
+    /// A pausa da transmissão desta pessoa, para o retrato.
+    ///
+    /// Um cadeado envenenado responde «sem pausa», que é o retrato de antes de
+    /// este campo existir.
+    fn parada_da_tela(&self) -> seele_core::retrato::ParadaDaMinhaTela {
+        self.parada_da_tela
+            .lock()
+            .map(|parada| *parada)
+            .unwrap_or_default()
+    }
+
+    /// Guarda qual codificador abriu a transmissão desta pessoa, ou esquece.
+    fn gravar_codificador_da_tela(&self, de: Option<(seele_core::ScreenId, String)>) {
+        if let Ok(mut guardado) = self.codificador_da_tela.lock() {
+            *guardado = de;
+        }
+    }
+
+    /// Põe na foto o codificador da transmissão desta pessoa.
+    ///
+    /// Só na tela **desta pessoa** e **de mesmo número** que o motor disse: o
+    /// nome ao lado da tela de outra pessoa, ou de uma transmissão de antes,
+    /// seria o rodapé afirmando o que ninguém mediu. Um cadeado envenenado
+    /// deixa o `None`, que a tela lê como «não sei».
+    fn vestir_o_codificador(&self, foto: &mut seele_core::retrato::FotoDaSala) {
+        let Some((tela, nome)) = self
+            .codificador_da_tela
+            .lock()
+            .ok()
+            .and_then(|guardado| guardado.clone())
+        else {
+            return;
+        };
+        for em_curso in [&mut foto.minha_transmissao, &mut foto.tela]
+            .into_iter()
+            .flatten()
+        {
+            if em_curso.e_minha && em_curso.tela == tela.0 {
+                em_curso.codificador = Some(nome.clone());
+            }
         }
     }
 
@@ -2234,9 +2367,12 @@ impl Connection {
             pending_weights: Mutex::new(Vec::new()),
             tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
+            parada_da_tela: Mutex::new(Default::default()),
+            codificador_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
+            camera: Mutex::new(None),
         });
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2255,43 +2391,41 @@ impl Connection {
 
         let thread_shared = Arc::clone(&shared);
         let thread_config = config.clone();
-        std::thread::Builder::new()
-            .name("seele-connection".into())
-            .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        tracing::error!(%error, "could not start the connection runtime");
-                        let _ = ready_tx.send(Err(ConnectionError::Unreachable.into()));
-                        return;
-                    }
-                };
-                runtime.block_on(drive(
-                    thread_config,
-                    alvo,
-                    key,
-                    pins,
-                    thread_shared,
-                    command_rx,
-                    &ready_tx,
-                    olhos,
-                    cancelamento,
-                ));
-                // **Antes de o runtime cair, e não depois.** `drive` voltou com
-                // a despedida do enlace feita (`Enlace::sair`), e é isso que
-                // `encerrar_e_esperar` espera. Soltar o runtime espera a piscina
-                // de bloqueio sem prazo — a bomba da tela é parada ali —, e um
-                // sinal depois dele seguraria a saída do app por isso.
-                let _ = encerrada_tx.send(());
-                drop(runtime);
-            })
-            .map_err(|error| {
-                tracing::error!(%error, "could not start the connection thread");
-                ConnectionError::Unreachable
-            })?;
+        subir_a_thread_da_conexao(Arc::clone(&shared), ready_tx, move |ready_tx| {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::error!(%error, "could not start the connection runtime");
+                    let _ = ready_tx.send(Err(ConnectionError::Unreachable.into()));
+                    return;
+                }
+            };
+            runtime.block_on(drive(
+                thread_config,
+                alvo,
+                key,
+                pins,
+                thread_shared,
+                command_rx,
+                ready_tx,
+                olhos,
+                cancelamento,
+            ));
+            // **Antes de o runtime cair, e não depois.** `drive` voltou com
+            // a despedida do enlace feita (`Enlace::sair`), e é isso que
+            // `encerrar_e_esperar` espera. Soltar o runtime espera a piscina
+            // de bloqueio sem prazo — a bomba da tela é parada ali —, e um
+            // sinal depois dele seguraria a saída do app por isso.
+            let _ = encerrada_tx.send(());
+            drop(runtime);
+        })
+        .map_err(|error| {
+            tracing::error!(%error, "could not start the connection thread");
+            ConnectionError::Unreachable
+        })?;
 
         // The thread reports the outcome of the handshake, then keeps running.
         let trust = ready_rx
@@ -2400,6 +2534,9 @@ impl Connection {
             linha: ChannelId(channel),
             id: ClientMessageId(id),
             corpo: body,
+            // Um anexo em resposta fica para quando a casca precisar: o
+            // núcleo já o leva (`Anexo::responde_a`).
+            responde_a: None,
             caminho: std::path::PathBuf::from(path),
             nome: file_name,
             tipo: declared_type,
@@ -2560,13 +2697,48 @@ impl Connection {
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
     pub fn send_message(&self, channel: u32, body: String) -> Result<String, ConnectionError> {
+        self.enviar(channel, body, None)
+    }
+
+    /// Diz alguma coisa **em resposta a uma mensagem** do mesmo canal.
+    ///
+    /// Tudo o que [`Self::send_message`] faz, mais o `replies_to`: a pendente
+    /// já nasce com ele ([`Message::replies_to`]), e tentar de novo manda a
+    /// mesma resposta. O servidor confere que a mensagem respondida existe e é
+    /// deste canal; a que não é volta como a pendente `Recusada`.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over, ou
+    /// [`ConnectionError::UnknownMessage`] quando `replies_to` é zero: uma
+    /// pendente não tem id de servidor, e não há como responder ao que o
+    /// servidor ainda não tem.
+    pub fn send_reply(
+        &self,
+        channel: u32,
+        body: String,
+        replies_to: u64,
+    ) -> Result<String, ConnectionError> {
+        if replies_to == 0 {
+            return Err(ConnectionError::UnknownMessage);
+        }
+        self.enviar(channel, body, Some(MessageId(replies_to)))
+    }
+
+    /// O envio, com ou sem resposta: o corpo de [`Self::send_message`].
+    fn enviar(
+        &self,
+        channel: u32,
+        body: String,
+        replies_to: Option<MessageId>,
+    ) -> Result<String, ConnectionError> {
         let corpo = body.trim().to_owned();
         if corpo.is_empty() {
             return Ok(String::new());
         }
         let id = ClientMessageId(next_client_message_id());
         let channel = ChannelId(channel);
-        self.anotar_pendente(channel, id, corpo.clone());
+        self.anotar_pendente(channel, id, corpo.clone(), replies_to);
 
         // **O teto é conferido aqui**, e não descoberto quando o quadro se
         // recusa a ser codificado. Ver [`Self::limite_da_mensagem`]: o caminho
@@ -2583,6 +2755,7 @@ impl Connection {
         self.command(Command::Send {
             channel,
             body: corpo,
+            replies_to,
             id,
         })?;
         Ok(id.get().to_string())
@@ -2609,11 +2782,11 @@ impl Connection {
             return Ok(false);
         };
         let id = ClientMessageId(chave);
-        let Some((channel, corpo)) = self.shared.room.lock().ok().and_then(|room| {
+        let Some((channel, corpo, replies_to)) = self.shared.room.lock().ok().and_then(|room| {
             room.pendentes
                 .iter()
                 .find(|pendente| pendente.client_message_id == id)
-                .map(|pendente| (pendente.channel, pendente.body.clone()))
+                .map(|pendente| (pendente.channel, pendente.body.clone(), pendente.replies_to))
         }) else {
             return Ok(false);
         };
@@ -2627,10 +2800,13 @@ impl Connection {
             self.recusar_pendente(id, recusa);
             return Ok(true);
         }
-        self.anotar_pendente(channel, id, corpo.clone());
+        // A resposta anotada no primeiro envio vai junto: tentar de novo manda
+        // a mesma mensagem, e não uma solta.
+        self.anotar_pendente(channel, id, corpo.clone(), replies_to);
         self.command(Command::Send {
             channel,
             body: corpo,
+            replies_to,
             id,
         })?;
         Ok(true)
@@ -2656,9 +2832,15 @@ impl Connection {
     }
 
     /// Anota uma pendente e acorda quem desenha.
-    fn anotar_pendente(&self, channel: ChannelId, id: ClientMessageId, body: String) {
+    fn anotar_pendente(
+        &self,
+        channel: ChannelId,
+        id: ClientMessageId,
+        body: String,
+        replies_to: Option<MessageId>,
+    ) {
         if let Ok(mut room) = self.shared.room.lock() {
-            room.anotar_envio(channel, id, body, agora_em_segundos());
+            room.anotar_resposta(channel, id, body, replies_to, agora_em_segundos());
         }
         self.shared.messages_changed();
     }
@@ -3327,6 +3509,125 @@ impl Connection {
         self.command(Command::RemoveMessage {
             message: MessageId(message),
         })
+    }
+
+    /// **O portão de versão**: um verbo só entra na fila para um servidor que
+    /// o entende. A tabela é a do protocolo (`desde_do_cliente`), e esta
+    /// função não repete número nenhum.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] antes do aperto de mão (o número
+    /// negociado ainda é zero), e [`ConnectionError::ServidorAntigo`] quando o
+    /// servidor negociou menos do que o verbo exige.
+    fn portao_de_versao(
+        &self,
+        mensagem: &seele_core::ClientMessage,
+    ) -> Result<(), ConnectionError> {
+        let negociado = self.protocolo_negociado();
+        if negociado == 0 {
+            return Err(ConnectionError::NotConnected);
+        }
+        match seele_core::perfil::portao_do_cliente(mensagem, negociado) {
+            Err(seele_core::perfil::ErroDoPerfil::ServidorAntigo { negociado, exige }) => {
+                Err(ConnectionError::ServidorAntigo { negociado, exige })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// **Edita uma mensagem sua** — protocolo 13.
+    ///
+    /// Só a autora edita; o servidor recusa a de outra pessoa com o aviso de
+    /// permissão negada, e a que já não existe com `PedidoRecusado`. A
+    /// confirmação é a mensagem mudar: o corpo novo chega por
+    /// [`Event::MessagesChanged`], com [`Message::edited`] ligado, para esta
+    /// máquina e para quem mais lê o canal. Não há pendente: se o servidor
+    /// não responder, o texto antigo continua na tela, que é a verdade.
+    ///
+    /// O corpo passa pelo mesmo `trim` do envio.
+    ///
+    /// # Errors
+    ///
+    /// - [`ConnectionError::UnknownMessage`]: `message` é zero (uma pendente;
+    ///   ver [`Self::remove_message`]);
+    /// - [`ConnectionError::MensagemVazia`]: não sobrou texto;
+    /// - [`ConnectionError::MensagemGrandeDemais`]: passa de
+    ///   [`Self::limite_da_mensagem`] bytes;
+    /// - [`ConnectionError::ServidorAntigo`]: o servidor negociou menos que o
+    ///   13, e nada foi escrito;
+    /// - [`ConnectionError::NotConnected`] once the session is over.
+    pub fn edit_message(&self, message: u64, body: String) -> Result<(), ConnectionError> {
+        if message == 0 {
+            return Err(ConnectionError::UnknownMessage);
+        }
+        let corpo = body.trim().to_owned();
+        if corpo.is_empty() {
+            return Err(ConnectionError::MensagemVazia);
+        }
+        if volta::grande_demais(&corpo).is_some() {
+            return Err(ConnectionError::MensagemGrandeDemais {
+                limite_bytes: seele_core::MAX_BODY_LEN as u64,
+            });
+        }
+        let message = MessageId(message);
+        self.portao_de_versao(&seele_core::ClientMessage::EditMessage {
+            id: message,
+            body: corpo.clone(),
+        })?;
+        self.command(Command::EditMessage {
+            message,
+            body: corpo,
+        })
+    }
+
+    /// **Tira o banimento de uma conta** — protocolo 13, a mesma permissão e
+    /// a mesma hierarquia de [`Self::ban_person`].
+    ///
+    /// A resposta é a lista de banidos como ficou ([`Event::BanidosChanged`],
+    /// [`Self::banidos`]), e a pessoa volta ao FORA DO AR de todo mundo. A
+    /// recusa chega como aviso: permissão negada, ou `PedidoRecusado` quando
+    /// a conta não estava banida.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::ServidorAntigo`] num servidor que negociou menos
+    /// que o 13; [`ConnectionError::NotConnected`] once the session is over.
+    pub fn unban_person(&self, person: u64) -> Result<(), ConnectionError> {
+        let person = PersonId(person);
+        self.portao_de_versao(&seele_core::ClientMessage::UnbanPerson { person })?;
+        self.command(Command::UnbanPerson { person })
+    }
+
+    /// **Pede a lista de banidos** — protocolo 13. Só responde a quem pode
+    /// banir; para os outros, volta o aviso de permissão negada.
+    ///
+    /// Pede, e não espera: a lista chega por [`Event::BanidosChanged`] e fica
+    /// em [`Self::banidos`]. Ela **não se atualiza sozinha** quando outra
+    /// pessoa bane alguém: quem abre a tela de banidos pede de novo.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::unban_person`].
+    pub fn list_bans(&self) -> Result<(), ConnectionError> {
+        self.portao_de_versao(&seele_core::ClientMessage::ListBans)?;
+        self.command(Command::ListBans)
+    }
+
+    /// Os banimentos que valem, como o servidor os listou da última vez que
+    /// esta sessão pediu ([`Self::list_bans`], [`Self::unban_person`]). Vazia
+    /// até pedir, e depois de uma reconexão.
+    ///
+    /// O `nickname` é o que o servidor guarda (o alias, `ana#K7Q2`); a base
+    /// que a tela mostra sai de [`Snapshot::identidades_apresentadas`], pela
+    /// conta, como para um membro do FORA DO AR.
+    #[must_use]
+    pub fn banidos(&self) -> Vec<Banido> {
+        self.shared
+            .room
+            .lock()
+            .map(|room| seele_core::retrato::banidos_de(&room))
+            .unwrap_or_default()
     }
 
     /// Asks the server to move a person into a voice room — `mover_pessoa`.
@@ -4047,15 +4348,167 @@ impl Connection {
     ) -> Result<(), ConnectionError> {
         let escolhida = self.fonte_escolhida(fonte)?;
         let biblioteca = modulo_de_video()?;
-        let pedido = seele_core::PedidoDeTela {
+        let pedido = seele_core::PedidoDeTela::DoSistema {
             biblioteca,
             origem: escolhida.origem(),
             captura: seele_core::CapturaEmCaixa::nova(escolhida.captura()),
         };
+        // A tela entra no lugar da câmera, se havia uma: a porta dos quadros
+        // dela fecha aqui, e a casca que ainda empurrar ouve
+        // [`ConnectionError::CameraNotLive`].
+        self.shared.largar_a_camera();
         self.command(Command::ShareScreen {
             pedido: Box::new(pedido),
             limites: limites_do_nucleo(limites),
         })
+    }
+
+    /// Começa a transmitir a **câmera**, no lugar da tela.
+    ///
+    /// # Quem captura e quem codifica
+    ///
+    /// A casca. Este workspace proíbe `unsafe`, e não há captura de câmera
+    /// nativa sem ele; a janela tem o `getUserMedia` e o `VideoEncoder` do
+    /// sistema. `largura` e `altura` são as medidas com que **ela** codifica —
+    /// vão no cabeçalho de abertura, e quem assiste arma o decodificador por
+    /// elas. Os quadros chegam depois, por [`Self::quadro_da_camera`].
+    ///
+    /// # Uma imagem por pessoa
+    ///
+    /// A câmera vai pelo mesmo caminho da tela — o mesmo `StartScreenShare`, a
+    /// mesma permissão, o mesmo fluxo —, e **no lugar dela**: quem estava
+    /// compartilhando a tela para de compartilhá-la quando liga a câmera. Quem
+    /// avisa a pessoa disso é a casca, antes de chamar.
+    ///
+    /// **`Ok` quer dizer «foi pedido»**, como em [`Self::compartilhar_tela`]:
+    /// o fluxo abre quando o servidor dá nome à transmissão, e a casca fica
+    /// sabendo por um [`Event::ScreenOpened`] da própria transmissão, com
+    /// `source: "camera"`. Só então há para onde mandar quadro.
+    ///
+    /// # Errors
+    ///
+    /// - [`ConnectionError::NotConnected`] sem sessão;
+    /// - [`ConnectionError::ServidorAntigo`] quando o servidor negociou menos
+    ///   que o protocolo da câmera (13). **Nada saiu**: um servidor do 12
+    ///   anunciaria a transmissão e recusaria o fluxo dela, e a sala ficaria
+    ///   olhando uma tela que não existe;
+    /// - [`ConnectionError::CameraBadSize`] para medidas que o cabeçalho de
+    ///   abertura recusaria.
+    pub fn compartilhar_camera(
+        &self,
+        largura: u32,
+        altura: u32,
+        limites: LimitesDeTela,
+    ) -> Result<(), ConnectionError> {
+        let comecou = self.comecar_a_camera(largura, altura, limites);
+        self.shared
+            .gravar_pedido_da_tela(comecou.is_ok().then_some(limites));
+        comecou
+    }
+
+    /// A metade de [`Self::compartilhar_camera`] que recusa antes do fio.
+    fn comecar_a_camera(
+        &self,
+        largura: u32,
+        altura: u32,
+        limites: LimitesDeTela,
+    ) -> Result<(), ConnectionError> {
+        let negociado = self.protocolo_negociado();
+        if negociado == 0 {
+            return Err(ConnectionError::NotConnected);
+        }
+        let exige = seele_core::PROTOCOLO_DA_CAMERA;
+        if negociado < exige {
+            return Err(ConnectionError::ServidorAntigo { negociado, exige });
+        }
+        let (largura, altura) = medidas_da_camera(largura, altura)?;
+        let (entrada, quadros) = seele_core::de_fora::canal_de_fora(largura, altura);
+        // A porta é trocada **antes** de o pedido sair: a resposta do servidor
+        // chega por outra thread, e um quadro que encontrasse a porta da
+        // câmera anterior iria para uma transmissão que acabou.
+        if let Ok(mut camera) = self.shared.camera.lock() {
+            *camera = Some(entrada);
+        }
+        let pedido = seele_core::PedidoDeTela::DeFora(quadros);
+        let pedido = self.command(Command::ShareScreen {
+            pedido: Box::new(pedido),
+            limites: limites_da_camera(limites),
+        });
+        if pedido.is_err() {
+            self.shared.largar_a_camera();
+        }
+        pedido
+    }
+
+    /// **O que a casca manda o codificador dela fazer com esta câmera**: as
+    /// medidas, a cadência, o teto de banda e o codec.
+    ///
+    /// `largura` e `altura` são as que a câmera entrega. As medidas que voltam
+    /// são as do degrau que os limites pedem, na proporção dela, e nunca
+    /// maiores que ela — o mesmo que o codificador de tela faz. Não fala com
+    /// o servidor: é conta.
+    #[must_use]
+    pub fn codificacao_da_camera(
+        &self,
+        largura: u32,
+        altura: u32,
+        limites: LimitesDeTela,
+    ) -> CodificacaoDaCamera {
+        codificacao_da_camera(largura, altura, limites)
+    }
+
+    /// Entrega um quadro da câmera, já codificado em H.264 Annex-B.
+    ///
+    /// `chave` diz se dá para começar a decodificar por ele. O primeiro de um
+    /// fluxo tem de ser, e a casca manda outro a cada
+    /// [`Event::CameraKeyFrameRequested`].
+    ///
+    /// # Errors
+    ///
+    /// Nenhum quadro some calado:
+    /// - [`ConnectionError::CameraNotLive`] quando não há câmera a transmitir;
+    /// - [`ConnectionError::CameraQueueFull`] quando a fila encheu — o quadro
+    ///   não foi, e o próximo tem de ser chave;
+    /// - [`ConnectionError::CameraBadSize`] para um quadro vazio ou maior que
+    ///   o fio carrega.
+    ///
+    /// Quando o quadro entra, volta **quantos estão na fila, contando este**
+    /// (`seele_core::de_fora::EntradaDeFora::quadro`): a casca deixa de
+    /// codificar com a fila pela metade, em vez de esperar a recusa — que
+    /// custa um quadro-chave.
+    pub fn quadro_da_camera(&self, chave: bool, bytes: Vec<u8>) -> Result<u32, ConnectionError> {
+        let entrada = self
+            .shared
+            .camera
+            .lock()
+            .ok()
+            .and_then(|camera| camera.clone())
+            .ok_or(ConnectionError::CameraNotLive)?;
+        let na_fila = entrada
+            .quadro(chave, bytes)
+            .map_err(|recusa| match recusa {
+                seele_core::de_fora::RecusaDeFora::FilaCheia { recusados } => {
+                    // Dito uma vez por potência de dois: a 30 quadros por segundo,
+                    // uma linha por recusa seria o próprio registro a engasgar.
+                    if recusados.is_power_of_two() {
+                        tracing::warn!(
+                            recusados,
+                            "a fila de quadros da câmera encheu: a rede não leva no passo de quem \
+                         codifica"
+                        );
+                    }
+                    ConnectionError::CameraQueueFull { dropped: recusados }
+                }
+                seele_core::de_fora::RecusaDeFora::Fechada => {
+                    self.shared.largar_a_camera();
+                    ConnectionError::CameraNotLive
+                }
+                seele_core::de_fora::RecusaDeFora::Vazio
+                | seele_core::de_fora::RecusaDeFora::GrandeDemais { .. } => {
+                    ConnectionError::CameraBadSize
+                }
+            })?;
+        Ok(u32::try_from(na_fila).unwrap_or(u32::MAX))
     }
 
     /// Tira da última listagem a fonte que a casca escolheu.
@@ -4063,6 +4516,69 @@ impl Connection {
     /// Lista de novo quando não há listagem guardada, e **só** nesse caso: uma
     /// casca que desenhou o menu tem a lista, e relistar por baixo dela
     /// renumeraria os índices no meio da escolha.
+    /// **As prévias da última lista de fontes** ([`Self::fontes_de_tela`]): a
+    /// imagem de cada monitor e de cada janela, entregue a `cada` com o `id` e
+    /// o nome que a lista deu, uma por vez e na ordem da lista.
+    ///
+    /// Capturar leva tempo (abrir a captura, esperar o primeiro quadro), e
+    /// quem chama roda isto fora da linha principal. A trava da lista só é
+    /// tomada para abrir cada captura: a espera pelo quadro é fora dela, e um
+    /// `compartilhar_tela` no meio não fica preso. Uma fonte que não entrega
+    /// quadro (minimizada, fechada entre a lista e agora) fica sem prévia.
+    ///
+    /// No máximo [`MAX_PREVIAS_DE_TELA`] fontes: além disso a caixa já é uma
+    /// lista longa, e cada prévia custa uma captura.
+    pub fn previas_de_tela(&self, mut cada: impl FnMut(u64, &str, seele_core::PreviaDeTela)) {
+        let ids: Vec<u64> = self.shared.fontes_de_tela.lock().map_or_else(
+            |_| Vec::new(),
+            |guardadas| {
+                guardadas
+                    .iter()
+                    .map(seele_core::FonteDeTela::id)
+                    .take(MAX_PREVIAS_DE_TELA)
+                    .collect()
+            },
+        );
+        for lote in ids.chunks(LOTE_DE_PREVIAS) {
+            let mut abertas = Vec::with_capacity(lote.len());
+            let mut a_lista_mudou = false;
+            for id in lote {
+                let comecada = self
+                    .shared
+                    .fontes_de_tela
+                    .lock()
+                    .ok()
+                    .and_then(|guardadas| {
+                        guardadas
+                            .iter()
+                            .find(|fonte| fonte.id() == *id)
+                            .map(|fonte| (fonte.rotulo().to_owned(), fonte.comecar_previa()))
+                    });
+                match comecada {
+                    Some((nome, Ok(em_curso))) => abertas.push(((*id, nome), em_curso)),
+                    Some((nome, Err(erro))) => {
+                        tracing::debug!(%erro, fonte = %nome, "a prévia desta fonte não abriu");
+                    }
+                    None => {
+                        // A lista mudou (uma relista, uma fonte escolhida): o
+                        // resto é de outra lista, e a tela pede de novo.
+                        a_lista_mudou = true;
+                        break;
+                    }
+                }
+            }
+            seele_core::colher_previas(
+                abertas,
+                seele_core::PRAZO_DA_PREVIA,
+                seele_core::PreviaEmCurso::olhar,
+                |(id, nome), previa| cada(id, &nome, previa),
+            );
+            if a_lista_mudou {
+                return;
+            }
+        }
+    }
+
     fn fonte_escolhida(&self, fonte: u64) -> Result<seele_core::FonteDeTela, ConnectionError> {
         let mut guardadas = self
             .shared
@@ -4100,6 +4616,10 @@ impl Connection {
         // dobra. As duas limpam, porque só uma delas acontece de cada vez:
         // quando esta pessoa aperta PARAR, o quadro do servidor pode nunca chegar.
         self.shared.gravar_pedido_da_tela(None);
+        self.shared.esquecer_a_parada_da_tela();
+        // E a porta da câmera, se era uma câmera: um quadro que a casca ainda
+        // empurrar depois de parar ouve [`ConnectionError::CameraNotLive`].
+        self.shared.largar_a_camera();
         self.command(Command::StopScreenShare)
     }
 
@@ -4211,13 +4731,19 @@ impl Connection {
         // sozinho na primeira transmissão (ver `TelaLigada`).
         let escolhida = self.shared.tela_assistida();
         let pedido = self.shared.pedido_da_tela();
-        let foto = match self.shared.room.lock() {
-            Ok(room) => foto_da_sala(&room, escolhida, pedido),
+        let parada = self.shared.parada_da_tela();
+        let mut foto = match self.shared.room.lock() {
+            // A pausa entra por cima da foto, e não pelo `Room`: quem pausa é
+            // o teto desta máquina, e o servidor não sabe dela.
+            Ok(room) => foto_da_sala(&room, escolhida, pedido).com_a_parada_da_minha_tela(parada),
             // Um cadeado envenenado é uma sessão que já não tem estado. A foto
             // vazia é a resposta honesta, e é a mesma que o `Room::new()` de
             // antes dava.
             Err(_) => foto_da_sala(&Room::new(), None, None),
         };
+        // Depois do cadeado do `Room`, com o próprio: o codificador é dado
+        // desta máquina, e não do `Room`.
+        self.shared.vestir_o_codificador(&mut foto);
         // A perda que o servidor contou vai na telemetria, e não na parte do
         // `Room`: ela é lida antes de a foto virar o retrato da sala. O apelido
         // e as permissões saem do retrato (`seele_core::retrato`), que é a
@@ -4588,8 +5114,10 @@ fn messages_of(room: &Room) -> Vec<Message> {
             author_nickname: message.author_nickname.clone(),
             at_seconds: message.at_seconds,
             body: message.body.clone(),
+            replies_to: message.replies_to.map(|pai| pai.0),
             own: message.own,
             edited: message.edited,
+            mentions_me: message.mentions_me,
             estado: EstadoDoEnvio::Confirmada,
             // O eco da própria, para a casca trocar a pendente pela gravada no
             // mesmo nó (ver `seele_sessao::Message::client_message_id`).
@@ -4631,8 +5159,10 @@ fn messages_of(room: &Room) -> Vec<Message> {
         author_nickname: meu_nome.clone(),
         at_seconds: pendente.at_seconds,
         body: pendente.body.clone(),
+        replies_to: pendente.replies_to.map(|pai| pai.0),
         own: true,
         edited: false,
+        mentions_me: false,
         estado: pendente.estado.into(),
         client_message_id: Some(pendente.client_message_id.get().to_string()),
         attachment: None,
@@ -4681,6 +5211,126 @@ fn limites_do_nucleo(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
         prioridade,
         com_som: limites.com_som,
     }
+}
+
+/// **O H.264 que a casca codifica**, na forma que o `VideoEncoder` pede:
+/// Baseline, nível 4.0 — o `ScreenCodec::H264Baseline` que a abertura anuncia.
+///
+/// Mora aqui, e não na casca: quem decide o perfil é quem escreve a abertura,
+/// e a casca não escreve perfil nenhum à mão. É o mesmo texto do
+/// `seele_web::tela::CODEC_DO_NAVEGADOR`, e a conformidade
+/// (`camera.rs`) prende um ao outro.
+pub const CODEC_DA_CAMERA: &str = "avc1.42E028";
+
+/// O teto de banda de uma câmera quando ninguém escolheu um: o da prova, o
+/// mesmo da tela (`seele_core::TETO_DA_PROVA_BPS`).
+pub const TETO_PADRAO_DA_CAMERA_BPS: u32 = seele_core::TETO_DA_PROVA_BPS;
+
+/// O que o codificador da casca recebe para a câmera.
+///
+/// A mesma forma do que o `.wasm` dá à página do navegador
+/// (`seele_web::tela::codificacao`), porque a casca é a mesma nos dois.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CodificacaoDaCamera {
+    /// O codec, como o `VideoEncoder` o pede. Ver [`CODEC_DA_CAMERA`].
+    pub codec: &'static str,
+    /// Largura a codificar, em pixels, par.
+    pub largura: u32,
+    /// Altura a codificar, em pixels, par.
+    pub altura: u32,
+    /// Quadros por segundo.
+    pub quadros: u32,
+    /// O teto de banda de partida, em bits por segundo. O que vale depois é o
+    /// que chega por [`Event::CameraBudget`].
+    pub banda_bps: u32,
+}
+
+/// A conta de [`Connection::codificacao_da_camera`], fora da conexão para ser
+/// conferida sem uma.
+#[must_use]
+pub fn codificacao_da_camera(
+    largura: u32,
+    altura: u32,
+    limites: LimitesDeTela,
+) -> CodificacaoDaCamera {
+    let do_nucleo = limites_da_camera(limites);
+    let fonte = (
+        usize::try_from(largura).unwrap_or(0),
+        usize::try_from(altura).unwrap_or(0),
+    );
+    let (mut l, mut a) = seele_core::medidas_para(do_nucleo.resolucao, fonte.0, fonte.1);
+    // Nunca ampliar: uma câmera de 480 linhas vai do tamanho dela, com os dois
+    // lados pares.
+    if fonte.0 > 0 && fonte.1 > 0 && fonte.1 < a {
+        (l, a) = ((fonte.0 / 2 * 2).max(2), (fonte.1 / 2 * 2).max(2));
+    }
+    CodificacaoDaCamera {
+        codec: CODEC_DA_CAMERA,
+        largura: u32::try_from(l).unwrap_or(u32::MAX),
+        altura: u32::try_from(a).unwrap_or(u32::MAX),
+        quadros: do_nucleo.cadencia.hz(),
+        banda_bps: limites.banda_bps.unwrap_or(TETO_PADRAO_DA_CAMERA_BPS),
+    }
+}
+
+/// As medidas de uma câmera, como o cabeçalho de abertura as aceita.
+///
+/// A régua é a do fio (`ScreenHeader::check`), perguntada aqui para que a
+/// recusa seja uma resposta na mão de quem chamou, e não um fluxo que não abre
+/// depois de a sala já ter ouvido que há uma transmissão.
+fn medidas_da_camera(largura: u32, altura: u32) -> Result<(u16, u16), ConnectionError> {
+    let (Ok(largura), Ok(altura)) = (u16::try_from(largura), u16::try_from(altura)) else {
+        return Err(ConnectionError::CameraBadSize);
+    };
+    seele_core::ScreenHeader {
+        version: seele_core::SCREEN_HEADER_VERSION,
+        screen: seele_core::ScreenId(0),
+        source: seele_core::ScreenSource::Camera,
+        codec: seele_core::ScreenCodec::H264Baseline,
+        width: largura,
+        height: altura,
+    }
+    .check()
+    .map_err(|_| ConnectionError::CameraBadSize)?;
+    Ok((largura, altura))
+}
+
+/// Os limites de uma câmera, como o núcleo os lê.
+///
+/// **Movimento, e sem som**, qualquer que seja o que a casca mandou nesses
+/// dois campos: uma câmera é um rosto que se mexe, e o som de quem fala já vai
+/// pela voz. A resolução e a cadência são tetos como os da tela, e nunca acima
+/// de 720p a 30 — é o que a casca codifica.
+fn limites_da_camera(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
+    let mut do_nucleo = limites_do_nucleo(LimitesDeTela {
+        altura_maxima: limites.altura_maxima.min(720),
+        quadros_maximos: limites.quadros_maximos.min(30),
+        ..limites
+    });
+    do_nucleo.prioridade = seele_core::tela::Prioridade::Movimento;
+    do_nucleo.com_som = false;
+    // **A câmera tem teto de banda, peça a casca o que pedir** — inclusive
+    // quando ela não pede nenhum, que é o que a casca faz. Sem escolha, o teto
+    // do fluxo é só o que a sonda mede, e ela sobe enquanto não vê dor: medido
+    // em 10/11/2026 (`docs/medidas/2026-11-10-tela-do-produto-sob-perda.md`),
+    // num caminho sem perda de 60 ms o orçamento chegou a 12,48 Mbps em 5 s, o
+    // codificador o encheu, e quem assistia viu 55% do tempo congelado. O
+    // codificador da tela para de gastar quando a imagem para; o de uma câmera
+    // gasta o que lhe derem.
+    let teto = teto_de_banda_da_camera(do_nucleo.resolucao);
+    do_nucleo.banda_bps = Some(do_nucleo.banda_bps.map_or(teto, |pedida| pedida.min(teto)));
+    do_nucleo
+}
+
+/// O máximo que uma câmera nesta resolução gasta, em bits por segundo.
+///
+/// **Derivado, e não escrito à mão**: é o que a tabela do núcleo diz que a
+/// resolução precisa a 30 quadros (`bits_por_quadro` ×
+/// `CADENCIA_DE_REFERENCIA`, 2,76 Mbps em 720p) — o limiar em que a imagem
+/// está paga. Acima dele a câmera só compraria fila.
+#[must_use]
+pub const fn teto_de_banda_da_camera(resolucao: seele_core::Resolucao) -> u32 {
+    seele_core::tela::bits_por_quadro(resolucao) * seele_core::tela::CADENCIA_DE_REFERENCIA
 }
 
 /// O base64 de ida e de volta mora no `seele-sessao` (`base64`) desde a
@@ -4801,6 +5451,37 @@ fn modulo_de_video() -> Result<seele_core::BibliotecaDeVideo, ConnectionError> {
     })
 }
 
+/// O que a abertura de um fluxo declarou, na forma que atravessa para a casca.
+///
+/// Exaustivo de propósito: uma fonte nova no fio reprova aqui, em vez de
+/// chegar à casca com o rótulo de outra.
+const fn tipo_da_tela(origem: seele_core::ScreenSource) -> ScreenKind {
+    match origem {
+        seele_core::ScreenSource::Monitor => ScreenKind::Monitor,
+        seele_core::ScreenSource::Window => ScreenKind::Window,
+        seele_core::ScreenSource::Camera => ScreenKind::Camera,
+    }
+}
+
+/// O evento que leva à casca um pedido da transmissão da própria câmera.
+fn evento_da_camera(
+    tela: seele_core::ScreenId,
+    sinal: seele_core::de_fora::SinalParaFora,
+) -> Event {
+    use seele_core::de_fora::SinalParaFora;
+    match sinal {
+        SinalParaFora::Chave => Event::CameraKeyFrameRequested { screen: tela.0 },
+        SinalParaFora::Banda { bps } => Event::CameraBudget {
+            screen: tela.0,
+            bps,
+        },
+        SinalParaFora::Parou(motivo) => Event::CameraPaused {
+            screen: tela.0,
+            reason: nome_da_parada(motivo),
+        },
+    }
+}
+
 /// O nome estável de um motivo de parada, para a casca escrever a frase.
 ///
 /// Um `match` exaustivo de propósito: um motivo novo em `seele-core` reprova
@@ -4830,6 +5511,46 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
     .into_iter()
     .map(nome_da_parada)
     .collect()
+}
+
+/// O nome estável de um motivo de queda, para a casca escrever a frase.
+///
+/// Exaustivo de propósito, como [`nome_da_parada`]: um motivo novo em
+/// `seele-core` reprova aqui, em vez de chegar à casca com o nome de outro.
+const fn nome_da_queda(motivo: seele_core::MotivoDeQueda) -> &'static str {
+    match motivo {
+        seele_core::MotivoDeQueda::Codificador => "Codificador",
+        seele_core::MotivoDeQueda::Captura => "Captura",
+        seele_core::MotivoDeQueda::Fluxo => "Fluxo",
+    }
+}
+
+/// Os nomes de queda que podem chegar a uma casca em
+/// [`Event::ScreenShareFell`].
+///
+/// Pelo mesmo motivo de [`motivos_de_parada_da_tela`]: o guarda de cobertura
+/// de frase da casca lê esta lista. Derivada de `MotivoDeQueda::TODOS`, que
+/// mora ao lado do enum — uma variante nova que não entre lá reprova no teste
+/// que prende os dois.
+#[must_use]
+pub fn motivos_de_queda_da_tela() -> Vec<&'static str> {
+    seele_core::MotivoDeQueda::TODOS
+        .into_iter()
+        .map(nome_da_queda)
+        .collect()
+}
+
+/// O evento que diz à casca que a transmissão desta pessoa caiu.
+fn evento_da_queda(
+    tela: seele_core::ScreenId,
+    origem: seele_core::ScreenSource,
+    motivo: seele_core::MotivoDeQueda,
+) -> Event {
+    Event::ScreenShareFell {
+        screen: tela.0,
+        source: tipo_da_tela(origem),
+        reason: nome_da_queda(motivo),
+    }
 }
 
 /// Se o painel da tela precisa ser redesenhado.
@@ -5315,6 +6036,9 @@ async fn drive(
 
     let mut sync = Signal::new();
     let mut next_tick = Instant::now() + TICK;
+    // O que esta ponta mede da voz que ouve, dito ao servidor uma vez por
+    // segundo (protocolo 13): ver `relatar_a_recepcao`.
+    let mut relator = seele_core::recepcao::Relator::novo(Instant::now());
 
     // **A volta do enlace** (lote P61): a busca do buraco do canal aberto, e o
     // que ficou sem resposta saindo de novo com a mesma chave. Ver `volta`.
@@ -5362,19 +6086,64 @@ async fn drive(
                         tela,
                         largura,
                         altura,
+                        origem,
                         leitura,
+                        codificador,
                     } => {
                         // **Gravada antes do evento**: a casca que reage ao
                         // `ScreenOpened` relendo o retrato já acha a tela nele.
                         shared.tela_abriu(tela, leitura);
+                        // E se era a própria, pausada pelo teto, a pausa
+                        // acabou: a volta é esta abertura, da mesma tela.
+                        shared.a_tela_voltou(tela);
+                        // E o codificador junto, pelo mesmo motivo. Só a
+                        // transmissão desta máquina traz nome; a de outra
+                        // pessoa não mexe no que está guardado.
+                        if let Some(nome) = codificador {
+                            shared.gravar_codificador_da_tela(Some((tela, nome)));
+                        }
                         shared.notify(&Event::ScreenOpened {
                             screen: tela.0,
                             width: largura,
                             height: altura,
+                            source: tipo_da_tela(origem),
                         });
+                    }
+                    // O que a transmissão da própria câmera pede a quem a
+                    // codifica — a casca. Um evento por pedido, com nome.
+                    seele_core::enlace::Aviso::Camera { tela, sinal } => {
+                        shared.notify(&evento_da_camera(tela, sinal));
                     }
                     seele_core::enlace::Aviso::TelaIlegivel { motivo } => {
                         shared.notify(&Event::ScreenUnreadable { reason: motivo });
+                    }
+                    // O teto pausou a transmissão desta pessoa. Vai ao retrato
+                    // (`TelaEmCurso::parada`), que é de onde a casca já lia a
+                    // frase — e que até aqui era sempre `None`. O evento é o
+                    // grosso de sempre: «a tela mudou, releia o retrato».
+                    //
+                    // A câmera recebe também o `CameraPaused` dela, por
+                    // `Aviso::Camera`: aquele manda a janela parar de
+                    // codificar, e este escreve a frase no palco.
+                    seele_core::enlace::Aviso::TelaParou { tela, motivo, .. } => {
+                        if shared.a_tela_parou(tela, motivo) {
+                            shared.notify(&Event::ScreenChanged);
+                        }
+                    }
+                    // A transmissão desta pessoa caiu, e o núcleo já a
+                    // encerrou. O retrato se acerta sozinho — o
+                    // `ScreenShareStopped` que o servidor devolve tira a
+                    // transmissão dele e esquece o pedido (`fold`) —, e o que
+                    // falta à casca é o que ele não diz: que não foi a pessoa
+                    // quem parou, e por quê.
+                    seele_core::enlace::Aviso::TelaCaiu {
+                        tela,
+                        origem,
+                        motivo,
+                    } => {
+                        // Caiu: não está mais pausada, está acabada.
+                        shared.esquecer_a_parada_da_tela();
+                        shared.notify(&evento_da_queda(tela, origem, motivo));
                     }
                     seele_core::enlace::Aviso::TelaQuadro {
                         tela,
@@ -5655,9 +6424,9 @@ async fn drive(
                         .map(|mut room| volta::repetir(&mut room, chave, agora_em_segundos()))
                         .unwrap_or(volta::Repetir::Nada);
                     match repetir {
-                        volta::Repetir::Mandar { canal, corpo, chave } => {
+                        volta::Repetir::Mandar { canal, corpo, responde_a, chave } => {
                             mexeu = true;
-                            if client.dizer(canal, corpo, chave).await.is_err() {
+                            if client.dizer(canal, corpo, responde_a, chave).await.is_err() {
                                 break;
                             }
                         }
@@ -5681,6 +6450,7 @@ async fn drive(
                 if measure(&mut sync, &client, &shared) {
                     shared.notify(&Event::TelemetryChanged);
                 }
+                relatar_a_recepcao(&mut relator, &client, &shared).await;
             }
         }
 
@@ -5724,8 +6494,19 @@ async fn drive(
     // - com o cadeado ocupado, a despedida sai primeiro, e a voz cai numa
     //   thread à parte quando ele soltar — até lá, o microfone segue aberto.
     drop(porta);
+    largar_o_que_a_sessao_segurava(&shared);
+    client.sair().await;
+}
+
+/// O que a sessão segurava nesta máquina, largado no fim dela.
+///
+/// Uma função, e não o rabo de `drive`, porque o fim tem duas portas: `drive`
+/// que volta, e `drive` que entra em pânico ([`subir_a_thread_da_conexao`]). Na
+/// segunda nada do rabo dele roda, e o microfone ficava aberto atrás de uma
+/// sessão que já não existia.
+fn largar_o_que_a_sessao_segurava(shared: &Arc<Shared>) {
     shared.voice.marcar(AberturaDoAudio::ForaDeSala);
-    largar_sem_segurar(&shared, |shared| &shared.voice);
+    largar_sem_segurar(shared, |shared| &shared.voice);
     // E sai do foco de voz (E3): uma sessão que acabou não segura o microfone
     // da máquina, nem enquanto a casca ainda guarda a `Connection` dela.
     shared.voice.sair_do_foco();
@@ -5748,7 +6529,67 @@ async fn drive(
     if let Ok(mut tuneis) = shared.tuneis.lock() {
         tuneis.abertos.clear();
     }
-    client.sair().await;
+}
+
+/// Sobe a thread da conexão, a que bombeia a sessão (`drive`), e ampara o
+/// pânico dela.
+///
+/// # O pânico que ninguém via
+///
+/// `drive` roda numa thread só dele. Um pânico ali desenrolava a thread, e mais
+/// nada: `running` continuava `true`, o estado do enlace continuava
+/// `Verified`, nenhum [`Event::Ended`] saía, e a voz, que mora no `Shared`,
+/// continuava aberta. A tela mostrava uma sessão de pé que não recebia nem
+/// mandava nada, e a única pista era a linha do gancho de pânico no
+/// `seele.log`.
+///
+/// Agora o fim anormal é um fim: a linha no log diz o que o pânico disse, o
+/// que a sessão segurava é largado ([`largar_o_que_a_sessao_segurava`]), e a
+/// casca recebe o [`Event::Ended`] de sempre, com [`EndReason::MotorCaiu`]. Não
+/// é evento novo nem atravessa o fio: é o caminho da sessão encerrada, com um
+/// motivo local a mais, como [`EndReason::ServidorTrocouNaVolta`].
+///
+/// Um pânico **antes** do aperto de mão responde a quem espera em `abrir`
+/// (`Unreachable`); depois dele o envio não tem leitor, e é largado.
+///
+/// `corpo` recebe o `ready` emprestado porque quem ampara precisa dele depois
+/// do pânico.
+fn subir_a_thread_da_conexao(
+    shared: Arc<Shared>,
+    ready: std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>,
+    corpo: impl FnOnce(&std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>) + Send + 'static,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("seele-connection".into())
+        .spawn(move || {
+            // `AssertUnwindSafe`: depois de um pânico nada de `corpo` é lido de
+            // novo. O que sobra é o `Shared`, e cada cadeado dele já trata o
+            // envenenamento onde é pego.
+            let fim = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| corpo(&ready)));
+            let Err(carga) = fim else {
+                return;
+            };
+            let detalhe = carga
+                .downcast_ref::<&'static str>()
+                .map(|texto| (*texto).to_owned())
+                .or_else(|| carga.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "pânico sem mensagem de texto".to_owned());
+            tracing::error!(
+                %detalhe,
+                "a thread da conexão entrou em pânico: a sessão é dada como caída, a voz é \
+                 largada e a tela recebe o fim com o motivo MotorCaiu"
+            );
+            let _ = ready.send(Err(ConnectionError::Unreachable.into()));
+            shared.running.store(false, Ordering::Relaxed);
+            shared
+                .link_state
+                .store(link_state_byte(LinkTrust::Offline), Ordering::Relaxed);
+            largar_o_que_a_sessao_segurava(&shared);
+            shared.notify(&Event::Ended {
+                reason: EndReason::MotorCaiu,
+            });
+        })
+        .map(|_| ())
 }
 
 /// Um relatório do núcleo como a casca o lê: motivos por nome, a latência em
@@ -7308,6 +8149,9 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
             });
         }
     }
+    if changed.banidos {
+        shared.notify(&Event::BanidosChanged);
+    }
     if changed.telemetry {
         shared.notify(&Event::TelemetryChanged);
     }
@@ -7343,6 +8187,9 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         // lado a lado, o da direita mentindo, e nada na tela dizendo qual.
         if minha.is_none() {
             shared.gravar_pedido_da_tela(None);
+            shared.esquecer_a_parada_da_tela();
+            // E o codificador com ele: o nome é o daquela transmissão.
+            shared.gravar_codificador_da_tela(None);
         }
         // **E a escolha de assistir é esquecida quando a tela escolhida sai do
         // ar.** ADR 0054: sem isto, a escolha ficaria apontando para uma
@@ -7463,6 +8310,36 @@ fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {
     #[cfg(all(debug_assertions, feature = "aparelho-de-mentira"))]
     let _ = diagnostico_da_voz::relatar(shared.carimbo(), telemetria.as_ref(), Instant::now());
     medir_a_volta(sync, shared, telemetria.as_ref(), rtt_micros)
+}
+
+/// **A vez do relato de recepção** (protocolo 13): uma vez por segundo, o que
+/// esta ponta mede da voz que ouve vai ao servidor, que o põe no sinal que os
+/// outros veem desta pessoa.
+///
+/// Só a fiação, como [`measure`]: o que é relatado e quando é do
+/// [`seele_core::recepcao::Relator`], e para quem o relato pode ir (um
+/// servidor do 12 não o conhece) é do [`Enlace::relatar_recepcao`]. Sem voz
+/// chegando não há medida, e nada sai.
+///
+/// A telemetria é lida de novo aqui, e não aproveitada de `measure`: o relator
+/// só a pede na vez dele, uma vez por segundo, e `measure` roda a cada volta.
+async fn relatar_a_recepcao(
+    relator: &mut seele_core::recepcao::Relator,
+    client: &Enlace,
+    shared: &Arc<Shared>,
+) {
+    let relato = relator.vez(Instant::now(), || {
+        shared
+            .voice
+            .lock()
+            .ok()
+            .and_then(|voice| voice.as_ref().map(Voice::telemetry))
+    });
+    if let Some(relato) = relato {
+        // `Err` é a sessão que acabou, e quem diz isso à casca é o laço.
+        // `Ok(false)` é um servidor que não ouve o relato: nada saiu.
+        let _ = client.relatar_recepcao(relato).await;
+    }
 }
 
 /// **Diagnóstico da entrada de voz, só na build de teste do CUA.**
@@ -7863,21 +8740,44 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             if client.abrir_linha(channel).await.is_err() {
                 return false;
             }
-            if let Ok(mut room) = shared.room.lock() {
+            // Abrir marca como lido, o canal que se deixa e o que se abre, e
+            // anota que a página que vem agora é histórico: a cerca (o `Ping`
+            // com este carimbo, logo atrás do pedido) é o que diz à sessão
+            // onde a página acaba e a conversa ao vivo começa — sem ela, uma
+            // menção de ontem levantaria o aviso de agora. Ver
+            // `Room::esperar_historico`.
+            let cerca = shared.room.lock().ok().map(|mut room| {
                 room.open_channel(channel);
-            }
+                room.esperar_historico(channel)
+            });
             // The fetch is what makes "sem perda de histórico" true: a client
             // arriving late reads what was said instead of an empty room.
-            if client.historico(channel, HISTORY_PAGE).await.is_err() {
+            let pedido = match cerca {
+                Some(carimbo) => {
+                    client
+                        .historico_com_cerca(channel, None, HISTORY_PAGE, carimbo)
+                        .await
+                }
+                None => client.historico(channel, HISTORY_PAGE).await,
+            };
+            if pedido.is_err() {
                 return false;
             }
+            // As não lidas do canal que abriu zeraram, e elas moram na lista
+            // de canais.
+            shared.notify(&Event::ChannelsChanged);
             // A Linha trocou, então a conversa trocou — mesmo que nenhuma
             // mensagem nova tenha chegado. `Room::open_channel` limpou a lista, e
             // sem isto a tela continuaria mostrando a conversa da Linha
             // anterior sob o nome da nova.
             shared.messages_changed();
         }
-        Command::Send { channel, body, id } => {
+        Command::Send {
+            channel,
+            body,
+            replies_to,
+            id,
+        } => {
             // specs/02-protocolo.md: idempotent by client_msg_id, so a resend
             // after a lost acknowledgement does not post twice.
             //
@@ -7886,7 +8786,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // de falhar na codificação e derrubar a sessão inteira por causa de
             // um acento.
             if client
-                .dizer(channel, body.trim().to_owned(), id)
+                .dizer(channel, body.trim().to_owned(), replies_to, id)
                 .await
                 .is_err()
             {
@@ -8065,6 +8965,21 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
+        Command::EditMessage { message, body } => {
+            if client.editar_mensagem(message, body).await.is_err() {
+                return false;
+            }
+        }
+        Command::UnbanPerson { person } => {
+            if client.desbanir(person).await.is_err() {
+                return false;
+            }
+        }
+        Command::ListBans => {
+            if client.listar_banidos().await.is_err() {
+                return false;
+            }
+        }
         Command::MovePerson { person, voice_room } => {
             if client.mover_pessoa(person, voice_room).await.is_err() {
                 return false;
@@ -8113,7 +9028,16 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // down — the head-of-channel block that ADR 0027 gave each transfer
             // its own stream to avoid.
             tokio::spawn(async move {
-                let _ = answer.send(preview_of(attachment.get(), &claimed, caixa.await.ok()));
+                let fetched = caixa.await.ok();
+                // Off the async workers: a preview larger than where it is
+                // drawn is decoded and reduced here, and that takes time.
+                let previa = tokio::task::spawn_blocking(move || {
+                    preview_of(attachment.get(), &claimed, fetched)
+                })
+                .await;
+                if let Ok(previa) = previa {
+                    let _ = answer.send(previa);
+                }
             });
         }
         Command::ShareScreen { pedido, limites } => {
@@ -8254,7 +9178,8 @@ fn preview_of(
     fetched: Option<seele_core::enlace::Previa>,
 ) -> Preview {
     use seele_core::enlace::Previa;
-    use seele_core::preview::{data_uri, judge, Verdict};
+    use seele_core::preview::{judge, Verdict};
+    use seele_core::reducao::{previa_na_janela, PreviaNaJanela, TETO_DE_PIXELS};
 
     let refused = |refusal: PreviewRefusal, found: Option<String>| Preview {
         attachment,
@@ -8273,13 +9198,35 @@ fn preview_of(
             None,
         ),
         Some(Previa::Bytes(bytes)) => match judge(claimed, &bytes) {
-            Verdict::Draw(format) => Preview {
-                attachment,
-                image: Some(data_uri(format, &bytes)),
-                claimed: claimed.to_owned(),
-                found: Some(format.media_type().to_owned()),
-                refusal: None,
-            },
+            // **Reduced to where it is drawn before it crosses the bridge**,
+            // and refused from its header when it declares too many pixels.
+            // The byte limit bounds the download and nothing else: the picture
+            // went to the window at the size it came, and the conversation,
+            // rebuilt on every message, wrote the whole `data:` URI into a new
+            // `<img>` each time (the sweep after the 4K cover, 11/11/2026).
+            // `found` stays what the sender's bytes were; the URI carries the
+            // type of the bytes that actually cross.
+            Verdict::Draw(format) => {
+                let found = Some(format.media_type().to_owned());
+                match previa_na_janela(bytes) {
+                    PreviaNaJanela::Pronta(uri) => Preview {
+                        attachment,
+                        image: Some(uri),
+                        claimed: claimed.to_owned(),
+                        found,
+                        refusal: None,
+                    },
+                    PreviaNaJanela::PixelsDemais { largura, altura } => refused(
+                        PreviewRefusal::TooManyPixels {
+                            width: largura,
+                            height: altura,
+                            limit: TETO_DE_PIXELS,
+                        },
+                        found,
+                    ),
+                    PreviaNaJanela::Ilegivel => refused(PreviewRefusal::Unreadable, found),
+                }
+            }
             Verdict::Disagrees { found, .. } => refused(
                 PreviewRefusal::Disagrees,
                 found.map(|format| format.media_type().to_owned()),
@@ -8535,3689 +9482,35 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
     }
 }
 
+#[path = "testes/a_volta_recusada_diz_o_motivo.rs"]
 #[cfg(test)]
-mod a_volta_recusada_diz_o_motivo {
-    use super::{classify_connect_failure, fim_da_sessao, ConnectionError, EndReason};
-    use seele_core::enlace::Motivo;
-    use seele_core::{ConnectError, DisconnectReason};
+mod a_volta_recusada_diz_o_motivo;
 
-    /// **O `OutraLinha` diz a relação**: a versão só quando o launcher a abre,
-    /// e se o servidor é mais novo que este app (decisão da orquestradora de
-    /// 15/10). Antes, o 30 vinha com «1», uma versão que ele não é.
-    #[test]
-    fn outra_linha_diz_a_versao_so_quando_o_launcher_a_abre_e_se_e_mais_nova() {
-        let caso = |numero| classify_connect_failure(&ConnectError::OutraLinha { numero });
-        assert_eq!(
-            caso(8),
-            ConnectionError::OutraLinha {
-                numero: 8,
-                servidor: Some("0.15".into()),
-                mais_nova: false,
-            },
-            "o Servidor 0.15 publicado"
-        );
-        assert_eq!(
-            caso(30),
-            ConnectionError::OutraLinha {
-                numero: 30,
-                servidor: None,
-                mais_nova: true,
-            },
-            "acima desta build: mais novo, e sem uma versão que ele não é"
-        );
-        assert_eq!(
-            caso(7),
-            ConnectionError::OutraLinha {
-                numero: 7,
-                servidor: None,
-                mais_nova: false,
-            },
-            "abaixo da 0.15: antigo, e sem versão oferecida"
-        );
-    }
-
-    #[test]
-    fn quem_nao_prova_a_chave_nao_chega_como_versao_incompativel() {
-        // Era `TlsRefused`, que esta tradução manda para
-        // `Refused { Incompatible }`: o impostor que repete o certificado do
-        // servidor aparecia como versão incompatível, e a tela mandava
-        // atualizar o SEELE nas duas máquinas.
-        assert_eq!(
-            classify_connect_failure(&ConnectError::ChaveNaoProvada),
-            ConnectionError::ChaveNaoProvada,
-            "quem não provou a chave do servidor chega à tela com outro nome, e a frase \
-             manda atualizar o SEELE por causa de um impostor"
-        );
-    }
-
-    #[test]
-    fn fim_da_recusa_diz_o_motivo_de_verdade_e_nao_credencial_recusada() {
-        // A volta da bateria recusada acabava em `CredentialRejected` qualquer
-        // que fosse o motivo, e a tela mandava conferir convite e senha: sobre
-        // um servidor que não é o do convite, sobre a chave que mudou, sobre o
-        // servidor lotado e sobre os MODs que mudaram. Passa pelo mesmo
-        // `fim_da_sessao` que `drive` chama, para que a fiação conte junto.
-        let casos = [
-            (
-                "InviteMismatch",
-                ConnectError::InviteMismatch {
-                    expected: "bbbb2222".into(),
-                    offered: "aaaa1111".into(),
-                },
-                EndReason::ServidorTrocouNaVolta,
-            ),
-            (
-                "Refused { ServerFull }",
-                ConnectError::Refused {
-                    reason: DisconnectReason::ServerFull,
-                },
-                EndReason::ServerFull,
-            ),
-            (
-                "PinChanged",
-                ConnectError::PinChanged {
-                    pinned: "aaaa1111".into(),
-                    offered: "cccc3333".into(),
-                },
-                EndReason::ChaveMudouNaVolta,
-            ),
-            (
-                "ModsNaoAceitos",
-                ConnectError::ModsNaoAceitos {
-                    mods: Vec::new(),
-                    conjunto: "conjunto".into(),
-                    plataformas: None,
-                },
-                EndReason::ModsMudaram,
-            ),
-            (
-                "ChaveNaoProvada",
-                ConnectError::ChaveNaoProvada,
-                EndReason::ServidorTrocouNaVolta,
-            ),
-        ];
-        let erradas: Vec<String> = casos
-            .into_iter()
-            .filter_map(|(nome, erro, esperado)| {
-                let obtido = fim_da_sessao(&Motivo::Recusado(erro));
-                (obtido != esperado).then(|| format!("{nome} deu {obtido:?}, e não {esperado:?}"))
-            })
-            .collect();
-        assert!(
-            erradas.is_empty(),
-            "a volta recusada chega à tela com um motivo que não é o dela, e a frase manda \
-             a pessoa conferir o que não está errado: {erradas:#?}"
-        );
-    }
-
-    #[test]
-    fn fim_da_recusa_do_que_nao_e_recusa_e_enlace_perdido() {
-        // Estas não chegam a `Recusado` hoje (`vale_insistir` as manda de volta
-        // à bateria). Se uma chegar, ela é rede, e não credencial.
-        for erro in [
-            ConnectError::LocalEndpoint,
-            ConnectError::Unreachable,
-            ConnectError::TlsRefused,
-            ConnectError::HandshakeTimeout,
-            ConnectError::SemResposta,
-            ConnectError::ProtocolViolation,
-        ] {
-            let obtido = fim_da_sessao(&Motivo::Recusado(erro.clone()));
-            assert_eq!(
-                obtido,
-                EndReason::LinkLost,
-                "a volta que acabou em {erro:?} chega à tela como {obtido:?}, e não como \
-                 enlace perdido: a frase manda procurar outra causa para uma falha de rede"
-            );
-        }
-    }
-
-    /// A ligação de `drive` a [`fim_da_sessao`], que nenhum teste de
-    /// comportamento alcança.
-    ///
-    /// Os testes de cima provam `fim_da_sessao`. `drive` só a usa com uma
-    /// sessão viva cuja volta pela bateria o servidor recuse, e nenhum teste
-    /// deste crate abre uma. Sem este guarda, um `match` reescrito à mão dentro
-    /// de `drive` (o `Recusado(_) => CredentialRejected` de antes do lote H)
-    /// deixaria todos verdes, e a tela voltaria a dizer «credencial recusada»
-    /// para toda volta recusada.
-    ///
-    /// Comentários fora, para que um parágrafo que cite a chamada não conte
-    /// como a chamada. As agulhas são montadas, e não escritas: este é o
-    /// arquivo que o teste lê.
-    #[test]
-    fn drive_traduz_o_fim_que_o_enlace_avisa_por_fim_da_sessao() {
-        let fonte = include_str!("lib.rs");
-        let sem_comentario: String = fonte
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let inicio = sem_comentario
-            .find(&format!("{} fn drive(", "async"))
-            .expect("`drive` sumiu de `lib.rs`");
-        let depois = sem_comentario.get(inicio..).expect("o começo de `drive`");
-        let fim = depois.find("\n}\n").expect("`drive` nunca fecha");
-        let corpo = depois.get(..fim).expect("o corpo de `drive`");
-        let Some(braco) = corpo
-            .split(&format!("enlace::Aviso::{}(motivo) =>", "Encerrado"))
-            .nth(1)
-        else {
-            panic!(
-                "`drive` não trata mais o fim que o enlace avisa pelo nome de sempre, e este \
-                 guarda deixou de achar o braço que ele prende"
-            );
-        };
-        let braco = braco
-            .split(&format!("{};", "break"))
-            .next()
-            .unwrap_or(braco);
-        assert!(
-            braco.contains(&format!("{}(&motivo)", "fim_da_sessao")),
-            "`drive` traduz o fim da sessão sem passar por `fim_da_sessao`: os testes de \
-             `fim_da_recusa` ficam verdes e a tela pode voltar a dizer «credencial recusada» \
-             para toda volta recusada:\n{braco}"
-        );
-    }
-}
-
+#[path = "testes/a_identidade_e_uma_por_maquina.rs"]
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "num teste, o pânico é o relatório"
 )]
-mod a_identidade_e_uma_por_maquina {
-    use std::path::{Path, PathBuf};
+mod a_identidade_e_uma_por_maquina;
 
-    use super::{codigo_com, impressao_com, pasta_da_identidade, semente_com};
-
-    fn pasta(nome: &str) -> PathBuf {
-        let caminho = std::env::temp_dir().join(format!(
-            "seele-ffi-identidade-{nome}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&caminho).unwrap();
-        caminho
-    }
-
-    /// O contrato do ADR 0061: a pasta da variável, quando ela não está vazia;
-    /// senão, a de hoje.
-    #[test]
-    fn a_pasta_da_identidade_e_a_da_variavel_quando_ela_nao_esta_vazia() {
-        let home = Path::new("/um/home");
-        assert_eq!(
-            pasta_da_identidade(home, Some("/a/maquina")),
-            PathBuf::from("/a/maquina")
-        );
-        assert_eq!(
-            pasta_da_identidade(home, Some("")),
-            home,
-            "vazia vale como ausente"
-        );
-        assert_eq!(pasta_da_identidade(home, None), home);
-    }
-
-    /// **A pessoa é a mesma nas duas linhas.** Com a variável, a impressão sai
-    /// da chave da pasta da máquina, e nenhuma chave nova nasce na pasta de
-    /// dados da linha — que é o que faria a pessoa ser outra nos servidores
-    /// 0.15.
-    #[test]
-    fn com_a_variavel_a_impressao_e_a_da_chave_da_maquina() {
-        let maquina = pasta("maquina");
-        let dados_da_linha = pasta("dados-da-linha");
-        std::fs::write(maquina.join("identity.key"), [5_u8; 32]).unwrap();
-        let esperada = seele_core::key_fingerprint(
-            super::identity::load_or_create(&maquina.join("identity.key"))
-                .unwrap()
-                .verifying_key()
-                .as_bytes(),
-        );
-
-        let lida = impressao_com(
-            dados_da_linha.to_str().unwrap(),
-            Some(maquina.to_str().unwrap()),
-        )
-        .unwrap();
-
-        assert_eq!(lida, esperada);
-        assert!(
-            !dados_da_linha.join("identity.key").exists(),
-            "uma chave nova nasceu na pasta de dados: a pessoa seria outra nesta linha"
-        );
-        let _ = std::fs::remove_dir_all(&maquina);
-        let _ = std::fs::remove_dir_all(&dados_da_linha);
-    }
-
-    /// Sem a variável, tudo como antes: a chave mora em `home`.
-    #[test]
-    fn sem_a_variavel_a_chave_e_a_de_home() {
-        let home = pasta("home");
-        std::fs::write(home.join("identity.key"), [6_u8; 32]).unwrap();
-        let esperada = seele_core::key_fingerprint(
-            super::identity::load_or_create(&home.join("identity.key"))
-                .unwrap()
-                .verifying_key()
-                .as_bytes(),
-        );
-        assert_eq!(
-            impressao_com(home.to_str().unwrap(), None).unwrap(),
-            esperada
-        );
-        assert_eq!(
-            impressao_com(home.to_str().unwrap(), Some("")).unwrap(),
-            esperada
-        );
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    /// **SEU CÓDIGO é o da chave da máquina** (tarefa 22 da F7, o terceiro
-    /// teste): com `SEELE_HOME=a` e `SEELE_IDENTIDADE=b`, o código é o da
-    /// chave de `b`. Um código lido de `a` seria um número que não toca aqui,
-    /// porque a sala sobe com a chave de `b`.
-    #[test]
-    fn com_a_variavel_o_codigo_e_o_da_chave_da_maquina() {
-        let maquina = pasta("maquina-do-codigo");
-        let dados_da_linha = pasta("dados-do-codigo");
-        std::fs::write(maquina.join("identity.key"), [5_u8; 32]).unwrap();
-        let chave = super::identity::load_or_create(&maquina.join("identity.key")).unwrap();
-        let esperado = seele_core::Codigo::da_chave(chave.verifying_key().as_bytes());
-
-        let lido = codigo_com(
-            dados_da_linha.to_str().unwrap(),
-            Some(maquina.to_str().unwrap()),
-        )
-        .unwrap();
-
-        assert_eq!(lido, esperado);
-        assert!(
-            !dados_da_linha.join("identity.key").exists(),
-            "uma chave nova nasceu na pasta de dados: SEU CÓDIGO seria o de outra pessoa"
-        );
-        let _ = std::fs::remove_dir_all(&maquina);
-        let _ = std::fs::remove_dir_all(&dados_da_linha);
-    }
-
-    /// **A sala sobe com a chave cujo código a pessoa mostra.** A semente é a
-    /// da pasta da identidade, e a chave que ela dá tem o código desta máquina:
-    /// uma sala de outra semente atenderia por outro número.
-    #[test]
-    fn a_semente_da_sala_e_a_da_chave_da_maquina_e_da_o_mesmo_codigo() {
-        let maquina = pasta("maquina-da-semente");
-        let dados_da_linha = pasta("dados-da-semente");
-        std::fs::write(maquina.join("identity.key"), [9_u8; 32]).unwrap();
-        let (home, variavel) = (
-            dados_da_linha.to_str().unwrap(),
-            Some(maquina.to_str().unwrap()),
-        );
-
-        let semente = semente_com(home, variavel).unwrap();
-
-        assert_eq!(
-            semente.bytes(),
-            super::identity::load_or_create(&maquina.join("identity.key"))
-                .unwrap()
-                .as_bytes(),
-            "a semente da sala não é a chave da pasta da identidade"
-        );
-        let da_sala = seele_core::SigningKey::from_bytes(semente.bytes());
-        assert_eq!(
-            seele_core::Codigo::da_chave(da_sala.verifying_key().as_bytes()),
-            codigo_com(home, variavel).unwrap(),
-            "a sala subiria com uma chave cujo código não é o que SEU CÓDIGO mostra"
-        );
-        let _ = std::fs::remove_dir_all(&maquina);
-        let _ = std::fs::remove_dir_all(&dados_da_linha);
-    }
-
-    /// **A semente não sai pelo `Debug`.** Ela é a chave privada da pessoa, e
-    /// um `tracing::info!(?semente)` a levaria ao `seele.log`.
-    #[test]
-    fn a_semente_nao_sai_pelo_debug() {
-        let maquina = pasta("maquina-do-debug");
-        std::fs::write(maquina.join("identity.key"), [0xA7_u8; 32]).unwrap();
-        let semente = semente_com(maquina.to_str().unwrap(), None).unwrap();
-
-        for impresso in [format!("{semente:?}"), format!("{semente:#?}")] {
-            for vazamento in ["167", "a7", "A7"] {
-                assert!(
-                    !impresso.contains(vazamento),
-                    "o `Debug` da semente imprime os bytes da chave:\n{impresso}"
-                );
-            }
-            assert!(
-                impresso.contains("oculta"),
-                "o `Debug` da semente não diz que ela está ali:\n{impresso}"
-            );
-        }
-        let _ = std::fs::remove_dir_all(&maquina);
-    }
-
-    /// O código de produção de `lib.rs`: o arquivo sem os módulos
-    /// `#[cfg(test)]`.
-    ///
-    /// Aqui, e não na `linha/0.15`, os módulos de teste ficam **espalhados**
-    /// entre funções de produção (`onde_mora_hoje`, `impressao_a_conferir`,
-    /// `pares_que_esta_versao_atende` vêm depois deles). Cortar no primeiro
-    /// `#[cfg(test)]`, como o guarda da 0.15 faz, deixaria de fora metade do
-    /// arquivo. Cada módulo de teste é de primeiro nível e fecha numa linha
-    /// `}` sozinha, que é onde a produção recomeça.
-    fn so_producao(fonte: &str) -> String {
-        let marca = format!("\n#[cfg({})]\n", "test");
-        let mut pedacos = fonte.split(marca.as_str());
-        let mut producao = pedacos.next().unwrap().to_owned();
-        for pedaco in pedacos {
-            let fim = pedaco
-                .find("\n}\n")
-                .expect("um módulo de teste sem a linha `}` que o fecha");
-            producao.push_str(&pedaco[fim + 3..]);
-        }
-        producao
-    }
-
-    /// **Os dois leitores de produção passam pela mesma resolução.** O
-    /// `impressao_desta_maquina` e o `connect` liam `identity.key` sob o `home`
-    /// cada um; um que continuasse lendo direto deixaria a pessoa com duas
-    /// chaves. As agulhas são montadas em tempo de execução para este teste não
-    /// ser contado.
-    #[test]
-    fn so_um_lugar_monta_o_caminho_da_chave() {
-        let fonte = so_producao(include_str!("lib.rs"));
-        // O guarda do guarda: a produção que vem **depois** dos módulos de
-        // teste está no texto lido, e nenhum teste está.
-        for depois_dos_testes in [
-            "pub async fn onde_mora_hoje",
-            "pub const fn pares_que_esta_versao_atende",
-        ] {
-            assert!(
-                fonte.contains(depois_dos_testes),
-                "a leitura da produção perdeu `{depois_dos_testes}`, que vem depois dos testes"
-            );
-        }
-        assert!(
-            !fonte.contains("fn a_pasta_da_identidade_e_a_da_variavel_quando_ela_nao_esta_vazia"),
-            "a leitura da produção levou um teste junto"
-        );
-
-        let monta = format!("{}(\"{}\")", ".join", "identity.key");
-        assert_eq!(
-            fonte.matches(&monta).count(),
-            1,
-            "a chave é procurada fora de `arquivo_da_identidade`"
-        );
-        // E cada um dos dois leitores usa o montador: a impressão desta
-        // máquina, e o `connect`.
-        for uso in [
-            format!("{}(Path::new(home), variavel)", "arquivo_da_identidade_com"),
-            format!("load_or_create(&{}(&home))", "arquivo_da_identidade"),
-        ] {
-            assert!(
-                fonte.contains(&uso),
-                "um dos dois leitores não passa pelo montador: falta `{uso}`"
-            );
-        }
-    }
-}
-
+#[path = "testes/tests.rs"]
 #[cfg(test)]
-mod tests {
-    // As funções da projeção que estes testes chamam sozinhas moram no
-    // `seele_core::retrato` desde a fase 2 da Tarefa 2.2 da F4.
-    use seele_core::retrato::{lines_of, tela_por_id, voice_rooms_of};
-    #[test]
-    fn a_chave_de_mensagem_nao_comeca_num_valor_fixo() {
-        // Pendência 19, a metade do app. Aqui o contador é do processo, e era
-        // *entre* processos que a repetição acontecia: reabrir o SEELE fazia a
-        // primeira mensagem ser lida como reenvio da primeira mensagem da
-        // abertura anterior, e ela não era gravada.
-        //
-        // Só dá para observar o sorteio uma vez por processo, então o que se
-        // afirma é a propriedade que sobrevive a isso: o valor não é pequeno, e
-        // o contador anda.
-        let primeira = super::next_client_message_id();
-        let segunda = super::next_client_message_id();
+mod tests;
 
-        assert!(
-            primeira > u64::from(u32::MAX),
-            "a metade alta não foi sorteada: {primeira}"
-        );
-        assert_eq!(segunda, primeira + 1, "o contador não anda de um em um");
-    }
-
-    use super::*;
-
-    #[test]
-    fn a_bare_host_gets_the_default_port() {
-        let (address, name, _) = resolve("localhost").expect("resolve");
-        assert_eq!(address.port(), seele_core::DEFAULT_PORT);
-        assert_eq!(name, "localhost");
-    }
-
-    #[test]
-    fn an_address_is_pinned_under_a_name_a_certificate_can_carry() {
-        // ADR 0003 pins per name. An IP is not a name a certificate is issued
-        // for, so pinning under one would file the pin somewhere nothing ever
-        // looks for it again.
-        let (_, name, pin) = resolve("127.0.0.1:8383").expect("resolve");
-        assert_eq!(
-            name, "localhost",
-            "TLS gets the name the certificate carries"
-        );
-        assert_eq!(pin, "127.0.0.1:8383", "the pin is filed under the address");
-    }
-
-    #[test]
-    fn every_expected_fingerprint_reaches_the_destino_it_promised() {
-        // `drive` builds this immediately before a real QUIC connection, so
-        // this is the only way to check the wiring without a live server —
-        // and the only thing standing between an invite's `fp=` and the
-        // refusal ADR 0006 exists to produce.
-        let (address, name, pin) = resolve("localhost:8383").expect("resolve");
-
-        let with_fingerprint = ConnectConfig {
-            server: "localhost:8383".into(),
-            alternate_servers: Vec::new(),
-            nickname: "rafael".into(),
-            home: "/tmp/does-not-matter".into(),
-            join_secret: None,
-            expected_fingerprint: Some("aaaa1111".into()),
-            codigo_esperado: None,
-            bilhete: None,
-            audio: false,
-            capture_device: None,
-            playback_device: None,
-        };
-        let destino = build_destino(&with_fingerprint, address, &name, &pin, &pin);
-        assert_eq!(destino.impressao_esperada(), Some("aaaa1111"));
-
-        let without = ConnectConfig {
-            expected_fingerprint: None,
-            bilhete: None,
-            ..with_fingerprint
-        };
-        let destino = build_destino(&without, address, &name, &pin, &pin);
-        assert_eq!(destino.impressao_esperada(), None);
-    }
-
-    /// A configuração de uma conexão por link, com a impressão que ele promete.
-    fn config_com_esperada(alvo: &str) -> ConnectConfig {
-        ConnectConfig {
-            server: alvo.into(),
-            alternate_servers: Vec::new(),
-            nickname: "rafael".into(),
-            home: "/tmp/does-not-matter".into(),
-            join_secret: None,
-            expected_fingerprint: Some(ESPERADA_DO_LINK.into()),
-            codigo_esperado: None,
-            bilhete: None,
-            audio: false,
-            capture_device: None,
-            playback_device: None,
-        }
-    }
-
-    /// O que o link promete nos testes do pino que prova o servidor.
-    const ESPERADA_DO_LINK: &str = "aaaa1111";
-
-    /// O destino que `drive` monta para o alvo: o primeiro, com a chave do
-    /// aceite igual à própria chave de pino.
-    fn destino_do_alvo(alvo: &str) -> seele_core::enlace::Destino {
-        let (address, name, pin) = resolve(alvo).expect("um endereço literal resolve sem rede");
-        build_destino(&config_com_esperada(alvo), address, &name, &pin, &pin)
-    }
-
-    #[test]
-    fn um_alternativo_nao_tem_o_pino_que_prova_o_servidor() {
-        // `drive` dá a todos os candidatos a chave do destino como chave do
-        // aceite, e a cada um a própria chave de pino: só o endereço que a
-        // pessoa escolheu tem as duas iguais. Num alternativo, o pin pode ser de
-        // outro servidor que esta máquina já fixou ali
-        // (`seele_core::tofu::TofuVerifier::decide`). Os dois endereços daqui
-        // são de escopo público, para a diferença ser só a de ser o alvo.
-        let config = config_com_esperada("203.0.113.7:8383");
-        let (address, name, pin) = resolve("203.0.113.7:8383").expect("resolve");
-        assert!(
-            build_destino(&config, address, &name, &pin, &pin).o_pino_prova_o_servidor,
-            "o alvo público deixou de ter o pino que prova o servidor: um link velho contra \
-             um servidor já fixado passaria a ser recusado, contra o ADR 0003"
-        );
-
-        let (outro, nome_do_outro, pin_do_outro) = resolve("203.0.113.9:9368").expect("resolve");
-        assert!(
-            !build_destino(&config, outro, &nome_do_outro, &pin_do_outro, &pin)
-                .o_pino_prova_o_servidor,
-            "um alternativo ficou com o pino que prova o servidor: o pin de outro servidor \
-             naquele endereço passaria por cima da impressão esperada, e o `Hello` sairia \
-             para ele"
-        );
-    }
-
-    #[test]
-    fn um_alvo_de_escopo_local_nao_tem_o_pino_que_prova_o_servidor() {
-        // O alvo de um link de quem hospeda em casa é o endereço da rede local
-        // do anfitrião (`seele_proto::uri`), e é também a chave da entrada que o
-        // link deixa na lista. Para quem visita pela internet, esse endereço se
-        // repete de uma casa para outra: na rede em que a pessoa está, outro
-        // servidor pode atender nele, já fixado nesta máquina. Ali, um pin que
-        // confere com a esperada discordando é, no caso comum, colisão, porque
-        // um servidor que trocou de chave dá `Changed`.
-        for alvo in [
-            "192.168.0.20:8383",
-            "10.0.0.5",
-            "172.16.3.4:9000",
-            "169.254.1.1:8383",
-            "100.64.1.2:8383",
-            "[fd00::5]:8383",
-            "[fe80::1]:8383",
-            "[::ffff:192.168.0.20]:8383",
-        ] {
-            assert!(
-                !destino_do_alvo(alvo).o_pino_prova_o_servidor,
-                "o alvo de escopo local {alvo} ficou com o pino que prova o servidor: o \
-                 servidor que atende nesse endereço na rede desta pessoa passaria pelo pino \
-                 dele, e o `Hello` sairia para ele com o convite, o apelido e a assinatura"
-            );
-        }
-    }
-
-    #[test]
-    fn um_alvo_publico_ou_de_loopback_tem_o_pino_que_prova_o_servidor() {
-        // O guarda de não ir longe demais. Um endereço público é o mesmo em
-        // qualquer rede, e o loopback é esta máquina em qualquer rede: nos dois,
-        // o pin do alvo prova a continuidade do servidor, e vale o ADR 0003.
-        for alvo in [
-            "203.0.113.7:8383",
-            "[2001:db8::7]:8383",
-            "127.0.0.1:8383",
-            "[::1]:8383",
-        ] {
-            assert!(
-                destino_do_alvo(alvo).o_pino_prova_o_servidor,
-                "o alvo {alvo} perdeu o pino que prova o servidor: um link velho contra um \
-                 servidor já fixado ali passaria a ser recusado, contra o ADR 0003"
-            );
-        }
-    }
-
-    #[test]
-    fn um_nome_decide_pelo_endereco_resolvido() {
-        // A decisão é sobre o endereço resolvido, o `SocketAddr` do destino, e
-        // não sobre o texto: `casa.local` que resolve para a rede de casa é um
-        // alvo de escopo local como `192.168.0.20`.
-        let config = config_com_esperada("casa.local:8383");
-        let na_rede_de_casa: SocketAddr = "192.168.0.20:8383".parse().expect("endereço");
-        assert!(
-            !build_destino(
-                &config,
-                na_rede_de_casa,
-                "casa.local",
-                "casa.local:8383",
-                "casa.local:8383"
-            )
-            .o_pino_prova_o_servidor,
-            "um nome que resolve para a rede de casa ficou com o pino que prova o servidor: \
-             o escopo não saiu do endereço resolvido, e o nome passou por público"
-        );
-        let publico: SocketAddr = "203.0.113.7:8383".parse().expect("endereço");
-        assert!(
-            build_destino(
-                &config,
-                publico,
-                "seele.exemplo.org",
-                "seele.exemplo.org:8383",
-                "seele.exemplo.org:8383"
-            )
-            .o_pino_prova_o_servidor,
-            "um nome que resolve para um endereço público perdeu o pino que prova o servidor"
-        );
-    }
-
-    /// O que o verificador decide com o destino que `drive` monta para `alvo`,
-    /// quando esta máquina já fixou naquele endereço a chave de quem atende e o
-    /// link promete outra. Devolve a decisão, a loja e a chave fixada.
-    fn a_volta_ao_alvo_ja_fixado(
-        alvo: &str,
-    ) -> (
-        seele_core::PinDecision,
-        Arc<seele_core::MemoryPinStore>,
-        String,
-    ) {
-        use seele_core::tofu::TofuVerifier;
-        use seele_core::{MemoryPinStore, PinDecision, PinStore};
-
-        const DE_QUEM_ATENDE: &[u8] = b"o certificado de quem atende no alvo";
-        let destino = destino_do_alvo(alvo);
-        let loja = Arc::new(MemoryPinStore::new());
-
-        // A visita de antes, sem link: a chave de quem atende ali fica fixada.
-        let visita = TofuVerifier::new(
-            Arc::clone(&loja) as Arc<dyn PinStore>,
-            destino.chave_do_pin.clone(),
-            None,
-            true,
-        );
-        let PinDecision::FirstContact {
-            fingerprint: fixada,
-        } = visita.decide(&destino.chave_do_pin, DE_QUEM_ATENDE)
-        else {
-            panic!("a visita de antes não fixou a chave de quem atende em {alvo}");
-        };
-
-        let verificador = TofuVerifier::new(
-            Arc::clone(&loja) as Arc<dyn PinStore>,
-            destino.chave_do_pin.clone(),
-            destino.impressao_esperada().map(str::to_owned),
-            destino.o_pino_prova_o_servidor,
-        );
-        let decisao = verificador.decide(&destino.chave_do_pin, DE_QUEM_ATENDE);
-        (decisao, loja, fixada)
-    }
-
-    #[test]
-    fn num_alvo_de_lan_o_pino_que_confere_nao_passa_por_cima_da_esperada() {
-        // O que a regra de cima compra, visto no verificador. Na rede desta
-        // pessoa, o servidor da casa dela atende no `192.168.0.20:8383` que o
-        // link de um amigo tem como alvo, e esta máquina já o fixou ali. O pin
-        // confere, e a esperada do link é a do amigo: é colisão, e o `Hello` não
-        // pode sair para quem atendeu.
-        use seele_core::{PinDecision, PinStore};
-
-        for alvo in ["192.168.0.20:8383", "[fd00::5]:8383"] {
-            let (decisao, loja, fixada) = a_volta_ao_alvo_ja_fixado(alvo);
-            assert_eq!(
-                decisao,
-                PinDecision::InviteRefused {
-                    expected: ESPERADA_DO_LINK.into(),
-                    offered: fixada.clone(),
-                },
-                "no alvo de LAN {alvo}, o pino de quem atende passou por cima da impressão \
-                 que o link promete: o `Hello` sairia para o servidor da rede desta pessoa \
-                 com o convite, o apelido e a assinatura, e o do amigo ficaria inalcançável \
-                 daqui"
-            );
-            let chave = chave_do_servidor(alvo).expect("chave");
-            assert_eq!(
-                loja.pinned(&chave),
-                Some(fixada),
-                "a recusa no alvo de LAN {alvo} mexeu no pino dali: ele continua sendo a \
-                 prova de quem atende nesse endereço, e a recusa não fixa nem desfaz nada"
-            );
-        }
-    }
-
-    #[test]
-    fn num_alvo_publico_ou_de_loopback_o_pino_que_confere_passa_e_so_avisa() {
-        // A metade que a recusa de cima não pode levar junto (ADR 0003): onde o
-        // pino prova o servidor, quem discorda dele é o link.
-        use seele_core::PinDecision;
-
-        for alvo in ["203.0.113.7:8383", "127.0.0.1:8383"] {
-            let (decisao, _, fixada) = a_volta_ao_alvo_ja_fixado(alvo);
-            assert_eq!(
-                decisao,
-                PinDecision::Matches {
-                    fingerprint: fixada
-                },
-                "o alvo {alvo}, já fixado, passou a ser recusado pela impressão do link: um \
-                 link velho trancaria a pessoa para fora do servidor que ela usa, contra o \
-                 ADR 0003"
-            );
-        }
-    }
-
-    /// **O aceite acompanha o servidor, e não o caminho até ele.**
-    ///
-    /// Encontrado em produção, e o laço era completo: a pessoa clicava em
-    /// ACEITAR, o sim era gravado sob o endereço que ela digitou, a conexão
-    /// entrava pelo candidato de retransmissão — cuja porta o NAT troca a cada
-    /// sessão — e o aceite, procurado sob *essa* porta, nunca existia. A tela
-    /// de aceite voltava. Aceitar de novo gravava no mesmo lugar e falhava do
-    /// mesmo jeito, para sempre.
-    ///
-    /// Os dados que fecharam o diagnóstico: `aceites` tinha
-    /// `192.168.50.30:8383 → acff8e16…`, exatamente o conjunto exigido, e quem
-    /// respondia era `187.255.97.152:9368`. O arquivo de pins guardava nove
-    /// portas diferentes do mesmo endereço público — uma por sessão.
-    ///
-    /// O pin continua por endereço, porque é isso que ele prova: *este*
-    /// endereço apresentou *esta* chave. O aceite é do **servidor**, e todos os
-    /// candidatos de uma chegada são o mesmo servidor — mesmo convite, mesma
-    /// impressão digital conferida.
-    #[test]
-    fn um_candidato_alternativo_encontra_o_aceite_do_destino() {
-        let home =
-            std::env::temp_dir().join(format!("seele-ffi-aceite-candidato-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(&home).expect("temporário");
-        let casa = home.to_string_lossy().into_owned();
-        let digitado = "192.168.50.30:8383";
-        let conjunto = "acff8e1650272dcca3835f2a8a6dc0af6ce12fd081e9806ee1ced396f3e4339d";
-        crate::mods::aceitar(&casa, digitado, conjunto).expect("gravar o sim");
-
-        let config = ConnectConfig {
-            home: casa.clone(),
-            server: digitado.into(),
-            alternate_servers: Vec::new(),
-            nickname: "alguem".into(),
-            join_secret: None,
-            expected_fingerprint: None,
-            codigo_esperado: None,
-            bilhete: None,
-            audio: false,
-            capture_device: None,
-            playback_device: None,
-        };
-
-        // O candidato que de fato responde: outro endereço, outra porta — a
-        // porta que o NAT escolheu nesta sessão e vai trocar na próxima.
-        let alternativo: SocketAddr = "187.255.97.152:9368".parse().expect("endereço");
-        let destino = build_destino(
-            &config,
-            alternativo,
-            "servidor",
-            "187.255.97.152:9368",
-            digitado,
-        );
-        assert_eq!(
-            destino.aceito.as_deref(),
-            Some(conjunto),
-            "o candidato alternativo não encontrou o aceite do destino: a tela \
-             de aceite volta, e aceitar de novo grava no mesmo lugar que já não \
-             é consultado"
-        );
-
-        // E a outra metade: o aceite continua sendo **daquele** servidor. Um
-        // destino que a pessoa nunca autorizou não herda o sim de ninguém.
-        let outro = build_destino(
-            &config,
-            alternativo,
-            "servidor",
-            "187.255.97.152:9368",
-            "outro.exemplo:8383",
-        );
-        assert_eq!(
-            outro.aceito, None,
-            "um servidor que nunca foi aceito herdou o consentimento de outro"
-        );
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    /// E a chamada de verdade passa a chave do destino a **todos** os
-    /// candidatos, e não a de cada um.
-    ///
-    /// Pelo mesmo motivo que `every_expected_fingerprint_reaches_the_destino_it_promised`
-    /// existe: `build_destino` pode estar certo e `drive` continuar chamando-o
-    /// com o argumento errado, e essa diferença só um aperto de mão de verdade
-    /// mostraria.
-    #[test]
-    fn a_chave_do_aceite_que_chega_aos_candidatos_e_a_do_destino() {
-        let fonte = include_str!("lib.rs");
-        let sem_comentario: String = fonte
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let chamada = sem_comentario
-            .split_once("std::iter::once((address, server_name.clone(), pin_key.clone()))")
-            .expect("a montagem dos destinos")
-            .1;
-        let ate_o_collect = chamada
-            .split_once(".collect()")
-            .map_or(chamada, |(antes, _)| antes);
-        assert!(
-            ate_o_collect.contains("&chave_do_aceite"),
-            "os candidatos voltaram a receber a própria chave como chave do \
-             aceite: quem entra pelo candidato de retransmissão cai no laço da \
-             tela de aceite: {ate_o_collect}"
-        );
-    }
-
-    /// O sim que a casca guarda é lido pela conexão seguinte.
-    ///
-    /// **A trava que este teste põe.** São dois caminhos que nunca se
-    /// encontram: `mods::aceitar` grava sem socket nenhum, de dentro de um
-    /// comando da janela, e `build_destino` lê já com o endereço resolvido. Se
-    /// os dois derivarem a chave por conta própria, o dia em que uma das regras
-    /// mudar é um dia em que o aceite é escrito num lugar e procurado noutro —
-    /// e o sintoma é mudo: ninguém vê um erro, a pessoa só é perguntada de novo
-    /// em toda entrada, para sempre.
-    ///
-    /// As três formas abaixo são as que já custaram caro em outro lugar: a
-    /// porta omitida (que a lista de visitados duplicava), o IPv6 literal (ADR
-    /// 0022, passo 2) e o endereço comum.
-    #[test]
-    fn o_aceite_e_guardado_sob_a_chave_que_a_conexao_vai_procurar() {
-        let home =
-            std::env::temp_dir().join(format!("seele-ffi-chave-do-aceite-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(&home).expect("temporário");
-        let casa = home.to_string_lossy().into_owned();
-        let conjunto = "b2".repeat(32);
-
-        for digitado in ["localhost:8383", "localhost", "[::1]:8383"] {
-            let (address, name, pin) = resolve(digitado).expect("resolve");
-
-            crate::mods::aceitar(&casa, digitado, &conjunto).expect("guardar o sim");
-
-            let config = ConnectConfig {
-                server: digitado.into(),
-                alternate_servers: Vec::new(),
-                nickname: "rafael".into(),
-                home: casa.clone(),
-                join_secret: None,
-                expected_fingerprint: None,
-                codigo_esperado: None,
-                bilhete: None,
-                audio: false,
-                capture_device: None,
-                playback_device: None,
-            };
-            let destino = build_destino(&config, address, &name, &pin, &pin);
-            assert_eq!(
-                destino.aceito,
-                Some(conjunto.clone()),
-                "o aceite guardado para «{digitado}» não foi encontrado pela conexão"
-            );
-
-            crate::mods::esquecer_aceite(&casa, digitado).expect("esquecer");
-            let destino = build_destino(&config, address, &name, &pin, &pin);
-            assert_eq!(
-                destino.aceito, None,
-                "retirar o consentimento de «{digitado}» não chegou à conexão"
-            );
-        }
-
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    /// Um alvo que não é endereço é recusado por nome, e não gravado como veio.
-    ///
-    /// Gravá-lo criaria a entrada que nada lê — ver o teste acima.
-    #[test]
-    fn um_alvo_que_nao_e_endereco_nao_vira_um_aceite_escrito_no_vazio() {
-        let casa = std::env::temp_dir().to_string_lossy().into_owned();
-        assert_eq!(
-            crate::mods::aceitar(&casa, "::1", &"c3".repeat(32)),
-            Err("EnderecoInvalido".to_owned()),
-            "um IPv6 sem colchetes foi aceito como chave"
-        );
-        assert_eq!(crate::mods::aceite_de(&casa, "::1"), None);
-    }
-
-    #[test]
-    fn a_host_that_does_not_exist_is_an_enum_and_not_a_panic() {
-        assert_eq!(
-            resolve("nao-existe.invalid:8383"),
-            Err(ConnectionError::UnresolvableHost)
-        );
-    }
-
-    #[test]
-    fn the_pattern_survives_the_round_trip_through_an_atomic() {
-        for link_state in [
-            LinkTrust::Offline,
-            LinkTrust::Unverified,
-            LinkTrust::Verified,
-        ] {
-            assert_eq!(
-                link_state_from_byte(link_state_byte(link_state)),
-                link_state
-            );
-        }
-    }
-
-    #[test]
-    fn an_unknown_pattern_byte_reads_as_offline() {
-        // Whatever goes wrong, it must not claim a verified session.
-        assert_eq!(link_state_from_byte(200), LinkTrust::Offline);
-    }
-
-    #[test]
-    fn message_identifiers_never_repeat_within_a_process() {
-        // Two handles in one process sending the same number would collide in
-        // the server's idempotency check, and the second message would vanish
-        // as a resend of the first.
-        let ids: std::collections::HashSet<u64> =
-            (0..1000).map(|_| next_client_message_id()).collect();
-        assert_eq!(ids.len(), 1000);
-    }
-
-    #[test]
-    fn a_snapshot_of_an_empty_room_is_empty_and_not_a_panic() {
-        let room = Room::new();
-        assert!(voice_rooms_of(&room).is_empty());
-        assert!(lines_of(&room).is_empty());
-        assert!(messages_of(&room).is_empty());
-    }
-
-    /// **A confirmada própria chega com o eco da pendente**, e é o que deixa a
-    /// casca trocar uma pela outra no mesmo nó (achado da revisão do R63 da
-    /// F5). Sem ele, quem usa leitor de tela e lia a mensagem que acabou de
-    /// mandar perdia a posição, a seleção e o REMOVER a cada envio.
-    ///
-    /// A de outra pessoa chega sem a chave, mesmo que o fio a traga. E a
-    /// própria relida do histórico chega com a chave gravada: o `FetchHistory`
-    /// do servidor responde com o `client_message_id` de cada linha.
-    #[test]
-    fn a_confirmada_propria_chega_com_a_chave_da_pendente() {
-        use seele_core::{ChannelInfo, ClientMessageId, PersonId, ServerMessage, SessionId, Ssrc};
-
-        let canal = ChannelId(1);
-        let mut room = Room::new();
-        room.apply(&ServerMessage::Session {
-            id: SessionId(1),
-            person: PersonId(7),
-            ssrc: Ssrc(700),
-            server: "Casa".into(),
-            voice_rooms: Vec::new(),
-            channels: vec![ChannelInfo {
-                id: canal,
-                name: "geral".into(),
-            }],
-            roles: Vec::new(),
-            permissions: Vec::new(),
-        });
-        room.open_channel(canal);
-        let recebida = |id: u64, autor: u64, chave: Option<u64>| ServerMessage::MessageReceived {
-            channel: canal,
-            id: MessageId(id),
-            author: PersonId(autor),
-            at_seconds: 0,
-            author_nickname: format!("pessoa{autor}"),
-            body: format!("mensagem {id}"),
-            replies_to: None,
-            client_message_id: chave.map(ClientMessageId),
-            attachment: None,
-        };
-
-        // A pendente, e a chave com que a casca a desenha.
-        room.anotar_envio(canal, ClientMessageId(77), "mensagem 5".into(), 0);
-        let pendente = messages_of(&room);
-        assert_eq!(pendente.len(), 1);
-        assert_eq!(pendente[0].client_message_id.as_deref(), Some("77"));
-
-        // Gravada: a pendente sai, e a confirmada leva a mesma chave.
-        room.apply(&recebida(5, 7, Some(77)));
-        // De outra pessoa, com uma chave no fio que não é desta máquina.
-        room.apply(&recebida(6, 8, Some(78)));
-        // A própria relida do histórico, com a chave que o servidor gravou.
-        room.apply(&recebida(2, 7, Some(31)));
-
-        let lista = messages_of(&room);
-        let de = |id: u64| lista.iter().find(|mensagem| mensagem.id == id);
-        assert_eq!(
-            lista.len(),
-            3,
-            "a pendente não saiu, ou alguma não chegou: {lista:?}"
-        );
-        let gravada = de(5).expect("a gravada");
-        assert_eq!(gravada.estado, EstadoDoEnvio::Confirmada);
-        assert_eq!(
-            gravada.client_message_id.as_deref(),
-            Some("77"),
-            "a confirmada própria chegou sem a chave da pendente, e a casca a desenha \
-             como uma mensagem nova"
-        );
-        assert_eq!(
-            de(6).expect("a de outra pessoa").client_message_id,
-            None,
-            "a chave de outra máquina chegou à casca"
-        );
-        assert_eq!(
-            de(2).expect("a relida").client_message_id.as_deref(),
-            Some("31"),
-            "o histórico traz a chave gravada, e a própria antiga a perdeu no caminho"
-        );
-    }
-
-    #[test]
-    fn the_snapshot_marks_which_person_is_us() {
-        // Without this the shell has to compare ids, which means the shell has
-        // to know what a `PersonId` is.
-        use seele_core::{PersonId, PersonProfile, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
-
-        let mut room = Room::new();
-        room.apply(&ServerMessage::Session {
-            id: SessionId(1),
-            person: PersonId(7),
-            ssrc: Ssrc(700),
-            server: "Casa".into(),
-            voice_rooms: vec![VoiceRoomInfo {
-                id: VoiceRoomId(1),
-                name: "SALA-01".into(),
-                limit: 20,
-                password_required: false,
-                channel: None,
-            }],
-            channels: Vec::new(),
-            roles: Vec::new(),
-            permissions: Vec::new(),
-        });
-        room.enter_voice_room(VoiceRoomId(1));
-        room.apply(&ServerMessage::PersonJoined {
-            voice_room: VoiceRoomId(1),
-            profile: PersonProfile {
-                id: PersonId(3),
-                nickname: "marcela".into(),
-                roles: Vec::new(),
-                material_e2ee: None,
-            },
-            ssrc: Ssrc(30),
-        });
-
-        let voice_rooms = voice_rooms_of(&room);
-        let people = &voice_rooms[0].people;
-        assert!(people.iter().any(|person| person.is_self));
-        assert_eq!(
-            people.iter().filter(|person| person.is_self).count(),
-            1,
-            "more than one person claims to be us"
-        );
-        assert!(voice_rooms[0].occupied_by_us);
-    }
-
-    #[test]
-    fn a_sync_band_travels_beside_its_number() {
-        // specs/06-clientes-gui.md forbids carrying it by colour alone, and the
-        // same applies here: a shell that only got a hue could not print a
-        // number, and one that only got a number would have to know the
-        // thresholds.
-        use seele_core::{
-            PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc, VoiceRoomInfo,
-        };
-
-        let mut room = Room::new();
-        room.voice_rooms = vec![VoiceRoomInfo {
-            id: VoiceRoomId(1),
-            name: "SALA-01".into(),
-            limit: 20,
-            password_required: false,
-            channel: None,
-        }];
-        room.apply(&ServerMessage::PersonJoined {
-            voice_room: VoiceRoomId(1),
-            profile: PersonProfile {
-                id: PersonId(3),
-                nickname: "marcela".into(),
-                roles: Vec::new(),
-                material_e2ee: None,
-            },
-            ssrc: Ssrc(30),
-        });
-        room.apply(&ServerMessage::PersonState(PersonState {
-            person: PersonId(3),
-            muted: false,
-            total_isolation: false,
-            speaking: false,
-            presence: Presence::Available,
-            signal: 72,
-        }));
-
-        // 72 rather than a critical number on purpose: `SignalBand::Critical` is
-        // the `Default`, so a shell that received it could not tell a banded
-        // ratio from a field nobody filled in.
-        let person = &voice_rooms_of(&room)[0].people[0];
-        assert_eq!(person.signal, 72);
-        assert_eq!(person.sync_band, types::SignalBand::Degraded);
-    }
-
-    #[test]
-    fn the_voice_rooms_average_crosses_already_banded() {
-        // MÉDIA DO VOICE_ROOM. The comp computes it in the shell; here the shell gets
-        // the number, the band and the sample size and has nothing left to
-        // decide. A voice room nobody is in carries `None`, not a critical zero.
-        use seele_core::{
-            PersonId, PersonProfile, PersonState, Presence, ServerMessage, Ssrc, VoiceRoomInfo,
-        };
-
-        let mut room = Room::new();
-        room.voice_rooms = vec![VoiceRoomInfo {
-            id: VoiceRoomId(1),
-            name: "SALA-01".into(),
-            limit: 20,
-            password_required: false,
-            channel: None,
-        }];
-        assert_eq!(voice_rooms_of(&room)[0].sync, None, "an empty voice room");
-
-        for (id, sync) in [(3_u64, 84_u8), (4, 85)] {
-            room.apply(&ServerMessage::PersonJoined {
-                voice_room: VoiceRoomId(1),
-                profile: PersonProfile {
-                    id: PersonId(id),
-                    nickname: format!("pessoa {id}"),
-                    roles: Vec::new(),
-                    material_e2ee: None,
-                },
-                ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
-            });
-            room.apply(&ServerMessage::PersonState(PersonState {
-                person: PersonId(id),
-                muted: false,
-                total_isolation: false,
-                speaking: false,
-                presence: Presence::Available,
-                signal: sync,
-            }));
-        }
-
-        let average = voice_rooms_of(&room)[0]
-            .sync
-            .expect("two people are seated");
-        assert_eq!(average.ratio, 85);
-        assert_eq!(average.band, types::SignalBand::Nominal);
-        assert_eq!(average.people, 2);
-    }
-
-    #[test]
-    fn a_listener_hears_what_the_room_folded() {
-        use seele_core::{AlertReason, AlertSeverity, ServerMessage};
-
-        #[derive(Default)]
-        struct Recorder(Mutex<Vec<Event>>);
-        impl EventListener for Recorder {
-            fn on_event(&self, event: Event) {
-                if let Ok(mut seen) = self.0.lock() {
-                    seen.push(event);
-                }
-            }
-        }
-
-        let shared = bare_shared();
-        let recorder = Arc::new(Recorder::default());
-        shared
-            .listeners
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&recorder) as Arc<dyn EventListener>);
-
-        fold(
-            &shared,
-            &ServerMessage::Alert {
-                severity: AlertSeverity::Critical,
-                reason: AlertReason::PermissionDenied,
-                operator_text: None,
-            },
-        );
-
-        let seen = recorder.0.lock().unwrap();
-        assert_eq!(seen.len(), 1);
-        let Event::NoticeRaised { notice } = &seen[0] else {
-            panic!("expected a notice, got {:?}", seen[0]);
-        };
-        assert_eq!(notice.severity, Severity::Critical);
-        assert_eq!(notice.reason, NoticeReason::PermissionDenied);
-    }
-
-    /// **O aviso da metade de servidor de um MOD chega à casca como evento**
-    /// (rascunho da API 6, §7.3; tarefa 8 do plano da F3), como a resposta de
-    /// um pedido: a casca o entrega às janelas daquele MOD. O núcleo não o
-    /// interpreta — a carga é JSON do MOD, e passa como veio.
-    #[test]
-    fn o_aviso_de_um_mod_chega_a_casca_como_evento() {
-        use seele_core::ServerMessage;
-
-        #[derive(Default)]
-        struct Recorder(Mutex<Vec<Event>>);
-        impl EventListener for Recorder {
-            fn on_event(&self, event: Event) {
-                if let Ok(mut seen) = self.0.lock() {
-                    seen.push(event);
-                }
-            }
-        }
-
-        let shared = bare_shared();
-        let recorder = Arc::new(Recorder::default());
-        shared
-            .listeners
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&recorder) as Arc<dyn EventListener>);
-
-        fold(
-            &shared,
-            &ServerMessage::ModAviso {
-                mod_id: "seele/mesa".into(),
-                canal: Some(ChannelId(7)),
-                carga: r#"{"revisao":3}"#.into(),
-            },
-        );
-
-        let seen = recorder.0.lock().unwrap();
-        assert_eq!(
-            seen.as_slice(),
-            &[Event::ModAviso {
-                mod_id: "seele/mesa".into(),
-                canal: Some(7),
-                carga: r#"{"revisao":3}"#.into(),
-            }],
-            "o aviso do MOD não chegou à casca como evento"
-        );
-    }
-
-    /// Uma `Connection` montada à mão, com o fim da thread da conexão em
-    /// `encerrada`.
-    fn conexao_com_o_fim(encerrada: std::sync::mpsc::Receiver<()>) -> Connection {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        Connection {
-            commands,
-            shared: bare_shared(),
-            encerrada: Mutex::new(Some(encerrada)),
-            ligacao: None,
-        }
-    }
-
-    /// **Sem o sinal da thread da conexão, `encerrar_e_esperar` espera o teto e
-    /// diz que não terminou.**
-    ///
-    /// O `false` é o que a casca escreve no `seele.log`: quem ficou vai notar a
-    /// saída pelo prazo de ociosidade. Uma `encerrar_e_esperar` que voltasse
-    /// `true` sem esperar o sinal deixaria o processo sair com a despedida no
-    /// meio, e a linha que diz isso nunca sairia.
-    #[test]
-    fn encerrar_e_esperar_sem_o_sinal_espera_o_teto_e_diz_que_nao_terminou() {
-        let (ainda_correndo, encerrada) = std::sync::mpsc::channel();
-        let connection = conexao_com_o_fim(encerrada);
-        let teto = Duration::from_millis(50);
-
-        let comeco = Instant::now();
-        let terminou = connection.encerrar_e_esperar(teto);
-        let levou = comeco.elapsed();
-
-        assert!(
-            !terminou,
-            "a thread da conexão não deu sinal nenhum, e `encerrar_e_esperar` disse que ela \
-             terminou: a casca deixa o processo sair com a despedida no meio, calada"
-        );
-        assert!(
-            levou >= teto,
-            "`encerrar_e_esperar` voltou em {levou:?}, antes do teto de {teto:?}: não esperou o \
-             sinal da thread da conexão"
-        );
-        drop(ainda_correndo);
-    }
-
-    /// **O sinal dado, ou a thread que terminou sem dá-lo, dizem que terminou.**
-    ///
-    /// O segundo é a thread que caiu antes de chegar ao sinal — o runtime que não
-    /// subiu, um pânico —: o remetente largado diz o mesmo fim, e esperar o teto
-    /// por ela seria segurar a saída por uma thread que não existe mais.
-    #[test]
-    fn encerrar_e_esperar_volta_na_hora_com_o_sinal_dado_ou_a_thread_acabada() {
-        let (sinal, encerrada) = std::sync::mpsc::channel();
-        sinal.send(()).expect("o sinal");
-        let deu_o_sinal = conexao_com_o_fim(encerrada);
-        let (sem_sinal, acabou) = std::sync::mpsc::channel::<()>();
-        drop(sem_sinal);
-        let acabou_sem_sinal = conexao_com_o_fim(acabou);
-        let teto = Duration::from_secs(5);
-
-        let comeco = Instant::now();
-        assert!(
-            deu_o_sinal.encerrar_e_esperar(teto),
-            "a thread da conexão deu o sinal, e `encerrar_e_esperar` disse que não terminou"
-        );
-        assert!(
-            acabou_sem_sinal.encerrar_e_esperar(teto),
-            "a thread da conexão acabou sem sinal, e `encerrar_e_esperar` disse que não terminou"
-        );
-        assert!(
-            comeco.elapsed() < teto,
-            "`encerrar_e_esperar` esperou o teto por uma thread que já tinha terminado"
-        );
-    }
-
-    fn relatorio_de_tunel_de_teste(encerrado: Option<&'static str>) -> RelatorioDeTunel {
-        RelatorioDeTunel {
-            mod_id: "x/jogo".into(),
-            nome: "eco".into(),
-            porta: 25565,
-            preferida: true,
-            desejada: 25565,
-            caminho: CaminhoDeTunel::Estrela,
-            latencia_ms: None,
-            bytes_por_segundo: 0,
-            bytes_por_segundo_ida: 0,
-            bytes_por_segundo_volta: 0,
-            conexoes: 0,
-            conexoes_diretas: 0,
-            conexoes_pela_estrela: 0,
-            quedas: Vec::new(),
-            udp_descartados: 0,
-            encerrado,
-        }
-    }
-
-    /// **M6.** O relatório final de um túnel pode chegar **antes** de a espera
-    /// da entrada voltar a `guardar_tunel_aberto`. Sem a conferência, o
-    /// `or_insert` punha na tabela um túnel que já acabou, e
-    /// `tuneis_abertos` o devolvia para sempre.
-    #[test]
-    fn o_tunel_que_acabou_antes_de_a_entrada_voltar_nao_ressuscita_na_tabela() {
-        let shared = bare_shared();
-        let aberta = PortaDeTunel {
-            porta: 25565,
-            preferida: true,
-            desejada: 25565,
-        };
-        // O caso de sempre: sem fim no meio, a porta entra na tabela.
-        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
-        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
-        assert_eq!(shared.tuneis.lock().unwrap().abertos.len(), 1);
-        guardar_relatorio_de_tunel(&shared, &relatorio_de_tunel_de_teste(Some("fechado")));
-        assert!(shared.tuneis.lock().unwrap().abertos.is_empty());
-
-        // A corrida: o pedido saiu (fins lidos), o relatório final chegou, e só
-        // então a espera voltou.
-        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
-        guardar_relatorio_de_tunel(&shared, &relatorio_de_tunel_de_teste(Some("maquina-saiu")));
-        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
-        assert!(
-            shared.tuneis.lock().unwrap().abertos.is_empty(),
-            "o túnel que acabou no meio voltou à tabela como fantasma"
-        );
-
-        // E uma entrada nova, depois do fim, é um túnel novo e entra.
-        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
-        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
-        assert_eq!(shared.tuneis.lock().unwrap().abertos.len(), 1);
-    }
-
-    /// A `Shared` with nothing in it, for the folds below. O mesmo da
-    /// conformidade dos dois produtores (`crate::sem_rede`).
-    fn bare_shared() -> Arc<Shared> {
-        crate::sem_rede::shared("marcela")
-    }
-
-    #[test]
-    fn o_jitter_da_tela_nao_e_a_profundidade_do_anel() {
-        // Duas grandezas com o mesmo nome, e mostrar a errada é pior que não
-        // mostrar nada:
-        //
-        // - `worst_jitter_depth_ms` é **profundidade do anel de reprodução**, e o
-        //   ADR 0028 acabou de dar um alvo a ele. Mostrá-lo como "jitter" exibiria a
-        //   nossa própria reserva como ruído da rede — e uma reserva saudável
-        //   apareceria na tela como problema;
-        // - `SourceTelemetry::jitter_ms` é o de **chegada** (RFC 3550), medido aqui,
-        //   e é o que a pessoa quer saber.
-        //
-        // E o que a tela lia antes deste conserto era um terceiro valor: o do
-        // relatório do servidor, que é sempre `0.0` porque o servidor não tem como
-        // saber — `session.rs` diz isso em comentário desde sempre.
-        // Uma reserva de anel saudável (42 ms) ao lado de um jitter de rede baixo
-        // (7,5 ms): mostrar a primeira faria uma conexão boa parecer ruim.
-        assert!(
-            (jitter_para_a_tela(7.5, 42.0) - 7.5).abs() < 0.01,
-            "a tela mostra o jitter de chegada, não a profundidade do anel"
-        );
-        // E nunca o zero que o servidor manda de propósito, que era o que a tela lia.
-        assert!(jitter_para_a_tela(7.5, 42.0) > 0.0);
-    }
-
-    #[test]
-    fn o_jitter_que_o_laco_de_voz_grava_e_o_que_a_casca_le() {
-        // A travessia inteira do número, sem o laço de voz: se o campo do
-        // `Shared` perdesse a escrita ou a leitura, a tela voltaria a mostrar um
-        // zero — que é exatamente o defeito de antes, com outra causa.
-        let compartilhado = bare_shared();
-        assert_eq!(
-            compartilhado.jitter_de_chegada_ms(),
-            0.0,
-            "sem medida nenhuma ainda não há jitter para mostrar"
-        );
-
-        compartilhado.gravar_jitter_de_chegada(jitter_para_a_tela(7.5, 42.0));
-
-        assert!(
-            (compartilhado.jitter_de_chegada_ms() - 7.5).abs() < 0.01,
-            "a casca leu {}, e o laço de voz gravou 7,5",
-            compartilhado.jitter_de_chegada_ms()
-        );
-    }
-
-    #[test]
-    fn a_profundidade_do_anel_vai_para_o_sync_ratio_e_a_chegada_para_a_tela() {
-        // A outra metade da fiação. `measure` em si precisa de um `Enlace` vivo
-        // e de um dispositivo de áudio aberto, então o que se afirma é a
-        // separação que ele faz, apartada nele para isto: qual das duas
-        // grandezas sai por qual porta.
-        //
-        // Os números são escolhidos para não poderem ser confundidos, e são os
-        // mesmos do teste da função pura: 42 ms de reserva de anel — saudável,
-        // que é o alvo que o ADR 0028 deu a ele — ao lado de 7,5 ms de jitter de
-        // rede. Trocar os dois de lugar em `measure` mostraria 42 na tela e uma
-        // conexão boa pareceria ruim.
-        let telemetria = seele_core::AudioTelemetry {
-            local: seele_core::LocalTelemetry::default(),
-            sources: vec![seele_core::SourceTelemetry {
-                ssrc: 700,
-                jitter_depth_ms: 42.0,
-                jitter_ms: 7.5,
-                ..Default::default()
-            }],
-        };
-
-        let volta = jitter_da_volta(&telemetria);
-
-        assert!(
-            (volta.profundidade_do_anel_ms - 42.0).abs() < 0.01,
-            "o Sync Ratio recebeu {}, e a reserva do anel era 42 ms",
-            volta.profundidade_do_anel_ms
-        );
-        let Some(chegada) = volta.chegada_ms else {
-            panic!("havia uma fonte sendo recebida e nenhum jitter de chegada saiu");
-        };
-        assert!(
-            (chegada - 7.5).abs() < 0.01,
-            "a tela recebeu {chegada}, e o jitter de chegada era 7,5 ms"
-        );
-    }
-
-    #[test]
-    fn sem_fonte_nenhuma_a_tela_nao_recebe_um_zero_inventado() {
-        // O pior de uma lista vazia seria zero, e zero é justamente o valor que
-        // esta tarefa existe para tirar da tela. Sem ninguém falando não há
-        // jitter de chegada nenhum a mostrar, e o último medido continua valendo
-        // até haver outro.
-        let telemetria = seele_core::AudioTelemetry {
-            local: seele_core::LocalTelemetry::default(),
-            sources: Vec::new(),
-        };
-
-        assert!(
-            jitter_da_volta(&telemetria).chegada_ms.is_none(),
-            "sem fonte nenhuma saiu um jitter de chegada, e ele só pode ser zero"
-        );
-    }
-
-    #[test]
-    fn gravar_o_mesmo_jitter_duas_vezes_nao_e_uma_mudanca() {
-        // O evento de telemetria existe para quem **não** puxa `snapshot` em
-        // laço, e ele não falava do jitter: enquanto o número era o `0.0` fixo
-        // do relatório do servidor isso não custava nada, porque ele nunca se
-        // mexia. Agora ele varia sozinho, e quem depende do evento ficaria com o
-        // número velho até outra coisa mudar.
-        //
-        // O limiar é meio milissegundo porque é a menor diferença que muda o
-        // texto: as duas cascas arredondam para milissegundo inteiro. Sem ele o
-        // evento sairia quatro vezes por segundo para redesenhar a mesma linha,
-        // porque um jitter alisado muda no último bit sempre.
-        let compartilhado = bare_shared();
-
-        assert!(
-            compartilhado.gravar_jitter_de_chegada(7.5),
-            "a primeira medida veio de um zero e não contou como mudança"
-        );
-        assert!(
-            !compartilhado.gravar_jitter_de_chegada(7.5),
-            "o mesmo número contou como mudança, e a tela redesenharia por nada"
-        );
-        assert!(
-            !compartilhado.gravar_jitter_de_chegada(7.6),
-            "um décimo de milissegundo acordou a tela para escrever `8ms` de novo"
-        );
-        assert!(
-            compartilhado.gravar_jitter_de_chegada(9.0),
-            "um milissegundo e meio a mais não contou como mudança, e o rodapé \
-             ficaria em `8ms` com a rede piorando"
-        );
-    }
-
-    /// Uma volta de telemetria com as duas grandezas plantadas para não poderem
-    /// ser confundidas: 42 ms de reserva de anel contra `chegada` de jitter de
-    /// rede.
-    fn volta_com(chegada_ms: f64) -> seele_core::AudioTelemetry {
-        seele_core::AudioTelemetry {
-            local: seele_core::LocalTelemetry::default(),
-            sources: vec![seele_core::SourceTelemetry {
-                ssrc: 1,
-                jitter_depth_ms: 42.0,
-                jitter_ms: chegada_ms,
-                ..seele_core::SourceTelemetry::default()
-            }],
-        }
-    }
-
-    #[test]
-    fn uma_volta_grava_o_jitter_de_chegada_e_nao_a_reserva_do_anel() {
-        // A fiação de `measure`, afirmada onde ela é afirmável. A versão
-        // anterior deste teste lia o **texto** de `measure` e passava verde com
-        // a propriedade quebrada: um braço que gravasse o jitter e devolvesse
-        // `false` satisfazia as duas asserções de texto que ela fazia.
-        let compartilhado = bare_shared();
-        let mut sync = Signal::new();
-
-        let _ = medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000);
-
-        assert!(
-            (compartilhado.jitter_de_chegada_ms() - 7.5).abs() < 0.01,
-            "a casca leria {}, e o jitter de chegada era 7,5 ms — 42,0 é a \
-             reserva do anel, que é a grandeza errada",
-            compartilhado.jitter_de_chegada_ms()
-        );
-    }
-
-    #[test]
-    fn o_evento_de_telemetria_conta_a_variacao_do_jitter() {
-        // A pendência do ledger, como comportamento. O evento existe para quem
-        // **não** puxa `snapshot` em laço, e ele não falava do jitter: enquanto
-        // o número era o `0.0` fixo do relatório do servidor isso não custava nada,
-        // porque ele nunca se mexia.
-        //
-        // A parcela é isolada deixando o Sync Ratio assentar primeiro: ele é
-        // uma média móvel, e com entradas constantes ele para de andar. A conta
-        // dele não usa o jitter de **chegada** — usa a reserva do anel, o
-        // ida-e-volta e a perda —, então depois de assentado o único motivo que
-        // resta para responder «mudou» é o jitter da tela.
-        let compartilhado = bare_shared();
-        let mut sync = Signal::new();
-
-        let mut assentou = false;
-        for _ in 0..500 {
-            if !medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000) {
-                assentou = true;
-                break;
-            }
-        }
-        assert!(
-            assentou,
-            "o Sync Ratio não parou de andar com entradas constantes, então este \
-             teste não consegue isolar a parcela do jitter"
-        );
-
-        assert!(
-            medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(12.0)), 41_000),
-            "o jitter de chegada subiu de 7,5 ms para 12 ms e a volta disse que \
-             não havia nada a contar à casca: quem depende do evento em vez de \
-             puxar `snapshot` em laço desenha o número velho"
-        );
-        assert!(
-            !medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(12.0)), 41_000),
-            "o mesmo jitter contou como mudança, e a tela redesenharia por nada"
-        );
-    }
-
-    #[test]
-    fn o_laco_entrega_a_volta_de_audio_que_ele_leu() {
-        // Um encosto, e só isso — as propriedades estão nos três testes de
-        // comportamento em volta. O que este guarda é o **hop** que sobrou:
-        // `measure` lê a telemetria de voz e a passa a `medir_a_volta`, e não há
-        // como afirmar essa linha de outro jeito — ela pede um `Enlace` vivo e
-        // um dispositivo de áudio aberto, que é justamente o motivo de tudo o
-        // mais ter saído dela.
-        //
-        // O que ele pega é uma mutação real: `medir_a_volta(sync, shared, None,
-        // rtt_micros)` tem o tipo certo, compila, e apaga a telemetria de áudio
-        // da tela inteira sem que nenhum dos outros testes veja.
-        let source = include_str!("lib.rs");
-        let Some(corpo) = source
-            .split("fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {")
-            .nth(1)
-            .and_then(|resto| resto.split("\n}").next())
-        else {
-            panic!("`measure` mudou de assinatura, e este encosto tem de mudar com ela");
-        };
-        let corpo: String = corpo
-            .lines()
-            .map(|linha| match linha.split_once("//") {
-                Some((antes, _)) => antes,
-                None => linha,
-            })
-            .collect::<Vec<&str>>()
-            .join("\n");
-
-        assert!(
-            corpo.contains("medir_a_volta(sync, shared, telemetria.as_ref(), rtt_micros)"),
-            "`measure` deixou de entregar a `medir_a_volta` a telemetria que ele \
-             acabou de ler, e o laço de voz para de chegar à tela:\n{corpo}"
-        );
-        assert!(
-            corpo.contains("shared\n        .voice\n        .lock()"),
-            "`measure` deixou de ler o laço de voz:\n{corpo}"
-        );
-    }
-
-    #[test]
-    fn sem_volta_de_audio_nenhuma_o_ultimo_jitter_medido_fica() {
-        // A contrapartida deliberada de não gravar zero, e o preço dela: numa
-        // sessão viva em que a voz cai no meio, o campo congela no último valor
-        // em vez de esvaziar. Gravar zero faria a tela afirmar «rede perfeita»
-        // sobre uma sessão sem áudio nenhum, que é o defeito que este ciclo
-        // tirou dali.
-        let compartilhado = bare_shared();
-        let mut sync = Signal::new();
-
-        let _ = medir_a_volta(&mut sync, &compartilhado, Some(&volta_com(7.5)), 41_000);
-        let _ = medir_a_volta(&mut sync, &compartilhado, None, 41_000);
-
-        assert!(
-            (compartilhado.jitter_de_chegada_ms() - 7.5).abs() < 0.01,
-            "a voz caiu e a tela passou a mostrar {}, que é o zero que este \
-             conserto existe para não mostrar",
-            compartilhado.jitter_de_chegada_ms()
-        );
-    }
-
-    #[test]
-    fn o_snapshot_le_o_jitter_que_o_laco_de_voz_gravou_e_nao_o_do_server() {
-        // As duas linhas que consertam o defeito são de fiação, e fiação não se
-        // afirma testando a função pura dos dois lados dela: `jitter_para_a_tela`
-        // podia estar perfeita enquanto o `snapshot` continuava lendo o relatório
-        // do servidor, e a suíte continuaria verde. Isto aqui é o teste que fica
-        // vermelho quando alguém desfaz o conserto.
-        //
-        // Os dois números são plantados de propósito para não poderem ser
-        // confundidos: 12,75 ms é o de chegada, medido neste receptor, e é o que
-        // a tela tem de mostrar; 99,0 ms é o que o relatório do servidor diz, e é o
-        // caminho errado. Na vida real esse campo é `0.0` fixo — o servidor não
-        // tem como medir jitter, que só existe no receptor —, mas plantar um 99
-        // aqui faz o teste distinguir "leu o certo" de "leu um zero que calhou de
-        // bater", que um `0.0` de verdade não distinguiria.
-        let compartilhado = bare_shared();
-        if let Ok(mut room) = compartilhado.room.lock() {
-            room.telemetry = Some(seele_core::Telemetry {
-                rtt_ms: Some(20.0),
-                jitter_ms: Some(99.0),
-                loss_fraction: Some(0.0),
-                subsystems: Vec::new(),
-            });
-        }
-        compartilhado.gravar_jitter_de_chegada(jitter_para_a_tela(12.75, 42.0));
-
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&compartilhado),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        let mostrado = connection.snapshot().telemetry.jitter_ms;
-
-        assert!(
-            (mostrado - 12.75).abs() < 0.01,
-            "a tela mostrou {mostrado}, e o laço de voz mediu 12,75 ms de chegada"
-        );
-        assert!(
-            (mostrado - 99.0).abs() > 0.01,
-            "a tela voltou a ler o jitter do relatório do servidor, que é o defeito 3.3"
-        );
-    }
-
-    #[test]
-    fn um_jitter_de_fracao_de_milissegundo_nao_e_arredondado_para_zero() {
-        // O campo guarda microssegundos inteiros justamente para isto: num
-        // enlace local o jitter fica abaixo de um milissegundo, e guardá-lo em
-        // milissegundos inteiros faria a tela dizer zero num caminho excelente —
-        // indistinguível do zero que o servidor manda.
-        let compartilhado = bare_shared();
-        compartilhado.gravar_jitter_de_chegada(0.25);
-
-        assert!(
-            (compartilhado.jitter_de_chegada_ms() - 0.25).abs() < 0.001,
-            "0,25 ms virou {}",
-            compartilhado.jitter_de_chegada_ms()
-        );
-    }
-
-    #[test]
-    fn um_jitter_impossivel_nao_atravessa_a_ponte() {
-        // `NaN` e negativo não têm como sair da RFC 3550, mas atravessariam a
-        // ponte para uma casca que os desenha — e um `NaN` numa tela vira texto
-        // que ninguém sabe ler. Zero é a resposta honesta para "não há medida".
-        //
-        // Quem garante isto é o `as u64` de `gravar_jitter_de_chegada`, que em
-        // Rust satura, e não uma guarda escrita à mão — havia um `max(0.0)` ali
-        // e ele foi tirado justamente porque nunca disparava. Este teste então
-        // não vigia código nosso: ele **fixa a linguagem**, e reprovaria se
-        // alguém trocasse aquele cast por uma conversão que embrulha ou por um
-        // `unsafe` de arredondamento sem verificação.
-        let compartilhado = bare_shared();
-
-        compartilhado.gravar_jitter_de_chegada(f32::NAN);
-        assert_eq!(compartilhado.jitter_de_chegada_ms(), 0.0);
-
-        compartilhado.gravar_jitter_de_chegada(-3.0);
-        assert_eq!(compartilhado.jitter_de_chegada_ms(), 0.0);
-    }
-
-    #[test]
-    fn a_room_made_now_reaches_the_shell_as_a_channel_change() {
-        // The bridge invents nothing: the server says a voice room exists, the room
-        // folds it in, and the shell is told to redraw the list it already
-        // knows how to draw. If this stopped firing, the person who made the
-        // room would be looking at the old list with no way to know.
-        use seele_core::{ServerMessage, VoiceRoomInfo};
-
-        #[derive(Default)]
-        struct Recorder(Mutex<Vec<Event>>);
-        impl EventListener for Recorder {
-            fn on_event(&self, event: Event) {
-                if let Ok(mut seen) = self.0.lock() {
-                    seen.push(event);
-                }
-            }
-        }
-
-        let shared = bare_shared();
-        let recorder = Arc::new(Recorder::default());
-        shared
-            .listeners
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&recorder) as Arc<dyn EventListener>);
-
-        fold(
-            &shared,
-            &ServerMessage::VoiceRoomCreated {
-                voice_room: VoiceRoomInfo {
-                    id: VoiceRoomId(2),
-                    name: "SALA-02 SALA DOS FUNDOS".into(),
-                    limit: 8,
-                    password_required: false,
-                    channel: None,
-                },
-            },
-        );
-
-        assert_eq!(
-            *recorder.0.lock().unwrap(),
-            vec![Event::ChannelsChanged],
-            "the shell was not told the channel list moved"
-        );
-        let room = shared.room.lock().unwrap();
-        assert_eq!(voice_rooms_of(&room).len(), 1);
-        assert_eq!(voice_rooms_of(&room)[0].name, "SALA-02 SALA DOS FUNDOS");
-    }
-
-    #[test]
-    fn the_snapshot_says_whether_this_person_may_make_rooms() {
-        // What a screen asks before drawing the control. Convenience, never
-        // enforcement — but a shell with no way to ask has only two options,
-        // and both are bad: hide the feature from the host, or offer everybody
-        // a button that mostly answers "no".
-        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
-
-        let shared = bare_shared();
-        fold(
-            &shared,
-            &ServerMessage::Session {
-                id: SessionId(1),
-                person: seele_core::PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: Vec::new(),
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: vec![Permission::Speak],
-            },
-        );
-        assert!(
-            !shared
-                .room
-                .lock()
-                .unwrap()
-                .permissions
-                .contains(&Permission::ManageVoiceRooms),
-            "a person who may only speak was told they may manage voice_rooms"
-        );
-
-        fold(
-            &shared,
-            &ServerMessage::Session {
-                id: SessionId(1),
-                person: seele_core::PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: Vec::new(),
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: vec![Permission::Speak, Permission::ManageVoiceRooms],
-            },
-        );
-        // And the field the screen actually reads, not only the list behind it.
-        // Asserting on `room.permissions` alone would pass with
-        // `may_manage_voice_rooms` hardcoded either way — measured, and it did.
-        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        assert!(connection.snapshot().may_manage_voice_rooms);
-
-        fold(
-            &shared,
-            &ServerMessage::Session {
-                id: SessionId(1),
-                person: seele_core::PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: Vec::new(),
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: vec![Permission::Speak],
-            },
-        );
-        assert!(
-            !connection.snapshot().may_manage_voice_rooms,
-            "the snapshot went on offering the control after the permission went away"
-        );
-    }
-
-    #[test]
-    fn the_snapshot_answers_each_moderation_verb_on_its_own() {
-        // Four permissions, four questions, four booleans — and not one
-        // `may_moderate`. `specs/04-servidor-seele.md` enumerates them
-        // separately and a role may carry any subset, so collapsing them here
-        // would draw the ban control for somebody who may only kick, and put a
-        // shell in the position of teaching people that half its buttons say no.
-        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
-
-        let shared = bare_shared();
-        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
-            id: SessionId(1),
-            person: seele_core::PersonId(7),
-            ssrc: Ssrc(700),
-            server: "Casa".into(),
-            voice_rooms: Vec::new(),
-            channels: Vec::new(),
-            roles: Vec::new(),
-            permissions,
-        };
-
-        fold(&shared, &sessao(vec![Permission::Speak]));
-        let nada = connection.snapshot();
-        assert!(!nada.may_kick);
-        assert!(!nada.may_ban);
-        assert!(!nada.may_remove_message);
-        assert!(!nada.may_move_person);
-
-        // An Operador holding exactly one of the four. The assertion that
-        // matters is the three `false`s beside the one `true`.
-        fold(&shared, &sessao(vec![Permission::Speak, Permission::Kick]));
-        let so_expulsa = connection.snapshot();
-        assert!(so_expulsa.may_kick);
-        assert!(
-            !so_expulsa.may_ban && !so_expulsa.may_remove_message && !so_expulsa.may_move_person,
-            "one moderation permission lit up the other three"
-        );
-
-        fold(
-            &shared,
-            &sessao(vec![
-                Permission::Kick,
-                Permission::Ban,
-                Permission::RemoveMessage,
-                Permission::MovePerson,
-            ]),
-        );
-        let tudo = connection.snapshot();
-        assert!(tudo.may_kick && tudo.may_ban && tudo.may_remove_message && tudo.may_move_person);
-
-        // And they go away again. A snapshot that latched would go on offering
-        // a control after a Comandante revoked it.
-        fold(&shared, &sessao(Vec::new()));
-        let depois = connection.snapshot();
-        assert!(
-            !depois.may_kick && !depois.may_ban && !depois.may_remove_message,
-            "the snapshot went on offering the controls after the permissions went away"
-        );
-    }
-
-    #[test]
-    fn destroying_a_room_is_a_permission_of_its_own_and_not_the_one_that_makes_them() {
-        // The decision this whole path turns on, asserted where a shell reads
-        // it. Making and renaming a room are mistakes a server survives;
-        // destroying one ends what other people wrote. A role that may build
-        // rooms without being able to unmake them is a role somebody can
-        // actually write — `specs/04-servidor-seele.md` enumerates
-        // `gerenciar_voice_rooms` and `administrar_server` separately — and a single
-        // boolean for both would make it impossible to offer correctly.
-        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
-
-        let shared = bare_shared();
-        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
-            id: SessionId(1),
-            person: seele_core::PersonId(7),
-            ssrc: Ssrc(700),
-            server: "Casa".into(),
-            voice_rooms: Vec::new(),
-            channels: Vec::new(),
-            roles: Vec::new(),
-            permissions,
-        };
-
-        // The role that builds and does not destroy. This is the pair the
-        // separation exists for, and the one a single boolean would get wrong.
-        fold(&shared, &sessao(vec![Permission::ManageVoiceRooms]));
-        let constroi = connection.snapshot();
-        assert!(constroi.may_manage_voice_rooms);
-        assert!(
-            !constroi.may_delete_rooms,
-            "the permission to make a room was read as the permission to destroy one"
-        );
-
-        // And the reverse, so the two are not simply the same field read twice.
-        fold(&shared, &sessao(vec![Permission::AdministerServer]));
-        let administra = connection.snapshot();
-        assert!(administra.may_delete_rooms);
-        assert!(!administra.may_manage_voice_rooms);
-
-        // Never the moderation permissions either: somebody trusted to remove a
-        // person for the evening is not thereby trusted with the server's past.
-        fold(
-            &shared,
-            &sessao(vec![
-                Permission::Kick,
-                Permission::Ban,
-                Permission::RemoveMessage,
-                Permission::MovePerson,
-            ]),
-        );
-        assert!(
-            !connection.snapshot().may_delete_rooms,
-            "a moderation permission lit up the one that destroys rooms"
-        );
-
-        // And it goes away again, like the five beside it.
-        fold(&shared, &sessao(Vec::new()));
-        assert!(!connection.snapshot().may_delete_rooms);
-    }
-
-    /// **Os cargos chegam à casca por evento, com a marca no retrato** (pedido
-    /// do G: a camada de cargos relia em laço). Um quadro e duas recusas iguais
-    /// seguidas: três `CargosChanged`, a marca subindo a cada um e igual à do
-    /// `Snapshot`, e a segunda recusa com número maior que a primeira — a mesma
-    /// recusa de novo é outra recusa. Uma mensagem que não é de cargo não mexe.
-    #[test]
-    fn os_cargos_chegam_por_evento_com_a_marca_no_retrato() {
-        use seele_core::cargos::{QuadroDeCargos, RecusaDeCargo};
-        use seele_core::ServerMessage;
-
-        #[derive(Default)]
-        struct Marcas(Mutex<Vec<u64>>);
-        impl EventListener for Marcas {
-            fn on_event(&self, event: Event) {
-                if let Event::CargosChanged { marca } = event {
-                    if let Ok(mut vistas) = self.0.lock() {
-                        vistas.push(marca);
-                    }
-                }
-            }
-        }
-
-        let shared = bare_shared();
-        let marcas = Arc::new(Marcas::default());
-        shared
-            .listeners
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&marcas) as Arc<dyn EventListener>);
-        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        assert_eq!(connection.snapshot().cargos_revision, 0);
-
-        let quadro = QuadroDeCargos {
-            cargos: Vec::new(),
-            atribuicoes: Vec::new(),
-            proprietario: None,
-            de_mods: Vec::new(),
-            revisao: 4,
-            dono_declarado: false,
-        };
-        fold(&shared, &ServerMessage::QuadroDeCargos(quadro));
-        let recusa = ServerMessage::CargoRecusado {
-            motivo: RecusaDeCargo::SemPermissao,
-        };
-        fold(&shared, &recusa);
-        let primeira = connection.cargos_na_tela().ultima_recusa.unwrap().seq;
-        fold(&shared, &recusa);
-        let segunda = connection.cargos_na_tela().ultima_recusa.unwrap().seq;
-        fold(&shared, &ServerMessage::Pong { timestamp: 1 });
-
-        assert_eq!(
-            *marcas.0.lock().unwrap(),
-            vec![1, 2, 3],
-            "um evento por mensagem de cargo, e só delas"
-        );
-        assert_eq!(
-            connection.snapshot().cargos_revision,
-            3,
-            "o retrato não leva a marca do último evento"
-        );
-        assert!(
-            segunda > primeira,
-            "a mesma recusa repetida não se distingue da anterior"
-        );
-        assert_eq!(connection.cargos_na_tela().quadro.unwrap().revisao, 4);
-    }
-
-    /// A shell watching a server dress itself, from the outside.
-    ///
-    /// The three properties a screen depends on and no type can state: the name
-    /// arrives whole, the picture does not, and the two do not move each
-    /// other\u{2019}s counter.
-    /// **O tema do servidor vai no retrato, e `None` o tira** (tarefa 17d da
-    /// F3): o núcleo guarda o `TemaMudou`, e a casca só o aplica se o retrato
-    /// o levar. Os dois lados, como o do ícone.
-    #[test]
-    fn o_tema_do_servidor_vai_no_retrato_e_none_o_tira() {
-        use seele_core::{ServerMessage, SessionId, Ssrc, TemaDoServidor};
-
-        let shared = bare_shared();
-        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        fold(
-            &shared,
-            &ServerMessage::Session {
-                id: SessionId(1),
-                person: seele_core::PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: Vec::new(),
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: Vec::new(),
-            },
-        );
-        assert_eq!(
-            connection.snapshot().tema_do_servidor,
-            None,
-            "a sessão nasce sem tema"
-        );
-
-        fold(
-            &shared,
-            &ServerMessage::TemaMudou {
-                tema: Some(TemaDoServidor {
-                    mod_id: "seele/estilo".into(),
-                    valores: r##"{"acento":"#c9a227"}"##.into(),
-                }),
-            },
-        );
-        assert_eq!(
-            connection.snapshot().tema_do_servidor,
-            Some(TemaDaSessao {
-                mod_id: "seele/estilo".into(),
-                valores: r##"{"acento":"#c9a227"}"##.into(),
-            }),
-            "o tema guardado no núcleo não foi ao retrato"
-        );
-
-        fold(&shared, &ServerMessage::TemaMudou { tema: None });
-        assert_eq!(
-            connection.snapshot().tema_do_servidor,
-            None,
-            "o `None` do servidor não tirou o tema do retrato"
-        );
-    }
-
-    #[test]
-    fn the_server_name_rides_the_snapshot_and_the_picture_rides_a_revision() {
-        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
-
-        let shared = bare_shared();
-        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        fold(
-            &shared,
-            &ServerMessage::Session {
-                id: SessionId(1),
-                person: seele_core::PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: Vec::new(),
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: vec![Permission::AdministerServer],
-            },
-        );
-        let inicio = connection.snapshot();
-        assert_eq!(inicio.server, "Casa");
-        assert_eq!(inicio.icon_revision, 0);
-        assert_eq!(connection.server_icon(), None);
-        assert!(
-            inicio.may_customise_server,
-            "whoever administers the server was not offered the control"
-        );
-
-        // The name travels whole, because it is a string and it is cheap.
-        fold(
-            &shared,
-            &ServerMessage::ServerRenamed {
-                name: "Casa".into(),
-            },
-        );
-        let renomeado = connection.snapshot();
-        assert_eq!(renomeado.server, "Casa");
-        assert_eq!(
-            renomeado.icon_revision, 0,
-            "a rename made every shell refetch a picture that did not change"
-        );
-
-        // The picture does not: the snapshot only says that it moved.
-        let bytes = vec![0x89, b'P', b'N', b'G', 4, 5, 6];
-        fold(
-            &shared,
-            &ServerMessage::ServerIconChanged {
-                icon: Some(bytes.clone()),
-            },
-        );
-        assert_eq!(connection.snapshot().icon_revision, 1);
-        assert_eq!(connection.server_icon(), Some(bytes));
-
-        // Including when it moves to nothing. A revision that only counted
-        // arrivals would leave the old picture on screen after it was taken
-        // down, because the shell would never be told to look again.
-        fold(&shared, &ServerMessage::ServerIconChanged { icon: None });
-        assert_eq!(connection.snapshot().icon_revision, 2);
-        assert_eq!(connection.server_icon(), None);
-    }
-
-    #[test]
-    fn a_picture_that_will_not_do_never_leaves_this_crate() {
-        // The failure this prevents is not a wrong error message: it is the app
-        // starting its five-minute internal battery because somebody picked a
-        // PDF. A frame the protocol will not build is a send that fails, and a
-        // send that fails is how a dropped link looks from `enlace`.
-        let shared = bare_shared();
-        let (commands, mut fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared,
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        assert_eq!(
-            connection.set_server_icon(Some(b"%PDF-1.7".to_vec())),
-            Err(ConnectionError::IconNotAPicture)
-        );
-        assert!(
-            fila.try_recv().is_err(),
-            "a picture the server would refuse was queued to be sent anyway"
-        );
-
-        // And the heavy one answers with the ceiling, because the sentence
-        // about it needs the number.
-        let mut gorda = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
-        gorda.extend_from_slice(&13_u32.to_be_bytes());
-        gorda.extend_from_slice(b"IHDR");
-        gorda.extend_from_slice(&128_u32.to_be_bytes());
-        gorda.extend_from_slice(&128_u32.to_be_bytes());
-        gorda.resize(64 * 1024, 0);
-        let Err(ConnectionError::IconTooBig { limit_bytes }) =
-            connection.set_server_icon(Some(gorda))
-        else {
-            panic!("a picture over the ceiling was queued");
-        };
-        assert!(limit_bytes > 0);
-        assert!(fila.try_recv().is_err());
-
-        // Taking the picture down is never refused: it carries no bytes to
-        // refuse, and whoever put one up has to be able to take it away.
-        assert_eq!(connection.set_server_icon(None), Ok(()));
-        assert!(
-            matches!(fila.try_recv(), Ok(Command::SetServerIcon { icon: None })),
-            "taking the picture down was swallowed instead of sent"
-        );
-    }
-
-    #[test]
-    fn dressing_the_server_is_a_permission_of_its_own_field() {
-        // Same permission as `may_delete_rooms` today, separate question. A
-        // shell reading the destroy flag to decide whether to draw a rename box
-        // would be leaning on a coincidence between two verbs.
-        use seele_core::{Permission, ServerMessage, SessionId, Ssrc};
-
-        let shared = bare_shared();
-        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
-            id: SessionId(1),
-            person: seele_core::PersonId(7),
-            ssrc: Ssrc(700),
-            server: "Casa".into(),
-            voice_rooms: Vec::new(),
-            channels: Vec::new(),
-            roles: Vec::new(),
-            permissions,
-        };
-
-        fold(&shared, &sessao(vec![Permission::ManageVoiceRooms]));
-        assert!(
-            !connection.snapshot().may_customise_server,
-            "the permission to make rooms was read as the permission to name the server"
-        );
-
-        fold(&shared, &sessao(vec![Permission::AdministerServer]));
-        assert!(connection.snapshot().may_customise_server);
-
-        fold(&shared, &sessao(Vec::new()));
-        assert!(
-            !connection.snapshot().may_customise_server,
-            "the snapshot went on offering the control after the permission went away"
-        );
-    }
-
-    #[test]
-    fn the_weight_of_a_line_reaches_the_caller_who_asked_for_it() {
-        // The number in the confirmation, and the one call on this bridge that
-        // waits for an answer. A shell that cannot get these three numbers must
-        // not open the box at all, so the wiring that carries them is worth
-        // pinning: the question registers a slot, the server's reply fills it,
-        // and the caller wakes with the counts unrounded.
-        let shared = bare_shared();
-        let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("runtime");
-        runtime.block_on(async {
-            let pergunta = tokio::spawn({
-                let shared = Arc::clone(&shared);
-                async move {
-                    // The driver's half, by hand: take the command off the
-                    // queue, park the sender, then let the answer arrive.
-                    let Some(Command::WeighChannel { channel, answer }) = queue.recv().await else {
-                        panic!("nothing asked the server to weigh anything");
-                    };
-                    shared
-                        .pending_weights
-                        .lock()
-                        .expect("pending")
-                        .push((channel, answer));
-                    shared.answer_weight(ChannelWeight {
-                        channel: 7,
-                        messages: 1_847,
-                        authors: 6,
-                        oldest_at_seconds: Some(1_678_600_000),
-                    });
-                }
-            });
-
-            let peso = connection.weigh_channel(7).await.expect("weight");
-            pergunta.await.expect("driver");
-
-            assert_eq!(peso.messages, 1_847);
-            assert_eq!(peso.authors, 6);
-            assert_eq!(peso.oldest_at_seconds, Some(1_678_600_000));
-        });
-
-        // And nothing was kept: the weight's whole value is being fresh, so
-        // asking for it left the room exactly as it was.
-        assert!(shared.room.lock().expect("room").channels.is_empty());
-        assert!(shared.pending_weights.lock().expect("pending").is_empty());
-    }
-
-    /// A recusa do servidor a uma pesagem, como o `nao_deu` a manda.
-    fn recusa_do_peso(causa: seele_core::CausaDaRecusa) -> seele_core::ServerMessage {
-        let pedido = (0..256)
-            .find(|n| seele_core::nome_do_pedido(*n) == Some("WeighChannel"))
-            .expect("o ordinal do WeighChannel");
-        seele_core::ServerMessage::Alert {
-            severity: seele_core::AlertSeverity::Warning,
-            reason: seele_core::AlertReason::PedidoRecusado { pedido, causa },
-            operator_text: None,
-        }
-    }
-
-    /// **Cada recusa de uma pesagem volta a uma espera, e nenhuma vira faixa.**
-    ///
-    /// Era o APAGAR de um canal pendurado: o servidor recusa o `WeighChannel`
-    /// pelo `nao_deu`, e nada resolvia a espera — a caixa «Não consegui
-    /// contar…» nunca abria, e cada clique a mais empilhava outra espera, viva
-    /// até a sessão acabar. Dois cliques aqui: duas esperas, duas recusas, as
-    /// duas voltam com a causa, e nada fica. E nenhuma faixa, porque a caixa
-    /// diz. Uma terceira recusa, sem ninguém esperando, vira faixa como
-    /// qualquer aviso.
-    #[test]
-    fn cada_recusa_de_uma_pesagem_volta_a_quem_perguntou_e_sem_faixa() {
-        let shared = bare_shared();
-        let (primeira, mut primeira_volta) = tokio::sync::oneshot::channel();
-        let (segunda, mut segunda_volta) = tokio::sync::oneshot::channel();
-        {
-            let mut pending = shared.pending_weights.lock().expect("pending");
-            pending.push((seele_core::ChannelId(7), primeira));
-            pending.push((seele_core::ChannelId(7), segunda));
-        }
-
-        receber(
-            &shared,
-            &recusa_do_peso(seele_core::CausaDaRecusa::FalhaDoServidor),
-        );
-        receber(
-            &shared,
-            &recusa_do_peso(seele_core::CausaDaRecusa::NaoExiste),
-        );
-
-        assert_eq!(
-            primeira_volta.try_recv(),
-            Ok(Err(types::CausaDaRecusa::FalhaDoServidor)),
-            "a primeira espera não voltou com a primeira recusa, e o APAGAR fica pendurado"
-        );
-        assert_eq!(
-            segunda_volta.try_recv(),
-            Ok(Err(types::CausaDaRecusa::NaoExiste)),
-            "a segunda espera não voltou com a segunda recusa"
-        );
-        assert!(shared.pending_weights.lock().expect("pending").is_empty());
-        assert_eq!(
-            shared.room.lock().expect("room").notice,
-            None,
-            "a recusa respondida virou faixa também, e a caixa e a faixa dizem a mesma coisa"
-        );
-
-        receber(
-            &shared,
-            &recusa_do_peso(seele_core::CausaDaRecusa::FalhaDoServidor),
-        );
-        assert!(
-            shared.room.lock().expect("room").notice.is_some(),
-            "sem ninguém esperando, a recusa sumiu calada em vez de virar faixa"
-        );
-    }
-
-    /// E pela pergunta inteira: `weigh_channel` volta com a causa, e não fica
-    /// esperando um peso que não vem.
-    #[test]
-    fn uma_pesagem_recusada_devolve_a_causa_a_quem_perguntou() {
-        let shared = bare_shared();
-        let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .expect("runtime");
-        let resposta = runtime.block_on(async {
-            let motor = tokio::spawn({
-                let shared = Arc::clone(&shared);
-                async move {
-                    let Some(Command::WeighChannel { channel, answer }) = queue.recv().await else {
-                        panic!("nada pediu a pesagem");
-                    };
-                    shared
-                        .pending_weights
-                        .lock()
-                        .expect("pending")
-                        .push((channel, answer));
-                    receber(
-                        &shared,
-                        &recusa_do_peso(seele_core::CausaDaRecusa::FalhaDoServidor),
-                    );
-                }
-            });
-            // Com prazo: sem o conserto a pergunta espera para sempre, e um
-            // teste que pendura não reprova, só não termina.
-            let resposta = tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                connection.weigh_channel(7),
-            )
-            .await
-            .expect("a pesagem recusada ficou esperando um peso que não vem");
-            motor.await.expect("motor");
-            resposta
-        });
-        assert_eq!(
-            resposta.map(|peso| peso.messages),
-            Err(ConnectionError::PedidoRecusado {
-                causa: types::CausaDaRecusa::FalhaDoServidor,
-            })
-        );
-    }
-
-    #[test]
-    fn a_weight_for_another_line_leaves_this_caller_waiting() {
-        // Two boxes cannot be open at once in one window, but a reply landing
-        // against the wrong slot would be the kind of mistake that fills a
-        // confirmation with somebody else's numbers — which is the exact
-        // failure the counted number exists to rule out.
-        let shared = bare_shared();
-        let (answer, mut resposta) = tokio::sync::oneshot::channel();
-        shared
-            .pending_weights
-            .lock()
-            .expect("pending")
-            .push((seele_core::ChannelId(7), answer));
-
-        shared.answer_weight(ChannelWeight {
-            channel: 9,
-            messages: 3,
-            authors: 1,
-            oldest_at_seconds: None,
-        });
-
-        assert!(
-            resposta.try_recv().is_err(),
-            "a count for another Channel was handed to the box asking about this one"
-        );
-        assert_eq!(
-            shared.pending_weights.lock().expect("pending").len(),
-            1,
-            "the question was dropped without being answered"
-        );
-    }
-
-    #[test]
-    fn asking_for_a_room_with_no_name_asks_for_nothing() {
-        // The same swallow `send_message` does for an empty body. Somebody who
-        // pressed the button with nothing typed has not asked for anything, and
-        // answering that with a red message puts an error on a screen where
-        // nothing went wrong. The check is here as well as in `seele-proto`
-        // because the proto one would arrive as a dropped connection rather
-        // than as nothing happening.
-        let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: bare_shared(),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        for blank in ["", "   ", "\t\n"] {
-            connection.create_voice_room(blank.into(), 8, None).unwrap();
-            connection.create_channel(blank.into()).unwrap();
-            connection.rename_voice_room(1, blank.into()).unwrap();
-            connection.rename_channel(1, blank.into()).unwrap();
-        }
-        assert!(
-            queue.try_recv().is_err(),
-            "a blank name was sent to the server"
-        );
-
-        connection
-            .create_voice_room("SALA-02".into(), 8, None)
-            .unwrap();
-        assert!(
-            matches!(queue.try_recv(), Ok(Command::CreateVoiceRoom { .. })),
-            "a real name was swallowed too"
-        );
-    }
-
-    #[test]
-    fn a_capture_device_crosses_with_both_halves_of_its_identity() {
-        // A shell shows the name and sends back the id, and the two are not
-        // interchangeable: two microphones of the same model report the same
-        // name, so a shell that stored the name would leave the second one
-        // unpickable — and one that *showed* the id would put a backend string
-        // on screen where a person expects "Scarlett Solo".
-        //
-        // Skips out loud rather than passing on a machine with no microphone. A
-        // test that succeeds whether or not the feature works is not a test, and
-        // CI has no sound card.
-        let found = capture_devices();
-        if found.is_empty() {
-            eprintln!("skipped: this machine lists no capture device");
-            return;
-        }
-
-        for device in &found {
-            assert!(
-                !device.id.is_empty(),
-                "a device with no id cannot be chosen"
-            );
-            assert!(
-                !device.name.is_empty(),
-                "a device with no name cannot be labelled"
-            );
-        }
-        assert!(
-            found.iter().filter(|device| device.default).count() <= 1,
-            "two devices both claim to be the machine's default"
-        );
-    }
-
-    #[test]
-    fn a_playback_device_crosses_with_both_halves_of_its_identity() {
-        // The twin of the check above, for the same reason and with the same
-        // skip: CI has no sound card, and a test that passes on a machine with
-        // no speakers passes on every machine.
-        let found = playback_devices();
-        if found.is_empty() {
-            eprintln!("skipped: this machine lists no playback device");
-            return;
-        }
-
-        for device in &found {
-            assert!(
-                !device.id.is_empty(),
-                "a device with no id cannot be chosen"
-            );
-            assert!(
-                !device.name.is_empty(),
-                "a device with no name cannot be labelled"
-            );
-        }
-        assert!(
-            found.iter().filter(|device| device.default).count() <= 1,
-            "two outputs both claim to be the machine's default"
-        );
-    }
-
-    #[test]
-    fn the_two_device_lists_are_not_the_same_list() {
-        // Both are `Vec<_>` of three strings, and the two functions differ by one
-        // word. A `playback_devices` that forwarded to the capture side would
-        // compile, serialise, and draw a list of microphones under SAÍDA DE SOM
-        // — and every pick from it would be refused by a machine that has no
-        // such output.
-        let (microphones, speakers) = (capture_devices(), playback_devices());
-        if microphones.is_empty() || speakers.is_empty() {
-            eprintln!(
-                "skipped: this machine lists {} microphones and {} outputs, and telling the \
-                 two lists apart needs one of each",
-                microphones.len(),
-                speakers.len()
-            );
-            return;
-        }
-
-        let ids: Vec<&str> = microphones
-            .iter()
-            .map(|device| device.id.as_str())
-            .collect();
-        assert!(
-            speakers
-                .iter()
-                .any(|device| !ids.contains(&device.id.as_str())),
-            "every listed output is also a listed microphone, so one list is the other: \
-             {ids:?}"
-        );
-    }
-
-    #[test]
-    fn a_capture_device_serialises_the_field_names_a_shell_reads() {
-        // The desktop shell is untyped JavaScript reading these three names off
-        // the wire. A `serde(rename)` added here would leave every row drawn
-        // `undefined`, with nothing failing anywhere — the same defect class
-        // `apps/seele-app/tests/frontend.rs` guards for `Match`.
-        let device = CaptureDevice {
-            id: "coreaudio:alguma-coisa".into(),
-            name: "Scarlett Solo".into(),
-            default: true,
-        };
-        let Ok(json) = serde_json::to_string(&device) else {
-            panic!("CaptureDevice does not serialise, so no shell can read it at all");
-        };
-        for field in ["\"id\"", "\"name\"", "\"default\""] {
-            assert!(
-                json.contains(field),
-                "a capture device no longer carries {field}: {json}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_playback_device_serialises_the_field_names_a_shell_reads() {
-        // Its own test and not an addition to the one above, because the two
-        // types are separate declarations: a `serde(rename)` on this one would
-        // leave every row under SAÍDA DE SOM drawn `undefined` while the
-        // microphone list next to it kept working, which is the version of this
-        // failure that takes longest to believe.
-        let device = PlaybackDevice {
-            id: "coreaudio:alguma-saida".into(),
-            name: "Fones de ouvido".into(),
-            default: true,
-        };
-        let Ok(json) = serde_json::to_string(&device) else {
-            panic!("PlaybackDevice does not serialise, so no shell can read it at all");
-        };
-        for field in ["\"id\"", "\"name\"", "\"default\""] {
-            assert!(
-                json.contains(field),
-                "a playback device no longer carries {field}: {json}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_snapshot_with_no_audio_names_no_microphone() {
-        // The two have to agree, always: a screen that read a device off a
-        // session with no voice path would draw a microphone that is not open.
-        // `AudioState::sem_voz` is the one place that pairing is decided, and
-        // it starts from what a person who chose nothing has chosen.
-        let quiet = AudioState::sem_voz(
-            &ControlesGuardados::de_partida(seele_core::DeviceChoice::default()),
-            AberturaDoAudio::ForaDeSala,
-        );
-        assert!(!quiet.available);
-        assert_eq!(quiet.capture, None);
-        assert_eq!(
-            quiet.playback, None,
-            "a session with no audio must not name an output it is not playing through"
-        );
-        assert_eq!(
-            quiet.mode,
-            VoiceMode::PushToTalk,
-            "a session with no audio must not read as an open microphone"
-        );
-    }
-
-    #[test]
-    fn a_pong_wakes_nobody() {
-        // Every event delivered is a redraw somewhere. The round-trip
-        // measurement is consumed by the core and is not news.
-        use seele_core::ServerMessage;
-
-        struct Counter(std::sync::atomic::AtomicUsize);
-        impl EventListener for Counter {
-            fn on_event(&self, _: Event) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        let shared = Arc::new(Shared {
-            caminho_medido: std::sync::atomic::AtomicU32::new(0),
-            link_battery: AtomicBool::new(false),
-            link_seconds: std::sync::atomic::AtomicU64::new(0),
-            link_attempts: std::sync::atomic::AtomicU32::new(0),
-            messages_revision: std::sync::atomic::AtomicU64::new(0),
-            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
-            icon_revision: std::sync::atomic::AtomicU64::new(0),
-            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
-            perfis: perfis::DoPerfil::negociado(seele_core::PROTOCOL_VERSION),
-            room: Mutex::new(Room::new()),
-            listeners: Mutex::new(Vec::new()),
-            sessao: SessaoId::nova(),
-            geracao: std::sync::atomic::AtomicU64::new(1),
-            voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
-            media: Mutex::new(None),
-            nickname: Mutex::new("marcela".into()),
-            link_state: AtomicU8::new(0),
-            rtt_micros: std::sync::atomic::AtomicU64::new(0),
-            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
-            caminho: Mutex::new(None),
-            impressao_do_servidor: Mutex::new(None),
-            signal: AtomicU8::new(0),
-            running: AtomicBool::new(true),
-            pending_weights: Mutex::new(Vec::new()),
-            tuneis: Mutex::new(TabelaDeTuneis::default()),
-            limites_da_tela: Mutex::new(None),
-            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
-            tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
-            fontes_de_tela: Mutex::new(Vec::new()),
-        });
-        let counter = Arc::new(Counter(std::sync::atomic::AtomicUsize::new(0)));
-        shared
-            .listeners
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&counter) as Arc<dyn EventListener>);
-
-        fold(&shared, &ServerMessage::Pong { timestamp: 1 });
-
-        assert_eq!(counter.0.load(Ordering::Relaxed), 0);
-    }
-
-    /// Uma sala com uma transmissão de tela em curso, e mais ninguém dentro.
-    ///
-    /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
-    /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
-    /// Um `Shared` vazio, para exercer o `fold` sem uma conexão.
-    /// **A lista de membros não vai no `Snapshot`** (P6, decisão da
-    /// orquestradora).
-    ///
-    /// O `Snapshot` inteiro ainda vai a todo MOD da API 5 para baixo
-    /// (`base.js`, a mensagem `snapshot`), e a lista de membros do servidor não é
-    /// dele. O FORA DO AR sai por [`Connection::membros_fora_do_ar`]. Se alguém
-    /// puser os membros fora do ar no `Snapshot`, o apelido aparece no JSON que
-    /// a janela e os MODs leem, e este teste reprova.
-    #[test]
-    fn o_snapshot_serializado_nao_leva_nenhum_membro_fora_do_ar() {
-        use seele_core::{ServerMessage, SessionId, Ssrc};
-        let shared = compartilhado_de_teste();
-        fold(
-            &shared,
-            &ServerMessage::Session {
-                id: SessionId(1),
-                person: seele_core::PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: Vec::new(),
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: Vec::new(),
-            },
-        );
-        let apelido = "membro-que-nenhum-mod-pode-ler";
-        fold(
-            &shared,
-            &ServerMessage::Membros {
-                membros: vec![seele_core::Membro {
-                    id: seele_core::PersonId(42),
-                    nickname: apelido.into(),
-                }],
-                fim: true,
-            },
-        );
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        // O controle: o membro chegou, e a janela o lê pelo acessor. Sem isto,
-        // um `Snapshot` sem ele não provaria nada.
-        assert_eq!(
-            connection.membros_fora_do_ar(),
-            vec![MembroForaDoAr {
-                id: 42,
-                nickname: apelido.into(),
-            }],
-            "o FORA DO AR não chegou ao acessor, e o teste mediu outra coisa"
-        );
-        let snapshot = serde_json::to_string(&connection.snapshot()).expect("o snapshot vira JSON");
-        assert!(
-            !snapshot.contains(apelido),
-            "o `Snapshot` leva um membro fora do ar, e todo MOD da API 5 para baixo o lê"
-        );
-    }
-
-    /// **O número do FORA DO AR já subiu quando o `RosterChanged` chega.**
-    ///
-    /// A casca relê a lista quando o evento chega, e só se o número andou. Um
-    /// número que sobe depois do aviso é um que ela pode ler velho, e aí o
-    /// grupo fica errado até a próxima mudança de membros — que pode não vir.
-    /// O ouvinte lê o número no instante do aviso, que é o instante em que a
-    /// casca o leria.
-    #[test]
-    fn o_numero_do_fora_do_ar_ja_subiu_quando_o_aviso_chega() {
-        use seele_core::ServerMessage;
-
-        struct Leitor(std::sync::Weak<Shared>, Mutex<Vec<u64>>);
-        impl EventListener for Leitor {
-            fn on_event(&self, event: Event) {
-                if !matches!(event, Event::RosterChanged) {
-                    return;
-                }
-                if let (Some(shared), Ok(mut lidos)) = (self.0.upgrade(), self.1.lock()) {
-                    lidos.push(
-                        shared
-                            .fora_do_ar_revision
-                            .load(std::sync::atomic::Ordering::Relaxed),
-                    );
-                }
-            }
-        }
-
-        let shared = compartilhado_de_teste();
-        let leitor = Arc::new(Leitor(Arc::downgrade(&shared), Mutex::new(Vec::new())));
-        shared
-            .listeners
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&leitor) as Arc<dyn EventListener>);
-
-        fold(
-            &shared,
-            &ServerMessage::Membros {
-                membros: vec![seele_core::Membro {
-                    id: seele_core::PersonId(42),
-                    nickname: "ritsuko".into(),
-                }],
-                fim: true,
-            },
-        );
-
-        assert_eq!(
-            leitor.1.lock().unwrap().as_slice(),
-            &[1],
-            "o `RosterChanged` saiu com o número do FORA DO AR ainda velho"
-        );
-    }
-
-    pub(super) fn compartilhado_de_teste() -> Arc<Shared> {
-        Arc::new(Shared {
-            caminho_medido: std::sync::atomic::AtomicU32::new(0),
-            link_battery: AtomicBool::new(false),
-            link_seconds: std::sync::atomic::AtomicU64::new(0),
-            link_attempts: std::sync::atomic::AtomicU32::new(0),
-            messages_revision: std::sync::atomic::AtomicU64::new(0),
-            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
-            icon_revision: std::sync::atomic::AtomicU64::new(0),
-            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
-            perfis: perfis::DoPerfil::negociado(seele_core::PROTOCOL_VERSION),
-            room: Mutex::new(Room::new()),
-            listeners: Mutex::new(Vec::new()),
-            sessao: SessaoId::nova(),
-            geracao: std::sync::atomic::AtomicU64::new(1),
-            voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
-            media: Mutex::new(None),
-            nickname: Mutex::new("marcela".into()),
-            link_state: AtomicU8::new(0),
-            rtt_micros: std::sync::atomic::AtomicU64::new(0),
-            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
-            caminho: Mutex::new(None),
-            impressao_do_servidor: Mutex::new(None),
-            signal: AtomicU8::new(0),
-            running: AtomicBool::new(true),
-            pending_weights: Mutex::new(Vec::new()),
-            tuneis: Mutex::new(TabelaDeTuneis::default()),
-            limites_da_tela: Mutex::new(None),
-            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
-            tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
-            fontes_de_tela: Mutex::new(Vec::new()),
-        })
-    }
-
-    /// Um retrato novo faz a revisão dos retratos andar.
-    ///
-    /// **É a diferença deste número que manda a casca rebuscar as imagens.**
-    /// Parada, o cache dela nunca invalida — e o efeito era completo e
-    /// silencioso: quem trocava a própria imagem via a prévia do diálogo mudar,
-    /// porque ela lê o arquivo desta máquina, e mais nada mudava em lugar
-    /// nenhum. Nem o bloco do operador, nem a grade da chamada, nem para as
-    /// outras pessoas, cujo cliente tinha o mesmo defeito.
-    ///
-    /// A causa foi a subida ter nascido no ramo errado: ao lado da revisão do
-    /// retrato **do servidor**, por semelhança, dentro de um `if changed.server`
-    /// — e `PersonIconChanged` marca `changed.roster`. Duas partes diferentes do
-    /// estado, e o ramo nunca rodava para ela.
-    #[test]
-    fn um_retrato_novo_faz_a_revisao_dos_retratos_andar() {
-        use seele_core::{PersonId, ServerMessage};
-
-        let shared = compartilhado_de_teste();
-        let antes = shared.person_icons_revision.load(Ordering::Relaxed);
-
-        fold(
-            &shared,
-            &ServerMessage::PersonIconChanged {
-                person: PersonId(7),
-                icon: Some(vec![1, 2, 3]),
-            },
-        );
-
-        assert!(
-            shared.person_icons_revision.load(Ordering::Relaxed) > antes,
-            "a revisão dos retratos não andou com um `PersonIconChanged`, e o \
-             cache da casca nunca vai rebuscar imagem nenhuma"
-        );
-    }
-
-    /// E uma mensagem que não é de retrato **não** a faz andar.
-    ///
-    /// Sem isto, a asserção acima passaria com a subida solta fora de qualquer
-    /// condição — e cada quadro do roster mandaria a casca rebuscar 8 KiB por
-    /// pessoa, que é exatamente o custo que a revisão existe para evitar.
-    #[test]
-    fn um_nome_novo_nao_faz_a_revisao_dos_retratos_andar() {
-        use seele_core::{PersonId, ServerMessage};
-
-        let shared = compartilhado_de_teste();
-        let antes = shared.person_icons_revision.load(Ordering::Relaxed);
-
-        fold(
-            &shared,
-            &ServerMessage::PersonRenamed {
-                person: PersonId(7),
-                nickname: "aleta".into(),
-            },
-        );
-
-        assert_eq!(
-            shared.person_icons_revision.load(Ordering::Relaxed),
-            antes,
-            "trocar de nome mandou a casca rebuscar todos os retratos"
-        );
-    }
-
-    fn sala_com_tela(quem_compartilha: seele_core::PersonId) -> Room {
-        use seele_core::{PersonId, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
-
-        let mut room = Room::new();
-        room.apply(&ServerMessage::Session {
-            id: SessionId(1),
-            person: PersonId(7),
-            ssrc: Ssrc(700),
-            server: "Casa".into(),
-            voice_rooms: vec![VoiceRoomInfo {
-                id: VoiceRoomId(1),
-                name: "SALA-01".into(),
-                limit: 20,
-                password_required: false,
-                channel: None,
-            }],
-            channels: Vec::new(),
-            roles: Vec::new(),
-            permissions: Vec::new(),
-        });
-        room.enter_voice_room(VoiceRoomId(1));
-        room.apply(&ServerMessage::ScreenShareStarted {
-            voice_room: VoiceRoomId(1),
-            person: quem_compartilha,
-            screen: ScreenId(9),
-        });
-        room
-    }
-
-    /// Senta mais uma pessoa na sala.
-    fn sentar(room: &mut Room, pessoa: u64) {
-        use seele_core::{PersonId, PersonProfile, ServerMessage, Ssrc};
-
-        room.apply(&ServerMessage::PersonJoined {
-            voice_room: VoiceRoomId(1),
-            profile: PersonProfile {
-                id: PersonId(pessoa),
-                nickname: format!("pessoa-{pessoa}"),
-                roles: Vec::new(),
-                material_e2ee: None,
-            },
-            ssrc: Ssrc(pessoa.wrapping_mul(10).try_into().unwrap_or(1)),
-        });
-    }
-
-    /// **A contagem de quem assiste é a do servidor, e não a do roster daqui.**
-    ///
-    /// # O que mudou no R20
-    ///
-    /// Era «quem está na sala menos quem compartilha», contado neste lado. Isso
-    /// **inclui quem escolheu não assistir** — e desde que a escolha existe, isso
-    /// é gente de verdade. Duas contagens para a mesma pergunta, discordando, e o
-    /// servidor já mandava a certa: `ScreenViewers` conta assinaturas, e é o mesmo
-    /// N pelo qual ele divide o teto no §5.1.
-    #[test]
-    fn a_tela_conta_quem_o_servidor_disse_que_assiste() {
-        use seele_core::{PersonId, ScreenId, ServerMessage};
-
-        let mut room = sala_com_tela(PersonId(3));
-        sentar(&mut room, 3);
-        sentar(&mut room, 4);
-
-        let tela = tela_por_id(&room, ScreenId(9), None).expect("a transmissão foi anunciada");
-        assert_eq!(tela.tela, 9, "a transmissão não diz qual ela é");
-        assert_eq!(tela.de, 3);
-        assert!(
-            !tela.e_minha,
-            "quem compartilha é a pessoa 3, e nós somos a 7"
-        );
-        // **Zero até o servidor contar.** Zero é a resposta honesta: uma
-        // transmissão que começou agora não tem ninguém assistindo ainda, e
-        // deduzir do roster era contar quem recusou.
-        assert_eq!(
-            tela.espectadores, 0,
-            "a contagem voltou a ser deduzida do roster desta máquina, e ela \
-             inclui quem escolheu não assistir"
-        );
-
-        room.apply(&ServerMessage::ScreenViewers {
-            tela: ScreenId(9),
-            quantos: 2,
-        });
-        assert_eq!(
-            tela_por_id(&room, ScreenId(9), None)
-                .expect("a transmissão continua")
-                .espectadores,
-            2,
-            "o `ScreenViewers` do servidor não chegou à ponte"
-        );
-    }
-
-    /// E uma transmissão que não é a pedida não é devolvida no lugar dela.
-    ///
-    /// R18: `tela_de` pegava a **primeira** do mapa da sala, então numa sala com
-    /// dois transmissores o painel podia falar de uma e a imagem ser de outra.
-    #[test]
-    fn a_tela_e_procurada_por_identidade() {
-        use seele_core::{PersonId, ScreenId, ServerMessage};
-
-        let mut room = sala_com_tela(PersonId(3));
-        room.apply(&ServerMessage::ScreenShareStarted {
-            voice_room: VoiceRoomId(1),
-            person: PersonId(4),
-            screen: ScreenId(11),
-        });
-
-        assert_eq!(
-            tela_por_id(&room, ScreenId(11), None)
-                .expect("a segunda transmissão existe")
-                .de,
-            4,
-            "a busca por identidade devolveu outra transmissão"
-        );
-        assert_eq!(
-            tela_por_id(&room, ScreenId(9), None)
-                .expect("a primeira continua")
-                .de,
-            3
-        );
-        assert!(
-            tela_por_id(&room, ScreenId(99), None).is_none(),
-            "uma transmissão que não existe foi respondida com outra"
-        );
-    }
-
-    #[test]
-    fn a_tela_de_quem_compartilha_se_reconhece() {
-        use seele_core::{PersonId, ScreenId};
-
-        // O pessoa 7 é quem esta sessão é — `sala_com_tela` o diz na `Session`.
-        let room = sala_com_tela(PersonId(7));
-        let tela = tela_por_id(&room, ScreenId(9), None).expect("a transmissão foi anunciada");
-        assert!(
-            tela.e_minha,
-            "sem isto a casca desenha o painel de quem assiste para quem compartilha"
-        );
-        // E `minha_tela_de` a encontra sem que ninguém diga o `ScreenId`: é a
-        // pergunta «qual é a minha», e ela é por identidade também — pela da
-        // pessoa. ADR 0054.
-        assert_eq!(
-            minha_tela_de(&room, None).map(|minha| minha.tela),
-            Some(9),
-            "a própria transmissão não é encontrada por identidade"
-        );
-    }
-
-    #[test]
-    fn nao_ha_tela_quando_ninguem_compartilha() {
-        use seele_core::{PersonId, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
-
-        let mut room = Room::new();
-        room.apply(&ServerMessage::Session {
-            id: SessionId(1),
-            person: PersonId(7),
-            ssrc: Ssrc(700),
-            server: "Casa".into(),
-            voice_rooms: vec![VoiceRoomInfo {
-                id: VoiceRoomId(1),
-                name: "SALA-01".into(),
-                limit: 20,
-                password_required: false,
-                channel: None,
-            }],
-            channels: Vec::new(),
-            roles: Vec::new(),
-            permissions: Vec::new(),
-        });
-        room.enter_voice_room(VoiceRoomId(1));
-        assert!(tela_por_id(&room, ScreenId(9), None).is_none());
-        assert!(minha_tela_de(&room, None).is_none());
-    }
-
-    /// **A ponte não finge saber o que está saindo, e já não reserva lugar.**
-    ///
-    /// # O que este teste era, e por que ele mudou
-    ///
-    /// Ele prendia `medida == false` e os três zeros — «alguém passou a medir o
-    /// que sai: então preencha os três números e mude este teste». A regra estava
-    /// certa e os quatro campos nunca tiveram valor: a tela reservava três caixas
-    /// e escrevia «ainda não há medida» nas três, para sempre.
-    ///
-    /// No R20 os quatro saíram da ponte, e a regra continua: nenhum campo de
-    /// medida existe enquanto não houver medida. O que este teste prende agora é
-    /// a **ausência** deles, e a mensagem diz o que fazer no dia em que houver.
-    #[test]
-    fn a_tela_nao_finge_saber_o_que_esta_saindo() {
-        use seele_core::{PersonId, ScreenId};
-
-        let tela = tela_por_id(&sala_com_tela(PersonId(3)), ScreenId(9), None)
-            .expect("a transmissão foi anunciada");
-        assert_eq!(
-            tela.parada, None,
-            "parar com motivo é decisão do teto, e nenhum teto roda deste lado"
-        );
-        // O guarda contra o campo que volta sem medida atrás dele mora em
-        // `types::a_tela_em_curso_atravessa_pelo_nome_e_diz_de_qual_tela_fala`,
-        // que é onde a forma do JSON é conferida. Aqui fica o que esta função
-        // devolve, e ela devolve só o que se sabe.
-        assert_eq!(tela.espectadores, 0, "a contagem foi inventada deste lado");
-    }
-
-    /// Um pedido qualquer, com os três controles do §5 preenchidos.
-    fn limites() -> LimitesDeTela {
-        LimitesDeTela {
-            banda_bps: Some(1_200_000),
-            altura_maxima: 1080,
-            quadros_maximos: 30,
-            prioridade: crate::types::Prioridade::Nitidez,
-            com_som: true,
-        }
-    }
-
-    #[test]
-    fn o_pedido_so_aparece_ao_lado_da_propria_tela() {
-        use seele_core::{PersonId, ScreenId};
-
-        // O §5 manda pôr o que está saindo ao lado do que foi pedido. O que foi
-        // pedido é escolha de quem transmite e **não viaja**: o `ScreenHeader`
-        // carrega resolução e codec, nunca o teto. Então esta ponte só tem como
-        // preencher a coluna da própria transmissão — e preenchê-la com a
-        // escolha desta máquina ao lado da tela de outra pessoa seria mostrar o
-        // teto de uma transmissão como se fosse o de outra.
-        let minha = tela_por_id(&sala_com_tela(PersonId(7)), ScreenId(9), Some(limites()))
-            .expect("a transmissão foi anunciada");
-        assert!(minha.e_minha);
-        assert_eq!(
-            minha.pedido,
-            Some(limites()),
-            "quem compartilha perdeu a metade da comparação que o §5 obriga"
-        );
-
-        let alheia = tela_por_id(&sala_com_tela(PersonId(3)), ScreenId(9), Some(limites()))
-            .expect("a transmissão foi anunciada");
-        assert!(!alheia.e_minha);
-        assert_eq!(
-            alheia.pedido, None,
-            "o teto escolhido nesta máquina foi mostrado como se fosse o de quem compartilha"
-        );
-    }
-
-    #[test]
-    fn o_pedido_morre_com_a_transmissao_e_nao_com_o_roster() {
-        use seele_core::{PersonId, ScreenId, ServerMessage};
-
-        // A memória do que foi pedido saiu do JavaScript da casca — onde ela
-        // morria com a janela — e passou a morar aqui. Isso troca um defeito por
-        // outro se ela sobreviver à transmissão: a próxima vez que esta pessoa
-        // compartilhasse mostraria o que está saindo agora ao lado de um teto de
-        // outra vez, e nada na tela diria qual dos dois números vale.
-        let shared = bare_shared();
-        if let Ok(mut room) = shared.room.lock() {
-            *room = sala_com_tela(PersonId(7));
-        }
-        shared.gravar_pedido_da_tela(Some(limites()));
-
-        // Alguém entra na sala: o N do §5.1 anda, a transmissão continua, e o
-        // que foi pedido continua valendo.
-        fold(
-            &shared,
-            &ServerMessage::PersonJoined {
-                voice_room: VoiceRoomId(1),
-                profile: seele_core::PersonProfile {
-                    id: PersonId(4),
-                    nickname: "pessoa-4".into(),
-                    roles: Vec::new(),
-                    material_e2ee: None,
-                },
-                ssrc: Ssrc(40),
-            },
-        );
-        assert_eq!(
-            shared.pedido_da_tela(),
-            Some(limites()),
-            "uma pessoa entrando na sala apagou o teto de quem estava compartilhando"
-        );
-
-        // A transmissão acaba: o pedido acaba com ela.
-        fold(
-            &shared,
-            &ServerMessage::ScreenShareStopped {
-                voice_room: VoiceRoomId(1),
-                screen: ScreenId(9),
-            },
-        );
-        assert_eq!(
-            shared.pedido_da_tela(),
-            None,
-            "o teto sobreviveu à transmissão a que ele pertencia"
-        );
-    }
-
-    #[test]
-    fn um_pedido_recusado_nao_vira_memoria() {
-        // `compartilhar_tela` guarda o que foi pedido **quando a transmissão
-        // começa**. Enquanto ela não começa, guardar seria pôr na coluna do
-        // pedido o teto de um botão que devolveu erro — e a coluna existe para
-        // explicar a diferença entre o que se pediu e o que está saindo, não
-        // para registrar tentativas.
-        let fonte = include_str!("lib.rs");
-        let Some(corpo) = fonte
-            .split("pub fn compartilhar_tela(")
-            .nth(1)
-            .and_then(|resto| resto.split("\n    }").next())
-        else {
-            panic!("`compartilhar_tela` mudou de forma; este guarda tem de mudar com ele");
-        };
-        assert!(
-            corpo.contains("comecou.is_ok().then_some(limites)"),
-            "`compartilhar_tela` guarda o pedido sem conferir se a transmissão começou:\n{corpo}"
-        );
-    }
-
-    #[test]
-    fn o_roster_redesenha_a_tela_so_quando_ha_tela() {
-        // §5.1: a contagem de espectadores é o N que divide o teto, e ela anda
-        // quando alguém entra ou sai — sem nenhuma mensagem de tela chegar. Uma
-        // casca que só redesenhasse em `ScreenShareStarted` escreveria
-        // «4 pessoas assistindo» numa sala de seis.
-        let so_roster = seele_core::Changed {
-            roster: true,
-            ..seele_core::Changed::default()
-        };
-        let so_tela = seele_core::Changed {
-            telas: true,
-            ..seele_core::Changed::default()
-        };
-
-        assert!(a_tela_mudou(so_roster, true));
-        assert!(
-            !a_tela_mudou(so_roster, false),
-            "sem transmissão em curso, todo mundo que entra numa sala acenderia o painel de tela"
-        );
-        assert!(
-            a_tela_mudou(so_tela, false),
-            "uma transmissão que acabou de acabar tem de apagar o painel"
-        );
-        assert!(a_tela_mudou(so_tela, true));
-        assert!(!a_tela_mudou(seele_core::Changed::default(), true));
-    }
-
-    #[test]
-    fn um_ouvinte_sabe_que_a_tela_comecou_e_que_a_sala_cresceu() {
-        use seele_core::{
-            PersonId, PersonProfile, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo,
-        };
-
-        #[derive(Default)]
-        struct Recorder(Mutex<Vec<Event>>);
-        impl EventListener for Recorder {
-            fn on_event(&self, event: Event) {
-                if let Ok(mut seen) = self.0.lock() {
-                    seen.push(event);
-                }
-            }
-        }
-
-        let shared = bare_shared();
-        let recorder = Arc::new(Recorder::default());
-        shared
-            .listeners
-            .lock()
-            .unwrap()
-            .push(Arc::clone(&recorder) as Arc<dyn EventListener>);
-
-        fold(
-            &shared,
-            &ServerMessage::Session {
-                id: SessionId(1),
-                person: PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: vec![VoiceRoomInfo {
-                    id: VoiceRoomId(1),
-                    name: "SALA-01".into(),
-                    limit: 20,
-                    password_required: false,
-                    channel: None,
-                }],
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: Vec::new(),
-            },
-        );
-        shared.room.lock().unwrap().enter_voice_room(VoiceRoomId(1));
-
-        // Alguém entra antes de haver tela: nada de `ScreenChanged`.
-        fold(
-            &shared,
-            &ServerMessage::PersonJoined {
-                voice_room: VoiceRoomId(1),
-                profile: PersonProfile {
-                    id: PersonId(3),
-                    nickname: "marcela".into(),
-                    roles: Vec::new(),
-                    material_e2ee: None,
-                },
-                ssrc: Ssrc(30),
-            },
-        );
-        assert!(
-            !recorder
-                .0
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|event| matches!(event, Event::ScreenChanged)),
-            "o painel de tela acordou numa sala sem transmissão nenhuma"
-        );
-
-        fold(
-            &shared,
-            &ServerMessage::ScreenShareStarted {
-                voice_room: VoiceRoomId(1),
-                person: PersonId(3),
-                screen: ScreenId(9),
-            },
-        );
-        let comecou = recorder
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|event| matches!(event, Event::ScreenChanged))
-            .count();
-        assert_eq!(
-            comecou, 1,
-            "a transmissão começou e a casca não foi avisada"
-        );
-
-        // E agora o roster sozinho, com a tela em curso: o N mudou.
-        fold(
-            &shared,
-            &ServerMessage::PersonJoined {
-                voice_room: VoiceRoomId(1),
-                profile: PersonProfile {
-                    id: PersonId(4),
-                    nickname: "pires".into(),
-                    roles: Vec::new(),
-                    material_e2ee: None,
-                },
-                ssrc: Ssrc(40),
-            },
-        );
-        let depois = recorder
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|event| matches!(event, Event::ScreenChanged))
-            .count();
-        assert_eq!(
-            depois, 2,
-            "entrou a quinta pessoa, o teto foi dividido por mais um, e a tela não soube"
-        );
-    }
-
-    #[test]
-    fn todo_motivo_de_parada_tem_um_nome_na_lista() {
-        // A lista é escrita à mão porque `seele_core::MotivoDeParada` não
-        // publica um `TODOS` — ao contrário de `chegada::Caminho`, que
-        // `caminhos()` deriva. Este teste é o que prende as duas: um motivo novo
-        // reprova no `match` de `nome_da_parada`, e um motivo esquecido na lista
-        // reprova aqui.
-        let nomes = motivos_de_parada_da_tela();
-        assert_eq!(
-            nomes.len(),
-            2,
-            "a lista de motivos andou e `nome_da_parada` não, ou o contrário"
-        );
-        assert!(nomes.contains(&nome_da_parada(seele_core::MotivoDeParada::SinalCritico)));
-        assert!(nomes.contains(&nome_da_parada(seele_core::MotivoDeParada::AbaixoDoPiso)));
-        let distintos: std::collections::BTreeSet<&str> = nomes.iter().copied().collect();
-        assert_eq!(
-            distintos.len(),
-            nomes.len(),
-            "dois motivos com o mesmo nome: a casca escreveria a mesma frase para os dois"
-        );
-    }
-
-    #[test]
-    fn esta_ponte_nao_decide_quem_perdeu_a_corrida_da_tela() {
-        // `specs/08-seguranca.md`: a interface esconder é conveniência; o
-        // servidor negar é a segurança. Uma transmissão por sala (§6.3) é regra
-        // do servidor, e quem perde a corrida é avisado por ele —
-        // `AlertReason::ScreenShareTaken`, que já atravessa como
-        // `NoticeReason::ScreenShareTaken`.
-        //
-        // O guarda lê a fonte porque a propriedade é sobre o que o código **não**
-        // faz, e nenhum valor a exibe: um `compartilhar_tela` que conferisse
-        // `room.telas` por conta própria compila, passa em tudo o mais, e recusa
-        // localmente o que o servidor teria aceitado.
-        let fonte = include_str!("lib.rs");
-        let Some(corpo) = fonte
-            .split("pub fn compartilhar_tela(")
-            .nth(1)
-            .and_then(|depois| depois.split("\n    }").next())
-        else {
-            panic!("`compartilhar_tela` mudou de forma; este guarda tem de mudar com ele");
-        };
-        assert!(
-            !corpo.contains("ScreenShareTaken"),
-            "`compartilhar_tela` julga a corrida por conta própria:\n{corpo}"
-        );
-        assert!(
-            !corpo.contains("telas"),
-            "`compartilhar_tela` lê o mapa de transmissões para decidir; quem decide é o servidor:\n{corpo}"
-        );
-    }
-}
-
+#[path = "testes/aviso_de_mensagens.rs"]
 #[cfg(test)]
-mod aviso_de_mensagens {
-    /// `Event::MessagesChanged` may only be raised by `Shared::messages_changed`.
-    ///
-    /// The two halves — bump the revision, then tell the shell — have to move
-    /// together, and they did not: `Command::OpenChannel` clears the room's
-    /// messages and raised the event **without** the bump. A shell that
-    /// refetches only when the number moves, which is the entire point of the
-    /// number, swallowed it, and switching Channel left the previous Channel's
-    /// conversation on screen under the new heading.
-    ///
-    /// Nothing about that failed. The event fired, the listener ran, the guard
-    /// compared two equal numbers and correctly concluded there was nothing to
-    /// do. Every part behaved; the pair was wrong.
-    ///
-    /// Reading the source is the only way to state "one door and no other" —
-    /// a behavioural test would have to know every future caller in advance.
-    #[test]
-    fn nobody_raises_the_event_without_moving_the_revision() {
-        let fonte = include_str!("lib.rs");
-        let Some(depois) = fonte.split("fn messages_changed(&self)").nth(1) else {
-            panic!(
-                "`messages_changed` is gone, and with it the only place the two halves are tied"
-            );
-        };
-        let Some(corpo) = depois.split("\n    }").next() else {
-            panic!("`messages_changed` is never closed");
-        };
-        assert!(
-            corpo.contains("fetch_add") && corpo.contains("Event::MessagesChanged"),
-            "the one function that ties the revision to the notice no longer does \
-             both:\n{corpo}"
-        );
+mod aviso_de_mensagens;
 
-        // Everything else may only reach it through that function.
-        //
-        // Scanned up to the first `#[cfg(test)]` and no further, and comments
-        // dropped. Both exclusions are load-bearing rather than tidy: this very
-        // test names the event three times in its own assertions, and the
-        // paragraphs above name it because that is what they are about. A guard
-        // its own text can trip is as broken as one its own text can satisfy.
-        let producao = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
-        let sem_comentarios: String = producao
-            .lines()
-            .filter(|channel| !channel.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mencoes = sem_comentarios.matches("Event::MessagesChanged").count();
-        assert_eq!(
-            mencoes, 1,
-            "`Event::MessagesChanged` is raised somewhere other than \
-             `messages_changed`, which is how the revision and the notice came \
-             apart the first time"
-        );
-    }
-}
-
+#[path = "testes/previa.rs"]
 #[cfg(test)]
-mod previa {
-    //! What a window is handed for one attachment. ADR 0027.
-    //!
-    //! This is the last place the bytes and the claim are both in scope, so it
-    //! is the last place the wrong one could be picked. The window past this
-    //! point gets a string and no choice.
-
-    use super::*;
-
-    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
-    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1];
-
-    #[test]
-    fn bytes_that_agree_with_the_claim_come_back_as_a_picture() {
-        // The claim is **shouted**, and the URI comes out lower case. A media
-        // type is case-insensitive, so this file agrees with itself and is
-        // drawn — and the spelling of the string a window receives is proof of
-        // which side of the agreement wrote it. With `image/png` on both sides
-        // the two are indistinguishable, and a URI spliced together from the
-        // claim would pass unnoticed.
-        let previa = preview_of(
-            7,
-            "IMAGE/PNG",
-            Some(seele_core::enlace::Previa::Bytes(PNG.to_vec())),
-        );
-        assert_eq!(previa.attachment, 7);
-        assert_eq!(previa.refusal, None);
-        assert_eq!(previa.found.as_deref(), Some("image/png"));
-        assert_eq!(
-            previa.image.as_deref(),
-            Some("data:image/png;base64,iVBORw0KGgoAAAAN"),
-            "the URI a window draws from was not written from the bytes"
-        );
-    }
-
-    #[test]
-    fn bytes_that_disagree_with_the_claim_come_back_with_no_picture_at_all() {
-        // The one that matters. A JPEG that called itself a PNG is refused, and
-        // the refusal carries both halves so a sentence can name them — but
-        // `image` is `None`, which is what a window acts on.
-        let previa = preview_of(
-            7,
-            "image/png",
-            Some(seele_core::enlace::Previa::Bytes(JPEG.to_vec())),
-        );
-        assert_eq!(previa.image, None, "a lying file was drawn anyway");
-        assert_eq!(previa.refusal, Some(PreviewRefusal::Disagrees));
-        assert_eq!(previa.claimed, "image/png");
-        assert_eq!(previa.found.as_deref(), Some("image/jpeg"));
-    }
-
-    #[test]
-    fn a_claim_never_reaches_the_string_a_window_draws_from() {
-        // Whatever the sender wrote, it is quoted into `claimed` and nowhere
-        // else. Here the claim is a whole `data:` URI of somebody's choosing,
-        // and the only thing it produces is a refusal.
-        let mentira = "data:image/png;base64,AAAA";
-        let previa = preview_of(
-            7,
-            mentira,
-            Some(seele_core::enlace::Previa::Bytes(PNG.to_vec())),
-        );
-        assert_eq!(previa.image, None);
-        assert_eq!(previa.refusal, Some(PreviewRefusal::NotAPicture));
-        assert_eq!(previa.claimed, mentira);
-    }
-
-    #[test]
-    fn a_file_over_the_limit_says_so_and_says_what_the_limit_is() {
-        let previa = preview_of(
-            7,
-            "image/png",
-            Some(seele_core::enlace::Previa::GrandeDemais { tamanho: 99 }),
-        );
-        assert_eq!(previa.image, None);
-        assert_eq!(
-            previa.refusal,
-            Some(PreviewRefusal::TooBig {
-                limit: seele_core::PREVIEW_LIMIT
-            }),
-            "«too big» with no number sends somebody nowhere"
-        );
-    }
-
-    #[test]
-    fn a_session_that_ended_mid_fetch_is_not_a_picture_and_not_a_panic() {
-        // The dropped channel. It reads as "the bytes did not come", which is
-        // true, and not as any of the three that say something about the file.
-        let previa = preview_of(7, "image/png", None);
-        assert_eq!(previa.image, None);
-        assert_eq!(previa.refusal, Some(PreviewRefusal::DidNotArrive));
-    }
-}
+mod previa;
 
 /// O log que responde «qual dos quatro deu o quê».
+#[path = "testes/uma_pendente_nao_e_uma_mensagem_do_servidor.rs"]
 #[cfg(test)]
-mod uma_pendente_nao_e_uma_mensagem_do_servidor {
-    use super::*;
-
-    /// **Uma pendente não pode ser endereçada como mensagem do servidor.**
-    ///
-    /// R05 abriu a porta e este guarda a fecha: `Message::id` vale zero numa
-    /// mensagem que o servidor ainda não confirmou, e zero não endereça nada.
-    ///
-    /// O primeiro caller a pisar nisto foi `conformance::moderacao`, que pegava
-    /// `messages()[0].id` e recebia «não há tal mensagem» no lugar da recusa de
-    /// permissão que ele mede. O próximo seria uma tela, e ali o sintoma seria
-    /// clicar em «remover» numa linha visível e nada acontecer.
-    #[test]
-    fn remover_uma_pendente_e_recusado_antes_de_sair() {
-        // Um `Connection` com o canal de comandos vivo: o teste não roda laço
-        // nenhum, e o que ele mede é a recusa acontecer **antes** de o comando
-        // sair. O receptor fica na mão para o canal não fechar.
-        let (manda, _recebe) = tokio::sync::mpsc::unbounded_channel();
-        let conexao = Connection {
-            commands: manda,
-            shared: super::tests::compartilhado_de_teste(),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        assert_eq!(
-            conexao.remove_message(0),
-            Err(ConnectionError::UnknownMessage),
-            "o pedido de remover o zero saiu para o servidor: ele responde «não \
-             há tal mensagem», que é verdade e é a frase errada para quem clicou \
-             num texto que está na tela"
-        );
-        // E um id de verdade continua saindo: um guarda que barrasse tudo passaria
-        // no teste acima e desligaria a remoção inteira.
-        assert!(conexao.remove_message(7).is_ok());
-    }
-}
+mod uma_pendente_nao_e_uma_mensagem_do_servidor;
 
 #[cfg(test)]
 mod trilha_no_log {
@@ -12605,199 +9898,17 @@ mod trilha_no_log {
     }
 }
 
+#[path = "testes/base64_escrito_a_mao.rs"]
 #[cfg(test)]
-mod base64_escrito_a_mao {
-    use super::base64_de;
+mod base64_escrito_a_mao;
 
-    #[test]
-    fn os_vetores_do_rfc_4648() {
-        // Escrever base64 à mão é barato; escrevê-lo **errado** é caro de um
-        // jeito específico: o `atob` da janela não reclama de quase nada, então
-        // um preenchimento errado no último grupo vira um quadro truncado que o
-        // decodificador recusa em silêncio — e o sintoma é uma tela preta, que
-        // é o mesmo sintoma de outras seis coisas.
-        //
-        // Os vetores são os do §10 do RFC 4648, que existem exatamente para
-        // isto e cobrem os três restos possíveis.
-        assert_eq!(base64_de(b""), "");
-        assert_eq!(base64_de(b"f"), "Zg==");
-        assert_eq!(base64_de(b"fo"), "Zm8=");
-        assert_eq!(base64_de(b"foo"), "Zm9v");
-        assert_eq!(base64_de(b"foob"), "Zm9vYg==");
-        assert_eq!(base64_de(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64_de(b"foobar"), "Zm9vYmFy");
-    }
-
-    #[test]
-    fn os_bytes_altos_tambem() {
-        // A tabela tem 64 entradas e o índice tem seis bits, então nenhum byte
-        // pode sair dela — mas um `>>` com o deslocamento errado sai, e sai
-        // justamente nos bytes altos, que texto ASCII nunca exercita. Um quadro
-        // de vídeo é quase só byte alto.
-        assert_eq!(base64_de(&[0xFF, 0xFF, 0xFF]), "////");
-        assert_eq!(base64_de(&[0x00, 0x00, 0x00]), "AAAA");
-        assert_eq!(base64_de(&[0xFB, 0xFF, 0xBE]), "+/++");
-        // E o Annex-B começa sempre assim: `00 00 00 01`.
-        assert_eq!(base64_de(&[0x00, 0x00, 0x00, 0x01]), "AAAAAQ==");
-    }
-}
-
+#[path = "testes/base64_ida_e_volta.rs"]
 #[cfg(test)]
-mod base64_ida_e_volta {
-    use super::{base64_de, de_base64};
+mod base64_ida_e_volta;
 
-    #[test]
-    fn a_volta_desfaz_a_ida_em_todo_tamanho() {
-        // Os três restos, porque é neles que base64 erra: múltiplo de três,
-        // sobra de um byte (dois `=`) e sobra de dois (um `=`). Um decodificador
-        // que ignorasse o resto devolveria bytes a mais no último grupo.
-        for tamanho in 0..=64usize {
-            let bytes: Vec<u8> = (0..tamanho).map(|i| (i * 7 % 256) as u8).collect();
-            let texto = base64_de(&bytes);
-            assert_eq!(
-                de_base64(&texto).as_deref(),
-                Some(bytes.as_slice()),
-                "não fechou em {tamanho} bytes: {texto}"
-            );
-        }
-    }
-
-    #[test]
-    fn o_que_o_navegador_escreve_e_lido() {
-        // Um vetor de fora, para o par não provar só que concorda consigo
-        // mesmo: `btoa("Olá, SEELE")` numa janela dá exatamente isto.
-        assert_eq!(
-            de_base64("T2zDoSwgU0VFTEU=").as_deref(),
-            Some("Olá, SEELE".as_bytes())
-        );
-    }
-
-    #[test]
-    fn espaco_em_branco_nao_atrapalha() {
-        // Base64 de e-mail vem quebrado em linhas, e recusar por isso seria
-        // recusar o caso comum de quem cola de fora.
-        assert_eq!(
-            de_base64("T2zDoSwg\n  U0VFTEU =").as_deref(),
-            Some("Olá, SEELE".as_bytes())
-        );
-    }
-
-    #[test]
-    fn texto_que_nao_e_base64_nao_vira_bytes_truncados() {
-        // O caso que importa: devolver o que deu para ler produziria um arquivo
-        // corrompido com cara de arquivo bom, e o defeito só apareceria na
-        // máquina de quem recebeu.
-        assert_eq!(de_base64("não é base64"), None);
-        // Um caractere sozinho são seis bits e não fecha byte nenhum.
-        assert_eq!(de_base64("QUJD RA=="), Some(b"ABCD".to_vec()));
-        assert_eq!(de_base64("QUJDR"), None);
-    }
-}
-
+#[path = "testes/conferir_a_troca.rs"]
 #[cfg(test)]
-mod conferir_a_troca {
-    //! A troca de dispositivo que volta `Ok` tem de ter acontecido.
-    //!
-    //! Não há como abrir uma placa de som num teste, então o que se prende aqui
-    //! é a **forma** da conferência: que ela exista no caminho dos dois lados, e
-    //! que ela compare o pedido com o aberto em vez de confiar no `Ok`.
-    //!
-    //! O defeito que ela existe para acusar foi relatado assim: «mostra EM USO
-    //! num e ESCOLHIDO no que eu escolhi, mas não muda». `EM USO` sai do
-    //! dispositivo que o `Voice` abriu e `ESCOLHIDO` da preferência gravada —
-    //! os dois discordando é o produto dizendo, sem saber, que a ordem foi
-    //! gravada e não cumprida. Nada no caminho devolvia erro.
-
-    const FONTE: &str = include_str!("lib.rs");
-
-    fn corpo(assinatura: &str) -> &'static str {
-        let depois = FONTE
-            .split(assinatura)
-            .nth(1)
-            .unwrap_or_else(|| panic!("`{assinatura}` mudou de forma"));
-        depois
-            .split("\n    }")
-            .next()
-            .unwrap_or_else(|| panic!("`{assinatura}` nunca fecha"))
-    }
-
-    /// Este continua lendo texto-fonte, e de propósito.
-    ///
-    /// O que ele guarda não é o que a conferência decide — isso agora é
-    /// comportamento, no `mod comportamento` logo abaixo. O que ele guarda é a
-    /// casca **chamar** a conferência: `set_capture_device` e a irmã dela
-    /// abrem aparelho de verdade, e conformidade roda sem placa de som, então
-    /// não há como exercitá-las aqui. Quem apaga a chamada volta a devolver
-    /// `Ok` para uma troca que não aconteceu, e nenhum tipo acusa isso.
-    #[test]
-    fn as_duas_trocas_conferem_o_que_pediram() {
-        for assinatura in [
-            "pub fn set_capture_device(&self, device: Option<String>)",
-            "pub fn set_playback_device(&self, device: Option<String>)",
-        ] {
-            let corpo = corpo(assinatura);
-            assert!(
-                corpo.contains("conferir_troca"),
-                "`{assinatura}` devolve `Ok` sem conferir se a troca aconteceu, \
-                 e um sucesso que não é sucesso é o defeito que custou três \
-                 versões nesta casca:\n{corpo}"
-            );
-        }
-    }
-
-    /// A conferência, exercitada pelo que ela **faz**.
-    ///
-    /// Substitui o guarda que lia o corpo de `conferir_troca` com
-    /// `include_str!` e conferia se certas palavras estavam lá. Aquele guarda
-    /// passaria com a comparação invertida, com o lado trocado, e com um `Ok`
-    /// devolvido sempre — nenhuma dessas três coisas é texto que falte, e todas
-    /// as três são o defeito que ele existe para acusar.
-    mod comportamento {
-        use super::super::{conferencia, ConnectionError, Lado};
-
-        #[test]
-        fn abrir_o_que_se_pediu_passa() {
-            assert!(conferencia(Some("fone-usb"), Some("fone-usb"), Lado::Saida).is_ok());
-        }
-
-        #[test]
-        fn abrir_outro_aparelho_e_recusado_pelo_lado_certo() {
-            // O defeito relatado: «mostra EM USO num e ESCOLHIDO no que eu
-            // escolhi, mas não muda». Voltar `Ok` aqui é o produto afirmando
-            // que fez o que não fez.
-            assert_eq!(
-                conferencia(Some("fone-usb"), Some("caixas-da-mesa"), Lado::Saida),
-                Err(ConnectionError::PlaybackDeviceGone)
-            );
-            assert_eq!(
-                conferencia(
-                    Some("microfone-bom"),
-                    Some("microfone-do-laptop"),
-                    Lado::Entrada
-                ),
-                Err(ConnectionError::CaptureDeviceGone)
-            );
-        }
-
-        #[test]
-        fn nao_abrir_nada_tambem_e_recusado() {
-            // Um aparelho que o sistema não descreve não é um aparelho que
-            // atende ao pedido: `None` não é «qualquer um serve».
-            assert_eq!(
-                conferencia(Some("fone-usb"), None, Lado::Saida),
-                Err(ConnectionError::PlaybackDeviceGone)
-            );
-        }
-
-        #[test]
-        fn sem_pedido_qualquer_aparelho_que_abra_esta_certo() {
-            // O caso mais comum de todos: o padrão da máquina. Exigir igualdade
-            // aqui recusaria toda sessão que nunca escolheu nada.
-            assert!(conferencia(None, Some("qualquer-um"), Lado::Entrada).is_ok());
-            assert!(conferencia(None, None, Lado::Saida).is_ok());
-        }
-    }
-}
+mod conferir_a_troca;
 
 // O que o quarto disse sobre onde um servidor mora hoje, reexportado para quem
 // lê a resposta de [`onde_mora_hoje`] sem nomear o `seele-core`, que o ADR 0002
@@ -12870,49 +9981,9 @@ fn onde_mora_pelo_enc3(localizacao: seele_core::encontro::Localizacao) -> OndeMo
     }
 }
 
+#[path = "testes/a_consulta_ao_quarto.rs"]
 #[cfg(test)]
-mod a_consulta_ao_quarto {
-    //! A porta da casca para o quarto: `onde_mora_hoje` com uma impressão
-    //! digital, e não com marcas.
-
-    use super::{onde_mora_hoje, OndeMora};
-
-    #[tokio::test]
-    async fn uma_impressao_que_nao_forma_marca_nao_manda_pergunta_nenhuma() {
-        // O ponto é um socket local **mudo**, e é ele quem prova que nada saiu:
-        // se alguma pergunta partisse, ela pararia no `recv_from` dele. Só a
-        // variante e a duração não bastam: uma consulta que perguntasse e
-        // desistisse depressa passaria nas duas.
-        let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let ponto = mudo.local_addr().unwrap().to_string();
-
-        let comecou = std::time::Instant::now();
-        let achado = onde_mora_hoje(&ponto, "curta").await;
-        let levou = comecou.elapsed();
-        assert_eq!(
-            achado,
-            OndeMora::SemMarca,
-            "uma impressão digital que não forma marca virou outra resposta: quem ler o log vai \
-             procurar defeito de rede onde não há"
-        );
-        assert!(
-            levou < std::time::Duration::from_millis(200),
-            "sem marca não há pergunta, e mesmo assim a consulta esperou {levou:?}"
-        );
-
-        let mut balde = [0_u8; 64];
-        let chegou = tokio::time::timeout(
-            std::time::Duration::from_millis(300),
-            mudo.recv_from(&mut balde),
-        )
-        .await;
-        assert!(
-            chegou.is_err(),
-            "a consulta devolveu `SemMarca` mas mandou um datagrama ao ponto assim mesmo: sem \
-             marca não há o que perguntar, e o que sai é tráfego sem resposta possível"
-        );
-    }
-}
+mod a_consulta_ao_quarto;
 
 /// A impressão contra a qual uma conexão confere o certificado do servidor.
 ///
@@ -12954,50 +10025,9 @@ pub fn impressao_a_conferir(do_link: Option<&str>, guardada: Option<&str>) -> Op
     do_link.or(guardada).map(str::to_owned)
 }
 
+#[path = "testes/a_volta_pela_trilha_confere.rs"]
 #[cfg(test)]
-mod a_volta_pela_trilha_confere {
-    use super::impressao_a_conferir;
-
-    #[test]
-    fn sem_link_nesta_sessao_confere_pela_guardada() {
-        assert_eq!(
-            impressao_a_conferir(None, Some("aaaa1111")),
-            Some("aaaa1111".to_owned()),
-            "quem volta pela lista entra num endereço novo sem conferir nada — o \
-             PRIMEIRO CONTATO cego do S3 — e sem `LEVE`"
-        );
-    }
-
-    #[test]
-    fn o_link_desta_sessao_vence_a_guardada() {
-        assert_eq!(
-            impressao_a_conferir(Some("bbbb2222"), Some("aaaa1111")),
-            Some("bbbb2222".to_owned()),
-            "um link colado agora é a intenção mais nova de quem conecta; conferir \
-             pela guardada recusaria o servidor que a pessoa acabou de pedir"
-        );
-    }
-
-    #[test]
-    fn so_o_link_e_o_caminho_de_sempre() {
-        assert_eq!(
-            impressao_a_conferir(Some("bbbb2222"), None),
-            Some("bbbb2222".to_owned()),
-            "sem nada guardado, o link desta sessão deixou de ser conferido: quem cola um \
-             link num endereço novo entra às cegas"
-        );
-    }
-
-    #[test]
-    fn sem_nenhuma_das_duas_nao_ha_o_que_conferir() {
-        assert_eq!(
-            impressao_a_conferir(None, None),
-            None,
-            "sem link e sem guardada apareceu uma impressão do nada: a conexão \
-             recusaria o servidor por uma promessa que ninguém fez"
-        );
-    }
-}
+mod a_volta_pela_trilha_confere;
 
 /// A impressão que a lista de servidores guarda depois de uma conexão.
 ///
@@ -13078,2786 +10108,25 @@ pub fn impressao_a_guardar(
     }
 }
 
+#[path = "testes/a_lista_guarda_a_impressao_aceita.rs"]
 #[cfg(test)]
-mod a_lista_guarda_a_impressao_aceita {
-    use super::{impressao_a_guardar, Trust};
+mod a_lista_guarda_a_impressao_aceita;
 
-    const DO_SERVIDOR: &str = "aaaa1111";
-    const DE_OUTRO: &str = "bbbb2222";
-
-    #[test]
-    fn um_link_que_discorda_do_pin_nao_vai_para_a_lista() {
-        // A conexão ficou de pé com a chave fixada (ADR 0003), e é ela que vale
-        // guardar. A do link é de outro servidor.
-        let veredito = Trust::InviteDisagrees {
-            expected: DE_OUTRO.into(),
-            offered: DO_SERVIDOR.into(),
-        };
-        assert_eq!(
-            impressao_a_guardar(&veredito, Some(DE_OUTRO), None),
-            Some(DO_SERVIDOR.to_owned()),
-            "a lista guardou a impressão do link que discordava do pin: a volta pela \
-             lista passa a esperar a chave de outro servidor e recusa o verdadeiro em \
-             todo endereço sem pin"
-        );
-    }
-
-    #[test]
-    fn a_volta_pelo_alvo_que_discorda_do_pin_grava_a_ofertada() {
-        // Sem link, quem discorda do pin é a guardada. `InviteDisagrees` só nasce
-        // num alvo de escopo público (`seele_core::tofu::TofuVerifier::decide`,
-        // com o pino que `build_destino` diz provar o servidor): ali o pin prova
-        // a continuidade do servidor da entrada (ADR 0003), e a ofertada é a
-        // chave dele. É assim que uma lista gravada pela 0.15.0, com a impressão
-        // de um link que discordava do pin, se cura na primeira volta pelo alvo.
-        // Num alvo de LAN, a mesma volta é recusada dentro do TLS
-        // (`num_alvo_de_lan_o_pino_que_confere_nao_passa_por_cima_da_esperada`).
-        let veredito = Trust::InviteDisagrees {
-            expected: DE_OUTRO.into(),
-            offered: DO_SERVIDOR.into(),
-        };
-        assert_eq!(
-            impressao_a_guardar(&veredito, None, Some(DE_OUTRO)),
-            Some(DO_SERVIDOR.to_owned()),
-            "a volta pelo alvo, onde o pin prova o servidor, deixou na lista a impressão que \
-             o pin desmente: uma lista envenenada pela 0.15.0 continua recusando o servidor \
-             verdadeiro em todo endereço sem pin"
-        );
-    }
-
-    #[test]
-    fn o_que_foi_conferido_vai_para_a_lista() {
-        let conferido = Trust::FirstContactVerified {
-            fingerprint: DO_SERVIDOR.into(),
-        };
-        assert_eq!(
-            impressao_a_guardar(&conferido, Some(DO_SERVIDOR), None),
-            Some(DO_SERVIDOR.to_owned()),
-            "o primeiro contato conferido pelo link não foi para a lista"
-        );
-        // O que o app passa numa volta pela lista: sem link, com a guardada.
-        assert_eq!(
-            impressao_a_guardar(&conferido, None, Some(DO_SERVIDOR)),
-            Some(DO_SERVIDOR.to_owned()),
-            "o primeiro contato conferido pela guardada, num endereço novo, não foi \
-             para a lista"
-        );
-        assert_eq!(
-            impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR), None),
-            Some(DO_SERVIDOR.to_owned()),
-            "a impressão do link que concorda com o pin não foi para a lista"
-        );
-        assert_eq!(
-            impressao_a_guardar(&Trust::Known, None, Some(DO_SERVIDOR)),
-            Some(DO_SERVIDOR.to_owned()),
-            "a guardada que concorda com o pin, numa volta pela lista, deixou de ser \
-             regravada, e a lista fica com uma impressão que ninguém confirmou hoje"
-        );
-    }
-
-    #[test]
-    fn o_que_ninguem_conferiu_deixa_a_lista_como_estava() {
-        assert_eq!(
-            impressao_a_guardar(&Trust::Known, None, None),
-            None,
-            "a volta sem impressão conferida inventou uma impressão para a lista"
-        );
-        assert_eq!(
-            impressao_a_guardar(
-                &Trust::FirstContact {
-                    fingerprint: DO_SERVIDOR.into()
-                },
-                None,
-                None
-            ),
-            None,
-            "um primeiro contato cego foi para a lista como se tivesse sido \
-             conferido: a volta por outro endereço passaria a conferir contra uma \
-             chave que ninguém prometeu"
-        );
-        assert_eq!(
-            impressao_a_guardar(
-                &Trust::InviteRefused {
-                    expected: DE_OUTRO.into(),
-                    offered: DO_SERVIDOR.into()
-                },
-                Some(DE_OUTRO),
-                None
-            ),
-            None,
-            "uma recusa deixou impressão na lista"
-        );
-    }
-}
-
+#[path = "testes/o_candidato_do_quarto.rs"]
 #[cfg(test)]
-mod o_candidato_do_quarto {
-    //! O endereço de hoje entra na corrida com a chave de pino que os outros
-    //! candidatos teriam. Era o que `ja_esta_na_corrida` garantia, quando o
-    //! `connect` do app comparava os textos antes de chamar a ponte. Desde a
-    //! tarefa 14b da F7, quem compara é a `Chegada`, pela chave de pino, e a
-    //! chave sai daqui.
+mod o_candidato_do_quarto;
 
-    use super::{candidato_do_quarto, resolve, ConnectConfig};
-
-    fn config() -> ConnectConfig {
-        ConnectConfig {
-            server: "casa.exemplo:8383".into(),
-            alternate_servers: Vec::new(),
-            nickname: "pessoa".into(),
-            home: String::new(),
-            join_secret: None,
-            expected_fingerprint: Some("ab".repeat(32)),
-            codigo_esperado: None,
-            bilhete: None,
-            audio: false,
-            capture_device: None,
-            playback_device: None,
-        }
-    }
-
-    fn chave_de(escrito: &str) -> String {
-        resolve(escrito).expect("um endereço escrito resolve").2
-    }
-
-    #[test]
-    fn o_proprio_alvo_tem_a_mesma_chave() {
-        let alvo = "187.255.97.152:9368";
-        let de_hoje = candidato_do_quarto(&config(), alvo.parse().unwrap(), &chave_de(alvo));
-        assert_eq!(
-            de_hoje.chave_do_pin,
-            chave_de(alvo),
-            "o endereço que o quarto devolveu é o próprio alvo e ganhou outra chave: a \
-             `Chegada` o poria de novo na corrida, com dois `Hello` para o mesmo servidor"
-        );
-    }
-
-    #[test]
-    fn a_chave_e_a_canonica_e_nao_o_texto() {
-        // O alvo escrito sem a porta padrão, e um IPv6 também sem ela.
-        for (escrito, de_hoje) in [
-            ("192.168.50.30", "192.168.50.30:8383"),
-            ("[2001:db8::1]", "[2001:db8::1]:8383"),
-        ] {
-            let candidato =
-                candidato_do_quarto(&config(), de_hoje.parse().unwrap(), &chave_de(escrito));
-            assert_eq!(
-                candidato.chave_do_pin,
-                chave_de(escrito),
-                "`{escrito}` e o `{de_hoje}` que o quarto deu têm a mesma chave de pino"
-            );
-        }
-    }
-
-    #[test]
-    fn a_porta_nova_e_outra_chave_e_o_pino_dela_nao_prova_o_servidor() {
-        let alvo = "187.255.97.152:9368";
-        let de_hoje = candidato_do_quarto(
-            &config(),
-            "187.255.97.152:9400".parse().unwrap(),
-            &chave_de(alvo),
-        );
-        assert_ne!(
-            de_hoje.chave_do_pin,
-            chave_de(alvo),
-            "a porta nova que o NAT deu ao servidor ficou com a chave do alvo, e a resposta do \
-             quarto não entraria na corrida"
-        );
-        assert!(
-            !de_hoje.o_pino_prova_o_servidor,
-            "o pino do endereço que o quarto deu passou a provar o servidor: o quarto pode \
-             apontar para outro servidor que esta máquina já fixou ali"
-        );
-    }
-}
-
+#[path = "testes/a_abertura_do_audio.rs"]
 #[cfg(test)]
-mod a_abertura_do_audio {
-    //! A espera de [`esperar_o_audio`], pelo que ela **faz** com o relógio.
-    //!
-    //! A abertura acontece dentro do laço de `drive`, que roda num runtime de
-    //! uma thread só. Uma abertura síncrona presa no driver seguraria a conexão
-    //! inteira — comandos, mensagens, a telemetria — pelo tempo que o driver
-    //! quisesse. Estes testes não abrem aparelho nenhum: o abridor é uma função
-    //! que dorme, e o que se afirma é quanto a espera leva e o que ela devolve.
+mod a_abertura_do_audio;
 
-    use super::{esperar_o_audio, Atraso};
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
-
-    /// Uma vez do driver nova, de uma sessão só deste teste.
-    fn vez() -> Arc<Mutex<()>> {
-        Arc::new(Mutex::new(()))
-    }
-
-    /// Um abridor que conta quantas aberturas estão no driver ao mesmo tempo, e
-    /// quantas aconteceram.
-    #[derive(Default)]
-    struct Driver {
-        em_voo: AtomicUsize,
-        no_maximo: AtomicUsize,
-        aberturas: AtomicUsize,
-    }
-
-    impl Driver {
-        fn abrir(&self, demora: Duration) -> &'static str {
-            self.aberturas.fetch_add(1, Ordering::SeqCst);
-            let agora = self.em_voo.fetch_add(1, Ordering::SeqCst) + 1;
-            self.no_maximo.fetch_max(agora, Ordering::SeqCst);
-            std::thread::sleep(demora);
-            self.em_voo.fetch_sub(1, Ordering::SeqCst);
-            "a voz"
-        }
-    }
-
-    /// M-c: duas aberturas da mesma sessão nunca ficam no driver ao mesmo
-    /// tempo. Entrar, sair e entrar de novo depressa larga a primeira, e a
-    /// thread dela segue no driver; a segunda espera a vez.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn duas_aberturas_da_mesma_sessao_nunca_ficam_no_driver_ao_mesmo_tempo() {
-        let vez = vez();
-        let driver = Arc::new(Driver::default());
-        let (primeiro, segundo) = (Arc::clone(&driver), Arc::clone(&driver));
-
-        let (a, b) = tokio::join!(
-            esperar_o_audio(
-                &vez,
-                move || primeiro.abrir(Duration::from_millis(150)),
-                Duration::from_secs(5)
-            ),
-            esperar_o_audio(
-                &vez,
-                move || segundo.abrir(Duration::from_millis(150)),
-                Duration::from_secs(5)
-            ),
-        );
-
-        assert!(
-            a.is_ok() && b.is_ok(),
-            "as duas aberturas tinham tempo de sobra"
-        );
-        assert_eq!(
-            driver.no_maximo.load(Ordering::SeqCst),
-            1,
-            "duas aberturas da mesma sessão ficaram no driver ao mesmo tempo"
-        );
-    }
-
-    /// E a abertura de que ninguém espera mais desiste quando a vez chega, sem
-    /// abrir aparelho nenhum.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_abertura_que_ja_desistiu_nao_abre_quando_chega_a_vez() {
-        let vez = vez();
-        let driver = Arc::new(Driver::default());
-        let (primeiro, segundo) = (Arc::clone(&driver), Arc::clone(&driver));
-
-        let (a, b) = tokio::join!(
-            esperar_o_audio(
-                &vez,
-                move || primeiro.abrir(Duration::from_millis(300)),
-                Duration::from_secs(5)
-            ),
-            async {
-                // A segunda pede depois de a primeira tomar a vez, e desiste
-                // antes de a primeira terminar.
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                esperar_o_audio(
-                    &vez,
-                    move || segundo.abrir(Duration::from_millis(10)),
-                    Duration::from_millis(50),
-                )
-                .await
-            },
-        );
-        assert!(a.is_ok());
-        assert_eq!(b, Err(Atraso));
-
-        // Dá tempo de a vez chegar à segunda thread.
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert_eq!(
-            driver.aberturas.load(Ordering::SeqCst),
-            1,
-            "a abertura de que ninguém esperava mais abriu o aparelho quando chegou a vez"
-        );
-    }
-
-    /// (d) da pendência 52: um driver preso não prende quem espera.
-    ///
-    /// A asserção de tempo vem antes da do valor, e é de propósito: a versão
-    /// síncrona — abrir na própria thread de quem espera — leva os dois
-    /// segundos inteiros e devolve a voz, e é o relógio que a reprova, sem
-    /// pendurar a bateria.
-    #[tokio::test]
-    async fn um_audio_que_nao_abre_no_prazo_volta_atrasado_sem_esperar_o_driver() {
-        let comeco = Instant::now();
-        let veio = esperar_o_audio(
-            &vez(),
-            || {
-                std::thread::sleep(Duration::from_secs(2));
-                "a voz"
-            },
-            Duration::from_millis(200),
-        )
-        .await;
-        let levou = comeco.elapsed();
-
-        assert!(
-            levou < Duration::from_secs(1),
-            "a espera pelo áudio levou {levou:?} com um prazo de 200 ms: ela esperou o \
-             driver, e um driver preso prende a conexão inteira junto"
-        );
-        assert_eq!(
-            veio,
-            Err(Atraso),
-            "o prazo venceu e a espera não disse que o áudio não veio"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_voz_que_abre_no_prazo_chega_inteira_e_pela_thread_com_nome() {
-        let veio = esperar_o_audio(
-            &vez(),
-            || std::thread::current().name().map(str::to_owned),
-            Duration::from_secs(5),
-        )
-        .await;
-
-        assert_eq!(
-            veio,
-            Ok(Some("seele-abre-audio".to_owned())),
-            "a abertura não correu na thread própria com nome: um pânico ali sai \
-             no log sem dizer de onde"
-        );
-    }
-
-    /// Uma voz que se larga, avisando que foi largada.
-    struct Aparelho(Arc<AtomicBool>);
-
-    impl Drop for Aparelho {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
-        }
-    }
-
-    /// A voz que chega depois do prazo é largada na thread que a abriu.
-    ///
-    /// É o `drop` que fecha o aparelho. Uma voz tardia guardada em algum lugar
-    /// seria um microfone aberto para uma sala que já desistiu dele.
-    #[tokio::test]
-    async fn a_voz_que_chega_tarde_e_largada_na_thread_que_a_abriu() {
-        let largada = Arc::new(AtomicBool::new(false));
-        let marca = Arc::clone(&largada);
-        let veio = esperar_o_audio(
-            &vez(),
-            move || {
-                std::thread::sleep(Duration::from_millis(300));
-                Aparelho(marca)
-            },
-            Duration::from_millis(50),
-        )
-        .await;
-        assert!(
-            veio.is_err(),
-            "o prazo de 50 ms venceu e a voz veio assim mesmo"
-        );
-
-        let ate = Instant::now() + Duration::from_secs(5);
-        while !largada.load(Ordering::SeqCst) && Instant::now() < ate {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(
-            largada.load(Ordering::SeqCst),
-            "a voz que chegou depois do prazo não foi largada: o aparelho fica aberto \
-             para uma sala que já seguiu sem ele"
-        );
-    }
-}
-
+#[path = "testes/o_audio_segue_a_sala.rs"]
 #[cfg(test)]
-mod o_audio_segue_a_sala {
-    //! A pendência 52: o áudio abre quando a pessoa passa a estar numa sala de
-    //! voz, e fecha quando ela deixa de estar.
-    //!
-    //! **A prova é da decisão, e nenhum aparelho abre aqui.** A voz é de
-    //! mentira e o abridor é injetado, no molde dos testes de
-    //! `reabrir_voz_na_reconexao`: `PortaDaVoz` e `VozDaSala` são genéricas na
-    //! voz justamente para isso, e `drive` usa as mesmas com a [`Voice`] de
-    //! verdade.
-    //!
-    //! [`Voice`]: seele_core::Voice
+mod o_audio_segue_a_sala;
 
-    use super::{
-        ganhos_a_aplicar, readotar_na_volta, sala_do_audio, Aberta, AberturaDoAudio,
-        ControlesGuardados, Futuro, Origem, PortaDaVoz, VozDaSala, VozViva,
-    };
-    use seele_core::retrato::voice_rooms_of;
-    use seele_core::{
-        AlertReason, AlertSeverity, DeviceChoice, PersonId, PersonProfile, Room, ServerMessage,
-        SessionId, SessionInfo, Ssrc, VoiceMode, VoiceRoomId, VoiceRoomInfo,
-    };
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    use std::time::Duration;
-
-    const SALA: VoiceRoomId = VoiceRoomId(1);
-
-    /// Uma voz de mentira, que lembra o que vestiu ao abrir, a tecla de falar e
-    /// o ganho que cada número recebeu.
-    #[derive(Debug, Default)]
-    struct Voz {
-        ssrc: u32,
-        vestida: Mutex<Option<ControlesGuardados>>,
-        /// A tecla de falar, como o átomo `key_held` dos controles do núcleo.
-        tecla: Mutex<bool>,
-        ganhos: Mutex<HashMap<u32, f32>>,
-    }
-
-    impl VozViva for Voz {
-        fn vestir(&self, escolhida: &ControlesGuardados) {
-            *self.vestida.lock().expect("o que a voz vestiu") = Some(escolhida.clone());
-        }
-
-        fn segurar(&self, segura: bool) {
-            *self.tecla.lock().expect("a tecla da voz") = segura;
-        }
-
-        fn ganhar(&self, ssrc: Ssrc, ganho: f32) {
-            self.ganhos
-                .lock()
-                .expect("os ganhos da voz")
-                .insert(ssrc.get(), ganho);
-        }
-    }
-
-    fn voz_de(ssrc: u32) -> Voz {
-        Voz {
-            ssrc,
-            vestida: Mutex::new(None),
-            tecla: Mutex::new(false),
-            ganhos: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// A voz que `Voice::reopen` devolve na volta: nova, no `ssrc` de agora, e
-    /// com os controles da velha — o que ela vestiu, a tecla e os ganhos por
-    /// número —, como `carregar_controles` os leva no núcleo.
-    fn reaberta(velha: &Voz, ssrc: u32) -> Voz {
-        Voz {
-            ssrc,
-            vestida: Mutex::new(velha.vestida.lock().expect("o que a velha vestiu").clone()),
-            tecla: Mutex::new(*velha.tecla.lock().expect("a tecla da velha")),
-            ganhos: Mutex::new(velha.ganhos.lock().expect("os ganhos da velha").clone()),
-        }
-    }
-
-    /// A tecla de falar da voz viva, se há uma.
-    fn tecla_de(voz: &VozDaSala<Voz>) -> Option<bool> {
-        voz.lock()
-            .expect("a voz")
-            .as_ref()
-            .map(|viva| *viva.tecla.lock().expect("a tecla da voz"))
-    }
-
-    fn entregue(aberta: Aberta<Voz>) -> Futuro<Voz> {
-        Box::pin(async move { aberta })
-    }
-
-    fn nada_abre(_: &DeviceChoice) -> Futuro<Voz> {
-        panic!("o áudio abriu num ponto em que nada devia abrir")
-    }
-
-    /// O que `drive` faz no fim de cada volta do laço: olha o assento, e, se
-    /// uma abertura começou, espera a chegada dela como o braço do `select!`.
-    ///
-    /// Devolve quantas vezes o abridor foi chamado.
-    async fn olhar_e_esperar(
-        porta: &mut PortaDaVoz<Voz>,
-        voz: &VozDaSala<Voz>,
-        room: &Room,
-        ssrc: u32,
-    ) -> u32 {
-        let mut aberturas = 0;
-        // O assento pelo qual o áudio abre, como `sala_de` o lê em `drive`.
-        porta.olhar(voz, sala_do_audio(room), |_| {
-            aberturas += 1;
-            entregue(Ok(Ok(voz_de(ssrc))))
-        });
-        if voz.abertura() == AberturaDoAudio::Abrindo {
-            let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-                .await
-                .expect("a abertura começou e não chegou");
-            porta.chegou(voz, aberta, nada_abre);
-        }
-        aberturas
-    }
-
-    fn ha_voz(voz: &VozDaSala<Voz>) -> bool {
-        voz.lock().expect("a voz").is_some()
-    }
-
-    /// O servidor decidiu o pedido de entrada que estava no ar: o `Pong` do
-    /// `Ping` marcado que o motor manda atrás de cada pedido.
-    fn decidida(room: &mut Room) {
-        room.apply(&ServerMessage::Pong {
-            // O `Pong` de um pedido mais novo que todos os destes testes: fecha
-            // o que está no ar, como o `Pong` do pedido que acabou de sair.
-            timestamp: seele_core::assento::carimbo_da_entrada(u64::from(u32::MAX)),
-        });
-    }
-
-    fn recusa(reason: AlertReason) -> ServerMessage {
-        ServerMessage::Alert {
-            severity: AlertSeverity::Warning,
-            reason,
-            operator_text: None,
-        }
-    }
-
-    /// (a) Fora de sala, nenhum aparelho aberto; entrar numa sala abre, sair
-    /// fecha.
-    ///
-    /// O primeiro olhar é o de `drive` logo depois do aperto de mão: o servidor
-    /// adotado e ninguém sentado. Antes da pendência 52, era ali que a voz abria,
-    /// para a sessão inteira.
-    #[tokio::test]
-    async fn fora_de_sala_nenhum_aparelho_abre_e_a_sala_abre_e_fecha() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.apply(&lia_na_sala());
-
-        let aberturas = olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        assert_eq!(
-            aberturas, 0,
-            "entrar no servidor abriu o áudio: quem fica só pela conversa por \
-             escrito segura o microfone e o repouso da máquina a sessão inteira"
-        );
-        assert!(!ha_voz(&voz), "há voz de pé fora de sala");
-        assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
-
-        room.enter_voice_room(SALA);
-        let aberturas = olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        assert_eq!(
-            aberturas, 0,
-            "o áudio abriu com a entrada ainda no ar: o microfone abre numa sala que \
-             ainda pode recusar (M-d)"
-        );
-        assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
-
-        decidida(&mut room);
-        let aberturas = olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        assert_eq!(aberturas, 1, "entrar numa sala não abriu o áudio");
-        assert!(ha_voz(&voz), "a voz que abriu não ficou no lugar");
-        assert_eq!(voz.abertura(), AberturaDoAudio::Aberto);
-
-        room.leave_voice_room();
-        let aberturas = olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        assert_eq!(aberturas, 0);
-        assert!(
-            !ha_voz(&voz),
-            "sair da sala não fechou o áudio: o microfone continua aberto para \
-             sala nenhuma"
-        );
-        assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
-    }
-
-    /// Os cinco caminhos para dentro e para fora de uma sala, um depois do outro.
-    ///
-    /// Todos são aplicados no `seele-core` — `Room::apply` e os dois métodos de
-    /// assento, pela porta única de `seele_core::assento` —, e a porta da voz só
-    /// vê o efeito no assento confirmado. É o que este teste prende: um caminho
-    /// novo que esquecesse o assento seria pego aqui, e não na tela de alguém com
-    /// o microfone aberto fora de sala.
-    ///
-    /// Cada pedido de entrada vem com a resposta que o servidor dá a ele, na
-    /// ordem em que ela chega: a recusa, quando há, e o `Pong` do `Ping`
-    /// marcado. E entram as três recusas que **não** tiram ninguém da sala
-    /// (C1 da rodada 1): a troca recusada, a troca para uma sala lotada e a
-    /// recusa sem pedido no ar, que é o apelido tomado.
-    #[tokio::test]
-    async fn o_audio_abre_e_fecha_pelos_cinco_caminhos_da_sala() {
-        const OUTRA: VoiceRoomId = VoiceRoomId(2);
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-
-        /// O nome do caminho, o que ele faz com o assento, e se a voz fica
-        /// aberta depois dele.
-        type Caminho = (&'static str, Box<dyn Fn(&mut Room)>, bool);
-        let caminhos: Vec<Caminho> = vec![
-            (
-                "a entrada pedida e aceita",
-                Box::new(|room| {
-                    room.enter_voice_room(SALA);
-                    decidida(room);
-                }),
-                true,
-            ),
-            ("a saída pedida", Box::new(Room::leave_voice_room), false),
-            (
-                "o operador que move para a sala",
-                Box::new(|room| {
-                    room.apply(&ServerMessage::MovedToVoiceRoom { voice_room: SALA });
-                }),
-                true,
-            ),
-            (
-                "a troca para outra sala, recusada",
-                Box::new(|room| {
-                    room.enter_voice_room(OUTRA);
-                    room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
-                    decidida(room);
-                }),
-                true,
-            ),
-            (
-                "a troca para outra sala, lotada",
-                Box::new(|room| {
-                    room.enter_voice_room(OUTRA);
-                    room.apply(&recusa(AlertReason::VoiceRoomFull));
-                    decidida(room);
-                }),
-                true,
-            ),
-            (
-                "uma recusa sem pedido no ar (o apelido tomado)",
-                Box::new(|room| {
-                    room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
-                }),
-                true,
-            ),
-            (
-                "a saída pedida de novo",
-                Box::new(Room::leave_voice_room),
-                false,
-            ),
-            (
-                "a entrada recusada de quem estava fora",
-                Box::new(|room| {
-                    room.enter_voice_room(SALA);
-                    room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
-                    decidida(room);
-                }),
-                false,
-            ),
-            (
-                "a entrada lotada de quem estava fora",
-                Box::new(|room| {
-                    room.enter_voice_room(SALA);
-                    room.apply(&recusa(AlertReason::VoiceRoomFull));
-                    decidida(room);
-                }),
-                false,
-            ),
-            (
-                "a entrada pedida e aceita mais uma vez",
-                Box::new(|room| {
-                    room.enter_voice_room(SALA);
-                    decidida(room);
-                }),
-                true,
-            ),
-            (
-                "a sala apagada",
-                Box::new(|room| {
-                    room.apply(&ServerMessage::VoiceRoomDeleted { voice_room: SALA });
-                }),
-                false,
-            ),
-        ];
-
-        for (caminho, andar, dentro) in caminhos {
-            andar(&mut room);
-            olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-            assert_eq!(
-                ha_voz(&voz),
-                dentro,
-                "depois de «{caminho}» a voz está {}: o áudio não segue a sala por \
-                 este caminho",
-                if ha_voz(&voz) { "aberta" } else { "fechada" }
-            );
-        }
-    }
-
-    /// (b) O que se escolhe fora de sala vale ao entrar: a voz abre muda.
-    ///
-    /// `escolher` é o que `Connection::set_muted` e os irmãos chamam — ver
-    /// `fora_de_sala_a_conexao_guarda_os_controles_e_o_retrato_os_mostra`.
-    #[tokio::test]
-    async fn os_controles_escolhidos_fora_de_sala_valem_ao_entrar() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        voz.escolher(|escolhida| escolhida.mudo = true);
-        voz.escolher(|escolhida| escolhida.isolamento = true);
-        voz.escolher(|escolhida| escolhida.modo = VoiceMode::VoiceActivated);
-        voz.escolher(|escolhida| escolhida.supressao = 0.25);
-        voz.escolher(|escolhida| escolhida.abertura_dbfs = Some(-48.0));
-
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        let viva = voz.lock().expect("a voz");
-        let vestida = viva
-            .as_ref()
-            .and_then(|viva| viva.vestida.lock().expect("o que a voz vestiu").clone());
-        let Some(vestida) = vestida else {
-            panic!(
-                "a voz abriu sem vestir o que a pessoa escolheu fora de sala: ela se \
-                 mutou antes de entrar, o roster a mostra muda, e o microfone está aberto"
-            );
-        };
-        assert!(
-            vestida.mudo,
-            "a voz abriu com o microfone aberto para quem se mutou fora de sala, \
-             enquanto o roster a mostra muda"
-        );
-        assert!(
-            vestida.isolamento,
-            "o Isolamento total pedido fora de sala se perdeu"
-        );
-        assert_eq!(vestida.modo, VoiceMode::VoiceActivated);
-        assert!((vestida.supressao - 0.25).abs() < f32::EPSILON);
-        assert_eq!(vestida.abertura_dbfs, Some(-48.0));
-    }
-
-    /// (c) A volta de quem está numa sala reabre a voz, e a de quem está fora
-    /// não abre nada.
-    ///
-    /// Na ordem do braço `Aviso::Reconectado` de `drive`: o `Room` volta com o
-    /// assento que o motor restabeleceu, a porta reabre a voz viva, e o olhar do
-    /// fim da volta não pode desfazer nada disso.
-    #[tokio::test]
-    async fn a_volta_de_quem_esta_na_sala_reabre_a_voz_e_a_de_quem_esta_fora_nao_abre() {
-        // Na sala, com a voz de pé.
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        assert!(ha_voz(&voz));
-
-        // A volta dentro da carência: o servidor devolve o assento e o `ssrc`
-        // (o mesmo 700, numa sessão nova), e o motor refaz a entrada. O canal de mídia é novo, e
-        // a voz reabre nele.
-        readotar_na_volta(&mut room, &sessao_numero(700, 701), "marcela", Some(SALA));
-        porta.na_volta(&voz, |_velha| entregue(Ok(Ok(voz_de(701)))), nada_abre);
-        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
-
-        assert_eq!(
-            voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc),
-            Some(701),
-            "quem caiu e voltou numa sala ficou sem a voz da conexão nova: o \
-             motor a sentou de novo, e o áudio fechou como se ela tivesse saído"
-        );
-        assert_eq!(voz.abertura(), AberturaDoAudio::Aberto);
-
-        // M3: a sala tem senha, e a entrada refeita sem ela é recusada. O
-        // servidor manteve a pessoa sentada, e a voz continua.
-        room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
-        assert!(
-            ha_voz(&voz),
-            "M3: a entrada refeita numa sala com senha foi recusada, o servidor manteve a \
-             pessoa sentada, e o áudio fechou: surda e muda numa sala em que todos a veem"
-        );
-        assert_eq!(room.current_voice_room, Some(SALA));
-
-        // Fora de sala, sem voz: a volta não abre aparelho nenhum.
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        readotar_na_volta(&mut room, &sessao(701), "marcela", None);
-        porta.na_volta(&voz, |_| panic!("não havia voz para reabrir"), nada_abre);
-        let aberturas = olhar_e_esperar(&mut porta, &voz, &room, 701).await;
-
-        assert_eq!(
-            aberturas, 0,
-            "a volta de quem estava fora de sala abriu o áudio"
-        );
-        assert!(!ha_voz(&voz));
-        assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
-    }
-
-    /// Item 1 do lote V: soltar a tecla de falar durante a reabertura da volta
-    /// fecha a fala na voz nova.
-    ///
-    /// A volta tira a voz do lugar enquanto ela reabre (`PortaDaVoz::na_volta`,
-    /// até o prazo do áudio), e `Voice::reopen` carrega a tecla da velha. A
-    /// janela manda a soltura uma vez só: perdida ali, a voz nova entrava com a
-    /// tecla segura e transmitia até a próxima pressão. `segurar_a_tecla` é o
-    /// que `Connection::set_talking` chama.
-    #[tokio::test]
-    async fn soltar_a_tecla_durante_a_reabertura_da_volta_fecha_a_fala() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        // Ela fala segurando a tecla.
-        voz.segurar_a_tecla(true);
-        assert_eq!(
-            tecla_de(&voz),
-            Some(true),
-            "a tecla apertada com a voz viva não chegou a ela: a pessoa segura a tecla \
-             de falar e ninguém a ouve"
-        );
-
-        // A rede cai e volta: a voz sai do lugar e reabre na conexão nova.
-        readotar_na_volta(&mut room, &sessao_numero(700, 701), "marcela", Some(SALA));
-        porta.na_volta(
-            &voz,
-            |velha| entregue(Ok(Ok(reaberta(&velha, 701)))),
-            nada_abre,
-        );
-        assert!(
-            !ha_voz(&voz),
-            "a voz não saiu do lugar durante a reabertura, e o teste mediu outra coisa"
-        );
-
-        // E solta a tecla no meio da reabertura.
-        voz.segurar_a_tecla(false);
-        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-            .await
-            .expect("a reabertura não chegou");
-        porta.chegou(&voz, aberta, nada_abre);
-
-        assert_eq!(
-            voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc),
-            Some(701),
-            "a voz reaberta na conexão nova não entrou no lugar: quem caiu e voltou fica \
-             sem voz, e a tecla abaixo é medida noutra"
-        );
-        assert_eq!(
-            tecla_de(&voz),
-            Some(false),
-            "a pessoa soltou a tecla de falar durante a reabertura da volta e a voz nova \
-             entrou com ela segura: o microfone transmite até a próxima pressão, com o \
-             roster dizendo que ela fala"
-        );
-
-        // Quem segura a tecla pela volta inteira continua falando na voz nova.
-        voz.segurar_a_tecla(true);
-        porta.na_volta(
-            &voz,
-            |velha| entregue(Ok(Ok(reaberta(&velha, 702)))),
-            nada_abre,
-        );
-        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-            .await
-            .expect("a segunda reabertura não chegou");
-        porta.chegou(&voz, aberta, nada_abre);
-        assert_eq!(
-            tecla_de(&voz),
-            Some(true),
-            "quem segurava a tecla pela volta inteira voltou calado: a voz nova soltou \
-             uma tecla que a pessoa não soltou"
-        );
-    }
-
-    /// Rodada 1 do lote V, achado 1: na volta, a voz velha sai do lugar calada e
-    /// com a tecla solta.
-    ///
-    /// Ela segue viva até a reabertura voltar — a vez do driver e a abertura do
-    /// aparelho —, mandando pelo canal da conexão que caiu, que ninguém fecha e
-    /// que fica de pé até o prazo de ociosidade. Fora do lugar, nenhuma
-    /// escolha a alcança: a soltura e o mudo pedidos durante a reabertura vão
-    /// só para a guardada. É a medida do c6 da revisão: a reaberta chegava a
-    /// `instalar` com a tecla segura, carregada da velha.
-    #[tokio::test]
-    async fn na_volta_a_voz_velha_sai_do_lugar_calada_e_com_a_tecla_solta() {
-        use std::sync::Arc;
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        voz.segurar_a_tecla(true);
-
-        // A volta: a velha vai para a reabertura, e o teste a guarda para olhar.
-        let velha_aqui: Arc<Mutex<Option<Voz>>> = Arc::default();
-        let guardar = Arc::clone(&velha_aqui);
-        readotar_na_volta(&mut room, &sessao_numero(700, 701), "marcela", Some(SALA));
-        porta.na_volta(
-            &voz,
-            move |velha| {
-                let nova = reaberta(&velha, 701);
-                *guardar.lock().expect("a velha") = Some(velha);
-                entregue(Ok(Ok(nova)))
-            },
-            nada_abre,
-        );
-
-        // Durante a reabertura, a pessoa solta a tecla e pede o mudo.
-        voz.segurar_a_tecla(false);
-        voz.escolher(|escolhida| escolhida.mudo = true);
-
-        let velha = velha_aqui.lock().expect("a velha").take();
-        let Some(velha) = velha else {
-            panic!("a volta não entregou a velha à reabertura, e o teste mediu outra coisa");
-        };
-        assert!(
-            !*velha.tecla.lock().expect("a tecla da velha"),
-            "a voz velha seguiu com a tecla segura durante a reabertura: ela transmite pela \
-             conexão que caiu depois de a pessoa soltar a tecla"
-        );
-        assert!(
-            velha
-                .vestida
-                .lock()
-                .expect("o que a velha vestiu")
-                .as_ref()
-                .is_some_and(|vestida| vestida.mudo),
-            "a voz velha seguiu sem mudo durante a reabertura: quem se mutou enquanto ela \
-             reabria continua no ar pela conexão que caiu"
-        );
-
-        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-            .await
-            .expect("a reabertura não chegou");
-        if let Ok(Ok(nova)) = &aberta {
-            assert!(
-                !*nova.tecla.lock().expect("a tecla da reaberta"),
-                "a reaberta chegou a `instalar` com a tecla segura, carregada da velha (c6 \
-                 da revisão)"
-            );
-        }
-        porta.chegou(&voz, aberta, nada_abre);
-        assert_eq!(
-            tecla_de(&voz),
-            Some(false),
-            "a voz que entrou no lugar está com a tecla segura que a pessoa soltou"
-        );
-        let mudo = voz.lock().expect("a voz").as_ref().and_then(|viva| {
-            viva.vestida
-                .lock()
-                .expect("o que a voz vestiu")
-                .as_ref()
-                .map(|vestida| vestida.mudo)
-        });
-        assert_eq!(
-            mudo,
-            Some(true),
-            "o mudo pedido durante a reabertura não chegou à voz que entrou no lugar"
-        );
-    }
-
-    /// Rodada 1 do lote V, achado 2: a tecla guardada não atravessa a saída da
-    /// sala.
-    ///
-    /// A janela perde soltura — numa recarga com a tecla segura, ou num
-    /// `invoke` que falha, porque `segurarFala` grava `falando` e engole o erro.
-    /// Antes do lote, toda voz aberta do zero nascia com a tecla solta; com a
-    /// tecla guardada, a soltura perdida entrava na sala seguinte e o microfone
-    /// abria transmitindo nela. É o c7 da revisão.
-    #[tokio::test]
-    async fn a_tecla_segura_nao_atravessa_a_saida_da_sala() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        // Segura a tecla, e a soltura nunca chega.
-        voz.segurar_a_tecla(true);
-        room.leave_voice_room();
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        assert!(!ha_voz(&voz), "sair da sala não fechou a voz");
-
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
-        assert_eq!(
-            tecla_de(&voz),
-            Some(false),
-            "a soltura que a janela perdeu numa sala entrou na seguinte: o microfone abre \
-             transmitindo, sem a pessoa ter apertado nada nesta sala"
-        );
-
-        // E a pressão no «ABRINDO» da entrada seguinte vem depois de entrar:
-        // continua valendo.
-        room.leave_voice_room();
-        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        porta.olhar(&voz, sala_do_audio(&room), |_| {
-            entregue(Ok(Ok(voz_de(702))))
-        });
-        assert_eq!(
-            voz.abertura(),
-            AberturaDoAudio::Abrindo,
-            "entrar de novo na sala não começou a abrir o áudio: a pessoa volta sem voz"
-        );
-        voz.segurar_a_tecla(true);
-        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-            .await
-            .expect("a abertura não chegou");
-        porta.chegou(&voz, aberta, nada_abre);
-        assert_eq!(
-            tecla_de(&voz),
-            Some(true),
-            "a tecla apertada no «ABRINDO» da sala seguinte foi esquecida: a pessoa segura a \
-             tecla e ninguém a ouve"
-        );
-    }
-
-    /// Item 1 do lote V, a variante: apertar a tecla de falar enquanto a
-    /// primeira abertura está no «ABRINDO» vale quando a voz chega.
-    #[tokio::test]
-    async fn apertar_a_tecla_durante_a_primeira_abertura_vale_quando_a_voz_chega() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        porta.olhar(&voz, Some(SALA), |_| entregue(Ok(Ok(voz_de(700)))));
-        assert_eq!(
-            voz.abertura(),
-            AberturaDoAudio::Abrindo,
-            "entrar na sala não começou a abrir o áudio, e a pressão abaixo não cai no \
-             «ABRINDO»"
-        );
-
-        voz.segurar_a_tecla(true);
-        let aberta = porta.chegada().await;
-        porta.chegou(&voz, aberta, nada_abre);
-
-        assert_eq!(
-            tecla_de(&voz),
-            Some(true),
-            "a pessoa apertou a tecla de falar no «ABRINDO» e a voz abriu com ela solta: \
-             ela segura a tecla e ninguém a ouve até soltar e apertar de novo"
-        );
-    }
-
-    /// Item 1 do lote V, pela conexão: sem voz viva, `set_talking` guarda a
-    /// tecla em vez de jogá-la fora.
-    #[test]
-    fn sem_voz_viva_a_conexao_guarda_a_tecla_de_falar() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(true),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        connection.set_talking(true);
-        assert!(
-            connection.shared.voice.escolhida().tecla_segura,
-            "`set_talking(true)` sem voz viva foi jogado fora: quem aperta a tecla \
-             enquanto a voz abre fala para ninguém"
-        );
-        connection.set_talking(false);
-        assert!(
-            !connection.shared.voice.escolhida().tecla_segura,
-            "`set_talking(false)` sem voz viva foi jogado fora: a voz que abrir \
-             transmite com a tecla solta"
-        );
-    }
-
-    /// A voz de verdade veste cada controle guardado, e segura a tecla de falar.
-    ///
-    /// Os testes acima provam, com a voz de mentira, **quando** a voz veste; o
-    /// que ela veste mora em `impl VozViva for Voice`, que pede placa de som.
-    /// Lido do fonte, campo por campo de `ControlesGuardados`: um campo que o
-    /// `vestir` de verdade esquecesse seria guardado, mostrado na tela e nunca
-    /// posto na voz. Os aparelhos ficam de fora, porque valem ao abrir e não ao
-    /// vestir.
-    #[test]
-    fn a_voz_de_verdade_veste_cada_controle_guardado() {
-        let fonte = include_str!("lib.rs");
-        let programa = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
-        let bloco = |abertura: &str| {
-            programa
-                .split(abertura)
-                .nth(1)
-                .and_then(|resto| resto.split("\n}\n").next())
-                .unwrap_or_else(|| panic!("`{abertura}` sumiu de `lib.rs`"))
-                .to_owned()
-        };
-        let campos: Vec<String> = bloco("struct ControlesGuardados {")
-            .lines()
-            .map(str::trim)
-            .filter(|linha| !linha.starts_with("//"))
-            .filter_map(|linha| linha.split_once(':').map(|(nome, _)| nome.to_owned()))
-            .collect();
-        assert!(
-            campos.len() >= 6,
-            "o guarda não achou os campos de `ControlesGuardados`, e um verde dele não diz \
-             nada: {campos:?}"
-        );
-        let voz = bloco("impl VozViva for Voice {");
-        for campo in campos
-            .iter()
-            .filter(|campo| !["aparelhos", "tecla_segura"].contains(&campo.as_str()))
-        {
-            assert!(
-                voz.contains(&format!("escolhida.{campo}")),
-                "a voz de verdade não veste `{campo}`: a escolha é guardada, a tela a \
-                 mostra, e a voz que abre fica no padrão"
-            );
-        }
-        assert!(
-            voz.contains("self.set_key_held(segura)"),
-            "a voz de verdade não segura a tecla de falar que a porta manda: a tecla \
-             guardada nunca chega ao microfone"
-        );
-    }
-
-    /// M-2 do lote V: o volume e o mudo do som da tela atravessam a saída e a
-    /// entrada na sala.
-    ///
-    /// Moravam só na voz, e com a pendência 52 a voz nasce a cada entrada: sair
-    /// e entrar de novo devolvia o som da transmissão a 100 e audível a quem o
-    /// tinha calado. `escolher_o_som_da_tela` é o que
-    /// `Connection::ajustar_volume_da_tela` e `Connection::calar_a_tela` chamam.
-    #[tokio::test]
-    async fn o_som_da_tela_atravessa_a_saida_e_a_entrada_na_sala() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        voz.escolher_o_som_da_tela(|escolhida| escolhida.volume_da_tela = 0.3)
-            .expect("o volume da tela, com a voz de pé");
-        voz.escolher_o_som_da_tela(|escolhida| escolhida.tela_calada = true)
-            .expect("o mudo da tela, com a voz de pé");
-
-        room.leave_voice_room();
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        assert!(!ha_voz(&voz), "sair da sala não fechou a voz");
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
-
-        let vestida = voz
-            .lock()
-            .expect("a voz")
-            .as_ref()
-            .and_then(|viva| viva.vestida.lock().expect("o que a voz vestiu").clone());
-        let Some(vestida) = vestida else {
-            panic!("a voz da sala não abriu, e este teste mediu outra coisa");
-        };
-        assert!(
-            (vestida.volume_da_tela - 0.3).abs() < f32::EPSILON,
-            "saiu da sala e entrou de novo, e o som da transmissão voltou a {} com a \
-             pessoa o tendo deixado em 0.3",
-            vestida.volume_da_tela
-        );
-        assert!(
-            vestida.tela_calada,
-            "saiu da sala e entrou de novo, e o som da transmissão voltou audível a quem o \
-             tinha calado"
-        );
-    }
-
-    /// M-2 do lote V, pela conexão: sem voz viva — a volta reabrindo, a sala
-    /// abrindo —, o som da tela é guardado, e só a sessão sem áudio o recusa.
-    #[test]
-    fn sem_voz_viva_a_conexao_guarda_o_som_da_tela() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(true),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        assert_eq!(
-            connection.ajustar_volume_da_tela(0.3),
-            Ok(()),
-            "sem voz viva, o volume da tela foi recusado e jogado fora: arrastado durante \
-             a volta, ele se perde"
-        );
-        assert_eq!(
-            connection.calar_a_tela(true),
-            Ok(()),
-            "sem voz viva, o mudo da tela foi recusado e jogado fora"
-        );
-        let escolhida = connection.shared.voice.escolhida();
-        assert!(
-            (escolhida.volume_da_tela - 0.3).abs() < f32::EPSILON && escolhida.tela_calada,
-            "o som da tela aceito sem voz viva não ficou guardado: a voz que abrir toca a \
-             transmissão a 100 e audível"
-        );
-
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let sem_audio = super::Connection {
-            commands,
-            shared: compartilhado(false),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        assert_eq!(
-            sem_audio.ajustar_volume_da_tela(0.3),
-            Err(crate::ConnectionError::NotConnected),
-            "numa sessão sem áudio o volume da tela foi aceito, e nenhuma voz vai tocá-lo"
-        );
-    }
-
-    /// Achado 6 da revisão do lote V: sem voz viva, `som_da_tela` mostra o que
-    /// ficou guardado.
-    ///
-    /// O M-2 passou a gravar o som da tela sem voz, e `som_da_tela` continuava
-    /// `None` ali: a janela relê depois de SILENCIAR (`tela-chamada.js`,
-    /// `desenharSomDoPalco`), não acha nada, e o botão não muda — enquanto a voz
-    /// que abrir depois abre calada. A sessão sem áudio continua `None`, como
-    /// em `controles_da_voz`.
-    #[test]
-    fn sem_voz_viva_o_som_da_tela_mostra_o_que_ficou_guardado() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(true),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        connection
-            .calar_a_tela(true)
-            .expect("o mudo da tela, sem voz");
-        assert_eq!(
-            connection.som_da_tela(),
-            Some(super::SomDaTela {
-                volume: 1.0,
-                calada: true
-            }),
-            "SILENCIAR sem voz viva gravou o mudo da tela, e o botão relê nada: ele segue \
-             dizendo SILENCIAR, e a voz que abrir depois abre calada"
-        );
-        connection
-            .ajustar_volume_da_tela(0.3)
-            .expect("o volume da tela, sem voz");
-        assert_eq!(
-            connection.som_da_tela(),
-            Some(super::SomDaTela {
-                volume: 0.3,
-                calada: true
-            }),
-            "o volume da tela guardado sem voz viva não chega à janela: o controle volta \
-             ao que era, e a voz abre no guardado"
-        );
-
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let sem_audio = super::Connection {
-            commands,
-            shared: compartilhado(false),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        assert_eq!(
-            sem_audio.som_da_tela(),
-            None,
-            "numa sessão sem áudio o som da tela aparece para ajustar, e nenhuma voz vai \
-             tocá-lo"
-        );
-    }
-
-    /// Achado 6, os dois de acordo: o botão que a janela desenha sem voz e a voz
-    /// que abre depois dizem o mesmo som da tela.
-    #[tokio::test]
-    async fn o_botao_sem_voz_e_a_voz_que_abre_dizem_o_mesmo_som_da_tela() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        voz.escolher_o_som_da_tela(|escolhida| escolhida.tela_calada = true)
-            .expect("o mudo da tela, fora de sala");
-        voz.escolher_o_som_da_tela(|escolhida| escolhida.volume_da_tela = 0.3)
-            .expect("o volume da tela, fora de sala");
-        let botao = voz.som_da_tela_escolhido();
-
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        let vestida = voz.lock().expect("a voz").as_ref().and_then(|viva| {
-            viva.vestida
-                .lock()
-                .expect("o que a voz vestiu")
-                .as_ref()
-                .map(|vestida| super::SomDaTela {
-                    volume: vestida.volume_da_tela,
-                    calada: vestida.tela_calada,
-                })
-        });
-        assert!(
-            vestida.is_some(),
-            "a voz da sala não abriu, e este teste mediu outra coisa"
-        );
-        assert_eq!(
-            botao, vestida,
-            "o botão que a janela desenha sem voz e a voz que abre depois discordam do som \
-             da tela: a pessoa vê SILENCIAR e a transmissão abre calada"
-        );
-    }
-
-    /// Uma abertura em curso na hora da volta abria sobre a conexão que caiu, e
-    /// recomeça na nova.
-    #[tokio::test]
-    async fn a_abertura_em_curso_na_volta_recomeca_na_conexao_nova() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        porta.olhar(&voz, Some(SALA), |_| {
-            Box::pin(std::future::pending::<Aberta<Voz>>())
-        });
-        assert_eq!(voz.abertura(), AberturaDoAudio::Abrindo);
-
-        let mut recomecou = false;
-        porta.na_volta(
-            &voz,
-            |_| panic!("não havia voz viva para reabrir"),
-            |_| {
-                recomecou = true;
-                entregue(Ok(Ok(voz_de(701))))
-            },
-        );
-        assert!(
-            recomecou,
-            "a abertura que corria sobre a conexão que caiu não recomeçou na nova"
-        );
-        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-            .await
-            .expect("a abertura recomeçada não chegou");
-        porta.chegou(&voz, aberta, nada_abre);
-        assert_eq!(
-            voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc),
-            Some(701)
-        );
-    }
-
-    /// Um aparelho escolhido enquanto a voz abria vale: a abertura que chega com
-    /// o pedido velho recomeça com o novo.
-    #[tokio::test]
-    async fn o_aparelho_escolhido_enquanto_a_voz_abre_nao_se_perde() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        porta.olhar(&voz, Some(SALA), |_| entregue(Ok(Ok(voz_de(1)))));
-
-        voz.guardar_aparelho(super::Lado::Entrada, Some("fone".into()));
-
-        let aberta = porta.chegada().await;
-        let mut pedido = None;
-        porta.chegou(&voz, aberta, |pedidos| {
-            pedido = Some(pedidos.clone());
-            entregue(Ok(Ok(voz_de(2))))
-        });
-        assert_eq!(
-            pedido.and_then(|pedidos| pedidos.capture),
-            Some("fone".to_owned()),
-            "a voz que abriu no microfone de antes ficou no lugar: a tela diz \
-             ESCOLHIDO num e EM USO noutro"
-        );
-        assert!(!ha_voz(&voz), "a voz do pedido velho ficou no lugar");
-        let aberta = porta.chegada().await;
-        porta.chegou(&voz, aberta, nada_abre);
-        assert_eq!(
-            voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc),
-            Some(2)
-        );
-    }
-
-    /// M-b: quem confere o aparelho é `instalar`, com o cadeado da voz preso.
-    ///
-    /// A corrida em si — uma troca entre a conferência e o cadeado — não tem
-    /// como ser forçada num teste sem uma costura no meio. O que se prende aqui
-    /// é que a conferência mora dentro de `instalar`: uma voz aberta com os
-    /// aparelhos de antes volta no `Err`, e o lugar fica vazio.
-    #[test]
-    fn instalar_recusa_a_voz_aberta_com_os_aparelhos_de_antes() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let pedidos = voz.escolhida().aparelhos;
-        voz.guardar_aparelho(super::Lado::Entrada, Some("fone".into()));
-
-        let devolvida = voz.instalar(voz_de(1), &pedidos, Origem::Nova);
-
-        assert!(
-            devolvida.is_err(),
-            "`instalar` pôs no lugar uma voz aberta no microfone de antes da escolha"
-        );
-        assert!(!ha_voz(&voz));
-        assert_eq!(
-            voz.instalar(voz_de(2), &voz.escolhida().aparelhos, Origem::Nova)
-                .map_err(|_| ()),
-            Ok(()),
-            "a voz aberta com os aparelhos de agora não entrou no lugar"
-        );
-        assert!(ha_voz(&voz));
-    }
-
-    /// O prazo vencido e o aparelho recusado têm estados próprios, e a sala
-    /// segue.
-    #[tokio::test]
-    async fn o_audio_que_nao_abre_deixa_o_estado_dito() {
-        for (aberta, estado) in [
-            (Err(super::Atraso), AberturaDoAudio::NaoAbriuNoPrazo),
-            (
-                Ok(Err("sem microfone".to_owned())),
-                AberturaDoAudio::SemAparelho,
-            ),
-        ] {
-            let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-            let mut porta = PortaDaVoz::nova();
-            porta.olhar(&voz, Some(SALA), move |_| entregue(aberta));
-            let chegou = porta.chegada().await;
-            porta.chegou(&voz, chegou, nada_abre);
-
-            assert!(!ha_voz(&voz));
-            assert_eq!(
-                voz.abertura(),
-                estado,
-                "o áudio não abriu e o estado não diz por quê: a tela fica sem a frase"
-            );
-
-            // E sair da sala volta a «fora de sala», sem frase nenhuma.
-            porta.olhar(&voz, None, nada_abre);
-            assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
-        }
-    }
-
-    /// Uma sessão que entrou sem áudio não abre aparelho em sala nenhuma.
-    #[test]
-    fn a_sessao_sem_audio_nao_abre_aparelho_na_sala() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(false, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        porta.olhar(&voz, Some(SALA), nada_abre);
-        assert_eq!(voz.abertura(), AberturaDoAudio::SemAparelho);
-    }
-
-    /// Um `Shared` sem voz de pé, de uma sessão que pediu áudio ou não.
-    fn compartilhado(quer_audio: bool) -> std::sync::Arc<super::Shared> {
-        use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8};
-        std::sync::Arc::new(super::Shared {
-            caminho_medido: AtomicU32::new(0),
-            link_battery: AtomicBool::new(false),
-            link_seconds: AtomicU64::new(0),
-            link_attempts: AtomicU32::new(0),
-            messages_revision: AtomicU64::new(0),
-            fora_do_ar_revision: AtomicU64::new(0),
-            icon_revision: AtomicU64::new(0),
-            person_icons_revision: AtomicU64::new(0),
-            perfis: crate::perfis::DoPerfil::negociado(seele_core::PROTOCOL_VERSION),
-            room: Mutex::new(Room::new()),
-            listeners: Mutex::new(Vec::new()),
-            sessao: super::SessaoId::nova(),
-            geracao: std::sync::atomic::AtomicU64::new(1),
-            voice: VozDaSala::nova(quer_audio, DeviceChoice::default()),
-            media: Mutex::new(None),
-            nickname: Mutex::new("marcela".into()),
-            link_state: AtomicU8::new(0),
-            rtt_micros: AtomicU64::new(0),
-            jitter_de_chegada_micros: AtomicU64::new(0),
-            caminho: Mutex::new(None),
-            impressao_do_servidor: Mutex::new(None),
-            signal: AtomicU8::new(0),
-            running: AtomicBool::new(true),
-            pending_weights: Mutex::new(Vec::new()),
-            tuneis: Mutex::new(crate::TabelaDeTuneis::default()),
-            limites_da_tela: Mutex::new(None),
-            tela_escolhida: Mutex::new(super::EscolhaDeTela::NinguemEscolheu),
-            tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
-            fontes_de_tela: Mutex::new(Vec::new()),
-        })
-    }
-
-    /// M-e: numa sessão que entrou sem áudio, `controles_da_voz` não responde,
-    /// e a casca lê os controles do disco, como sempre leu.
-    ///
-    /// Os guardados da sessão são os padrões — nada os aplica a voz nenhuma, e
-    /// nenhuma tela os muda —, e devolvê-los escondia da configuração a escolha
-    /// gravada (`controles_da_voz`, em `main.rs`, cai no disco só com `None`).
-    #[test]
-    fn a_sessao_sem_audio_deixa_os_controles_da_voz_para_o_disco() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(false),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        assert_eq!(
-            connection.controles_da_voz(),
-            None,
-            "a sessão sem áudio respondeu os controles com os padrões dela, e a tela de \
-             configuração deixou de mostrar o que está gravado no disco"
-        );
-    }
-
-    /// Fora de sala, cada controle da conexão é guardado, nenhum é recusado, e
-    /// o retrato mostra o escolhido.
-    ///
-    /// Antes da pendência 52 a voz estava sempre de pé, e estes comandos falavam
-    /// com ela. Sem ela: o mudo, o isolamento, o modo, a supressão e a
-    /// sensibilidade pulavam calados; `controles_da_voz` devolvia `None`; e
-    /// trocar o microfone devolvia `NoAudioDevice` — que a casca escreve como
-    /// «o microfone sumiu» a quem só ainda não entrou numa sala.
-    #[test]
-    fn fora_de_sala_a_conexao_guarda_os_controles_e_o_retrato_os_mostra() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(true),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-
-        connection.set_muted(true).expect("o mudo fora de sala");
-        connection
-            .set_total_isolation(true)
-            .expect("o isolamento fora de sala");
-        connection.set_voice_mode(crate::VoiceMode::VoiceActivated);
-        connection.set_supressao_de_ruido(0.25);
-        connection.set_abertura_da_voz_dbfs(Some(-48.0));
-        assert_eq!(
-            connection.set_capture_device(Some("fone".into())),
-            Ok(()),
-            "escolher o microfone fora de sala foi recusado: a casca diz que o \
-             aparelho sumiu a quem só ainda não entrou numa sala"
-        );
-        assert_eq!(connection.set_playback_device(Some("caixa".into())), Ok(()));
-
-        let retrato = connection.snapshot();
-        assert!(
-            retrato.muted && retrato.total_isolation,
-            "o retrato esqueceu o mudo e o isolamento escolhidos fora de sala: o \
-             botão volta solto na tela, e a voz abre sem eles"
-        );
-        assert_eq!(retrato.voice_mode, crate::VoiceMode::VoiceActivated);
-        assert!(!retrato.audio_available);
-        assert_eq!(retrato.abertura_do_audio, AberturaDoAudio::ForaDeSala);
-
-        let Some(controles) = connection.controles_da_voz() else {
-            panic!("fora de sala não há controles de voz para a tela desenhar");
-        };
-        assert!((controles.supressao - 0.25).abs() < f32::EPSILON);
-        assert!((controles.abertura_dbfs + 48.0).abs() < f32::EPSILON);
-        assert!(controles.abertura_escolhida);
-
-        let escolhida = connection.shared.voice.escolhida();
-        assert_eq!(escolhida.aparelhos.capture.as_deref(), Some("fone"));
-        assert_eq!(escolhida.aparelhos.playback.as_deref(), Some("caixa"));
-    }
-
-    /// F1-microfone-macos: o silêncio digital atravessa a ponte na telemetria,
-    /// pelo nome que a tela lê, e falso sem voz.
-    ///
-    /// A tela o lê como `snapshot.telemetry.microfone_entrega_silencio_digital`
-    /// (`desenharAberturaDoAudio`). Um nome que mudasse deste lado calaria a
-    /// frase do macOS sem erro em lugar nenhum: o campo chegaria `undefined`.
-    #[test]
-    fn o_silencio_digital_chega_na_telemetria_pelo_nome_que_a_tela_le() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(true),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        let retrato = serde_json::to_value(connection.snapshot()).expect("o retrato vira JSON");
-        assert_eq!(
-            retrato
-                .get("telemetry")
-                .and_then(|telemetria| telemetria.get("microfone_entrega_silencio_digital")),
-            Some(&serde_json::Value::Bool(false)),
-            "o retrato não leva `telemetry.microfone_entrega_silencio_digital`, ou o leva \
-             verdadeiro sem voz nenhuma: a frase do macOS nunca acende, ou acende fora de \
-             sala"
-        );
-    }
-
-    /// E com a voz de pé, o retrato lê o silêncio digital da telemetria dela.
-    ///
-    /// Lido do fonte porque o caminho com voz pede uma [`Voice`] de verdade, e
-    /// ela pede placa de som. Sem esta linha, um `false` escrito no lugar da
-    /// leitura deixava o teste de cima verde e a frase do macOS apagada para
-    /// sempre.
-    ///
-    /// [`Voice`]: seele_core::Voice
-    #[test]
-    fn o_retrato_com_voz_le_o_silencio_digital_da_telemetria_dela() {
-        let fonte = include_str!("lib.rs");
-        let programa = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
-        let Some(corpo) = programa
-            .split("fn audio_state(&self) -> AudioState {")
-            .nth(1)
-            .and_then(|resto| resto.split("\n    }\n").next())
-        else {
-            panic!("`Connection::audio_state` sumiu, e com ela o retrato da voz");
-        };
-        assert!(
-            corpo.contains("silencio_digital: telemetry.local.microfone_entrega_silencio_digital"),
-            "com a voz de pé, o retrato não lê o silêncio digital que o laço de voz \
-             mediu: o produto sabe que o microfone entrega zero e não conta"
-        );
-    }
-
-    /// Acréscimo A do lote I-b: a supressão e a sensibilidade gravadas em disco
-    /// valem na primeira abertura do áudio.
-    ///
-    /// A casca aplicava só o modo logo depois do `connect`; a supressão e a
-    /// sensibilidade do disco ficavam de fora, e a sessão começava nos padrões
-    /// até a pessoa mexer — com a tela de configuração, que lê o disco fora de
-    /// sessão, mostrando outra coisa. `vestir_com_o_disco` é o que `main.rs`
-    /// chama ali (por [`super::Connection::vestir_as_escolhas_gravadas`]), e o
-    /// guarda `a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect`, em
-    /// `frontend.rs`, prende a chamada.
-    #[tokio::test]
-    async fn a_supressao_e_a_sensibilidade_gravadas_valem_na_primeira_abertura() {
-        use seele_core::preferences::Preferences;
-
-        let pasta = std::env::temp_dir().join(format!(
-            "seele-ffi-escolhas-gravadas-{}",
-            std::process::id()
-        ));
-        let arquivo = pasta.join("preferencias");
-        {
-            let mut ajustes = Preferences::open(arquivo.clone()).expect("as preferências");
-            ajustes
-                .set_supressao_de_ruido(Some(0.25))
-                .expect("grava a supressão");
-            ajustes
-                .set_abertura_da_voz_dbfs(Some(-48.0))
-                .expect("grava a sensibilidade");
-            ajustes
-                .set_voice_mode(Some(VoiceMode::VoiceActivated))
-                .expect("grava o modo");
-        }
-        // Lidas de novo do disco, como a casca as lê a cada conexão.
-        let do_disco = Preferences::open(arquivo).expect("relê as preferências");
-        let _ = std::fs::remove_dir_all(&pasta);
-
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        // O aperto de mão, e logo depois o que a casca faz com o disco.
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-        super::vestir_com_o_disco(&voz, &do_disco);
-
-        room.enter_voice_room(SALA);
-        decidida(&mut room);
-        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
-
-        let vestida = voz
-            .lock()
-            .expect("a voz")
-            .as_ref()
-            .and_then(|viva| viva.vestida.lock().expect("o que a voz vestiu").clone());
-        let Some(vestida) = vestida else {
-            panic!("a voz da sala não abriu, e este teste mediu outra coisa");
-        };
-        assert!(
-            (vestida.supressao - 0.25).abs() < f32::EPSILON,
-            "a supressão gravada em disco não valeu na primeira abertura: a pessoa a \
-             baixou para 25% e a sessão abre com a redução inteira (vestiu {})",
-            vestida.supressao
-        );
-        assert_eq!(
-            vestida.abertura_dbfs,
-            Some(-48.0),
-            "a sensibilidade gravada em disco não valeu na primeira abertura: a ativação \
-             por voz abre no padrão, e não onde a pessoa a deixou"
-        );
-        assert_eq!(
-            vestida.modo,
-            VoiceMode::VoiceActivated,
-            "o modo gravado em disco deixou de valer no connect"
-        );
-    }
-
-    // ---- o volume de cada pessoa (F1-vazamento, passo 3 (2), e acréscimo B) ----
-
-    /// A Rafa sentada na sala, com o `ssrc` que o servidor deu a ela nesta
-    /// conexão dela.
-    fn rafa_na_sala(ssrc: u32) -> ServerMessage {
-        ServerMessage::PersonJoined {
-            voice_room: SALA,
-            profile: PersonProfile {
-                id: PersonId(11),
-                nickname: "rafa".into(),
-                roles: Vec::new(),
-                material_e2ee: None,
-            },
-            ssrc: Ssrc(ssrc),
-        }
-    }
-
-    /// O ganho que a voz viva tem para este número, se ela existe e tem um.
-    fn ganho_de(voz: &VozDaSala<Voz>, ssrc: u32) -> Option<f32> {
-        voz.lock().expect("a voz").as_ref().and_then(|viva| {
-            viva.ganhos
-                .lock()
-                .expect("os ganhos da voz")
-                .get(&ssrc)
-                .copied()
-        })
-    }
-
-    /// Uma volta do laço de `drive`, na ordem dele: o olhar do fim da volta, a
-    /// chegada de uma abertura quando ela começou — o braço do `select!` da
-    /// volta seguinte —, e os volumes, no fim de cada volta.
-    async fn volta_do_laco(porta: &mut PortaDaVoz<Voz>, voz: &VozDaSala<Voz>, room: &Mutex<Room>) {
-        let sala = sala_do_audio(&room.lock().expect("a sala"));
-        porta.olhar(voz, sala, |_| entregue(Ok(Ok(voz_de(700)))));
-        if voz.abertura() == AberturaDoAudio::Abrindo {
-            let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-                .await
-                .expect("a abertura começou e não chegou");
-            porta.chegou(voz, aberta, nada_abre);
-        }
-        voz.seguir_os_volumes(room);
-    }
-
-    /// A sala da Marcela, com a Rafa sentada nela pelo número `ssrc`.
-    fn sala_com_a_rafa(ssrc: u32) -> Mutex<Room> {
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.apply(&rafa_na_sala(ssrc));
-        Mutex::new(room)
-    }
-
-    /// (b) do passo 3: o volume é por apelido, e vale pelo `ssrc` de agora.
-    ///
-    /// A Rafa caiu e voltou, ou trocou de rede: o servidor a reapresenta com um
-    /// número novo. A voz só conhece números, e o volume de 150 que a Marcela
-    /// escolheu para ela tem de ir para o número novo.
-    #[test]
-    fn o_volume_volta_quando_o_ssrc_muda() {
-        let room = sala_com_a_rafa(900);
-        let volumes = HashMap::from([("rafa".to_owned(), 150_u16)]);
-        assert_eq!(
-            ganhos_a_aplicar(&volumes, &room.lock().expect("a sala")),
-            vec![(Ssrc(900), 1.5)],
-            "o volume de 150 da Rafa não virou o ganho 1.5 no número dela"
-        );
-
-        room.lock().expect("a sala").apply(&rafa_na_sala(901));
-        assert_eq!(
-            ganhos_a_aplicar(&volumes, &room.lock().expect("a sala")),
-            vec![(Ssrc(901), 1.5)],
-            "a Rafa voltou com outro `ssrc` e o volume dela ficou no número velho: a \
-             janela mostra 150 e ela toca a 100"
-        );
-
-        // Quem não está aqui não ganha número nenhum, e o nome não depende de
-        // maiúscula, como em `Room::ssrc_of`.
-        let volumes = HashMap::from([("RAFA".to_owned(), 50_u16), ("lia".to_owned(), 200)]);
-        assert_eq!(
-            ganhos_a_aplicar(&volumes, &room.lock().expect("a sala")),
-            vec![(Ssrc(901), 0.5)],
-            "o volume de quem não está aqui virou ganho de alguém, ou o apelido passou a \
-             depender de maiúscula"
-        );
-    }
-
-    /// O segundo teste do (b): o laço aplica os volumes **na abertura** da voz
-    /// e **na troca** de `ssrc`, e só quando algo mudou.
-    ///
-    /// `volta_do_laco` é a volta de `drive`; o guarda
-    /// `os_volumes_sao_seguidos_no_fim_de_cada_volta_de_drive` prende que
-    /// `drive` faz o mesmo.
-    #[tokio::test]
-    async fn o_laco_aplica_os_volumes_na_abertura_e_na_troca_de_ssrc() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let room = sala_com_a_rafa(900);
-        volta_do_laco(&mut porta, &voz, &room).await;
-
-        // Fora de sala: só grava.
-        voz.guardar_volume("rafa", 150);
-        assert!(
-            !voz.seguir_os_volumes(&room),
-            "fora de sala não há voz, e mesmo assim algum ganho foi posto"
-        );
-
-        {
-            let mut sala = room.lock().expect("a sala");
-            sala.enter_voice_room(SALA);
-            decidida(&mut sala);
-        }
-        volta_do_laco(&mut porta, &voz, &room).await;
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.5),
-            "a voz abriu e o volume escolhido fora de sala não foi posto nela: a janela \
-             diz 150 e a Rafa toca a 100"
-        );
-        assert!(
-            !voz.seguir_os_volumes(&room),
-            "nada mudou e os ganhos foram postos de novo: o laço reescreve a voz a cada \
-             volta"
-        );
-
-        room.lock().expect("a sala").apply(&rafa_na_sala(901));
-        volta_do_laco(&mut porta, &voz, &room).await;
-        assert_eq!(
-            ganho_de(&voz, 901),
-            Some(1.5),
-            "a Rafa voltou com outro `ssrc` e o laço não levou o volume dela para o \
-             número novo"
-        );
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.0),
-            "o número velho da Rafa ficou com o ganho dela: o volume é da pessoa, e um \
-             servidor que reusa o número o daria a outra"
-        );
-    }
-
-    /// Acréscimo B do lote I-b (o M-a da revisão do I-a): os volumes voltam ao
-    /// reabrir a voz.
-    ///
-    /// Com a pendência 52, quem sai da sala e entra de novo recebe uma voz nova,
-    /// com ganho 1.0, e a janela continuava mostrando o valor de antes.
-    #[tokio::test]
-    async fn o_volume_volta_quando_se_sai_da_sala_e_entra_de_novo() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let room = sala_com_a_rafa(900);
-        volta_do_laco(&mut porta, &voz, &room).await;
-        {
-            let mut sala = room.lock().expect("a sala");
-            sala.enter_voice_room(SALA);
-            decidida(&mut sala);
-        }
-        volta_do_laco(&mut porta, &voz, &room).await;
-
-        // Dentro da sala, como `Connection::set_volume` faz: grava e aplica.
-        voz.guardar_volume("rafa", 150);
-        voz.seguir_os_volumes(&room);
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.5),
-            "dentro da sala, o volume escolhido não chegou à voz viva"
-        );
-
-        room.lock().expect("a sala").leave_voice_room();
-        volta_do_laco(&mut porta, &voz, &room).await;
-        assert!(!ha_voz(&voz), "sair da sala não fechou a voz");
-
-        {
-            let mut sala = room.lock().expect("a sala");
-            sala.enter_voice_room(SALA);
-            decidida(&mut sala);
-        }
-        volta_do_laco(&mut porta, &voz, &room).await;
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.5),
-            "saiu da sala e entrou de novo, e a voz nova abriu com a Rafa a 100 enquanto \
-             a janela mostra 150"
-        );
-    }
-
-    /// Item 2 do lote V: depois de uma volta, o número que mudou de dono volta
-    /// a 1.0, e o volume vai com a pessoa para o número novo.
-    ///
-    /// A volta com o assento resgatado reinstala a voz que `Voice::reopen`
-    /// abriu, com os ganhos por número da velha. Enquanto ela reabre, a
-    /// fotografia de ocupação chega: o 900, que era da Rafa, é da Bia, e a Rafa
-    /// está no 901. `instalar` zerava os aplicados, e `seguir_os_volumes` não
-    /// sabia que o 900 tinha 1.5: medido pela revisão, `900=Some(1.5)
-    /// 901=Some(1.5)` — a Bia a 150 com a janela dizendo 100.
-    ///
-    /// O `seele-server` de hoje não dá um número a outra pessoa no mesmo
-    /// processo (`Registry::issue` só conta para a frente), e depois de um
-    /// reinício não há resgate: o olhar do fim da volta fecha a voz, e a que
-    /// abre é nova. O fio não promete nenhuma das duas coisas.
-    #[tokio::test]
-    async fn depois_da_volta_o_numero_que_mudou_de_dono_volta_a_um() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let room = sala_com_a_rafa(900);
-        {
-            let mut sala = room.lock().expect("a sala");
-            sala.enter_voice_room(SALA);
-            decidida(&mut sala);
-        }
-        volta_do_laco(&mut porta, &voz, &room).await;
-        voz.guardar_volume("rafa", 150);
-        voz.seguir_os_volumes(&room);
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.5),
-            "antes da volta, o volume da Rafa não chegou à voz"
-        );
-
-        // O braço `Reconectado`, com o assento resgatado, e o fim da volta dele.
-        readotar_na_volta(
-            &mut room.lock().expect("a sala"),
-            &sessao_numero(700, 701),
-            "marcela",
-            Some(SALA),
-        );
-        porta.na_volta(
-            &voz,
-            |velha| entregue(Ok(Ok(reaberta(&velha, 701)))),
-            nada_abre,
-        );
-        let sala = sala_do_audio(&room.lock().expect("a sala"));
-        porta.olhar(&voz, sala, nada_abre);
-        voz.seguir_os_volumes(&room);
-
-        // A fotografia de ocupação chega enquanto a voz reabre.
-        {
-            let mut sala = room.lock().expect("a sala");
-            sala.apply(&ServerMessage::PersonJoined {
-                voice_room: SALA,
-                profile: PersonProfile {
-                    id: PersonId(12),
-                    nickname: "bia".into(),
-                    roles: Vec::new(),
-                    material_e2ee: None,
-                },
-                ssrc: Ssrc(900),
-            });
-            sala.apply(&rafa_na_sala(901));
-        }
-        voz.seguir_os_volumes(&room);
-
-        // A reabertura chega, e o fim da volta segue os volumes.
-        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
-            .await
-            .expect("a reabertura não chegou");
-        porta.chegou(&voz, aberta, nada_abre);
-        voz.seguir_os_volumes(&room);
-        let ssrc = voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc);
-        assert_eq!(
-            ssrc,
-            Some(701),
-            "a voz no lugar não é a reaberta, e o teste mediu outra coisa"
-        );
-
-        assert_eq!(
-            ganho_de(&voz, 901),
-            Some(1.5),
-            "a Rafa voltou no 901 e o volume dela não foi junto: a janela diz 150 e ela \
-             toca a 100"
-        );
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.0),
-            "depois da volta, o 900 passou a ser da Bia e ficou com o volume que a Marcela \
-             deu à Rafa: a Bia toca a 150 com a janela dizendo 100"
-        );
-    }
-
-    /// M-4 da rodada 1 do lote I-b: quem troca de nome leva o volume junto.
-    ///
-    /// O volume é por apelido, e é isso que o faz sobreviver à volta, quando a
-    /// pessoa ganha outra sessão e outro `ssrc`. Mas o apelido muda: o servidor
-    /// avisa com `PersonRenamed { person, nickname }`, e o `Room` sabe o nome de
-    /// antes pelo mesmo `PersonId`. Antes, a Rafa que virava Rafael voltava a
-    /// 1,0, e a entrada «rafa» ficava guardada para quem pegasse o apelido
-    /// depois. A troca passa por `dobrar_no_room`, que é o que `fold` chama.
-    #[tokio::test]
-    async fn quem_troca_de_nome_leva_o_volume_junto() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let room = sala_com_a_rafa(900);
-        {
-            let mut sala = room.lock().expect("a sala");
-            sala.enter_voice_room(SALA);
-            decidida(&mut sala);
-        }
-        volta_do_laco(&mut porta, &voz, &room).await;
-        voz.guardar_volume("rafa", 150);
-        voz.seguir_os_volumes(&room);
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.5),
-            "antes da troca de nome, o volume da Rafa não chegou à voz"
-        );
-
-        super::dobrar_no_room(
-            &room,
-            &voz,
-            &ServerMessage::PersonRenamed {
-                person: PersonId(11),
-                nickname: "rafael".into(),
-            },
-        );
-        volta_do_laco(&mut porta, &voz, &room).await;
-
-        assert_eq!(
-            ganho_de(&voz, 900),
-            Some(1.5),
-            "a Rafa trocou de nome para Rafael e o volume dela voltou a 1,0, com a janela \
-             mostrando 150"
-        );
-        assert_eq!(
-            voz.volumes(),
-            HashMap::from([("rafael".to_owned(), 150)]),
-            "o volume não mudou de chave: «rafa» continua guardado, e vale para quem pegar \
-             o apelido depois"
-        );
-    }
-
-    /// Rodada 2 do lote I-b: quem troca para um nome que tem volume guardado de
-    /// outra pessoa não herda esse volume.
-    ///
-    /// A Rafa, sem volume nenhum, vira «lia», e há `lia: 50` de uma Lia que saiu.
-    /// A troca não mexia em nada quando quem trocou não tinha volume, e o 50 da
-    /// outra Lia passava a valer para a Rafa — contra o que `renomear_volume`
-    /// diz de si: é da pessoa que trocou que o servidor está falando.
-    #[tokio::test]
-    async fn quem_troca_para_um_nome_com_volume_velho_nao_herda_o_volume() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        let room = sala_com_a_rafa(900);
-        {
-            let mut sala = room.lock().expect("a sala");
-            sala.enter_voice_room(SALA);
-            decidida(&mut sala);
-        }
-        volta_do_laco(&mut porta, &voz, &room).await;
-        // O volume de uma Lia que já saiu, e nenhum para a Rafa.
-        voz.guardar_volume("lia", 50);
-
-        super::dobrar_no_room(
-            &room,
-            &voz,
-            &ServerMessage::PersonRenamed {
-                person: PersonId(11),
-                nickname: "lia".into(),
-            },
-        );
-        volta_do_laco(&mut porta, &voz, &room).await;
-
-        assert_eq!(
-            ganho_de(&voz, 900).unwrap_or(1.0),
-            1.0,
-            "a Rafa trocou de nome para «lia» e passou a tocar com o volume que alguém deu \
-             a outra Lia, que já saiu"
-        );
-        assert!(
-            voz.volumes().is_empty(),
-            "o volume da outra Lia continua guardado sob o nome que agora é da Rafa: {:?}",
-            voz.volumes()
-        );
-    }
-
-    /// E pelo caminho de verdade: `fold`, o que `drive` chama a cada mensagem.
-    #[test]
-    fn a_troca_de_nome_que_o_servidor_anuncia_move_o_volume_pela_conexao() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(true),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        {
-            let mut room = connection.shared.room.lock().expect("a sala");
-            room.adopt(&sessao(700), "marcela");
-            room.apply(&rafa_na_sala(900));
-        }
-        connection
-            .set_volume("rafa".into(), 150)
-            .expect("o volume da Rafa");
-
-        super::fold(
-            &connection.shared,
-            &ServerMessage::PersonRenamed {
-                person: PersonId(11),
-                nickname: "rafael".into(),
-            },
-        );
-
-        assert_eq!(
-            connection.volumes_locais(),
-            HashMap::from([("rafael".to_owned(), 150)]),
-            "`fold` dobrou a troca de nome no `Room` e deixou o volume no nome velho: a \
-             janela desenha o Rafael a 100"
-        );
-        let ganhos = ganhos_a_aplicar(
-            &connection.volumes_locais(),
-            &connection.shared.room.lock().expect("a sala"),
-        );
-        assert_eq!(
-            ganhos,
-            vec![(Ssrc(900), 1.5)],
-            "depois da troca de nome, o volume não chega mais ao número da pessoa"
-        );
-    }
-
-    /// F1-vazamento, passo 3 (2): o volume mora na conexão, e `volumes_locais`
-    /// o devolve.
-    ///
-    /// Na conexão, e não na janela: uma conexão nova nasce sem volume nenhum, e
-    /// o 150 que alguém deu à Rafa de um servidor não passa à Rafa de outro.
-    /// Fora de sala o volume só grava, como o mudo e os aparelhos.
-    #[test]
-    fn o_volume_mora_na_conexao_e_volumes_locais_o_devolve() {
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = super::Connection {
-            commands,
-            shared: compartilhado(true),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        {
-            let mut room = connection.shared.room.lock().expect("a sala");
-            room.adopt(&sessao(700), "marcela");
-            room.apply(&rafa_na_sala(900));
-        }
-        assert!(
-            connection.volumes_locais().is_empty(),
-            "uma conexão nova já nasce com volumes: eles vieram de outra sessão"
-        );
-
-        assert_eq!(
-            connection.set_volume("rafa".into(), 150),
-            Ok(()),
-            "o volume pedido fora de sala foi recusado: a pessoa escolhe antes de entrar \
-             e a escolha some"
-        );
-        assert_eq!(
-            connection.volumes_locais(),
-            HashMap::from([("rafa".to_owned(), 150)]),
-            "o volume escolhido não chega à janela por `volumes_locais`"
-        );
-        assert_eq!(
-            connection.set_volume("ninguém".into(), 50),
-            Err(crate::ConnectionError::UnknownPerson),
-            "um apelido que não está aqui foi guardado"
-        );
-
-        // E nunca pelo retrato: ele vai inteiro aos MODs.
-        fn chaves(valor: &serde_json::Value, todas: &mut Vec<String>) {
-            match valor {
-                serde_json::Value::Object(campos) => {
-                    for (chave, dentro) in campos {
-                        todas.push(chave.clone());
-                        chaves(dentro, todas);
-                    }
-                }
-                serde_json::Value::Array(itens) => {
-                    for item in itens {
-                        chaves(item, todas);
-                    }
-                }
-                _ => {}
-            }
-        }
-        let retrato = serde_json::to_value(connection.snapshot()).expect("o retrato vira JSON");
-        let mut todas = Vec::new();
-        chaves(&retrato, &mut todas);
-        assert!(
-            !todas.iter().any(|chave| chave.contains("volume")),
-            "o volume de cada pessoa foi parar no retrato, que os MODs leem: quanto esta \
-             máquina quer ouvir cada um não é deles ({todas:?})"
-        );
-
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let sem_audio = super::Connection {
-            commands,
-            shared: compartilhado(false),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        sem_audio
-            .shared
-            .room
-            .lock()
-            .expect("a sala")
-            .apply(&rafa_na_sala(900));
-        // A ordem das duas recusas é a de antes: quem não está aqui é dito
-        // primeiro, com ou sem áudio. A conformidade conta com ela
-        // (`acceptance_m5::the_volume_of_a_stranger_is_refused_by_name`, que
-        // conecta sem áudio).
-        assert_eq!(
-            sem_audio.set_volume("ninguém".into(), 50),
-            Err(crate::ConnectionError::UnknownPerson),
-            "numa sessão sem áudio, o volume de quem não está aqui deixou de ser \
-             recusado pelo nome: a casca diz «sem áudio» sobre uma pessoa que não existe"
-        );
-        assert_eq!(
-            sem_audio.set_volume("rafa".into(), 150),
-            Err(crate::ConnectionError::NoAudioDevice),
-            "numa sessão sem áudio o volume foi aceito, e nenhuma voz vai tocá-lo"
-        );
-    }
-
-    /// O corpo de `drive`, sem as linhas de comentário, e os três pedaços que a
-    /// ligação da porta da voz atravessa: antes do laço, o `select!`, e o resto
-    /// da volta do laço depois dele.
-    fn pedacos_de_drive() -> (String, String, String, String) {
-        let fonte = include_str!("lib.rs");
-        let sem_comentario: String = fonte
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let inicio = sem_comentario
-            .find(&format!("{} fn drive(", "async"))
-            .expect("`drive` sumiu de `lib.rs`");
-        let depois = &sem_comentario[inicio..];
-        let corpo = &depois[..depois.find("\n}\n").expect("`drive` nunca fecha")];
-        let (antes_do_laco, laco) = corpo
-            .split_once("    while shared.running")
-            .expect("o laço de `drive` mudou de forma, e este guarda tem de mudar com ele");
-        let (_, select) = laco
-            .split_once("tokio::select! {")
-            .expect("o `select!` de `drive` sumiu");
-        // O `select!` fecha na primeira linha com a indentação dele.
-        let (select, resto_da_volta) = select
-            .split_once("\n        }\n")
-            .expect("o `select!` de `drive` não fecha na indentação de sempre");
-        (
-            corpo.to_owned(),
-            antes_do_laco.to_owned(),
-            select.to_owned(),
-            resto_da_volta.to_owned(),
-        )
-    }
-
-    /// I2 da rodada 1 do lote I-a: a porta da voz está ligada ao laço de
-    /// `drive`, nos três lugares, e só nos três.
-    ///
-    /// Os testes acima provam a porta, e nenhum deles vê `drive`. A revisão
-    /// desfez duas ligações e ficou tudo verde: sem o olhar do fim da volta do
-    /// laço — o único ponto que abre o áudio ao entrar numa sala — e com um
-    /// `porta.comecar` logo depois do olhar do aperto de mão, que abre o áudio
-    /// ao conectar. Este guarda lê o texto de `drive` porque é ali que a ligação
-    /// mora, e nenhum valor a exibe sem um enlace de verdade.
-    #[test]
-    fn a_porta_da_voz_esta_ligada_ao_laco_de_drive() {
-        let (corpo, antes_do_laco, select, resto_da_volta) = pedacos_de_drive();
-        let olhar = "porta.olhar(&shared.voice, sala_de(&shared),";
-
-        assert_eq!(
-            antes_do_laco.matches("porta.").count(),
-            1,
-            "antes do laço, `drive` mexe na porta da voz mais de uma vez — ou nenhuma: o \
-             aperto de mão é um olhar só, com o servidor adotado e ninguém sentado, e \
-             qualquer outra coisa ali abre o áudio ao conectar"
-        );
-        assert!(
-            antes_do_laco.contains(olhar),
-            "o olhar do aperto de mão sumiu, ou deixou de ler o assento confirmado"
-        );
-        assert!(
-            select.contains("aberta = porta.chegada() =>"),
-            "o `select!` de `drive` não espera mais a abertura em curso: a voz abre e nunca \
-             chega ao lugar"
-        );
-        assert!(
-            resto_da_volta.contains(olhar),
-            "o olhar do fim da volta do laço sumiu: é o único ponto que abre o áudio ao \
-             entrar numa sala e o fecha ao sair"
-        );
-        for chamada in corpo
-            .match_indices("porta.")
-            .map(|(onde, _)| &corpo[onde..])
-        {
-            assert!(
-                [
-                    "porta.olhar(",
-                    "porta.na_volta(",
-                    "porta.chegada()",
-                    "porta.chegou("
-                ]
-                .iter()
-                .any(|permitida| chamada.starts_with(permitida)),
-                "`drive` chama a porta da voz por fora das quatro portas dela: {}",
-                chamada.lines().next().unwrap_or_default()
-            );
-        }
-        for (onde, _) in corpo.match_indices("abrir_a_voz(") {
-            let antes = corpo[..onde].trim_end().trim_end_matches('{').trim_end();
-            assert!(
-                antes.ends_with("|pedidos|"),
-                "`drive` chama `abrir_a_voz` fora de uma closure dada à porta: a voz abre \
-                 sem a porta decidir"
-            );
-        }
-    }
-
-    /// Os volumes são seguidos no fim de cada volta do laço de `drive`.
-    /// F1-vazamento e acréscimo B.
-    ///
-    /// É dali que eles chegam à voz que acabou de abrir — a chegada da
-    /// abertura é um braço do `select!`, e a volta termina logo depois — e ao
-    /// `ssrc` novo de quem voltou, que entra no `Room` por uma mensagem dobrada
-    /// num braço do mesmo `select!`. Os testes acima provam a decisão com a
-    /// volta de `volta_do_laco`; este prende que `drive` dá a mesma volta.
-    #[test]
-    fn os_volumes_sao_seguidos_no_fim_de_cada_volta_de_drive() {
-        let (_, _, _, resto_da_volta) = pedacos_de_drive();
-        assert!(
-            resto_da_volta.contains("shared.voice.seguir_os_volumes(&shared.room)"),
-            "o fim da volta de `drive` não segue mais os volumes: a voz que abre fica \
-             com todo mundo a 100, e quem volta com outro `ssrc` perde o volume dele"
-        );
-    }
-
-    /// M-4 do lote V: o fim da sessão larga a voz sem esperar o cadeado dela.
-    ///
-    /// `switch_device` segura o cadeado da voz enquanto o driver abre o aparelho
-    /// novo. Preso ali, ele segurava o fim de `drive` — e com ele a despedida —
-    /// até o teto da casca, que dizia «a despedida não terminou» sem dizer por
-    /// quê. A troca é uma thread que segura o cadeado e só solta quando o
-    /// teste manda, depois de medir quanto o fim levou.
-    #[test]
-    fn o_fim_da_sessao_larga_a_voz_sem_esperar_a_troca_de_aparelho() {
-        use std::sync::Arc;
-        let voz: Arc<VozDaSala<Voz>> = Arc::new(VozDaSala::nova(true, DeviceChoice::default()));
-
-        *voz.lock().expect("a voz") = Some(voz_de(700));
-        super::largar_sem_segurar(&voz, |voz| voz);
-        assert!(
-            !ha_voz(&voz),
-            "com o cadeado livre, o fim da sessão não largou a voz: o microfone fica \
-             aberto depois da despedida"
-        );
-
-        *voz.lock().expect("a voz") = Some(voz_de(701));
-        let (preso, prendeu) = std::sync::mpsc::channel();
-        let (solta, soltar) = std::sync::mpsc::channel::<()>();
-        let troca = {
-            let voz = Arc::clone(&voz);
-            std::thread::spawn(move || {
-                let mut viva = voz.lock().expect("a voz");
-                preso.send(()).expect("a troca avisa que prendeu");
-                // O driver demora, e a troca põe a voz nova antes de soltar.
-                let _ = soltar.recv_timeout(Duration::from_secs(2));
-                *viva = Some(voz_de(702));
-            })
-        };
-        prendeu.recv().expect("a troca prendeu o cadeado");
-        super::trilha_no_log::segundo_despachante();
-        let espiao = super::trilha_no_log::Espiao::default();
-        let antes = std::time::Instant::now();
-        tracing::subscriber::with_default(espiao.clone(), || {
-            super::largar_sem_segurar(&voz, |voz| voz);
-        });
-        let levou = antes.elapsed();
-        let _ = solta.send(());
-        troca.join().expect("a troca terminou");
-        assert!(
-            levou < Duration::from_millis(500),
-            "o fim da sessão esperou {levou:?} pelo cadeado da voz, preso por uma troca de \
-             aparelho no driver: a despedida sai depois do teto da casca, e quem ficou só \
-             vê a saída pelo prazo de ociosidade"
-        );
-
-        let ate = std::time::Instant::now() + Duration::from_secs(5);
-        while ha_voz(&voz) && std::time::Instant::now() < ate {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            !ha_voz(&voz),
-            "a troca de aparelho soltou o cadeado e a voz que ela pôs ficou de pé depois \
-             do fim da sessão: o microfone fica aberto sem sessão nenhuma"
-        );
-        let escrito = espiao.escrito();
-        let Some(linha) = escrito
-            .iter()
-            .find(|linha| linha.contains("o cadeado da voz estava ocupado no fim da sessão"))
-        else {
-            panic!(
-                "o fim da sessão largou a voz por fora e o log não diz: quem lê o `seele.log` \
-                 de uma saída lenta não acha o microfone que ficou aberto. Escrito: \
-                 {escrito:?}"
-            );
-        };
-        // Rodada 1, achado 3: o cadeado também fica preso por um instante quando
-        // alguém só lê a voz — o retrato, o som da tela, os controles —, e a
-        // linha não pode afirmar uma causa que ela não sabe.
-        assert!(
-            !linha.contains("troca de aparelho"),
-            "o aviso do fim da sessão diz que uma troca de aparelho prendia a voz sem \
-             saber quem a prendia: quem lê o log vai procurar um driver preso que não \
-             houve. Linha: {linha}"
-        );
-    }
-
-    /// Rodada 1 do lote V, achado 4: a thread que larga a voz também larga com
-    /// o cadeado envenenado.
-    ///
-    /// Quem segurava o cadeado entrou em pânico com ele na mão. O `try_lock` já
-    /// tratava o veneno; a thread de `largar_sem_segurar` não, e a voz ficava de
-    /// pé depois do fim da sessão, com o microfone aberto.
-    #[test]
-    fn a_voz_cai_mesmo_com_o_cadeado_envenenado_na_thread_que_a_larga() {
-        use std::sync::Arc;
-        let voz: Arc<VozDaSala<Voz>> = Arc::new(VozDaSala::nova(true, DeviceChoice::default()));
-        *voz.lock().expect("a voz") = Some(voz_de(700));
-
-        let (preso, prendeu) = std::sync::mpsc::channel();
-        let (solta, soltar) = std::sync::mpsc::channel::<()>();
-        let quem_segura = {
-            let voz = Arc::clone(&voz);
-            std::thread::spawn(move || {
-                let _viva = voz.lock().expect("a voz");
-                preso.send(()).expect("avisa que prendeu");
-                let _ = soltar.recv_timeout(Duration::from_secs(2));
-                panic!("pânico com o cadeado da voz na mão, de propósito");
-            })
-        };
-        prendeu.recv().expect("o cadeado foi preso");
-        super::largar_sem_segurar(&voz, |voz| voz);
-        let _ = solta.send(());
-        assert!(
-            quem_segura.join().is_err(),
-            "quem segurava o cadeado não entrou em pânico, e o teste mediu outra coisa"
-        );
-
-        let de_pe = || {
-            voz.viva
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_some()
-        };
-        let ate = std::time::Instant::now() + Duration::from_secs(2);
-        while de_pe() && std::time::Instant::now() < ate {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            !de_pe(),
-            "com o cadeado envenenado, a thread que larga a voz desistiu: a voz ficou de pé \
-             depois do fim da sessão, com o microfone aberto"
-        );
-    }
-
-    /// M-4 do lote V: o fim de `drive` larga a voz pelo caminho que não espera,
-    /// e antes da despedida.
-    ///
-    /// O teste acima prova o caminho; este prende que `drive` o usa. Antes da
-    /// despedida, para o microfone fechar antes de o servidor saber da saída.
-    #[test]
-    fn o_fim_de_drive_larga_a_voz_antes_da_despedida_e_sem_esperar() {
-        let (corpo, _, _, _) = pedacos_de_drive();
-        let Some((_, fim)) = corpo.rsplit_once("shared.running.store(false") else {
-            panic!("o fim de `drive` mudou de forma, e este guarda tem de mudar com ele");
-        };
-        let Some(larga) = fim.find("largar_sem_segurar(&shared,") else {
-            panic!(
-                "o fim de `drive` não larga mais a voz pelo caminho que não espera: uma \
-                 troca de aparelho presa no driver segura a despedida até o teto da casca"
-            );
-        };
-        let Some(sai) = fim.find("client.sair().await") else {
-            panic!("a despedida sumiu do fim de `drive`");
-        };
-        assert!(
-            larga < sai,
-            "o fim de `drive` larga a voz depois da despedida: o microfone continua aberto \
-             enquanto o servidor ainda ouve"
-        );
-        assert!(
-            !fim.contains("shared.voice.lock()"),
-            "o fim de `drive` voltou a esperar o cadeado da voz, que uma troca de aparelho \
-             no driver segura até o teto da casca"
-        );
-    }
-
-    /// Nenhum caminho abre a voz por fora da porta da sala.
-    ///
-    /// Os testes acima provam a decisão da porta, e nenhum deles vê `drive`:
-    /// uma abertura escrita de volta logo depois do aperto de mão — onde ela
-    /// morou até a 0.15 — passaria por todos. Este guarda conta, no programa e
-    /// sem comentários, quem chama o núcleo para abrir uma voz: uma vez só, e
-    /// dentro de `abrir_a_voz`, que só a porta chama. A reabertura da volta é
-    /// `reopen`, que parte da voz que já estava aberta.
-    #[test]
-    fn a_voz_so_abre_pela_porta_da_sala() {
-        let fonte = include_str!("lib.rs");
-        let programa = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
-        let sem_comentarios: String = programa
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let abertura = format!("Voice::{}(", "start_preferring");
-        assert_eq!(
-            sem_comentarios.matches(&abertura).count(),
-            1,
-            "a voz abre por fora de `abrir_a_voz`: uma abertura no aperto de mão \
-             segura o microfone a sessão inteira, dentro de sala ou não"
-        );
-        for outra in [
-            format!("Voice::{}(", "start"),
-            format!("Voice::{}(", "start_on"),
-        ] {
-            assert!(
-                !sem_comentarios.contains(&outra),
-                "a FFI abre uma voz com `{outra}` por fora da porta da sala"
-            );
-        }
-        let Some(abridor) = sem_comentarios
-            .split(&format!("fn {}(", "abrir_a_voz"))
-            .nth(1)
-            .and_then(|resto| resto.split("\n}\n").next())
-        else {
-            panic!("`abrir_a_voz` sumiu, e com ela a única porta da voz");
-        };
-        assert!(
-            abridor.contains(&abertura),
-            "a única abertura da voz não está em `abrir_a_voz`"
-        );
-    }
-
-    /// A sessão que o aperto de mão entrega. O `ssrc` muda a cada conexão.
-    fn sessao(ssrc: u32) -> SessionInfo {
-        sessao_numero(ssrc, u64::from(ssrc))
-    }
-
-    /// A sessão com o número que o teste escolhe. O resgate de assento é o
-    /// mesmo `ssrc` numa sessão de número maior.
-    fn sessao_numero(ssrc: u32, numero: u64) -> SessionInfo {
-        SessionInfo {
-            id: SessionId(numero),
-            person: PersonId(7),
-            ssrc: Ssrc(ssrc),
-            server: "Casa".into(),
-            voice_rooms: vec![VoiceRoomInfo {
-                id: SALA,
-                name: "Sala".into(),
-                limit: 0,
-                password_required: false,
-                channel: None,
-            }],
-            channels: Vec::new(),
-            permissions: Vec::new(),
-        }
-    }
-
-    /// A Lia sentada na sala, do jeito que o servidor a apresenta.
-    fn lia_na_sala() -> ServerMessage {
-        ServerMessage::PersonJoined {
-            voice_room: SALA,
-            profile: PersonProfile {
-                id: PersonId(9),
-                nickname: "lia".into(),
-                roles: Vec::new(),
-                material_e2ee: None,
-            },
-            ssrc: Ssrc(900),
-        }
-    }
-
-    /// (c), a medida: o que a FFI vê depois de uma volta de quem estava numa sala.
-    ///
-    /// A volta é a do braço `Aviso::Reconectado` de `drive`: a sessão nova é
-    /// adotada, e o servidor reapresenta quem está sentado — e nunca a própria
-    /// pessoa (`seele-server`, `session.rs`, pula `session.person` na
-    /// fotografia de ocupação). Enquanto isso o motor do enlace **já** mandou
-    /// `EnterVoiceRoom` pela conexão nova (`restabelecer`, em `enlace.rs`), e o
-    /// servidor a sentou: a voz dela está na sala.
-    ///
-    /// `Some(SALA)` é o que `Aviso::Reconectado` traz: o assento que o motor
-    /// restabeleceu.
-    #[test]
-    fn a_volta_mostra_a_pessoa_na_sala_em_que_o_motor_a_sentou_de_novo() {
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.apply(&lia_na_sala());
-        room.enter_voice_room(SALA);
-
-        readotar_na_volta(&mut room, &sessao(701), "marcela", Some(SALA));
-        room.apply(&lia_na_sala());
-
-        let salas = voice_rooms_of(&room);
-        assert_eq!(
-            room.current_voice_room,
-            Some(SALA),
-            "depois da volta a FFI tira a pessoa da sala em que o motor a sentou de \
-             novo: a tela a desenha FORA DE SALA enquanto a voz dela está lá, e um \
-             gatilho do áudio lido deste espelho fecharia a voz de quem só caiu e \
-             voltou. O que a tela recebe: {salas:?}"
-        );
-        assert!(
-            salas
-                .iter()
-                .any(|sala| sala.occupied_by_us && sala.people.iter().any(|p| p.is_self)),
-            "a pessoa voltou à sala e não aparece sentada nela na própria tela: {salas:?}"
-        );
-    }
-
-    /// Quem estava fora de sala volta fora de sala.
-    #[test]
-    fn a_volta_de_quem_estava_fora_de_sala_continua_fora() {
-        let mut room = Room::new();
-        room.adopt(&sessao(700), "marcela");
-        room.apply(&lia_na_sala());
-
-        readotar_na_volta(&mut room, &sessao(701), "marcela", None);
-
-        assert_eq!(
-            room.current_voice_room, None,
-            "a volta sentou numa sala quem estava fora de todas"
-        );
-    }
-}
-
+#[path = "testes/a_voz_quando_o_enlace_volta.rs"]
 #[cfg(test)]
-mod a_voz_quando_o_enlace_volta {
-    //! O braço da reconexão, exercitado pelo que ele **faz**.
-    //!
-    //! Complementa o guarda de texto-fonte de
-    //! `crates/seele-conformance/tests/voz_na_reconexao.rs`, que só conseguia
-    //! afirmar que a palavra `reopen` aparecia no braço. Três coisas que aquele
-    //! guarda deixaria passar são defeitos de verdade, e são estas:
-    //!
-    //! - reabrir **a partir** da voz viva, e não construir uma do zero — é o
-    //!   que carrega mudo, Isolamento total, modo e ganhos por cima da
-    //!   reabertura;
-    //! - abrir voz para quem estava em texto puro, que devolveria microfone a
-    //!   quem não tem nenhum;
-    //! - guardar uma voz que não reabriu, que deixaria a casca falando por uma
-    //!   conexão morta em vez de esmaecer para texto.
-    //!
-    //! Desde a pendência 52 a reabertura corre na thread de `esperar_o_audio`,
-    //! e a voz nova chega pelo braço da porta: os três testes passam por
-    //! `PortaDaVoz::na_volta` e `PortaDaVoz::chegou`, que é o caminho de `drive`.
-
-    use super::{
-        Aberta, AberturaDoAudio, ControlesGuardados, Futuro, PortaDaVoz, VozDaSala, VozViva,
-    };
-    use seele_core::{DeviceChoice, VoiceRoomId};
-
-    /// Uma voz de mentira: o que interessa é o que atravessa a reabertura.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    struct Voz {
-        controles: Vec<&'static str>,
-        ssrc: u32,
-    }
-
-    impl VozViva for Voz {
-        fn vestir(&self, _: &ControlesGuardados) {}
-        fn segurar(&self, _: bool) {}
-        fn ganhar(&self, _: seele_core::Ssrc, _: f32) {}
-    }
-
-    fn entregue(aberta: Aberta<Voz>) -> Futuro<Voz> {
-        Box::pin(async move { aberta })
-    }
-
-    fn nada_abre_do_zero(_: &DeviceChoice) -> Futuro<Voz> {
-        panic!("a volta abriu uma voz do zero, sem partir da que estava viva")
-    }
-
-    /// Uma sala com esta voz de pé, como a volta a encontra.
-    fn na_sala_com(viva: Voz) -> (VozDaSala<Voz>, PortaDaVoz<Voz>) {
-        let voz = VozDaSala::nova(true, DeviceChoice::default());
-        *voz.lock().expect("a voz") = Some(viva);
-        let mut porta = PortaDaVoz::nova();
-        porta.olhar(&voz, Some(VoiceRoomId(1)), nada_abre_do_zero);
-        (voz, porta)
-    }
-
-    async fn esperar(porta: &mut PortaDaVoz<Voz>, voz: &VozDaSala<Voz>) {
-        let aberta = tokio::time::timeout(std::time::Duration::from_secs(5), porta.chegada())
-            .await
-            .expect("a reabertura não chegou");
-        porta.chegou(voz, aberta, nada_abre_do_zero);
-    }
-
-    #[tokio::test]
-    async fn a_voz_viva_reabre_carregando_os_controles() {
-        let (voz, mut porta) = na_sala_com(Voz {
-            controles: vec!["mudo", "isolamento", "ganho de quem fala alto"],
-            ssrc: 1,
-        });
-
-        porta.na_volta(
-            &voz,
-            |atual| {
-                // A reabertura parte da voz que estava viva: é daí que os
-                // controles vêm. Quem chama `start_on` não precisa deste `atual`.
-                entregue(Ok(Ok(Voz {
-                    controles: atual.controles,
-                    ssrc: 2,
-                })))
-            },
-            nada_abre_do_zero,
-        );
-        esperar(&mut porta, &voz).await;
-
-        assert_eq!(
-            voz.lock().expect("a voz").clone(),
-            Some(Voz {
-                controles: vec!["mudo", "isolamento", "ganho de quem fala alto"],
-                ssrc: 2,
-            }),
-            "a reconexão devolveu uma voz nova sem os controles de agora: o \
-             roster continua mostrando quem estava mudo como mudo, e o \
-             microfone volta aberto"
-        );
-        assert_eq!(voz.abertura(), AberturaDoAudio::Aberto);
-    }
-
-    #[test]
-    fn quem_estava_em_texto_puro_continua_em_texto_puro() {
-        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
-        let mut porta = PortaDaVoz::nova();
-        porta.olhar(&voz, None, nada_abre_do_zero);
-        let mut tentou = false;
-
-        porta.na_volta(
-            &voz,
-            |_| {
-                tentou = true;
-                entregue(Ok(Ok(Voz {
-                    controles: vec![],
-                    ssrc: 2,
-                })))
-            },
-            nada_abre_do_zero,
-        );
-
-        assert!(
-            !tentou && voz.lock().expect("a voz").is_none(),
-            "a reconexão abriu voz para quem não tinha nenhuma; sem placa de \
-             som isso é abrir um microfone que não existe"
-        );
-        assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
-    }
-
-    #[tokio::test]
-    async fn a_voz_que_nao_reabre_da_lugar_ao_texto() {
-        let (voz, mut porta) = na_sala_com(Voz {
-            controles: vec!["mudo"],
-            ssrc: 1,
-        });
-
-        porta.na_volta(
-            &voz,
-            |_| entregue(Ok(Err("sem aparelho".to_owned()))),
-            nada_abre_do_zero,
-        );
-        esperar(&mut porta, &voz).await;
-
-        assert!(
-            voz.lock().expect("a voz").is_none(),
-            "a reconexão guardou a voz que não reabriu: ela sai por uma \
-             conexão morta, com `ssrc` velho, e `audio_available` mente"
-        );
-        assert_eq!(voz.abertura(), AberturaDoAudio::SemAparelho);
-    }
-}
+mod a_voz_quando_o_enlace_volta;
 
 /// Quantos pares esta versão do cliente consegue atender ao mesmo tempo.
 ///
@@ -15924,683 +10193,43 @@ impl Connection {
     }
 }
 
+#[path = "testes/onde_um_anexo_grava.rs"]
 #[cfg(test)]
-mod onde_um_anexo_grava {
-    //! A pergunta que a casca faz antes de salvar, e que a gravação refaz.
-    //!
-    //! `destino_de` é o lugar só onde o nome sai do histórico e passa pela regra
-    //! de `seele_core::anexo_no_disco`, e onde a pasta é conferida. A frase de
-    //! confirmação e a gravação perguntam aqui, e por isso não discordam.
+mod onde_um_anexo_grava;
 
-    use super::*;
-
-    const LINHA_ABERTA: ChannelId = ChannelId(1);
-    const OUTRA_LINHA: ChannelId = ChannelId(2);
-
-    /// Um histórico com um anexo deste nome, numa linha que não é a aberta.
-    fn com_anexo(nome: &str) -> Arc<Shared> {
-        let shared = super::tests::compartilhado_de_teste();
-        let mensagem = seele_core::Message {
-            id: MessageId(1),
-            channel: OUTRA_LINHA,
-            author: PersonId(2),
-            author_nickname: "rafael".into(),
-            at_seconds: 0,
-            body: String::new(),
-            replies_to: None,
-            own: false,
-            client_message_id: None,
-            edited: false,
-            attachment: Some(seele_core::AttachmentInfo {
-                id: seele_core::AttachmentId(7),
-                file_name: nome.to_owned(),
-                declared_type: "image/png".into(),
-                byte_size: 10,
-                state: seele_core::AttachmentState::Available,
-            }),
-        };
-        shared
-            .room
-            .lock()
-            .unwrap()
-            .mensagens
-            .entry(OUTRA_LINHA)
-            .or_default()
-            .push(mensagem);
-        shared
-    }
-
-    fn pasta() -> String {
-        std::env::temp_dir().to_string_lossy().into_owned()
-    }
-
-    #[test]
-    fn um_nome_que_e_so_um_nome_grava_na_pasta_dada() {
-        let shared = com_anexo("foto.png");
-        let (onde, nome) = destino_de(&shared, seele_core::AttachmentId(7), &pasta())
-            .expect("um nome comum numa pasta absoluta é recusado");
-        assert_eq!(
-            onde,
-            std::env::temp_dir(),
-            "a pasta mudou entre a casca e a gravação"
-        );
-        assert_eq!(
-            nome, "foto.png",
-            "o nome que sai do histórico não é o que o remetente mandou"
-        );
-        // E em qualquer linha, não só na aberta: o download pode terminar depois
-        // de a pessoa trocar de linha.
-        assert!(
-            !shared
-                .room
-                .lock()
-                .unwrap()
-                .mensagens
-                .contains_key(&LINHA_ABERTA),
-            "o anexo deste teste devia estar fora da linha aberta"
-        );
-    }
-
-    #[test]
-    fn um_nome_que_nao_e_so_um_nome_e_recusado_e_citado_por_extenso() {
-        for (alegado, citado) in [
-            ("../.zshrc", "../.zshrc"),
-            ("foto\u{202E}gnp.exe", "foto\\u{202E}gnp.exe"),
-        ] {
-            let shared = com_anexo(alegado);
-            let recusa = destino_de(&shared, seele_core::AttachmentId(7), &pasta())
-                .expect_err("um nome com caminho ou disfarce passou para a gravação");
-            assert_eq!(
-                recusa,
-                SaveRefused {
-                    reason: NotSavedReason::NomeRecusado,
-                    claimed: citado.to_owned(),
-                    folder: pasta(),
-                },
-                "a recusa de {alegado:?} não diz o motivo, ou cita o nome de um \
-                 jeito que a própria frase não consegue mostrar"
-            );
-        }
-    }
-
-    #[test]
-    fn sem_pasta_absoluta_nada_grava() {
-        // A janela fazia esta conferência com `pastaDeDestino === ""`. Agora a
-        // casca calcula a pasta, e uma vazia ou relativa gravaria onde quer que
-        // o processo tenha sido iniciado — um lugar que a frase não nomeia.
-        let shared = com_anexo("foto.png");
-        for folder in ["", "Downloads", "./pasta"] {
-            let recusa = destino_de(&shared, seele_core::AttachmentId(7), folder)
-                .expect_err("uma pasta vazia ou relativa foi aceita para gravar");
-            assert_eq!(
-                recusa.reason,
-                NotSavedReason::SemPasta,
-                "a pasta {folder:?} não foi recusada como falta de pasta"
-            );
-        }
-    }
-
-    #[test]
-    fn um_anexo_fora_do_historico_nao_ganha_nome_de_fora() {
-        let shared = com_anexo("foto.png");
-        let recusa = destino_de(&shared, seele_core::AttachmentId(8), &pasta())
-            .expect_err("um anexo que o histórico não tem ganhou um nome");
-        assert_eq!(
-            recusa,
-            SaveRefused {
-                reason: NotSavedReason::AnexoDesconhecido,
-                claimed: String::new(),
-                folder: pasta(),
-            },
-            "um anexo fora do histórico não foi recusado com motivo próprio"
-        );
-    }
-}
-
+#[path = "testes/o_debug_da_configuracao.rs"]
 #[cfg(test)]
-mod o_debug_da_configuracao {
-    use super::ConnectConfig;
-
-    /// O `join_secret` é o convite de uso único ou a senha do servidor, e o
-    /// `Debug` é por onde um `tracing::info!(?config)` no `connect` do app o
-    /// levaria ao `seele.log` (o filtro padrão, `seele_app=info`, escreve lá).
-    /// Lote R da F5, rodada 1.
-    #[test]
-    fn o_debug_da_configuracao_esconde_o_segredo_e_mostra_o_resto() {
-        let segredo = "segredo-do-teste-do-debug-da-configuracao";
-        let config = ConnectConfig {
-            server: "a.exemplo:8384".into(),
-            alternate_servers: Vec::new(),
-            nickname: "bia".into(),
-            home: "/tmp/casa-de-teste".into(),
-            join_secret: Some(segredo.to_owned()),
-            expected_fingerprint: None,
-            codigo_esperado: None,
-            bilhete: None,
-            audio: false,
-            capture_device: None,
-            playback_device: None,
-        };
-        for impresso in [format!("{config:?}"), format!("{config:#?}")] {
-            assert!(
-                !impresso.contains(segredo),
-                "o `Debug` de `ConnectConfig` imprime o `join_secret` — o convite de uso \
-                 único ou a senha do servidor —, e um `tracing::info!(?config)` o levaria \
-                 ao `seele.log`:\n{impresso}"
-            );
-            assert!(
-                impresso.contains("<oculto>"),
-                "o `Debug` de `ConnectConfig` não diz que há segredo, e quem investiga \
-                 uma recusa não sabe se a entrada levou um:\n{impresso}"
-            );
-            assert!(
-                impresso.contains("a.exemplo:8384") && impresso.contains("bia"),
-                "o `Debug` de `ConnectConfig` escondeu mais que o segredo:\n{impresso}"
-            );
-        }
-        let sem = ConnectConfig {
-            join_secret: None,
-            ..config
-        };
-        let impresso = format!("{sem:?}");
-        assert!(
-            impresso.contains("join_secret: None"),
-            "sem segredo, o `Debug` de `ConnectConfig` não diz `None`:\n{impresso}"
-        );
-    }
-}
+mod o_debug_da_configuracao;
 
 /// O alvo canônico de quem liga (tarefa 30 da F7): a ida e a volta são a mesma
 /// regra, e só um código que fecha vira alvo.
+#[path = "testes/o_alvo_do_codigo.rs"]
 #[cfg(test)]
-mod o_alvo_do_codigo {
-    use super::{alvo_do_codigo, codigo_do_alvo, Codigo};
+mod o_alvo_do_codigo;
 
-    #[test]
-    fn o_alvo_e_arroba_codigo_e_volta_ao_mesmo_codigo() {
-        let codigo = Codigo::da_chave(&[0; 32]);
-        let alvo = alvo_do_codigo(&codigo);
-        assert_eq!(alvo, format!("@{codigo}"));
-        assert_eq!(codigo_do_alvo(&alvo), Some(codigo));
-        assert_eq!(codigo_do_alvo(&format!("  {alvo}  ")), Some(codigo));
-    }
-
-    #[test]
-    fn um_endereco_ou_um_codigo_que_nao_fecha_nao_e_alvo_de_codigo() {
-        for texto in [
-            "casa.exemplo:8383",
-            "10.0.0.1:8383",
-            "[::1]:8383",
-            "CSM7-NBFR-CAYQ-EV4Y",
-            "@CSM7-NBFR-CAYQ-EV4Z",
-            "@",
-        ] {
-            assert_eq!(
-                codigo_do_alvo(texto),
-                None,
-                "`{texto}` virou alvo de código"
-            );
-        }
-    }
-}
-
+#[path = "testes/o_codigo_esperado.rs"]
 #[cfg(test)]
-mod o_codigo_esperado {
-    //! O ATENDER (tarefa 27 da F7) entra na própria sala conferindo o próprio
-    //! código, e não uma impressão: a conferência é a do `ConfereCodigo` do
-    //! núcleo, e é este campo do `ConnectConfig` que a escolhe.
+mod o_codigo_esperado;
 
-    use super::{build_destino, quarto_de, ConnectConfig};
-    use seele_core::enlace::Esperada;
-    use seele_core::Codigo;
-
-    fn codigo() -> Codigo {
-        Codigo::da_chave(&[7; 32])
-    }
-
-    fn config(impressao: Option<String>, codigo: Option<Codigo>) -> ConnectConfig {
-        ConnectConfig {
-            server: "127.0.0.1:8385".into(),
-            alternate_servers: Vec::new(),
-            nickname: "pessoa".into(),
-            home: String::new(),
-            join_secret: None,
-            expected_fingerprint: impressao,
-            codigo_esperado: codigo,
-            bilhete: None,
-            audio: false,
-            capture_device: None,
-            playback_device: None,
-        }
-    }
-
-    fn esperada(config: &ConnectConfig) -> Option<Esperada> {
-        build_destino(
-            config,
-            "127.0.0.1:8385".parse().unwrap(),
-            "localhost",
-            "127.0.0.1:8385",
-            "127.0.0.1:8385",
-        )
-        .esperada
-    }
-
-    #[test]
-    fn o_codigo_esperado_vira_a_esperada_de_cada_destino() {
-        assert_eq!(
-            esperada(&config(None, Some(codigo()))),
-            Some(Esperada::Codigo(codigo())),
-            "o ATENDER entraria na própria sala sem conferir quem atende"
-        );
-    }
-
-    #[test]
-    fn com_o_codigo_e_a_impressao_vale_o_codigo() {
-        assert_eq!(
-            esperada(&config(Some("ab".repeat(32)), Some(codigo()))),
-            Some(Esperada::Codigo(codigo()))
-        );
-    }
-
-    #[test]
-    fn sem_o_codigo_a_impressao_segue_como_era() {
-        assert_eq!(
-            esperada(&config(Some("ab".repeat(32)), None)),
-            Some(Esperada::Certificado("ab".repeat(32)))
-        );
-        assert_eq!(esperada(&config(None, None)), None);
-    }
-
-    /// O quarto é perguntado pela impressão que a conexão confere. Com o
-    /// código valendo, não há impressão conferida, e um quarto perguntado por
-    /// ela apontaria um servidor que o TLS não aceita.
-    #[test]
-    fn o_quarto_so_e_perguntado_pela_impressao_que_a_conexao_confere() {
-        assert!(quarto_de(&config(Some("ab".repeat(32)), None), "127.0.0.1:8385").is_some());
-        assert!(
-            quarto_de(
-                &config(Some("ab".repeat(32)), Some(codigo())),
-                "127.0.0.1:8385"
-            )
-            .is_none(),
-            "com o código valendo, o quarto seria perguntado por uma impressão que ninguém confere"
-        );
-        assert!(quarto_de(&config(None, None), "127.0.0.1:8385").is_none());
-    }
-
-    /// O `Debug` é escrito à mão: um campo novo que ele esquecesse sumiria do
-    /// `seele.log` de quem investiga uma recusa.
-    #[test]
-    fn o_debug_mostra_o_codigo_esperado() {
-        let impresso = format!("{:?}", config(None, Some(codigo())));
-        assert!(
-            impresso.contains(&format!("codigo_esperado: Some({:?})", codigo())),
-            "o `Debug` de `ConnectConfig` não mostra o código esperado:\n{impresso}"
-        );
-    }
-}
-
+#[path = "testes/o_toque.rs"]
 #[cfg(test)]
-mod o_toque {
-    //! O toque da sala pessoal na saída escolhida, e na padrão quando a
-    //! escolhida sumiu: um fone desligado não pode custar uma ligação. Provado
-    //! sem abrir aparelho nenhum, pelo `tocar_com` que recebe quem abre.
+mod o_toque;
 
-    use super::{tocar_com, ConnectionError};
-    use seele_core::DeviceError;
+/// O codificador de vídeo em uso chega ao retrato, na tela de quem transmite.
+#[path = "testes/o_codificador_no_retrato.rs"]
+#[cfg(test)]
+mod o_codificador_no_retrato;
 
-    #[test]
-    fn a_saida_escolhida_toca_quando_abre() {
-        let mut pedidas = Vec::new();
-        let tocado = tocar_com(Some("fone".to_owned()), |saida| {
-            pedidas.push(saida.clone());
-            Ok::<_, DeviceError>(saida)
-        });
-        assert_eq!(tocado, Ok(Some("fone".to_owned())));
-        assert_eq!(pedidas, vec![Some("fone".to_owned())]);
-    }
-
-    #[test]
-    fn a_saida_escolhida_que_sumiu_cai_na_padrao() {
-        let mut pedidas = Vec::new();
-        let tocado = tocar_com(Some("fone".to_owned()), |saida| {
-            pedidas.push(saida.clone());
-            match saida {
-                Some(id) => Err(DeviceError::PlaybackDeviceGone { id }),
-                None => Ok("padrão"),
-            }
-        });
-        assert_eq!(
-            tocado,
-            Ok("padrão"),
-            "um fone desligado calou o toque: a ligação seria perdida sem som"
-        );
-        assert_eq!(pedidas, vec![Some("fone".to_owned()), None]);
-    }
-
-    #[test]
-    fn sem_saida_nenhuma_o_toque_diz_que_nao_abriu() {
-        let tocado = tocar_com(None, |_| Err::<(), _>(DeviceError::NoOutputDevice));
-        assert_eq!(tocado, Err(ConnectionError::NoAudioDevice));
-        let tocado = tocar_com(Some("fone".to_owned()), |saida| {
-            Err::<(), _>(match saida {
-                Some(id) => DeviceError::PlaybackDeviceGone { id },
-                None => DeviceError::NoOutputDevice,
-            })
-        });
-        assert_eq!(tocado, Err(ConnectionError::NoAudioDevice));
-    }
-}
+/// O pânico da thread da conexão vira fim de sessão, com motivo, e não silêncio.
+#[path = "testes/o_panico_da_thread_da_conexao.rs"]
+#[cfg(test)]
+mod o_panico_da_thread_da_conexao;
 
 /// O carimbo de sessão (E3 da 0.17): quem é a sessão, em que volta do enlace
 /// ela está, e o que acontece com um comando ou um evento de outra.
+#[path = "testes/o_carimbo_da_sessao.rs"]
 #[cfg(test)]
-mod o_carimbo_da_sessao {
-    use std::sync::{Arc, Mutex};
-
-    use super::{Carimbo, Command, Connection, ConnectionError, Event, EventListener, SessaoId};
-
-    /// Uma `Connection` sem rede, com a fila dos comandos à vista.
-    fn conexao() -> (Connection, tokio::sync::mpsc::UnboundedReceiver<Command>) {
-        let (commands, fila) = tokio::sync::mpsc::unbounded_channel();
-        let conexao = Connection {
-            commands,
-            shared: super::sem_rede::shared("marcela"),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        (conexao, fila)
-    }
-
-    #[test]
-    fn o_contador_nunca_da_zero_nem_repete() {
-        let mut anterior = SessaoId::nova();
-        assert_ne!(anterior, 0, "o contador deu 0, que não é sessão");
-        for _ in 0..1000 {
-            let numero = SessaoId::nova();
-            assert_ne!(numero, 0, "o contador deu 0, que não é sessão");
-            assert!(
-                numero > anterior,
-                "o contador não subiu: {anterior} e depois {numero}"
-            );
-            anterior = numero;
-        }
-        // Linhas pedindo ao mesmo tempo nunca recebem o mesmo número.
-        let linhas: Vec<_> = (0..8)
-            .map(|_| std::thread::spawn(|| (0..500).map(|_| SessaoId::nova()).collect::<Vec<_>>()))
-            .collect();
-        let mut todos: Vec<u64> = linhas
-            .into_iter()
-            .flat_map(|linha| linha.join().unwrap_or_default())
-            .collect();
-        let quantos = todos.len();
-        assert_eq!(quantos, 8 * 500);
-        todos.sort_unstable();
-        todos.dedup();
-        assert_eq!(
-            todos.len(),
-            quantos,
-            "duas sessões do mesmo processo receberam o mesmo número"
-        );
-        assert!(!todos.contains(&0));
-    }
-
-    #[test]
-    fn duas_conexoes_tem_sessoes_diferentes_e_comecam_na_geracao_1() {
-        let (uma, _fila_de_uma) = conexao();
-        let (outra, _fila_da_outra) = conexao();
-        assert_eq!(uma.carimbo().geracao, 1);
-        assert_eq!(outra.carimbo().geracao, 1);
-        assert_ne!(uma.carimbo().sessao, 0);
-        assert_ne!(
-            uma.carimbo().sessao,
-            outra.carimbo().sessao,
-            "duas conexões com a mesma sessão: um comando de uma passaria na outra"
-        );
-    }
-
-    #[test]
-    fn o_comando_com_o_carimbo_certo_sai() {
-        let (conexao, mut fila) = conexao();
-        let carimbo = conexao.carimbo();
-        let aceita = conexao.com(carimbo);
-        assert!(aceita.is_ok(), "o carimbo da própria conexão foi recusado");
-        if let Ok(conexao) = aceita {
-            assert_eq!(conexao.open_channel(7), Ok(()));
-        }
-        assert!(
-            matches!(fila.try_recv(), Ok(Command::OpenChannel(canal)) if canal.0 == 7),
-            "o comando aceito não chegou à fila do driver"
-        );
-    }
-
-    #[test]
-    fn o_comando_de_outra_sessao_e_recusado_e_nada_sai() {
-        let (conexao, mut fila) = conexao();
-        let esperado = conexao.carimbo();
-        let veio = Carimbo {
-            sessao: esperado.sessao + 1,
-            geracao: esperado.geracao,
-        };
-        let recusa = conexao
-            .com(veio)
-            .and_then(|conexao| conexao.open_channel(7));
-        assert_eq!(
-            recusa,
-            Err(ConnectionError::SessaoNaoConfere { esperado, veio }),
-            "um comando com a sessão de outra conexão passou"
-        );
-        assert!(
-            fila.try_recv().is_err(),
-            "o comando recusado chegou à fila do driver mesmo assim"
-        );
-    }
-
-    #[test]
-    fn o_comando_de_antes_da_reconexao_e_recusado() {
-        let (conexao, mut fila) = conexao();
-        let velho = conexao.carimbo();
-        // O que o braço `Aviso::Reconectado` de `drive` faz.
-        assert_eq!(conexao.shared.nova_geracao(), 2);
-        let novo = conexao.carimbo();
-        assert_eq!(
-            novo,
-            Carimbo {
-                sessao: velho.sessao,
-                geracao: 2
-            },
-            "a reconexão mudou a sessão, ou não subiu a geração"
-        );
-        assert_eq!(
-            conexao.com(velho).map(|_| ()),
-            Err(ConnectionError::SessaoNaoConfere {
-                esperado: novo,
-                veio: velho
-            }),
-            "um comando de antes da reconexão passou"
-        );
-        assert!(fila.try_recv().is_err());
-        assert!(conexao.com(novo).is_ok(), "o carimbo novo foi recusado");
-    }
-
-    #[test]
-    fn a_recusa_tem_nome_e_os_dois_carimbos_no_serde() {
-        let recusa = ConnectionError::SessaoNaoConfere {
-            esperado: Carimbo {
-                sessao: 4,
-                geracao: 2,
-            },
-            veio: Carimbo {
-                sessao: 4,
-                geracao: 1,
-            },
-        };
-        assert_eq!(
-            serde_json::to_value(&recusa).ok(),
-            Some(serde_json::json!({
-                "SessaoNaoConfere": {
-                    "esperado": { "sessao": 4, "geracao": 2 },
-                    "veio": { "sessao": 4, "geracao": 1 }
-                }
-            }))
-        );
-    }
-
-    /// Quem implementa o `on_event_carimbado`.
-    struct Carimbado(Mutex<Vec<(Carimbo, Event)>>);
-    impl EventListener for Carimbado {
-        fn on_event(&self, _: Event) {
-            panic!("o evento chegou sem carimbo a quem pediu o carimbo");
-        }
-        fn on_event_carimbado(&self, carimbo: Carimbo, event: Event) {
-            if let Ok(mut ouvidos) = self.0.lock() {
-                ouvidos.push((carimbo, event));
-            }
-        }
-    }
-
-    /// Quem só implementa o `on_event`, como toda casca de antes da 0.17.
-    struct SoOEvento(Mutex<Vec<Event>>);
-    impl EventListener for SoOEvento {
-        fn on_event(&self, event: Event) {
-            if let Ok(mut ouvidos) = self.0.lock() {
-                ouvidos.push(event);
-            }
-        }
-    }
-
-    #[test]
-    fn o_evento_sai_com_o_carimbo_de_agora() {
-        let (conexao, _fila) = conexao();
-        let ouvinte = Arc::new(Carimbado(Mutex::new(Vec::new())));
-        conexao.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
-        let antes = conexao.carimbo();
-        conexao.shared.messages_changed();
-        conexao.shared.nova_geracao();
-        let depois = conexao.carimbo();
-        conexao.shared.messages_changed();
-        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
-        assert_eq!(
-            ouvidos,
-            vec![
-                (antes, Event::MessagesChanged),
-                (depois, Event::MessagesChanged)
-            ],
-            "o evento não saiu com o carimbo da sessão e da geração em que aconteceu"
-        );
-    }
-
-    /// **A despedida recuperável chega à casca com nome e carimbo, e não como
-    /// fim.** O `FellBehind` (pelo quadro, ou pelo código de fechamento que o
-    /// core traduz no mesmo quadro) vira um `CaiuComMotivo` com o carimbo da
-    /// geração que caiu, e nenhum `Ended`. A expulsão continua sendo fim, e não
-    /// ganha o aviso de queda.
-    #[test]
-    fn a_despedida_recuperavel_avisa_com_carimbo_e_nao_encerra() {
-        use seele_core::{DisconnectReason, ServerMessage};
-        let (para_tras, _fila) = conexao();
-        let ouvinte = Arc::new(Carimbado(Mutex::new(Vec::new())));
-        para_tras.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
-        let da_geracao_que_caiu = para_tras.carimbo();
-
-        super::receber_a_mensagem_do_motor(
-            &para_tras.shared,
-            &ServerMessage::Disconnecting {
-                reason: DisconnectReason::FellBehind,
-            },
-        );
-        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
-        let quedas: Vec<_> = ouvidos
-            .iter()
-            .filter(|(_, evento)| matches!(evento, Event::CaiuComMotivo { .. }))
-            .collect();
-        assert_eq!(
-            quedas,
-            vec![&(
-                da_geracao_que_caiu,
-                Event::CaiuComMotivo {
-                    reason: DisconnectReason::FellBehind.into()
-                }
-            )],
-            "o «ficou para trás» não chegou à casca como uma queda com nome e carimbo"
-        );
-        assert!(
-            !ouvidos
-                .iter()
-                .any(|(_, evento)| matches!(evento, Event::Ended { .. })),
-            "o «ficou para trás» virou fim: {ouvidos:?}"
-        );
-        assert!(
-            para_tras.snapshot().ended.is_none(),
-            "o retrato marcou fim numa despedida recuperável"
-        );
-
-        // A expulsão é fim, e não ganha o aviso de queda.
-        let (expulsa, _fila) = conexao();
-        let ouvinte = Arc::new(Carimbado(Mutex::new(Vec::new())));
-        expulsa.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
-        super::receber_a_mensagem_do_motor(
-            &expulsa.shared,
-            &ServerMessage::Disconnecting {
-                reason: DisconnectReason::Kicked,
-            },
-        );
-        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
-        assert!(
-            !ouvidos
-                .iter()
-                .any(|(_, evento)| matches!(evento, Event::CaiuComMotivo { .. })),
-            "a expulsão ganhou o aviso de queda recuperável"
-        );
-        assert!(
-            expulsa.snapshot().ended.is_some(),
-            "a expulsão deixou de ser fim"
-        );
-    }
-
-    #[test]
-    fn quem_so_implementa_on_event_continua_ouvindo() {
-        let (conexao, _fila) = conexao();
-        let ouvinte = Arc::new(SoOEvento(Mutex::new(Vec::new())));
-        conexao.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
-        conexao.shared.messages_changed();
-        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
-        assert_eq!(ouvidos, vec![Event::MessagesChanged]);
-    }
-
-    /// Lido da fonte, como `nobody_raises_the_event_without_moving_the_revision`:
-    /// fora do corpo padrão do trait, nenhum evento é entregue sem carimbo, e a
-    /// geração sobe no braço da volta antes do primeiro evento dele.
-    #[test]
-    fn nenhum_evento_sai_sem_carimbo_e_a_volta_sobe_a_geracao() {
-        let fonte = include_str!("lib.rs");
-        let producao = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
-        let sem_comentarios: String = producao
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert_eq!(
-            sem_comentarios.matches(".on_event(").count(),
-            1,
-            "alguém entrega evento por `on_event` direto, sem o carimbo: só o corpo \
-             padrão de `on_event_carimbado` pode"
-        );
-        let Some(braco) = sem_comentarios
-            .split("seele_core::enlace::Aviso::Reconectado {")
-            .nth(1)
-        else {
-            panic!("o braço `Aviso::Reconectado` de `drive` sumiu");
-        };
-        let geracao = braco.find("shared.nova_geracao()");
-        let online = braco.find("shared.gravar_enlace(");
-        assert!(
-            matches!((geracao, online), (Some(g), Some(o)) if g < o),
-            "no braço da volta, a geração não sobe antes do primeiro evento: um \
-             comando de antes da queda passaria"
-        );
-    }
-}
+mod o_carimbo_da_sessao;
 
 /// **A tela que o servidor liga sozinho aparece no retrato.**
 ///
@@ -16609,548 +10238,23 @@ mod o_carimbo_da_sessao {
 /// da pessoa. Quem não tinha clicado em VER recebia a imagem e lia «NINGUÉM
 /// ESTÁ COMPARTILHANDO», com `assistida` falso. Ver
 /// [`seele_core::retrato::TelaLigada`].
+#[path = "testes/a_tela_ligada_pelo_servidor.rs"]
 #[cfg(test)]
-mod a_tela_ligada_pelo_servidor {
-    use std::sync::{Arc, Mutex};
+mod a_tela_ligada_pelo_servidor;
 
-    use seele_core::{
-        PersonId, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomId, VoiceRoomInfo,
-    };
-
-    use super::{Connection, Shared};
-
-    /// Uma sessão (somos a pessoa 7) sentada na sala 1, onde a pessoa 3
-    /// transmite a tela 9 e a pessoa 4 a tela 11.
-    fn sessao() -> (Connection, Arc<Shared>) {
-        let shared = crate::sem_rede::shared("marcela");
-        if let Ok(mut room) = shared.room.lock() {
-            room.apply(&ServerMessage::Session {
-                id: SessionId(1),
-                person: PersonId(7),
-                ssrc: Ssrc(700),
-                server: "Casa".into(),
-                voice_rooms: vec![VoiceRoomInfo {
-                    id: VoiceRoomId(1),
-                    name: "SALA-01".into(),
-                    limit: 20,
-                    password_required: false,
-                    channel: None,
-                }],
-                channels: Vec::new(),
-                roles: Vec::new(),
-                permissions: Vec::new(),
-            });
-            room.enter_voice_room(VoiceRoomId(1));
-            for (pessoa, tela) in [(3, 9), (4, 11)] {
-                room.apply(&ServerMessage::ScreenShareStarted {
-                    voice_room: VoiceRoomId(1),
-                    person: PersonId(pessoa),
-                    screen: ScreenId(tela),
-                });
-            }
-        }
-        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
-        let conexao = Connection {
-            commands,
-            shared: Arc::clone(&shared),
-            encerrada: Mutex::new(None),
-            ligacao: None,
-        };
-        (conexao, shared)
-    }
-
-    /// A tela do retrato, e quais da lista dizem `assistida`.
-    fn no_retrato(conexao: &Connection) -> (Option<u32>, Vec<u32>) {
-        let retrato = conexao.snapshot();
-        let assistidas = retrato
-            .transmissoes
-            .iter()
-            .filter(|transmissao| transmissao.assistida)
-            .map(|transmissao| transmissao.tela)
-            .collect();
-        (retrato.tela.map(|tela| tela.tela), assistidas)
-    }
-
-    // Os números de leitura são os do `Aviso::TelaAbriu`/`TelaFechou`.
-
-    #[test]
-    fn a_abertura_automatica_aparece_no_retrato_e_como_assistida() {
-        let (conexao, shared) = sessao();
-        assert_eq!(no_retrato(&conexao), (None, vec![]));
-        shared.tela_abriu(ScreenId(9), 1);
-        assert_eq!(
-            no_retrato(&conexao),
-            (Some(9), vec![9]),
-            "o servidor ligou a tela 9 e o retrato diz que ninguém está compartilhando"
-        );
-        // A escolha continua sendo de ninguém: ligar não é escolher.
-        assert_eq!(conexao.tela_escolhida(), None);
-    }
-
-    #[test]
-    fn a_escolha_explicita_de_outra_tela_vence_a_automatica() {
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        let _ = conexao.assistir(11, true);
-        assert_eq!(no_retrato(&conexao), (Some(11), vec![11]));
-        // E a 9 chegando de novo (o servidor reenviando) não muda a escolha.
-        shared.tela_abriu(ScreenId(9), 2);
-        assert_eq!(no_retrato(&conexao), (Some(11), vec![11]));
-    }
-
-    #[test]
-    fn o_nao_ver_explicito_vence_a_automatica() {
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        let _ = conexao.assistir(9, false);
-        assert_eq!(
-            no_retrato(&conexao),
-            (None, vec![]),
-            "quem recusou aparece assistindo"
-        );
-        // O servidor religando não desfaz a recusa no retrato.
-        shared.tela_abriu(ScreenId(9), 2);
-        shared.tela_abriu(ScreenId(11), 3);
-        assert_eq!(no_retrato(&conexao), (None, vec![]));
-    }
-
-    #[test]
-    fn o_fechamento_limpa() {
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        assert!(
-            shared.tela_fechou(ScreenId(9), 1),
-            "o fim da vigente não fechou"
-        );
-        assert_eq!(no_retrato(&conexao), (None, vec![]));
-    }
-
-    #[test]
-    fn o_fim_da_transmissao_no_servidor_limpa_mesmo_sem_tela_fechou() {
-        // O `ScreenShareStopped` tira a tela da sala antes do fim da leitura.
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        crate::fold(
-            &shared,
-            &ServerMessage::ScreenShareStopped {
-                voice_room: VoiceRoomId(1),
-                screen: ScreenId(9),
-            },
-        );
-        assert_eq!(no_retrato(&conexao), (None, vec![]));
-        assert_eq!(
-            shared
-                .tela_ligada
-                .lock()
-                .ok()
-                .and_then(|ligada| ligada.agora(1)),
-            None,
-            "a tela que saiu da sala ficou guardada"
-        );
-    }
-
-    /// Astra: a troca de par aborta a leitura da mesma tela (o fim dela não
-    /// chegava), a nova abre e depois acaba — e o retrato não pode ficar com
-    /// um fantasma da primeira.
-    #[test]
-    fn a_leitura_substituida_nao_deixa_fantasma() {
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        shared.tela_abriu(ScreenId(9), 2);
-        assert!(shared.tela_fechou(ScreenId(9), 2));
-        assert_eq!(
-            no_retrato(&conexao),
-            (None, vec![]),
-            "a leitura nova acabou e o retrato diz que se assiste"
-        );
-    }
-
-    #[test]
-    fn na_alternancia_9_11_9_fica_a_9_nova_e_o_fim_velho_nao_a_apaga() {
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        shared.tela_abriu(ScreenId(11), 2);
-        shared.tela_abriu(ScreenId(9), 3);
-        assert_eq!(no_retrato(&conexao), (Some(9), vec![9]));
-        // Os fins atrasados das duas primeiras leituras.
-        assert!(
-            !shared.tela_fechou(ScreenId(9), 1),
-            "o fim de uma leitura substituída foi tratado como o da vigente"
-        );
-        let _ = shared.tela_fechou(ScreenId(11), 2);
-        assert_eq!(
-            no_retrato(&conexao),
-            (Some(9), vec![9]),
-            "um fim velho apagou a 9 nova"
-        );
-        assert!(shared.tela_fechou(ScreenId(9), 3));
-        assert_eq!(no_retrato(&conexao), (None, vec![]));
-    }
-
-    #[test]
-    fn o_fim_da_tela_anterior_nao_apaga_a_nova() {
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        shared.tela_abriu(ScreenId(11), 2);
-        let _ = shared.tela_fechou(ScreenId(9), 1);
-        assert_eq!(
-            no_retrato(&conexao),
-            (Some(11), vec![11]),
-            "o `TelaFechou` da tela anterior apagou a nova"
-        );
-    }
-
-    #[test]
-    fn a_troca_de_geracao_nao_deixa_tela_velha_e_o_fim_atrasado_nao_apaga_a_nova() {
-        let (conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        // O enlace voltou (o braço `Reconectado`).
-        shared.nova_geracao();
-        shared.tela_ligada_nova_geracao();
-        assert_eq!(
-            no_retrato(&conexao),
-            (None, vec![]),
-            "a tela ligada antes da queda ficou no retrato da volta"
-        );
-        shared.tela_abriu(ScreenId(9), 2);
-        assert_eq!(no_retrato(&conexao), (Some(9), vec![9]));
-        // O fim da leitura de antes da queda chega agora.
-        assert!(!shared.tela_fechou(ScreenId(9), 1));
-        assert_eq!(
-            no_retrato(&conexao),
-            (Some(9), vec![9]),
-            "o fim atrasado da leitura da geração anterior apagou a da volta"
-        );
-    }
-
-    #[test]
-    fn o_proprio_espelho_nao_e_tela_ligada() {
-        let (conexao, shared) = sessao();
-        if let Ok(mut room) = shared.room.lock() {
-            room.apply(&ServerMessage::ScreenShareStarted {
-                voice_room: VoiceRoomId(1),
-                person: PersonId(7),
-                screen: ScreenId(20),
-            });
-        }
-        shared.tela_abriu(ScreenId(9), 1);
-        // Esta pessoa começa a compartilhar: o espelho dela chega como abertura.
-        shared.tela_abriu(ScreenId(20), 2);
-        assert_eq!(no_retrato(&conexao), (Some(9), vec![9]));
-        // E o fim do espelho é o vigente dele: o palco dele fecha.
-        assert!(shared.tela_fechou(ScreenId(20), 2));
-    }
-
-    #[test]
-    fn cada_sessao_tem_a_sua() {
-        let (uma, shared_uma) = sessao();
-        let (outra, _) = sessao();
-        shared_uma.tela_abriu(ScreenId(9), 1);
-        assert_eq!(no_retrato(&uma), (Some(9), vec![9]));
-        assert_eq!(no_retrato(&outra), (None, vec![]));
-    }
-
-    /// Astra P2: a leitura velha da 9 solta um quadro depois da abertura nova
-    /// da mesma 9, antes de o abort efetivar. Ele não chega à casca — que só
-    /// conhece a tela, e o daria ao decodificador da nova —, e os da nova sim.
-    #[test]
-    fn o_quadro_da_leitura_substituida_nao_chega_a_casca() {
-        struct Anota(Mutex<Vec<Vec<u8>>>);
-        impl crate::EventListener for Anota {
-            fn on_event(&self, event: crate::Event) {
-                if let crate::Event::ScreenFrame { data, .. } = event {
-                    if let Ok(mut anotados) = self.0.lock() {
-                        anotados.push(data.into_bytes());
-                    }
-                }
-            }
-        }
-        let (conexao, shared) = sessao();
-        let anota = Arc::new(Anota(Mutex::new(Vec::new())));
-        conexao.subscribe(Arc::clone(&anota) as Arc<dyn crate::EventListener>);
-
-        shared.tela_abriu(ScreenId(9), 1);
-        shared.quadro_da_tela(ScreenId(9), 1, true, b"velha-1");
-        shared.tela_abriu(ScreenId(9), 2);
-        shared.quadro_da_tela(ScreenId(9), 1, false, b"velha-2");
-        shared.quadro_da_tela(ScreenId(9), 2, true, b"nova-1");
-        shared.quadro_da_tela(ScreenId(9), 2, false, b"nova-2");
-
-        let chegaram = anota.0.lock().map(|a| a.clone()).unwrap_or_default();
-        let esperados: Vec<Vec<u8>> = [&b"velha-1"[..], b"nova-1", b"nova-2"]
-            .iter()
-            .map(|bytes| crate::base64_de(bytes).into_bytes())
-            .collect();
-        assert_eq!(
-            chegaram, esperados,
-            "um quadro da leitura substituída chegou à casca, ou um da nova não chegou"
-        );
-    }
-
-    /// O mesmo para o som: o pacote da leitura velha da 9, depois da abertura
-    /// nova da mesma 9, não vai à fila da mistura; o da nova vai. O braço
-    /// `TelaSom` do laço só chama `Voice::som_da_tela` quando
-    /// `som_da_leitura_vale` diz que sim.
-    #[test]
-    fn o_som_da_leitura_substituida_nao_entra_na_fila() {
-        let (_conexao, shared) = sessao();
-        shared.tela_abriu(ScreenId(9), 1);
-        assert!(shared.som_da_leitura_vale(ScreenId(9), 1));
-        shared.tela_abriu(ScreenId(9), 2);
-        assert!(
-            !shared.som_da_leitura_vale(ScreenId(9), 1),
-            "o som da leitura substituída entraria na fila da nova"
-        );
-        assert!(
-            shared.som_da_leitura_vale(ScreenId(9), 2),
-            "o som da leitura nova não entraria na fila"
-        );
-    }
-}
-
+#[path = "testes/o_diagnostico_da_voz.rs"]
 #[cfg(test)]
-mod o_diagnostico_da_voz {
-    /// **Fora da build de teste, o diagnóstico não existe.** O guarda lê o
-    /// fonte, como o `fora_da_build_de_teste_e_constante` do app: a chamada no
-    /// `measure` e o módulo inteiro estão sob o `cfg` do recurso com debug.
-    /// Roda sem o recurso, que é a build de todo dia.
-    #[test]
-    fn fora_da_build_de_teste_nao_existe() {
-        let fonte = include_str!("lib.rs");
-        let porta = "#[cfg(all(debug_assertions, feature = \"aparelho-de-mentira\"))]";
-        assert!(
-            fonte.contains(&format!(
-                "{porta}\n    let _ = diagnostico_da_voz::relatar(shared.carimbo(), \
-                 telemetria.as_ref(), Instant::now());\n    medir_a_volta(sync, shared, \
-                 telemetria.as_ref(), rtt_micros)\n}}"
-            )),
-            "a chamada do diagnóstico no `measure` saiu de baixo do cfg da build de teste"
-        );
-        assert!(
-            fonte.contains(&format!("{porta}\nmod diagnostico_da_voz {{")),
-            "o módulo do diagnóstico saiu de baixo do cfg da build de teste"
-        );
-        // A produção chama num lugar só, o `measure`, que é o que está acima
-        // deste módulo de testes.
-        let producao = fonte
-            .split(concat!("mod o_diagnostico", "_da_voz {"))
-            .next()
-            .unwrap_or_default();
-        assert_eq!(
-            producao
-                .matches(concat!("diagnostico_da_voz", "::relatar("))
-                .count(),
-            1,
-            "o diagnóstico ganhou outra chamada fora do `measure`"
-        );
-    }
+mod o_diagnostico_da_voz;
 
-    /// O resto pede o recurso: sem ele o módulo não compila.
-    #[cfg(all(debug_assertions, feature = "aparelho-de-mentira"))]
-    mod com_o_recurso {
-        use super::super::{diagnostico_da_voz, Carimbo};
-        use std::sync::{Arc, Mutex, PoisonError};
-        use std::time::Instant;
+#[path = "testes/mesa_de_texto.rs"]
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod mesa_de_texto;
 
-        /// A variável é do processo: um teste destes por vez.
-        static VEZ: Mutex<()> = Mutex::new(());
-
-        /// Um assinante mínimo que guarda a mensagem de cada evento: o teste
-        /// afirma o que o `tracing::info!` de fato emitiu, e não só a função pura.
-        struct Captura(Arc<Mutex<Vec<String>>>);
-
-        struct Mensagem(String);
-        impl tracing::field::Visit for Mensagem {
-            fn record_debug(&mut self, campo: &tracing::field::Field, valor: &dyn std::fmt::Debug) {
-                if campo.name() == "message" {
-                    self.0 = format!("{valor:?}");
-                }
-            }
-        }
-
-        impl tracing::Subscriber for Captura {
-            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
-                true
-            }
-            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-                tracing::span::Id::from_u64(1)
-            }
-            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-            fn event(&self, evento: &tracing::Event<'_>) {
-                let mut mensagem = Mensagem(String::new());
-                evento.record(&mut mensagem);
-                if *evento.metadata().level() == tracing::Level::INFO {
-                    self.0
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(mensagem.0);
-                }
-            }
-            fn enter(&self, _: &tracing::span::Id) {}
-            fn exit(&self, _: &tracing::span::Id) {}
-        }
-
-        fn telemetria() -> seele_core::AudioTelemetry {
-            seele_core::AudioTelemetry {
-                local: seele_core::LocalTelemetry {
-                    playback_underruns: 11,
-                    capture_overruns: 2,
-                    playout_catchup_frames: 33,
-                    playout_resyncs: 4,
-                    playout_worst_lateness_ms: 27.5,
-                    pacing_ppm: -12.0,
-                    pacing_depth_ms: 41.0,
-                    pacing_target_ms: 40.0,
-                    pacing_clamps: 5,
-                    pacing_primes: 6,
-                    ..seele_core::LocalTelemetry::default()
-                },
-                sources: vec![
-                    seele_core::SourceTelemetry {
-                        ssrc: 7,
-                        jitter_depth_ms: 60.0,
-                        jitter_ms: 1.25,
-                        loss_fraction: 0.5,
-                        concealed_frames: 260,
-                        comfort_frames: 240,
-                        late_frames: 9,
-                        descartes_por_rajada: 12,
-                        buraco_pulado: 3,
-                        rtt_ms: None,
-                    },
-                    seele_core::SourceTelemetry {
-                        ssrc: 8,
-                        ..seele_core::SourceTelemetry::default()
-                    },
-                ],
-            }
-        }
-
-        /// Roda `corpo` com a variável no valor pedido, e a devolve depois.
-        fn com_a_variavel<T>(valor: Option<&str>, corpo: impl FnOnce() -> T) -> T {
-            let _vez = VEZ.lock().unwrap_or_else(PoisonError::into_inner);
-            let antes = std::env::var_os("SEELE_AUDIO_DE_MENTIRA");
-            match valor {
-                Some(valor) => std::env::set_var("SEELE_AUDIO_DE_MENTIRA", valor),
-                None => std::env::remove_var("SEELE_AUDIO_DE_MENTIRA"),
-            }
-            let feito = corpo();
-            match antes {
-                Some(antes) => std::env::set_var("SEELE_AUDIO_DE_MENTIRA", antes),
-                None => std::env::remove_var("SEELE_AUDIO_DE_MENTIRA"),
-            }
-            feito
-        }
-
-        #[test]
-        fn com_a_variavel_a_linha_sai_com_os_campos_uma_vez_a_cada_5_s() {
-            crate::trilha_no_log::segundo_despachante();
-            let capturado = Arc::new(Mutex::new(Vec::new()));
-            let assinante = Captura(Arc::clone(&capturado));
-            let telemetria = telemetria();
-            let carimbo = Carimbo {
-                sessao: 9_001,
-                geracao: 2,
-            };
-            let agora = Instant::now();
-            let (primeira, logo_depois, cinco_s_depois, outra_sessao) =
-                com_a_variavel(Some("1"), || {
-                    tracing::subscriber::with_default(assinante, || {
-                        (
-                            diagnostico_da_voz::relatar(carimbo, Some(&telemetria), agora),
-                            diagnostico_da_voz::relatar(
-                                carimbo,
-                                Some(&telemetria),
-                                agora + std::time::Duration::from_millis(4_999),
-                            ),
-                            diagnostico_da_voz::relatar(
-                                Carimbo {
-                                    sessao: 9_001,
-                                    geracao: 3,
-                                },
-                                None,
-                                agora + diagnostico_da_voz::A_CADA,
-                            ),
-                            diagnostico_da_voz::relatar(
-                                Carimbo {
-                                    sessao: 9_002,
-                                    geracao: 1,
-                                },
-                                Some(&telemetria),
-                                agora,
-                            ),
-                        )
-                    })
-                });
-            let primeira = primeira.expect("com a variável, a primeira linha da sessão sai");
-            assert_eq!(
-                primeira,
-                "diagnóstico da voz: sessao=9001 geracao=2 underruns=11 overruns=2 erros=0 \
-                 eventos=0 catchup=33 resyncs=4 atraso_ms=27.5 pacing_ppm=-12.0 \
-                 pacing_prof_ms=41.0 pacing_alvo_ms=40.0 pacing_grampos=5 pacing_primes=6 \
-                 fontes=2 | ssrc=7 prof_ms=60.0 jitter_ms=1.25 perda=0.5000 plc=260 \
-                 comfort=240 late=9 rajada=12 buraco_pulado=3 | ssrc=8 prof_ms=0.0 jitter_ms=0.00 \
-                 perda=0.0000 plc=0 comfort=0 late=0 rajada=0 buraco_pulado=0"
-            );
-            assert_eq!(
-                logo_depois, None,
-                "duas linhas da mesma sessão em menos de 5 s"
-            );
-            assert_eq!(
-                cinco_s_depois.as_deref(),
-                Some("diagnóstico da voz: sessao=9001 geracao=3 voz=nenhuma"),
-                "passados 5 s a sessão diz de novo, com a geração nova"
-            );
-            assert!(
-                outra_sessao.is_some(),
-                "o limite é por sessão, não do processo"
-            );
-            let emitido = capturado
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone();
-            assert_eq!(
-                emitido,
-                vec![
-                    primeira,
-                    cinco_s_depois.unwrap_or_default(),
-                    outra_sessao.unwrap_or_default()
-                ],
-                "o `tracing::info!` não emitiu exatamente as linhas devolvidas"
-            );
-        }
-
-        #[test]
-        fn sem_a_variavel_nao_sai() {
-            crate::trilha_no_log::segundo_despachante();
-            for valor in [None, Some("0"), Some("")] {
-                let capturado = Arc::new(Mutex::new(Vec::new()));
-                let assinante = Captura(Arc::clone(&capturado));
-                let disse = com_a_variavel(valor, || {
-                    tracing::subscriber::with_default(assinante, || {
-                        diagnostico_da_voz::relatar(
-                            Carimbo {
-                                sessao: 9_100,
-                                geracao: 1,
-                            },
-                            Some(&telemetria()),
-                            Instant::now(),
-                        )
-                    })
-                });
-                assert_eq!(
-                    disse, None,
-                    "com SEELE_AUDIO_DE_MENTIRA={valor:?} a linha saiu"
-                );
-                assert!(
-                    capturado
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .is_empty(),
-                    "com SEELE_AUDIO_DE_MENTIRA={valor:?} o log recebeu algo"
-                );
-            }
-        }
-    }
-}
+#[path = "testes/camera_tests.rs"]
+#[cfg(test)]
+mod camera_tests;

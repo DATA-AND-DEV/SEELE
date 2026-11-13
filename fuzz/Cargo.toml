@@ -4,6 +4,7 @@ description = "Fuzz targets for the untrusted-input surface of seele-proto."
 version = "0.0.0"
 edition = "2021"
 publish = false
+license = "AGPL-3.0-only"
 
 # Excluded from the main workspace: fuzzing needs nightly, and `cargo build
 # --workspace` on stable must not try to compile this.

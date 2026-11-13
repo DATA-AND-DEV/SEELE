@@ -98,7 +98,20 @@ jobs:
           # alguém já havia decidido lançar, no `release.yml`, onde nada
           # reprovava. Todo o `captura/macos.rs` e o caminho de
           # `SCStream` nunca foram vistos por nada automático.
-          - os: macos-15
+          #
+          # **`macos-26`, e não `macos-15`: é o SDK que decide.** O
+          # `apple-metal` 0.8.8, que o `screencapturekit` arrasta, compila
+          # Swift no `build.rs` e usa símbolos do macOS 26 dentro de
+          # `if #available(macOS 26.0, *)`. O `#available` é conferido quando
+          # roda, e o símbolo tem de existir quando compila: com o SDK do
+          # macOS 15 o build script reprovava, e **nenhum** lint e nenhum
+          # teste rodava no Mac (execução 43264412497, 12/11/2026). O rótulo
+          # `macos-26` é a imagem arm64 do macOS 26, lido do README do
+          # `actions/runner-images` nesse mesmo dia; o que **não** foi medido
+          # é este workflow nela — a primeira execução é a prova. Os dois
+          # jobs do `release.yml` (`validar` e `empacotar`) usam o mesmo
+          # rótulo, pelo mesmo motivo.
+          - os: macos-26
             name: macos
     runs-on: ${{ matrix.os }}
     steps:
@@ -138,8 +151,9 @@ jobs:
           - os: windows-2022
             name: windows
           # Pelo mesmo motivo da matriz de clippy acima: três sistemas
-          # anunciados, três sistemas testados.
-          - os: macos-15
+          # anunciados, três sistemas testados. E no mesmo runner dela, pelo
+          # SDK (ver lá).
+          - os: macos-26
             name: macos
     runs-on: ${{ matrix.os }}
     steps:
@@ -244,7 +258,21 @@ jobs:
         # teste que precise de hardware terá de ser nomeado aqui — que é a
         # conversa certa a ter, em vez de um filtro largo engolindo os seguintes
         # em silêncio.
-        run: cargo test --workspace -- --skip a_saida_desta_maquina_abre_como_entrada
+        #
+        # **Com `--no-fail-fast`.** Sem ele o cargo para no primeiro binário de
+        # teste vermelho, e os que viriam depois não ficam nem verdes nem
+        # vermelhos: em 12/11/2026 (execução 43264412497) o Linux parou no
+        # `seele-audio`, por um runner sem placa de som, e o Windows no
+        # `reserva` do `seele-conformance` — de tudo o que vinha depois, nos
+        # dois, não se soube nada. O passo continua vermelho com um vermelho
+        # só; o que muda é que ele diz todos.
+        run: cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada
+        # O passo bom leva de 25 a 45 min; um teste pendurado não segura a
+        # máquina. (O runner do Linux que «perdia a comunicação» aos 54 min, em
+        # 13/11, não era um teste pendurado: era um `kill -KILL -<pid>` sem
+        # `--` em dois testes, que o procps lê como `kill(-1)` quando o pid
+        # começa por 1 e mata o próprio runner.)
+        timeout-minutes: 60
 
   # As bancadas de navegador, que nada automático rodava.
   #
@@ -341,6 +369,13 @@ jobs:
       - run: node apps/seele-app/bancada/gif-na-conversa.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # As prévias de imagem da conversa têm teto (11/11/2026, a varredura do
+      # incidente da capa em 4K): os dois mapas que as guardam só cresciam até
+      # o fim da sessão. O bolso despeja e diz o que recolheu, a recusa por
+      # pixels tem frase, e despejar uma imagem de link não a busca de novo.
+      - run: node apps/seele-app/bancada/teto-das-previas.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # O texto da sessão sob um tema claro, pelo contraste que o navegador
       # computa (09/10/2026): a cor resolvida acima de `#tela-sessao` deixava o
       # corpo das mensagens a 1,09:1 com um tema que a validação aceitava.
@@ -385,6 +420,11 @@ jobs:
       # O núcleo de confiança no desktop (tarefa 9 da F3): o MUDO, o fone, o
       # SAIR, o «no ar» e o veredito nas cores do produto, sob qualquer tema.
       - run: node apps/seele-app/bancada/nucleo.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # O codificador de vídeo em uso no rodapé da sessão: o nome que o retrato
+      # traz, à vista só durante a transmissão própria, e como texto.
+      - run: node apps/seele-app/bancada/codificador-no-rodape.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       # O tema do servidor na casca (tarefa 17d da F3): chega pelo retrato e é
@@ -460,6 +500,12 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/vista-pessoal-0-17.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1600x919
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1280x720
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/palco-depois-de-reconectar.cjs
@@ -592,8 +638,25 @@ jobs:
       # Ela é lenta: 561 s num Mac M-series em 15/10/2026, contra uns 74 das
       # outras 18 somadas. O prazo é três vezes isso, para um runner mais lento.
       - run: python3 tools/bancada-do-celular.py "$RUNNER_TEMP/bancada-do-celular"
+        id: bancada-do-celular
         if: ${{ !cancelled() }}
         timeout-minutes: 30
+      # **As fotos de uma bancada do celular vermelha sobem como artefato.** A
+      # pasta fica na temporária do runner, que some no fim do job: em
+      # 12/11/2026 (execução 43264412497) o G3 disse «o desktop mudou em
+      # (1308, 8, 1399, 15)» e as duas fotos que ele comparou não existiam mais
+      # para ninguém olhar. Só quando ela reprova (ou estoura o prazo): verde,
+      # as fotos não dizem nada que o registro já não diga. O caminho é
+      # `runner.temp`, e não `$RUNNER_TEMP`: o `path` de uma ação não passa por
+      # shell. O teste `a_bancada_do_celular_vermelha_sobe_as_fotos`, em
+      # `xtask/tests/empacotamento.rs`, exige este passo e a mesma pasta.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.bancada-do-celular.outcome == 'failure' }}
+        with:
+          name: bancada-do-celular
+          path: ${{ runner.temp }}/bancada-do-celular
+          retention-days: 7
+          if-no-files-found: warn
       # A área útil da 0.17 (`area-util.cjs`): cada tela na superfície inteira, no desktop e no celular de verdade (a largura real
       # de cada tela e não só a da raiz, a rolagem própria, o foco preso das camadas, o teclado simulado sobre campos de texto,
       # o aviso do endereço novo). Com `--webkit`, UMA execução mede os DOIS motores (area-util.cjs, `motores`): o Chromium que o
@@ -609,6 +672,37 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/desktop-estreito.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/mesa-de-texto.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/camera.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/transmissao-que-cai.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/previas-de-tela.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/apoio-na-ajuda.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/teste-de-conexao.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/instalavel.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/conversa-longa.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A notificação do sistema na página de navegador, com a ponte de verdade e
+      # um `Notification` de mentira: a opção nasce desligada, a permissão é
+      # pedida dentro do clique, a recusa do navegador fica dita, e a menção e o
+      # toque notificam só com a página fora da frente.
+      - run: node apps/seele-app/bancada/notificacao-do-sistema.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/hotfix-0195.cjs
@@ -741,6 +835,13 @@ jobs:
       - run: node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # A recepção que a página mede (protocolo 13), com o mesmo `.wasm`: um
+      # laço local joga fora um datagrama em cada dez, e a perda e o jitter
+      # contados nos buffers de jitter do worklet têm de chegar à página, com
+      # o relato saindo uma vez por segundo. O mesmo teste de ordem segura esta.
+      - run: node apps/seele-app/bancada/recepcao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # A identidade do navegador (Tarefa 3.4 da F4): o link lido pelo `.wasm` com
       # a `prova` que o mesmo passo compilou, e o token da tentativa contra um
       # servidor de mentira. O mesmo teste de ordem segura esta.
@@ -784,6 +885,14 @@ jobs:
       # temporária, com o `seele-server` por caminho, e o compila no `target/`
       # daqui, de onde sai `target/debug/portaria-da-bancada`. Esse crate tem
       # o próprio `Cargo.lock` (o `serde_json` não é fixado pelo do workspace).
+      #
+      # **O manifesto é o do `empacotar/publicar.sh`, letra por letra**, com a
+      # raiz daqui (`$GITHUB_WORKSPACE`) no lugar da de lá (`$RAIZ`). Até
+      # 12/11/2026 este passo escrevia a palavra `PLACEHOLDER` no `Cargo.toml`,
+      # o cargo recusava o arquivo, e a `portaria-no-navegador.cjs` ia junto,
+      # sem binário (execução 43264412497). O teste
+      # `o_ci_e_o_publicar_escrevem_o_mesmo_manifesto_da_portaria`, em
+      # `xtask/tests/empacotamento.rs`, compara os dois.
       - name: a portaria-da-bancada
         if: ${{ !cancelled() }}
         timeout-minutes: 15
@@ -791,7 +900,7 @@ jobs:
           pasta="$RUNNER_TEMP/portaria-da-bancada"
           mkdir -p "$pasta/src"
           cp apps/seele-app/bancada/medidas/portaria-2026-10-24/portaria-da-bancada.main.rs.txt "$pasta/src/main.rs"
-          printf 'PLACEHOLDER' "$GITHUB_WORKSPACE" > "$pasta/Cargo.toml"
+          printf '[package]\nname = "portaria-da-bancada"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[workspace]\n\n[dependencies]\nseele-server = { path = "%s/crates/seele-server" }\nserde_json = "1"\n' "$GITHUB_WORKSPACE" > "$pasta/Cargo.toml"
           cargo build --quiet --manifest-path "$pasta/Cargo.toml" --target-dir target
       - run: node apps/seele-app/bancada/portaria-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm target/debug/portaria-da-bancada chromium playwright
         if: ${{ !cancelled() }}
@@ -802,6 +911,10 @@ jobs:
       - run: cargo build --quiet --package seele-enlace --example eco
         if: ${{ !cancelled() }}
       - run: cargo build --quiet --package seele-encontro
+        if: ${{ !cancelled() }}
+      # A sala pessoal de verdade, para a página entrar nela pelo código
+      # (`sala-pelo-codigo.cjs`, ADR 0068).
+      - run: cargo build --quiet --package seele-server --example sala_da_bancada
         if: ${{ !cancelled() }}
       - run: cargo test --package xtask pacote_web::tests
         if: ${{ !cancelled() }}
@@ -834,6 +947,16 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       # Conversas por link e regressões de interface em Chromium/WebKit.
+      #
+      # **Neste runner, a perna em que duas páginas se ligam não roda no WebKit**,
+      # em três bancadas: `chamada-web.cjs`, `pessoal-web-integrada.cjs` e
+      # `pessoal-codigo-web.cjs`. No WebKit de Linux o candidato de host sai com
+      # nome mDNS (`<uuid>.local`), e o nome de uma página não vira endereço na
+      # outra: nenhum par se forma e o ICE fica em `new` (medido na execução
+      # 43313171939; o `diagnostico-rtc.cjs` conta). Cada uma escreve
+      # `PULADO: …` na saída, com o que ficou de fora; a perna roda no macOS, na
+      # bateria do `publicar.sh`. `SEELE_EXIGE_DUAS_PAGINAS_NO_WEBKIT` a traz de
+      # volta aqui, para medir de novo.
       - run: node apps/seele-app/bancada/chamada-web.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -890,6 +1013,9 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/sala-pelo-codigo.cjs target/debug/seele-encontro target/debug/examples/sala_da_bancada target/wasm32-unknown-unknown/release/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
 
@@ -956,10 +1082,17 @@ jobs:
   # `62e3f7e` (05/10) já sem `--locked`, dizendo que o lock estava atrás. Não se
   # mediu se o job rodou, nem com que resultado, entre 05/10 e 08/10. Quem
   # aceita `--locked` é o `cargo metadata`, e ele reprova se o lock precisa
-  # mudar. O conserto é local e sem rede: `cargo metadata --offline
-  # --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null`, e comitar o
-  # lock. O teste `o_lock_do_fuzz_lista_o_que_o_seele_proto_declara` diz o mesmo
-  # antes do push.
+  # mudar. O conserto é local e sem rede: `cp Cargo.lock fuzz/Cargo.lock`,
+  # `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1
+  # > /dev/null`, e comitar o lock. A cópia vem antes porque o `metadata`
+  # sozinho resolve o que falta na versão mais nova que achar: em 12/11/2026,
+  # quando este passo reprovou pelo `dimpl` com `aws-lc-rs` do `seele-enlace`,
+  # ele pôs o `aws-lc-sys` 0.47.0, e o produto sai com o 0.46.0. Partindo do lock
+  # do workspace, o cargo mantém as versões do produto e tira o que o fuzz não
+  # usa. Os testes `o_lock_do_fuzz_lista_o_que_os_crates_da_casa_declaram` e
+  # `o_lock_do_fuzz_resolve_como_o_do_workspace` dizem o que dá para dizer
+  # antes do push, só com os arquivos; um recurso novo que só acrescenta uma
+  # dependência a um pacote é este passo que pega.
   #
   # Cada alvo por nome, e cada passo roda mesmo depois de um vermelho, como as
   # bancadas: um alvo que entra em pânico não esconde os outros. O teste

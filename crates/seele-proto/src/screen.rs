@@ -140,6 +140,59 @@ pub enum ScreenSource {
     Monitor,
     /// A single window.
     Window,
+    /// A câmera de quem transmite — protocolo 13.
+    ///
+    /// **No lugar da tela, e não ao lado dela**: uma pessoa manda um fluxo de
+    /// imagem por vez, e é este byte que diz a quem recebe qual dos dois é.
+    /// Nenhum verbo novo: a câmera começa e para pelos mesmos
+    /// `StartScreenShare` e `StopScreenShare`, com a mesma permissão.
+    ///
+    /// **Só vai para quem negociou [`PROTOCOLO_DA_CAMERA`] ou mais.** Um par
+    /// do protocolo 12 recusa o código que não conhece
+    /// ([`ScreenError::UnknownSource`]) — é a regra de cima funcionando —, e por
+    /// isso quem transmite não escreve este byte para um servidor do 12, e o
+    /// servidor do 13 o reescreve como [`Self::Monitor`] na cópia de quem
+    /// assiste pelo 12 ([`abertura_para`]).
+    Camera,
+}
+
+/// O protocolo em que [`ScreenSource::Camera`] nasceu.
+///
+/// As tabelas `desde` de `crate::vocabulario` cobrem mensagens de controle, e
+/// este é um byte de cabeçalho de fluxo: o portão dele é feito à mão, por quem
+/// transmite e por quem encaminha, e os dois leem o número daqui.
+pub const PROTOCOLO_DA_CAMERA: u8 = 13;
+
+/// O protocolo em que o vídeo passa a ir por RTP (ADR 0067).
+///
+/// Entre duas pontas que negociaram este número ou mais, a transmissão sobe
+/// e desce pela mídia RTP da conexão, e a abertura vai no controle
+/// (`TelaPorMidia`). Com um par abaixo dele, o canal `u` de sempre. O servidor
+/// traduz entre os dois.
+///
+/// É o 13, que **não está publicado** (o último release é do 12): o RTP entra
+/// nele em vez de gastar um número.
+pub const PROTOCOLO_DA_MIDIA: u8 = 13;
+
+/// Um quadro H.264 em Annex B é um quadro-chave: tem uma fatia IDR (NAL 5).
+///
+/// No canal `u` quem manda diz o tipo no cabeçalho do quadro. No RTP não há
+/// cabeçalho do SEELE: quem recebe olha as NAL. O servidor usa isto para
+/// ligar quem entra no meio num quadro-chave e para traduzir um quadro do
+/// RTP para o canal; quem assiste, para saber de onde pode recomeçar.
+#[must_use]
+pub fn e_quadro_chave_h264(annex_b: &[u8]) -> bool {
+    let mut resto = annex_b;
+    while let Some(inicio) = resto.windows(3).position(|j| j == [0, 0, 1]) {
+        let Some(nal) = resto.get(inicio + 3..) else {
+            return false;
+        };
+        if nal.first().is_some_and(|cabecalho| cabecalho & 0x1F == 5) {
+            return true;
+        }
+        resto = nal;
+    }
+    false
 }
 
 impl ScreenSource {
@@ -149,6 +202,7 @@ impl ScreenSource {
         match self {
             Self::Monitor => 0,
             Self::Window => 1,
+            Self::Camera => 2,
         }
     }
 
@@ -158,8 +212,56 @@ impl ScreenSource {
         match code {
             0 => Some(Self::Monitor),
             1 => Some(Self::Window),
+            2 => Some(Self::Camera),
             _ => None,
         }
+    }
+
+    /// O menor protocolo negociado que entende esta fonte.
+    #[must_use]
+    pub const fn desde(self) -> u8 {
+        match self {
+            Self::Monitor | Self::Window => 1,
+            Self::Camera => PROTOCOLO_DA_CAMERA,
+        }
+    }
+}
+
+/// Onde o byte da fonte mora dentro da abertura.
+const POSICAO_DA_FONTE: usize = 5;
+
+/// **A abertura como um par deste protocolo a entende.**
+///
+/// Os onze bytes de quem transmite, intocados, quando o par negociou um
+/// protocolo que conhece a fonte; quando não, a mesma abertura com a fonte
+/// escrita como [`ScreenSource::Monitor`]. Só o byte da fonte muda: o nome da
+/// transmissão, o codec e as medidas são os de quem transmite.
+///
+/// # Por que reescrever, e não deixar recusar
+///
+/// Um cliente do protocolo 12 que recebe o código 2 recusa a abertura e
+/// mostra o aviso de transmissão ilegível — honesto, e sem imagem. A imagem
+/// de uma câmera é H.264 como a de uma tela, e ele a decodifica igual: com a
+/// fonte reescrita ele vê a pessoa, com o rótulo «tela», em vez de não ver
+/// nada. O rótulo errado é o preço menor.
+///
+/// Uma abertura que não se lê (curta, ou de fonte desconhecida) volta como
+/// veio: quem decide o que fazer com ela é quem a lê.
+#[must_use]
+pub fn abertura_para(protocolo_do_par: u8, abertura: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let fonte = abertura
+        .get(POSICAO_DA_FONTE)
+        .copied()
+        .and_then(ScreenSource::from_code);
+    match fonte {
+        Some(fonte) if abertura.len() >= SCREEN_HEADER_LEN && protocolo_do_par < fonte.desde() => {
+            let mut reescrita = abertura.to_vec();
+            if let Some(byte) = reescrita.get_mut(POSICAO_DA_FONTE) {
+                *byte = ScreenSource::Monitor.code();
+            }
+            std::borrow::Cow::Owned(reescrita)
+        }
+        _ => std::borrow::Cow::Borrowed(abertura),
     }
 }
 
@@ -391,7 +493,7 @@ impl ScreenHeader {
         }
 
         let screen = ScreenId(read_u32(header, 1));
-        let source_code = header.get(5).copied().unwrap_or_default();
+        let source_code = header.get(POSICAO_DA_FONTE).copied().unwrap_or_default();
         let Some(source) = ScreenSource::from_code(source_code) else {
             return Err(ScreenError::UnknownSource { code: source_code });
         };
@@ -1082,6 +1184,65 @@ mod tests {
         );
     }
 
+    /// **A câmera é o código 2, e vai e volta.** O 3 continua recusado: o
+    /// código novo entrou no fim, e não abriu a porta para o que vier depois.
+    #[test]
+    fn a_camera_e_o_codigo_dois_e_o_tres_continua_recusado() {
+        let camera = ScreenHeader {
+            source: ScreenSource::Camera,
+            ..header()
+        };
+        let mut buffer = [0_u8; SCREEN_HEADER_LEN];
+        camera.encode(&mut buffer).unwrap();
+        assert_eq!(buffer[5], 2, "a câmera não saiu como o código 2");
+        assert_eq!(ScreenHeader::decode(&buffer).unwrap().0, camera);
+        assert_eq!(ScreenSource::from_code(2), Some(ScreenSource::Camera));
+
+        let mut desconhecida = buffer;
+        desconhecida[5] = 3;
+        assert_eq!(
+            ScreenHeader::decode(&desconhecida),
+            Err(ScreenError::UnknownSource { code: 3 })
+        );
+    }
+
+    /// **Quem negociou o 12 recebe a câmera escrita como monitor**, e quem
+    /// negociou o 13 a recebe intocada. Só o byte da fonte muda; e a tela e a
+    /// janela, que o 12 conhece, não são tocadas em protocolo nenhum.
+    #[test]
+    fn a_abertura_da_camera_vira_monitor_para_quem_negociou_menos_que_treze() {
+        let camera = ScreenHeader {
+            source: ScreenSource::Camera,
+            ..header()
+        };
+        let mut buffer = [0_u8; SCREEN_HEADER_LEN];
+        camera.encode(&mut buffer).unwrap();
+
+        assert_eq!(&*abertura_para(PROTOCOLO_DA_CAMERA, &buffer), &buffer[..]);
+        assert_eq!(&*abertura_para(PROTOCOL_VERSION, &buffer), &buffer[..]);
+
+        let para_o_doze = abertura_para(PROTOCOLO_DA_CAMERA - 1, &buffer).into_owned();
+        let (lida, _) = ScreenHeader::decode(&para_o_doze).unwrap();
+        assert_eq!(
+            lida,
+            ScreenHeader {
+                source: ScreenSource::Monitor,
+                ..camera
+            },
+            "a reescrita mexeu em mais que a fonte"
+        );
+
+        let mut janela = [0_u8; SCREEN_HEADER_LEN];
+        header().encode(&mut janela).unwrap();
+        assert_eq!(&*abertura_para(10, &janela), &janela[..]);
+
+        // O que não se lê volta como veio: curto, ou de fonte desconhecida.
+        assert_eq!(&*abertura_para(10, &buffer[..7]), &buffer[..7]);
+        let mut estranha = buffer;
+        estranha[5] = 9;
+        assert_eq!(&*abertura_para(10, &estranha), &estranha[..]);
+    }
+
     #[test]
     fn a_screen_stood_on_end_is_carried_and_not_refused() {
         // The trap in writing the ceiling as a width. 1080 × 1920 is a portrait
@@ -1665,5 +1826,26 @@ mod os_quadros {
         assert!(
             matches!(tudo.get(1), Some(LidoDaTela::Quadro { bytes, .. }) if bytes.len() == MAX_QUADRO_LEN)
         );
+    }
+
+    /// **A chave se reconhece pela fatia IDR, onde quer que ela esteja no
+    /// quadro**: um quadro-chave de verdade traz SPS e PPS antes dela, com
+    /// prefixos de três ou de quatro bytes.
+    #[test]
+    fn o_quadro_chave_h264_se_reconhece_pela_fatia_idr() {
+        let sps = [0, 0, 0, 1, 0x67, 0x42, 0xE0, 0x28];
+        let pps = [0, 0, 1, 0x68, 0xCE, 0x3C, 0x80];
+        let idr = [0, 0, 1, 0x65, 0x88, 0x84, 0x00];
+        let comum = [0, 0, 0, 1, 0x41, 0x9A, 0x24];
+        let chave: Vec<u8> = [&sps[..], &pps[..], &idr[..]].concat();
+        assert!(e_quadro_chave_h264(&chave));
+        assert!(e_quadro_chave_h264(&idr));
+        assert!(!e_quadro_chave_h264(&comum));
+        // SPS e PPS sozinhos não são imagem nenhuma.
+        assert!(!e_quadro_chave_h264(&[&sps[..], &pps[..]].concat()));
+        // E o que não é Annex B não é chave: nem vazio, nem cortado no prefixo.
+        assert!(!e_quadro_chave_h264(&[]));
+        assert!(!e_quadro_chave_h264(&[0, 0, 1]));
+        assert!(!e_quadro_chave_h264(&[0x65, 0x65, 0x65]));
     }
 }

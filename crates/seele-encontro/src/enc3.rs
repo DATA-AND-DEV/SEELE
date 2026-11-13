@@ -15,6 +15,15 @@
 //!   [`PRAZO_DA_CHAMADA`], quem liga ouve `CALADO`. As chamadas pendentes são o
 //!   único estado novo, com teto ([`CHAMADAS_PENDENTES`]).
 //!
+//! # A impressão DTLS da sala (ADR 0068, 1.0)
+//!
+//! A sala pessoal diz no `ATENDE` a impressão do certificado DTLS dela, que é
+//! efêmero e nenhum código carrega. O ponto a repassa **só** à linha do sinal
+//! (o navegador, que precisa dela antes de fechar o DTLS), e só quando a marca
+//! chamada é de sala. Nada é guardado: ela chega com o `ATENDE` e sai com a
+//! resposta. Um `ATENDE` sem ela (um anfitrião de antes da 1.0) responde como
+//! sempre. É pista, e não prova: quem autentica é a apresentação da sala.
+//!
 //! # O que o ponto escreve a quem não pediu
 //!
 //! Só o `CHAMADO`, e só a uma escuta registrada no quarto do ENC/3, com o
@@ -117,19 +126,30 @@ pub enum QuemLiga {
         para: SocketAddr,
     },
     /// Quem ligou pelo sinal: a linha de execução do pedido HTTP espera aqui.
-    Sinal(SyncSender<Resposta3>),
+    Sinal(SyncSender<DoSinal>),
 }
+
+/// O que a linha do sinal recebe: a resposta do ENC/3, e a impressão DTLS que
+/// o `ATENDE` de uma sala trouxe ([`Chamadas::atendida`]).
+pub type DoSinal = (Resposta3, Option<[u8; 32]>);
 
 impl QuemLiga {
     /// Entrega a resposta. Uma que não sai (o socket que falhou, o pedido HTTP
     /// que já desistiu) não é erro do ponto.
     pub fn entregar(self, resposta: Resposta3) {
+        self.entregar_com_a_impressao(resposta, None);
+    }
+
+    /// [`Self::entregar`], com a impressão DTLS que o `ATENDE` trouxe. **Só a
+    /// linha do sinal a recebe**: o `AQUI` do ENC/3 não tem campo para ela, e
+    /// quem liga por UDP (o nativo) não precisa dela.
+    pub fn entregar_com_a_impressao(self, resposta: Resposta3, impressao: Option<[u8; 32]>) {
         match self {
             Self::Udp { socket, para } => {
                 let _ = socket.send_to(&resposta3(&resposta), para);
             }
             Self::Sinal(espera) => {
-                let _ = espera.try_send(resposta);
+                let _ = espera.try_send((resposta, impressao));
             }
         }
     }
@@ -200,10 +220,20 @@ impl Chamadas {
         Ok(())
     }
 
-    /// O `ATENDE`: o `id` pendente, do IP da escuta. Devolve a chamada e a
-    /// resposta para quem ligou; `None` cala (um `id` que não existe, ou que
-    /// veio de outro IP: um terceiro tentando forjar).
-    pub fn atendida(&self, atende: &Atende, de: SocketAddr) -> Option<(QuemLiga, Resposta3)> {
+    /// O `ATENDE`: o `id` pendente, do IP da escuta. Devolve a chamada, a
+    /// resposta para quem ligou e a impressão DTLS que o `ATENDE` disse;
+    /// `None` cala (um `id` que não existe, ou que veio de outro IP: um
+    /// terceiro tentando forjar).
+    ///
+    /// **A impressão só passa para uma marca de sala** (ADR 0068). Um servidor
+    /// guardado não tem por que dizê-la (a dele é a do convite), e uma página
+    /// de antes da 1.0, que só chama servidores guardados, não lê um `AQUI` com
+    /// um campo a mais.
+    pub fn atendida(
+        &self,
+        atende: &Atende,
+        de: SocketAddr,
+    ) -> Option<(QuemLiga, Resposta3, Option<[u8; 32]>)> {
         let mut pendentes = self.trancar();
         let pendente = pendentes.get(&atende.id)?;
         if pendente.escuta_ip.to_canonical() != de.ip().to_canonical() {
@@ -219,12 +249,15 @@ impl Chamadas {
         } else {
             pendente.endereco_do_servidor
         };
+        let impressao = atende
+            .impressao
+            .filter(|_| e_marca_de_sala(&pendente.servidor));
         let resposta = Resposta3::Aqui {
             marca: pendente.servidor,
             endereco,
             dicas: atende.dicas.clone(),
         };
-        Some((pendente.quem, resposta))
+        Some((pendente.quem, resposta, impressao))
     }
 }
 

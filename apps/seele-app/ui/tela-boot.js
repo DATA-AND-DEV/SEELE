@@ -526,23 +526,40 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
     } else if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
     } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "", esta)) {
-      erro.hidden = false;
-      // O apelido que esta tentativa mandou, para a recusa por nome tomado
-      // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
-      // para a recusa por ela acusar o link ou a lista. Ver `fraseDeErro`.
-      erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
-      // **Numa ligação, a frase de quem liga**, com o nome de quem foi chamado
-      // (tarefa 28 da F7; spec de 23/09, «Erros e frases»). O que não é dela
-      // fica com a frase de sempre, logo acima.
-      if (ligacao) {
-        erro.textContent =
-          fraseDaLigacao(motivo, ligacao.nome, falha?.trail) ?? erro.textContent;
+      const dizerAFalha = () => {
+        erro.hidden = false;
+        // O apelido que esta tentativa mandou, para a recusa por nome tomado
+        // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
+        // para a recusa por ela acusar o link ou a lista. Ver `fraseDeErro`.
+        erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
+        // **Numa ligação, a frase de quem liga**, com o nome de quem foi chamado
+        // (tarefa 28 da F7; spec de 23/09, «Erros e frases»). O que não é dela
+        // fica com a frase de sempre, logo acima.
+        if (ligacao) {
+          erro.textContent =
+            fraseDaLigacao(motivo, ligacao.nome, falha?.trail) ?? erro.textContent;
+        }
+      };
+      // **Um código sem sala recua para a conversa direta** (ADR 0068), e só
+      // se ela também não achar ninguém a frase da sala aparece: a de uma
+      // tentativa que outra já substituiu, não.
+      const recuou = recuarParaAConversaDireta(alvo, apelido, motivo, () => {
+        if (esta === tentativas) dizerAFalha();
+      });
+      if (!recuou) {
+        dizerAFalha();
+        // **O caminho de quem não conectou por causa de rede** (lacuna 8 da
+        // análise para a 1.0): debaixo da frase, o TESTAR A CONEXÃO. Depois de a
+        // frase estar escrita, porque a oferta guarda a frase com que nasceu.
+        // Numa ligação pelo código não há oferta: o teste mede pelo convite de
+        // um servidor, e quem liga por código não tem um para colar lá.
+        oferecerOTesteNaEntrada(ligacao ? null : motivo);
+        // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
+        // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
+        // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
+        // pessoa, e esta tentativa termina agora, devolvendo o CONECTAR.
+        entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn("entrar pela recusa:", f));
       }
-      // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
-      // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
-      // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
-      // pessoa, e esta tentativa termina agora, devolvendo o CONECTAR.
-      entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn("entrar pela recusa:", f));
     }
   } finally {
     // **Só a tentativa mais nova devolve o CONECTAR** (lote W2 da F5). A que
@@ -786,6 +803,39 @@ function mostrarAlcance(
  * não some calado: vai ao `seele.log`.
  */
 let hospedandoAgora = false;
+
+/**
+ * A frase de `#boot-erro` com que a oferta do teste de conexão nasceu, ou
+ * `null` sem oferta na tela.
+ */
+let fraseDaOfertaNaEntrada = null;
+
+/**
+ * **O TESTAR A CONEXÃO debaixo da frase vermelha da entrada**, para `erro`; com
+ * `null`, ou com uma falha que não é de rede, a oferta sai.
+ */
+function oferecerOTesteNaEntrada(erro) {
+  const ofereceu = oferecerOTesteDeConexao($("boot-teste-de-conexao"), erro);
+  fraseDaOfertaNaEntrada = ofereceu ? $("boot-erro").textContent : null;
+}
+
+// **A oferta some quando a frase dela some.** `#boot-erro` tem meia dúzia de
+// escritores — esta tela, o HOSPEDAR, as camadas de MODs, de servidores e de
+// versões, a configuração do servidor —, e só o `conectar` sabe de rede. Um
+// TESTAR A CONEXÃO que sobrasse debaixo de «ESTE SERVIDOR EXIGE MODS» mandaria
+// medir a rede de quem tem outra coisa a resolver. Vigiado aqui, e não por uma
+// chamada em cada escritor, que o próximo a escrever na linha esqueceria.
+new MutationObserver(() => {
+  if (fraseDaOfertaNaEntrada === null) return;
+  const linha = $("boot-erro");
+  if (linha.hidden || linha.textContent !== fraseDaOfertaNaEntrada) oferecerOTesteNaEntrada(null);
+}).observe($("boot-erro"), {
+  attributes: true,
+  attributeFilter: ["hidden"],
+  childList: true,
+  characterData: true,
+  subtree: true,
+});
 
 async function hospedar() {
   if (hospedandoAgora) {

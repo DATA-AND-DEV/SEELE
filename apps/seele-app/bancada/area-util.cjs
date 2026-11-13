@@ -430,7 +430,12 @@ function veredito(m, t) {
   if (m.cargos_acoes && m.cargos_acoes.cancelar && !m.cargos_acoes.cancelar.livre) f.push("CANCELAR coberto: " + JSON.stringify(m.cargos_acoes.cancelar));
   if (m.teclado_no_campo && !m.teclado_no_campo.ok) f.push("o campo ficou sob o teclado: " + JSON.stringify(m.teclado_no_campo));
   if (m.aviso_origem_nova && m.aviso_origem_nova.altura_pct > 30) f.push(`o aviso do endereço novo toma ${m.aviso_origem_nova.altura_pct}% da altura`);
-  if (m.mutacoes_em_1s > 200) f.push(`laço de mutações: ${m.mutacoes_em_1s} em 1 s`);
+  // **A sessão PARADA não muda o DOM**: 3 a 8 mutações em 1 s nas 72 cenas de sessão (medido em 11/11/2026, nos dois motores) — o relógio do
+  // UPTIME, o aviso que a própria medida liga e desliga e o que o produto faz em resposta a ele. O limite era 200, e com ele o guarda não
+  // guardava: o tique de 500 ms reescrevia 67 a 75 atributos e textos IGUAIS por quadro (~150 por segundo), e a cena só reprovava quando um
+  // terceiro tique caía dentro da janela da medida (4 a 9 das 284, conforme a fase). 40 é cinco vezes o maior valor medido e menos que um
+  // tique só do redesenho sem comparação: com o conserto revertido, as 72 cenas reprovam, e não 4.
+  if (m.mutacoes_em_1s > 40) f.push(`laço de mutações: ${m.mutacoes_em_1s} em 1 s`);
   if (m.avisos && m.avisos.altura_pct > 25) f.push(`os avisos tomam ${m.avisos.altura_pct}% da altura`);
   if (m.avisos && m.avisos.botoes_de_voz_cobertos.length) f.push("botão de voz coberto: " + m.avisos.botoes_de_voz_cobertos.join(", "));
   if (m.teclado && !m.teclado.ok) f.push("a barra de ações não voltou/sumiu direito com o teclado: " + JSON.stringify(m.teclado));

@@ -131,7 +131,7 @@ async fn sem_leitura_o_historico_nao_chega() -> Result<()> {
     let mut anfitriao = conectar(endereco, "quem-hospeda", 1).await?;
     anfitriao.join_channel(GERAL).await?;
     anfitriao
-        .send_message(GERAL, "há conversa aqui", ClientMessageId(1))
+        .send_message(GERAL, "há conversa aqui", None, ClientMessageId(1))
         .await?;
     let gravada = esperar(&mut anfitriao, |evento| {
         matches!(evento, ServerMessage::MessageReceived { .. }).then_some(())
@@ -200,7 +200,7 @@ async fn revogar_a_escrita_morde_a_sessao_viva() -> Result<()> {
     let mut pessoa = conectar(endereco, "pessoa", 2).await?;
     pessoa.join_channel(GERAL).await?;
     pessoa
-        .send_message(GERAL, "antes", ClientMessageId(1))
+        .send_message(GERAL, "antes", None, ClientMessageId(1))
         .await?;
     let antes = esperar(&mut pessoa, |evento| match evento {
         ServerMessage::MessageReceived { body, .. } => Some(body.clone()),
@@ -216,7 +216,7 @@ async fn revogar_a_escrita_morde_a_sessao_viva() -> Result<()> {
     tirar_o_papel(&banco, "pessoa", 2)?;
 
     pessoa
-        .send_message(GERAL, "depois", ClientMessageId(2))
+        .send_message(GERAL, "depois", None, ClientMessageId(2))
         .await?;
     let veredito = esperar(&mut pessoa, |evento| match evento {
         ServerMessage::MessageReceived { body, .. } if body == "depois" => Some(Ok(())),
@@ -263,11 +263,12 @@ async fn um_destino_invalido_nao_leva_a_mensagem_de_outra_pessoa() -> Result<()>
         .send_message(
             ChannelId(4_040),
             "para um canal que não existe",
+            None,
             ClientMessageId(1),
         )
         .await?;
     anfitriao
-        .send_message(GERAL, "esta tem de ficar", ClientMessageId(1))
+        .send_message(GERAL, "esta tem de ficar", None, ClientMessageId(1))
         .await?;
 
     let boa = esperar(&mut anfitriao, |evento| match evento {
@@ -359,7 +360,7 @@ async fn a_difusao_para_quando_a_leitura_e_revogada() -> Result<()> {
     ouvinte.join_channel(GERAL).await?;
 
     anfitriao
-        .send_message(GERAL, "com permissão", ClientMessageId(1))
+        .send_message(GERAL, "com permissão", None, ClientMessageId(1))
         .await?;
     let chegou = esperar(&mut ouvinte, |evento| match evento {
         ServerMessage::MessageReceived { body, .. } => Some(body.clone()),
@@ -376,7 +377,7 @@ async fn a_difusao_para_quando_a_leitura_e_revogada() -> Result<()> {
     tirar_o_papel(&banco, "ouvinte", 2)?;
 
     anfitriao
-        .send_message(GERAL, "sem permissão", ClientMessageId(2))
+        .send_message(GERAL, "sem permissão", None, ClientMessageId(2))
         .await?;
     let vazou = esperar(&mut ouvinte, |evento| match evento {
         ServerMessage::MessageReceived { body, .. } if body == "sem permissão" => Some(()),

@@ -200,7 +200,58 @@ fn porta_livre() -> u16 {
     }
 }
 
+/// **Quem nasce com tela nasce sozinho.** A tela de nascença é do processo
+/// ([`seele_core::enlace::este_processo_tem_tela`]), e este binário roda as
+/// provas em paralelo: quem liga o padrão ([`enlace_que_nasce_com_tela`])
+/// escreve aqui, e todo outro enlace nasce lendo ([`enlace`]) — nenhum nasce
+/// com a tela de outro.
+static TELA_DE_NASCENCA: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 async fn enlace(
+    endereco: SocketAddr,
+    conjunto: &str,
+    semente: u8,
+    apelido: &str,
+) -> Result<Enlace> {
+    let _sem_tela = TELA_DE_NASCENCA.read().await;
+    conectar(endereco, conjunto, semente, apelido).await
+}
+
+/// Um enlace que **já nasce com tela**, como o do app: o `main` dele diz
+/// `este_processo_tem_tela(true)` antes de conectar.
+///
+/// É o que a prova de quem **chega** precisa. O servidor manda o pedido de
+/// máquina na chegada, e o núcleo decide na hora em que ele chega: ligar a tela
+/// com [`Enlace::aceitar_pedidos_de_maquina`] depois de o enlace voltar perde
+/// essa corrida (é o que a documentação de `este_processo_tem_tela` diz), o
+/// pedido é recusado `sem-tela` e não chega a ninguém. Era assim que
+/// `o_pedido_a_quem_nao_esta_volta_quando_ela_chega` reprovava numa máquina
+/// carregada (medido em 12/11/2026 no Windows, com dois processadores: uma em
+/// oito, e sempre com 300 ms entre a chegada e a tela).
+///
+/// O padrão do processo fica ligado só enquanto este enlace nasce, com
+/// [`TELA_DE_NASCENCA`] presa para escrita: nenhum outro enlace deste binário
+/// nasce no meio.
+async fn enlace_que_nasce_com_tela(
+    endereco: SocketAddr,
+    conjunto: &str,
+    semente: u8,
+    apelido: &str,
+) -> Result<Enlace> {
+    /// Desliga o padrão ao sair, também se a conexão falhar ou for largada.
+    struct Desliga;
+    impl Drop for Desliga {
+        fn drop(&mut self) {
+            seele_core::enlace::este_processo_tem_tela(false);
+        }
+    }
+    let _so_este = TELA_DE_NASCENCA.write().await;
+    seele_core::enlace::este_processo_tem_tela(true);
+    let _desliga = Desliga;
+    conectar(endereco, conjunto, semente, apelido).await
+}
+
+async fn conectar(
     endereco: SocketAddr,
     conjunto: &str,
     semente: u8,
@@ -333,15 +384,35 @@ impl Maquina {
 
     /// O batimento do jogo anda?
     async fn jogo_vivo(&self) -> bool {
-        let ler = || {
-            std::fs::read_to_string(self.raiz().join("batimento"))
-                .ok()
-                .and_then(|t| t.trim().parse::<u64>().ok())
-                .unwrap_or(0)
-        };
-        let antes = ler();
+        let antes = self.batimento().await;
         tokio::time::sleep(Duration::from_millis(300)).await;
-        ler() > antes
+        self.batimento().await > antes
+    }
+
+    /// O contador que o jogo escreveu por último; zero se ele nunca escreveu.
+    ///
+    /// **Vazio não é zero.** O jogo reescreve o arquivo a cada 20 ms (trunca e
+    /// escreve), e a leitura que cai entre as duas coisas vê o arquivo vazio.
+    /// Lida como zero na segunda amostra de [`Self::jogo_vivo`], um jogo vivo
+    /// passava por morto — «o jogo da dona caiu na volta», «a dona parou sem
+    /// quem hospeda» (medido em 12/11/2026 no Windows, 4 rodadas em série em
+    /// 37: na amostra que reprovou, a leitura veio `""`, com o contador em 298
+    /// antes dela e de 317 a 363 nas dez leituras seguintes). Por isso a
+    /// amostra é lida de novo até ser um número, por até 100 ms (cinco
+    /// reescritas do jogo); o arquivo que não existe, ou que não vira número
+    /// nesse tempo, é zero.
+    async fn batimento(&self) -> u64 {
+        let arquivo = self.raiz().join("batimento");
+        for _ in 0..25 {
+            let lido = std::fs::read_to_string(&arquivo)
+                .ok()
+                .and_then(|t| t.trim().parse::<u64>().ok());
+            if let Some(contador) = lido {
+                return contador;
+            }
+            tokio::time::sleep(Duration::from_millis(4)).await;
+        }
+        0
     }
 
     /// Um mundo com arquivos e pastas, e uma marca de quem o escreveu.
@@ -1298,9 +1369,9 @@ async fn o_pedido_a_quem_nao_esta_volta_quando_ela_chega() -> Result<()> {
     )
     .await?;
     esperar_momento(&mut joga, r#""motivo":"nao-esta-aqui""#).await?;
-    // Ela chega: o lugar volta à metade de servidor, que pede de novo.
-    let mut de_volta = enlace(endereco, &conjunto, 7, "ausente").await?;
-    de_volta.aceitar_pedidos_de_maquina(true);
+    // Ela chega **já com tela**, como quem abre o app: o lugar volta à metade
+    // de servidor, que pede de novo, e o pedido tem quem o leia quando chega.
+    let mut de_volta = enlace_que_nasce_com_tela(endereco, &conjunto, 7, "ausente").await?;
     esperar_momento(
         &mut joga,
         &format!(

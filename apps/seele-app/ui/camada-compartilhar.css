@@ -387,7 +387,17 @@
   background: color-mix(in srgb, var(--seele-osso) 8%, var(--seele-negro-absoluto));
 }
 
-.compartilhar-fonte[aria-pressed="true"]::before {
+/* A prévia da fonte, quando chega (`vestirAPrevia`): a imagem inteira dentro
+   do quadro, sem cortar — numa janela estreita, o que sobra é o fundo. */
+.compartilhar-fonte[data-com-previa="sim"]::before {
+  background-image: var(--previa-da-fonte);
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: var(--seele-negro-absoluto);
+}
+
+.compartilhar-fonte[aria-pressed="true"]:not([data-com-previa="sim"])::before {
   background: linear-gradient(135deg, color-mix(in srgb, var(--seele-osso) 12%, var(--seele-negro-absoluto)), var(--seele-negro-absoluto));
 }
 

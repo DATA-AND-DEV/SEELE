@@ -1577,6 +1577,8 @@
   outline: 2px solid var(--seele-osso);
   outline-offset: 2px;
 }
+/* O interruptor parado (as notificações onde o navegador não as tem): apagado, e sem a mão de clicar. */
+#painel-audio .alertas-chave input[role="switch"]:disabled { opacity: 0.5; cursor: not-allowed; }
 #alertas-bloco[data-desligado="sim"] .alertas-grupos,
 #alertas-bloco[data-desligado="sim"] .server-regua input[type="range"],
 #alertas-bloco[data-desligado="sim"] .server-regua-valor { opacity: 0.5; }

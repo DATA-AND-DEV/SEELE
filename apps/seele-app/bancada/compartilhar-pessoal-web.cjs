@@ -3,7 +3,16 @@
 // vídeo por requestVideoFrameCallback com o mesmo encoder e protocolo.
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 const engines=require('./playwright.cjs');
+const {registrarRtc,relatarRtc,comPrazo}=require('./diagnostico-rtc.cjs');
 const wasmPath=process.argv[2];if(!wasmPath)throw new Error('uso: compartilhar-pessoal-web.cjs caminho/seele_web.wasm');
+// **Os prazos desta bancada, que não tinha nenhum.** No runner de Linux de 12/11/2026 (execução 43264412497) o Chromium passou e, no
+// WebKit, os dois enlaces não se ligaram: o `await Promise.all([pa.pronto,pb.pronto])` ficou esperando para sempre e o passo
+// pendurou até o teto dele, cinco minutos, sem uma frase. Agora os enlaces têm 30 s para se ligar, e cada motor tem 90 s para a
+// prova inteira (as duas levam 14 s juntas num Mac, medido em 12/11/2026); quando um prazo vence, a página diz o
+// `iceConnectionState`, o `connectionState` e os candidatos que juntou e recebeu (`diagnostico-rtc.cjs`). A variável é para ver o
+// prazo vencer numa máquina em que os enlaces se ligam: `SEELE_PRAZO_DOS_ENLACES_MS=1` reprova com a frase e o diagnóstico.
+const PRAZO_DOS_ENLACES_MS=Number(process.env.SEELE_PRAZO_DOS_ENLACES_MS||30000);
+const PRAZO_DO_MOTOR_MS=90000;
 const ui=path.join(__dirname,'../ui');
 const originalSps=fs.readFileSync(path.join(ui,'palco-imagem.js'),'utf8');
 const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice(at,originalSps.indexOf('\n}\n',at)+3);
@@ -18,21 +27,28 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
  let sample=null;
  try{for(const engine of ['chromium','webkit']){
   const browser=await engines[engine]().launch({headless:true});
+  let page;
   try{
-   const page=await browser.newPage({viewport:{width:1000,height:700}});
+   page=await browser.newPage({viewport:{width:1000,height:700}});
+   await registrarRtc(page);
    await page.exposeFunction('abrirTelaCheiaRecebida',()=>page.locator('#b > button').click());
    if(engine==='webkit') await page.addInitScript(()=>{delete globalThis.MediaStreamTrackProcessor;});
    if(process.env.SEELE_PREVIEW_DIR){fs.mkdirSync(process.env.SEELE_PREVIEW_DIR,{recursive:true});await page.exposeFunction('preview',()=>page.screenshot({path:path.join(process.env.SEELE_PREVIEW_DIR,`${engine}-tela-pessoal-h264.png`)}));}
    await page.goto(`http://127.0.0.1:${server.address().port}`);
-   const result=await page.evaluate(async sample=>{
-    const check=(v,m)=>{if(!v)throw new Error(m);};const tick=()=>new Promise(ok=>setTimeout(ok,20));
+   const result=await comPrazo(page.evaluate(async ({sample,prazoDosEnlaces})=>{
+    window.conferidos=[];const check=(v,m)=>{if(!v)throw new Error(m);window.conferidos.push(m);};const tick=()=>new Promise(ok=>setTimeout(ok,20));
     const until=async f=>{const start=performance.now();while(!f()){if(performance.now()-start>10000)throw new Error('prazo mídia: '+JSON.stringify(window.events));await tick();}};
     const wasmBytes=await(await fetch('/seele_web.wasm')).arrayBuffer();
     async function service(){const wasm=(await WebAssembly.instantiate(wasmBytes,{})).instance.exports;return {wasm,operar(input){const b=new TextEncoder().encode(JSON.stringify(input));const p=wasm.alocar(b.length);try{new Uint8Array(wasm.memory.buffer).set(b,p);wasm.chamada_operar(p,b.length);const r=JSON.parse(new TextDecoder().decode(new Uint8Array(wasm.memory.buffer,wasm.saida_ptr(),wasm.saida_len())));if(r.erro)throw Error(r.erro);return r;}finally{wasm.liberar(p,b.length);}}};}
     const sa=await service(),sb=await service();let pa,pb;
     pa=criarEnlaceDaChamadaWeb({papel:'quem-liga',enviarSinal:s=>pb.receberSinalAutenticado(s)});
     pb=criarEnlaceDaChamadaWeb({papel:'quem-recebe',enviarSinal:s=>pa.receberSinalAutenticado(s)});
-    await pb.iniciar();await pa.iniciar();await Promise.all([pa.pronto,pb.pronto]);
+    await pb.iniciar();await pa.iniciar();
+    // Com prazo e com frase: o que cada enlace sabe de si (`diagnostico`: os dois estados e os candidatos por tipo) vai no erro.
+    let relogioDosEnlaces;
+    try{await Promise.race([Promise.all([pa.pronto,pb.pronto]),new Promise((_,nao)=>{relogioDosEnlaces=setTimeout(()=>nao(new Error(
+     `os dois enlaces não se ligaram em ${prazoDosEnlaces/1000} s: quem liga ${JSON.stringify(pa.diagnostico)}, quem recebe ${JSON.stringify(pb.diagnostico)}`)),prazoDosEnlaces);})]);}
+    finally{clearTimeout(relogioDosEnlaces);}
     window.events=[];const packets=[];let a,b;
     let omitirProximoFechar=false;
     const transport={ouvir:fn=>pa.tela.ouvir(fn),enviar:bytes=>{
@@ -61,12 +77,25 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
       }finally{HTMLVideoElement.prototype.requestVideoFrameCallback=apresentar;blue.color('#2040e0');}
       await until(()=>pixel()[2]>150&&pixel()[0]<80);
       const clone=blue.stream.getVideoTracks()[0].clone(),leitorParado=leitorDeVideoSemProcessador(clone);
-      const primeiro=await leitorParado.read();primeiro.value.close();
+      // **A leitura do clone tem prazo.** No WebKit do Linux (o do CI, sem
+      // tela) o clone de uma trilha de canvas pode nunca entregar o primeiro
+      // quadro a um segundo `<video>`: a prova ficava 90 s parada aqui, com a
+      // transmissão de verdade entregando 1665 quadros ao lado (13/11, duas
+      // rodadas). Sem o primeiro quadro não há o que pausar: a conferência do
+      // watchdog é pulada e isso é DITO; o leitor de verdade segue cobrado
+      // acima e abaixo.
+      const primeiro=await Promise.race([leitorParado.read(),new Promise(ok=>setTimeout(()=>ok(null),5000))]);
+      if(primeiro===null){
+       window.parciais=(window.parciais??[]).concat('o clone da trilha não entregou quadro em 5 s: a conferência do watchdog com o vídeo pausado não rodou');
+       await leitorParado.cancel();clone.stop();
+      }else{
+      primeiro.value.close();
       const auxiliar=[...document.querySelectorAll('[data-captura-da-tela]')].at(-1);auxiliar.pause();
       const esperando=leitorParado.read();
       const duplicou=await Promise.race([esperando.then(()=>true),new Promise(ok=>setTimeout(()=>ok(false),250))]);
       check(!duplicou,'watchdog não duplica vídeo pausado');
       await leitorParado.cancel();check((await esperando).done,'cancelar solta leitura e watchdog pendentes');clone.stop();
+      }
      }
      const output=document.querySelector('#b canvas');
      check(output.height>output.width,'monitor vertical anunciado e decodificado vertical');
@@ -98,7 +127,12 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
       await until(()=>!document.fullscreenElement&&!document.webkitFullscreenElement);
      }else{a.parar();await until(()=>document.getElementById('b').hidden);blue.stop();}
      // Resolver o seletor após fechar não deixa captura órfã.
-     let deliver;Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{configurable:true,value:()=>new Promise(ok=>deliver=ok)});
+     // O dublê vai no protótipo, e não em `navigator.mediaDevices`: no WebKit o
+     // objeto que esse getter devolve pode ser recriado entre dois `await`, e
+     // a propriedade posta nele sumia. O produto chamava então a captura de
+     // verdade, a entrega daqui não chegava a ninguém, e «captura após prazo
+     // fechada» reprovava 5 em 30 rodadas sem defeito nenhum do produto.
+     let deliver;Object.defineProperty(MediaDevices.prototype,'getDisplayMedia',{configurable:true,value:()=>new Promise(ok=>deliver=ok)});
      const pending=a.compartilhar();a.fechar();await pending;const late=artificial('#ffffff');deliver(late.stream);await tick();
      check(late.stream.getTracks().every(t=>t.readyState==='ended'),'captura tardia fechada');late.stop();
      // Relógio acelerado só para o seletor: prazo recusa e faixas tardias param.
@@ -184,11 +218,24 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     const decoded=frames();b.fechar();b.fechar();pa.abortar();pb.abortar();
     check(!document.querySelector('#a canvas')&&!document.querySelector('#b canvas'),'canvas removidos');
     return {captured,decoded,errors,oldPackets,newPackets,leitor:typeof MediaStreamTrackProcessor==='function'?'TrackProcessor':'requestVideoFrameCallback',quadrosServidor};
-   },sample);
+   },{sample,prazoDosEnlaces:PRAZO_DOS_ENLACES_MS}),PRAZO_DO_MOTOR_MS,`${engine}: a prova na página não terminou`);
    if(result.captured)sample={oldPackets:result.oldPackets,newPackets:result.newPackets};
+   for(const parcial of await page.evaluate(()=>window.parciais??[]))console.error(`PARCIAL (${engine}): ${parcial}`);
    console.log(JSON.stringify({engine,version:browser.version(),captura:result.captured?'canvas real':'indisponível: receptor com amostra real',leitor:result.leitor,quadrosDecodificados:result.decoded,quadrosServidor:result.quadrosServidor,erros:result.errors}));
    assert.ok(result.decoded>0);
    if(engine==='webkit'){assert.equal(result.captured,true);assert.equal(result.leitor,'requestVideoFrameCallback');}
+  }catch(erro){
+   // Antes de fechar o navegador: o que a página sabe do WebRTC dela, e os eventos da prova até ali.
+   if(page){
+    // **Onde parou**: a última conferência que passou. Em 13/11 o WebKit do
+    // Linux ficou 90 s num `await` sem prazo, com 1665 quadros chegando, e os
+    // eventos sozinhos não diziam em qual. E os eventos vão resumidos: a lista
+    // inteira de quadros afogava o resto do log.
+    console.error(`${engine}: a última conferência que passou:`,await page.evaluate(()=>JSON.stringify((window.conferidos??[]).slice(-3))).catch(falha=>`sem resposta: ${falha}`));
+    console.error(`${engine}: os eventos da prova até a falha:`,await page.evaluate(()=>{const e=window.events??[];const q=e.filter(x=>x.tipo==='quadro').length;return JSON.stringify({quadros:q,outros:e.filter(x=>x.tipo!=='quadro')});}).catch(falha=>`sem resposta: ${falha}`));
+    await relatarRtc(engine,{pagina:page});
+   }
+   throw erro;
   }finally{await browser.close();}
  }}finally{server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

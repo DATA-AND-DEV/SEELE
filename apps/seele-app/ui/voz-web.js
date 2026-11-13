@@ -132,7 +132,30 @@ const ALCA_DA_TELA = 0xffffffff;
  * O transporte é `{ enviar(pacote) → boolean, ouvir(fn) → parar }`: a sessão
  * pelo WebTransport (Tarefa 2.6), ou um laço de bancada.
  */
-function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
+/**
+ * **Por onde o som da sala sai**: pela tag `<audio>` ou direto pelo contexto.
+ *
+ * A tag é mídia para o sistema, e é isso que a mantém tocando com a tela
+ * bloqueada no iOS. É também o que a põe na disputa pela saída: quando outro
+ * aplicativo toca som (um jogo, um vídeo), o navegador **pausa a tag**, e a
+ * sala fica muda até a pessoa voltar. O Chrome do Android pede a saída ao
+ * sistema para a tag e não para o Web Audio; o som que sai direto do contexto
+ * não entra na disputa e toca junto com o do outro aplicativo.
+ *
+ * `direta` é uma **experiência**, e por isso não é o padrão em sistema nenhum:
+ * ninguém a mediu num aparelho. Liga-se pelo endereço (`?saida=direta`), para
+ * comparar as duas no mesmo celular; `?saida=tag` é o de sempre.
+ */
+function saidaPedidaNoEndereco() {
+  try {
+    const pedida = new URLSearchParams(globalThis.location?.search ?? "").get("saida");
+    return pedida === "direta" || pedida === "tag" ? pedida : null;
+  } catch {
+    return null;
+  }
+}
+
+function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOndeSai = saidaPedidaNoEndereco() ?? "tag" }) {
   const w = wasm;
   const cfg = CONFIGURACAO_DA_VOZ;
 
@@ -186,6 +209,8 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     fonte: null,
     /** Se os ouvintes do fim da página estão registrados (um só jogo, sem duplicar). */
     escutandoAPagina: false,
+    /** A saída foi pausada pelo sistema (outro aplicativo tomou o áudio) e ainda não voltou. */
+    saidaPausada: false,
     faixa: null,
     captura: null,
     reproducao: null,
@@ -503,6 +528,26 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
   const pedidosDeContas = new Map();
   let proximoPedido = 0;
 
+  /**
+   * **A recepção medida**: o jitter e a perda da voz que chega, contados nos
+   * buffers de jitter do `.wasm` do worklet (`Reproducao::recepcao`), pela
+   * mesma janela do desktop (`seele_voz::recepcao`). Quem chama pede a cada
+   * volta da medida; a resposta chega como o evento `recepcao` em
+   * `aoAcontecer`, com `{ jitter_ms, perda, relato }` — `null` no que não foi
+   * medido, e `relato` só na vez dele (uma por segundo, decidida no `.wasm`).
+   * O som da tela não é voz, e fica fora da conta.
+   *
+   * Cada recepção nova (entrar, a volta do enlace, sair) troca a geração: a
+   * resposta de um pedido de antes não é dita.
+   */
+  let geracaoDaRecepcao = 0;
+
+  function pedirARecepcao() {
+    if (!vivo.dentro || !vivo.reproducao) return false;
+    mandarAReproducao({ tipo: "recepcao", pedido: geracaoDaRecepcao, agora: performance.now(), fora: ALCA_DA_TELA });
+    return true;
+  }
+
   function ouvirAReproducao(no) {
     // Quanto o `.wasm` leva para compilar dentro do worklet, medido daqui: o
     // escopo do worklet não tem relógio de parede, e o de áudio pode nem ter
@@ -523,6 +568,10 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
         const resolver = pedidosDeContas.get(m.pedido);
         pedidosDeContas.delete(m.pedido);
         if (resolver) resolver(m);
+      } else if (m.tipo === "recepcao") {
+        // A resposta de uma recepção que já recomeçou (outra sala, a volta do
+        // enlace) mediu outra voz: não é dita.
+        if (m.pedido === geracaoDaRecepcao && vivo.dentro && m.medida) aoAcontecer({ tipo: "recepcao", medida: m.medida });
       } else if (m.tipo === "falha") {
         falha(m.onde, m.texto);
         if (m.texto.startsWith("o .wasm") || m.texto.startsWith("o worklet nasceu")) pronta(false);
@@ -559,10 +608,11 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
   // ------------------------------------------------- abrir e fechar
 
   async function trocarSaida(id) {
-    const elemento = vivo.elemento, vez = geracaoDoAudio;
+    // Quem toca é a tag; na saída direta, o próprio contexto.
+    const elemento = vivo.elemento ?? (vivo.saidaDireta ? vivo.ctx : null), vez = geracaoDoAudio;
     if (!elemento || typeof elemento.setSinkId !== "function") throw new Error("Seleção de saída indisponível");
     await elemento.setSinkId(id);
-    if (vez !== geracaoDoAudio || vivo.elemento !== elemento) throw new DOMException("Conversa encerrada", "AbortError");
+    if (vez !== geracaoDoAudio || (vivo.elemento ?? vivo.ctx) !== elemento) throw new DOMException("Conversa encerrada", "AbortError");
   }
 
   /**
@@ -643,9 +693,32 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     aoAcontecer({ tipo: "audio-fechado", motivo: "pagina" });
   };
 
+  /**
+   * Toca de novo a saída que o sistema pausou, e acorda o contexto se ele
+   * dormiu junto. Sem efeito com o áudio fechado. Um `play()` recusado (a
+   * página sem gesto recente) fica dito, e a próxima volta tenta de novo.
+   */
+  function retomarASaida() {
+    const { elemento, ctx } = vivo;
+    if (!ctx || (!elemento && !vivo.saidaDireta)) return;
+    if (ctx.state !== "running" && typeof ctx.resume === "function") {
+      ctx.resume().catch((erro) => falha("saída", erro));
+    }
+    if (elemento?.paused) {
+      Promise.resolve(elemento.play()).catch((erro) => falha("saída", erro));
+    }
+  }
+
+  /** A página voltou à vista: o que o sistema pausou enquanto ela estava escondida volta. */
+  const aoMudarAVista = () => {
+    if (document.hidden || !vivo.ctx) return;
+    if (vivo.saidaPausada || vivo.elemento?.paused || vivo.ctx.state !== "running") retomarASaida();
+  };
+
   function escutarAPagina() {
     if (vivo.escutandoAPagina) return;
     vivo.escutandoAPagina = true;
+    document.addEventListener("visibilitychange", aoMudarAVista);
     window.addEventListener("pagehide", aoSairDaPagina);
     window.addEventListener("freeze", aoSairDaPagina);
     document.addEventListener("freeze", aoSairDaPagina);
@@ -654,6 +727,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
   function pararDeEscutarAPagina() {
     if (!vivo.escutandoAPagina) return;
     vivo.escutandoAPagina = false;
+    document.removeEventListener("visibilitychange", aoMudarAVista);
     window.removeEventListener("pagehide", aoSairDaPagina);
     window.removeEventListener("freeze", aoSairDaPagina);
     document.removeEventListener("freeze", aoSairDaPagina);
@@ -721,24 +795,63 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     vivo.reproducao = reproducao;
     ouvirAReproducao(reproducao);
 
-    // A saída pela tag `<audio>`: o iOS a trata como mídia, que segue com a
-    // tela bloqueada.
-    const destino = ctx.createMediaStreamDestination();
-    vivo.destino = destino;
-    reproducao.connect(destino);
-    const elemento = document.createElement("audio");
-    elemento.playsInline = true;
-    elemento.srcObject = destino.stream;
-    elemento.onpause = () => aoAcontecer({ tipo: "saida", estado: "pausada" });
-    elemento.onplay = () => aoAcontecer({ tipo: "saida", estado: "tocando" });
-    document.body.append(elemento);
-    vivo.elemento = elemento;
-    if (aparelhoDeSaida && elemento.setSinkId) {
-      await elemento.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
+    vivo.saidaDireta = porOndeSai === "direta";
+    if (vivo.saidaDireta) {
+      // **Direto pelo contexto, sem a tag** (ver `saidaPedidaNoEndereco`). O
+      // que diz que o sistema calou a sala passa a ser o estado do contexto:
+      // `suspended` ou `interrupted` é a saída pausada, `running` é tocando.
+      reproducao.connect(ctx.destination);
+      vivo.destino = null;
+      vivo.elemento = null;
+      vivo.saidaPausada = false;
+      ctx.onstatechange = () => {
+        aoAcontecer({ tipo: "contexto", estado: ctx.state });
+        if (vivo.ctx !== ctx || ctx.state === "closed") return;
+        const pausada = ctx.state !== "running";
+        if (pausada === vivo.saidaPausada) return;
+        vivo.saidaPausada = pausada;
+        aoAcontecer({ tipo: "saida", estado: pausada ? "pausada" : "tocando" });
+        if (pausada && !document.hidden) retomarASaida();
+      };
+      if (aparelhoDeSaida && typeof ctx.setSinkId === "function") {
+        await ctx.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
+        conferir();
+      }
+    } else {
+      // A saída pela tag `<audio>`: o iOS a trata como mídia, que segue com a
+      // tela bloqueada.
+      const destino = ctx.createMediaStreamDestination();
+      vivo.destino = destino;
+      reproducao.connect(destino);
+      const elemento = document.createElement("audio");
+      elemento.playsInline = true;
+      elemento.srcObject = destino.stream;
+      // **A saída que o sistema pausa volta sozinha quando a página está à
+      // vista.** No celular, outro aplicativo que toca som (um vídeo, uma
+      // ligação) toma o áudio, e o navegador pausa esta tag. Ninguém a retomava:
+      // a pessoa voltava para a sala e não ouvia mais nada, sem aviso, até sair
+      // e entrar de novo. Com a página **escondida** a saída fica pausada de
+      // propósito: retomá-la ali seria tomar o áudio de volta do aplicativo que
+      // a pessoa abriu. Quem a retoma é a volta (`aoMudarAVista`).
+      elemento.onpause = () => {
+        vivo.saidaPausada = true;
+        aoAcontecer({ tipo: "saida", estado: "pausada" });
+        if (!document.hidden) retomarASaida();
+      };
+      elemento.onplay = () => {
+        vivo.saidaPausada = false;
+        aoAcontecer({ tipo: "saida", estado: "tocando" });
+      };
+      document.body.append(elemento);
+      vivo.elemento = elemento;
+      vivo.saidaPausada = false;
+      if (aparelhoDeSaida && elemento.setSinkId) {
+        await elemento.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
+        conferir();
+      }
+      await elemento.play();
       conferir();
     }
-    await elemento.play();
-    conferir();
     if (navigator.mediaSession && window.MediaMetadata) {
       if (vivo.sessao && !vivo.sessao.metadataMudou) {
         vivo.sessao.metadata = navigator.mediaSession.metadata;
@@ -902,6 +1015,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     w.voz_envio(numeroDaVoz, performance.timeOrigin + performance.now());
     w.voz_recepcao(numeroDaVoz);
     fecharDecoders();
+    geracaoDaRecepcao += 1;
     mandarAReproducao({ tipo: "recomecar" });
     controles.ganhos.clear();
     vestir();
@@ -918,6 +1032,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     w.voz_reabrir(numeroDaVoz);
     w.voz_recepcao(numeroDaVoz);
     fecharDecoders();
+    geracaoDaRecepcao += 1;
     mandarAReproducao({ tipo: "recomecar" });
     controles.ganhos.clear();
     vestir();
@@ -932,6 +1047,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     vivo.pararDeOuvir = null;
     vivo.transporte = null;
     fecharDecoders();
+    geracaoDaRecepcao += 1;
     mandarAReproducao({ tipo: "recomecar" });
   }
 
@@ -1066,6 +1182,8 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     sair,
     desligar,
     contas: lerContas,
+    /** Pede uma volta da medida da recepção; a resposta é o evento `recepcao`. */
+    pedirARecepcao,
     /** A promessa do `.wasm` compilado no worklet (`false` se falhou). */
     reproducaoPronta: () => vivo.reproducaoPronta,
     abrirTeste,

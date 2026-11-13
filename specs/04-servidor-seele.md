@@ -1,5 +1,17 @@
 # 04 — Servidor (seeled)
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original; a seção de cargos já é a da 0.17.
+>
+> - **Continua valendo:** o servidor encaminha a voz sem decodificar; cargos e permissões como descritos abaixo (ADR 0064); SQLite com migrações embutidas; toda ação validada no servidor.
+> - **Mudou:**
+>   - **não existe arquivo TOML.** A seção «Configuração» abaixo nunca foi implementada. O `seeled` recebe o endereço e `--proprietario` pela linha de comando, e o caminho do banco por `SEELE_DB` (padrão `seele.db` na pasta atual). Senha, convite e teto de anexos são subcomandos que escrevem no banco: `seeled senha`, `seeled convite`, `seeled anexos` (`crates/seele-server/src/main.rs`, função `uso`);
+>   - **não há endpoint de saúde nem métricas Prometheus.** Nada em `crates/seele-server` os implementa;
+>   - **o desligamento gracioso existe, com outro motivo:** em `SIGTERM` e `SIGINT` o `seeled` manda `Disconnecting` com `ServerShuttingDown` (e não `ManutencaoProgramada`) a cada sessão, espera até 3 s e fecha (`main.rs`, `Daemon::encerrar_avisando` em `lib.rs`). No Windows só o Ctrl+C é ouvido;
+>   - **há cópia e restauração:** `seeled backup <pasta>` e `seeled restore <pasta>` (`crates/seele-server/src/copia.rs`);
+>   - **o transporte é o do `seele-enlace`:** onde o texto diz «datagram», leia-se mensagem do canal `voz` (ADR 0063). O servidor também encaminha a tela (`crates/seele-server/src/tela.rs`) e guarda anexos com teto (ADR 0027);
+>   - o teto da sala é contado pela subida, e não só declarado (ADR 0038).
+> - **Manda agora:** `crates/seele-server/src/main.rs` para a operação, o ADR 0064 para a autoridade e o `README.md` da raiz, seção «Operar o servidor».
+
 ## Identidade
 
 O daemon se chama `seeled`. Uma instância é um **Server Central**. Internamente, três subsistemas nomeados — não é decoração: são fronteiras reais de módulo, e o estado de cada um aparece nas telas de diagnóstico do cliente.
@@ -66,6 +78,27 @@ dono e registra o aviso acionável.
 
 **Sem sobrescritas por canal na 0.17.** Fica o «cargo exigido» de leitura e escrita da Linha: a pessoa
 tem de ter aquele cargo, e quem administra passa.
+
+## A sala pessoal (a conversa pessoal, desde a 1.0)
+
+**A conversa pessoal é a sala pessoal** (ADR 0068). Quem recebe uma ligação hospeda, no próprio app, um
+`seele-server` em memória: uma sessão comum, com a campainha do ADR 0059 na frente.
+
+- **Quem entra**: outro app, pelo código, e a página do navegador ou do celular, também pelo código, como
+  convidada. A página não hospeda.
+- **O grupo**: até 6 pessoas, contando quem hospeda (`TETO_DA_LIGACAO`). A terceira pessoa entra **ligando
+  para o código de quem hospeda**, que atende com a conversa em curso. Quem liga com a ligação no teto lê
+  `ServerFull`.
+- **O fim**: quando quem hospeda sai, todos leem `ChamadaEncerrada`. A sala não passa para outra pessoa.
+- **O que a sala diz ao ponto de encontro**: além do registro assinado, a impressão do certificado DTLS
+  efêmero dela, no `ATENDE` (uma segunda linha do datagrama). É por ela que o navegador fecha o DTLS; quem
+  autentica a sala continua sendo a apresentação `0x03` (`08-seguranca.md`).
+
+O protocolo de controle não mudou para isto: o `Tocando` e as razões `ChamadaRecusada`, `NinguemAtendeu`,
+`ChamadaEncerrada` e `ServerFull` são os de antes.
+
+**Limites ditos**: a ligação não sobrevive a quem hospeda sair nem à troca de rede dele; quem hospeda não é
+avisado de uma ligação recusada sem tocar (a ligação cheia, ou alguém bloqueado).
 
 ## Concorrência
 

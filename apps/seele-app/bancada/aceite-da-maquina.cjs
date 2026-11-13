@@ -48,7 +48,9 @@
 //     com a metade de pé e o jogo parado; a lista relida também.
 // 20. (e2e de 31/10, passo 14) o jogo que sobrou de um app que fechou sem
 //     desligá-lo: `maquina-sobra` e `maquinas_sobras` põem na faixa o que se
-//     achou e o que se fez, uma linha por processo.
+//     achou e o que se fez, uma linha por processo; e o que não parou manda
+//     encerrá-lo pela ferramenta do sistema em que a janela roda, na primeira
+//     linha da faixa, à vista sem rolar mesmo com outras três sobras.
 // 21. (e2e de 31/10, passo 5) o MOD sem o id repetido, e o servidor do SEELE
 //     pelo nome, e não o id do jogo.
 // 22. (API 8 parte 7) o pedido da reserva diz que é a reserva — chip e título à
@@ -68,7 +70,12 @@ async function caso(motor, numero, prova) {
   try {
     await prova();
   } catch (erro) {
-    falhas.push(`${motor} · caso ${numero}: ${String(erro.message).split("\n")[0]}`);
+    // **A mensagem inteira, numa linha só.** Cortada na primeira quebra, a
+    // reprovação do caso 20 mostrava só a primeira linha da faixa (a do
+    // processo 4242), e dali se leu que a linha do 4646 não existia: ela
+    // estava três linhas abaixo, com a frase certa. A faixa tem uma linha por
+    // máquina, então toda mensagem que a cita tem quebras.
+    falhas.push(`${motor} · caso ${numero}: ${String(erro.message).trim().split(/\n+/).join(" ⏎ ")}`);
   }
 }
 
@@ -684,10 +691,69 @@ async function caso(motor, numero, prova) {
           faixa = await pagina.evaluate(() => faixaDeMaquinas());
           assert.equal((faixa.match(/processo 4545/g) ?? []).length, 1, `${motor}: 20 · o parando ficou ao lado do desfecho: ${faixa}`);
           assert.doesNotMatch(faixa, /nenhum jogo sobe/, `${motor}: 20 · o parando não saiu: ${faixa}`);
-          // Que não parou: o caminho vale fora do Mac também (revisão da 0.19, M4).
-          await pagina.evaluate((s) => emitir("maquina-sobra", { ...s, pid: 4646, desfecho: "nao-parou", motivo: "EPERM" }), sobra);
-          faixa = await pagina.evaluate(() => faixaDeMaquinas());
-          assert.match(faixa, /processo 4646.*pelo gerenciador de processos do sistema/s, `${motor}: 20 · nao-parou: ${faixa}`);
+          // Que não parou: a única sobra que pede uma ação de quem lê. O
+          // payload é o do Rust (`sobra_na_tela`: `nao-parou`, zero segundos e
+          // o `motivo`). O caminho vale fora do Mac também (revisão da 0.19,
+          // M4) — e, desde a 0.19.5, a frase nomeia a ferramenta do sistema em
+          // que a janela roda (`ambienteDasInstrucoes`), no lugar de «o
+          // gerenciador de processos do sistema (no Mac, o Monitor de
+          // Atividade)» para todos. Esta bancada ficou esperando a frase
+          // antiga num Mac, e reprovava com o produto certo: agora prova a de
+          // cada sistema, e que nenhuma cita a ferramenta de outro.
+          await pagina.evaluate((s) => emitir("maquina-sobra", { ...s, pid: 4646, desfecho: "nao-parou", segundos: 0, motivo: "EPERM" }), sobra);
+          const ferramentas = { macos: "Monitor de Atividade", windows: "Gerenciador de Tarefas", outro: "gerenciador de processos do sistema" };
+          const plataformaDaBancada = await pagina.evaluate(() => $("barra-janela").dataset.plataforma);
+          assert.equal(plataformaDaBancada, "macos", `${motor}: 20 · a bancada combina um Mac, e a barra diz ${plataformaDaBancada}`);
+          try {
+            for (const [plataforma, ferramenta] of Object.entries(ferramentas)) {
+              faixa = await pagina.evaluate((p) => {
+                $("barra-janela").dataset.plataforma = p;
+                desenharAFaixaDeMaquinas();
+                return faixaDeMaquinas();
+              }, plataforma);
+              const linhas = faixa.split("\n").filter((l) => l.includes("processo 4646"));
+              assert.equal(linhas.length, 1, `${motor}: 20 · nao-parou (${plataforma}): a faixa não tem uma linha, e uma só, do processo 4646: ${faixa}`);
+              assert.match(linhas[0], /o SEELE não conseguiu pará-lo \(EPERM\): ele segue rodando, com o mundo e a porta/, `${motor}: 20 · nao-parou (${plataforma}): ${linhas[0]}`);
+              assert.ok(linhas[0].endsWith(`encerre-o pelo ${ferramenta}.`), `${motor}: 20 · nao-parou (${plataforma}): a linha não manda ao ${ferramenta}: ${linhas[0]}`);
+              for (const [outra, alheia] of Object.entries(ferramentas)) {
+                if (outra !== plataforma) assert.ok(!linhas[0].includes(alheia), `${motor}: 20 · nao-parou (${plataforma}): a linha cita a ferramenta de ${outra}: ${linhas[0]}`);
+              }
+            }
+          } finally {
+            // A barra volta ao sistema combinado: os casos seguintes leem dela.
+            await pagina.evaluate((p) => { $("barra-janela").dataset.plataforma = p; desenharAFaixaDeMaquinas(); }, plataformaDaBancada);
+          }
+          // **A que não parou é a primeira linha, e fica à vista sem rolar.** A
+          // faixa rola a partir de 30% da altura da janela: na ordem de
+          // chegada, esta era a quarta linha e, numa janela de 1000×640, ficava
+          // inteira abaixo da dobra, atrás de três sobras que não pedem nada.
+          // Na tela de entrada, que é onde a faixa mora no alto.
+          assert.deepEqual(
+            await pagina.evaluate(() => [...document.querySelectorAll("#maquinas .maquina-bloco")].map((b) => /processo (\d+)/.exec(b.innerText)?.[1])),
+            ["4646", "4242", "4343", "4545"],
+            `${motor}: 20 · a ordem das linhas`,
+          );
+          await pagina.setViewportSize({ width: 1000, height: 640 });
+          await pagina.evaluate(() => { $("tela-sessao").hidden = true; $("tela-boot").hidden = false; });
+          try {
+            await pagina.waitForFunction(() => document.documentElement.dataset.jogosNaBarra === "nao", null, { timeout: 5000 });
+            const medida = await pagina.evaluate(() => {
+              const caixa = $("maquinas").getBoundingClientRect();
+              const bloco = [...document.querySelectorAll("#maquinas .maquina-bloco")].find((b) => b.innerText.includes("processo 4646"));
+              const r = bloco.getBoundingClientRect();
+              const no = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return {
+                topo: r.top, pe: r.bottom, caixaTopo: caixa.top, caixaPe: caixa.bottom,
+                rola: $("maquinas").scrollHeight > $("maquinas").clientHeight, alcanca: bloco.contains(no),
+              };
+            });
+            assert.equal(medida.rola, true, `${motor}: 20 · com quatro sobras a faixa devia rolar nesta janela, ou a prova não prova nada: ${JSON.stringify(medida)}`);
+            assert.ok(medida.topo >= medida.caixaTopo - 1 && medida.pe <= medida.caixaPe + 1, `${motor}: 20 · a que não parou está fora da vista: ${JSON.stringify(medida)}`);
+            assert.equal(medida.alcanca, true, `${motor}: 20 · a que não parou está coberta: ${JSON.stringify(medida)}`);
+          } finally {
+            await pagina.evaluate(() => { $("tela-boot").hidden = true; $("tela-sessao").hidden = false; });
+            await pagina.setViewportSize({ width: 1400, height: 900 });
+          }
           await pagina.evaluate(() => { table.maquinas_sobras = () => []; });
         });
 

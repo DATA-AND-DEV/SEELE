@@ -14,7 +14,9 @@
 //!   dito: o `CHAMA` de [`seele_proto::encontro::pedido_do_sinal`]. A resposta é
 //!   `200` com uma das quatro linhas de
 //!   [`seele_proto::encontro::RespostaDoSinal`], que chega depois do `ATENDE`
-//!   ou no fim de [`crate::enc3::PRAZO_DA_CHAMADA`];
+//!   ou no fim de [`crate::enc3::PRAZO_DA_CHAMADA`]. **O `AQUI` de uma sala
+//!   pessoal leva a impressão DTLS que ela disse no `ATENDE`** (ADR 0068), como
+//!   um terceiro campo: o navegador precisa dela antes de fechar o DTLS;
 //! - `OPTIONS /sinal/1`, a pergunta prévia do CORS, que o navegador só faz se
 //!   a página mandar um cabeçalho que não é «simples» (ela não manda);
 //! - o resto ouve `404`, `405`, `400` ou `413`, sem corpo útil.
@@ -37,8 +39,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use seele_proto::encontro::{
-    ler_pedido_do_sinal, resposta_do_sinal, sinal_de, Motivo, Resposta3, RespostaDoSinal,
-    Vizinhanca, LIMITE_DO_SINAL,
+    ler_pedido_do_sinal, resposta_do_sinal, sinal_de, Motivo, RespostaDoSinal, Vizinhanca,
+    LIMITE_DO_SINAL,
 };
 
 use crate::enc3::{chamar, QuemLiga, PRAZO_DA_CHAMADA};
@@ -318,7 +320,39 @@ fn escrever(
         }
         restante = restante.get(escritos..).ok_or(io::ErrorKind::InvalidData)?;
     }
-    conexao.flush()
+    conexao.flush()?;
+    despedir(conexao);
+    Ok(())
+}
+
+/// Quanto do pedido que sobrou sem ler o ponto ainda engole antes de fechar.
+const SOBRA_ENGOLIDA: usize = 64 * 1024;
+/// Por quanto tempo, no máximo, ele espera essa sobra.
+const PRAZO_DA_SOBRA: Duration = Duration::from_millis(250);
+
+/// **Fecha sem derrubar a resposta.** Uma recusa (o `413`, por exemplo) sai
+/// antes de o corpo do pedido ser lido; fechar o soquete com bytes por ler faz
+/// o sistema mandar um RST, e quem pediu pode ver «conexão reiniciada» no
+/// lugar da recusa (medido no Linux do CI, em `tests/enc3.rs`). O ponto avisa
+/// que acabou de escrever e engole a sobra, com teto de bytes e de tempo: é
+/// um serviço público, e ninguém o segura aberto por aqui.
+fn despedir(conexao: &mut TcpStream) {
+    if conexao.shutdown(std::net::Shutdown::Write).is_err() {
+        return;
+    }
+    let fim = Instant::now() + PRAZO_DA_SOBRA;
+    let mut balde = [0_u8; 4096];
+    let mut engolidos = 0_usize;
+    while engolidos < SOBRA_ENGOLIDA {
+        let prazo = fim.saturating_duration_since(Instant::now());
+        if prazo.is_zero() || conexao.set_read_timeout(Some(prazo)).is_err() {
+            return;
+        }
+        match conexao.read(&mut balde) {
+            Ok(0) | Err(_) => return,
+            Ok(lidos) => engolidos = engolidos.saturating_add(lidos),
+        }
+    }
 }
 
 fn atender(
@@ -455,7 +489,7 @@ fn responder(
             agora,
         };
     }
-    let (manda, espera) = mpsc::sync_channel::<Resposta3>(1);
+    let (manda, espera) = mpsc::sync_channel::<crate::enc3::DoSinal>(1);
     match chamar(
         quarto,
         chama,
@@ -470,7 +504,9 @@ fn responder(
             quarto.chamadas.esquecer(&id);
             resposta
                 .ok()
-                .and_then(|resposta| sinal_de(&resposta))
+                .and_then(|(resposta, impressao)| {
+                    Some(sinal_de(&resposta)?.com_a_impressao(impressao))
+                })
                 .unwrap_or(RespostaDoSinal::Calado)
         }
     }

@@ -149,7 +149,12 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
 
     // E continua servindo: reconectar sem poder falar seria voltar para nada.
     enlace
-        .dizer(ChannelId(LINE), "voltei".to_owned(), ClientMessageId(1))
+        .dizer(
+            ChannelId(LINE),
+            "voltei".to_owned(),
+            None,
+            ClientMessageId(1),
+        )
         .await?;
 
     de_novo.shutdown();
@@ -203,7 +208,12 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     // Falar de novo prova que a sala de voz e a Linha foram refeitos: sem `join_channel`
     // o servidor aceita a mensagem e não a devolve para ninguém.
     enlace
-        .dizer(ChannelId(LINE), "de volta".to_owned(), ClientMessageId(1))
+        .dizer(
+            ChannelId(LINE),
+            "de volta".to_owned(),
+            None,
+            ClientMessageId(1),
+        )
         .await?;
 
     let ouviu = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
@@ -295,7 +305,12 @@ async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> 
     // que nunca chegou a abrir se pareceria, lá embaixo, com uma Linha que a
     // reconexão não reabriu.
     enlace
-        .dizer(ChannelId(LINE), "estou aqui".to_owned(), ClientMessageId(0))
+        .dizer(
+            ChannelId(LINE),
+            "estou aqui".to_owned(),
+            None,
+            ClientMessageId(0),
+        )
         .await?;
     let pronta = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
         matches!(
@@ -407,6 +422,7 @@ async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> 
         .dizer(
             ChannelId(LINE),
             "continuo aqui".to_owned(),
+            None,
             ClientMessageId(1),
         )
         .await?;
@@ -464,7 +480,12 @@ async fn quem_hospeda_fechou_acaba_com_a_sessao_em_vez_de_reconectar() -> Result
     // aqui. Sem ela, o evento iria para um barramento que esta sessão ainda
     // não assinou, e o teste mediria o preparo em vez da fronteira.
     enlace
-        .dizer(ChannelId(LINE), "estou aqui".to_owned(), ClientMessageId(0))
+        .dizer(
+            ChannelId(LINE),
+            "estou aqui".to_owned(),
+            None,
+            ClientMessageId(0),
+        )
         .await?;
     let pronta = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
         matches!(

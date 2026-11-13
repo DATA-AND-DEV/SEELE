@@ -162,6 +162,16 @@ async fn abrir(endereco: SocketAddr, semente: u8, _janela: u32) -> Result<Par> {
 /// nenhuma chega perto disto. Quem decide são as asserções.
 const SEGURANCA: Duration = Duration::from_secs(120);
 
+/// Quanto o teste espera pelo motivo da conexão depois de a leitura do `ctl`
+/// acabar num corte.
+///
+/// O mesmo 1 s do cliente de produto (`ESPERA_PELO_CORTE` em
+/// `seele-core/src/client.rs`), que é privado de lá: quem vê o corte do fluxo
+/// ainda pode não ver o motivo, e a diferença entre os dois é o resto de uma
+/// passada da tarefa do enlace (a despedida no fio e o `encerrar`), não um
+/// tempo de rede.
+const ESPERA_PELO_CORTE: Duration = Duration::from_secs(1);
+
 /// O carimbo do `Ping` que cada falante manda atrás da rajada.
 const FIM_DA_RAJADA: u64 = 0x5EE1E;
 
@@ -479,6 +489,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     let mut chegaram = 0_usize;
     let mut desligado = None;
     let mut fim = None;
+    let mut o_fluxo_terminou = false;
     tokio::time::timeout(SEGURANCA, async {
         loop {
             match frame::read::<ServerMessage>(&mut ouvinte.recebe).await {
@@ -499,6 +510,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
                 Ok(_) => {}
                 Err(erro) => {
                     fim = Some(format!("o fluxo terminou: {erro}"));
+                    o_fluxo_terminou = true;
                     break;
                 }
             }
@@ -506,6 +518,28 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     })
     .await
     .expect("o ouvinte não teve nem a testemunha nem a despedida: o servidor travou");
+
+    // **O corte do fluxo chega antes do motivo da conexão.** No enlace, o `Corte`
+    // do `ctl` é entregue a quem lê o fluxo (`entrada.send(Entrada::Corte(..))`,
+    // em `seele-enlace/src/ponta.rs`) e só depois, no `encerrar`, o motivo é
+    // publicado (`comp.motivo.send_replace`). Quem acorda com o erro da leitura e
+    // pergunta `acabou()` na mesma hora pode achar `None` numa conexão que está
+    // fechando com o código certo — foi o que o Linux do CI viu em 12/11/2026:
+    // «o par cortou o fluxo (código 1397030960)», que é o
+    // `CODIGO_FICOU_PARA_TRAS`, e «a conexão do ouvinte: None».
+    //
+    // O cliente de produto já espera por isso (`ESPERA_PELO_CORTE` em
+    // `seele-core/src/client.rs`), e o `ficou_para_tras.rs` também. O teste faz
+    // o mesmo, e só quando a leitura acabou no fluxo: com a testemunha ou com a
+    // despedida lidas, o motivo é o de agora, e esperar por um fechamento que
+    // não vem só gastaria o tempo.
+    let motivo_do_ouvinte = if o_fluxo_terminou {
+        tokio::time::timeout(ESPERA_PELO_CORTE, ouvinte._conexao.closed())
+            .await
+            .ok()
+    } else {
+        ouvinte._conexao.acabou()
+    };
 
     let perdidos = servidor.server().atrasos.eventos();
     let desligados = desfechos
@@ -542,7 +576,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     // código tipado do fechamento (`CODIGO_FICOU_PARA_TRAS`), que chega mesmo
     // quando o quadro não tem crédito para sair. Qualquer outro fechamento não
     // conta.
-    let fechou_ficando_para_tras = ouvinte._conexao.acabou()
+    let fechou_ficando_para_tras = motivo_do_ouvinte
         == Some(seele_enlace::Motivo::Fechada {
             codigo: seele_proto::transport::CODIGO_FICOU_PARA_TRAS,
         });
@@ -552,7 +586,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
             || fechou_ficando_para_tras,
         "pendência nº 1: {chegaram} de {somadas} chegaram e o servidor não disse nada — \
          {perdidos} eventos morreram no barramento (a leitura acabou em {fim:?}, \
-         a conexão do ouvinte: {:?})",
+         a conexão do ouvinte: {motivo_do_ouvinte:?}, e agora: {:?})",
         ouvinte._conexao.acabou()
     );
     // E a conexão de quem só parou de ler continua de pé quando chegou tudo:

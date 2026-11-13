@@ -366,10 +366,25 @@ pub struct Message {
     pub at_seconds: i64,
     /// The body.
     pub body: String,
+    /// A mensagem a que esta responde: o `id` dela, ou `None`.
+    ///
+    /// Só o identificador. A citada pode não estar na página que a casca tem
+    /// (é mais antiga, ou foi apagada): a casca a procura em
+    /// `Connection::messages` pelo `id`, e desenha «mensagem indisponível»
+    /// quando não a acha. Numa pendente, é a resposta que esta máquina anotou
+    /// ao enviar.
+    pub replies_to: Option<u64>,
     /// Whether we wrote it.
     pub own: bool,
     /// Whether it has been edited since.
+    ///
+    /// Vale também para o que veio do histórico: o servidor manda a marca
+    /// atrás da página (um `MessageEdited` por mensagem editada).
     pub edited: bool,
+    /// Se o corpo chama **quem está logado** (`@apelido`), pela regra de
+    /// [`crate::menciona`]. Sempre `false` na própria mensagem e numa
+    /// pendente.
+    pub mentions_me: bool,
     /// The file hanging off it, if any. ADR 0027.
     pub attachment: Option<Attachment>,
     /// Em que pé está o **envio** desta mensagem.
@@ -1181,6 +1196,11 @@ pub enum Event {
         /// Um erro por campo quando o motivo é `Campos`; vazio nos outros.
         campos: Vec<crate::perfis::ErroDeCampo>,
     },
+    /// A lista de banidos desta sessão mudou: chegou inteira (a resposta de
+    /// `Connection::list_bans` ou de `Connection::unban_person`), ou alguém
+    /// saiu dela porque voltou a ser membro. A casca relê
+    /// [`crate::Connection::banidos`].
+    BanidosChanged,
     /// New measurements.
     TelemetryChanged,
     /// Something to surface.
@@ -1278,6 +1298,13 @@ pub enum Event {
         width: u16,
         /// Altura em pixels.
         height: u16,
+        /// O que é: a tela inteira, uma janela, ou a câmera de quem transmite.
+        ///
+        /// **Só o fluxo sabe**, e é por isso que mora aqui e não no
+        /// [`Snapshot`]: o anúncio de uma transmissão no controle não diz o
+        /// que ela mostra, e a casca só pode escrever «câmera» depois de a
+        /// abertura chegar. Antes disso ela não afirma nem um nem outro.
+        source: ScreenKind,
     },
     /// Um quadro comprimido de uma transmissão alheia.
     ///
@@ -1304,6 +1331,33 @@ pub enum Event {
     ScreenClosed {
         /// Qual transmissão.
         screen: u32,
+    },
+    /// **A transmissão desta pessoa caiu sozinha, e já foi encerrada.**
+    ///
+    /// # O silêncio que este evento fecha
+    ///
+    /// Quem produzia a imagem morreu no meio — o codificador recusou um
+    /// quadro, a captura recusou recomeçar, o fluxo não abriu —, e só o
+    /// `seele.log` ficava sabendo: o retrato continuava dizendo que esta pessoa
+    /// compartilhava, o botão continuava em PARAR DE COMPARTILHAR, e a sala
+    /// olhava uma transmissão anunciada e sem imagem.
+    ///
+    /// Quando ele chega, o núcleo **já encerrou**: o servidor ouviu o mesmo
+    /// `StopScreenShare` de quem aperta parar, e o `ScreenShareStopped` que
+    /// volta tira a transmissão do retrato ([`Self::ScreenChanged`]). O que
+    /// este evento carrega é o que o retrato não diz: que não foi a pessoa
+    /// quem parou, e por quê.
+    ///
+    /// **Nada recomeça sozinho.** A casca diz o que houve, e quem compartilha
+    /// de novo é a pessoa.
+    ScreenShareFell {
+        /// Qual transmissão.
+        screen: u32,
+        /// O que ela mostrava: a frase é «a tela» ou «a câmera» por isto.
+        source: ScreenKind,
+        /// O nome estável do motivo, dos de
+        /// [`crate::motivos_de_queda_da_tela`]. A frase é da casca.
+        reason: &'static str,
     },
     /// Um túnel de jogo de quem joga mediu de novo, ou acabou.
     ///
@@ -1361,6 +1415,57 @@ pub enum Event {
         /// `mod-desligado`, `outro-pedido` ou `sem-aceite`. A frase é da casca.
         motivo: &'static str,
     },
+    /// **A própria câmera tem de mandar um quadro-chave.**
+    ///
+    /// Quem codifica a câmera é a casca (o `VideoEncoder` da janela), e não
+    /// este lado: o pedido de quem acabou de entrar para assistir, ou de um
+    /// quadro que o teto descartou no caminho, só serve de alguma coisa se
+    /// chegar até lá. Sem este evento o pedido morria aqui, e quem entrou
+    /// ficava olhando o palco vazio até a transmissão recomeçar.
+    CameraKeyFrameRequested {
+        /// Qual transmissão.
+        screen: u32,
+    },
+    /// **O teto de banda da própria câmera, agora.**
+    ///
+    /// Em bits por segundo, do fluxo inteiro. A casca mira o codificador
+    /// abaixo dele: o que estourar é descartado antes do fio, e cada descarte
+    /// custa um quadro-chave. Chega quando o fluxo abre e a cada vez que o
+    /// teto anda — o sinal da voz, quem entra para assistir, a subida de quem
+    /// hospeda.
+    CameraBudget {
+        /// Qual transmissão.
+        screen: u32,
+        /// O teto.
+        bps: u32,
+    },
+    /// **A própria câmera parou de ir para a sala**, e volta sozinha.
+    ///
+    /// O §3.2 do desenho da tela: quando o sinal aperta, quem para é o vídeo,
+    /// e a voz fica. O fluxo fechou; a casca para de codificar e diz por quê.
+    /// A volta é um [`Self::ScreenOpened`] novo da mesma transmissão.
+    CameraPaused {
+        /// Qual transmissão.
+        screen: u32,
+        /// O nome estável do motivo, dos de
+        /// [`crate::motivos_de_parada_da_tela`]. A frase é da casca.
+        reason: &'static str,
+    },
+}
+
+/// O que uma transmissão mostra, como a abertura do fluxo declarou.
+///
+/// Atravessa como texto minúsculo — `"monitor"`, `"window"`, `"camera"` —,
+/// pelo mesmo motivo de [`Prioridade`]: a casca escreve e lê este JSON à mão.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenKind {
+    /// A tela inteira.
+    Monitor,
+    /// Uma janela.
+    Window,
+    /// A câmera de quem transmite (protocolo 13).
+    Camera,
 }
 
 /// Where one file is on its way.
@@ -1685,7 +1790,7 @@ pub struct LimitesDosCampos {
 
 /// Why a file was not drawn.
 ///
-/// Four, and they are four because they ask different things of the person
+/// Six, and each is its own because they ask different things of the person
 /// reading. One says the file is fine and this window will not spend the memory;
 /// another says the file is not what it claimed to be, which is not a transfer
 /// problem and not something to retry.
@@ -1706,6 +1811,27 @@ pub enum PreviewRefusal {
         /// no number is a sentence nobody can act on.
         limit: u64,
     },
+    /// The file fits the byte limit and declares more pixels than a window
+    /// will decode: a few megabytes of PNG can open into gigabytes.
+    ///
+    /// Refused from the header, before a pixel is decoded on either side of
+    /// the bridge. Carries the numbers for the reason [`Self::TooBig`] does.
+    TooManyPixels {
+        /// The declared width, in pixels.
+        width: u32,
+        /// The declared height, in pixels.
+        height: u32,
+        /// The most pixels (width × height) a preview will decode.
+        limit: u64,
+    },
+    /// The bytes start as a picture's and do not open as one: the header that
+    /// carries the dimensions could not be read, or the picture was larger
+    /// than where it is drawn and could not be decoded to be reduced.
+    ///
+    /// Not [`Self::Disagrees`]: the leading bytes are what the file claimed.
+    /// And not drawn, because a picture whose size cannot be read is one whose
+    /// cost to the window cannot be bounded.
+    Unreadable,
     /// Never a picture in the first place — a document, a build, a text file.
     ///
     /// A window should not have asked, and this is what it gets if it did.
@@ -1998,6 +2124,28 @@ pub enum ConnectionError {
     /// clique numa linha que ainda está subindo. Quem quer largar uma pendente
     /// usa `Connection::descartar_mensagem`.
     UnknownMessage,
+    /// **O servidor desta conexão não conhece o pedido**: ele negociou um
+    /// número de protocolo menor que o do verbo. Nada foi escrito no fio.
+    ///
+    /// Editar uma mensagem, desbanir e listar os banidos nasceram no 13; um
+    /// servidor da 0.19 (12) pularia o verbo calado, e a pessoa clicaria sem
+    /// nada acontecer. A casca diz que o servidor precisa ser atualizado — ou,
+    /// melhor, esconde o controle quando `Connection::protocolo_negociado()`
+    /// é menor que `exige`.
+    ServidorAntigo {
+        /// O número que esta conexão negociou.
+        negociado: u8,
+        /// O número em que o pedido nasceu.
+        exige: u8,
+    },
+    /// O corpo de uma edição ficou vazio. Uma mensagem sem texto não é uma
+    /// edição: quem quer tirá-la usa `Connection::remove_message`.
+    MensagemVazia,
+    /// O corpo de uma edição passa do teto do fio. Nada saiu.
+    MensagemGrandeDemais {
+        /// O teto, em **bytes** (`Connection::limite_da_mensagem`).
+        limite_bytes: u64,
+    },
     /// No voice room or Channel by that name or number.
     UnknownChannel,
     /// The control stream broke.
@@ -2079,6 +2227,27 @@ pub enum ConnectionError {
     /// Um hash que não bate quase nunca é corrupção: é uma página de erro de
     /// proxy chegando no lugar do arquivo.
     ScreenModuleRefused,
+    /// Um quadro da câmera chegou e não há transmissão de câmera para levá-lo.
+    ///
+    /// A transmissão acabou — a pessoa parou, o servidor a encerrou, a conexão
+    /// caiu — ou nunca chegou a abrir. A casca para de codificar e solta a
+    /// câmera: continuar seria a luz da câmera acesa para ninguém.
+    CameraNotLive,
+    /// A fila de quadros da câmera encheu, e este quadro **não foi**.
+    ///
+    /// A rede não está levando no passo de quem codifica. O quadro recusado
+    /// era referência do seguinte, então a casca faz do próximo um
+    /// quadro-chave; e o número vai junto para ela poder dizer quantos já
+    /// ficaram, em vez de a imagem engasgar sem explicação.
+    CameraQueueFull {
+        /// Quantos quadros esta transmissão já recusou por fila cheia.
+        dropped: u64,
+    },
+    /// As medidas da câmera não são as de uma transmissão que o fio carrega.
+    ///
+    /// Zero, ímpar que virou zero, ou acima de 1080p. Respondido antes de
+    /// qualquer coisa sair, pela mesma régua do cabeçalho de abertura.
+    CameraBadSize,
 }
 
 impl std::fmt::Display for ConnectionError {
@@ -2647,6 +2816,7 @@ mod tests {
                 prioridade: Prioridade::Nitidez,
                 com_som: true,
             }),
+            codificador: Some("OpenH264 (software)".into()),
         };
         let json = serde_json::to_string(&tela).expect("uma estrutura simples sempre serializa");
 
@@ -2657,6 +2827,8 @@ mod tests {
             "\"espectadores\"",
             "\"parada\"",
             "\"pedido\"",
+            // O nome que o rodapé da sessão lê (`tel-video`, em `tela-sessao.js`).
+            "\"codificador\":\"OpenH264 (software)\"",
         ] {
             assert!(json.contains(nome), "{nome} não atravessa: {json}");
         }
@@ -2706,6 +2878,7 @@ mod tests {
             espectadores: 6,
             parada: None,
             pedido: None,
+            codificador: None,
         };
         let json = serde_json::to_string(&alheia).expect("uma estrutura simples sempre serializa");
         assert!(

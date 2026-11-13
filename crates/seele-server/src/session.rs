@@ -43,7 +43,6 @@ use seele_proto::ids::{
     ChannelId, ClientMessageId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId,
 };
 use seele_proto::screen::SCREEN_HEADER_LEN;
-use seele_proto::signal::{Signal, SyncInputs};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
 use tokio::sync::mpsc;
 
@@ -843,6 +842,18 @@ where
     }
 }
 
+/// Se a escrita falhou só porque a mensagem não passou pela validação ou não
+/// coube no quadro, isto é, antes de qualquer byte ir ao fluxo.
+///
+/// `frame::write_em` codifica e enquadra antes do `write_all`, e os dois
+/// passos falham com [`seele_proto::control::ControlError`]; a E/S falha com
+/// outro tipo. É essa diferença que deixa descartar uma mensagem sem deslocar
+/// o enquadramento de quem lê.
+fn so_nao_codificou(erro: &anyhow::Error) -> bool {
+    erro.downcast_ref::<seele_proto::control::ControlError>()
+        .is_some()
+}
+
 /// A handshake that did not succeed, with the reason to send back.
 struct Refusal {
     reason: DisconnectReason,
@@ -944,12 +955,32 @@ async fn handshake(
     // que sim. Ver `admissao::Passe`: quem bate numa porta com portaria é
     // mandado tentar de novo, e queimar o convite dele nesta linha o deixaria
     // de fora para sempre — inclusive depois de aprovado.
-    let (passe, recusa_adiada, chegada) = {
+    //
+    // **O Argon2 da senha roda sem o banco na mão e fora do executor**, como o
+    // da senha de sala de voz. Isto é antes de qualquer autenticação: feito
+    // com o `Mutex` da persistência fechado e numa thread do Tokio, cada
+    // batida com um palpite parava o banco de todo mundo pelo tempo de um
+    // Argon2. Lê-se a política, solta-se o banco, a conta vai para
+    // `spawn_blocking`, e só o que precisa do banco (o convite) volta a ele.
+    let politica = {
         let guard = server.persistence.lock().await;
-        let politica = crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
+        crate::admissao::Politica::carregar(&guard).map_err(|error| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: format!("could not read the admission policy: {error}"),
-        })?;
+        })?
+    };
+    let senha_confere = if politica.tem_senha() && join_secret.is_some() {
+        let (politica, segredo) = (politica.clone(), join_secret.clone());
+        // Sob o teto de `ARGON2_SIMULTANEOS`: isto é antes de autenticar.
+        crate::admissao::conferir_fora_do_executor(move || {
+            politica.senha_confere(segredo.as_deref())
+        })
+        .await
+    } else {
+        false
+    };
+    let (passe, recusa_adiada, chegada) = {
+        let guard = server.persistence.lock().await;
         // A recusa aqui é **adiada**, e não devolvida na hora.
         //
         // O motivo é um defeito relatado em campo: «aprovei a entrada de
@@ -972,7 +1003,9 @@ async fn handshake(
         // segredo errado, e o balde por endereço do ADR 0025 já limita quantas
         // vezes por minuto. É mais barato que o Argon2 que o caminho da senha
         // pagaria, e o que se compra com ele é quem foi aprovado poder voltar.
-        let (passe, recusa_adiada) = match politica.avaliar(&guard, join_secret.as_deref()) {
+        let avaliado =
+            politica.avaliar_com_a_senha_conferida(&guard, join_secret.as_deref(), senha_confere);
+        let (passe, recusa_adiada) = match avaliado {
             Ok(Ok(passe)) => (Some(passe), None),
             Ok(Err(recusa)) => (None, Some(format!("admissão recusada: {recusa:?}"))),
             Err(error) => {
@@ -2087,9 +2120,23 @@ async fn run_session(
     // pode aparecer no laço que lê o controle de todo mundo.
     let (tela_tx, tela_rx) =
         mpsc::channel::<crate::tela::AberturaDeTela>(crate::tela::ABERTURAS_DEPTH);
+    // **O vídeo por RTP (ADR 0067).** A mídia da conexão só é ligada quando o
+    // par diz que ligou a dele (`MidiaLigada`): o número do protocolo não
+    // basta, porque a página do navegador fala o mesmo número e não tem
+    // mídia. Daí em diante a tela desta sessão sobe e desce por RTP em vez de
+    // pelo canal `u`.
+    let mut midia_rtp: Option<crate::midia::MidiaDaSessao> = None;
+    // Guardada até a sessão acabar: largar o guarda abortaria a tarefa.
+    let mut tarefas_da_midia: Vec<AbortaAoSair> = Vec::new();
+    // A entrada por RTP da transmissão desta pessoa, enquanto há uma.
+    let mut tela_por_midia: Option<tokio::task::JoinHandle<()>> = None;
+    // Por onde a tarefa que escreve as transmissões fica sabendo que a saída
+    // passou a ser a mídia. Lido a cada transmissão que começa.
+    let saida_por_midia = Arc::new(std::sync::OnceLock::new());
     let _telas = AbortaAoSair(tokio::spawn(crate::tela::bombear(
         connection.clone(),
         tela_rx,
+        Arc::clone(&saida_por_midia),
     )));
 
     // Uma tarefa que aceita os fluxos unidirecionais que chegam. São dois
@@ -2367,6 +2414,13 @@ async fn run_session(
                         ServerMessage::Membros { membros, .. } => {
                             membros.iter().map(|m| m.id).collect()
                         }
+                        // O apelido gravado de um banido é o alias com a
+                        // marca (`ana#K7Q2`), como o de um membro: a
+                        // identidade apresentada vem atrás, para a lista
+                        // mostrar o nome que a tela mostra em todo lugar.
+                        ServerMessage::Banidos { banidos, .. } => {
+                            banidos.iter().map(|b| b.person).collect()
+                        }
                         _ => Vec::new(),
                     };
                     for id in ids {
@@ -2499,7 +2553,10 @@ async fn run_session(
     // the whole `PersonState` in, so a field left at a default is not left
     // alone, it is overwritten.
     let mut last_ratio = 0_u8;
-    let mut sync = Signal::new();
+    let mut sinal = crate::sinal::SinalDaSessao::novo();
+    // Quantos relatos de recepção desta sessão não passaram na conferência. O
+    // primeiro vai ao registro; o total, ao fim da sessão.
+    let mut relatos_recusados = 0_u32;
     let mut telemetry = tokio::time::interval(TELEMETRY_INTERVAL);
     telemetry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -3246,11 +3303,15 @@ async fn run_session(
                                     .tentar(session.person, id, Instant::now());
                                 if pode_tentar {
                                     let (fechadura, senha) = (fechadura.clone(), password.clone());
-                                    let certa = tokio::task::spawn_blocking(move || {
-                                        crate::admissao::senha_abre(&fechadura, senha.as_deref())
-                                    })
-                                    .await
-                                    .unwrap_or(false);
+                                    let certa = crate::admissao::conferir_fora_do_executor(
+                                        move || {
+                                            crate::admissao::senha_abre(
+                                                &fechadura,
+                                                senha.as_deref(),
+                                            )
+                                        },
+                                    )
+                                    .await;
                                     if certa {
                                         server
                                             .occupancy
@@ -3461,6 +3522,25 @@ async fn run_session(
                                 if limit == 0 { DEFAULT_PAGE } else { limit },
                             )?
                         };
+                        // **A editada volta marcada**, sem campo novo no fio. O
+                        // `MessageReceived` não diz se a mensagem foi editada
+                        // (campo novo em mensagem que existe é proibido,
+                        // ADR 0058), então atrás da página vai um
+                        // `MessageEdited` para cada uma que tem `edited_at`:
+                        // a variante é do 9, todo par a lê, e quem a recebe
+                        // marca «editada» como marcaria uma edição ao vivo.
+                        // Sem isto a marca só existia para quem estava
+                        // olhando na hora da edição.
+                        let editadas: Vec<ServerMessage> = page
+                            .iter()
+                            .rev()
+                            .filter(|stored| stored.edited_at.is_some())
+                            .map(|stored| ServerMessage::MessageEdited {
+                                channel: stored.channel,
+                                id: stored.id,
+                                body: stored.body.clone(),
+                            })
+                            .collect();
                         // Oldest first on the wire, so a client can append.
                         for stored in page.into_iter().rev() {
                             escrever!(&ServerMessage::MessageReceived {
@@ -3474,6 +3554,9 @@ async fn run_session(
                                 client_message_id: stored.client_message_id,
                                 attachment: stored.attachment,
                             }).await?;
+                        }
+                        for editada in &editadas {
+                            escrever!(editada).await?;
                         }
                     }
                     ClientMessage::Ping { timestamp } => {
@@ -3874,6 +3957,169 @@ async fn run_session(
                                     channel: alvo.channel,
                                     id,
                                 });
+                            }
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                        }
+                    }
+                    // **Editar a própria mensagem** (protocolo 13).
+                    //
+                    // As recusas, na ordem em que são perguntadas, e cada uma
+                    // com a resposta que não conta o que a pessoa não pode
+                    // saber:
+                    //
+                    // 1. a mensagem não existe, ou foi apagada: `NaoExiste`;
+                    // 2. quem pede não lê o canal dela: `NaoExiste` também,
+                    //    como no `RemoveMessage` — outra palavra diria a quem
+                    //    não lê quais ids há lá dentro;
+                    // 3. a mensagem é de outra pessoa: `PermissionDenied`.
+                    //    Editar não é moderar, e nem quem administra edita o
+                    //    que outro escreveu (`Messages::edit`);
+                    // 4. a pessoa já não escreve neste canal: a mesma
+                    //    `PermissionDenied`. Quem teve a escrita tirada não
+                    //    continua falando pelas mensagens antigas.
+                    //
+                    // O corpo já veio conferido contra o teto do `SendMessage`
+                    // (`Validate`, na leitura do quadro).
+                    ClientMessage::EditMessage { id, body } => {
+                        let alvo = {
+                            let mut guard = server.persistence.lock().await;
+                            Messages::new(&mut guard).one(id).ok().flatten()
+                        };
+                        let Some(alvo) = alvo else {
+                            nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
+                            continue;
+                        };
+                        if !pode_ler_canal(server, session.person, alvo.channel).await {
+                            nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
+                            continue;
+                        }
+                        let escreve = {
+                            let guard = server.persistence.lock().await;
+                            crate::autorizacao::pode_no_canal(
+                                &guard,
+                                session.person,
+                                alvo.channel,
+                                crate::autorizacao::Acesso::Escrita,
+                            )
+                            .unwrap_or(false)
+                        };
+                        if alvo.author != session.person || !escreve {
+                            recusar(&mut send, session.protocol_version, session.person, "EditMessage").await?;
+                            continue;
+                        }
+                        let feito = {
+                            let mut guard = server.persistence.lock().await;
+                            Messages::new(&mut guard).edit(id, session.person, &body)
+                        };
+                        match feito {
+                            Ok(gravada) => {
+                                tracing::info!(by = %session.person, %id, "message edited");
+                                // O canal e o corpo saem da linha gravada, e
+                                // não do pedido: é o que o histórico vai
+                                // devolver a quem chegar depois.
+                                let _ = server.events.send(Event::MessageEdited {
+                                    channel: gravada.channel,
+                                    id,
+                                    body: gravada.body,
+                                });
+                            }
+                            // Apagada entre a leitura e a gravação, ou de outra
+                            // pessoa (`Messages::edit` confere de novo).
+                            Err(erro) => match erro.downcast_ref::<crate::persistence::messages::MessageRefusal>() {
+                                Some(crate::persistence::messages::MessageRefusal::NotFound) => {
+                                    nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
+                                }
+                                Some(crate::persistence::messages::MessageRefusal::NotTheAuthor) => {
+                                    recusar(&mut send, session.protocol_version, session.person, "EditMessage").await?;
+                                }
+                                None => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                            },
+                        }
+                    }
+                    // **Desbanir** (protocolo 13): a permissão e a hierarquia
+                    // do `BanPerson`. Quem não pode banir uma pessoa não pode
+                    // desfazer o banimento que alguém acima pôs nela.
+                    ClientMessage::UnbanPerson { person: alvo } => {
+                        if alvo == session.person
+                            || !moderavel(server, session.person, alvo, Permission::Ban).await
+                        {
+                            recusar(&mut send, session.protocol_version, session.person, "UnbanPerson").await?;
+                            continue;
+                        }
+                        let (feito, membro, banidos) = {
+                            let guard = server.persistence.lock().await;
+                            let permissions = Permissions::new(&guard);
+                            let feito = permissions.unban(alvo, session.person);
+                            let membro = permissions.person(alvo).ok().map(|pessoa| {
+                                seele_proto::control::Membro {
+                                    id: pessoa.id,
+                                    nickname: pessoa.nickname,
+                                }
+                            });
+                            (feito, membro, permissions.banidos())
+                        };
+                        match feito {
+                            Ok(true) => {
+                                tracing::info!(by = %session.person, %alvo, "unbanned");
+                                // **Voltou a ser membro**, para todo mundo: o
+                                // `MembroBanido` a tirou do FORA DO AR de quem
+                                // estava na sala, e sem isto ela só voltaria
+                                // para quem reconectasse. A variante é a de
+                                // uma conta nova, do 9: quem a recebe põe a
+                                // pessoa na lista de membros, e é isso que
+                                // aconteceu.
+                                if manda_a_lista_de_membros(server) {
+                                    if let Some(membro) = membro {
+                                        let _ = server.events.send(Event::MembroNovo { membro });
+                                    }
+                                }
+                                // E quem pediu recebe a lista como ficou.
+                                match banidos {
+                                    Ok(banidos) => {
+                                        for parte in partes_dos_banidos(banidos) {
+                                            if entende_a_mensagem(&parte, session.protocol_version) {
+                                                escrever!(&parte).await?;
+                                            }
+                                        }
+                                    }
+                                    Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                                }
+                            }
+                            // Não havia banimento valendo: respondido, e não
+                            // ignorado, como o `RemoveMessage` do que já sumiu.
+                            Ok(false) => {
+                                nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(BanimentoNaoExiste)).await?;
+                            }
+                            Err(erro) if matches!(
+                                erro.downcast_ref::<crate::permissions::Refusal>(),
+                                Some(crate::permissions::Refusal::PermissionDenied)
+                            ) => {
+                                recusar(&mut send, session.protocol_version, session.person, "UnbanPerson").await?;
+                            }
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
+                        }
+                    }
+                    // **A lista de banidos** (protocolo 13), só para quem pode
+                    // banir: o motivo é o registro de quem modera, e não é de
+                    // quem só conversa.
+                    ClientMessage::ListBans => {
+                        if !pode(server, session.person, Permission::Ban).await {
+                            recusar(&mut send, session.protocol_version, session.person, "ListBans").await?;
+                            continue;
+                        }
+                        let banidos = {
+                            let guard = server.persistence.lock().await;
+                            Permissions::new(&guard).banidos()
+                        };
+                        match banidos {
+                            Ok(banidos) => {
+                                for parte in partes_dos_banidos(banidos) {
+                                    // Um par que negociou menos que o 13 não
+                                    // conhece a variante, e não a recebe.
+                                    if entende_a_mensagem(&parte, session.protocol_version) {
+                                        escrever!(&parte).await?;
+                                    }
+                                }
                             }
                             Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
@@ -4324,6 +4570,94 @@ async fn run_session(
                         }
                     }
 
+                    ClientMessage::MidiaLigada => {
+                        if midia_rtp.is_none() {
+                            let (sessao, leitura) =
+                                crate::midia::MidiaDaSessao::ligar(&connection);
+                            tarefas_da_midia.push(AbortaAoSair(tokio::spawn(
+                                crate::midia::ler(
+                                    leitura,
+                                    sessao.clone(),
+                                    Arc::clone(server),
+                                    session.person,
+                                ),
+                            )));
+                            let _ = saida_por_midia.set(sessao.saida(
+                                Arc::clone(server),
+                                session.person,
+                                avisos_tx.clone(),
+                            ));
+                            midia_rtp = Some(sessao);
+                            tracing::info!(person = %session.person, "a mídia RTP desta sessão foi ligada");
+                        }
+                    }
+
+                    ClientMessage::TelaPorMidia { abertura } => {
+                        // Só quem ligou a mídia (`MidiaLigada`) chega aqui com
+                        // ela. De um par que não ligou, a transmissão não tem
+                        // por onde subir: fica no registro.
+                        let Some(midia) = midia_rtp.as_ref() else {
+                            tracing::warn!(
+                                person = %session.person,
+                                "um par sem a mídia ligada abriu uma transmissão por RTP; ignorada"
+                            );
+                            continue;
+                        };
+                        // Uma geração nova troca a entrada: a anterior vê o
+                        // fim e diz à sala que fechou, e só então a nova abre —
+                        // a mesma ordem de dois canais `u` seguidos.
+                        let entrada = midia.abrir_entrada();
+                        let anterior = tela_por_midia.take();
+                        let contexto = Arc::clone(server);
+                        let salas = Arc::clone(voice_rooms);
+                        let avisos = avisos_tx.clone();
+                        let pessoa = session.person;
+                        let sessao = session.id;
+                        tela_por_midia = Some(tokio::spawn(async move {
+                            if let Some(anterior) = anterior {
+                                let _ = anterior.await;
+                            }
+                            if let Err(erro) = encaminhar_tela(
+                                &contexto,
+                                &salas,
+                                pessoa,
+                                sessao,
+                                &avisos,
+                                abertura,
+                                FonteDaTela::Midia(entrada),
+                            )
+                            .await
+                            {
+                                tracing::debug!(%pessoa, %erro, "a tela por RTP terminou");
+                            }
+                        }));
+                    }
+
+                    // **O cliente relata a própria recepção** (protocolo 13):
+                    // a perda e o jitter da voz que chega a ele, que este
+                    // servidor não tem como medir. Entra no sinal **desta**
+                    // sessão e de nenhuma outra — o relato é de quem manda
+                    // sobre si. A forma, a validade e a conta são de
+                    // `crate::sinal`; a frequência já foi julgada pelo `vigia`
+                    // acima, antes de este braço rodar.
+                    ClientMessage::RelatoDeRecepcao(relato) => {
+                        if let Err(motivo) = sinal.relatou(relato, std::time::Instant::now()) {
+                            // Ignorado, e a sessão segue. Dito uma vez por
+                            // sessão: um cliente defeituoso relata a cada
+                            // segundo, e o registro não é lugar para isso.
+                            relatos_recusados = relatos_recusados.saturating_add(1);
+                            if relatos_recusados == 1 {
+                                tracing::warn!(
+                                    person = %session.person,
+                                    ?motivo,
+                                    ?relato,
+                                    "relato de recepção fora da faixa, ignorado: o sinal \
+                                     desta pessoa segue sem ele"
+                                );
+                            }
+                        }
+                    }
+
                     ClientMessage::EmprestarSubida {
                         consentimento,
                         impressao,
@@ -4676,6 +5010,26 @@ async fn run_session(
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
 
+                // A perda de subida da voz desta pessoa entra no sinal dela. A
+                // sala já a media e só a dizia a quem fala (`translate`,
+                // abaixo, continua a filtrar o relato por destinatário); o
+                // sinal é o que os outros veem dela, e é agregado.
+                //
+                // E a subida de quem esta pessoa **ouve** — as outras da sala
+                // dela — é o que se desconta da perda que o cliente dela
+                // relata: o receptor não separa o que a descida dele perdeu do
+                // que a subida de quem fala perdeu, e este servidor separa.
+                // Fica dentro da conta do sinal desta sessão; a ninguém é dito
+                // (a promessa do ADR 0036 é do `translate`, e segue valendo).
+                if let Event::UplinkLoss { person, fraction, voice_room } = &event {
+                    let agora = std::time::Instant::now();
+                    if *person == session.person {
+                        sinal.a_voz_perdeu(*fraction, agora);
+                    } else if current_voice_room == Some(*voice_room) {
+                        sinal.a_voz_ouvida_perdeu(*person, *fraction, agora);
+                    }
+                }
+
                 // O que desta conexão o escritor anunciou deixa de estar no ar,
                 // gravado ou recusado. Antes de qualquer filtro: a conta é do
                 // que esta conexão mandou, e não do que ela vê.
@@ -4926,8 +5280,15 @@ async fn run_session(
                 // num servidor que a `specs/04-servidor-seele.md` dimensiona em
                 // cinquenta pessoas, e as mensagens são de ritmo humano — não é
                 // o caminho de quadro de áudio.
+                //
+                // **E a assinatura, desde o 13, é a própria permissão**
+                // ([`Assinatura`]): quem pode ler o canal recebe o que se diz
+                // nele sem ter mandado `JoinChannel`. A ordem das duas
+                // perguntas é a de antes — a lista, que é de graça, e só
+                // então o banco.
+                let assinatura = Assinatura::de(&channels, session.protocol_version);
                 if let Some(canal) = canal_do_evento(&event) {
-                    if !channels.contains(&canal)
+                    if !assinatura.contem(canal)
                         || !pode_ler_canal(server, session.person, canal).await
                     {
                         continue;
@@ -4958,9 +5319,26 @@ async fn run_session(
                         continue;
                     }
                 }
-                if let Some(message) = translate(&event, &channels, session.person) {
+                if let Some(message) = translate(&event, assinatura, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
-                        escrever!(&message).await?;
+                        // **Um evento que não codifica é descartado, e não
+                        // encerra a sessão de quem ia recebê-lo.** O conteúdo
+                        // de um evento vem de outra pessoa; um `?` aqui dava a
+                        // ela o poder de derrubar esta sessão com um campo
+                        // fora do teto. Só o erro de validação/codificação é
+                        // descartado: ele acontece antes de qualquer byte sair,
+                        // então o fluxo continua inteiro. Erro de E/S e o
+                        // «ficou para trás» seguem encerrando.
+                        if let Err(erro) = escrever!(&message).await {
+                            if !so_nao_codificou(&erro) {
+                                return Err(erro);
+                            }
+                            tracing::warn!(
+                                %erro,
+                                person = %session.person,
+                                "uma mensagem nascida de evento não codificou e foi descartada"
+                            );
+                        }
                     }
                 }
                 // **Os cargos mudaram e esta pessoa foi atingida**: as
@@ -5055,21 +5433,17 @@ async fn run_session(
                 }
 
                 // **O que o enlace não mede vai como `None`** (a Telemetry da
-                // linha 2), e nunca como zero. O Sync Ratio só é alimentado
-                // quando há RTT e perda medidos; sem eles a sessão não inventa
-                // uma medida, e o valor é o «ainda sem medida» do `Signal`
-                // (`Signal::value` sem nenhum `update`).
+                // linha 2), e nunca como zero.
                 let rtt_ms = stats.ida_e_volta.map(|volta| volta.as_secs_f32() * 1000.0);
                 let loss_fraction = stats.fracao_de_perda_na_saida;
-                let ratio = match (rtt_ms, loss_fraction) {
-                    (Some(rtt_ms), Some(loss_fraction)) => sync.update(SyncInputs {
-                        rtt_ms,
-                        // Medido no receptor; o servidor não tem.
-                        jitter_ms: 0.0,
-                        loss_fraction,
-                    }),
-                    _ => sync.value(),
-                };
+                // **O sinal, com tudo o que este servidor mede desta pessoa.**
+                //
+                // Aqui havia um `match (rtt_ms, loss_fraction)` que só
+                // alimentava a conta com as duas medidas juntas, e a perda de
+                // saída só existe para quem recebe RTP: todos os outros
+                // ficavam no «ainda sem medida», que vale 100, para sempre.
+                // Que medida entra, e quando, é de `crate::sinal`.
+                let ratio = sinal.tique(&stats, std::time::Instant::now());
                 last_ratio = ratio;
 
                 escrever!(&ServerMessage::Telemetry(Telemetry {
@@ -5124,6 +5498,16 @@ async fn run_session(
         );
     }
 
+    // Os relatos de recepção que não entraram na conta, quando a primeira
+    // linha não disse tudo.
+    if relatos_recusados > 1 {
+        tracing::warn!(
+            person = %session.person,
+            total = relatos_recusados,
+            "relatos de recepção fora da faixa ignorados nesta sessão"
+        );
+    }
+
     // E o que o enlace recusou ou descartou nesta conexão.
     //
     // Até a 0.16 era o `STREAM_DATA_BLOCKED` do quinn («o par parou de ler»).
@@ -5132,7 +5516,7 @@ async fn run_session(
     // violações do envelope, voz descartada na chegada e voz que não saiu.
     // Zero em todos é o normal e não merece linha.
     let contadores = connection.contadores();
-    if contadores != seele_enlace::Contadores::default() {
+    if o_enlace_recusou_algo(&contadores) {
         tracing::warn!(
             person = %session.person,
             canais_recusados = contadores.canais_recusados,
@@ -5140,11 +5524,37 @@ async fn run_session(
             violacoes = contadores.violacoes,
             voz_descartada = contadores.voz_descartada,
             voz_nao_saiu = contadores.voz_nao_saiu,
+            midia_nao_saiu = contadores.midia_nao_saiu,
+            midia_malformada = contadores.midia_malformada,
+            tunel_descartado = contadores.tunel_descartado,
+            tunel_grande_demais = contadores.tunel_grande_demais,
             "o enlace recusou ou descartou coisas desta conexão"
         );
     }
 
     Ok(())
+}
+
+/// Se o enlace recusou ou descartou alguma coisa desta conexão: algum dos
+/// contadores **de recusa** saiu do zero.
+///
+/// O `maior_volume_no_sctp` fica de fora: é uma medida (o maior volume que já
+/// esperou na frente da voz), e não uma recusa. Comparar a estrutura inteira
+/// com a vazia fazia toda conexão que mandou um arquivo ou uma tela pelo canal
+/// sair com o aviso — e com todos os números impressos em zero, porque a
+/// linha só listava cinco dos campos. Um aviso que aparece sempre e não diz o
+/// quê ensina a não ler o aviso.
+const fn o_enlace_recusou_algo(c: &seele_enlace::Contadores) -> bool {
+    c.canais_recusados
+        + c.cortes_por_fila
+        + c.violacoes
+        + c.voz_descartada
+        + c.voz_nao_saiu
+        + c.midia_nao_saiu
+        + c.midia_malformada
+        + c.tunel_descartado
+        + c.tunel_grande_demais
+        > 0
 }
 
 /// O que uma saída alcança.
@@ -5462,6 +5872,7 @@ async fn assentar(
             ),
             outbound: outbound.clone(),
             tela: tela.clone(),
+            versao: session.protocol_version,
         })
         .await?;
 
@@ -5767,7 +6178,11 @@ async fn apontar_um_par(
         let (responder, resposta) = tokio::sync::oneshot::channel();
         let canal = voice_rooms.of(voice_room).await;
         if canal
-            .send(VoiceRoomCommand::QuemRecebe { screen, responder })
+            .send(VoiceRoomCommand::QuemRecebe {
+                screen,
+                para: quem_quer,
+                responder,
+            })
             .await
             .is_err()
         {
@@ -5851,21 +6266,80 @@ async fn receber_tela(
     avisos: &mpsc::Sender<ServerMessage>,
     fluxo: &mut crate::transporte::Recebe,
 ) -> Result<()> {
-    let Some((voice_room, screen)) = server.telas.lock().await.de(person, sessao) else {
+    if server.telas.lock().await.de(person, sessao).is_none() {
         // Parar o fluxo e não ignorá-lo: um cliente que abriu sem pedir tem de
         // descobrir agora, e não pela imagem que nunca aparece do outro lado.
+        // Antes de ler a abertura: quem não transmite não custa uma leitura.
         let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
         bail!("um fluxo de tela chegou de quem não está transmitindo");
-    };
+    }
 
     // Inteiro, e não remendado: o byte que a tarefa de aceitação consumiu é o
     // **tipo do fluxo**, e ele vem antes do cabeçalho em vez de ser o primeiro
     // byte dele. Era isto que o `primeiro` carregava de volta para cá.
     let mut abertura = [0_u8; SCREEN_HEADER_LEN];
     fluxo.read_exact(&mut abertura).await?;
+    encaminhar_tela(
+        server,
+        voice_rooms,
+        person,
+        sessao,
+        avisos,
+        abertura,
+        FonteDaTela::Canal(fluxo),
+    )
+    .await
+}
+
+/// De onde vêm os bytes de uma transmissão: do canal `u`, como sempre, ou da
+/// mídia RTP de quem transmite (ADR 0067), já no enquadramento da sala.
+enum FonteDaTela<'a> {
+    Canal(&'a mut crate::transporte::Recebe),
+    Midia(crate::midia::EntradaPorMidia),
+}
+
+impl FonteDaTela<'_> {
+    async fn ler(&mut self, buffer: &mut [u8]) -> Result<crate::midia::Lido> {
+        match self {
+            Self::Canal(fluxo) => Ok(match fluxo.read(buffer).await? {
+                Some(lidos) => {
+                    crate::midia::Lido::Bytes(buffer.get(..lidos).unwrap_or_default().to_vec())
+                }
+                None => crate::midia::Lido::Fim,
+            }),
+            Self::Midia(entrada) => Ok(entrada.ler().await),
+        }
+    }
+
+    /// Diz a quem manda que este fluxo não é mais lido. No canal é o `stop`;
+    /// na mídia não há o que parar, e quem avisa é o controle.
+    fn cortar(&mut self) {
+        if let Self::Canal(fluxo) = self {
+            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+        }
+    }
+}
+
+/// Leva uma transmissão, da abertura ao fim, à sala de voz de quem transmite.
+///
+/// O que [`receber_tela`] sempre fez, agora com a fonte dita: os bytes vêm do
+/// canal ou da mídia, e daqui em diante a sala não distingue.
+async fn encaminhar_tela(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    person: PersonId,
+    sessao: SessionId,
+    avisos: &mpsc::Sender<ServerMessage>,
+    abertura: [u8; SCREEN_HEADER_LEN],
+    mut fonte: FonteDaTela<'_>,
+) -> Result<()> {
+    let Some((voice_room, screen)) = server.telas.lock().await.de(person, sessao) else {
+        fonte.cortar();
+        bail!("uma transmissão de tela chegou de quem não está transmitindo");
+    };
     let (cabecalho, _) = seele_proto::screen::ScreenHeader::decode(&abertura)?;
     if cabecalho.screen != screen {
-        let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+        fonte.cortar();
         bail!(
             "um fluxo de tela declarou {} e não {screen}",
             cabecalho.screen
@@ -5892,7 +6366,7 @@ async fn receber_tela(
         // a tarefa leitora do controle existe para não ter.
         if let Ok(motivo) = fim_rx.try_recv() {
             tracing::info!(%person, %voice_room, %screen, ?motivo, "o servidor encerrou uma transmissão");
-            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+            fonte.cortar();
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
@@ -5931,13 +6405,32 @@ async fn receber_tela(
         // Compartilhar a tela, em `aplicar_os_cargos`): aí o fluxo é cortado, e
         // nenhum byte a mais vai à sala.
         if server.telas.lock().await.de(person, sessao) != Some((voice_room, screen)) {
-            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+            fonte.cortar();
             tracing::info!(%person, %screen, "a transmissão foi encerrada pelo servidor; o fluxo foi cortado");
+            // **E a sala fica sabendo, pelo nome desta transmissão.** O
+            // controle tirou a vaga — a pessoa parou, ou pediu outra no lugar
+            // (a tela trocada pela câmera) —, e este fluxo ainda tinha bytes a
+            // caminho. Voltar daqui calado deixava a transmissão registrada na
+            // sala para sempre: a próxima da mesma pessoa era recusada como
+            // «já tomada», e ficava anunciada sem que nenhum byte dela
+            // chegasse a alguém (medido em `tests/camera.rs`).
+            //
+            // Pelo nome, e não só pela sessão: se a seguinte já está
+            // registrada, este fim não é dela.
+            let _ = sala
+                .send(VoiceRoomCommand::TelaFechou {
+                    from: person,
+                    sessao,
+                    screen,
+                })
+                .await;
             return Ok(());
         }
-        match fluxo.read(&mut buffer).await? {
-            Some(lidos) => {
-                let bytes = buffer.get(..lidos).unwrap_or_default().to_vec();
+        match fonte.ler(&mut buffer).await? {
+            // Nada desta vez (a mídia não tem «o fluxo fechou»): volta às
+            // duas conferências acima.
+            crate::midia::Lido::Nada => {}
+            crate::midia::Lido::Bytes(bytes) => {
                 // `send` e não `try_send`: encher a fila da sala de voz tem de virar
                 // contrapressão no QUIC de quem compartilha, que é onde ela
                 // conserta alguma coisa. Descartar aqui deslocaria o
@@ -5948,7 +6441,7 @@ async fn receber_tela(
                 })
                 .await?;
             }
-            None => break,
+            crate::midia::Lido::Fim => break,
         }
     }
     // O fim limpo. Quem parou de propósito também manda `StopScreenShare` pelo
@@ -5958,6 +6451,7 @@ async fn receber_tela(
         .send(VoiceRoomCommand::TelaFechou {
             from: person,
             sessao,
+            screen,
         })
         .await;
     Ok(())
@@ -6162,6 +6656,11 @@ async fn nao_deu(
 #[error("no such message")]
 struct MensagemNaoExiste;
 
+/// O banimento que um pedido quis tirar não existe: a pessoa não está banida.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("no such ban")]
+struct BanimentoNaoExiste;
+
 /// Qual das três causas do fio é esta falha.
 ///
 /// Só as duas que a pessoa resolve sozinha têm nome — o alvo sumiu, o nome é de
@@ -6171,6 +6670,7 @@ fn causa_da_falha(erro: &anyhow::Error) -> CausaDaRecusa {
         .downcast_ref::<crate::persistence::channels::NoSuchChannel>()
         .is_some()
         || erro.downcast_ref::<MensagemNaoExiste>().is_some()
+        || erro.downcast_ref::<BanimentoNaoExiste>().is_some()
     {
         return CausaDaRecusa::NaoExiste;
     }
@@ -6247,6 +6747,31 @@ fn partes_dos_membros(membros: Vec<seele_proto::control::Membro>) -> Vec<ServerM
         .collect()
 }
 
+/// Os banidos em quadros de [`ServerMessage::Banidos`]: partes de até
+/// [`seele_proto::control::MAX_BANIDOS_POR_PARTE`], e `ultima` só na última.
+///
+/// Uma lista vazia ainda vira uma parte, vazia e com `ultima`: é ela que diz
+/// a quem pediu que ninguém está banido, em vez de deixá-lo esperando.
+fn partes_dos_banidos(banidos: Vec<seele_proto::control::Banido>) -> Vec<ServerMessage> {
+    if banidos.is_empty() {
+        return vec![ServerMessage::Banidos {
+            banidos,
+            ultima: true,
+        }];
+    }
+    let quantas = banidos
+        .len()
+        .div_ceil(seele_proto::control::MAX_BANIDOS_POR_PARTE);
+    banidos
+        .chunks(seele_proto::control::MAX_BANIDOS_POR_PARTE)
+        .enumerate()
+        .map(|(posicao, parte)| ServerMessage::Banidos {
+            banidos: parte.to_vec(),
+            ultima: posicao + 1 == quantas,
+        })
+        .collect()
+}
+
 /// Os perfis em quadros de [`ServerMessage::Perfis`]: partes de até
 /// [`seele_proto::perfil::MAX_PERFIS_POR_PARTE`], e `ultima` só na última.
 ///
@@ -6272,10 +6797,88 @@ fn partes_dos_perfis(perfis: Vec<seele_proto::perfil::PerfilPublico>) -> Vec<Ser
         .collect()
 }
 
+/// **O número de protocolo a partir do qual uma conexão assina, sem pedir,
+/// todo canal de texto que ela pode ler.**
+///
+/// # O defeito que isto conserta
+///
+/// A conversa de um canal só era difundida a quem tivesse mandado
+/// `JoinChannel`, e o cliente só o manda ao **abrir** o canal. As não lidas e
+/// as menções por canal (a mesa de texto da 1.0) contam o que chega: num canal
+/// que a pessoa ainda não abriu nesta conexão não chegava nada, e a lista
+/// mostrava zero com a conversa andando lá dentro. Depois de uma reconexão era
+/// pior: só o canal aberto voltava a ser assinado, e os que já tinham sido
+/// abertos antes da queda ficavam mudos.
+///
+/// # Por que aqui, e não o cliente assinando todos
+///
+/// Medido antes de decidir (10/11/2026):
+///
+/// - a lista de canais do `Session` é **inteira** (`read_server`), e o
+///   `ChannelInfo` é `{id, name}`: o cliente não sabe quais ele pode ler;
+/// - um `JoinChannel` de canal que a pessoa não lê responde com o alerta
+///   `PermissionDenied` (R01, de propósito: a recusa de **abrir** tem de ser
+///   vista). Assinar todos às cegas poria esse aviso na tela de quem entra num
+///   servidor com um canal fechado, sem ter apertado nada;
+///   e o alerta não diz de qual pedido é, então o cliente não tem como calá-lo;
+/// - um canal criado depois, e uma permissão que muda, pediriam do cliente uma
+///   assinatura nova que ele não tem como saber quando mandar.
+///
+/// A difusão já pergunta ao banco, por evento e por destinatário, se a pessoa
+/// pode ler o canal ([`pode_ler_canal`]) — é o guarda do R01 e do R08. Deixar
+/// essa pergunta ser a assinatura resolve os quatro casos de uma vez: a
+/// entrada, a volta de uma queda (uma conexão nova nasce assinada), o canal
+/// criado depois, e a permissão dada ou tirada com a sessão de pé. É o desenho
+/// que o aviso de MOD já tem («pede a permissão, e não a assinatura»).
+///
+/// **O histórico não entra nisto.** Nada é lido do banco nem mandado a mais na
+/// entrada: só passa a chegar o que for dito dali em diante. A página de um
+/// canal continua sendo pedida quando ele é aberto (`FetchHistory`).
+///
+/// # O fio não muda, e um par 12 não vê diferença
+///
+/// Nenhum quadro novo e nenhum campo novo: são os mesmos `MessageReceived`,
+/// `MessageEdited` e `MessageRemoved`. O que muda é a quem eles chegam, e só
+/// para quem negociou o 13 — um cliente da 0.19 continua recebendo exatamente
+/// os canais que assinou, que é o que ele conta e o que a placa de «mensagem
+/// nova» dele espera. O `JoinChannel` continua valendo para todos, e a recusa
+/// dele continua visível.
+///
+/// O custo: uma leitura do banco por destinatário por mensagem, agora também
+/// para quem não está com o canal aberto. A `specs/04-servidor-seele.md`
+/// dimensiona um servidor em cinquenta pessoas, e mensagem é ritmo de gente.
+const ASSINA_O_QUE_LE_DESDE: u8 = 13;
+
+/// Quais canais de texto esta conexão recebe: os que ela pediu, ou — desde o
+/// [`ASSINA_O_QUE_LE_DESDE`] — todos. **Não é a permissão**: quem a confere é
+/// [`pode_ler_canal`], por evento, antes de [`translate`].
+#[derive(Debug, Clone, Copy)]
+struct Assinatura<'a> {
+    /// Os que a conexão pediu com `JoinChannel` (os canais que ela abriu).
+    pedidos: &'a [ChannelId],
+    /// Se ela recebe todo canal que pode ler, sem pedir.
+    todos: bool,
+}
+
+impl<'a> Assinatura<'a> {
+    /// A de uma conexão que negociou `versao` e pediu `pedidos`.
+    const fn de(pedidos: &'a [ChannelId], versao: u8) -> Self {
+        Self {
+            pedidos,
+            todos: versao >= ASSINA_O_QUE_LE_DESDE,
+        }
+    }
+
+    /// Se o que se diz em `canal` é desta conexão.
+    fn contem(self, canal: ChannelId) -> bool {
+        self.todos || self.pedidos.contains(&canal)
+    }
+}
+
 /// Decides whether an event concerns this connection, and what to send.
 fn translate(
     event: &Event,
-    channels: &[ChannelId],
+    channels: Assinatura<'_>,
     self_person: PersonId,
 ) -> Option<ServerMessage> {
     match event {
@@ -6289,11 +6892,11 @@ fn translate(
         // não conhece sessão nenhuma — o barramento é o único caminho de uma
         // para outra. Difundir contaria a toda a sala a qualidade da rede de
         // cada um, que é o oposto da promessa do ADR 0036.
-        Event::UplinkLoss { person, fraction } if *person == self_person => {
-            Some(ServerMessage::UplinkLoss {
-                fraction: *fraction,
-            })
-        }
+        Event::UplinkLoss {
+            person, fraction, ..
+        } if *person == self_person => Some(ServerMessage::UplinkLoss {
+            fraction: *fraction,
+        }),
         Event::UplinkLoss { .. } => None,
 
         // Nunca por aqui. A audiência deste depende de `AdministerServer`, e
@@ -6333,7 +6936,7 @@ fn translate(
         Event::MembroBanido { person } => Some(ServerMessage::MembroBanido { person: *person }),
         Event::MessagePosted(message) => {
             channels
-                .contains(&message.channel)
+                .contem(message.channel)
                 .then(|| ServerMessage::MessageReceived {
                     channel: message.channel,
                     id: message.id,
@@ -6382,7 +6985,7 @@ fn translate(
 
         Event::MessageEdited { channel, id, body } => {
             channels
-                .contains(channel)
+                .contem(*channel)
                 .then(|| ServerMessage::MessageEdited {
                     channel: *channel,
                     id: *id,
@@ -6391,7 +6994,7 @@ fn translate(
         }
         Event::MessageRemoved { channel, id } => {
             channels
-                .contains(channel)
+                .contem(*channel)
                 .then_some(ServerMessage::MessageRemoved {
                     channel: *channel,
                     id: *id,
@@ -7695,8 +8298,9 @@ mod fim_de_tela_por_sessao {
             "desassentar" => Some("encerrar_telas_desta_conexao("),
             // A troca de sala: leva embora toda transmissão anterior da pessoa.
             "assentar" => Some("encerrar_telas_da_pessoa("),
-            // O fim decidido pelo servidor, de dentro da tarefa da tela.
-            "receber_tela" => Some("encerrar_telas_desta_conexao("),
+            // O fim decidido pelo servidor, de dentro da tarefa da tela — a
+            // mesma para o canal e para a mídia RTP (ADR 0067).
+            "encaminhar_tela" => Some("encerrar_telas_desta_conexao("),
             _ => None,
         };
 
@@ -7788,6 +8392,49 @@ mod o_fora_do_ar {
         assert_eq!(forma(0), [(0, true)]);
     }
 
+    /// A lista de banidos se parte do mesmo jeito: `ultima` só na última, uma
+    /// parte vazia para a lista vazia, e toda parte passa na validação do fio.
+    #[test]
+    fn os_banidos_se_partem_como_os_membros() {
+        use seele_proto::control::{Banido, Validate, MAX_BANIDOS_POR_PARTE};
+
+        let forma = |quantos: usize| -> Vec<(usize, bool)> {
+            let banidos = (0..quantos)
+                .map(|n| Banido {
+                    person: PersonId(n as u64 + 1),
+                    nickname: format!("b{n}"),
+                    reason: None,
+                    expires_at: None,
+                    issued_by: Some(PersonId(1)),
+                })
+                .collect();
+            partes_dos_banidos(banidos)
+                .into_iter()
+                .map(|parte| {
+                    parte.validate().expect("uma parte não passa no fio");
+                    match parte {
+                        ServerMessage::Banidos { banidos, ultima } => (banidos.len(), ultima),
+                        outra => panic!("saiu {outra:?} no lugar de uma parte"),
+                    }
+                })
+                .collect()
+        };
+        assert_eq!(forma(0), [(0, true)]);
+        assert_eq!(forma(1), [(1, true)]);
+        assert_eq!(
+            forma(MAX_BANIDOS_POR_PARTE),
+            [(MAX_BANIDOS_POR_PARTE, true)]
+        );
+        assert_eq!(
+            forma(2 * MAX_BANIDOS_POR_PARTE + 1),
+            [
+                (MAX_BANIDOS_POR_PARTE, false),
+                (MAX_BANIDOS_POR_PARTE, false),
+                (1, true)
+            ]
+        );
+    }
+
     /// `fim` só na última, e nenhuma parte vazia a mais quando a conta fecha.
     #[test]
     fn o_fim_vai_so_na_ultima_parte() {
@@ -7843,11 +8490,62 @@ mod a_causa_da_recusa {
     }
 }
 
+/// **Quem recebe a conversa de um canal** ([`Assinatura`]): desde o 13, quem
+/// não pediu nada; antes dele, só quem pediu.
+#[cfg(test)]
+mod a_assinatura_do_que_se_le {
+    use super::{translate, Assinatura, ASSINA_O_QUE_LE_DESDE};
+    use crate::server::Event;
+    use seele_proto::{
+        control::ServerMessage,
+        ids::{ChannelId, MessageId, PersonId},
+    };
+
+    fn editada(canal: u32) -> Event {
+        Event::MessageEdited {
+            channel: ChannelId(canal),
+            id: MessageId(9),
+            body: "outra".into(),
+        }
+    }
+
+    /// O número é o da mesa de texto da 1.0. Baixá-lo põe um par da 0.19 a
+    /// receber canais que ele não assinou; subi-lo devolve o defeito das não
+    /// lidas que só contam em canal aberto.
+    #[test]
+    fn o_treze_recebe_sem_pedir_e_o_doze_so_o_que_pediu() {
+        assert_eq!(ASSINA_O_QUE_LE_DESDE, 13);
+        let chega = |pedidos: &[ChannelId], versao: u8, canal: u32| {
+            translate(
+                &editada(canal),
+                Assinatura::de(pedidos, versao),
+                PersonId(1),
+            )
+            .is_some()
+        };
+        assert!(chega(&[], 13, 4), "o 13 não recebeu sem pedir");
+        assert!(!chega(&[], 12, 4), "o 12 recebeu o que não pediu");
+        assert!(
+            chega(&[ChannelId(4)], 12, 4),
+            "o 12 não recebeu o que pediu"
+        );
+        assert!(!chega(&[ChannelId(5)], 12, 4));
+        assert_eq!(
+            translate(&editada(4), Assinatura::de(&[], 13), PersonId(1)),
+            Some(ServerMessage::MessageEdited {
+                channel: ChannelId(4),
+                id: MessageId(9),
+                body: "outra".into(),
+            })
+        );
+    }
+}
+
 /// O aviso da metade de servidor de um MOD, do barramento ao fio (rascunho da
 /// API 6, §7.3; tarefa 8 do plano da F3).
 #[cfg(test)]
 mod o_aviso_do_mod {
-    use super::translate;
+    use super::{translate, Assinatura};
     use crate::server::Event;
     use seele_proto::{
         control::ServerMessage,
@@ -7867,7 +8565,7 @@ mod o_aviso_do_mod {
                 carga: r#"{"revisao":3}"#.to_owned(),
             };
             assert_eq!(
-                translate(&evento, &[], PersonId(1)),
+                translate(&evento, Assinatura::de(&[], 12), PersonId(1)),
                 Some(ServerMessage::ModAviso {
                     mod_id: "seele/mesa".to_owned(),
                     canal,
@@ -7883,7 +8581,7 @@ mod o_aviso_do_mod {
 /// bytes de sempre, e a do túnel com as duas mensagens do protocolo 12.
 #[cfg(test)]
 mod a_apresentacao {
-    use super::translate;
+    use super::{translate, Assinatura};
     use crate::pares::{MotivoDaApresentacao, Papel};
     use crate::server::Event;
     use seele_proto::{
@@ -7922,7 +8620,7 @@ mod a_apresentacao {
         assert_eq!(
             translate(
                 &apresentacao(tela.clone(), 1, Papel::Serve),
-                &[],
+                Assinatura::de(&[], 12),
                 PersonId(1)
             ),
             Some(ServerMessage::SirvaTelaPara {
@@ -7932,7 +8630,11 @@ mod a_apresentacao {
             })
         );
         assert_eq!(
-            translate(&apresentacao(tela, 2, Papel::Busca), &[], PersonId(2)),
+            translate(
+                &apresentacao(tela, 2, Papel::Busca),
+                Assinatura::de(&[], 12),
+                PersonId(2)
+            ),
             Some(ServerMessage::AssistaTelaPor {
                 screen: ScreenId(7),
                 enderecos: enderecos(),
@@ -7949,7 +8651,7 @@ mod a_apresentacao {
             enderecos: enderecos(),
             impressao: "a".repeat(64),
         };
-        let mensagem = translate(&servir, &[], PersonId(1));
+        let mensagem = translate(&servir, Assinatura::de(&[], 12), PersonId(1));
         assert!(
             matches!(
                 &mensagem,
@@ -7961,7 +8663,11 @@ mod a_apresentacao {
             "Tunel+Serve não virou SirvaTunelPara: {mensagem:?}"
         );
         assert_eq!(
-            translate(&apresentacao(tunel(), 2, Papel::Busca), &[], PersonId(2)),
+            translate(
+                &apresentacao(tunel(), 2, Papel::Busca),
+                Assinatura::de(&[], 12),
+                PersonId(2)
+            ),
             Some(ServerMessage::AlcanceTunelPor {
                 mod_id: "seele/jogo".to_owned(),
                 nome: "mundo".to_owned(),
@@ -7972,7 +8678,11 @@ mod a_apresentacao {
         );
         // E só a quem é endereçada: privacidade do endereço, como sempre.
         assert_eq!(
-            translate(&apresentacao(tunel(), 2, Papel::Busca), &[], PersonId(1)),
+            translate(
+                &apresentacao(tunel(), 2, Papel::Busca),
+                Assinatura::de(&[], 12),
+                PersonId(1)
+            ),
             None
         );
     }
@@ -8046,5 +8756,47 @@ mod batida_com_disco_ocupado {
             "não houve disputa real no SQLite"
         );
         assert!(rodadas >= 20, "o executor só rodou {rodadas} vezes durante {transcorrido:?} de escrita: a batida parou a rede");
+    }
+}
+
+#[cfg(test)]
+mod o_aviso_do_enlace {
+    use super::o_enlace_recusou_algo;
+    use seele_enlace::Contadores;
+
+    /// O volume que esperou na frente da voz é medida, e não recusa: sozinho
+    /// não acende o aviso. Comparar com `Contadores::default()` reprova aqui.
+    #[test]
+    fn so_o_volume_medido_nao_e_recusa() {
+        let so_volume = Contadores {
+            maior_volume_no_sctp: 48_000,
+            ..Contadores::default()
+        };
+        assert!(!o_enlace_recusou_algo(&so_volume));
+        assert!(!o_enlace_recusou_algo(&Contadores::default()));
+    }
+
+    /// Cada contador de recusa acende o aviso, inclusive os da mídia e do
+    /// túnel, que a linha antiga nem imprimia.
+    #[test]
+    fn cada_recusa_acende_o_aviso() {
+        let um = |muda: fn(&mut Contadores)| {
+            let mut c = Contadores::default();
+            muda(&mut c);
+            c
+        };
+        for c in [
+            um(|c| c.canais_recusados = 1),
+            um(|c| c.cortes_por_fila = 1),
+            um(|c| c.violacoes = 1),
+            um(|c| c.voz_descartada = 1),
+            um(|c| c.voz_nao_saiu = 1),
+            um(|c| c.midia_nao_saiu = 1),
+            um(|c| c.midia_malformada = 1),
+            um(|c| c.tunel_descartado = 1),
+            um(|c| c.tunel_grande_demais = 1),
+        ] {
+            assert!(o_enlace_recusou_algo(&c), "{c:?} não acendeu o aviso");
+        }
     }
 }

@@ -399,6 +399,15 @@ pub const MAX_REACH_ITENS: usize = 16;
 /// sem poder ser anunciado.
 pub const MAX_REACH_LEN: usize = 48;
 
+/// Quantos endereços de rede local uma declaração de par leva
+/// ([`ClientMessage::EmprestarSubida`]).
+///
+/// Um a menos que [`crate::tunel::MAX_ENDERECOS_DE_TUNEL`], e a conta é a
+/// razão: o servidor acrescenta o endereço público de quem declarou e manda a
+/// soma a **outra pessoa** numa apresentação. Uma entrada que aceitasse mais
+/// do que a saída comporta faria a mensagem dessa outra pessoa não codificar.
+pub const MAX_LOCAIS_DE_PAR: usize = crate::tunel::MAX_ENDERECOS_DE_TUNEL - 1;
+
 /// Why a control frame could not be handled.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ControlError {
@@ -527,6 +536,10 @@ pub enum Permission {
     /// Até a 0.16 a tela pegava carona no [`Self::Speak`]. A migração 18
     /// espelha: quem concedia ou negava `Speak` concede ou restringe esta, e
     /// transmitir continua exatamente igual a falar até alguém separar.
+    ///
+    /// **A câmera é desta permissão também** (protocolo 13): ela vai pelo
+    /// caminho da tela e no lugar dela, com o mesmo `StartScreenShare`, e não
+    /// ganhou um bit próprio.
     ShareScreen,
     /// O equivalente do ADMINISTRATOR do Discord: implica todas as permissões,
     /// inclusive as de MOD.
@@ -592,6 +605,36 @@ pub struct Membro {
 /// `uma_parte_cheia_cabe_num_quadro`. Um servidor com mais membros manda mais
 /// partes.
 pub const MAX_MEMBROS_POR_PARTE: usize = 256;
+
+/// Um banimento que vale agora, como a lista de banidos o mostra a quem pode
+/// banir (protocolo 13, a mesa mínima de texto da 1.0).
+///
+/// O banimento é **por conta** (a chave), e não por endereço. O motivo é o que
+/// quem baniu escreveu para o próprio registro: o mesmo texto do
+/// [`ClientMessage::BanPerson`], com o mesmo teto.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Banido {
+    /// A conta banida.
+    pub person: PersonId,
+    /// O apelido dela.
+    pub nickname: String,
+    /// O que quem baniu escreveu, se escreveu.
+    pub reason: Option<String>,
+    /// Quando o banimento acaba, em segundos desde a época. `None` é
+    /// permanente.
+    pub expires_at: Option<i64>,
+    /// Quem baniu. `None` quando a conta de quem baniu já não existe.
+    pub issued_by: Option<PersonId>,
+}
+
+/// O teto de banidos numa parte de [`ServerMessage::Banidos`].
+///
+/// **É teto de quadro, e não de gosto**, como [`MAX_MEMBROS_POR_PARTE`]: com o
+/// maior identificador, o maior apelido e o maior motivo
+/// ([`MAX_ALERT_TEXT_LEN`]), 24 banidos ainda cabem em [`MAX_FRAME_LEN`] —
+/// preso em `uma_parte_cheia_de_banidos_cabe_num_quadro`. Um servidor com mais
+/// banidos manda mais partes.
+pub const MAX_BANIDOS_POR_PARTE: usize = 24;
 
 /// Uma janela de certificado curto do `h3`: o hash dele e quando ele vale.
 ///
@@ -2088,6 +2131,76 @@ pub enum ClientMessage {
         /// Qual das duas.
         lado: crate::perfil::LadoDoPerfil,
     },
+
+    // ---- a mesa mínima de texto da 1.0 (protocolo 13) ----
+    /// Reescreve o corpo de uma mensagem **de quem pede**.
+    ///
+    /// Só o autor edita: editar não é moderar, e nem quem administra o
+    /// servidor põe palavras na boca de outra pessoa (a moderação é o
+    /// [`Self::RemoveMessage`], que aparece como remoção). O corpo tem as
+    /// mesmas regras do [`Self::SendMessage`].
+    ///
+    /// Sem canal, pelo motivo do `RemoveMessage`: o canal do anúncio sai da
+    /// linha gravada, e não de quem pede. A resposta é o
+    /// [`ServerMessage::MessageEdited`] difundido a quem lê o canal; a recusa
+    /// é um [`AlertReason::PedidoRecusado`] (a mensagem não existe) ou
+    /// [`AlertReason::PermissionDenied`] (a mensagem é de outra pessoa).
+    EditMessage {
+        /// Qual mensagem.
+        id: MessageId,
+        /// O corpo novo.
+        body: String,
+    },
+    /// Tira todo banimento de uma conta. A mesma permissão e a mesma
+    /// hierarquia do [`Self::BanPerson`].
+    ///
+    /// A resposta a quem pediu é a lista atualizada
+    /// ([`ServerMessage::Banidos`]); os outros recebem o
+    /// [`ServerMessage::MembroNovo`] de quem voltou a ser membro.
+    UnbanPerson {
+        /// Quem.
+        person: PersonId,
+    },
+    /// Pede a lista de banidos. Só para quem pode banir; a resposta é
+    /// [`ServerMessage::Banidos`], em partes.
+    ListBans,
+    /// **Esta conexão ligou a mídia RTP** (protocolo 13, ADR 0067): daqui em
+    /// diante as transmissões a que esta sessão assiste descem por ela
+    /// ([`ServerMessage::TelaPorMidia`]) em vez de pelo canal `u`, e a dela
+    /// pode subir por ela ([`Self::TelaPorMidia`]).
+    ///
+    /// Dito, e não deduzido do número do protocolo: a página do navegador
+    /// fala o mesmo número e não tem mídia. Quem recebe isto liga a mídia do
+    /// lado dele. Não há volta: a mídia fica ligada até a conexão acabar.
+    MidiaLigada,
+    /// **A transmissão desta pessoa sobe por RTP** (protocolo 13, ADR 0067),
+    /// na faixa 0 da mídia da conexão, e esta é a abertura dela: os mesmos
+    /// onze bytes que abrem o canal `u` ([`crate::screen::ScreenHeader`]).
+    ///
+    /// Só depois de [`Self::MidiaLigada`]. Vem depois do
+    /// [`ServerMessage::ScreenShareStarted`] e antes do primeiro quadro. Vem
+    /// de novo a cada geração (uma troca de medidas): a geração
+    /// nova começa num quadro-chave. Quem manda isto não abre o canal `u`.
+    TelaPorMidia {
+        /// A abertura, como iria no canal.
+        abertura: [u8; crate::screen::SCREEN_HEADER_LEN],
+    },
+    /// **O que este cliente mede da própria recepção** (protocolo 13): a perda
+    /// e o jitter da voz que chega a ele, que só existem no receptor.
+    ///
+    /// Sai cerca de uma vez por segundo
+    /// ([`crate::signal::INTERVALO_DO_RELATO_MS`]) enquanto há o que medir, e
+    /// vale por [`crate::signal::VALIDADE_DO_RELATO_MS`]. O servidor o põe na
+    /// conta do sinal **de quem relatou** e de mais ninguém: é o que fecha o
+    /// buraco de quem está calado e sem vídeo, de quem o servidor não mede
+    /// perda nenhuma.
+    ///
+    /// Sem resposta. A forma dos números é conferida por
+    /// [`crate::signal::Recepcao::confere`], **e não pelo [`Validate`]**, de
+    /// propósito: o `Validate` roda no `decode`, e um quadro que ele recusa
+    /// encerra a leitura do controle. Um número torto num relato de telemetria
+    /// não vale a sessão — o servidor o ignora e segue.
+    RelatoDeRecepcao(crate::signal::Recepcao),
 }
 
 /// Server to client.
@@ -3064,6 +3177,48 @@ pub enum ServerMessage {
         /// As imagens que não puderam ser trazidas.
         faltou: Vec<crate::perfil::LadoDoPerfil>,
     },
+
+    /// Os banimentos que valem agora, só para quem pediu
+    /// ([`ClientMessage::ListBans`] ou [`ClientMessage::UnbanPerson`]) e pode
+    /// banir (protocolo 13). No padrão de `Membros` e `Perfis`: partes de até
+    /// [`MAX_BANIDOS_POR_PARTE`], e `ultima` fecha a lista. Um banimento que
+    /// já expirou não aparece.
+    Banidos {
+        /// Uma parte da lista.
+        banidos: Vec<Banido>,
+        /// Esta é a última parte.
+        ultima: bool,
+    },
+
+    /// **Uma transmissão a que esta sessão assiste desce por RTP** (protocolo
+    /// 13, ADR 0067), na faixa dita, e esta é a abertura dela: os mesmos onze
+    /// bytes que abrem o canal `u`.
+    ///
+    /// Vem antes do primeiro quadro da faixa, que é sempre um quadro-chave, e
+    /// de novo a cada geração de quem transmite. A faixa é desta transmissão
+    /// até ela acabar ([`Self::ScreenShareStopped`]), até esta sessão deixar
+    /// de assistir, ou até outro `TelaPorMidia` dar a faixa a outra.
+    TelaPorMidia {
+        /// A faixa da mídia da conexão.
+        faixa: u8,
+        /// A abertura, como iria no canal.
+        abertura: [u8; crate::screen::SCREEN_HEADER_LEN],
+    },
+
+    /// **A cópia que descia por uma faixa acabou** (protocolo 13, ADR 0067).
+    ///
+    /// No canal `u` isto é o fim do fluxo, e quem assiste lê a diferença
+    /// entre o fim limpo (`finish`) e a cópia que se perdeu (`reset`). A mídia
+    /// não tem fluxo para fechar, então o fim vem dito. `limpo` é essa mesma
+    /// diferença: `true` quando a transmissão acabou, `false` quando esta
+    /// sessão deixou de recebê-la (parou de assistir, saiu da sala, ou o
+    /// servidor cortou a cópia).
+    FimDaTelaPorMidia {
+        /// A faixa que ficou livre.
+        faixa: u8,
+        /// A transmissão acabou, e não só a cópia desta sessão.
+        limpo: bool,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -3194,11 +3349,11 @@ pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
 }
 
 impl ListaDeCima for ClientMessage {
-    const CONHECIDAS: u32 = 56;
+    const CONHECIDAS: u32 = 62;
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 66;
+    const CONHECIDAS: u32 = 69;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3686,6 +3841,7 @@ impl Validate for ClientMessage {
                 locais,
             } => {
                 check_impressao(impressao)?;
+                check("locais", locais.len(), MAX_LOCAIS_DE_PAR)?;
                 // **A regra do opt-in, no fio.** `locais` é a topologia de
                 // rede interna da máquina de quem declara, e só quem empresta
                 // a conexão tem razão para publicá-la: quem assiste é
@@ -3799,6 +3955,16 @@ impl Validate for ClientMessage {
                 ..
             } => crate::perfil::conferir_tamanhos(nome_exibido, pronomes, status, bio),
             Self::TirarImagemDoPerfil { .. } => Ok(()),
+            // O mesmo teto do `SendMessage`: uma edição não é uma porta para
+            // um corpo maior do que o que se pode enviar.
+            Self::EditMessage { body, .. } => check("body", body.len(), MAX_BODY_LEN),
+            Self::UnbanPerson { .. }
+            | Self::ListBans
+            | Self::MidiaLigada
+            | Self::TelaPorMidia { .. }
+            // A faixa dos números é do `Recepcao::confere`, que o servidor
+            // aplica sem derrubar a sessão. Ver a variante.
+            | Self::RelatoDeRecepcao(_) => Ok(()),
         }
     }
 }
@@ -4115,6 +4281,19 @@ impl Validate for ServerMessage {
                 check("campos_do_perfil", campos.len(), 5)
             }
             Self::PendenciaDoPerfil { faltou } => check("faltou", faltou.len(), 2),
+            Self::Banidos { banidos, .. } => {
+                check("banidos", banidos.len(), MAX_BANIDOS_POR_PARTE)?;
+                for banido in banidos {
+                    check("nickname", banido.nickname.len(), MAX_NICKNAME_LEN)?;
+                    check(
+                        "reason",
+                        banido.reason.as_ref().map_or(0, String::len),
+                        MAX_ALERT_TEXT_LEN,
+                    )?;
+                }
+                Ok(())
+            }
+            Self::TelaPorMidia { .. } | Self::FimDaTelaPorMidia { .. } => Ok(()),
         }
     }
 }
@@ -5839,16 +6018,32 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            55,
+            61,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            65,
+            68,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
+        );
+        // **E o que cada lado diz conhecer acompanha a lista.** `CONHECIDAS`
+        // é o que o laço de controle usa para pular um ordinal de um
+        // vocabulário mais novo: uma variante acrescentada sem subir este
+        // número é lida como desconhecida e **ignorada calada** pela própria
+        // build que a define (medido em 10/11/2026: o `MidiaLigada` chegava ao
+        // servidor e não fazia nada).
+        assert_eq!(
+            <ClientMessage as ListaDeCima>::CONHECIDAS,
+            u32::from(ultima_variante::<ClientMessage>()) + 1,
+            "`CONHECIDAS` do cliente não acompanha a lista"
+        );
+        assert_eq!(
+            <ServerMessage as ListaDeCima>::CONHECIDAS,
+            u32::from(ultima_variante::<ServerMessage>()) + 1,
+            "`CONHECIDAS` do servidor não acompanha a lista"
         );
 
         // E o número da versão, preso ao lado delas. Ele é o que diz a um par se
@@ -5940,9 +6135,31 @@ mod o_vocabulario_e_a_versao {
         // `MaquinaParada`, `PedidoDaMaquina`) e o servidor de 58 para 61
         // (`PedidoDeMaquina`, `AvisoParaMaquina`, `MaquinaDispensada`).
         //
+        // **13 em 10/11/2026: a mesa mínima de texto da 1.0.** O 12 **está
+        // publicado** (v0.19.6, commit `f7ea590e9`, conferido no release em
+        // 10/11), então nada pôde pegar carona nele. O cliente foi de 56 para
+        // 59 variantes (o último ordinal, de 55 para 58): `EditMessage`,
+        // `UnbanPerson` e `ListBans`. O servidor, de 66 para 67 (o último
+        // ordinal, de 65 para 66): `Banidos`. Um par 12 continua entrando e
+        // não recebe o `Banidos` (`vocabulario::desde`), e um cliente 13 não
+        // escreve os três verbos a um servidor 12 (`desde_do_cliente`). Editar
+        // e responder não precisaram de mensagem nova do servidor: o
+        // `MessageEdited` e o `replies_to` são do 9.
+        //
+        // **E o vídeo por RTP (10/11/2026), ainda no 13**, que **não está
+        // publicado** (o último release é a v0.19.6, do 12, conferido em
+        // 10/11): `MidiaLigada` e `TelaPorMidia` no fim da lista do cliente,
+        // que foi de 59 para 61, e `TelaPorMidia` e `FimDaTelaPorMidia` no fim
+        // da do servidor, que foi de 67 para 69. ADR 0067.
+        //
+        // **E o relato de recepção (11/11/2026), ainda no 13**, que continua
+        // sem publicar (o último release é a v0.19.6, commit `f7ea590e9`, do
+        // 12, conferido em 11/11): `RelatoDeRecepcao` no fim da lista do
+        // cliente, que foi de 61 para 62. A do servidor não mudou: o relato
+        // não tem resposta. Um servidor 12 não o recebe (`desde_do_cliente`).
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            12,
+            13,
             "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
              de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
              a mesma história"
@@ -6217,6 +6434,45 @@ mod o_vocabulario_e_a_versao {
         }
     }
 
+    /// **O teto de entrada casa com o de saída.** O servidor acrescenta o
+    /// endereço público aos `locais` e manda a soma em `SirvaTunelPara`, que
+    /// tem teto de [`crate::tunel::MAX_ENDERECOS_DE_TUNEL`]. Sem teto aqui,
+    /// quem declarava dezesseis locais fazia a mensagem de **outra pessoa**
+    /// não codificar — e a sessão dela caía.
+    #[test]
+    fn locais_tem_teto_e_a_soma_com_o_publico_cabe_na_apresentacao() {
+        let local = |n: usize| -> std::net::SocketAddr {
+            format!("10.0.{}.{}:4000", n / 250, n % 250 + 1)
+                .parse()
+                .unwrap()
+        };
+        let declarar = |quantos: usize| ClientMessage::EmprestarSubida {
+            consentimento: ConsentimentoDePar {
+                pares_que_atende: 1,
+                assiste_por_par: true,
+            },
+            impressao: "3c".repeat(32),
+            locais: (0..quantos).map(local).collect(),
+        };
+        assert!(declarar(MAX_LOCAIS_DE_PAR).validate().is_ok());
+        assert!(matches!(
+            declarar(MAX_LOCAIS_DE_PAR + 1).validate(),
+            Err(ControlError::FieldTooLong {
+                field: "locais",
+                ..
+            })
+        ));
+        // O que o servidor monta com uma declaração no teto: locais + público.
+        let apresentacao = ServerMessage::SirvaTunelPara {
+            mod_id: "seele/eco".into(),
+            nome: "eco".into(),
+            quem: PersonId(1),
+            enderecos: (0..=MAX_LOCAIS_DE_PAR).map(local).collect(),
+            impressao: "3c".repeat(32),
+        };
+        assert!(encode(&apresentacao).is_ok());
+    }
+
     #[test]
     fn uma_impressao_de_verdade_continua_passando() {
         // A outra metade: um guarda que recusasse tudo passaria no teste acima
@@ -6461,6 +6717,180 @@ mod o_toque {
         let quadro = encode(&tocando).unwrap();
         assert_eq!(quadro, vec![PROTOCOL_VERSION, 41, 45]);
         assert_eq!(decode::<ServerMessage>(&quadro).unwrap(), tocando);
+    }
+}
+
+#[cfg(test)]
+mod mesa_de_texto {
+    //! O vocabulário do protocolo 13: editar a própria mensagem, desbanir e
+    //! a lista de banidos.
+    use super::*;
+
+    fn banido(id: u64) -> Banido {
+        Banido {
+            person: PersonId(id),
+            nickname: "kaworu".into(),
+            reason: Some("spam".into()),
+            expires_at: Some(1_800_000_000),
+            issued_by: Some(PersonId(1)),
+        }
+    }
+
+    #[test]
+    fn as_quatro_mensagens_vao_e_voltam() {
+        for mensagem in [
+            ClientMessage::EditMessage {
+                id: MessageId(3),
+                body: "olá, linha".into(),
+            },
+            ClientMessage::UnbanPerson {
+                person: PersonId(7),
+            },
+            ClientMessage::ListBans,
+        ] {
+            assert_eq!(
+                decode::<ClientMessage>(&encode(&mensagem).unwrap()).unwrap(),
+                mensagem
+            );
+        }
+        for mensagem in [
+            ServerMessage::Banidos {
+                banidos: vec![
+                    banido(7),
+                    Banido {
+                        person: PersonId(8),
+                        nickname: "gendo".into(),
+                        reason: None,
+                        expires_at: None,
+                        issued_by: None,
+                    },
+                ],
+                ultima: false,
+            },
+            ServerMessage::Banidos {
+                banidos: vec![],
+                ultima: true,
+            },
+        ] {
+            assert_eq!(
+                decode::<ServerMessage>(&encode(&mensagem).unwrap()).unwrap(),
+                mensagem
+            );
+        }
+    }
+
+    /// Os três verbos ficam no fim da lista do cliente, e o `Banidos` no fim
+    /// da do servidor: um par 12 lê tudo o que já existia igual.
+    #[test]
+    fn as_variantes_novas_estao_no_fim_das_listas() {
+        let do_cliente = crate::vocabulario::variantes::<ClientMessage>().unwrap();
+        assert_eq!(
+            do_cliente.get(56..),
+            Some(
+                &[
+                    "EditMessage",
+                    "UnbanPerson",
+                    "ListBans",
+                    "MidiaLigada",
+                    "TelaPorMidia",
+                    "RelatoDeRecepcao"
+                ][..]
+            )
+        );
+        let do_servidor = crate::vocabulario::variantes::<ServerMessage>().unwrap();
+        assert_eq!(
+            do_servidor.get(66..),
+            Some(&["Banidos", "TelaPorMidia", "FimDaTelaPorMidia"][..])
+        );
+    }
+
+    /// A edição tem o teto do envio: editar não é porta para um corpo maior.
+    #[test]
+    fn a_edicao_tem_o_teto_do_envio() {
+        let no_teto = ClientMessage::EditMessage {
+            id: MessageId(1),
+            body: "x".repeat(MAX_BODY_LEN),
+        };
+        assert!(encode(&no_teto).is_ok());
+        let acima = ClientMessage::EditMessage {
+            id: MessageId(1),
+            body: "x".repeat(MAX_BODY_LEN + 1),
+        };
+        assert!(matches!(
+            encode(&acima),
+            Err(ControlError::FieldTooLong { field: "body", .. })
+        ));
+    }
+
+    /// Uma parte cheia, com o maior de cada campo, cabe num quadro: o teto de
+    /// banidos por parte é de quadro, e não de gosto.
+    #[test]
+    fn uma_parte_cheia_de_banidos_cabe_num_quadro() {
+        let cheia = ServerMessage::Banidos {
+            banidos: (0..MAX_BANIDOS_POR_PARTE)
+                .map(|_| Banido {
+                    person: PersonId(u64::MAX),
+                    nickname: "n".repeat(MAX_NICKNAME_LEN),
+                    reason: Some("r".repeat(MAX_ALERT_TEXT_LEN)),
+                    expires_at: Some(i64::MIN),
+                    issued_by: Some(PersonId(u64::MAX)),
+                })
+                .collect(),
+            ultima: false,
+        };
+        let quadro = encode(&cheia).unwrap();
+        assert!(quadro.len() <= MAX_FRAME_LEN, "{} bytes", quadro.len());
+    }
+
+    #[test]
+    fn os_tetos_dos_banidos_valem_nos_dois_sentidos() {
+        let demais = ServerMessage::Banidos {
+            banidos: (0..=MAX_BANIDOS_POR_PARTE)
+                .map(|i| banido(u64::try_from(i).unwrap()))
+                .collect(),
+            ultima: true,
+        };
+        assert!(matches!(
+            encode(&demais),
+            Err(ControlError::FieldTooLong {
+                field: "banidos",
+                ..
+            })
+        ));
+        let mut longo = banido(1);
+        longo.nickname = "n".repeat(MAX_NICKNAME_LEN + 1);
+        assert!(matches!(
+            encode(&ServerMessage::Banidos {
+                banidos: vec![longo],
+                ultima: true,
+            }),
+            Err(ControlError::FieldTooLong {
+                field: "nickname",
+                ..
+            })
+        ));
+        let mut falador = banido(1);
+        falador.reason = Some("r".repeat(MAX_ALERT_TEXT_LEN + 1));
+        let quadro = {
+            // Como um servidor que não validou o escreveria: o teto tem de
+            // valer também para quem lê.
+            let mut bytes = vec![PROTOCOL_VERSION];
+            bytes.extend(
+                postcard::to_allocvec(&ServerMessage::Banidos {
+                    banidos: vec![falador],
+                    ultima: true,
+                })
+                .unwrap(),
+            );
+            bytes
+        };
+        assert!(matches!(
+            decode::<ServerMessage>(&quadro),
+            Err(ControlError::FieldTooLong {
+                field: "reason",
+                ..
+            })
+        ));
     }
 }
 

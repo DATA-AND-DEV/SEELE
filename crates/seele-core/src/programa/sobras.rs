@@ -31,7 +31,9 @@
 //! tela diz qual dos dois aconteceu.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 /// O registro de um processo de jogo que roda.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -223,6 +225,7 @@ fn sinalizar(grupo: u32, sinal: nix::sys::signal::Signal) -> Result<(), String> 
 }
 
 /// Espera o processo do registro sumir, até `prazo`. Devolve se sumiu.
+#[cfg(unix)]
 fn esperar_sumir(registro: &RegistroDeProcesso, prazo: Duration) -> bool {
     let fim = Instant::now() + prazo;
     loop {

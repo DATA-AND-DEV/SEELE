@@ -310,7 +310,23 @@ async fn quem_parou_de_ler_e_ficou_para_tras_fecha_com_o_codigo_tipado() -> Resu
     let mut ouvinte = abrir(endereco, 1).await?;
     entrar_na_line(&mut ouvinte).await?;
     sentar(&mut ouvinte, &servidor).await?;
-    let falante = abrir(endereco, 2).await?;
+    // **O falante lê o que chega, como todo cliente lê.** Desde o protocolo 13
+    // quem pode ler um canal recebe o que se diz nele sem assinar
+    // (`ASSINA_O_QUE_LE_DESDE`, em `session.rs`): este par recebe o megabyte e
+    // meio que o teste grava, e um par que não lesse ficaria ele mesmo para
+    // trás — com razão, e era o que este teste media sem querer («o falante
+    // caiu junto», na primeira rodada depois da mudança). O que se quer provar
+    // é que o fechamento é de quem **parou de ler**, e não de quem lê.
+    let Par {
+        conexao: conexao_do_falante,
+        envio: _envio_do_falante,
+        recebe: mut do_falante,
+        pessoa: quem_fala,
+        ..
+    } = abrir(endereco, 2).await?;
+    let lendo = tokio::spawn(async move {
+        while frame::read::<ServerMessage>(&mut do_falante).await.is_ok() {}
+    });
 
     // O ouvinte para de ler aqui, e o `Recebe` continua vivo.
     //
@@ -320,7 +336,7 @@ async fn quem_parou_de_ler_e_ficou_para_tras_fecha_com_o_codigo_tipado() -> Resu
     // visto no `recv`, e o teste passava sem a vigia (medido na reversão em
     // mutacao-E-apos-credito). Separadas, a segunda fase só pode ser vista
     // pela vigia.
-    encher(&servidor, falante.pessoa, outro, GRANDES, 0).await?;
+    encher(&servidor, quem_fala, outro, GRANDES, 0).await?;
     let presa = esperar_a_escrita_presa(&ouvinte.conexao).await;
     assert!(
         presa,
@@ -336,7 +352,7 @@ async fn quem_parou_de_ler_e_ficou_para_tras_fecha_com_o_codigo_tipado() -> Resu
         None,
         "a escrita presa, sozinha, fechou a conexão"
     );
-    encher(&servidor, falante.pessoa, outro, 0, ANEL_DO_BARRAMENTO * 2).await?;
+    encher(&servidor, quem_fala, outro, 0, ANEL_DO_BARRAMENTO * 2).await?;
 
     let motivo = tokio::time::timeout(PRAZO, ouvinte.conexao.closed())
         .await
@@ -360,7 +376,8 @@ async fn quem_parou_de_ler_e_ficou_para_tras_fecha_com_o_codigo_tipado() -> Resu
         "a sessão foi encerrada por ter ficado para trás, e o contador marcou zero"
     );
     // A outra conexão segue de pé: o fechamento é de quem ficou para trás.
-    assert_eq!(falante.conexao.acabou(), None, "o falante caiu junto");
+    assert_eq!(conexao_do_falante.acabou(), None, "o falante caiu junto");
+    lendo.abort();
     // E a queda é recuperável: a vigia sai pelo `?`, e o assento da graça tem de
     // ter sido guardado assim mesmo.
     let _volta = volta_sentado(endereco, &servidor, 1, &ouvinte).await?;

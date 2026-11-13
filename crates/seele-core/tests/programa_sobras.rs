@@ -96,9 +96,16 @@ fn esperar_morrer(pid: u32) -> bool {
     false
 }
 
+/// **Com o `--`, sempre.** Sem ele o `kill` do procps (o do Linux) lê `-12345`
+/// como opções: toma o primeiro dígito por um pid negativo, e `-1…` vira
+/// `kill(-1)`, o sinal para **todo processo do usuário**. Medido em 13/11 num
+/// Debian com o procps 4.0.2: `kill -KILL -12345` matou tudo o que havia, e
+/// `-21345` não matou nada (nem o grupo pedido). No CI isto derrubou o runner
+/// do Linux cinco vezes seguidas, sempre que o órfão caía num pid começado
+/// por 1, e levou o log junto.
 fn matar(pid: u32) {
     let _ = std::process::Command::new("kill")
-        .args(["-KILL", &format!("-{pid}")])
+        .args(["-KILL", "--", &format!("-{pid}")])
         .status();
 }
 

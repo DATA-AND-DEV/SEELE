@@ -1,5 +1,19 @@
 # 03 — Áudio
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original.
+>
+> - **Continua valendo:** os dois pipelines, as regras do thread de tempo real, os parâmetros do Opus (48 kHz, mono, 20 ms, 16 a 48 kbps, modo VOIP, DTX ligado, FEC desligado), o jitter buffer adaptativo e o push-to-talk como padrão (`crates/seele-core/src/voice.rs`).
+> - **Mudou:**
+>   - **a voz sai pelo canal `voz` do WebRTC**, sem ordem e sem retransmissão, e não por RTP (`crates/seele-enlace/src/ponta.rs`, ADR 0063);
+>   - **o binding do Opus é o `shiguredo_opus`**, e não `audiopus` nem `opus` (ADR 0008, `crates/seele-audio/src/codec.rs`);
+>   - **a ativação por voz não usa `webrtc-vad`:** é energia com histerese, em Rust (ADR 0015);
+>   - **ganho automático e supressão de ruído deixaram de estar em aberto:** existem em `crates/seele-audio/src/ganho.rs` e `supressao.rs` (a supressão, no ADR 0055);
+>   - **cancelamento de eco:** o nativo continua sem, com fone exigido (ADR 0007). No navegador a página pede o do próprio navegador (`apps/seele-app/ui/voz-web.js`);
+>   - **o portão, o jitter buffer e o mixer moram em `crates/seele-voz`**, para servirem ao desktop e ao navegador; `seele-audio` ficou com dispositivos, codec e DSP;
+>   - **o bitrate adaptativo é em faixas, sobre a perda de subida que o servidor mede** (ADR 0036);
+>   - **há um segundo perfil de Opus, para o som da tela:** modo `Audio`, 96 kbps, sem DTX (`crates/seele-audio/src/codec.rs`).
+> - **Manda agora:** os ADRs 0007, 0008, 0010, 0015, 0036 e 0055, e os crates `seele-audio` e `seele-voz`.
+
 Esta é a parte difícil do projeto. Tratar com prioridade e prototipar cedo.
 
 ## Pipeline de captura

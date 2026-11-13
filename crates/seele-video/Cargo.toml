@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # `specs/01-arquitetura.md`, regra de dependência: este crate vê `seele-proto` e
 # mais nada. Guardado por `cargo xtask check-deps` (ADR 0002).
@@ -70,7 +71,11 @@ tracing = "0.1.44"
 # `cargo:rustc-link-arg`, que **o Cargo ignora quando vem de dependência**: sem
 # a linha em `.cargo/config.toml`, o binário linka e morre no `dyld`.
 [target.'cfg(target_os = "macos")'.dependencies]
-screencapturekit = "8.0.1"
+# `macos_14_0` abre a foto do sistema (`SCScreenshotManager`), que a prévia da
+# caixa de compartilhar usa. A feature só liga o lado em Rust: a ponte em Swift
+# confere a versão do macOS na hora (`#available`), e num sistema mais antigo a
+# foto devolve erro e a prévia cai para a captura.
+screencapturekit = { version = "8.0.1", features = ["macos_14_0"] }
 core-graphics = "0.25"
 objc2-video-toolbox = { version = "0.3.2", default-features = false, features = ["std", "VTBase", "VTErrors", "VTSession", "VTCompressionSession", "VTCompressionProperties", "objc2-core-media", "objc2-core-video"] }
 objc2-core-video = { version = "0.3.2", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn", "CVPixelFormatDescription"] }

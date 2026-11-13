@@ -70,8 +70,12 @@ e `wasm32-wasip1`; mudança do pin exige revisar o script.
 SHA-256 Linux já fixado em `xtask/src/wasi_sdk.rs`. Em seguida, `pacote-web`
 compila só `seele-web` e `seele-motor-web`, com `--locked`, e aplica os guardas
 existentes de perfil/tamanho/exportações WASM, CSP, tokens e comandos da ponte.
-A saída inclui `_headers`. O script também exige os dois WASM e `index.html` e
-recusa alteração de `Cargo.lock`.
+A saída inclui `_headers` e `404.html`. O script também exige os dois WASM e
+`index.html` e recusa alteração de `Cargo.lock`.
+
+O `404.html` desliga o fallback de SPA do Pages: sem ele, um caminho que não
+existe responde 200 com o `index.html` e sem a CSP da página. Depois de
+publicar, `curl -sI https://seele.sh/x-nao-existe` tem de responder 404.
 
 O SDK e as compilações reutilizam `target/` quando presente; o preparador do SDK
 reconhece sua marca de verificação. Só reutilizar cache confiável deste projeto.

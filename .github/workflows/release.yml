@@ -147,7 +147,10 @@ jobs:
           # tinha dois sistemas e o produto anuncia três; o Mac só era compilado
           # quando alguém já havia decidido lançar, no job de empacotar, onde um
           # teste reprovado não impedia nada.
-          - os: macos-15
+          #
+          # `macos-26` pelo SDK: o `apple-metal` 0.8.8 não compila com o do
+          # macOS 15. O porquê está na matriz de clippy do `ci.yml`.
+          - os: macos-26
             nome: macos
     runs-on: ${{ matrix.os }}
     steps:
@@ -188,8 +191,11 @@ jobs:
       # qualquer outro teste que precise de hardware vai ter de ser nomeado aqui
       # — o que é a conversa certa a ter, em vez de um filtro largo que engole os
       # próximos em silêncio.
+      #
+      # Com `--no-fail-fast`, como no `ci.yml`: o primeiro binário vermelho não
+      # esconde os seguintes. O portão fecha do mesmo jeito, e diz todos.
       - name: Testes
-        run: cargo test --workspace -- --skip a_saida_desta_maquina_abre_como_entrada
+        run: cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada
 
       # As bancadas de MOD de `node` puro, uma vez só e no Linux: elas rodam o
       # código de verdade num contexto de VM, com o resto de mentira, e não
@@ -294,7 +300,11 @@ jobs:
           # targets were built» e o macOS fica sendo o único sistema que não
           # atualiza sozinho. O `.app` solto não vai para o release: o passo de
           # reunir escolhe por extensão, e diretório não é arquivo.
-          - os: macos-15
+          #
+          # `macos-26` pelo SDK, como no `validar` (o porquê está na matriz de
+          # clippy do `ci.yml`). O SDK é o de compilar: o macOS mínimo do
+          # pacote continua sendo o que o `tauri.conf.json` declara.
+          - os: macos-26
             nome: macos
             bundles: app,dmg
 

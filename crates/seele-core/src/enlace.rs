@@ -47,12 +47,12 @@ use seele_proto::control::{
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId,
 };
-use seele_proto::signal::SignalBand;
+use seele_proto::signal::{Recepcao, SignalBand};
 use seele_proto::tunel::{ProtocoloDeTunel, RecusaDeTunel};
 use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
-use crate::client::{Client, ConnectError, MediaChannel, SessionInfo};
+use crate::client::{Client, ConnectError, MediaChannel, PeloChama, SessionInfo};
 // **A regra das despedidas que acabam a sessão mora no `seele-sessao`**, e o
 // `Room` chama a mesma: eram duas respostas, e o `Room` tratava toda
 // `Disconnecting` como fim enquanto este motor reconectava (pendência 61). A
@@ -279,12 +279,24 @@ pub enum Aviso {
         largura: u16,
         /// Altura em pixels.
         altura: u16,
+        /// **O que é**: monitor, janela ou câmera, como o cabeçalho declarou.
+        ///
+        /// É por aqui que quem assiste fica sabendo que a imagem é uma câmera
+        /// (protocolo 13): o anúncio da transmissão no controle não diz, e a
+        /// casca escreve «câmera» ou «tela» pelo que chega aqui.
+        origem: seele_proto::screen::ScreenSource,
         /// **Qual leitura abriu**: um número por leitura, crescente no
         /// processo ([`nova_leitura_de_tela`]). O [`Self::TelaFechou`] dela leva
         /// o mesmo número. Sem ele, o fim de uma leitura substituída (o par
         /// renomeado aborta a anterior da mesma tela) não se distinguia do fim
         /// da que está no ar.
         leitura: u64,
+        /// **Qual codificador de vídeo abriu este fluxo**, quando a transmissão
+        /// é desta máquina e a bomba a codifica: o nome que
+        /// `seele_video::codec::CodificaVideo::nome` dá. `None` numa tela
+        /// alheia (o cabeçalho do fio não diz, e não precisa) e na câmera, que
+        /// a janela codifica. Dado desta máquina: não atravessa o fio.
+        codificador: Option<String>,
     },
     /// Um quadro comprimido de uma tela alheia.
     ///
@@ -356,6 +368,64 @@ pub enum Aviso {
         tela: ScreenId,
         /// Qual leitura acabou: o número do [`Self::TelaAbriu`] dela.
         leitura: u64,
+    },
+    /// **A transmissão desta pessoa caiu**: acabou sem ninguém mandar, e este
+    /// motor já a encerrou.
+    ///
+    /// # O silêncio que isto fecha
+    ///
+    /// Quando quem produz a imagem morria — o codificador recusando um quadro,
+    /// a captura recusando recomeçar, o fluxo que não abriu —, só a tarefa que
+    /// escoa ficava sabendo, e ela escrevia uma linha no `seele.log`. O motor
+    /// continuava com a transmissão «viva», o servidor continuava anunciando-a
+    /// à sala, e a casca continuava oferecendo PARAR DE COMPARTILHAR sobre uma
+    /// tela que ninguém via. O produto sabia e não contava.
+    ///
+    /// Quando este aviso sai, três coisas já aconteceram, nesta ordem: o
+    /// produtor foi largado, o `StopScreenShare` foi escrito no controle (o
+    /// mesmo de quem aperta parar — a sala recebe o `ScreenShareStopped` de
+    /// sempre), e o [`Self::TelaFechou`] do espelho já passou.
+    ///
+    /// **Não há recomeço automático.** Recomeçar é pôr a tela de alguém no ar
+    /// sem aperto; quem recomeça é a pessoa, e a casca diz isso na frase.
+    TelaCaiu {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// O que ela mostrava: é a casca que decide entre «a tela» e «a
+        /// câmera» na frase.
+        origem: seele_proto::screen::ScreenSource,
+        /// Por quê, enumerado. O detalhe do sistema ficou no `seele.log`.
+        motivo: crate::tela::MotivoDeQueda,
+    },
+    /// **A transmissão desta pessoa está pausada**: o teto parou o vídeo, o
+    /// fluxo fechou, e ela volta sozinha.
+    ///
+    /// É o §3.2 visto por quem transmite. Não é [`Self::TelaCaiu`]: ali a
+    /// transmissão acabou e recomeçar é com a pessoa; aqui ela continua
+    /// anunciada, a bomba continua viva, e a volta é o [`Self::TelaAbriu`] de
+    /// sempre, da mesma tela. Até este aviso existir, quem transmitia era a
+    /// única pessoa da sala que não tinha como saber que a imagem parou.
+    TelaParou {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// O que ela mostra: é a casca que decide entre «a tela» e «a câmera».
+        origem: seele_proto::screen::ScreenSource,
+        /// Por quê, enumerado.
+        motivo: crate::tela::MotivoDeParada,
+    },
+    /// A transmissão da **própria câmera** pede alguma coisa a quem a
+    /// codifica, que está fora deste processo (`crate::de_fora`).
+    ///
+    /// A tela não precisa disto: o codificador dela mora aqui, e o pedido de
+    /// quadro-chave e o teto novo vão direto à bomba. O da câmera mora na
+    /// janela, e sem este aviso um `KeyFrameRequested` do servidor morreria
+    /// deste lado — quem acabou de entrar esperaria uma imagem que ninguém
+    /// mandou refazer.
+    Camera {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// O que ela pede.
+        sinal: crate::de_fora::SinalParaFora,
     },
     /// O que um túnel de jogo mediu: caminho, latência, bytes, quedas.
     ///
@@ -435,13 +505,17 @@ impl std::fmt::Debug for Aviso {
                 tela,
                 largura,
                 altura,
+                origem,
                 leitura,
+                codificador,
             } => f
                 .debug_struct("TelaAbriu")
                 .field("tela", tela)
                 .field("largura", largura)
                 .field("altura", altura)
+                .field("origem", origem)
                 .field("leitura", leitura)
+                .field("codificador", codificador)
                 .finish(),
             Self::TelaIlegivel { motivo } => f
                 .debug_struct("TelaIlegivel")
@@ -476,6 +550,31 @@ impl std::fmt::Debug for Aviso {
                 .debug_struct("TelaFechou")
                 .field("tela", tela)
                 .field("leitura", leitura)
+                .finish(),
+            Self::TelaCaiu {
+                tela,
+                origem,
+                motivo,
+            } => f
+                .debug_struct("TelaCaiu")
+                .field("tela", tela)
+                .field("origem", origem)
+                .field("motivo", motivo)
+                .finish(),
+            Self::TelaParou {
+                tela,
+                origem,
+                motivo,
+            } => f
+                .debug_struct("TelaParou")
+                .field("tela", tela)
+                .field("origem", origem)
+                .field("motivo", motivo)
+                .finish(),
+            Self::Camera { tela, sinal } => f
+                .debug_struct("Camera")
+                .field("tela", tela)
+                .field("sinal", sinal)
                 .finish(),
             // A oferta fica de fora: o log diz qual pedido, e o resumo a
             // identifica inteira.
@@ -598,6 +697,8 @@ enum Comando {
     Dizer {
         linha: ChannelId,
         corpo: String,
+        /// A mensagem a que esta responde, se responde a alguma.
+        responde_a: Option<MessageId>,
         id: ClientMessageId,
     },
     Historico {
@@ -669,6 +770,19 @@ enum Comando {
     RemoverMensagem {
         mensagem: MessageId,
     },
+    /// Os três verbos do protocolo 13. Nenhum volta na reconexão, pelo motivo
+    /// de `Banir` e `RemoverMensagem`: ver `Motor::lembrar`.
+    EditarMensagem {
+        mensagem: MessageId,
+        corpo: String,
+    },
+    Desbanir {
+        pessoa: PersonId,
+    },
+    ListarBanidos,
+    /// O que esta ponta mede da voz que ouve (protocolo 13). Não volta na
+    /// reconexão: é uma medida de agora, e a seguinte sai em um segundo.
+    RelatarRecepcao(Recepcao),
     MoverPersono {
         pessoa: PersonId,
         voice_room: VoiceRoomId,
@@ -837,6 +951,10 @@ impl Comando {
             Self::Cargo(_) => "Cargo",
             Self::Banir { .. } => "Banir",
             Self::RemoverMensagem { .. } => "RemoverMensagem",
+            Self::EditarMensagem { .. } => "EditarMensagem",
+            Self::Desbanir { .. } => "Desbanir",
+            Self::ListarBanidos => "ListarBanidos",
+            Self::RelatarRecepcao(_) => "RelatarRecepcao",
             Self::MoverPersono { .. } => "MoverPersono",
             Self::ApagarVoiceRoom { .. } => "ApagarVoiceRoom",
             Self::ApagarLinha { .. } => "ApagarLinha",
@@ -910,6 +1028,74 @@ const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
 /// e o resto desta sessão até o par responder ou o prazo vencer. A tarefa roda
 /// solta (ver [`Motor::assistir_por_par`]) e devolve o que decidiu por aqui; só
 /// quem tem o `&mut Client` — o laço de `rodar` — pode falar com o servidor.
+/// O que o espelho da própria transmissão vira para a casca.
+///
+/// Os mesmos avisos que uma tela alheia produz, pelo mesmo caminho, para a
+/// casca não ter dois modos de desenhar a mesma coisa — e mais o que só quem
+/// transmite tem a ouvir: que o teto pausou a imagem ([`Aviso::TelaParou`]).
+///
+/// `None` é o quadro da câmera, que não volta: ver `talvez_ligar_a_bomba`.
+///
+/// Fora da tarefa que escoa para ter teste sem enlace nenhum.
+fn aviso_do_espelho(
+    visto: crate::bomba::EspelhoDaTela<'_>,
+    tela: ScreenId,
+    origem: seele_proto::screen::ScreenSource,
+    leitura: u64,
+) -> Option<Aviso> {
+    Some(match visto {
+        crate::bomba::EspelhoDaTela::Abriu {
+            largura,
+            altura,
+            codificador,
+        } => Aviso::TelaAbriu {
+            tela,
+            largura,
+            altura,
+            origem,
+            leitura,
+            // O nome que a bomba escreveu na placa: é por aqui que a tela de
+            // quem transmite fica sabendo qual codificador abriu o fluxo.
+            codificador,
+        },
+        crate::bomba::EspelhoDaTela::Quadro { .. }
+            if origem == seele_proto::screen::ScreenSource::Camera =>
+        {
+            return None;
+        }
+        crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
+            tela,
+            chave,
+            bytes: bytes.to_vec(),
+            leitura,
+        },
+        crate::bomba::EspelhoDaTela::Parou(motivo) => Aviso::TelaParou {
+            tela,
+            origem,
+            motivo,
+        },
+    })
+}
+
+/// O que a tarefa que escoa a transmissão desta pessoa devolve ao laço de
+/// [`Motor::rodar`] quando ela acaba **com erro**.
+///
+/// Pelo mesmo motivo de [`ResultadoDoPar`]: a tarefa roda solta, e só o laço —
+/// dono do `&mut Client` e de [`Motor::tela_viva`] — pode avisar o servidor e
+/// largar o produtor.
+///
+/// **`leitura` é a identidade, e não o [`ScreenId`].** Uma transmissão que o
+/// motor já encerrou por decisão (o botão, a queda do enlace, o
+/// `ScreenShareStopped`) também pode acabar com erro na tarefa — o fluxo dela
+/// foi cortado no meio —, e esse fim chega aqui depois de outra transmissão ter
+/// nascido. O número da leitura é único no processo; o nome que o servidor dá
+/// não precisa ser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FimComErroDaTela {
+    leitura: u64,
+    motivo: crate::tela::MotivoDeQueda,
+}
+
 #[derive(Debug)]
 enum ResultadoDoPar {
     /// Um verbo do túnel que uma tarefa solta quer mandar (`TunelFalhou`,
@@ -940,6 +1126,9 @@ pub struct Anexo {
     pub id: ClientMessageId,
     /// O que a pessoa escreveu ao lado do arquivo. Pode ser vazio.
     pub corpo: String,
+    /// A mensagem a que esta responde, se responde a alguma. O servidor
+    /// confere que ela é do mesmo canal, como no envio sem arquivo.
+    pub responde_a: Option<MessageId>,
     /// Onde o arquivo está nesta máquina. Nunca sai daqui.
     pub caminho: std::path::PathBuf,
     /// Que nome dar a ele do outro lado.
@@ -1558,9 +1747,18 @@ enum Lote {
     /// impressão esperada, a chave de pino, o apelido, o segredo —, **sem** a
     /// prova pelo pino: é um candidato que ninguém escolheu
     /// ([`Destino::o_pino_prova_o_servidor`]).
+    ///
+    /// `do_convite_v6` são os candidatos IPv6 do anfitrião que o convite já
+    /// trazia ([`e_ipv6`]). Servem à **segunda chamada**
+    /// (`crate::encontro::Chamada::chamar_pelo_ipv6`), a que sai quando o
+    /// anfitrião atendeu e o IPv4 não abriu: é até eles que o sistema escolhe a
+    /// origem que vira candidato, e é a eles que a discagem seguinte vai, com
+    /// o que o segundo `AQUI` der. O `AQUI` não diz IPv6 nenhum do anfitrião:
+    /// o `ATENDE` só leva o endereço que o ponto viu e as dicas de rede local.
     PelaChamada {
         chamada: crate::encontro::Chamada,
         modelo: Box<Candidato>,
+        do_convite_v6: Vec<Candidato>,
     },
 }
 
@@ -1569,7 +1767,13 @@ impl Lote {
     fn candidatos(&self) -> Vec<&Candidato> {
         match self {
             Self::Direto(candidatos) => candidatos.iter().collect(),
-            Self::PelaChamada { modelo, .. } => vec![modelo.as_ref()],
+            Self::PelaChamada {
+                modelo,
+                do_convite_v6,
+                ..
+            } => std::iter::once(modelo.as_ref())
+                .chain(do_convite_v6)
+                .collect(),
         }
     }
 
@@ -1650,6 +1854,75 @@ fn destinos_da_chamada(modelo: &Candidato, atendida: &crate::encontro::Atendida)
             antes: modelo.antes.clone(),
         })
         .collect()
+}
+
+/// Os destinos da discagem que segue a **segunda chamada** do degrau 4, a que
+/// levou o IPv6 desta máquina: os do segundo `AQUI`
+/// ([`destinos_da_chamada`]), e os IPv6 do anfitrião que o convite já trazia,
+/// cada um com as regras que tinha.
+///
+/// **Os do convite vão junto porque o `AQUI` não os diz.** O anfitrião furou
+/// para o IPv6 de quem chama, e o pacote que entra por esse furo tem de ir ao
+/// IPv6 dele. Sem repetir o que o `AQUI` já deu (um anfitrião registrado no
+/// ponto por IPv6 diz o próprio).
+fn destinos_da_segunda_chamada(
+    modelo: &Candidato,
+    atendida: &crate::encontro::Atendida,
+    do_convite_v6: &[Candidato],
+) -> Vec<Candidato> {
+    let mut destinos = destinos_da_chamada(modelo, atendida);
+    for candidato in do_convite_v6 {
+        let repetido = destinos
+            .iter()
+            .any(|ja| mesmo_endereco(ja.destino.servidor, candidato.destino.servidor));
+        if !repetido {
+            destinos.push(candidato.clone());
+        }
+    }
+    destinos
+}
+
+/// Se este endereço é IPv6 de verdade: o `::ffff:a.b.c.d` é IPv4 escrito de
+/// outro jeito, e sai pelo caminho IPv4.
+fn e_ipv6(servidor: SocketAddr) -> bool {
+    servidor.ip().to_canonical().is_ipv6()
+}
+
+/// Os alvos da discagem que segue a segunda chamada na volta da bateria
+/// interna: o endereço que o ponto deu, as dicas, e o próprio endereço da
+/// sessão quando ele é IPv6 ([`e_ipv6`]).
+///
+/// A discagem direta a ele deu em silêncio, e o que mudou desde então é o
+/// furo: o anfitrião mandou para o IPv6 desta máquina, e o firewall dele
+/// passou a deixar entrar. Sem voltar a ele, o furo IPv6 abria e ninguém
+/// passava.
+fn alvos_da_segunda_volta(
+    servidor: SocketAddr,
+    atendida: &crate::encontro::Atendida,
+) -> Vec<SocketAddr> {
+    let mut alvos: Vec<SocketAddr> = std::iter::once(atendida.endereco)
+        .chain(atendida.dicas.iter().copied())
+        .collect();
+    if e_ipv6(servidor) && !alvos.iter().any(|ja| mesmo_endereco(*ja, servidor)) {
+        alvos.push(servidor);
+    }
+    alvos
+}
+
+/// Quanto um lote da corrida pode durar, quando corre com outros.
+///
+/// O degrau 4 soma o prazo da chamada ao da discagem. E o lote da chamada
+/// pode fazê-lo duas vezes: a segunda chamada, com o IPv6, só sai depois de a
+/// discagem da primeira dar em silêncio, e sem este dobro ela nasceria com o
+/// prazo do lote já gasto. Quem não tem IPv6 global não a faz, e o lote acaba
+/// na hora de sempre: isto é um teto, e não uma espera.
+fn prazo_do_lote(pela_chamada: bool) -> Duration {
+    let uma_volta = crate::encontro::PRAZO_DA_CHAMADA + PRAZO_DA_DISCAGEM_NA_CORRIDA;
+    if pela_chamada {
+        uma_volta * 2
+    } else {
+        uma_volta
+    }
 }
 
 /// Se dois endereços são o mesmo, com o IPv4 mapeado igual ao escrito.
@@ -1811,6 +2084,13 @@ impl Enlace {
             })
             .collect();
         let alvo = todos.first().cloned();
+        // Os IPv6 do anfitrião que o convite trouxe: servem à segunda chamada
+        // do degrau 4.
+        let do_convite_v6: Vec<Candidato> = todos
+            .iter()
+            .filter(|candidato| e_ipv6(candidato.destino.servidor))
+            .cloned()
+            .collect();
 
         // Com o quarto a caminho, quem precisa de furo espera a resposta dele, e
         // quem não precisa começa na hora.
@@ -1833,6 +2113,7 @@ impl Enlace {
             fila.push(Lote::PelaChamada {
                 chamada,
                 modelo: Box::new(modelo),
+                do_convite_v6,
             });
         }
         let corrida_de_um = fila.len() == 1 && quarto.is_none();
@@ -1856,6 +2137,7 @@ impl Enlace {
             tardios,
             Some(tocados),
             |posicao, lote: Lote| {
+                let pela_chamada = matches!(lote, Lote::PelaChamada { .. });
                 let chave = chave.clone();
                 let pins = Arc::clone(&pins);
                 let ponta = ponta.clone();
@@ -1882,10 +2164,9 @@ impl Enlace {
                     );
                     // Um lote sozinho não tem prazo além do da discagem e do
                     // aperto: é o caminho de antes para um link de um endereço.
-                    // O degrau 4 soma o prazo da chamada ao da discagem.
-                    let prazo = (!corrida_de_um).then_some(
-                        crate::encontro::PRAZO_DA_CHAMADA + PRAZO_DA_DISCAGEM_NA_CORRIDA,
-                    );
+                    // O degrau 4 soma o prazo da chamada ao da discagem, e pode
+                    // fazê-lo duas vezes ([`prazo_do_lote`]).
+                    let prazo = (!corrida_de_um).then(|| prazo_do_lote(pela_chamada));
                     match ate_o_prazo_ou_o_toque(
                         prazo,
                         tentativa,
@@ -1982,39 +2263,100 @@ impl Enlace {
         tocou: mpsc::UnboundedSender<(u8, u16)>,
         prazo_da_discagem: Duration,
     ) -> Result<(Self, String), ConnectError> {
-        let (candidatos, credencial, pelo_ponto) = match lote {
-            Lote::Direto(candidatos) => (candidatos, None, false),
-            Lote::PelaChamada { chamada, modelo } => {
+        let (candidatos, pelo_chama, segunda) = match lote {
+            Lote::Direto(candidatos) => (candidatos, None, None),
+            Lote::PelaChamada {
+                chamada,
+                modelo,
+                do_convite_v6,
+            } => {
                 let atendida = chamada
                     .chamar(ponta.ponta(), crate::encontro::PRAZO_DA_CHAMADA)
                     .await
                     .map_err(falha_da_chamada)?;
                 (
                     destinos_da_chamada(&modelo, &atendida),
-                    Some(atendida.credencial),
-                    true,
+                    Some(PeloChama {
+                        credencial: atendida.credencial,
+                        espera_checagem_ipv6: false,
+                    }),
+                    Some((chamada, modelo, do_convite_v6)),
                 )
             }
         };
-        let numerados: Vec<(Candidato, u8)> = candidatos
-            .into_iter()
-            .map(|candidato| {
-                let numero = numeracao.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                contar(
-                    olhos.as_ref(),
-                    Andamento::Tentando(Tentativa {
-                        candidato: numero,
-                        onde: candidato.destino.servidor,
-                        avisou: pelo_ponto,
-                    }),
-                );
-                (candidato, numero)
-            })
+        let pelo_ponto = pelo_chama.is_some();
+        let numerar = |candidatos: Vec<Candidato>| -> Vec<(Candidato, u8)> {
+            candidatos
+                .into_iter()
+                .map(|candidato| {
+                    let numero = numeracao.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    contar(
+                        olhos.as_ref(),
+                        Andamento::Tentando(Tentativa {
+                            candidato: numero,
+                            onde: candidato.destino.servidor,
+                            avisou: pelo_ponto,
+                        }),
+                    );
+                    (candidato, numero)
+                })
+                .collect()
+        };
+        let primeira = Self::discar_o_lote(
+            &ponta,
+            numerar(candidatos),
+            pelo_chama,
+            bilhete.clone(),
+            chave.clone(),
+            Arc::clone(&pins),
+            tocou.clone(),
+            prazo_da_discagem,
+        )
+        .await;
+        let Some((chamada, modelo, do_convite_v6)) = segunda else {
+            return primeira;
+        };
+        match primeira {
+            // **O ponto disse que o anfitrião atendeu, e o caminho não abriu.**
+            // É a falha que o degrau 4 tem de nomear: dois NATs que não deixam
+            // entrar o que não saiu, sem relay. Antes de nomeá-la, o que resta.
+            Err(ConnectError::SemResposta) => {}
+            outro => return outro,
+        }
+        // **A segunda chamada, com o IPv6 desta máquina.** O IPv4 não abriu, e
+        // o anfitrião só furou o endereço que o ponto viu. Com o IPv6 de quem
+        // chama no `CHAMA`, ele fura também o firewall IPv6 do roteador dele, e
+        // a discagem volta com o que o segundo `AQUI` der e com os IPv6 dele
+        // que o convite já trazia. Esta discagem aceita a checagem IPv6 do
+        // anfitrião mesmo sem conhecer IPv6 nenhum dele (quem liga por
+        // código): a primeira acabou, e não há outra com este `U`.
+        let enderecos_v6: Vec<SocketAddr> = do_convite_v6
+            .iter()
+            .map(|candidato| candidato.destino.servidor)
             .collect();
+        let Some(Ok(atendida)) = chamada
+            .chamar_pelo_ipv6(
+                ponta.ponta(),
+                crate::encontro::PRAZO_DA_CHAMADA,
+                &enderecos_v6,
+            )
+            .await
+        else {
+            // Sem IPv6 global para dizer, ou o ponto não atendeu desta vez: é
+            // a falha de antes, com o nome de antes.
+            return Err(ConnectError::NatNaoAbriu);
+        };
         Self::discar_o_lote(
             &ponta,
-            numerados,
-            credencial,
+            numerar(destinos_da_segunda_chamada(
+                &modelo,
+                &atendida,
+                &do_convite_v6,
+            )),
+            Some(PeloChama {
+                credencial: atendida.credencial,
+                espera_checagem_ipv6: true,
+            }),
             bilhete,
             chave,
             pins,
@@ -2023,10 +2365,7 @@ impl Enlace {
         )
         .await
         .map_err(|erro| match erro {
-            // **O ponto disse que o anfitrião atendeu, e o caminho não abriu.**
-            // É a falha que o degrau 4 tem de nomear: dois NATs que não deixam
-            // entrar o que não saiu, sem relay.
-            ConnectError::SemResposta if pelo_ponto => ConnectError::NatNaoAbriu,
+            ConnectError::SemResposta => ConnectError::NatNaoAbriu,
             outro => outro,
         })
     }
@@ -2045,7 +2384,7 @@ impl Enlace {
     async fn discar_o_lote(
         ponta: &crate::transporte::PontaDaSessao,
         mut restantes: Vec<(Candidato, u8)>,
-        credencial: Option<String>,
+        pelo_chama: Option<PeloChama>,
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
@@ -2061,7 +2400,7 @@ impl Enlace {
             let conexao = match crate::client::discar(
                 ponta.ponta(),
                 alvos,
-                credencial.clone(),
+                pelo_chama.clone(),
                 prazo,
             )
             .await
@@ -2253,6 +2592,7 @@ impl Enlace {
         let (comandos_tx, comandos_rx) = mpsc::channel(COMANDOS);
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
+        let (quedas_da_tela_tx, quedas_da_tela) = mpsc::unbounded_channel();
 
         let bateria = bateria_de(&destino);
         let tuneis = crate::tunel::Tuneis::nova(avisos_tx.clone());
@@ -2288,11 +2628,17 @@ impl Enlace {
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
+            estimativa_da_midia: None,
+            ultima_chave_pela_midia: None,
+            chave_devida: false,
+            ultima_mudanca_da_midia: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
+            quedas_da_tela,
+            quedas_da_tela_tx,
             tarefas_de_par: TarefasDePar::default(),
             tuneis,
             lado_da_maquina,
@@ -2524,13 +2870,22 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
+    ///
+    /// `responde_a` é a mensagem a que esta responde, ou `None`.
     pub async fn dizer(
         &self,
         linha: ChannelId,
         corpo: String,
+        responde_a: Option<MessageId>,
         id: ClientMessageId,
     ) -> Result<(), Fechado> {
-        self.mandar(Comando::Dizer { linha, corpo, id }).await
+        self.mandar(Comando::Dizer {
+            linha,
+            corpo,
+            responde_a,
+            id,
+        })
+        .await
     }
 
     /// Pede histórico.
@@ -2820,6 +3175,65 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn remover_mensagem(&self, mensagem: MessageId) -> Result<(), Fechado> {
         self.mandar(Comando::RemoverMensagem { mensagem }).await
+    }
+
+    /// Pede ao servidor que reescreva o corpo de uma mensagem própria
+    /// (protocolo 13).
+    ///
+    /// **O portão de versão é de quem chama** ([`seele_sessao::perfil::portao_do_cliente`],
+    /// com o número negociado): a fila não devolve o motivo de um comando que
+    /// não saiu. O motor confere de novo, e um servidor que negociou menos
+    /// não recebe o verbo — só o registro fica sabendo.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn editar_mensagem(&self, mensagem: MessageId, corpo: String) -> Result<(), Fechado> {
+        self.mandar(Comando::EditarMensagem { mensagem, corpo })
+            .await
+    }
+
+    /// Pede ao servidor que tire todo banimento de uma conta (protocolo 13).
+    /// O portão de versão é de quem chama, como em [`Self::editar_mensagem`].
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn desbanir(&self, pessoa: PersonId) -> Result<(), Fechado> {
+        self.mandar(Comando::Desbanir { pessoa }).await
+    }
+
+    /// Pede a lista de banidos (protocolo 13). O portão de versão é de quem
+    /// chama, como em [`Self::editar_mensagem`].
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn listar_banidos(&self) -> Result<(), Fechado> {
+        self.mandar(Comando::ListarBanidos).await
+    }
+
+    /// Relata ao servidor o que esta ponta mede da voz que ouve (protocolo
+    /// 13): a perda e o jitter que só existem no receptor, e que entram no
+    /// sinal que os outros veem **desta** pessoa.
+    ///
+    /// Devolve se o relato foi para a fila. **`false` não é erro**: o servidor
+    /// de agora negociou menos que o 13 ([`o_servidor_ouve_o_relato`]) e não
+    /// conhece a mensagem — nada sai, e o sinal desta pessoa segue, lá, como
+    /// sempre foi. O portão é conferido aqui, a cada relato, porque o número
+    /// negociado muda com a volta do enlace; o motor confere de novo
+    /// (`Client::relatar_recepcao`), e essa segunda cerca vai ao registro —
+    /// uma vez por segundo, se a primeira não existisse.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn relatar_recepcao(&self, relato: Recepcao) -> Result<bool, Fechado> {
+        if !o_servidor_ouve_o_relato(self.versao_negociada()) {
+            return Ok(false);
+        }
+        self.mandar(Comando::RelatarRecepcao(relato)).await?;
+        Ok(true)
     }
 
     /// Pede ao servidor que mova alguém para uma sala de voz.
@@ -3424,6 +3838,21 @@ impl Enlace {
     }
 }
 
+/// Se um servidor que negociou `negociado` conhece o relato de recepção
+/// (`ClientMessage::RelatoDeRecepcao`).
+///
+/// A tabela é a do protocolo (`desde_do_cliente`), pela mesma porta dos outros
+/// verbos: um servidor 12 — a v0.19.6 publicada — leria uma variante que não
+/// conhece. Zero, o «ainda sem aperto de mão», também não ouve.
+#[must_use]
+pub fn o_servidor_ouve_o_relato(negociado: u8) -> bool {
+    let relato = ClientMessage::RelatoDeRecepcao(Recepcao {
+        perda: None,
+        jitter_ms: None,
+    });
+    seele_sessao::perfil::portao_do_cliente(&relato, negociado).is_ok()
+}
+
 /// A resposta que [`Enlace::pedir_servico_de_tunel`] ainda espera.
 #[derive(Debug)]
 pub struct EsperaDeServico {
@@ -3718,6 +4147,18 @@ struct Motor {
     /// na tica que ele já tem — ver [`Motor::medir_o_caminho`]. Era a pergunta
     /// 2 do §8.
     caminho: crate::caminho::Sonda,
+    /// O caminho de saída como a mídia RTP o estima (ADR 0067), já na
+    /// medida que o [`crate::tela::TetoDeVideo`] espera. `None` sem
+    /// transmissão por mídia: aí vale a sonda.
+    estimativa_da_midia: Option<u32>,
+    /// Quando o último quadro-chave foi pedido a quem codifica, numa
+    /// transmissão por mídia, e se há um pedido esperando a vez
+    /// ([`ENTRE_CHAVES_PELA_MIDIA`]).
+    ultima_chave_pela_midia: Option<Instant>,
+    chave_devida: bool,
+    /// Quando a estimativa da mídia mudou o teto pela última vez
+    /// ([`SUBIDA_DO_TETO_PELA_MIDIA`]).
+    ultima_mudanca_da_midia: Option<Instant>,
     /// Se já há uma tentativa de servir um par em curso.
     ///
     /// No A1 quem empresta serve um par por vez (`crate::par::atender` só
@@ -3751,6 +4192,11 @@ struct Motor {
     /// para mandar de volta. Clonada a cada tarefa nova: um `Sender` barato
     /// de clonar, e cada tarefa é dona da própria cópia.
     resultados_do_par_tx: mpsc::UnboundedSender<ResultadoDoPar>,
+    /// Por onde a tarefa que escoa a transmissão desta pessoa diz que acabou
+    /// com erro — ver [`FimComErroDaTela`] e [`Motor::a_tela_caiu`].
+    quedas_da_tela: mpsc::UnboundedReceiver<FimComErroDaTela>,
+    /// A metade de [`Self::quedas_da_tela`] que cada tarefa que escoa leva.
+    quedas_da_tela_tx: mpsc::UnboundedSender<FimComErroDaTela>,
     /// As tarefas soltas do caminho entre pares — a única coisa que alcança
     /// aquele caminho depois de ele ter começado.
     ///
@@ -3791,11 +4237,69 @@ struct Queda {
 struct TelaViva {
     /// O nome que o servidor deu a esta transmissão.
     tela: ScreenId,
-    /// A alça da thread do codificador. Largá-la para a bomba.
-    bomba: crate::bomba::Bomba,
+    /// O número desta transmissão no processo: o mesmo que o espelho carrega
+    /// no [`Aviso::TelaAbriu`]. É por ele que um fim com erro é casado com a
+    /// transmissão que está no ar — ver [`FimComErroDaTela`].
+    leitura: u64,
+    /// O que ela mostra, para o [`Aviso::TelaCaiu`] dizer.
+    origem: seele_proto::screen::ScreenSource,
+    /// Quem produz os quadros. Largá-lo para a transmissão.
+    produtor: Produtor,
     /// O que a pessoa escolheu, guardado porque o teto é recalculado a cada
     /// `ScreenViewers` e a escolha é uma das pernas dele (§5).
     limites: LimitesDeTela,
+}
+
+/// Quem produz os quadros de uma transmissão desta pessoa.
+///
+/// A tela tem a bomba — a thread que captura e codifica aqui. A câmera tem a
+/// alça de `crate::de_fora`: quem codifica é a janela, e deste lado há só uma
+/// tarefa que entrega os quadros a quem escoa. As ordens são as mesmas, e
+/// cada uma vira o que o produtor sabe fazer com ela.
+#[derive(Debug)]
+enum Produtor {
+    /// A thread do codificador de tela.
+    Bomba(crate::bomba::Bomba),
+    /// A câmera, codificada fora deste processo.
+    DeFora(crate::de_fora::AlcaDeFora),
+}
+
+impl Produtor {
+    /// O teto andou.
+    fn teto(&self, teto: crate::tela::TetoDeVideo, faixa: SignalBand) {
+        match self {
+            Self::Bomba(bomba) => {
+                let _ = bomba.teto(teto, faixa);
+            }
+            // Quem está de fora não lê as pernas do teto: recebe o resultado,
+            // em bits por segundo, ou a parada com o motivo.
+            Self::DeFora(alca) => {
+                let _ = alca.teto(teto.teto(faixa));
+            }
+        }
+    }
+
+    /// A pessoa mexeu na resolução ou na cadência.
+    ///
+    /// Só a bomba troca de degrau sozinha. As medidas da câmera são as do
+    /// codificador da janela, e mudá-las é ela recomeçar a transmissão.
+    fn escolha(&self, resolucao: crate::Resolucao, cadencia: crate::Cadencia) {
+        if let Self::Bomba(bomba) = self {
+            let _ = bomba.escolha(resolucao, cadencia);
+        }
+    }
+
+    /// Alguém que assiste precisa de um quadro-chave.
+    fn chave(&self) {
+        match self {
+            Self::Bomba(bomba) => {
+                let _ = bomba.chave();
+            }
+            Self::DeFora(alca) => {
+                let _ = alca.chave();
+            }
+        }
+    }
 }
 
 /// As tarefas soltas do caminho entre pares, e quem é dono delas.
@@ -4083,6 +4587,27 @@ fn faixa_nova(
     (nova != atual).then_some(nova)
 }
 
+/// **A faixa que corta o teto do vídeo**, que não é sempre a do sinal.
+///
+/// No canal confiável, a faixa é o único jeito de o vídeo ceder quando a rede
+/// piora: Degraded corta o teto pela metade, Critical para. Na mídia RTP quem
+/// regula a taxa é a estimativa do TWCC (ADR 0067), que vê o atraso e a perda
+/// de cada pacote e já cede ao congestionamento — e que **não** lê perda
+/// sorteada como falta de banda. Cortar de novo pela faixa era cobrar a mesma
+/// perda duas vezes: medido em 11/11/2026 a 5% de perda, o vídeo caía de
+/// 2,4 para 1,4 Mbps com o caminho livre, e com perda e atraso juntos a faixa
+/// Critical o parava — a parada que a estimativa já não causa.
+///
+/// A faixa continua valendo para o que a tela **mostra** (o sinal) e para o
+/// canal. Só o teto do vídeo pela mídia deixa de segui-la.
+const fn faixa_para_o_teto(do_sinal: SignalBand, pela_midia: bool) -> SignalBand {
+    if pela_midia {
+        SignalBand::Nominal
+    } else {
+        do_sinal
+    }
+}
+
 impl Motor {
     async fn rodar(mut self, mut comandos: mpsc::Receiver<Comando>) {
         let mut tica = tokio::time::interval(TICA);
@@ -4109,6 +4634,18 @@ impl Motor {
             // é o que deixa o braço novo do `select!` chamar `cliente.par_falhou`
             // sem pedir `self` de novo.
             let resultados_do_par = &mut self.resultados_do_par;
+            // E a fila do que a mídia RTP diz ao motor, pelo mesmo motivo da
+            // fila de telas. O pedido de quadro-chave precisa do `self`
+            // inteiro, então o braço só o anota, e ele é atendido depois do
+            // `select!`.
+            let fila_da_midia = self.cliente.as_ref().and_then(Client::fila_da_midia);
+            let mut pediram_chave_pela_midia = false;
+            // E o fim com erro da transmissão desta pessoa, pelo mesmo motivo
+            // de `resultados_do_par`: um campo próprio, disjunto do cliente.
+            // Encerrar a transmissão precisa do `self` inteiro, então o braço
+            // só anota, e ela é encerrada depois do `select!`.
+            let quedas_da_tela = &mut self.quedas_da_tela;
+            let mut a_tela_caiu = None;
 
             // Só há o que ler quando há conexão. Sem ela, a espera é o relógio.
             let houve_evento = match self.cliente.as_mut() {
@@ -4119,9 +4656,28 @@ impl Motor {
                     Some(fluxo) = espera_da_fila(&fila_de_telas) => {
                         escoar_tela_alheia(
                             avisos_da_tela.clone(),
-                            fluxo,
+                            FonteDaTelaAlheia::Canal(fluxo),
                             DeOndeVeioATela::Servidor(Arc::clone(&repasse_da_tela)),
                         );
+                        None
+                    }
+                    // A mídia RTP (ADR 0067): a abertura de uma geração da
+                    // transmissão desta pessoa vai ao servidor pelo controle,
+                    // que só este laço escreve.
+                    Some(da_midia) = espera_da_midia(&fila_da_midia) => {
+                        match da_midia {
+                            crate::client::DaMidia::Abertura(abertura) => {
+                                if let Err(erro) = cliente.tela_por_midia(abertura).await {
+                                    tracing::warn!(
+                                        %erro,
+                                        "a abertura da transmissão por RTP não saiu; ninguém vai vê-la"
+                                    );
+                                }
+                            }
+                            crate::client::DaMidia::PediramChave => {
+                                pediram_chave_pela_midia = true;
+                            }
+                        }
                         None
                     }
                     // O que uma tarefa solta do caminho entre pares (ver
@@ -4159,6 +4715,12 @@ impl Motor {
                         }
                         None
                     }
+                    // A tarefa que escoa a transmissão desta pessoa acabou com
+                    // erro. Ver `Motor::a_tela_caiu`.
+                    Some(fim) = quedas_da_tela.recv() => {
+                        a_tela_caiu = Some(fim);
+                        None
+                    }
                     comando = comandos.recv() => {
                         match comando {
                             Some(Comando::Sair) | None => return self.despedir().await,
@@ -4188,6 +4750,14 @@ impl Motor {
                     _ = tica.tick() => None,
                 },
             };
+
+            if pediram_chave_pela_midia {
+                // O mesmo que um `KeyFrameRequested` do controle faz.
+                self.pedir_a_chave_da_tela();
+            }
+            if let Some(fim) = a_tela_caiu {
+                self.a_tela_caiu(fim).await;
+            }
 
             if let Some(evento) = houve_evento {
                 match evento {
@@ -4268,6 +4838,10 @@ impl Motor {
 
     /// Um passo da bateria. Devolve `true` quando a sessão acabou.
     async fn passo(&mut self) -> bool {
+        // Um pedido de quadro-chave que esperava a vez (`pedir_a_chave_da_tela`).
+        if self.chave_devida {
+            self.pedir_a_chave_da_tela();
+        }
         // Antes da bateria, e não depois: o passo pode encerrar a sessão, e uma
         // leitura depois disso seria contra um cliente que já foi embora.
         self.medir_o_caminho();
@@ -4682,7 +5256,12 @@ impl Motor {
             }
             Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
-            Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
+            Comando::Dizer {
+                linha,
+                corpo,
+                responde_a,
+                id,
+            } => cliente.send_message(linha, &corpo, responde_a, id).await,
             Comando::ImagemDeMod {
                 pedido,
                 bytes,
@@ -4766,6 +5345,12 @@ impl Motor {
                     .await
             }
             Comando::RemoverMensagem { mensagem } => cliente.remove_message(mensagem).await,
+            Comando::EditarMensagem { mensagem, corpo } => {
+                cliente.edit_message(mensagem, &corpo).await
+            }
+            Comando::Desbanir { pessoa } => cliente.unban_person(pessoa).await,
+            Comando::ListarBanidos => cliente.list_bans().await,
+            Comando::RelatarRecepcao(relato) => cliente.relatar_recepcao(relato).await,
             Comando::MoverPersono { pessoa, voice_room } => {
                 cliente.move_person(pessoa, voice_room).await
             }
@@ -4807,7 +5392,7 @@ impl Motor {
                         channel: anexo.linha,
                         client_message_id: anexo.id,
                         body: &anexo.corpo,
-                        replies_to: None,
+                        replies_to: anexo.responde_a,
                         path: &anexo.caminho,
                         file_name: &anexo.nome,
                         declared_type: &anexo.tipo,
@@ -4908,11 +5493,32 @@ impl Motor {
             // este comando, e guardar depois abriria uma janela em que o
             // `ScreenShareStarted` chega e não encontra a escolha da pessoa.
             Comando::CompartilharTela { fonte, limites } => {
+                // **A câmera só é pedida a um servidor que a conhece.** A
+                // fonte 2 nasceu no protocolo 13, e um servidor do 12 recusa o
+                // cabeçalho dela *depois* de ter anunciado a transmissão à
+                // sala: ficaria desenhada uma tela que não tem fluxo. Quem
+                // chama já conferiu e respondeu com o nome do erro; isto é a
+                // parede que não depende de quem chama. O pedido é largado
+                // aqui, e a entrada da janela passa a responder «fechada».
+                let negociado = cliente.versao_negociada();
+                if fonte.origem().desde() > negociado {
+                    tracing::warn!(
+                        negociado,
+                        exige = fonte.origem().desde(),
+                        "a câmera foi pedida a um servidor que não a conhece; nada saiu"
+                    );
+                    return;
+                }
+                // **No lugar da tela, e não ao lado dela.** Uma pessoa manda
+                // um fluxo de imagem por vez, e quem troca é o servidor: o
+                // pedido novo toma a vaga, o fim da transmissão anterior é
+                // anunciado à sala (e a esta ponta, que mata a bomba dela em
+                // `a_tela_ouviu`), e só então a nova ganha nome.
                 if self.caminho.estimativa_medida().is_none()
                     && self.caminho.estimativa() == crate::tela::CAMINHO_DA_PROVA_BPS
                 {
                     self.caminho =
-                        crate::caminho::Sonda::partindo_de(limites.caminho_inicial_bps());
+                        crate::caminho::Sonda::partindo_de(limites.semente_da_sonda_bps());
                 }
                 self.tela_pedida = Some((fonte, limites));
                 cliente.start_screen_share().await
@@ -4935,7 +5541,7 @@ impl Motor {
                 };
                 viva.limites = limites;
                 let (resolucao, cadencia) = (limites.resolucao, limites.cadencia);
-                viva.bomba.escolha(resolucao, cadencia);
+                viva.produtor.escolha(resolucao, cadencia);
                 // E o teto de novo, porque a banda escolhida é uma das pernas
                 // dele: sem esta linha, mexer só na banda não mudaria nada.
                 self.reconferir_o_teto();
@@ -5423,10 +6029,27 @@ impl Motor {
             // §3.3: quadro-chave quando quem recebe pede, e nunca periódico.
             // Um de 1080p custa 65 KiB, quatro vezes um quadro comum.
             ServerMessage::KeyFrameRequested { screen, .. } => {
-                if let Some(viva) = self.tela_viva.as_ref() {
-                    if viva.tela == screen {
-                        let _ = viva.bomba.chave();
-                    }
+                if self.e_a_minha_tela(screen) {
+                    self.pedir_a_chave_da_tela();
+                }
+            }
+            // Uma transmissão a que esta sessão assiste desce pela mídia RTP
+            // (ADR 0067): a abertura vem aqui, e os quadros, pela faixa.
+            ServerMessage::TelaPorMidia { faixa, abertura }
+                if faixa == crate::tela::FAIXA_DE_SAIDA =>
+            {
+                self.assistir_pela_midia(abertura);
+            }
+            ServerMessage::FimDaTelaPorMidia { faixa, limpo }
+                if faixa == crate::tela::FAIXA_DE_SAIDA =>
+            {
+                if !limpo {
+                    tracing::info!(
+                        "a cópia de uma transmissão por RTP acabou antes da transmissão"
+                    );
+                }
+                if let Some(cliente) = self.cliente.as_ref() {
+                    cliente.fim_da_tela_por_midia();
                 }
             }
             ServerMessage::ScreenViewers { tela, quantos } => {
@@ -5672,7 +6295,7 @@ impl Motor {
                         Ok(Ok(fluxo)) => {
                             ler_a_tela_alheia(
                                 avisos,
-                                fluxo,
+                                FonteDaTelaAlheia::Canal(fluxo),
                                 DeOndeVeioATela::Par {
                                     screen,
                                     resultados: resultados.clone(),
@@ -6017,7 +6640,12 @@ fn locais_a_publicar<F: FnOnce() -> Vec<SocketAddr>>(
     todos: F,
 ) -> Vec<SocketAddr> {
     if consentimento.empresta_conexao() {
-        todos()
+        // O servidor recusa mais que isto (`MAX_LOCAIS_DE_PAR`): uma máquina
+        // com muitas interfaces manda as primeiras, e não uma declaração que
+        // o fio rejeita.
+        let mut locais = todos();
+        locais.truncate(seele_proto::control::MAX_LOCAIS_DE_PAR);
+        locais
     } else {
         Vec::new()
     }
@@ -6303,10 +6931,28 @@ async fn espera_da_fila(
 /// estão no doc de [`DeOndeVeioATela`].
 fn escoar_tela_alheia(
     avisos: mpsc::UnboundedSender<Aviso>,
-    fluxo: crate::transporte::Recebe,
+    fonte: FonteDaTelaAlheia,
     de_onde: DeOndeVeioATela,
 ) {
-    tokio::spawn(ler_a_tela_alheia(avisos, fluxo, de_onde));
+    tokio::spawn(ler_a_tela_alheia(avisos, fonte, de_onde));
+}
+
+/// Por onde os quadros de uma transmissão alheia chegam: pelo canal `u`, ou
+/// pela mídia RTP da conexão (ADR 0067), com a abertura já lida do controle.
+enum FonteDaTelaAlheia {
+    Canal(crate::transporte::Recebe),
+    Midia(crate::tela::RecepcaoPorMidia),
+}
+
+/// A espera da fila da mídia, que pode não existir (sem conexão, ou com um
+/// servidor que não fala RTP). Como [`espera_da_fila`].
+async fn espera_da_midia(
+    fila: &Option<crate::client::FilaDaMidia>,
+) -> Option<crate::client::DaMidia> {
+    match fila {
+        Some(fila) => fila.lock().await.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// O corpo de [`escoar_tela_alheia`], sem a tarefa.
@@ -6320,16 +6966,22 @@ fn escoar_tela_alheia(
 /// baixo. Uma tarefa só é o que faz a alça valer.
 async fn ler_a_tela_alheia(
     avisos: mpsc::UnboundedSender<Aviso>,
-    fluxo: crate::transporte::Recebe,
+    fonte: FonteDaTelaAlheia,
     de_onde: DeOndeVeioATela,
 ) {
     {
         {
-            let aberto = match &de_onde {
-                DeOndeVeioATela::Servidor(_) => {
-                    crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await
+            let aberto = match fonte {
+                FonteDaTelaAlheia::Midia(recepcao) => {
+                    Ok(crate::tela::LeituraDeTela::Midia(recepcao))
                 }
-                DeOndeVeioATela::Par { .. } => crate::tela::Recepcao::do_fluxo(fluxo).await,
+                FonteDaTelaAlheia::Canal(fluxo) => match &de_onde {
+                    DeOndeVeioATela::Servidor(_) => {
+                        crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await
+                    }
+                    DeOndeVeioATela::Par { .. } => crate::tela::Recepcao::do_fluxo(fluxo).await,
+                }
+                .map(crate::tela::LeituraDeTela::Canal),
             };
             let mut recepcao = match aberto {
                 Ok(recepcao) => recepcao,
@@ -6375,7 +7027,9 @@ async fn ler_a_tela_alheia(
                     tela,
                     largura: cabecalho.width,
                     altura: cabecalho.height,
+                    origem: cabecalho.source,
                     leitura,
+                    codificador: None,
                 })
                 .is_err()
             {
@@ -6494,6 +7148,41 @@ async fn ler_a_tela_alheia(
 
 /// O número da próxima leitura de tela, crescente no processo: o `leitura` de
 /// [`Aviso::TelaAbriu`] e de [`Aviso::TelaFechou`].
+/// O menor intervalo entre duas subidas do teto pela estimativa da mídia.
+/// Ver [`Motor::medir_o_caminho`].
+const SUBIDA_DO_TETO_PELA_MIDIA: Duration = Duration::from_secs(3);
+
+/// O menor intervalo entre dois quadros-chave pedidos numa transmissão por
+/// mídia. Ver [`Motor::pedir_a_chave_da_tela`].
+const ENTRE_CHAVES_PELA_MIDIA: Duration = Duration::from_secs(2);
+
+/// A estimativa de banda do RTP, na medida que o [`crate::tela::TetoDeVideo`]
+/// espera como «caminho».
+///
+/// O teto gasta 60% do caminho (a regra da sonda, que mede o cano inteiro). A
+/// estimativa do RTP já é o que **este fluxo** pode mandar, e a medida do
+/// protótipo usou 85% dela (`docs/medidas/2026-11-10-rtp-sob-perda.md`). A
+/// conversão faz os 60% do teto darem 85% da estimativa.
+///
+/// **Nunca abaixo do que dá o piso do vídeo.** Pela sonda, um caminho que não
+/// carrega o piso para o vídeo, e ele volta quando a sonda mede de novo. Pela
+/// mídia isso é um beco sem saída: a estimativa vem do que é mandado, e com o
+/// vídeo parado ela não tem como subir (medido em 11/11/2026: uma queda
+/// passageira da estimativa a 1 Mbps parou a imagem por 18 s). O vídeo segue no
+/// piso, e a estimativa volta com ele.
+fn para_a_medida_do_teto(estimativa_bps: u64) -> u32 {
+    let caminho = u32::try_from(estimativa_bps.saturating_mul(85) / 60).unwrap_or(u32::MAX);
+    // O teto gasta 60% do caminho: este é o caminho cujos 60% dão o piso.
+    let do_piso = crate::tela::PISO_DE_BANDA_BPS.saturating_mul(100) / 60 + 1;
+    caminho.max(do_piso)
+}
+
+/// O contrário de [`para_a_medida_do_teto`]: de um caminho, a estimativa
+/// que o RTP teria de ter para o teto dar o mesmo.
+fn da_medida_do_teto(caminho_bps: u32) -> u32 {
+    u32::try_from(u64::from(caminho_bps).saturating_mul(60) / 85).unwrap_or(u32::MAX)
+}
+
 fn nova_leitura_de_tela() -> u64 {
     static PROXIMA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     PROXIMA.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -6543,9 +7232,11 @@ impl Motor {
         };
 
         let avisos = self.avisos.clone();
-        // Uma leitura por transmissão própria, como a das alheias.
-        let leitura = nova_leitura_de_tela();
-        self.nascer_a_tela(tela, move |origem, mut eventos, pedido_de_chave| {
+        let quedas = self.quedas_da_tela_tx.clone();
+        let escoar = move |origem: seele_proto::screen::ScreenSource,
+                           mut eventos: mpsc::Receiver<crate::EventoDaBomba>,
+                           pedido_de_chave: crate::bomba::PedidoDeChave,
+                           leitura: u64| {
             // Numa tarefa própria pelo mesmo motivo de `Comando::Anexar`:
             // escoar dura o que a transmissão durar, e fazê-lo dentro do laço
             // pararia quem lê a conexão e atende comandos até a pessoa parar de
@@ -6556,24 +7247,16 @@ impl Motor {
                 // mesma coisa. Quem compartilha era a única pessoa da sala que
                 // não via o que estava mostrando — o servidor não devolve a
                 // transmissão a quem a produziu, e com razão.
+                //
+                // **Da câmera, só a abertura.** Quem a codifica é a janela, que
+                // tem a imagem na mão antes de ela ser comprimida: devolver-lhe
+                // os quadros seria mandá-la decodificar o que ela mesma acabou
+                // de codificar. A abertura vai, porque é ela que diz à janela
+                // que o fluxo existe e que os quadros já têm para onde ir.
                 let espelho = |visto: crate::bomba::EspelhoDaTela<'_>| {
-                    let aviso = match visto {
-                        crate::bomba::EspelhoDaTela::Abriu { largura, altura } => {
-                            Aviso::TelaAbriu {
-                                tela,
-                                largura,
-                                altura,
-                                leitura,
-                            }
-                        }
-                        crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
-                            tela,
-                            chave,
-                            bytes: bytes.to_vec(),
-                            leitura,
-                        },
-                    };
-                    let _ = avisos.send(aviso);
+                    if let Some(aviso) = aviso_do_espelho(visto, tela, origem, leitura) {
+                        let _ = avisos.send(aviso);
+                    }
                 };
                 let fim = escoadouro
                     .escoar_espelhado(tela, origem, &mut eventos, espelho, Some(&pedido_de_chave))
@@ -6586,10 +7269,83 @@ impl Motor {
                 // «nunca andou».
                 match fim {
                     Ok(contagem) => tracing::info!(?contagem, "a transmissão de tela acabou"),
-                    Err(erro) => tracing::warn!(%erro, "a transmissão de tela caiu"),
+                    Err(erro) => {
+                        let motivo = erro.motivo_de_queda();
+                        tracing::warn!(%erro, ?motivo, %tela, "a transmissão de tela caiu");
+                        // **O `warn` não basta, e era só ele que havia.** Quem
+                        // age é o laço do motor: encerra a transmissão, avisa o
+                        // servidor e diz à casca. Sem motor do outro lado a
+                        // sessão acabou, e não há a quem contar.
+                        let _ = quedas.send(FimComErroDaTela { leitura, motivo });
+                    }
                 }
             });
+        };
+        self.nascer_a_tela(tela, escoar);
+    }
+
+    /// A tarefa que escoa a transmissão desta pessoa acabou com erro: a
+    /// transmissão **acaba de verdade**, e a casca fica sabendo por quê.
+    ///
+    /// # O que o erro deixava de pé
+    ///
+    /// Tudo. [`Self::tela_viva`] continuava `Some`, com um produtor morto
+    /// dentro; o servidor continuava anunciando a transmissão — quem assistia
+    /// via o palco de alguém sem imagem, e quem entrava na sala recebia o
+    /// `ScreenShareStarted` de uma tela que não existia —; e a casca lia do
+    /// retrato que esta pessoa estava compartilhando.
+    ///
+    /// # Só a transmissão que está no ar
+    ///
+    /// Um fim com erro de uma transmissão que este motor **já encerrou** não é
+    /// queda: é o fluxo dela cortado por quem mandou parar (o botão, o
+    /// `ScreenShareStopped`, a queda do enlace). Todos esses caminhos tiram
+    /// [`Self::tela_viva`] antes de a tarefa poder acabar, então a conferência
+    /// é a identidade: a leitura do fim tem de ser a da transmissão viva.
+    ///
+    /// # O servidor ouve o mesmo de quem aperta parar
+    ///
+    /// `StopScreenShare`, e mais nada: a sala recebe o `ScreenShareStopped` de
+    /// uma parada comum, esta ponta inclusive — e é ele que tira a transmissão
+    /// do retrato. Uma mensagem nova para «caiu» obrigaria todo cliente a
+    /// aprender a ler um fim que já tem nome.
+    ///
+    /// # Sem recomeço
+    ///
+    /// Pela mesma decisão de [`Self::lembrar`]: uma transmissão que voltasse
+    /// sozinha poria a tela de alguém no ar sem aperto. A casca diz o que
+    /// houve, e quem recomeça é a pessoa.
+    async fn a_tela_caiu(&mut self, fim: FimComErroDaTela) {
+        let Some((tela, origem)) = self
+            .tela_viva
+            .as_ref()
+            .filter(|viva| viva.leitura == fim.leitura)
+            .map(|viva| (viva.tela, viva.origem))
+        else {
+            return;
+        };
+        self.parar_a_tela();
+        let avisou = match self.cliente.as_mut() {
+            Some(cliente) => cliente.stop_screen_share().await.is_ok(),
+            None => false,
+        };
+        tracing::warn!(
+            %tela,
+            motivo = ?fim.motivo,
+            avisou_o_servidor = avisou,
+            "a transmissão desta pessoa caiu e foi encerrada"
+        );
+        let _ = self.avisos.send(Aviso::TelaCaiu {
+            tela,
+            origem,
+            motivo: fim.motivo,
         });
+        // O controle que não escreve é o enlace que caiu: a sala fica sabendo
+        // pelo fim da sessão, e a bateria começa aqui em vez de na próxima
+        // leitura.
+        if !avisou && self.cliente.is_some() {
+            self.cair();
+        }
     }
 
     /// O pedido guardado vira bomba, e `escoar` recebe o canal dela.
@@ -6606,6 +7362,7 @@ impl Motor {
             seele_proto::screen::ScreenSource,
             mpsc::Receiver<crate::EventoDaBomba>,
             crate::bomba::PedidoDeChave,
+            u64,
         ),
     ) {
         if self.tela_viva.is_some() {
@@ -6614,15 +7371,28 @@ impl Motor {
         let Some((pedido, limites)) = self.tela_pedida.take() else {
             return;
         };
+        self.semear_a_midia(&limites);
+        // Uma leitura por transmissão própria, como a das alheias: é o número
+        // que o espelho carrega no `TelaAbriu`, e é a identidade pela qual um
+        // fim com erro é casado com a transmissão que está no ar
+        // ([`FimComErroDaTela`]). Nasce aqui, com ela, para que quem escoa e
+        // [`TelaViva`] nunca tenham dois números para a mesma transmissão.
+        let leitura = nova_leitura_de_tela();
 
-        let PedidoDeTela {
-            biblioteca,
-            captura,
-            origem,
-        } = *pedido;
+        let (biblioteca, captura, origem) = match *pedido {
+            PedidoDeTela::DoSistema {
+                biblioteca,
+                captura,
+                origem,
+            } => (biblioteca, captura, origem),
+            PedidoDeTela::DeFora(quadros) => {
+                self.nascer_a_camera(tela, leitura, quadros, limites, escoar);
+                return;
+            }
+        };
         let arranjo = crate::bomba::Arranjo {
             teto: self.teto_de_video(Some(&limites)),
-            faixa: self.faixa,
+            faixa: self.faixa_do_teto(),
             escolha_de_resolucao: limites.resolucao,
             cadencia: limites.cadencia,
             prioridade: limites.prioridade,
@@ -6641,10 +7411,70 @@ impl Motor {
             }
         };
 
-        escoar(origem, eventos, bomba.pedido_de_chave());
+        escoar(origem, eventos, bomba.pedido_de_chave(), leitura);
         self.tela_viva = Some(TelaViva {
             tela,
-            bomba,
+            leitura,
+            origem,
+            produtor: Produtor::Bomba(bomba),
+            limites,
+        });
+    }
+
+    /// A câmera pedida vira transmissão: o fluxo abre com o teto de agora, e
+    /// os quadros que a janela empurrar passam a ir a quem escoa.
+    ///
+    /// **O portão de versão, pela segunda vez.** Quem pede a câmera já foi
+    /// conferido antes de o `StartScreenShare` sair (`Comando::CompartilharTela`),
+    /// mas entre o pedido e o nome a conexão pode ter caído e voltado num
+    /// servidor do protocolo 12 — que recusa a fonte 2 e deixaria anunciada
+    /// uma transmissão sem fluxo. Aqui o pedido é largado: a entrada da janela
+    /// passa a responder «fechada», e ela diz por quê.
+    fn nascer_a_camera(
+        &mut self,
+        tela: ScreenId,
+        leitura: u64,
+        quadros: crate::de_fora::QuadrosDeFora,
+        limites: LimitesDeTela,
+        escoar: impl FnOnce(
+            seele_proto::screen::ScreenSource,
+            mpsc::Receiver<crate::EventoDaBomba>,
+            crate::bomba::PedidoDeChave,
+            u64,
+        ),
+    ) {
+        let negociado = self.protocolo.load(std::sync::atomic::Ordering::Relaxed);
+        if negociado < seele_proto::screen::PROTOCOLO_DA_CAMERA {
+            tracing::warn!(
+                negociado,
+                exige = seele_proto::screen::PROTOCOLO_DA_CAMERA,
+                "o servidor deu nome a uma câmera numa conexão que não a conhece; nada foi aberto"
+            );
+            return;
+        }
+        let teto = self
+            .teto_de_video(Some(&limites))
+            .teto(self.faixa_do_teto());
+        let avisos = self.avisos.clone();
+        let (alca, eventos, pedido_de_chave) = crate::de_fora::ligar_de_fora(
+            quadros,
+            teto,
+            crate::tela::intervalo_de_quadro(limites.cadencia.hz()),
+            move |sinal| {
+                let _ = avisos.send(Aviso::Camera { tela, sinal });
+            },
+        );
+        escoar(
+            seele_proto::screen::ScreenSource::Camera,
+            eventos,
+            pedido_de_chave,
+            leitura,
+        );
+        self.tela_viva = Some(TelaViva {
+            tela,
+            leitura,
+            origem: seele_proto::screen::ScreenSource::Camera,
+            produtor: Produtor::DeFora(alca),
             limites,
         });
     }
@@ -6657,11 +7487,92 @@ impl Motor {
     /// assumido para sempre. Enquanto a sonda não mediu nada, ela devolve
     /// exatamente aquela suposição, então a primeira transmissão de uma sessão
     /// abre com o mesmo teto de antes.
+    /// Pede um quadro-chave a quem codifica a transmissão desta pessoa.
+    ///
+    /// **Por mídia, no máximo um a cada [`ENTRE_CHAVES_PELA_MIDIA`], e o que
+    /// chega antes disso espera a vez em vez de sumir.** Um quadro-chave leva
+    /// de 300 ms a um segundo para atravessar o caminho; cada pedido que chegava
+    /// nesse meio-tempo (de quem assiste, do servidor) fazia outro, que atrasava
+    /// o primeiro. Num caminho de 1 Mbps isso virava um quadro-chave atrás do
+    /// outro: 30 em 20 s, e um quarto do tempo com a imagem parada
+    /// (`docs/medidas/2026-11-10-rtp-no-produto.md`). O pedido adiado não se
+    /// perde: quem entrou no meio da transmissão só é ligado num quadro-chave,
+    /// e o servidor pede uma vez só por ele.
+    ///
+    /// Pelo canal nada muda: lá quem junta os pedidos é quem escoa.
+    fn pedir_a_chave_da_tela(&mut self) {
+        let Some(viva) = self.tela_viva.as_ref() else {
+            return;
+        };
+        if self.estimativa_da_midia.is_none() {
+            viva.produtor.chave();
+            return;
+        }
+        let agora = Instant::now();
+        let cedo = self
+            .ultima_chave_pela_midia
+            .is_some_and(|antes| agora.saturating_duration_since(antes) < ENTRE_CHAVES_PELA_MIDIA);
+        if cedo {
+            self.chave_devida = true;
+            return;
+        }
+        self.ultima_chave_pela_midia = Some(agora);
+        self.chave_devida = false;
+        viva.produtor.chave();
+    }
+
+    /// Começa a ler uma transmissão que desce pela mídia RTP.
+    fn assistir_pela_midia(&mut self, abertura: [u8; seele_proto::screen::SCREEN_HEADER_LEN]) {
+        let Some(cliente) = self.cliente.as_ref() else {
+            return;
+        };
+        match cliente.receber_tela_por_midia(abertura) {
+            Ok(Some(recepcao)) => escoar_tela_alheia(
+                self.avisos.clone(),
+                FonteDaTelaAlheia::Midia(recepcao),
+                DeOndeVeioATela::Servidor(Arc::clone(&self.repasse)),
+            ),
+            Ok(None) => tracing::warn!(
+                "o servidor mandou uma transmissão pela mídia a uma conexão que não a ligou"
+            ),
+            Err(erro) => {
+                // Como a abertura ilegível de um canal: a casca fica sabendo.
+                tracing::warn!(
+                    %erro,
+                    "chegou pela mídia uma transmissão de tela que esta versão não sabe ler"
+                );
+                let _ = self.avisos.send(Aviso::TelaIlegivel {
+                    motivo: erro.to_string(),
+                });
+            }
+        }
+    }
+
+    /// A transmissão que vai nascer sobe pela mídia RTP? Então a estimativa
+    /// de banda dela parte de onde a sonda partiria, e não dos 300 kbps de
+    /// quem ainda não mandou nada (que ficam abaixo do piso do vídeo).
+    fn semear_a_midia(&mut self, limites: &crate::video::LimitesDeTela) {
+        self.estimativa_da_midia = None;
+        let Some(remetente) = self.cliente.as_ref().and_then(Client::remetente_de_midia) else {
+            return;
+        };
+        let semente = limites.semente_da_sonda_bps();
+        remetente.semear_estimativa(u64::from(da_medida_do_teto(semente)));
+        // Até onde a estimativa procura: o dobro de onde parte, que cobre a
+        // banda escolhida com folga para o som e a retransmissão.
+        remetente.taxa_desejada(u64::from(semente).saturating_mul(2));
+        self.estimativa_da_midia = Some(semente);
+        self.ultima_mudanca_da_midia = Some(Instant::now());
+    }
+
     fn teto_de_video(
         &self,
         limites: Option<&crate::video::LimitesDeTela>,
     ) -> crate::tela::TetoDeVideo {
-        let mut teto = crate::tela::TetoDeVideo::com_caminho(self.caminho.estimativa());
+        let caminho = self
+            .estimativa_da_midia
+            .unwrap_or_else(|| self.caminho.estimativa());
+        let mut teto = crate::tela::TetoDeVideo::com_caminho(caminho);
         // **A escolha é piso enquanto ninguém mediu, e teto sempre.**
         //
         // `caminho_de_quem_hospeda_bps` é `Some` só quando o `HostUplink` veio
@@ -6703,6 +7614,40 @@ impl Motor {
         let (Some(cliente), Some(viva)) = (self.cliente.as_ref(), self.tela_viva.as_ref()) else {
             return;
         };
+        // **Com a transmissão na mídia RTP, quem mede o caminho é ela** (ADR
+        // 0067): a estimativa do TWCC vê a perda e o atraso de cada pacote, e
+        // não lê perda sorteada como congestionamento. A sonda por `Ping`
+        // fica para os servidores antigos.
+        if let (Some(antes), Some(remetente)) =
+            (self.estimativa_da_midia, cliente.remetente_de_midia())
+        {
+            if let Some(bps) = remetente.estimativa_bps() {
+                let agora = para_a_medida_do_teto(bps);
+                self.caminho_medido
+                    .store(agora, std::sync::atomic::Ordering::Relaxed);
+                // **Mudar o teto custa um quadro-chave**: quem codifica é
+                // reconfigurado, e o codificador recomeça de uma imagem
+                // inteira. A estimativa do RTP muda a cada retorno; repassar
+                // cada mudança fazia chover quadro-chave, e num caminho de
+                // 1 Mbps a rajada deles derrubava a própria estimativa
+                // (medido em 11/11/2026: de 3,3 Mbps a 260 kbps em 6 s, sem
+                // perda). Então:
+                // - **cair é na hora**, mas só de 15% para mais;
+                // - **subir é devagar**: 25% para mais, e no máximo uma vez a
+                //   cada [`SUBIDA_DO_TETO_PELA_MIDIA`].
+                let caiu = agora < antes.saturating_sub(antes / 7);
+                let pode_subir = self
+                    .ultima_mudanca_da_midia
+                    .is_none_or(|quando| quando.elapsed() >= SUBIDA_DO_TETO_PELA_MIDIA);
+                let subiu = pode_subir && agora > antes.saturating_add(antes / 4);
+                if caiu || subiu {
+                    self.estimativa_da_midia = Some(agora);
+                    self.ultima_mudanca_da_midia = Some(Instant::now());
+                    self.reconferir_o_teto();
+                }
+            }
+            return;
+        }
         let amostra = crate::caminho::Amostra {
             transporte: cliente.amostra_do_transporte(),
             teto: self.teto_de_video(Some(&viva.limites)).teto(self.faixa),
@@ -6740,6 +7685,12 @@ impl Motor {
         }
     }
 
+    /// A faixa que o teto do vídeo segue agora: a do sinal no canal, e a
+    /// nominal enquanto a transmissão vai pela mídia ([`faixa_para_o_teto`]).
+    const fn faixa_do_teto(&self) -> SignalBand {
+        faixa_para_o_teto(self.faixa, self.estimativa_da_midia.is_some())
+    }
+
     /// Conta à bomba que o teto andou.
     ///
     /// Uma ordem só para as três coisas que o mexem, porque o N já mora dentro
@@ -6749,11 +7700,15 @@ impl Motor {
             return;
         };
         let teto = self.teto_de_video(Some(&viva.limites));
-        let _ = viva.bomba.teto(teto, self.faixa);
+        viva.produtor.teto(teto, self.faixa_do_teto());
     }
 
     /// Mata a bomba, se houver uma.
     fn parar_a_tela(&mut self) {
+        self.estimativa_da_midia = None;
+        self.ultima_mudanca_da_midia = None;
+        self.ultima_chave_pela_midia = None;
+        self.chave_devida = false;
         // A contagem morre junto: ela é de **uma** transmissão, e deixá-la de pé
         // faria a próxima nascer dividindo a perna de quem hospeda pelo público
         // da anterior — um teto apertado sem que ninguém estivesse assistindo.
@@ -6947,13 +7902,21 @@ fn matar(viva: Option<TelaViva>) {
     // pararia junto a tarefa que escoa — que é justamente quem tem de esvaziar o
     // canal para a thread conseguir entregar o `Fim` dela. Na piscina de bloqueio
     // o mesmo fim não custa nada ao laço.
+    let bomba = match viva.produtor {
+        Produtor::Bomba(bomba) => bomba,
+        // Sem thread a juntar: a tarefa ouve o fim e fecha o fluxo sozinha.
+        Produtor::DeFora(alca) => {
+            alca.parar();
+            return;
+        }
+    };
     match tokio::runtime::Handle::try_current() {
         Ok(runtime) => {
-            runtime.spawn_blocking(move || viva.bomba.parar());
+            runtime.spawn_blocking(move || bomba.parar());
         }
         // Fora de um runtime — um teste que monta o motor à mão. Aqui não há
         // tarefa nenhuma para proteger do bloqueio.
-        Err(_) => viva.bomba.parar(),
+        Err(_) => bomba.parar(),
     }
 }
 
@@ -7351,17 +8314,49 @@ async fn voltar(
             let alvos = std::iter::once(atendida.endereco)
                 .chain(atendida.dicas.iter().copied())
                 .collect();
-            crate::client::discar(
+            let primeira = crate::client::discar(
                 ponta.ponta(),
                 alvos,
-                Some(atendida.credencial),
+                Some(PeloChama {
+                    credencial: atendida.credencial,
+                    espera_checagem_ipv6: false,
+                }),
                 PRAZO_POR_CANDIDATO,
             )
-            .await
-            .map_err(|erro| match erro {
-                ConnectError::SemResposta => ConnectError::NatNaoAbriu,
-                outro => outro,
-            })?
+            .await;
+            match primeira {
+                Ok(conexao) => conexao,
+                // O anfitrião atendeu e o IPv4 não abriu: a segunda chamada,
+                // com o IPv6 desta máquina, como na entrada
+                // ([`Enlace::tentar_o_lote`]).
+                Err(ConnectError::SemResposta) => {
+                    let Some(Ok(atendida)) = chamada
+                        .chamar_pelo_ipv6(
+                            ponta.ponta(),
+                            crate::encontro::PRAZO_DA_CHAMADA,
+                            &[destino.servidor],
+                        )
+                        .await
+                    else {
+                        return Err(ConnectError::NatNaoAbriu);
+                    };
+                    crate::client::discar(
+                        ponta.ponta(),
+                        alvos_da_segunda_volta(destino.servidor, &atendida),
+                        Some(PeloChama {
+                            credencial: atendida.credencial,
+                            espera_checagem_ipv6: true,
+                        }),
+                        PRAZO_POR_CANDIDATO,
+                    )
+                    .await
+                    .map_err(|erro| match erro {
+                        ConnectError::SemResposta => ConnectError::NatNaoAbriu,
+                        outro => outro,
+                    })?
+                }
+                Err(outro) => return Err(outro),
+            }
         }
         Err(erro) => return Err(erro),
     };
@@ -7696,4366 +8691,19 @@ fn vale_insistir(erro: &ConnectError) -> bool {
 /// Estes testes nasceram com ela (`e09d537a`) e saíram por engano no revert
 /// `b4f5ef94`, que tirava outra coisa. De 31/08 a 09/10 a corrida não teve
 /// prova nenhuma, e o doc dela dizia que tinha.
-mod a_corrida {
-    use super::{correr, ConnectError};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    const DEFASAGEM: Duration = Duration::from_millis(250);
-
-    /// Uma corrida sem ninguém que chegue depois: a de sempre.
-    fn sem_tardios() -> Option<std::future::Pending<Vec<usize>>> {
-        None
-    }
-
-    /// Quem chega `depois`, e com quem.
-    fn tardios(
-        depois: Duration,
-        quem: Vec<usize>,
-    ) -> Option<impl std::future::Future<Output = Vec<usize>>> {
-        Some(async move {
-            tokio::time::sleep(depois).await;
-            quem
-        })
-    }
-
-    /// Uma tentativa de teste: o que `correr` recebe de `tentar`.
-    type Futuro =
-        std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize, ConnectError>> + Send>>;
-
-    /// O diário de quem começou: posição, quem, e em que milissegundo.
-    type Diario = Arc<std::sync::Mutex<Vec<(usize, usize, u128)>>>;
-
-    /// Quem começou, com o quê e quando, e o que cada um faz: os candidatos de
-    /// `rapidos` fecham em 10 ms, os de `falham` falham na hora, e os outros
-    /// demoram uma eternidade e então desistem.
-    fn anotando(
-        rapidos: &'static [usize],
-        falham: &'static [usize],
-    ) -> (Diario, impl Fn(usize, usize) -> Futuro) {
-        let comeco = tokio::time::Instant::now();
-        let quando = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let anotar = Arc::clone(&quando);
-        let tentar = move |posicao: usize, quem: usize| {
-            anotar
-                .lock()
-                .unwrap()
-                .push((posicao, quem, comeco.elapsed().as_millis()));
-            Box::pin(async move {
-                if falham.contains(&quem) {
-                    return Err(ConnectError::Unreachable);
-                }
-                if !rapidos.contains(&quem) {
-                    tokio::time::sleep(Duration::from_secs(100)).await;
-                    return Err(ConnectError::SemResposta);
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                Ok(quem)
-            }) as Futuro
-        };
-        (quando, tentar)
-    }
-
-    /// O primeiro a fechar vence, mesmo estando por último na lista.
-    ///
-    /// É a propriedade inteira do RFC 8305, e a que a série não tem: em série o
-    /// candidato lento **precisa** terminar antes de o rápido começar.
-    #[tokio::test(start_paused = true)]
-    async fn o_rapido_vence_mesmo_estando_por_ultimo() {
-        let corrida = correr(
-            vec![0, 1, 2],
-            DEFASAGEM,
-            sem_tardios(),
-            None,
-            |posicao, _| async move {
-                // Os dois primeiros demoram uma eternidade; o terceiro fecha logo.
-                let espera = if posicao == 2 { 50 } else { 100_000 };
-                tokio::time::sleep(Duration::from_millis(espera)).await;
-                Ok::<usize, ConnectError>(posicao)
-            },
-        )
-        .await;
-
-        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(2));
-    }
-
-    /// O segundo candidato começa sem esperar o primeiro terminar.
-    ///
-    /// Sem esta propriedade não há Happy Eyeballs nenhum — é literalmente a
-    /// diferença entre 9,6 s e ~1,1 s na pendência nº 26.
-    #[tokio::test(start_paused = true)]
-    async fn o_segundo_comeca_antes_de_o_primeiro_terminar() {
-        let comecaram = Arc::new(AtomicUsize::new(0));
-        let contador = Arc::clone(&comecaram);
-
-        let corrida = correr(
-            vec![0, 1],
-            DEFASAGEM,
-            sem_tardios(),
-            None,
-            move |posicao, _| {
-                let contador = Arc::clone(&contador);
-                async move {
-                    contador.fetch_add(1, Ordering::SeqCst);
-                    // O primeiro nunca termina dentro do horizonte deste teste.
-                    let espera = if posicao == 0 { 100_000 } else { 10 };
-                    tokio::time::sleep(Duration::from_millis(espera)).await;
-                    Ok::<usize, ConnectError>(posicao)
-                }
-            },
-        )
-        .await;
-
-        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
-        assert_eq!(
-            comecaram.load(Ordering::SeqCst),
-            2,
-            "o segundo candidato não chegou a começar"
-        );
-    }
-
-    /// Quando todos falham, todas as falhas voltam — quem chama precisa delas
-    /// para escolher a que melhor descreve o que houve, e para limpar os pins.
-    #[tokio::test(start_paused = true)]
-    async fn todas_as_falhas_voltam_quando_ninguem_fecha() {
-        let corrida = correr(
-            vec![0, 1, 2],
-            DEFASAGEM,
-            sem_tardios(),
-            None,
-            |_, _| async { Err::<usize, ConnectError>(ConnectError::Unreachable) },
-        )
-        .await;
-
-        assert!(corrida.vencedor.is_none());
-        assert_eq!(corrida.falhas.len(), 3);
-    }
-
-    /// Uma lista vazia não trava: devolve sem vencedor e sem falha.
-    #[tokio::test(start_paused = true)]
-    async fn uma_corrida_sem_candidatos_termina() {
-        let corrida = correr(Vec::new(), DEFASAGEM, sem_tardios(), None, |_, _| async {
-            Ok::<usize, ConnectError>(0)
-        })
-        .await;
-
-        assert!(corrida.vencedor.is_none());
-        assert!(corrida.falhas.is_empty());
-    }
-
-    /// Quem falha cedo não impede quem vem depois de vencer.
-    #[tokio::test(start_paused = true)]
-    async fn uma_falha_imediata_nao_encerra_a_corrida() {
-        let corrida = correr(
-            vec![0, 1],
-            DEFASAGEM,
-            sem_tardios(),
-            None,
-            |posicao, _| async move {
-                if posicao == 0 {
-                    return Err(ConnectError::Unreachable);
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                Ok::<usize, ConnectError>(posicao)
-            },
-        )
-        .await;
-
-        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
-        assert_eq!(corrida.falhas.len(), 1);
-    }
-
-    /// Os candidatos começam um a cada defasagem, na ordem da lista: o
-    /// primeiro na hora, o segundo em 250 ms, o terceiro em 500 ms.
-    ///
-    /// É a ordem de hoje escrita em números. Quem mexer na corrida tem de
-    /// manter estes três instantes quando ninguém chega depois.
-    #[tokio::test(start_paused = true)]
-    async fn os_candidatos_comecam_um_a_cada_defasagem_na_ordem_da_lista() {
-        let (quando, tentar) = anotando(&[], &[]);
-        let corrida = correr(vec![10, 11, 12], DEFASAGEM, sem_tardios(), None, tentar).await;
-
-        assert!(corrida.vencedor.is_none());
-        assert_eq!(
-            *quando.lock().unwrap(),
-            vec![(0, 10, 0), (1, 11, 250), (2, 12, 500)]
-        );
-    }
-
-    /// **O candidato tardio que hoje se perde.** Todos os da lista falham na
-    /// hora, e o único que fecharia chega 100 ms depois — o endereço que o
-    /// quarto dá a quem volta a um servidor guardado. A corrida de antes acaba
-    /// quando a lista acaba, e ele chega a uma corrida que já terminou.
-    #[tokio::test(start_paused = true)]
-    async fn um_tardio_que_chega_depois_de_todos_falharem_ainda_corre() {
-        let (_, tentar) = anotando(&[20], &[10, 11]);
-        let corrida = correr(
-            vec![10, 11],
-            DEFASAGEM,
-            tardios(Duration::from_millis(100), vec![20]),
-            None,
-            tentar,
-        )
-        .await;
-
-        assert_eq!(
-            corrida.vencedor.map(|(_, quem)| quem),
-            Some(20),
-            "o candidato tardio se perdeu: a corrida acabou antes de ele chegar"
-        );
-    }
-
-    /// O tardio começa **na hora** em que chega, na frente de quem ainda espera
-    /// a vez, e a defasagem recomeça dele. As posições são a ordem em que cada
-    /// um começou, que é o que a trilha numera.
-    #[tokio::test(start_paused = true)]
-    async fn um_tardio_comeca_na_hora_e_na_frente_dos_que_esperam() {
-        let (quando, tentar) = anotando(&[], &[]);
-        let corrida = correr(
-            vec![10, 11, 12],
-            DEFASAGEM,
-            tardios(Duration::from_millis(100), vec![20]),
-            None,
-            tentar,
-        )
-        .await;
-
-        assert_eq!(
-            *quando.lock().unwrap(),
-            vec![(0, 10, 0), (1, 20, 100), (2, 11, 350), (3, 12, 600)]
-        );
-        assert_eq!(corrida.iniciados, vec![10, 20, 11, 12]);
-    }
-
-    /// Um quarto que não traz ninguém não mexe nos instantes: ninguém começa
-    /// fora da vez por causa dele.
-    #[tokio::test(start_paused = true)]
-    async fn um_tardio_vazio_nao_muda_a_ordem_de_hoje() {
-        let (quando, tentar) = anotando(&[], &[]);
-        let _ = correr(
-            vec![10, 11, 12],
-            DEFASAGEM,
-            tardios(Duration::from_millis(100), Vec::new()),
-            None,
-            tentar,
-        )
-        .await;
-
-        assert_eq!(
-            *quando.lock().unwrap(),
-            vec![(0, 10, 0), (1, 11, 250), (2, 12, 500)]
-        );
-    }
-
-    /// Quem já ganhava continua ganhando, sem esperar quem ainda vai chegar.
-    #[tokio::test(start_paused = true)]
-    async fn quem_ja_ganhava_nao_espera_o_tardio() {
-        let (_, tentar) = anotando(&[10], &[]);
-        let comeco = tokio::time::Instant::now();
-        let corrida = correr(
-            vec![10, 11],
-            DEFASAGEM,
-            tardios(Duration::from_secs(60), vec![20]),
-            None,
-            tentar,
-        )
-        .await;
-
-        assert_eq!(corrida.vencedor.map(|(_, quem)| quem), Some(10));
-        assert!(
-            comeco.elapsed() < Duration::from_millis(100),
-            "quem ganhava esperou {:?} por um tardio",
-            comeco.elapsed()
-        );
-    }
-
-    /// Conta quando uma tentativa foi largada sem terminar.
-    struct Largada {
-        quando: Arc<std::sync::Mutex<Vec<(usize, Duration)>>>,
-        posicao: usize,
-        comeco: tokio::time::Instant,
-        terminou: bool,
-    }
-
-    impl Drop for Largada {
-        fn drop(&mut self) {
-            if !self.terminou {
-                self.quando
-                    .lock()
-                    .unwrap()
-                    .push((self.posicao, self.comeco.elapsed()));
-            }
-        }
-    }
-
-    /// **Quem toca vence, e ninguém mais começa** (tarefa 16 da F7).
-    ///
-    /// O 0 nunca responde; o 1 toca 10 ms depois de começar e só termina 20 s
-    /// depois, quando atendem; o 2 começaria aos 500 ms. O 2 não começa, o 0 é
-    /// largado no instante do toque (e não no fim da corrida), e o 1 vence.
-    #[tokio::test(start_paused = true)]
-    async fn quem_toca_vence_e_ninguem_mais_comeca() {
-        let (avisa, tocados) = tokio::sync::mpsc::unbounded_channel();
-        let comecaram = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let largadas = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let comeco = tokio::time::Instant::now();
-        let tentar = {
-            let comecaram = Arc::clone(&comecaram);
-            let largadas = Arc::clone(&largadas);
-            move |posicao: usize, _| {
-                comecaram.lock().unwrap().push(posicao);
-                let avisa = avisa.clone();
-                let largada = Largada {
-                    quando: Arc::clone(&largadas),
-                    posicao,
-                    comeco,
-                    terminou: false,
-                };
-                async move {
-                    // O marcador inteiro, e não só o campo: é o `Drop` dele
-                    // que conta a tentativa largada.
-                    let mut largada = largada;
-                    if posicao == 1 {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                        let _ = avisa.send(1);
-                        tokio::time::sleep(Duration::from_secs(20)).await;
-                    } else {
-                        tokio::time::sleep(Duration::from_secs(100)).await;
-                    }
-                    largada.terminou = true;
-                    Ok::<usize, ConnectError>(posicao)
-                }
-            }
-        };
-        let corrida = correr(
-            vec![0, 1, 2],
-            DEFASAGEM,
-            sem_tardios(),
-            Some(tocados),
-            tentar,
-        )
-        .await;
-
-        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
-        assert_eq!(
-            *comecaram.lock().unwrap(),
-            vec![0, 1],
-            "alguém começou depois do toque, e chegaria à sala como um segundo toque"
-        );
-        let largadas = largadas.lock().unwrap().clone();
-        assert!(
-            largadas.len() == 1
-                && largadas.first().is_some_and(
-                    |(posicao, quando)| *posicao == 0 && *quando < Duration::from_secs(1)
-                ),
-            "quem corria não foi largado no instante do toque: {largadas:?}"
-        );
-    }
-
-    /// **Depois do toque, a sessão de outro candidato não vence** (tarefa 16 da
-    /// F7). O 0 abre uma sessão no mesmo instante em que o 1 toca: quem tocou
-    /// já levou a corrida, e a sessão do 0 é largada.
-    #[tokio::test(start_paused = true)]
-    async fn depois_do_toque_a_sessao_de_outro_nao_vence() {
-        let (avisa, tocados) = tokio::sync::mpsc::unbounded_channel();
-        let corrida = correr(
-            vec![0, 1],
-            DEFASAGEM,
-            sem_tardios(),
-            Some(tocados),
-            move |posicao: usize, _| {
-                let avisa = avisa.clone();
-                async move {
-                    if posicao == 0 {
-                        // Pronta no mesmo instante do toque do 1, que começa
-                        // na vez dele e toca 10 ms depois.
-                        tokio::time::sleep(DEFASAGEM + Duration::from_millis(10)).await;
-                        return Ok::<usize, ConnectError>(0);
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    let _ = avisa.send(1);
-                    tokio::time::sleep(Duration::from_secs(20)).await;
-                    Ok(1)
-                }
-            },
-        )
-        .await;
-
-        assert_eq!(
-            corrida.vencedor.map(|(posicao, _)| posicao),
-            Some(1),
-            "a sessão de quem não tocou venceu a de quem estava tocando"
-        );
-    }
-
-    /// **Quem toca e não é atendido leva a corrida junto** (tarefa 16 da F7).
-    ///
-    /// O 0 toca e, 5 s depois, a sala diz que ninguém atendeu; o 1 entraria aos
-    /// 300 ms. Ligar de novo pelo outro caminho seria tocar outra vez para quem
-    /// não atendeu: a corrida acaba com o desfecho de quem tocou.
-    #[tokio::test(start_paused = true)]
-    async fn quem_toca_e_nao_e_atendido_leva_a_corrida_junto() {
-        let (avisa, tocados) = tokio::sync::mpsc::unbounded_channel();
-        let ninguem = ConnectError::Refused {
-            reason: seele_proto::control::DisconnectReason::NinguemAtendeu,
-        };
-        let recusa = ninguem.clone();
-        let corrida = correr(
-            vec![0, 1],
-            DEFASAGEM,
-            sem_tardios(),
-            Some(tocados),
-            move |posicao: usize, _| {
-                let avisa = avisa.clone();
-                let recusa = recusa.clone();
-                async move {
-                    if posicao == 0 {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                        let _ = avisa.send(0);
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        return Err(recusa);
-                    }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    Ok::<usize, ConnectError>(posicao)
-                }
-            },
-        )
-        .await;
-
-        assert!(
-            corrida.vencedor.is_none(),
-            "outro candidato entrou depois de o toque não ser atendido"
-        );
-        assert_eq!(corrida.falhas, vec![(0, ninguem)]);
-    }
-
-    /// **O prazo do candidato se solta quando ele toca** (tarefa 16 da F7): sem
-    /// toque, a tentativa que passa do prazo é largada nele; com toque, ela vai
-    /// até o fim, e quem ouve sabe uma vez, com o prazo do toque.
-    #[tokio::test(start_paused = true)]
-    async fn o_prazo_do_candidato_se_solta_quando_ele_toca() {
-        let prazo = Duration::from_secs(4);
-
-        let (_sem_toque, mut ninguem_toca) = tokio::sync::mpsc::unbounded_channel::<u16>();
-        let sem_toque = super::ate_o_prazo_ou_o_toque(
-            Some(prazo),
-            tokio::time::sleep(Duration::from_secs(10)),
-            &mut ninguem_toca,
-            |_| panic!("ninguém tocou"),
-        )
-        .await;
-        assert!(sem_toque.is_none(), "a tentativa sem toque passou do prazo");
-
-        let (toca, mut ouviu) = tokio::sync::mpsc::unbounded_channel::<u16>();
-        let ouvidos = std::sync::Mutex::new(Vec::new());
-        let com_toque = super::ate_o_prazo_ou_o_toque(
-            Some(prazo),
-            async move {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                let _ = toca.send(45);
-                tokio::time::sleep(Duration::from_secs(9)).await;
-                "atendida"
-            },
-            &mut ouviu,
-            |prazo_s| ouvidos.lock().unwrap().push(prazo_s),
-        )
-        .await;
-        assert_eq!(
-            com_toque,
-            Some("atendida"),
-            "quem tocava caiu no prazo do candidato"
-        );
-        assert_eq!(*ouvidos.lock().unwrap(), vec![45]);
-    }
-}
+mod a_corrida;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A impressão esperada só existe para um certificado: quem liga para um
-    /// código espera uma chave, e não uma impressão (spec de 23/09, «Quem liga
-    /// confere o código dentro do TLS»). O veredito, que lê a impressão, não
-    /// vê nenhuma num destino de código, e não uma impressão inventada.
-    #[test]
-    fn a_impressao_esperada_so_existe_para_um_certificado() {
-        let mut destino = destino_de_teste(Some("ab"));
-        assert_eq!(destino.impressao_esperada(), Some("ab"));
-
-        destino.esperada = Some(Esperada::Codigo(seele_proto::codigo::Codigo::da_chave(
-            &[7; 32],
-        )));
-        assert_eq!(
-            destino.impressao_esperada(),
-            None,
-            "um destino de código passou a ter uma impressão esperada"
-        );
-
-        destino.esperada = None;
-        assert_eq!(destino.impressao_esperada(), None);
-    }
-
-    #[test]
-    fn uma_ligacao_tem_a_bateria_de_um_minuto_e_um_servidor_a_de_cinco() {
-        let agora = Duration::from_secs(100);
-        let carga = |esperada: Option<Esperada>| {
-            let mut destino = destino_de_teste(None);
-            destino.esperada = esperada;
-            let mut bateria = bateria_de(&destino);
-            bateria.on_connection_lost(agora);
-            bateria.remaining(agora)
-        };
-
-        assert_eq!(
-            carga(Some(Esperada::Codigo(
-                seele_proto::codigo::Codigo::da_chave(&[7; 32])
-            ))),
-            Some(crate::battery::CARGA_DA_LIGACAO),
-            "uma ligação ganhou a bateria de cinco minutos"
-        );
-        assert_eq!(
-            carga(Some(Esperada::Certificado("ab".into()))),
-            Some(seele_proto::transport::SESSION_GRACE)
-        );
-        assert_eq!(carga(None), Some(seele_proto::transport::SESSION_GRACE));
-    }
-
-    /// A marca do aviso é a de quem se espera que atenda: a do servidor, tirada
-    /// da impressão, ou a da sala, tirada do código (ADR 0062). Antes da 6c a
-    /// batida lia a impressão, e um destino de código não tem impressão: uma
-    /// ligação não avisava ponto nenhum, e o furo do lado de quem recebe nunca
-    /// abria.
-    #[test]
-    fn a_marca_do_aviso_sai_do_que_se_espera() {
-        const FP: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
-        let mut destino = destino_de_teste(Some(FP));
-        assert_eq!(
-            destino.marca_do_aviso(),
-            crate::encontro::Marcas::do_servidor(FP).map(|marcas| marcas.aviso().clone())
-        );
-        assert!(destino.marca_do_aviso().is_some());
-
-        // Uma impressão que não dá marca não bate em ponto nenhum.
-        destino.esperada = Some(Esperada::Certificado("curto".into()));
-        assert_eq!(destino.marca_do_aviso(), None);
-
-        let codigo = seele_proto::codigo::Codigo::da_chave(&[7; 32]);
-        destino.esperada = Some(Esperada::Codigo(codigo));
-        assert_eq!(
-            destino.marca_do_aviso(),
-            Some(crate::encontro::Marcas::da_sala(&codigo).aviso().clone()),
-            "um destino de código não avisa com a marca do aviso da sala"
-        );
-
-        destino.esperada = None;
-        assert_eq!(destino.marca_do_aviso(), None);
-    }
-
-    /// **A recusa local desfaz a entrada que ela recusou, e não a mais antiga
-    /// no ar** (R1-M4 da revisão do P61).
-    ///
-    /// O caso do revisor: ela na sala 1; a entrada A (sala 2) no ar; a entrada
-    /// B (sala 3) com a senha grande demais, recusada aqui. A recusa local ia
-    /// pela porta do servidor, que recusa o pedido mais antigo no ar — A —, e
-    /// depois do `Pong` de A (o servidor a pôs na 2) o motor ficava na 3, com a
-    /// confirmada na 1 e B no ar para sempre.
-    #[test]
-    fn a_recusa_local_desfaz_a_entrada_que_ela_recusou() {
-        use seele_proto::control::ControlError;
-        let grande = ControlError::FieldTooLong {
-            field: "password",
-            len: 40,
-            limit: 32,
-        };
-        let pong = |numero: u64| ServerMessage::Pong {
-            timestamp: crate::assento::carimbo_da_entrada(numero),
-        };
-        let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(1), None));
-        motor.ouvir_o_assento(&pong(1));
-        assert_eq!(motor.voice_room, Some(VoiceRoomId(1)));
-
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(
-            VoiceRoomId(3),
-            Some("x".repeat(40)),
-        ));
-        let numero_de_b = motor.entradas.ultimo_numero().expect("B foi pedida");
-        motor.recusar_aqui("EntrarNaVoiceRoom", &grande, Some(numero_de_b));
-        assert_eq!(
-            (
-                motor.voice_room,
-                motor.entradas.confirmada(motor.voice_room)
-            ),
-            (Some(VoiceRoomId(2)), Some(VoiceRoomId(1))),
-            "a recusa local não devolveu o assento a A, ainda no ar"
-        );
-
-        // O servidor decide A: a pôs na 2.
-        motor.ouvir_o_assento(&pong(2));
-        assert_eq!(
-            (
-                motor.voice_room,
-                motor.entradas.confirmada(motor.voice_room),
-                motor.entradas.len()
-            ),
-            (Some(VoiceRoomId(2)), Some(VoiceRoomId(2)), 0),
-            "o motor, o áudio e o servidor discordam depois da recusa local"
-        );
-    }
-
-    /// **Um campo grande demais é recusa daquele comando, e não queda** (M2 da
-    /// revisão do P61).
-    ///
-    /// A revisão mediu: o apelido, o nome de canal e a senha da sala acima do
-    /// teto do fio faziam o `encode` falhar, e `executar` chamava `cair()`. A
-    /// prova de ponta a ponta é `queda_recuperavel::um_campo_grande_demais_nao_derruba_o_enlace`;
-    /// esta prova as três peças dela: o que é recusa e o que é queda, o que vai
-    /// ao `seele.log` (o comando e o campo, **nunca o valor**), e a entrada
-    /// desfeita no motor.
-    #[test]
-    fn um_campo_grande_demais_e_recusa_local_e_nao_queda() {
-        use seele_proto::control::ControlError;
-        let grande = || ControlError::FieldTooLong {
-            field: "password",
-            len: 52,
-            limit: 32,
-        };
-        assert!(recusa_local(&anyhow::Error::from(grande())).is_some());
-        assert!(
-            recusa_local(&anyhow::Error::from(grande()).context("escrevendo o quadro")).is_some(),
-            "com um contexto em cima, a recusa virou queda"
-        );
-        assert!(
-            recusa_local(&anyhow::anyhow!("o fluxo de controle fechou")).is_none(),
-            "um erro de transporte virou recusa: o enlace caído não começaria a bateria"
-        );
-
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-        let mut motor = motor_de_teste();
-        let senha = "segredo-que-nao-vai-ao-log".repeat(2);
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), Some(senha)));
-        assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
-        let numero = motor.entradas.ultimo_numero();
-        motor.recusar_aqui("EntrarNaVoiceRoom", &grande(), numero);
-
-        assert_eq!(
-            motor.voice_room, None,
-            "a entrada recusada aqui ficou no motor, e a volta a refaria a cada queda"
-        );
-        let linhas = rastro.linhas();
-        assert!(
-            linhas
-                .iter()
-                .any(|linha| linha.contains("EntrarNaVoiceRoom") && linha.contains("password")),
-            "o `seele.log` não diz qual comando nem qual campo: {linhas:?}"
-        );
-        assert!(
-            !linhas.iter().any(|linha| linha.contains("segredo")),
-            "a senha foi ao `seele.log`: {linhas:?}"
-        );
-    }
-
-    /// **O motor acaba a sessão exatamente onde o `Room` acaba** (lote P61,
-    /// pendência 61).
-    ///
-    /// O motor tratava `FellBehind` como queda e o `Room` tratava toda
-    /// `Disconnecting` como fim: a janela mostrava a tela de fim enquanto este
-    /// motor reconectava por baixo. Os dois passaram a chamar a mesma regra,
-    /// `seele_sessao::despedida::a_sessao_acabou_aqui`, e é lá que mora o teste
-    /// exaustivo dela, com a tabela escrita à parte.
-    ///
-    /// Este é o par do `toda_despedida_acaba_onde_o_motor_acaba`, no `state.rs`,
-    /// e olha pelo outro lado: o nome que **este** motor chama é conferido
-    /// contra o `Room`, razão por razão. Uma lista própria escrita aqui, que
-    /// sombreasse a importada, reprova.
-    #[test]
-    fn o_motor_acaba_a_sessao_onde_o_room_acaba() {
-        for motivo in [
-            DisconnectReason::Incompatible,
-            DisconnectReason::CredentialRejected,
-            DisconnectReason::HandshakeTimeout,
-            DisconnectReason::Kicked,
-            DisconnectReason::Banned,
-            DisconnectReason::ServerFull,
-            DisconnectReason::ScheduledMaintenance,
-            DisconnectReason::ServerShuttingDown,
-            DisconnectReason::Timeout,
-            DisconnectReason::ProtocolViolation,
-            DisconnectReason::RateLimited,
-            DisconnectReason::FellBehind,
-            DisconnectReason::AdmissionPending,
-            DisconnectReason::AdmissionDenied,
-            DisconnectReason::NicknameTaken,
-            DisconnectReason::ModsRecusados,
-            DisconnectReason::ModsMudaram,
-            DisconnectReason::ModsIndisponiveis,
-            DisconnectReason::ChamadaEncerrada,
-            DisconnectReason::NinguemAtendeu,
-            DisconnectReason::ChamadaRecusada,
-            DisconnectReason::ModsDeOutraApi { apis: 1 << 7 },
-        ] {
-            let mut room = crate::state::Room::new();
-            let fim = room
-                .apply(&ServerMessage::Disconnecting { reason: motivo })
-                .ended;
-            assert_eq!(
-                a_sessao_acabou_aqui(motivo),
-                fim,
-                "{motivo:?}: o motor e o `Room` discordam sobre o fim"
-            );
-        }
-    }
-
-    #[test]
-    fn so_quem_empresta_publica_os_enderecos_da_propria_maquina() {
-        // **O guarda do achado de privacidade do fix round 3.** O round 2
-        // passou a publicar os endereços de interface de *todo* cliente,
-        // inclusive de quem não empresta — contra o §5 da spec, que nomeia
-        // privacidade como a primeira das duas razões do opt-in.
-        //
-        // **E consentir em assistir por par não basta**, que é a metade nova:
-        // aquele consentimento decide se o endereço **público** desta máquina
-        // pode ser entregue a quem a serve, e não se a topologia interna dela
-        // é publicada. Destrancar a segunda com a primeira daria a quem
-        // consentiu no menor o custo do maior — ver o doc desta função.
-        //
-        // Os endereços são inventados de propósito: a decisão não pode
-        // depender de quais interfaces a máquina que roda o teste tem, senão
-        // o guarda passa a valer só onde há uma LAN.
-        let da_maquina = || vec![SocketAddr::from(([192, 168, 1, 10], 4444))];
-        for calado in [
-            ConsentimentoDePar::de_ninguem(),
-            ConsentimentoDePar {
-                pares_que_atende: 0,
-                assiste_por_par: true,
-            },
-        ] {
-            assert!(
-                locais_a_publicar(calado, da_maquina).is_empty(),
-                "quem não empresta ({calado:?}) publicou a topologia de rede interna da máquina"
-            );
-        }
-        assert_eq!(
-            locais_a_publicar(
-                ConsentimentoDePar {
-                    pares_que_atende: 1,
-                    assiste_por_par: false,
-                },
-                da_maquina
-            ),
-            da_maquina(),
-            "quem optou por emprestar deixou de publicar por onde ser alcançado"
-        );
-    }
-
-    #[test]
-    fn enderecos_locais_excluem_loopback_nao_especificado_e_link_local() {
-        // A parte que `locais_de_pares` não pode errar: publicar loopback ou
-        // um não-especificado não ajuda ninguém a discar, e link-local não
-        // sai do cabo — mesmo motivo que
-        // `seele-server::alcance::interfaces::descobrir` já documenta para o
-        // convite.
-        let locais = [IpAddr::from([192, 168, 1, 10]), IpAddr::from([10, 0, 0, 5])];
-        for ip in locais {
-            assert!(e_endereco_de_rede_local(ip), "{ip} devia contar como local");
-        }
-        let excluidos = [
-            IpAddr::from([127, 0, 0, 1]),
-            IpAddr::from([0, 0, 0, 0]),
-            IpAddr::from([169, 254, 1, 1]),
-            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
-            IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-            IpAddr::V6(std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
-        ];
-        for ip in excluidos {
-            assert!(
-                !e_endereco_de_rede_local(ip),
-                "{ip} não devia contar como local"
-            );
-        }
-    }
-
-    #[test]
-    fn insistir_contra_recusa_nao_muda_a_resposta() {
-        // A diferença entre reconectar e martelar. Uma chave trocada é o alerta
-        // do ADR 0003 e tentar de novo só o repetiria a cada backoff.
-        assert!(!vale_insistir(&ConnectError::PinChanged {
-            pinned: "a".into(),
-            offered: "b".into(),
-        }));
-        // Um convite que não confere também não melhora com repetição: seria o
-        // mesmo link errado contra o mesmo servidor a cada backoff.
-        assert!(!vale_insistir(&ConnectError::InviteMismatch {
-            expected: "a".into(),
-            offered: "b".into(),
-        }));
-        assert!(vale_insistir(&ConnectError::Unreachable));
-        assert!(vale_insistir(&ConnectError::HandshakeTimeout));
-    }
-
-    #[test]
-    fn quem_nao_prova_a_chave_respondeu_e_insistir_nao_muda_a_resposta() {
-        // Era `TlsRefused`, que a bateria repete: insistir mandaria um aperto
-        // de mão a quem já não provou ter a chave, a cada batida, por cinco
-        // minutos. E é resposta de alguém, como a impressão que não confere:
-        // perder a corrida para o «não alcancei» de um endereço morto
-        // esconderia o impostor atrás de uma falha de rede.
-        assert!(
-            alguem_respondeu(&ConnectError::ChaveNaoProvada),
-            "quem mostrou o certificado sem a chave perde a corrida para um endereço \
-             morto, e a tela diz «não alcancei» sobre um impostor"
-        );
-        assert!(
-            !vale_insistir(&ConnectError::ChaveNaoProvada),
-            "a bateria insiste contra quem não provou a chave do servidor, e a volta \
-             martela o impostor em vez de acabar"
-        );
-    }
-
-    /// Um conjunto de MODs a aceitar não é uma queda de rede.
-    ///
-    /// # As duas metades, e por que elas estavam faltando
-    ///
-    /// [`ConnectError::ModsNaoAceitos`] entrou na enumeração e ficou de fora
-    /// das duas decisões que a usam. Sem a primeira, a pergunta com a lista
-    /// perde a corrida de `conectar_entre` para o «não alcancei» de um endereço
-    /// morto — que falha primeiro porque falhar é rápido — e a casca fica sem o
-    /// que mostrar. Sem a segunda, a bateria interna reconecta por cinco
-    /// minutos contra uma decisão que só uma pessoa pode tomar, mandando
-    /// `RecusarMods` a cada batida.
-    ///
-    /// É a metade simétrica do que `a_sessao_acabou_aqui` já dizia para
-    /// `DisconnectReason::ModsMudaram`, e agora as duas estão escritas.
-    #[test]
-    fn um_conjunto_de_mods_a_aceitar_nao_e_falha_de_rede() {
-        let pergunta = || ConnectError::ModsNaoAceitos {
-            mods: Vec::new(),
-            conjunto: "9f86d0".into(),
-            plataformas: None,
-        };
-
-        assert!(
-            alguem_respondeu(&pergunta()),
-            "a lista de MODs veio de um servidor que respondeu o aperto de mão inteiro"
-        );
-        assert!(
-            !vale_insistir(&pergunta()),
-            "a reconexão automática encontra o mesmo anúncio e o mesmo não"
-        );
-    }
-
-    /// **E a pergunta sobrevive à corrida.** O guarda de comportamento do
-    /// achado acima: não basta o predicado dizer «respondeu», é a escolha da
-    /// falha que precisa mudar.
-    ///
-    /// A ordem aqui é a do caso típico e não uma conveniência: o endereço morto
-    /// é anotado **primeiro**, porque um destino inalcançável falha em
-    /// milissegundos enquanto o anúncio exige o aperto de mão inteiro.
-    /// Revertendo qualquer uma das duas metades do conserto, este teste vê
-    /// `Unreachable` — que é a casca dizendo «não alcancei» sobre um servidor
-    /// que estava ali, com a lista na mão.
-    #[test]
-    fn a_pergunta_dos_mods_ganha_do_endereco_morto_que_falhou_antes() {
-        let mut a_mostrar = FalhaAMostrar::default();
-        a_mostrar.anotar(ConnectError::Unreachable);
-        a_mostrar.anotar(ConnectError::ModsNaoAceitos {
-            mods: Vec::new(),
-            conjunto: "9f86d0".into(),
-            plataformas: None,
-        });
-
-        assert!(
-            matches!(a_mostrar.escolhida(), ConnectError::ModsNaoAceitos { .. }),
-            "a pergunta com a lista de MODs foi descartada em favor de um «não alcancei»"
-        );
-    }
-
-    /// Sem ninguém que tenha respondido, a primeira falha é a que sobra — e sem
-    /// falha nenhuma sobra a verdade. As duas outras pernas de
-    /// [`FalhaAMostrar`], para que o teste acima não seja o único a passar por
-    /// aqui.
-    #[test]
-    fn sem_ninguem_que_respondeu_sobra_a_primeira_falha() {
-        let mut a_mostrar = FalhaAMostrar::default();
-        a_mostrar.anotar(ConnectError::SemResposta);
-        a_mostrar.anotar(ConnectError::Unreachable);
-        assert!(matches!(a_mostrar.escolhida(), ConnectError::SemResposta));
-
-        assert!(matches!(
-            FalhaAMostrar::default().escolhida(),
-            ConnectError::Unreachable
-        ));
-    }
-
-    #[test]
-    fn uma_recusa_desfaz_o_pin_que_o_verificador_acabou_de_escrever() {
-        // Sem isto a recusa é decorativa: a visita seguinte, sem link para
-        // conferir, veria `Matches` e entraria no servidor recém-rejeitado.
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        let decisao = PinDecision::FirstContact {
-            fingerprint: "aaaa1111".into(),
-        };
-        let veredito = crate::tofu::verdict(&decisao, Some("bbbb2222"));
-
-        aplicar_veredito(&veredito, &loja, "casa");
-
-        assert_eq!(loja.pinned("casa"), None, "a recusa deixou o pin para trás");
-    }
-
-    /// **Um primeiro contato pelo código é conferido, e não cego.** O
-    /// `ConfereCodigo` provou dentro do TLS que a chave é a do código, como a
-    /// impressão de um link prova um certificado. Dizer `FirstContact` faria a
-    /// casca perguntar «confia nesta chave?» a quem acabou de prová-la, e na
-    /// própria sala de quem recebe (o ATENDER, tarefa 27 da F7).
-    #[test]
-    fn um_primeiro_contato_pelo_codigo_e_conferido_e_nao_cego() {
-        let mut destino = destino_de_teste(None);
-        destino.esperada = Some(Esperada::Codigo(seele_proto::codigo::Codigo::da_chave(
-            &[7; 32],
-        )));
-        let loja = crate::tofu::MemoryPinStore::new();
-
-        let primeiro = conferir(
-            &destino,
-            &PinDecision::FirstContact {
-                fingerprint: "aaaa1111".into(),
-            },
-            &loja,
-        );
-        assert!(
-            matches!(
-                &primeiro,
-                Ok(Verdict::FirstContactVerified { fingerprint }) if fingerprint == "aaaa1111"
-            ),
-            "o primeiro contato pelo código saiu {primeiro:?}, e não conferido"
-        );
-
-        let depois = conferir(
-            &destino,
-            &PinDecision::Matches {
-                fingerprint: "aaaa1111".into(),
-            },
-            &loja,
-        );
-        assert!(matches!(depois, Ok(Verdict::Known)), "{depois:?}");
-    }
-
-    #[test]
-    fn um_veredito_que_nao_recusa_deixa_o_pin_onde_esta() {
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        let decisao = PinDecision::Matches {
-            fingerprint: "aaaa1111".into(),
-        };
-        let veredito = crate::tofu::verdict(&decisao, Some("bbbb2222"));
-
-        aplicar_veredito(&veredito, &loja, "casa");
-
-        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
-    }
-
-    /// Um destino de teste onde a chave do pin e o nome TLS são **diferentes**.
-    ///
-    /// Diferentes de propósito: confundir os dois já custou caro a este projeto
-    /// uma vez — dois servidores numa LAN dividindo a entrada `localhost`, e o
-    /// segundo parecendo o primeiro com a chave trocada (`tofu.rs`). Um teste
-    /// em que os dois valores são iguais não pega essa troca.
-    fn destino_de_teste(impressao_esperada: Option<&str>) -> Destino {
-        Destino {
-            servidor: "127.0.0.1:1".parse().expect("endereço"),
-            nome_tls: "localhost".into(),
-            chave_do_pin: "casa".into(),
-            apelido: "pessoa".into(),
-            segredo: None,
-            esperada: impressao_esperada.map(|fp| Esperada::Certificado(fp.to_owned())),
-            o_pino_prova_o_servidor: true,
-            aceito: None,
-        }
-    }
-
-    #[test]
-    fn um_convite_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() {
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-        let decisao = PinDecision::FirstContact {
-            fingerprint: "aaaa1111".into(),
-        };
-
-        let erro = conferir(&destino_de_teste(Some("bbbb2222")), &decisao, &loja)
-            .expect_err("um convite que não confere tinha que derrubar a conexão");
-
-        // Quem prometeu é o link, quem ofereceu é o servidor. Trocar os dois
-        // faria a casca acusar o lado errado.
-        assert_eq!(
-            erro,
-            ConnectError::InviteMismatch {
-                expected: "bbbb2222".into(),
-                offered: "aaaa1111".into(),
-            }
-        );
-        // Sob a **chave do pin**, não sob o nome TLS.
-        assert_eq!(loja.pinned("casa"), None, "a recusa deixou o pin para trás");
-    }
-
-    #[test]
-    fn um_convite_que_confere_deixa_seguir_e_diz_que_foi_conferido() {
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-        let decisao = PinDecision::FirstContact {
-            fingerprint: "aaaa1111".into(),
-        };
-
-        let veredito = conferir(&destino_de_teste(Some("aaaa1111")), &decisao, &loja)
-            .expect("o convite confere; não havia o que recusar");
-
-        assert_eq!(
-            veredito,
-            Verdict::FirstContactVerified {
-                fingerprint: "aaaa1111".into()
-            }
-        );
-        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
-    }
-
-    #[test]
-    fn sem_convite_o_primeiro_contato_segue_cego_como_sempre_foi() {
-        // Quem digitou o endereço à mão não tem o que conferir, e recusar aqui
-        // trancaria para fora todo mundo que não veio de um link.
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-        let decisao = PinDecision::FirstContact {
-            fingerprint: "aaaa1111".into(),
-        };
-
-        let veredito = conferir(&destino_de_teste(None), &decisao, &loja)
-            .expect("sem convite não há o que recusar");
-
-        assert_eq!(
-            veredito,
-            Verdict::FirstContact {
-                fingerprint: "aaaa1111".into()
-            }
-        );
-        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
-    }
-
-    #[test]
-    fn um_convite_velho_contra_um_pin_que_bate_avisa_e_nao_derruba() {
-        // A metade oposta da recusa, e a que some sem ninguém notar: com pin
-        // estabelecido, o TOFU já provou que este é o servidor de ontem, então
-        // quem está errado é o link. Derrubar aqui trancaria a pessoa para fora
-        // de um servidor que ela usa porque um amigo mandou um link velho.
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-        let decisao = PinDecision::Matches {
-            fingerprint: "aaaa1111".into(),
-        };
-
-        let veredito = conferir(&destino_de_teste(Some("bbbb2222")), &decisao, &loja)
-            .expect("um link velho não derruba um servidor já conhecido");
-
-        assert_eq!(
-            veredito,
-            Verdict::InviteDisagrees {
-                expected: "bbbb2222".into(),
-                offered: "aaaa1111".into(),
-            }
-        );
-        // Esta é a asserção que segura a política: sem ela o teste passa mesmo
-        // se o aviso virar recusa, porque o veredito continuaria o mesmo e só o
-        // efeito mudaria.
-        assert_eq!(
-            loja.pinned("casa"),
-            Some("aaaa1111".into()),
-            "o aviso desfez o pin, e a próxima visita entraria cega"
-        );
-    }
-
-    #[test]
-    fn um_convite_que_concorda_com_o_pin_nao_tem_nada_a_dizer() {
-        // Completa a tabela: pin bate, link concorda, nada acontece.
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-        let decisao = PinDecision::Matches {
-            fingerprint: "aaaa1111".into(),
-        };
-
-        let veredito = conferir(&destino_de_teste(Some("aaaa1111")), &decisao, &loja)
-            .expect("não havia nada de errado para recusar");
-
-        assert_eq!(veredito, Verdict::Known);
-        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
-    }
-
-    #[test]
-    fn um_aperto_de_mao_que_falhou_nao_deixa_o_pin_que_o_tls_escreveu() {
-        // `desfazer_pin_orfao`, a limpeza de depois da corrida: o candidato cujo
-        // prazo estourou foi derrubado no meio do aperto de mão, depois de o
-        // verificador aceitar a chave e fixá-la, e não teve chance de se limpar
-        // (a limpeza do próprio aperto, `desfazer_o_pin_deste_aperto`, vai com
-        // ele). Sem nada fixado antes da corrida (`None`), o pin que está lá é
-        // órfão e cai. O que sobrasse faria a visita seguinte ver `Matches`, e aí,
-        // num alvo de escopo público, um convite que **não** confere viraria
-        // `InviteDisagrees` — de recusar para avisar, sem ninguém decidir isso.
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        desfazer_pin_orfao(&loja, "casa", None, &ConnectError::SemResposta);
-
-        assert_eq!(loja.pinned("casa"), None);
-    }
-
-    #[test]
-    fn um_pin_que_ja_existia_sobrevive_a_um_aperto_que_falhou() {
-        // Só o que este aperto escreveu é órfão. Apagar um pin antigo porque a
-        // rede caiu jogaria fora a memória de que o ADR 0003 depende.
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        desfazer_pin_orfao(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
-
-        assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
-    }
-
-    #[test]
-    fn o_pin_que_este_aperto_escreveu_e_desfeito_quando_ele_falha() {
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
-
-        assert_eq!(
-            loja.pinned("casa"),
-            None,
-            "o pin que o aperto que falhou escreveu ficou na loja, e a visita seguinte, \
-             sem link, entraria calada no servidor recusado"
-        );
-    }
-
-    #[test]
-    fn o_que_um_aperto_nao_escreveu_nao_e_dele_para_desfazer() {
-        // A recusa pela impressão, a chave trocada e toda falha de um aperto
-        // que não chegou a aceitar um primeiro contato não escrevem nada. Um
-        // pin que exista na hora é de um vizinho da corrida, e desfazê-lo é a
-        // confiança de primeiro contato do ADR 0003 sumindo calada.
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        desfazer_o_pin_deste_aperto(&loja, "casa", None, &ConnectError::SemResposta);
-
-        assert_eq!(
-            loja.pinned("casa"),
-            Some("aaaa1111".into()),
-            "um aperto que não escreveu nada apagou o pin de outro"
-        );
-    }
-
-    #[test]
-    fn um_pin_que_o_vizinho_trocou_depois_fica_com_o_vizinho() {
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "bbbb2222".into());
-
-        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
-
-        assert_eq!(
-            loja.pinned("casa"),
-            Some("bbbb2222".into()),
-            "o aperto que falhou apagou um pin que já não era o que ele tinha escrito"
-        );
-    }
-
-    #[test]
-    fn o_pin_que_um_aperto_desfaz_vai_ao_log_com_a_chave_e_o_motivo() {
-        // «Por que meu pino sumiu» não tinha resposta: as duas limpezas apagavam
-        // calado. `info`, que é o nível que o `seele.log` grava.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        desfazer_o_pin_deste_aperto(
-            &loja,
-            "casa",
-            Some("aaaa1111"),
-            &ConnectError::HandshakeTimeout,
-        );
-
-        let linhas = rastro.linhas();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("INFO")
-                && linha.contains("casa")
-                && linha.contains("aaaa1111")
-                && linha.contains("HandshakeTimeout")),
-            "o pin que o aperto que falhou tinha fixado foi apagado sem dizer no log qual \
-             chave, qual impressão e por quê. Rastro: {linhas:?}"
-        );
-    }
-
-    #[test]
-    fn o_pin_orfao_desfeito_depois_da_corrida_vai_ao_log_com_a_chave_e_o_motivo() {
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        desfazer_pin_orfao(&loja, "casa", None, &ConnectError::SemResposta);
-
-        let linhas = rastro.linhas();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("INFO")
-                && linha.contains("casa")
-                && linha.contains("aaaa1111")
-                && linha.contains("SemResposta")),
-            "o pin órfão de um candidato que perdeu a corrida foi apagado sem dizer no log \
-             qual chave, qual impressão e por quê. Rastro: {linhas:?}"
-        );
-    }
-
-    #[test]
-    fn a_limpeza_que_nao_apaga_nada_nao_escreve_nada() {
-        // A linha é de quando um pino some. Uma por candidato que não apagou nada
-        // enterraria as que importam.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-        let loja = crate::tofu::MemoryPinStore::new();
-        loja.pin("casa", "aaaa1111".into());
-
-        desfazer_o_pin_deste_aperto(&loja, "casa", None, &ConnectError::SemResposta);
-        desfazer_o_pin_deste_aperto(&loja, "casa", Some("bbbb2222"), &ConnectError::SemResposta);
-        desfazer_pin_orfao(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
-
-        assert_eq!(
-            loja.pinned("casa"),
-            Some("aaaa1111".into()),
-            "uma limpeza que não devia apagar nada apagou, e o teste mediu outra coisa"
-        );
-        let linhas = rastro.linhas();
-        assert!(
-            linhas.is_empty(),
-            "uma limpeza que não apagou pino nenhum escreveu no log: {linhas:?}"
-        );
-    }
-    #[tokio::test]
-    async fn o_pin_orfao_de_um_candidato_que_estourou_o_prazo_vai_ao_log_com_a_falha_dele() {
-        // A limpeza de depois da corrida, pelo caminho de verdade. Um candidato
-        // termina o TLS (o verificador fixa a chave), manda o `Hello` e não
-        // ouve nada: o prazo do candidato estoura, a tentativa é derrubada no
-        // meio, e o pin fica órfão. A linha que o apaga tem de dizer a falha
-        // que este candidato deu (`SemResposta`, o prazo), e não uma escolhida
-        // pelo caminho.
-        //
-        // Desde a 0.17 o prazo é o do **lote**, e só existe quando há corrida:
-        // aqui o degrau 4 é o segundo lote, por um ponto de encontro mudo. O
-        // lote direto disca, fixa a chave, manda o `Hello` e não ouve nada até
-        // o prazo dele (o da chamada mais o da discagem, 8 s).
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-
-        let (escuta, onde_de_quem_segura, impressao_de_quem_segura) =
-            ponta_com_certificado_proprio();
-        let segura = tokio::spawn(async move {
-            let conexao = escuta.aceitar().await;
-            std::future::pending::<()>().await;
-            drop(conexao);
-        });
-        let chave = "chave-de-quem-segura";
-        let quem_nao_sai = destino_na_chave(
-            "127.0.0.1:9".parse().expect("endereço"),
-            "chave-de-quem-nao-sai",
-            None,
-        );
-        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
-        let ponto_mudo = std::net::UdpSocket::bind("127.0.0.1:0").expect("ponto mudo");
-        let bilhete = seele_proto::uri::Bilhete::novo(
-            ponto_mudo.local_addr().expect("endereço").to_string(),
-            "198.51.100.4:41000",
-        )
-        .expect("bilhete de teste");
-
-        let resultado = tokio::time::timeout(
-            Duration::from_secs(20),
-            Enlace::conectar_entre_com_bilhete(
-                vec![
-                    destino_na_chave(onde_de_quem_segura, chave, Some(&impressao_de_quem_segura)),
-                    quem_nao_sai,
-                ],
-                Some(bilhete),
-                SigningKey::from_bytes(&[9; 32]),
-                Arc::clone(&loja) as Arc<dyn PinStore>,
-            ),
-        )
-        .await
-        .expect("a corrida não terminou");
-        segura.abort();
-
-        assert!(
-            resultado.is_err(),
-            "um candidato entrou numa corrida sem servidor que respondesse, e o teste mediu \
-             outra coisa"
-        );
-        assert_eq!(
-            loja.pinned(chave),
-            None,
-            "o pin órfão do candidato que estourou o prazo ficou na loja depois da corrida"
-        );
-        let linhas = rastro.linhas();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("INFO")
-                && linha.contains(chave)
-                && linha.contains(&impressao_de_quem_segura)
-                && linha.contains("SemResposta")),
-            "o pin órfão foi apagado sem dizer no log a falha do candidato que o deixou \
-             (`SemResposta`, o prazo): a falha que a corrida passa à limpeza não é a dele. \
-             Rastro: {linhas:?}"
-        );
-    }
-
-    #[test]
-    fn a_loja_do_aperto_repassa_tudo_e_anota_so_o_que_ele_escreve() {
-        let de_verdade = Arc::new(crate::tofu::MemoryPinStore::new());
-        de_verdade.pin("velha", "cccc3333".into());
-        let deste_aperto = PinsDesteAperto::nova(Arc::clone(&de_verdade) as Arc<dyn PinStore>);
-
-        assert_eq!(
-            deste_aperto.pinned("velha"),
-            Some("cccc3333".into()),
-            "a loja do aperto não repassou a leitura: o verificador veria um pin \
-             que não existe, ou nenhum que existe"
-        );
-        assert_eq!(
-            deste_aperto.o_que_escreveu(),
-            None,
-            "a loja do aperto anotou como escrito um pin que já estava lá"
-        );
-
-        deste_aperto.pin("casa", "aaaa1111".into());
-
-        assert_eq!(
-            de_verdade.pinned("casa"),
-            Some("aaaa1111".into()),
-            "a loja do aperto não repassou a escrita: o pin fixado no TLS se perdia"
-        );
-        assert_eq!(
-            deste_aperto.o_que_escreveu(),
-            Some("aaaa1111".into()),
-            "a loja do aperto não anotou o que o TLS escreveu, e a limpeza não \
-             teria o que desfazer"
-        );
-
-        deste_aperto.unpin("casa");
-        assert_eq!(
-            de_verdade.pinned("casa"),
-            None,
-            "a loja do aperto não repassou o desfazer"
-        );
-    }
-
-    #[test]
-    fn o_que_a_reconexao_restaura_e_o_que_a_pessoa_escolheu() {
-        let mut motor = motor_de_teste();
-
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
-        motor.lembrar(&Comando::AbrirLinha(ChannelId(7)));
-        motor.lembrar(&Comando::Muted(true));
-        motor.lembrar(&Comando::Isolamento(true));
-
-        assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
-        assert_eq!(motor.linha, Some(ChannelId(7)));
-        assert!(motor.muted);
-        assert!(motor.isolamento);
-
-        // Ejetar não é uma queda: quem saiu da sala de voz não volta para ele.
-        motor.lembrar(&Comando::SairDaVoiceRoom);
-        assert_eq!(motor.voice_room, None);
-    }
-
-    /// A sala que a volta refaz segue o que o servidor disse, pelos mesmos
-    /// caminhos que o assento da casca segue em `Room::apply`.
-    ///
-    /// Desde a pendência 52 isto deixou de ser só o roster: a casca senta a
-    /// pessoa, na volta, na sala que `Aviso::Reconectado` diz que o motor refez,
-    /// e o áudio abre por esse assento. Um motor que guardasse a sala apagada,
-    /// ou a que recusou a entrada, a refaria na volta — e a casca abriria o
-    /// microfone numa sala que não existe, ou que acabou de dizer não, até a
-    /// recusa chegar.
-    #[test]
-    fn a_voice_room_que_a_volta_refaz_segue_o_que_o_servidor_disse() {
-        let alerta = |reason| ServerMessage::Alert {
-            severity: seele_proto::control::AlertSeverity::Warning,
-            reason,
-            operator_text: None,
-        };
-        let mut motor = motor_de_teste();
-
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
-        motor.ouvir_o_assento(&entrada_decidida());
-        motor.ouvir_o_assento(&ServerMessage::VoiceRoomDeleted {
-            voice_room: VoiceRoomId(9),
-        });
-        assert_eq!(
-            motor.voice_room,
-            Some(VoiceRoomId(2)),
-            "apagar outra sala tirou esta pessoa da dela"
-        );
-        motor.ouvir_o_assento(&ServerMessage::VoiceRoomDeleted {
-            voice_room: VoiceRoomId(2),
-        });
-        assert_eq!(
-            motor.voice_room, None,
-            "a volta refaria a entrada numa sala que foi apagada"
-        );
-
-        for recusa in [
-            seele_proto::control::AlertReason::VoiceRoomEntryRefused,
-            seele_proto::control::AlertReason::VoiceRoomFull,
-        ] {
-            motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(3), None));
-            motor.ouvir_o_assento(&alerta(recusa));
-            // E o `Pong` do `Ping` marcado, que o servidor manda depois de
-            // decidir cada pedido.
-            motor.ouvir_o_assento(&entrada_decidida());
-            assert_eq!(
-                motor.voice_room, None,
-                "a volta refaria a entrada que o servidor recusou ({recusa:?})"
-            );
-        }
-
-        motor.ouvir_o_assento(&ServerMessage::MovedToVoiceRoom {
-            voice_room: VoiceRoomId(5),
-        });
-        assert_eq!(motor.voice_room, Some(VoiceRoomId(5)));
-    }
-
-    /// O `Pong` do `Ping` marcado que segue cada pedido de entrada.
-    fn entrada_decidida() -> ServerMessage {
-        ServerMessage::Pong {
-            // O `Pong` de um pedido mais novo que todos os destes testes: fecha
-            // o que está no ar, como o `Pong` do pedido que acabou de sair.
-            timestamp: crate::assento::carimbo_da_entrada(u64::from(u32::MAX)),
-        }
-    }
-
-    /// M3 no motor: a volta com o mesmo `ssrc`, numa sessão de número maior, é
-    /// o servidor devolvendo o assento, e a recusa da entrada que `restabelecer`
-    /// refaz sem a senha devolve a pessoa a ele. Com `ssrc` novo não havia
-    /// assento a devolver, e com o mesmo `ssrc` numa sessão de número igual o
-    /// servidor subiu de novo (N1 da rodada 2): também não.
-    ///
-    /// O servidor de teste devolve sempre o `ssrc` 1 na sessão 1.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_volta_com_o_assento_resgatado_nao_o_perde_para_a_reentrada_recusada() {
-        let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
-        let recusa = ServerMessage::Alert {
-            severity: seele_proto::control::AlertSeverity::Warning,
-            reason: seele_proto::control::AlertReason::VoiceRoomEntryRefused,
-            operator_text: None,
-        };
-
-        for (ssrc_da_queda, sessao_da_queda, depois) in [
-            (
-                seele_proto::ids::Ssrc(1),
-                seele_proto::ids::SessionId(0),
-                Some(VoiceRoomId(5)),
-            ),
-            (
-                seele_proto::ids::Ssrc(9),
-                seele_proto::ids::SessionId(0),
-                None,
-            ),
-            (
-                seele_proto::ids::Ssrc(1),
-                seele_proto::ids::SessionId(1),
-                None,
-            ),
-        ] {
-            let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
-            let (avisos, _avisos_rx) = mpsc::unbounded_channel();
-            motor.avisos = avisos;
-            motor.voice_room = Some(VoiceRoomId(5));
-            motor.queda = Some(Queda {
-                ssrc: ssrc_da_queda,
-                sessao: sessao_da_queda,
-                confirmada: Some(VoiceRoomId(5)),
-            });
-
-            motor.tentar().await;
-            assert!(motor.cliente.is_some(), "a volta não reconectou");
-            assert_eq!(
-                motor.voice_room,
-                Some(VoiceRoomId(5)),
-                "a volta não refez a sala"
-            );
-            motor.ouvir_o_assento(&recusa);
-            motor.ouvir_o_assento(&entrada_decidida());
-            assert_eq!(
-                motor.voice_room, depois,
-                "com o `ssrc` {ssrc_da_queda:?} e a sessão {sessao_da_queda:?} da queda, a recusa da entrada refeita deixou a \
-                 volta em {:?}",
-                motor.voice_room
-            );
-        }
-    }
-
-    /// I1 da rodada 1 do lote I-a: o braço de `Alert` do motor esquece só o
-    /// pedido recusado, e não a sala em que o servidor manteve a pessoa.
-    ///
-    /// Esquecer a sala a cada recusa fazia a volta de uma queda sair sem sala
-    /// — e a casca, que segue o assento do motor, fechar o áudio — de quem o
-    /// servidor ainda tinha sentado: a troca de sala recusada, a volta numa
-    /// sala com senha, o apelido tomado.
-    #[test]
-    fn uma_recusa_esquece_so_o_pedido_e_nao_a_sala_que_a_volta_refaz() {
-        let recusa = ServerMessage::Alert {
-            severity: seele_proto::control::AlertSeverity::Warning,
-            reason: seele_proto::control::AlertReason::VoiceRoomEntryRefused,
-            operator_text: None,
-        };
-        let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
-        motor.ouvir_o_assento(&entrada_decidida());
-
-        // Uma recusa sem pedido no ar: o apelido tomado.
-        motor.ouvir_o_assento(&recusa);
-        assert_eq!(
-            motor.voice_room,
-            Some(VoiceRoomId(2)),
-            "uma recusa sem pedido de entrada no ar fez a volta esquecer a sala em que o \
-             servidor manteve a pessoa"
-        );
-
-        // A troca recusada: volta à sala de antes, e não a lugar nenhum.
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(3), None));
-        motor.ouvir_o_assento(&recusa);
-        motor.ouvir_o_assento(&entrada_decidida());
-        assert_eq!(
-            motor.voice_room,
-            Some(VoiceRoomId(2)),
-            "a troca de sala recusada fez a volta esquecer a sala de antes, onde o servidor \
-             manteve a pessoa"
-        );
-    }
-
-    /// Um destino guardado em `servidor`, com uma impressão de verdade: é dela
-    /// que sai a marca do aviso.
-    fn guardado_em(servidor: &str) -> Destino {
-        Destino {
-            servidor: servidor.parse().expect("endereço"),
-            nome_tls: "localhost".into(),
-            chave_do_pin: servidor.to_owned(),
-            apelido: "pessoa".into(),
-            segredo: None,
-            esperada: Some(Esperada::Certificado(
-                "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
-            )),
-            o_pino_prova_o_servidor: false,
-            aceito: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn quem_esta_na_mesma_casa_comeca_sem_esperar_o_quarto() {
-        // A pendência 55: com o ponto ou o DNS mudos, quem estava na mesma casa
-        // pagava o prazo inteiro do quarto antes de tentar o endereço de casa.
-        // Aqui o quarto nunca responde, e a tentativa de casa tem de começar na
-        // hora.
-        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("o loopback não abriu");
-        let guardado = seele_proto::uri::Bilhete::novo(
-            ponto.local_addr().expect("endereço").to_string(),
-            "198.51.100.4:41000",
-        )
-        .expect("bilhete de teste");
-        let (_entrega, quarto) = tokio::sync::oneshot::channel::<DoQuarto>();
-        let (olhos, mut tentativas) = mpsc::unbounded_channel();
-
-        let tentativa = tokio::spawn(Enlace::conectar_entre_com_o_quarto(
-            vec![
-                guardado_em("127.0.0.1:9"),
-                guardado_em("[::ffff:127.0.0.1]:9"),
-            ],
-            Some(guardado),
-            SigningKey::from_bytes(&[7; 32]),
-            Arc::new(crate::tofu::MemoryPinStore::new()),
-            olhos,
-            Some(quarto),
-        ));
-        let primeira = tokio::time::timeout(Duration::from_millis(500), tentativas.recv()).await;
-        // E quem precisa de furo continua esperando o quarto, que não veio.
-        let segunda = tokio::time::timeout(Duration::from_millis(500), tentativas.recv()).await;
-        tentativa.abort();
-
-        let Ok(Some(super::Andamento::Tentando(primeira))) = primeira else {
-            panic!("a tentativa de casa não começou em meio segundo: esperou o quarto");
-        };
-        assert_eq!(primeira.onde.to_string(), "127.0.0.1:9");
-        assert!(
-            segunda.is_err(),
-            "quem precisa de furo começou sem a resposta do quarto: {segunda:?}"
-        );
-    }
-
-    /// Um ponto de encontro de mentira que responde todo `CHAMA` com `AQUI`
-    /// para `endereco`, e conta quantos chegaram.
-    fn ponto_que_atende_o_chama(
-        endereco: SocketAddr,
-    ) -> (seele_proto::uri::Bilhete, Arc<std::sync::atomic::AtomicU32>) {
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("ponto");
-        socket.set_nonblocking(true).expect("não bloqueante");
-        let onde = socket.local_addr().expect("endereço");
-        let chamados = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let contando = Arc::clone(&chamados);
-        tokio::spawn(async move {
-            let socket = tokio::net::UdpSocket::from_std(socket).expect("tokio");
-            let mut balde = [0_u8; seele_proto::encontro::TAMANHO3 + 1];
-            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
-                let Some(seele_proto::encontro::Pedido3::Chama(chama)) =
-                    seele_proto::encontro::analisar3(balde.get(..lidos).unwrap_or_default())
-                else {
-                    continue;
-                };
-                contando.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let resposta =
-                    seele_proto::encontro::resposta3(&seele_proto::encontro::Resposta3::Aqui {
-                        marca: chama.servidor,
-                        endereco,
-                        dicas: Vec::new(),
-                    });
-                let _ = socket.send_to(&resposta, de).await;
-            }
-        });
-        let bilhete = seele_proto::uri::Bilhete::novo(onde.to_string(), "198.51.100.4:41000")
-            .expect("bilhete");
-        (bilhete, chamados)
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn quando_o_direto_cala_o_chama_do_ponto_da_o_caminho() {
-        // O degrau 4 da 0.17 pelo caminho de produção: o endereço do convite
-        // não responde, o `CHAMA` sai pela ponta da sessão, o ponto devolve
-        // onde o anfitrião atende, e a discagem vai para lá.
-        let (onde_de_verdade, impressao, hellos) = servidor_que_conta_os_hellos();
-        let (bilhete, chamados) = ponto_que_atende_o_chama(onde_de_verdade);
-        let morto = std::net::UdpSocket::bind("127.0.0.1:0").expect("morto");
-        let mut destino = destino_na_chave(
-            morto.local_addr().expect("endereço"),
-            "chave-da-volta",
-            Some(&impressao),
-        );
-        destino.o_pino_prova_o_servidor = false;
-        let (olhos, mut andamentos) = mpsc::unbounded_channel();
-
-        let entrou = tokio::time::timeout(
-            Duration::from_secs(20),
-            Enlace::conectar_entre_observado(
-                vec![destino],
-                Some(bilhete),
-                SigningKey::from_bytes(&[9; 32]),
-                Arc::new(crate::tofu::MemoryPinStore::new()),
-                olhos,
-            ),
-        )
-        .await
-        .expect("a chegada pelo ponto não terminou");
-        assert!(
-            entrou.is_ok(),
-            "o CHAMA não deu caminho: {:?}",
-            entrou.err()
-        );
-        assert!(chamados.load(std::sync::atomic::Ordering::SeqCst) >= 1);
-        assert_eq!(hellos.load(std::sync::atomic::Ordering::SeqCst), 1);
-        let mut pelo_ponto = false;
-        while let Ok(andamento) = andamentos.try_recv() {
-            if let Andamento::Tentando(tentativa) = andamento {
-                pelo_ponto |= tentativa.avisou && tentativa.onde == onde_de_verdade;
-            }
-        }
-        assert!(
-            pelo_ponto,
-            "a trilha não diz que o endereço que entrou veio do ponto de encontro"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn o_ponto_atende_e_o_caminho_nao_abre_e_e_nat_que_nao_abriu() {
-        // O `AQUI` chegou e o ICE para o endereço dele não voltou: é a falha
-        // que o degrau 4 tem de nomear, e não «não alcancei».
-        let mudo_do_anfitriao = std::net::UdpSocket::bind("127.0.0.1:0").expect("mudo");
-        let (bilhete, _) =
-            ponto_que_atende_o_chama(mudo_do_anfitriao.local_addr().expect("endereço"));
-        let morto = std::net::UdpSocket::bind("127.0.0.1:0").expect("morto");
-        let destino = destino_na_chave(
-            morto.local_addr().expect("endereço"),
-            "chave-que-nao-abre",
-            Some(&"c".repeat(64)),
-        );
-        let resultado = tokio::time::timeout(
-            Duration::from_secs(25),
-            Enlace::conectar_entre_com_bilhete(
-                vec![destino],
-                Some(bilhete),
-                SigningKey::from_bytes(&[9; 32]),
-                Arc::new(crate::tofu::MemoryPinStore::new()),
-            ),
-        )
-        .await
-        .expect("a chegada não terminou");
-        assert_eq!(resultado.err(), Some(ConnectError::NatNaoAbriu));
-    }
-
-    #[test]
-    fn o_endereco_de_hoje_entra_logo_depois_do_alvo_que_espera() {
-        // A posição que ele tinha quando o `connect` do app o punha na frente
-        // dos alternativos: logo depois do alvo. Desde a 0.17 os que esperavam
-        // o quarto e o endereço de hoje vão num lote só, um agente ICE.
-        let pins = crate::tofu::MemoryPinStore::new();
-        let candidato = |onde: &str| Candidato {
-            destino: guardado_em(onde),
-            antes: None,
-        };
-        let de_hoje = |onde: &str| DoQuarto {
-            candidato: Some(guardado_em(onde)),
-        };
-        let ordem = |lotes: Vec<Lote>| -> Vec<String> {
-            assert_eq!(lotes.len(), 1, "o quarto soltou mais de um lote");
-            lotes
-                .first()
-                .map(|lote| {
-                    lote.candidatos()
-                        .iter()
-                        .map(|candidato| candidato.destino.servidor.to_string())
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-
-        let alvo_espera = lote_do_quarto(
-            de_hoje("203.0.113.9:8383"),
-            vec![candidato("203.0.113.1:8383"), candidato("203.0.113.2:8383")],
-            true,
-            &pins,
-        );
-        assert_eq!(
-            ordem(alvo_espera),
-            ["203.0.113.1:8383", "203.0.113.9:8383", "203.0.113.2:8383"]
-        );
-
-        let alvo_ja_corre = lote_do_quarto(
-            de_hoje("203.0.113.9:8383"),
-            vec![candidato("203.0.113.2:8383")],
-            false,
-            &pins,
-        );
-        assert_eq!(
-            ordem(alvo_ja_corre),
-            ["203.0.113.9:8383", "203.0.113.2:8383"]
-        );
-        assert!(
-            lote_do_quarto(DoQuarto::default(), Vec::new(), false, &pins).is_empty(),
-            "um quarto que não trouxe nada soltou um lote vazio na corrida"
-        );
-    }
-
-    /// Uma ponta anfitriã de teste (ICE completo controlado, DTLS passivo) com certificado
-    /// próprio, em `127.0.0.1`, e a impressão dele.
-    ///
-    /// Só fecha o aperto do enlace (DTLS, `ctl` e a apresentação vazia de um
-    /// `seeled`): o que acontece com a conexão depois é de quem chama, por
-    /// `Ponta::aceitar`.
-    fn ponta_com_certificado_proprio() -> (crate::transporte::Ponta, SocketAddr, String) {
-        let certificado = crate::transporte::CertificadoDtls::efemero().expect("certificado");
-        let impressao = crate::client::hex(&certificado.impressao());
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
-        let ponta = crate::transporte::Ponta::de_socket(
-            socket,
-            Some(crate::transporte::ConfigDoAnfitriao::novo(certificado)),
-        )
-        .expect("ponta de teste");
-        let endereco = ponta.local_addr();
-        (ponta, endereco, impressao)
-    }
-
-    /// Discar `destino` e fazer o aperto do protocolo, como a entrada de um
-    /// endereço só faz, sem declarar identidade de par.
-    async fn conectar_por_teste(
-        destino: Destino,
-        chave: SigningKey,
-        pins: Arc<dyn PinStore>,
-    ) -> Result<Enlace, ConnectError> {
-        let ponta = crate::transporte::abrir_ponta(None)?;
-        let conexao = crate::client::discar(
-            ponta.ponta(),
-            vec![destino.servidor],
-            None,
-            seele_proto::transport::HANDSHAKE_TIMEOUT,
-        )
-        .await?;
-        Enlace::conectar_sobre(ponta, conexao, None, destino, chave, pins, None).await
-    }
-
-    /// Uma loja de pins que finge o vizinho de uma corrida.
-    ///
-    /// Desarmada, é uma loja comum. Armada, a **primeira** leitura devolve o que
-    /// havia e, logo depois de olhar, grava `vizinho` na chave: o instante entre
-    /// o verificador de um candidato decidir e ele desistir, em que o outro
-    /// candidato fixa a chave dele. Existe porque esse instante dura
-    /// microssegundos, e um teste que dependesse de o pegar por acaso não
-    /// provaria nada.
-    #[derive(Debug)]
-    struct LojaComVizinho {
-        dentro: crate::tofu::MemoryPinStore,
-        armada: std::sync::atomic::AtomicBool,
-        vizinho: std::sync::Mutex<Option<(String, String)>>,
-    }
-
-    impl LojaComVizinho {
-        fn nova(chave: &str, impressao_do_vizinho: &str) -> Self {
-            Self {
-                dentro: crate::tofu::MemoryPinStore::new(),
-                armada: std::sync::atomic::AtomicBool::new(false),
-                vizinho: std::sync::Mutex::new(Some((
-                    chave.to_owned(),
-                    impressao_do_vizinho.to_owned(),
-                ))),
-            }
-        }
-
-        fn armar(&self) {
-            self.armada.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    impl PinStore for LojaComVizinho {
-        fn pinned(&self, host: &str) -> Option<String> {
-            let visto = self.dentro.pinned(host);
-            if self.armada.swap(false, std::sync::atomic::Ordering::SeqCst) {
-                if let Some((chave, impressao)) = self.vizinho.lock().expect("vizinho").take() {
-                    self.dentro.pin(&chave, impressao);
-                }
-            }
-            visto
-        }
-
-        fn pin(&self, host: &str, fingerprint: String) {
-            self.dentro.pin(host, fingerprint);
-        }
-
-        fn unpin(&self, host: &str) {
-            self.dentro.unpin(host);
-        }
-    }
-
-    /// Destino de teste: `nome_tls` de sempre, a chave de pino que o teste
-    /// escolhe, e a impressão esperada que ele quiser.
-    fn destino_na_chave(onde: SocketAddr, chave: &str, esperada: Option<&str>) -> Destino {
-        Destino {
-            servidor: onde,
-            nome_tls: "localhost".into(),
-            chave_do_pin: chave.to_owned(),
-            apelido: "pessoa".into(),
-            segredo: None,
-            esperada: esperada.map(|fp| Esperada::Certificado(fp.to_owned())),
-            o_pino_prova_o_servidor: true,
-            aceito: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn a_recusa_pela_impressao_nao_apaga_o_pin_que_o_vizinho_fixa_logo_depois() {
-        // O pino órfão que a corrida do ADR 0037 não protegia. Dois candidatos
-        // de um convite com a mesma chave de pino (`chave_do_pin` é `host:porta`
-        // do nome, e alternativos do mesmo nome colidem): o verdadeiro fixa a
-        // chave dele, e o outro (um impostor, ou a porta velha de um NAT) é
-        // recusado pela impressão. O verificador do impostor olhou e não viu pin
-        // nenhum; o vizinho fixa; o impostor desiste. A limpeza de
-        // `conectar_por` achava `nada antes, algo agora` e apagava o pin que o
-        // vizinho acabou de escrever — sem o guarda do vencedor que a limpeza de
-        // depois da corrida tem, e sem dizer nada.
-        let (ponta_b, onde_b, impressao_b) = ponta_com_certificado_proprio();
-        let impressao_de_a = "a".repeat(64);
-        let chave = "casa:8383";
-        let loja = Arc::new(LojaComVizinho::nova(chave, &impressao_de_a));
-
-        // Quem atende fecha o aperto do enlace e fica de pé. A loja é armada
-        // antes: a primeira leitura é a do verificador, depois do DTLS e antes
-        // do `Hello`, e é ela que dispara o vizinho.
-        let segura_b = tokio::spawn(async move {
-            let conexao = ponta_b.aceitar().await;
-            std::future::pending::<()>().await;
-            drop(conexao);
-        });
-        loja.armar();
-
-        let resultado = tokio::time::timeout(
-            Duration::from_secs(20),
-            conectar_por_teste(
-                destino_na_chave(onde_b, chave, Some(&impressao_de_a)),
-                SigningKey::from_bytes(&[8; 32]),
-                Arc::clone(&loja) as Arc<dyn PinStore>,
-            ),
-        )
-        .await
-        .expect("a tentativa recusada não terminou");
-        segura_b.abort();
-
-        let Err(erro) = resultado else {
-            panic!("a tentativa que a impressão desmente entrou");
-        };
-        assert_eq!(
-            erro,
-            ConnectError::InviteMismatch {
-                expected: impressao_de_a.clone(),
-                offered: impressao_b
-            },
-            "o candidato que a impressão desmente não foi recusado por ela, e o \
-             teste mediu outra coisa"
-        );
-        assert_eq!(
-            loja.pinned(chave),
-            Some(impressao_de_a),
-            "a recusa do impostor apagou o pin que o candidato verdadeiro tinha \
-             acabado de fixar: a confiança de primeiro contato foi desfeita calada"
-        );
-    }
-
-    #[tokio::test]
-    async fn um_candidato_de_outra_chave_nao_apaga_o_pin_que_o_vizinho_fixou() {
-        // O mesmo desenho com servidores de verdade, e a ordem que sobra quando
-        // o verdadeiro é o primeiro a fixar: o outro candidato encontra o pin do
-        // vizinho, vê outra chave e falha com `PinChanged`. Também não escreveu
-        // nada, e também não pode desfazer o que era do vizinho — era assim que
-        // o pin do candidato verdadeiro sumia mesmo antes de a impressão chegar
-        // ao TLS.
-        //
-        // **A**, o verdadeiro, termina o TLS, fixa a chave dele e nunca
-        // responde ao `Hello`: fica de pé no meio do aperto de mão. **B** tem
-        // outro certificado, e o teste o segura no meio do TLS até **A** ter
-        // fixado, sem depender de relógio:
-        //
-        // 1. **B** começa, e não vê pin nenhum;
-        // 2. **A** fixa a chave dele;
-        // 3. **B** falha, sem ter escrito nada.
-        let (ponta_a, onde_a, impressao_a) = ponta_com_certificado_proprio();
-        let (ponta_b, onde_b, impressao_b) = ponta_com_certificado_proprio();
-        let chave = "casa:8383";
-        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
-
-        let segura_a = tokio::spawn(async move {
-            let conexao = ponta_a.aceitar().await;
-            std::future::pending::<()>().await;
-            drop(conexao);
-        });
-        let segura_b = tokio::spawn(async move {
-            let conexao = ponta_b.aceitar().await;
-            std::future::pending::<()>().await;
-            drop(conexao);
-        });
-
-        let a = conectar_por_teste(
-            destino_na_chave(onde_a, chave, Some(&impressao_a)),
-            SigningKey::from_bytes(&[7; 32]),
-            Arc::clone(&loja) as Arc<dyn PinStore>,
-        );
-        // **B** só disca depois de **A** fixar: a ordem é a do texto acima, sem
-        // relógio.
-        let b = async {
-            while loja.pinned(chave).as_deref() != Some(impressao_a.as_str()) {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-            conectar_por_teste(
-                destino_na_chave(onde_b, chave, None),
-                SigningKey::from_bytes(&[8; 32]),
-                Arc::clone(&loja) as Arc<dyn PinStore>,
-            )
-            .await
-        };
-        let resultado_de_b = tokio::time::timeout(Duration::from_secs(20), async {
-            tokio::select! {
-                biased;
-                _ = a => panic!(
-                    "a tentativa que devia ficar parada no `Hello` terminou: o \
-                     servidor de teste respondeu, ou o aperto de mão falhou"
-                ),
-                resultado = b => resultado,
-            }
-        })
-        .await
-        .expect("a disputa entre as duas tentativas não terminou");
-        segura_a.abort();
-        segura_b.abort();
-
-        let Err(erro) = resultado_de_b else {
-            panic!("a tentativa de outra chave entrou");
-        };
-        assert_eq!(
-            erro,
-            ConnectError::PinChanged {
-                pinned: impressao_a.clone(),
-                offered: impressao_b
-            },
-            "o candidato de outra chave não falhou como chave trocada, e o teste \
-             mediu outra coisa"
-        );
-        assert_eq!(
-            loja.pinned(chave),
-            Some(impressao_a),
-            "um candidato que falhou sem escrever nada apagou o pin do vizinho"
-        );
-    }
-
-    /// Um servidor que fala só o aperto de mão do protocolo e derruba a
-    /// conexão assim que ele termina — antes que quem está do outro lado
-    /// consiga escrever mais nada por ela.
-    ///
-    /// Existe para reproduzir o §2.2 do relatório sem depender de uma queda de
-    /// rede de verdade acontecer bem no instante certo — isso seria uma
-    /// corrida contra o relógio, e uma corrida não prova a mesma coisa duas
-    /// vezes seguidas. Aqui não há corrida: a conexão morre porque **este
-    /// servidor a derruba**, no mesmo fôlego em que confirma o aperto de mão
-    /// como bom. `Client::connect_por` sai com sucesso; a escrita seguinte,
-    /// na mesma conexão, é a que encontra a queda.
-    async fn servidor_que_aperta_a_mao_e_cai() -> SocketAddr {
-        // O TLS é o de qualquer ponta de teste. O que este servidor tem de seu
-        // é o que faz depois dele, e a impressão não interessa a quem o chama.
-        let (escuta, endereco, _) = ponta_com_certificado_proprio();
-
-        tokio::spawn(async move {
-            let Some(conexao) = escuta.aceitar().await else {
-                return;
-            };
-            let Some((mut envio, mut recebe)) = conexao.controle() else {
-                return;
-            };
-
-            // `Hello`, ignorado: este servidor de teste aceita qualquer um.
-            if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
-                .await
-                .is_err()
-            {
-                return;
-            }
-            if crate::frame::write(
-                &mut envio,
-                &seele_proto::control::ServerMessage::Challenge { nonce: vec![0; 32] },
-            )
-            .await
-            .is_err()
-            {
-                return;
-            }
-            // `Response`, também ignorado: não há assinatura para conferir
-            // aqui, só o aperto de mão precisa completar.
-            if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
-                .await
-                .is_err()
-            {
-                return;
-            }
-            // A parada sai **antes** do `Session`, e não depois — de propósito.
-            // `stop_sending` e o quadro do `Session` seguem os dois na mesma
-            // direção (deste servidor para o cliente), então chegam juntos ou
-            // quase juntos, e o processamento das duas mensagens acontece na
-            // mesma passada de leitura da conexão do cliente, antes que o
-            // código dele sequer acorde do `await` que lê o `Session`. Fechar
-            // a conexão inteira **depois** do `Session` sair é uma corrida —
-            // ou o fecho alcança o `Session` no meio do caminho, ou não
-            // alcança a próxima escrita do cliente a tempo, dependendo de
-            // quanto a rede demorar. `stop_sending` na direção que o cliente
-            // escreve não tem essa corrida: uma vez que o cliente processa o
-            // pacote, a próxima escrita dele volta erro na hora, sem depender
-            // de outro round-trip.
-            let _ = recebe.stop(0);
-            let _ = crate::frame::write(
-                &mut envio,
-                &seele_proto::control::ServerMessage::Session {
-                    id: seele_proto::ids::SessionId(1),
-                    person: PersonId(1),
-                    ssrc: seele_proto::ids::Ssrc(1),
-                    server: "servidor de teste".into(),
-                    voice_rooms: vec![],
-                    channels: vec![],
-                    roles: vec![],
-                    permissions: vec![],
-                },
-            )
-            .await;
-            // A conexão fica viva de propósito — é o `stop_sending` acima que
-            // derruba só a direção que importa. Vazam porque o teste é curto e
-            // derrubar os endpoints fecharia a conexão que ele ainda mede.
-            std::mem::forget(escuta);
-            std::mem::forget(conexao);
-        });
-
-        endereco
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_reentrada_na_sala_falha_na_reconexao_e_o_cliente_nao_se_da_por_sentado() {
-        // O mecanismo do §2.2 do relatório: o servidor confirma por silêncio,
-        // então uma falha de envio que ninguém confere vira divergência
-        // permanente. É a terceira via para o mesmo sintoma relatado — «pra
-        // mim ele não está na call, pra ele sim» — e aqui é o espelho: pra
-        // esta pessoa ela está, e o servidor nunca recebeu o pedido.
-        let endereco = servidor_que_aperta_a_mao_e_cai().await;
-
-        let mut motor = motor_de_teste();
-        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
-        motor.avisos = avisos;
-        motor.destino.servidor = endereco;
-        motor.destino.nome_tls = "localhost".into();
-        motor.destino.chave_do_pin = endereco.to_string();
-        // A sala que a pessoa tinha escolhido antes de cair — o que
-        // `Motor::tentar` tenta restaurar nesta reconexão, e o que a queda
-        // desta conexão vai impedir de restaurar.
-        motor.voice_room = Some(VoiceRoomId(9));
-
-        motor.tentar().await;
-
-        assert!(
-            motor.cliente.is_none(),
-            "a reentrada na sala falhou, mas o motor se deu por reconectado do mesmo jeito \
-             — exatamente o defeito: o cliente se acha dentro da sala, e o servidor nunca \
-             recebeu o pedido."
-        );
-
-        while let Ok(aviso) = avisos_rx.try_recv() {
-            assert!(
-                !matches!(aviso, Aviso::Reconectado { .. }),
-                "o motor anunciou reconexão mesmo sem ter restaurado a sala de voz — é isto \
-                 que faz a casca se dar por dentro da sala para si mesma enquanto o servidor \
-                 nunca a teve."
-            );
-        }
-
-        // A intenção continua guardada: a próxima tentativa da bateria tenta
-        // de novo a mesma sala, e não esquece o que a pessoa escolheu.
-        assert_eq!(motor.voice_room, Some(VoiceRoomId(9)));
-    }
-
-    /// Uma ponta com certificado próprio que atende o aperto de mão do protocolo
-    /// inteiro e fica de pé, contando os `Hello` que chegaram até ela.
-    ///
-    /// Devolve o endereço, a impressão do certificado e a contagem. É o lado do
-    /// servidor que os testes da volta da bateria olham: um `Hello` que chega
-    /// aqui levou o apelido e a assinatura de quem reconectava.
-    fn servidor_que_conta_os_hellos() -> (SocketAddr, String, Arc<std::sync::atomic::AtomicU32>) {
-        servidor_que_conta_os_hellos_depois_de(Duration::ZERO)
-    }
-
-    /// O mesmo, com o socket aberto na hora e a ponta só começando a ler
-    /// depois de `atraso`: as checagens ICE que chegam antes esperam no socket,
-    /// e quem responde primeiro é qualquer outro candidato do mesmo lote.
-    fn servidor_que_conta_os_hellos_depois_de(
-        atraso: Duration,
-    ) -> (SocketAddr, String, Arc<std::sync::atomic::AtomicU32>) {
-        let certificado = crate::transporte::CertificadoDtls::efemero().expect("certificado");
-        let impressao = crate::client::hex(&certificado.impressao());
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
-        let endereco = socket.local_addr().expect("endereço");
-        let hellos = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let contando = Arc::clone(&hellos);
-        tokio::spawn(async move {
-            tokio::time::sleep(atraso).await;
-            let Ok(escuta) = crate::transporte::Ponta::de_socket(
-                socket,
-                Some(crate::transporte::ConfigDoAnfitriao::novo(certificado)),
-            ) else {
-                return;
-            };
-            // As conexões ficam guardadas aqui, de pé, até o teste acabar: a
-            // reconexão tem de encontrar a sessão viva depois do `Session`.
-            let mut de_pe = Vec::new();
-            while let Some(conexao) = escuta.aceitar().await {
-                let Some((mut envio, mut recebe)) = conexao.controle() else {
-                    continue;
-                };
-                if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
-                    .await
-                    .is_err()
-                {
-                    continue;
-                }
-                contando.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if crate::frame::write(
-                    &mut envio,
-                    &seele_proto::control::ServerMessage::Challenge { nonce: vec![0; 32] },
-                )
-                .await
-                .is_err()
-                {
-                    continue;
-                }
-                // `Response`, ignorado: não há assinatura a conferir aqui.
-                if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
-                    .await
-                    .is_err()
-                {
-                    continue;
-                }
-                let _ = crate::frame::write(
-                    &mut envio,
-                    &seele_proto::control::ServerMessage::Session {
-                        id: seele_proto::ids::SessionId(1),
-                        person: PersonId(1),
-                        ssrc: seele_proto::ids::Ssrc(1),
-                        server: "servidor de teste".into(),
-                        voice_rooms: vec![],
-                        channels: vec![],
-                        roles: vec![],
-                        permissions: vec![],
-                    },
-                )
-                .await;
-                de_pe.push((conexao, envio, recebe));
-            }
-        });
-        (endereco, impressao, hellos)
-    }
-
-    /// Um motor que volta pela bateria a `endereco`, com a chave de quem atende
-    /// ali já fixada e uma impressão esperada que a desmente.
-    fn motor_que_volta_a(
-        endereco: SocketAddr,
-        fixada: &str,
-        o_pino_prova_o_servidor: bool,
-    ) -> (Motor, Arc<crate::tofu::MemoryPinStore>) {
-        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
-        loja.pin(&endereco.to_string(), fixada.to_owned());
-        let mut motor = motor_de_teste();
-        motor.pins = Arc::clone(&loja) as Arc<dyn PinStore>;
-        motor.destino.servidor = endereco;
-        motor.destino.nome_tls = "localhost".into();
-        motor.destino.chave_do_pin = endereco.to_string();
-        motor.destino.esperada = Some(Esperada::Certificado("ab".repeat(32)));
-        motor.destino.o_pino_prova_o_servidor = o_pino_prova_o_servidor;
-        (motor, loja)
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_volta_da_bateria_onde_o_pino_nao_prova_o_servidor_e_recusada_antes_do_hello() {
-        // `Motor::tentar` não passa por `conferir`: a conferência da volta é só
-        // a do verificador, e ele só sabe se o pino prova o servidor pelo que
-        // `tentar` lhe passa do destino. Aqui o destino é o de um candidato que
-        // a pessoa não escolheu, ou de um alvo de LAN: quem atende está fixado
-        // com a chave dele, e a esperada é de outro servidor. A volta tem de ser
-        // recusada dentro do TLS, como a entrada foi.
-        let (endereco, impressao, hellos) = servidor_que_conta_os_hellos();
-        let (mut motor, loja) = motor_que_volta_a(endereco, &impressao, false);
-        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
-        motor.avisos = avisos;
-
-        motor.tentar().await;
-
-        assert_eq!(
-            hellos.load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "a volta da bateria mandou o `Hello` a quem o pino não prova: o apelido e a \
-             assinatura saíram para um servidor que a impressão esperada desmente"
-        );
-        assert!(
-            motor.cliente.is_none(),
-            "a volta da bateria se deu por reconectada num endereço cujo pino não prova o \
-             servidor, com a impressão esperada discordando"
-        );
-        let mut recusada = false;
-        while let Ok(aviso) = avisos_rx.try_recv() {
-            recusada |= matches!(
-                aviso,
-                Aviso::Encerrado(Motivo::Recusado(ConnectError::InviteMismatch { .. }))
-            );
-        }
-        assert!(
-            recusada,
-            "a volta recusada pela impressão não encerrou a sessão como recusa: a bateria \
-             insistiria contra um servidor que não é o do link"
-        );
-        assert_eq!(
-            loja.pinned(&endereco.to_string()),
-            Some(impressao),
-            "a recusa da volta mexeu no pino daquele endereço, que continua sendo a prova de \
-             quem atende ali"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_volta_recusada_diz_no_registro_por_que_a_sessao_acabou() {
-        // A volta recusada acabava com a sessão sem uma linha no `seele.log`:
-        // só a tentativa que falha e deixa a bateria correndo tinha o `debug!`
-        // dela. A que acaba com tudo saía calada, e quem relatava «caiu e não
-        // voltou» não tinha o que mostrar.
-        //
-        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
-        // thread, e `tentar` roda nela.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-
-        let (endereco, impressao, _) = servidor_que_conta_os_hellos();
-        let (mut motor, _) = motor_que_volta_a(endereco, &impressao, false);
-        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
-        motor.avisos = avisos;
-
-        motor.tentar().await;
-
-        let mut recusada = false;
-        while let Ok(aviso) = avisos_rx.try_recv() {
-            recusada |= matches!(aviso, Aviso::Encerrado(Motivo::Recusado(_)));
-        }
-        assert!(
-            recusada,
-            "a volta pela impressão que não confere não acabou recusada, e o teste mediu \
-             outra coisa"
-        );
-        let linhas = rastro.linhas();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("WARN")
-                && linha.contains("a volta da bateria foi recusada")
-                && linha.contains("InviteMismatch")),
-            "a volta recusada acabou com a sessão sem dizer no `seele.log` qual recusa foi: \
-             quem relata «caiu e não voltou» não tem o que mostrar. Linhas: {linhas:?}"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_volta_da_bateria_onde_o_pino_prova_o_servidor_reconecta_com_a_esperada_divergente() {
-        // A metade que a recusa de cima não pode levar junto (ADR 0003). No alvo
-        // de escopo público, ou no loopback, o pino prova o servidor: a volta
-        // passa com a esperada discordando, como a entrada passou e avisou.
-        let (endereco, impressao, hellos) = servidor_que_conta_os_hellos();
-        let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
-        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
-        motor.avisos = avisos;
-
-        motor.tentar().await;
-
-        assert!(
-            motor.cliente.is_some(),
-            "a volta da bateria ao alvo cujo pino prova o servidor foi recusada pela impressão \
-             esperada: quem entrou avisado seria derrubado na primeira queda de rede"
-        );
-        let mut reconectou = false;
-        while let Ok(aviso) = avisos_rx.try_recv() {
-            reconectou |= matches!(aviso, Aviso::Reconectado { .. });
-        }
-        assert!(
-            reconectou,
-            "o motor voltou sem anunciar a reconexão à casca"
-        );
-        assert_eq!(
-            hellos.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "a volta que reconectou não passou por um aperto de mão do protocolo com o \
-             servidor de teste, e o teste mediu outra coisa"
-        );
-    }
-
-    /// O aviso da volta diz em que sala de voz o motor sentou a pessoa de novo.
-    ///
-    /// A pendência 52 abre o áudio pelo assento, e a casca não tem outro jeito de
-    /// saber dele depois de uma queda: a sessão nova chega sem assento, e o
-    /// servidor confirma a entrada por silêncio. Quem estava fora de sala volta
-    /// com `None`, e a casca não abre aparelho nenhum.
-    ///
-    /// # A colisão de porta, em toda rodada
-    ///
-    /// Este teste reprovava uma vez em muitas, com `None` contra
-    /// `Some(Some(VoiceRoomId(5)))` depois de 20,0 s em `tentar` (lote Y da F5).
-    /// Medido: o socket `[::]:0` de quem volta caía numa porta que um socket
-    /// IPv4 em `127.0.0.1` já segurava — numa rodada sem nada de fora, o que
-    /// `servidor_que_aperta_a_mao_e_cai` esquece de pé de propósito, no teste
-    /// anterior —, a resposta do servidor ao aperto de mão ia para ele, e o QUIC
-    /// desistia pela ociosidade (`TimedOut`). O servidor de teste ficava no
-    /// `entrada.await` daquela conexão.
-    ///
-    /// A primeira volta encena isso de propósito onde o sistema deixa (o
-    /// macOS): a proposta de socket que o sistema daria colide com um socket
-    /// IPv4 que o teste segura. Sem a conferência de
-    /// [`crate::client::socket_de_quem_conecta`], a volta reprova sempre, com a
-    /// mensagem de antes. Onde o sistema recusa a colisão, a volta corre com os
-    /// sockets IPv4 de pé, e a recusa fica medida em
-    /// `client::testes_do_socket`.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_volta_avisa_a_voice_room_em_que_o_motor_sentou_a_pessoa_de_novo() {
-        let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
-
-        for sala in [Some(VoiceRoomId(5)), None] {
-            let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
-            let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
-            motor.avisos = avisos;
-            motor.voice_room = sala;
-
-            // Os ladrões ficam de pé até a volta acabar: é um deles que recebe a
-            // resposta do servidor se o socket de quem volta dividir a porta com
-            // ele. Onde o sistema recusa a colisão, a volta corre com eles de pé,
-            // e não há proposta a encenar.
-            let (_ladroes, encenada) = if sala.is_some() {
-                use crate::client::testes_do_socket::{encenar_a_colisao, Encenacao};
-                match encenar_a_colisao() {
-                    Encenacao::Colisao { ladrao, proposta } => {
-                        crate::client::PROPOSTA_DE_TESTE
-                            .with(|vaga| *vaga.borrow_mut() = Some(Ok(proposta)));
-                        (vec![ladrao], true)
-                    }
-                    Encenacao::Recusa { ladroes, .. } => (ladroes, false),
-                }
-            } else {
-                (Vec::new(), false)
-            };
-
-            // `tentar` roda nesta thread — é o futuro do `block_on` do teste —, e
-            // é nela que a proposta guardada vale.
-            motor.tentar().await;
-            if encenada {
-                assert!(
-                    crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
-                    "a volta não abriu o socket pela proposta guardada, e o teste não \
-                     encenou a colisão"
-                );
-            }
-
-            let mut avisada = None;
-            while let Ok(aviso) = avisos_rx.try_recv() {
-                if let Aviso::Reconectado { voice_room, .. } = aviso {
-                    avisada = Some(voice_room);
-                }
-            }
-            assert_eq!(
-                avisada,
-                Some(sala),
-                "a volta não avisou a sala que o motor refez nela: a casca desenha fora \
-                 de sala quem está sentado, e o áudio que segue o assento fecha a voz \
-                 de quem só caiu e voltou"
-            );
-        }
-    }
-
-    /// Uma ponta com certificado próprio que aceita todo aperto de mão do TLS e
-    /// não fala nada depois: o bastante para o verificador de quem conecta ver
-    /// a chave dela e decidir.
-    fn ponta_que_so_mostra_a_chave() -> (SocketAddr, String) {
-        let (escuta, endereco, impressao) = ponta_com_certificado_proprio();
-        tokio::spawn(async move {
-            let mut de_pe = Vec::new();
-            while let Some(conexao) = escuta.aceitar().await {
-                de_pe.push(conexao);
-            }
-        });
-        (endereco, impressao)
-    }
-
-    #[tokio::test]
-    async fn a_recusa_de_um_candidato_perdedor_vai_ao_log_mesmo_quando_outro_entra() {
-        // O evento que o Plano 1B existe para barrar é um impostor num endereço
-        // da corrida (o do quarto, por exemplo) com a chave errada. Quando outro
-        // candidato vencia, as falhas da corrida eram descartadas sem uma linha,
-        // e esse evento não deixava rastro no `seele.log`.
-        //
-        // Desde a 0.17 os quatro vão num agente ICE só, e o ICE fica com quem
-        // responde primeiro. O verdadeiro começa a ler o socket um segundo
-        // depois, de propósito, para os outros dois responderem antes:
-        // - um que a impressão esperada desmente (`InviteMismatch`);
-        // - um cuja chave fixada mudou (`PinChanged`);
-        // - um endereço onde ninguém responde;
-        // - o verdadeiro.
-        // O lote redisca sem quem recusou, e cada recusa vai ao log.
-        //
-        // A chave de pino de cada um não é o texto do endereço, de propósito: o
-        // verificador também registra as duas recusas, sob a chave de pino, e
-        // um guarda que casasse com a linha dele não provaria nada sobre a
-        // corrida.
-        //
-        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
-        // thread, e a corrida inteira roda nela.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-
-        let (onde_do_impostor, impressao_do_impostor) = ponta_que_so_mostra_a_chave();
-        let (onde_do_trocado, impressao_do_trocado) = ponta_que_so_mostra_a_chave();
-        let (onde_do_verdadeiro, impressao_do_verdadeiro, _) =
-            servidor_que_conta_os_hellos_depois_de(Duration::from_secs(1));
-        let fixada_antes = "f".repeat(64);
-        let onde_de_quem_nao_sai: SocketAddr = "127.0.0.1:9".parse().expect("endereço");
-
-        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
-        loja.pin("chave-do-trocado", fixada_antes.clone());
-        let quem_nao_sai = destino_na_chave(onde_de_quem_nao_sai, "chave-de-quem-nao-sai", None);
-        let destinos = vec![
-            destino_na_chave(
-                onde_do_impostor,
-                "chave-do-impostor",
-                Some(&impressao_do_verdadeiro),
-            ),
-            destino_na_chave(onde_do_trocado, "chave-do-trocado", None),
-            quem_nao_sai,
-            destino_na_chave(
-                onde_do_verdadeiro,
-                "chave-do-verdadeiro",
-                Some(&impressao_do_verdadeiro),
-            ),
-        ];
-
-        let entrou = tokio::time::timeout(
-            Duration::from_secs(20),
-            Enlace::conectar_entre_com_bilhete(
-                destinos,
-                None,
-                SigningKey::from_bytes(&[9; 32]),
-                Arc::clone(&loja) as Arc<dyn PinStore>,
-            ),
-        )
-        .await
-        .expect("a corrida não terminou");
-        assert!(
-            entrou.is_ok(),
-            "o candidato verdadeiro não venceu a corrida ({:?}), e o teste mediu outra coisa",
-            entrou.err()
-        );
-
-        let linhas = rastro.linhas();
-        let do_impostor = onde_do_impostor.to_string();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("WARN")
-                && linha.contains(&do_impostor)
-                && linha.contains(&impressao_do_verdadeiro)
-                && linha.contains(&impressao_do_impostor)),
-            "a recusa pela impressão de um candidato perdedor sumiu do log quando outro entrou: \
-             quem lê o `seele.log` não fica sabendo que um servidor com a chave errada atendeu \
-             em {do_impostor}. Rastro: {linhas:?}"
-        );
-        let do_trocado = onde_do_trocado.to_string();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("WARN")
-                && linha.contains(&do_trocado)
-                && linha.contains(&fixada_antes)
-                && linha.contains(&impressao_do_trocado)),
-            "a chave trocada de um candidato perdedor sumiu do log quando outro entrou: o \
-             alarme do ADR 0003 em {do_trocado} não deixou rastro. Rastro: {linhas:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn sem_vencedor_a_recusa_de_um_candidato_vai_ao_log_do_mesmo_jeito() {
-        // O caminho sem vencedor já registrava cada falha, em `info`. A recusa
-        // pela impressão sobe para `warn`, com o endereço e as duas impressões,
-        // pela mesma regra do caminho com vencedor: as duas voltas escrevem a
-        // falha de um candidato pela mesma função, e um guarda só no caminho
-        // com vencedor deixaria este mudar calado.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-
-        let (onde_do_impostor, impressao_do_impostor) = ponta_que_so_mostra_a_chave();
-        let esperada = "e".repeat(64);
-        let quem_nao_sai = destino_na_chave(
-            "127.0.0.1:9".parse().expect("endereço"),
-            "chave-de-quem-nao-sai",
-            None,
-        );
-        let destinos = vec![
-            destino_na_chave(onde_do_impostor, "chave-do-impostor", Some(&esperada)),
-            quem_nao_sai,
-        ];
-
-        let resultado = tokio::time::timeout(
-            Duration::from_secs(20),
-            Enlace::conectar_entre_com_bilhete(
-                destinos,
-                None,
-                SigningKey::from_bytes(&[9; 32]),
-                Arc::new(crate::tofu::MemoryPinStore::new()) as Arc<dyn PinStore>,
-            ),
-        )
-        .await
-        .expect("a corrida não terminou");
-        assert!(
-            resultado.is_err(),
-            "um candidato entrou numa corrida sem servidor verdadeiro, e o teste mediu outra coisa"
-        );
-
-        let linhas = rastro.linhas();
-        let do_impostor = onde_do_impostor.to_string();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("WARN")
-                && linha.contains(&do_impostor)
-                && linha.contains(&esperada)
-                && linha.contains(&impressao_do_impostor)),
-            "sem vencedor, a recusa pela impressão de um candidato não foi ao log em `warn` com \
-             o endereço e as duas impressões. Rastro: {linhas:?}"
-        );
-    }
-
-    #[test]
-    fn um_anexo_que_nao_foi_salvo_deixa_o_porque_no_log() {
-        // A tela recebe `Falhou` e mais nada: o `NaoSalvou` do core não leva
-        // motivo. Mas quem investiga depois precisa saber se foi o hash, o
-        // prazo ou o disco, e só o motor sabe — se ele não escreve, a pergunta
-        // volta dias depois sem dado nenhum junto.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-
-        let fim = fim_do_salvar(
-            AttachmentId(41),
-            std::path::Path::new("/tmp/pasta/.foto.png.seele-parcial"),
-            Err(anyhow::anyhow!(
-                "o arquivo não chegou inteiro e foi descartado"
-            )),
-        );
-        assert_eq!(
-            fim,
-            Transferencia::NaoSalvou {
-                anexo: AttachmentId(41)
-            },
-            "um anexo que não fechou com o hash não chegou à tela como não salvo"
-        );
-        let linhas = rastro.linhas();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("WARN")
-                && linha.contains("anexo=41")
-                && linha.contains("o arquivo não chegou inteiro")),
-            "um anexo que não foi salvo não deixou no `seele.log` qual anexo foi \
-             nem por quê, e o motor era o único que sabia. Rastro: {linhas:?}"
-        );
-
-        let salvo = fim_do_salvar(
-            AttachmentId(42),
-            std::path::Path::new("/tmp/pasta/.foto.png.seele-parcial"),
-            Ok((3_000, std::path::PathBuf::from("/tmp/pasta/foto (2).png"))),
-        );
-        assert_eq!(
-            salvo,
-            Transferencia::Salvo {
-                anexo: AttachmentId(42),
-                caminho: std::path::PathBuf::from("/tmp/pasta/foto (2).png"),
-            },
-            "um anexo salvo não levou à tela o caminho real em que ficou"
-        );
-    }
-
-    #[test]
-    fn dizer_nao_e_lembrado() {
-        // Só estado é restaurado. Reenviar mensagens numa reconexão duplicaria
-        // o que a pessoa disse, e a idempotência do protocolo protege contra
-        // reenvio do **mesmo** identificador, não contra este erro.
-        let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::Dizer {
-            linha: ChannelId(1),
-            corpo: "oi".into(),
-            id: ClientMessageId(1),
-        });
-        assert_eq!(motor.linha, None);
-    }
-
-    #[test]
-    fn moderar_nao_e_lembrado() {
-        // Um `Expulsar` guardado seria refeito ao voltar da bateria: cinco
-        // minutos depois, alguém que já tinha reconectado cairia de novo, sem
-        // ninguém ter pedido nada. O mesmo para banir.
-        let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
-
-        motor.lembrar(&Comando::Expulsar {
-            pessoa: PersonId(9),
-        });
-        motor.lembrar(&Comando::Banir {
-            pessoa: PersonId(9),
-            motivo: None,
-            expira_em: None,
-        });
-        motor.lembrar(&Comando::MoverPersono {
-            pessoa: PersonId(9),
-            voice_room: VoiceRoomId(5),
-        });
-        motor.lembrar(&Comando::RemoverMensagem {
-            mensagem: MessageId(1),
-        });
-
-        assert_eq!(
-            motor.voice_room,
-            Some(VoiceRoomId(2)),
-            "moderar outra pessoa mexeu em onde este cliente está"
-        );
-    }
-
-    // ------------------------------------------------------- a tela
-
-    /// Uma captura de mentira: entrega sempre um quadro do tamanho pedido.
-    ///
-    /// A da máquina precisa de monitor e de permissão, e nenhum dos dois existe
-    /// num agente de integração contínua. O que estes testes provam é a máquina
-    /// de estados, não a ScreenCaptureKit.
-    #[derive(Debug)]
-    struct CapturaDeMentira;
-
-    #[derive(Debug)]
-    struct FonteDeMentira {
-        largura: usize,
-        altura: usize,
-        passo: std::sync::atomic::AtomicUsize,
-    }
-
-    impl crate::video::FonteDeQuadros for FonteDeMentira {
-        fn tomar(&self) -> Option<seele_video::codec::QuadroI420> {
-            let passo = self
-                .passo
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let (largura, altura) = (self.largura, self.altura);
-            let mut luma = Vec::with_capacity(largura * altura);
-            for linha in 0..altura {
-                for coluna in 0..largura {
-                    // Bordas duras: um quadro chapado sairia com trinta bytes e
-                    // não provaria que o codificador rodou.
-                    let claro = ((coluna + passo) / 8 + linha / 12).is_multiple_of(2);
-                    luma.push(if claro { 235 } else { 16 });
-                }
-            }
-            let croma = vec![128; largura.div_ceil(2) * altura.div_ceil(2)];
-            seele_video::codec::QuadroI420::novo(largura, altura, luma, croma.clone(), croma).ok()
-        }
-    }
-
-    impl crate::video::Captura for CapturaDeMentira {
-        type Fonte = FonteDeMentira;
-
-        fn iniciar(
-            &mut self,
-            resolucao: seele_video::codec::Resolucao,
-            _cadencia: seele_video::codec::Cadencia,
-        ) -> Result<Self::Fonte, crate::video::CapturaRecusou> {
-            Ok(FonteDeMentira {
-                largura: resolucao.largura(),
-                altura: resolucao.altura(),
-                passo: std::sync::atomic::AtomicUsize::new(0),
-            })
-        }
-    }
-
-    /// O módulo do Cisco, ou `None` com o motivo impresso.
-    ///
-    /// **Pula em vez de falhar, e o motivo é a licença**: o módulo não pode
-    /// morar neste repositório, e um teste que o exigisse seria vermelho em toda
-    /// máquina limpa — um teste sempre vermelho é um teste que todo mundo
-    /// aprende a ignorar. Mesma decisão de `crate::bomba` e de `crate::video`.
-    fn biblioteca_de_teste() -> Option<seele_video::BibliotecaDeVideo> {
-        let mut pastas = Vec::new();
-        if let Some(apontado) = std::env::var_os("SEELE_OPENH264") {
-            let caminho = std::path::PathBuf::from(apontado);
-            pastas.push(if caminho.is_dir() {
-                caminho
-            } else {
-                caminho.parent().map_or_else(|| caminho.clone(), Into::into)
-            });
-        }
-        pastas.push(
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("..")
-                .join("target"),
-        );
-        match seele_video::BibliotecaDeVideo::procurar_e_carregar(&pastas) {
-            Ok(biblioteca) => Some(biblioteca),
-            Err(motivo) => {
-                // Ver `seele-video/tests/ida_e_volta.rs`: onde o codec é
-                // exigido, faltar é falha e não licença para pular. Um teste
-                // que volta cedo conta como passado, e é assim que uma suíte
-                // fica verde sem nunca ter rodado.
-                // Só onde há módulo publicado; no Linux o Cisco não publica.
-                assert!(
-                    std::env::var_os("SEELE_EXIGE_CODEC").is_none()
-                        || seele_video::modulo::publicado_para_este_sistema().is_none(),
-                    "SEELE_EXIGE_CODEC está ligado, este sistema tem módulo publicado \
-                     e ele não está aqui: {motivo}"
-                );
-                eprintln!(
-                    "PULADO: {motivo}.\n  O produto não vem com codec, e é a licença que impõe \
-                     isso. Aponte-o com SEELE_OPENH264.\n  Ligue SEELE_EXIGE_CODEC para que \
-                     faltar vire falha em vez de pulo."
-                );
-                None
-            }
-        }
-    }
-
-    fn pedido_de_teste(biblioteca: seele_video::BibliotecaDeVideo) -> PedidoDeTela {
-        PedidoDeTela {
-            biblioteca,
-            captura: crate::video::CapturaEmCaixa::nova(CapturaDeMentira),
-            origem: seele_proto::screen::ScreenSource::Monitor,
-        }
-    }
-
-    #[test]
-    fn a_bomba_so_nasce_quando_o_server_da_nome_a_transmissao() {
-        let Some(biblioteca) = biblioteca_de_teste() else {
-            return;
-        };
-        let mut motor = motor_de_teste();
-
-        // O botão foi apertado: o que existe é o pedido, e mais nada. Uma bomba
-        // aqui seria uma bomba sem `ScreenId` para pôr no cabeçalho do fluxo.
-        motor.tela_pedida = Some((
-            Box::new(pedido_de_teste(biblioteca)),
-            crate::video::LimitesDeTela::default(),
-        ));
-        assert!(
-            motor.tela_viva.is_none(),
-            "o pedido sozinho já tinha ligado a captura"
-        );
-
-        // O servidor respondeu, e a transmissão ganhou nome.
-        let mut canal = None;
-        motor.nascer_a_tela(ScreenId(7), |origem, eventos, _| {
-            canal = Some((origem, eventos));
-        });
-
-        let viva = motor.tela_viva.as_ref().expect("a bomba não nasceu");
-        assert_eq!(viva.tela, ScreenId(7), "a bomba nasceu com outro nome");
-        assert!(
-            motor.tela_pedida.is_none(),
-            "o pedido sobreviveu à transmissão que ele abriu, e o próximo \
-             `ScreenShareStarted` abriria uma segunda"
-        );
-
-        let (origem, mut eventos) = canal.expect("quem escoa não recebeu o canal");
-        assert_eq!(
-            origem,
-            seele_proto::screen::ScreenSource::Monitor,
-            "o cabeçalho do fluxo sairia dizendo que é uma janela"
-        );
-
-        // E ela está codificando de verdade: o primeiro evento é o fluxo a
-        // abrir, que só sai depois de a captura e o codificador armarem.
-        match eventos.blocking_recv() {
-            Some(crate::EventoDaBomba::Fluxo { geracao, .. }) => assert_eq!(geracao, 1),
-            outro => panic!("a bomba não abriu fluxo nenhum: {outro:?}"),
-        }
-
-        // E morre com o enlace. Uma bomba que sobrevivesse à queda seria uma
-        // thread codificando para uma conexão morta.
-        motor.cair();
-        assert!(
-            motor.tela_viva.is_none(),
-            "a bomba sobreviveu à queda do enlace"
-        );
-        assert!(
-            motor.tela_pedida.is_none(),
-            "o pedido sobreviveu à queda, e a reconexão poria a tela de alguém \
-             no ar sem que ninguém apertasse nada"
-        );
-
-        // A thread acabou de fato: o `Fim` é a última coisa que ela manda, e o
-        // canal fecha depois dele.
-        let mut acabou = false;
-        while let Some(evento) = eventos.blocking_recv() {
-            if matches!(evento, crate::EventoDaBomba::Fim(None)) {
-                acabou = true;
-            }
-        }
-        assert!(acabou, "a thread do codificador não disse que acabou");
-    }
-
-    /// O fecho: do pedido guardado ao primeiro quadro lido do outro lado.
-    ///
-    /// **É a pergunta que esta tarefa existe para responder** — apertar
-    /// compartilhar faz um quadro sair pela conexão? — e ela não se responde
-    /// olhando `tela_viva`: o que prova é o cabeçalho que quem recebe lê e os
-    /// bytes que vêm depois dele. `crate::bomba` já prova a bomba contra uma
-    /// conexão; o que estava sem prova é a costura do meio, que é o
-    /// `Escoadouro` que o [`Client`] embrulha e a tarefa que o motor solta.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn do_pedido_guardado_ao_quadro_lido_do_outro_lado() {
-        let Some(biblioteca) = biblioteca_de_teste() else {
-            return;
-        };
-        // O par paciente, e não o `par`: a bomba arma depois do aperto, e o
-        // prazo de ociosidade do QUIC não pode ser menor que a paciência com
-        // ela. Ver `crate::bomba::tests::par_paciente`.
-        let (saida, entrada) = crate::bomba::tests::par_paciente().await;
-        let escoadouro = crate::bomba::Escoadouro::nova(saida);
-        let tela = ScreenId(0x00C0_FFEE);
-
-        let mut motor = motor_de_teste();
-        motor.tela_pedida = Some((
-            Box::new(pedido_de_teste(biblioteca)),
-            crate::video::LimitesDeTela::default(),
-        ));
-
-        // A mesma forma da produção: uma tarefa própria, porque escoar dura o
-        // que a transmissão durar.
-        let mut escoando = None;
-        motor.nascer_a_tela(tela, |origem, mut eventos, _| {
-            escoando = Some(tokio::spawn(async move {
-                escoadouro.escoar(tela, origem, &mut eventos).await
-            }));
-        });
-        let escoando = escoando.expect("quem escoa não foi chamado");
-
-        let mut recepcao =
-            crate::bomba::tests::aceitar_com_paciencia(&entrada, || escoando.is_finished()).await;
-        assert_eq!(
-            recepcao.cabecalho().screen,
-            tela,
-            "o fluxo abriu com o nome de outra transmissão"
-        );
-        assert_eq!(
-            recepcao.cabecalho().source,
-            seele_proto::screen::ScreenSource::Monitor,
-            "o cabeçalho diz janela sobre um monitor"
-        );
-
-        let primeiro = recepcao
-            .proximo_quadro()
-            .await
-            .expect("ler o primeiro quadro")
-            .expect("o fluxo não podia ter acabado");
-        assert!(primeiro.chave(), "o primeiro quadro de um fluxo é chave");
-        assert!(!primeiro.bytes.is_empty(), "saiu um quadro vazio");
-
-        // E a queda do enlace fecha tudo: a bomba morre e o fluxo termina.
-        motor.cair();
-        let contagem = escoando
-            .await
-            .expect("a tarefa de escoar")
-            .expect("escoar até o fim");
-        assert!(contagem.enviados >= 1, "nenhum quadro chegou ao fio");
-        assert_eq!(contagem.fluxos, 1);
-    }
-
-    #[test]
-    fn sem_pedido_guardado_um_nome_de_transmissao_nao_liga_nada() {
-        // O servidor reenvia `ScreenShareStarted` a cada pessoa que entra numa sala de voz
-        // onde já há transmissão — inclusive a quem está transmitindo. Sem esta
-        // guarda, cada pessoa entrando na sala ligaria outra captura da mesma
-        // tela.
-        let mut motor = motor_de_teste();
-        let mut chamou = false;
-        motor.nascer_a_tela(ScreenId(1), |_, _, _| chamou = true);
-        assert!(!chamou, "ligou uma bomba que ninguém pediu");
-        assert!(motor.tela_viva.is_none());
-    }
-
-    #[test]
-    fn compartilhar_tela_nao_e_lembrado_para_a_reconexao() {
-        // Refeito depois de cinco minutos de bateria, poria o monitor de alguém
-        // no ar sem que ninguém tivesse apertado nada — e minutos depois de a
-        // pessoa ter desistido.
-        let mut motor = motor_de_teste();
-        motor.voice_room = Some(VoiceRoomId(3));
-        motor.lembrar(&Comando::PararDeCompartilhar);
-        assert_eq!(motor.voice_room, Some(VoiceRoomId(3)));
-    }
-
-    /// A metade da regra de aceite do §3.2 que faltava.
-    ///
-    /// O teto respondia ao `HostUplink` e ao número de espectadores e **não**
-    /// ao sinal da voz piorando: numa sala onde a voz começava a doer, a tela
-    /// não cedia sozinha. A perna que faltava já vinha pelo fio — o servidor
-    /// devolve a taxa de cada pessoa em `PersonState`, uma vez por segundo — e
-    /// ninguém guardava a sua.
-    #[test]
-    fn a_faixa_da_voz_desce_pelo_que_o_server_devolve() {
-        use seele_proto::control::{PersonState, Presence};
-
-        let eu = PersonId(7);
-        let outra = PersonId(9);
-        let estado = |pessoa: PersonId, taxa: u8| PersonState {
-            person: pessoa,
-            signal: taxa,
-            speaking: false,
-            muted: false,
-            total_isolation: false,
-            presence: Presence::Available,
-        };
-
-        // A voz doendo derruba a faixa, e é isto que faz a tela ceder.
-        assert_eq!(
-            faixa_nova(SignalBand::Nominal, &estado(eu, 10), Some(eu)),
-            Some(SignalBand::Critical),
-            "a taxa despencou e a faixa não acompanhou"
-        );
-
-        // A de outra pessoa não move nada. Sem esta guarda, a tela cederia
-        // porque a conexão **de outro** piorou — e quem compartilha ficaria
-        // pagando pelo vizinho.
-        assert_eq!(
-            faixa_nova(SignalBand::Nominal, &estado(outra, 10), Some(eu)),
-            None
-        );
-
-        // Sem sessão não há «esta pessoa». Uma mensagem antes do aperto de mão
-        // terminar não é sobre ninguém que este motor conheça.
-        assert_eq!(faixa_nova(SignalBand::Nominal, &estado(eu, 10), None), None);
-
-        // E a mesma faixa não vira ordem: a taxa chega uma vez por segundo e
-        // quase sempre no mesmo degrau, e refazer o teto a cada chegada
-        // acordaria a thread do codificador para lhe dizer o que ela já sabe.
-        assert_eq!(
-            faixa_nova(SignalBand::Critical, &estado(eu, 10), Some(eu)),
-            None
-        );
-
-        // E ela sobe de volta: ceder não pode ser de mão única, ou a tela
-        // ficaria pequena para sempre depois do primeiro engasgo.
-        assert_eq!(
-            faixa_nova(SignalBand::Critical, &estado(eu, 100), Some(eu)),
-            Some(SignalBand::Nominal)
-        );
-    }
-
-    /// **A perna que faltava no teto, ligada.**
-    ///
-    /// O motor usava `TetoDeVideo::novo()` para a perna de quem compartilha, o
-    /// que quer dizer o cano das provas — 2 Mbps — para sempre, em toda casa.
-    /// Quem tinha fibra via 720p a sessão inteira. Agora aquela perna sai da
-    /// [`crate::caminho::Sonda`], e este teste é o fio entre as duas: janelas
-    /// cheias e calmas entram, e o teto que sai da mesma função sobe.
-    #[test]
-    fn o_teto_sai_do_caminho_que_a_sonda_mediu_e_nao_da_suposicao() {
-        use crate::caminho::{Amostra, Transporte};
-        use crate::tela::Teto;
-
-        let mut motor = motor_de_teste();
-        // O servidor declarou uma subida larga, então a perna dele sai da frente e
-        // quem manda no `min` do §5.1 é a desta máquina. Sem isto o teto ficaria
-        // preso em 1200 kbps por causa da **outra** perna, que é um achado
-        // separado — ver `caminho::tests::sem_a_subida_do_server_...`.
-        motor.caminho_de_quem_hospeda_bps = Some(100_000_000);
-
-        // Antes de medir, a suposição de sempre: a primeira transmissão de uma
-        // sessão abre exatamente com o teto que abria antes deste módulo.
-        assert_eq!(
-            motor.teto_de_video(None).teto(SignalBand::Nominal),
-            Teto::Bps(1_200_000)
-        );
-
-        // Cinco janelas cheias e sem piora, como a tica do motor as entregaria.
-        let inicio = Instant::now();
-        let mut bytes = 0_u64;
-        for segundo in 0..12_u32 {
-            let teto = motor.teto_de_video(None).teto(SignalBand::Nominal);
-            // O que sai pelo soquete numa janela em que a tela encheu o teto: o
-            // orçamento inteiro mais a voz.
-            bytes += u64::from(teto.bps() + 60_000) / 8;
-            let amostra = Amostra {
-                transporte: Transporte {
-                    bytes_enviados: bytes,
-                    // A telemetria da 0.17: sem perda nem congestionamento, com a
-                    // ida e volta do `Ping` da sonda andando a cada janela.
-                    eventos_de_congestionamento: None,
-                    pacotes_perdidos: None,
-                    ida_e_volta: Some(crate::caminho::IdaEVolta {
-                        valor: Duration::from_millis(20),
-                        amostras: u64::from(segundo) * 2 + 1,
-                        em_voo: None,
-                    }),
-                },
-                teto,
-                faixa: SignalBand::Nominal,
-            };
-            motor
-                .caminho
-                .observar(inicio + Duration::from_secs(u64::from(segundo)), &amostra);
-        }
-
-        let teto = motor.teto_de_video(None).teto(SignalBand::Nominal);
-        assert!(
-            teto.bps() > 1_200_000,
-            "doze janelas cheias e o teto continuou na suposição: {teto:?}"
-        );
-        assert_eq!(
-            teto.resolucao_estimada(),
-            Some(seele_video::codec::Resolucao::P720),
-            "o caminho medido comprava 720p e a tela continuou menor"
-        );
-    }
-
-    /// Sem transmissão não há quem encha o cano, e ler o transporte ali seria
-    /// medir a voz — que diz que está bom a 40 kbps e não diz quanto cabe.
-    #[test]
-    fn sem_tela_no_ar_a_sonda_nao_e_alimentada() {
-        let mut motor = motor_de_teste();
-        let antes = motor.caminho.estimativa();
-        motor.medir_o_caminho();
-        assert_eq!(motor.caminho.estimativa(), antes);
-        assert_eq!(
-            motor.teto_de_video(None).teto(SignalBand::Nominal),
-            crate::tela::Teto::Bps(1_200_000)
-        );
-    }
-
-    /// **Sem `HostUplink`, a perna do hospedeiro sai da escolha.**
-    ///
-    /// É o pedido inteiro: escolher 1080p e não esperar a escada subir de
-    /// 2 Mbps em oito janelas.
-    #[test]
-    fn sem_host_uplink_a_perna_do_hospedeiro_sai_da_escolha() {
-        use crate::tela::Teto;
-        use crate::video::LimitesDeTela;
-        use seele_video::codec::Resolucao;
-
-        let mut motor = motor_de_teste();
-        // A perna de quem compartilha sai da frente, para o teto revelar a do
-        // hospedeiro sozinha. Em produção ela também parte da escolha — o
-        // `Comando::CompartilharTela` semeia a sonda com o mesmo número —, e aí
-        // as duas dão o mesmo valor; aqui ela é posta alta de propósito para
-        // que este teste falhe pelo motivo que ele nomeia.
-        motor.caminho = crate::caminho::Sonda::partindo_de(100_000_000);
-        motor.caminho_de_quem_hospeda_bps = None;
-        let limites = LimitesDeTela {
-            resolucao: Resolucao::P1080,
-            ..LimitesDeTela::default()
-        };
-
-        let teto = motor
-            .teto_de_video(Some(&limites))
-            .teto(SignalBand::Nominal);
-
-        // 10 400 000 de piso × 60% = 6 240 000, o limiar de 1080p em cheio.
-        assert_eq!(
-            teto,
-            Teto::Bps(6_240_000),
-            "escolher 1080p sem medida nenhuma do hospedeiro tinha de abrir no \
-             teto que 1080p custa; abriu em {teto:?} — a escolha só passaria a \
-             valer oito janelas depois, que é o que este piso existe para não \
-             fazer"
-        );
-    }
-
-    /// **A semente lembrada é grampeada e não volta ao disco como medida.**
-    ///
-    /// Decisão da 0.17: quem chama `lembrar_o_caminho` pode ter lido um número
-    /// sem data nem rede, e o motor não dá a ele confiança ilimitada; e uma
-    /// sessão que só recebeu a semente publica zero, que quem grava lê como
-    /// «não mediu».
-    #[test]
-    fn o_caminho_lembrado_tem_teto_e_nao_vira_medida() {
-        let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::LembrarCaminho(90_000_000));
-        assert_eq!(
-            motor.caminho.estimativa(),
-            crate::caminho::TETO_DA_SEMENTE_BPS,
-            "a semente passou do teto da semente"
-        );
-        assert_eq!(
-            motor
-                .caminho_medido
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0,
-            "a semente foi publicada como medida, e voltaria ao disco com data nova"
-        );
-    }
-
-    /// **Uma medida baixa desmente a escolha, e vence.**
-    ///
-    /// Repetir o palpite por cima de um número que a máquina já mediu seria
-    /// insistir no que ela sabe estar errado. O lado alto está coberto pelo
-    /// teste acima, onde o piso manda porque não há medida nenhuma.
-    #[test]
-    fn a_medida_baixa_do_hospedeiro_vence_o_piso_da_escolha() {
-        use crate::tela::Teto;
-        use crate::video::LimitesDeTela;
-        use seele_video::codec::Resolucao;
-
-        let mut motor = motor_de_teste();
-        motor.caminho = crate::caminho::Sonda::partindo_de(100_000_000);
-        // Um mega medido: muito abaixo dos 10,4 que 1080p pediria de palpite.
-        motor.caminho_de_quem_hospeda_bps = Some(1_000_000);
-        let limites = LimitesDeTela {
-            resolucao: Resolucao::P1080,
-            ..LimitesDeTela::default()
-        };
-
-        let teto = motor
-            .teto_de_video(Some(&limites))
-            .teto(SignalBand::Nominal);
-
-        assert_eq!(
-            teto,
-            Teto::Bps(600_000),
-            "com 1 Mbps medidos do hospedeiro o teto saiu {teto:?}: o piso da \
-             escolha passou por cima de uma medida de verdade, e o produto \
-             voltou a prometer banda que ninguém conferiu"
-        );
-    }
-
-    /// **Fora de uma transmissão não há escolha**, e o padrão segue a suposição.
-    #[test]
-    fn sem_transmissao_o_padrao_do_hospedeiro_segue_a_suposicao() {
-        use crate::tela::Teto;
-
-        let mut motor = motor_de_teste();
-        motor.caminho_de_quem_hospeda_bps = None;
-
-        let teto = motor.teto_de_video(None).teto(SignalBand::Nominal);
-
-        assert_eq!(
-            teto,
-            Teto::Bps(1_200_000),
-            "sem escolha nenhuma o teto deixou de ser o de CAMINHO_DA_PROVA_BPS: \
-             {teto:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn sem_sessao_o_pedido_de_tunel_e_sem_resposta_e_o_servidor_onze_e_antigo() {
-        use crate::client::NaoSaiu;
-        let mut motor = motor_de_teste();
-        let (resposta, caixa) = tokio::sync::oneshot::channel();
-        motor
-            .entrar_no_tunel("seele/jogo".into(), "mundo".into(), resposta)
-            .await;
-        assert_eq!(
-            caixa.await.unwrap().unwrap_err(),
-            RecusaDeTunel::SemResposta
-        );
-        let (resposta, caixa) = tokio::sync::oneshot::channel();
-        motor
-            .servir_tunel(
-                "seele/jogo".into(),
-                "mundo".into(),
-                ProtocoloDeTunel::Tcp,
-                1,
-                resposta,
-            )
-            .await;
-        assert_eq!(
-            caixa.await.unwrap().unwrap_err(),
-            RecusaDeTunel::SemResposta
-        );
-        // E o que o cliente diz do verbo que não saiu vira a recusa certa.
-        assert_eq!(
-            recusa_do_verbo(&NaoSaiu::ServidorAntigo),
-            RecusaDeTunel::ServidorAntigo
-        );
-        assert_eq!(
-            recusa_do_verbo(&NaoSaiu::Escrita("fechado".into())),
-            RecusaDeTunel::SemResposta
-        );
-    }
-
-    fn motor_de_teste() -> Motor {
-        let (avisos, _) = mpsc::unbounded_channel();
-        let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
-        let tuneis = crate::tunel::Tuneis::nova(avisos.clone());
-        Motor {
-            bilhete: None,
-            destino: Destino {
-                servidor: "127.0.0.1:1".parse().expect("endereço"),
-                nome_tls: "localhost".into(),
-                chave_do_pin: "127.0.0.1:1".into(),
-                apelido: "pessoa".into(),
-                segredo: None,
-                esperada: None,
-                o_pino_prova_o_servidor: true,
-                aceito: None,
-            },
-            chave: SigningKey::from_bytes(&[7; 32]),
-            pins: Arc::new(crate::tofu::MemoryPinStore::new()),
-            cliente: None,
-            bateria: Battery::new(),
-            inicio: Instant::now(),
-            voice_room: None,
-            entradas: crate::assento::EntradasPendentes::default(),
-            queda: None,
-            linha: None,
-            muted: false,
-            isolamento: false,
-            avisos,
-            rtt: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            tela_pedida: None,
-            tela_viva: None,
-            faixa: FAIXA_INICIAL,
-            caminho_de_quem_hospeda_bps: None,
-            espectadores: 0,
-            caminho: crate::caminho::Sonda::nova(),
-            caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            protocolo: Arc::new(std::sync::atomic::AtomicU8::new(0)),
-            atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            consentimento: ConsentimentoDePar::de_ninguem(),
-            repasse: Arc::new(RepasseDeTela::default()),
-            resultados_do_par,
-            resultados_do_par_tx,
-            tarefas_de_par: TarefasDePar::default(),
-            tuneis,
-            lado_da_maquina: LadoDaMaquina::default(),
-        }
-    }
-
-    /// **Uma tarefa de par não sobrevive ao motor que a criou.**
-    ///
-    /// # A alça largada não aborta nada
-    ///
-    /// `Motor::caminhos_de_par` guardava `JoinHandle`s num mapa comum, e
-    /// **largar um `JoinHandle` desprende a tarefa — não a cancela**. Os dois
-    /// caminhos que matam este motor largam o mapa sem tocá-lo:
-    /// `Enlace::drop` aborta a tarefa de `rodar`, e um `Comando::Sair` a faz
-    /// voltar; nos dois o `Motor` é solto, o mapa vai junto, e cada tarefa de
-    /// par fica viva — lendo do par, com a conexão QUIC de pé, para uma sessão
-    /// que já acabou.
-    ///
-    /// O que este teste prende é a **posse**: quem for dono das alças tem de
-    /// abortá-las ao ser solto, e não confiar em ninguém se lembrar de pedir.
-    /// A tarefa aqui é um contador que não para sozinho nunca — se ele
-    /// continuar subindo depois de o motor sumir, é porque ninguém a cancelou.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn destruir_o_motor_aborta_as_tarefas_de_par_que_ele_guarda() {
-        let mut motor = motor_de_teste();
-
-        let batidas = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let contando = Arc::clone(&batidas);
-        let tarefa = tokio::spawn(async move {
-            loop {
-                contando.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        });
-        motor.tarefas_de_par.assistir(ScreenId(1), tarefa);
-
-        // Andar de verdade antes do corte: um contador parado em zero passaria
-        // este teste sem que tarefa nenhuma tivesse chegado a existir.
-        ate_que(
-            "a tarefa de par dar sinal de vida antes de o motor ser destruído",
-            Duration::from_secs(5),
-            || batidas.load(std::sync::atomic::Ordering::Relaxed) > 0,
-        )
-        .await;
-
-        drop(motor);
-
-        // `abort` é um pedido, não um corte instantâneo: o runtime solta a
-        // tarefa no próximo toque nela. A margem é para isso, e não para
-        // esconder um cancelamento que não aconteceu — o que decide é o
-        // contador ter **parado**, não onde ele parou.
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let parou_em = batidas.load(std::sync::atomic::Ordering::Relaxed);
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let depois = batidas.load(std::sync::atomic::Ordering::Relaxed);
-
-        assert_eq!(
-            depois, parou_em,
-            "a tarefa de par continuou correndo depois de o motor ser destruído (subiu de \
-             {parou_em} para {depois}): a alça foi largada em vez de abortada, e quem fechou a \
-             sessão continua lendo do par com a conexão de pé"
-        );
-    }
-
-    /// **A despedida cala o caminho do par antes de dizer que acabou.**
-    ///
-    /// O `Encerrado` é o último aviso que a casca ouve de uma sessão que ela
-    /// mesma fechou. `Motor::despedir` segura o motor de pé depois dele,
-    /// esperando o fechamento sair (`ESPERA_DA_DESPEDIDA`); se as tarefas de
-    /// par ainda estivessem vivas nesse intervalo, cada quadro que elas
-    /// lessem do par entraria na fila **depois** do fim — e a soltura do
-    /// `Motor` só as aborta quando a espera acaba.
-    ///
-    /// A tarefa daqui é a forma de [`Motor::assistir_por_par`] sem a rede: um
-    /// laço que escreve quadro na fila de avisos até alguém a parar. O motor
-    /// fica de pé depois da despedida, como fica durante a espera de verdade.
-    /// O que este teste prova em `seele-core` é a ordem; a prova pela rede, com
-    /// um par de verdade, é `uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para`,
-    /// em `seele-conformance`.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_despedida_cala_as_tarefas_de_par_antes_do_encerrado() {
-        let mut motor = motor_de_teste();
-        let (avisos, mut ouvidos) = mpsc::unbounded_channel();
-        motor.avisos = avisos;
-
-        let entregando = motor.avisos.clone();
-        let quadros = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let contando = Arc::clone(&quadros);
-        let tarefa = tokio::spawn(async move {
-            loop {
-                let quadro = Aviso::TelaQuadro {
-                    tela: ScreenId(1),
-                    chave: false,
-                    bytes: vec![0],
-                    leitura: 1,
-                };
-                if entregando.send(quadro).is_err() {
-                    return;
-                }
-                contando.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        });
-        motor.tarefas_de_par.assistir(ScreenId(1), tarefa);
-        ate_que(
-            "a tarefa de par entregar um quadro antes da despedida",
-            Duration::from_secs(5),
-            || quadros.load(std::sync::atomic::Ordering::Relaxed) > 0,
-        )
-        .await;
-
-        motor.despedir().await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        let mut viu_o_fim = false;
-        let mut depois_do_fim = 0_u32;
-        while let Ok(aviso) = ouvidos.try_recv() {
-            match aviso {
-                Aviso::Encerrado(Motivo::Pedido) => viu_o_fim = true,
-                Aviso::TelaQuadro { .. } if viu_o_fim => depois_do_fim += 1,
-                _ => {}
-            }
-        }
-        assert!(
-            viu_o_fim,
-            "a despedida não disse `Encerrado(Pedido)`, e a casca não fica sabendo que a sessão \
-             que ela fechou acabou"
-        );
-        assert_eq!(
-            depois_do_fim, 0,
-            "{depois_do_fim} quadros do par entraram na fila depois do `Encerrado`: a despedida \
-             avisou o fim com o caminho do par de pé, e a casca recebe imagem de uma sessão que \
-             ela já fechou"
-        );
-        drop(motor);
-    }
-
-    /// **Abortar quem servia um par devolve a vaga, em vez de prendê-la.**
-    ///
-    /// # O risco que o conserto vizinho criou
-    ///
-    /// Cancelar as tarefas de par fecha um defeito e abre outro. A vaga de
-    /// `Motor::atendendo_pares` era devolvida na **última linha** do corpo da
-    /// tarefa que serve — e um `abort` faz a última linha nunca correr. Uma
-    /// vaga que não volta é esta máquina fora da malha para sempre e **sem erro
-    /// em lugar nenhum**: o servidor continua apontando este par, porque a vaga
-    /// dele voltou na queda, e o cliente recusa cada pedido em silêncio pela
-    /// vaga que ficou. Ninguém do outro lado fica sabendo; só a imagem para de
-    /// aliviar.
-    ///
-    /// É por isso que a vaga virou [`VagaDeAtendimento`], um punho com `Drop`:
-    /// soltar a tarefa solta o guarda, e soltar o guarda devolve a vaga.
-    ///
-    /// # O que é de produção aqui, e o que não é
-    ///
-    /// De produção: quem toma a vaga (`VagaDeAtendimento::tomar`), quem põe a
-    /// tarefa de pé e guarda a alça (`Motor::passar_a_servir`) e quem corta
-    /// (`Motor::cair`). Montado à mão: só o que `Motor::servir_par` tiraria de
-    /// um `Client` — a ponta QUIC, a identidade e o endereço do outro lado —,
-    /// porque um `Client` precisa de um servidor e isso mora em
-    /// `seele-conformance`.
-    ///
-    /// # Por que o prazo curto é o discriminador
-    ///
-    /// O alvo é um **buraco negro**: uma ponta bindada de verdade, sem
-    /// `ServerConfig` nenhum, que nunca responde — o mesmo truque de
-    /// [`servir_um_par_desarma_a_ponta_de_quem_empresta_depois_de_servir`], e
-    /// pela mesma razão de não arriscar um `ECONNREFUSED` rápido do sistema.
-    /// Contra ele `servir_um_par` gasta [`PRAZO_DO_PAR`] inteiro — três
-    /// segundos — antes de desistir e devolver a vaga pelo fim do corpo.
-    ///
-    /// Então a vaga voltar **dentro de um segundo** só pode ter vindo do
-    /// cancelamento, e não do fim natural. É esse intervalo que separa o
-    /// conserto do defeito, e é por isso que a espera aqui tem prazo próprio em
-    /// vez do de [`ate_que`]: sem a alça guardada não há o que abortar, e sem o
-    /// `Drop` do guarda o `abort` prende a vaga para sempre.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn cair_devolve_a_vaga_de_quem_estava_servindo_um_par() {
-        let mut motor = motor_de_teste();
-        let punho = Arc::clone(&motor.atendendo_pares);
-
-        let vaga = VagaDeAtendimento::tomar(&punho).expect("a vaga nasce livre");
-        assert!(
-            punho.load(std::sync::atomic::Ordering::Acquire),
-            "tomar a vaga não a marcou como tomada, e o resto deste teste não mede nada"
-        );
-        assert!(
-            VagaDeAtendimento::tomar(&punho).is_none(),
-            "a vaga foi tomada duas vezes: `crate::par::atender` só aceita uma ligação, e um \
-             segundo `SirvaTelaPara` entraria por cima de um repasse em curso"
-        );
-
-        let ponta = ponta_de_sessao_de_teste();
-        let buraco_negro = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let onde_ninguem_atende = buraco_negro.local_addr().unwrap();
-        let impressao = par::impressao(&par::identidade_efemera().unwrap());
-        motor.passar_a_servir(
-            vaga,
-            ponta,
-            ScreenId(1),
-            vec![onde_ninguem_atende],
-            impressao,
-        );
-
-        motor.cair();
-
-        ate_que(
-            "a vaga de quem servia um par voltar depois da queda, antes de `PRAZO_DO_PAR`",
-            Duration::from_secs(1),
-            || !punho.load(std::sync::atomic::Ordering::Acquire),
-        )
-        .await;
-
-        // E a prova que importa: a vaga não voltou só no papel. A conexão que
-        // substitui a que caiu precisa **conseguir tomá-la**, senão esta
-        // máquina reconecta viva e fora da malha.
-        assert!(
-            VagaDeAtendimento::tomar(&punho).is_some(),
-            "a vaga voltou a `false` e mesmo assim não pôde ser tomada de novo"
-        );
-    }
-
-    /// **A reativação tardia, e ela não é hipótese.** O servidor escolhe um
-    /// par, difunde `AssistaTelaPor` pelo barramento, e só então a retirada de
-    /// consentimento desta máquina chega lá. As duas se cruzam no fio, e sem o
-    /// guarda o pedido velho seria atendido: esta máquina discaria — e seria
-    /// discada — com o endereço que acabou de tirar de circulação.
-    ///
-    /// # Por que a asserção é sobre o relato, e não sobre a alça
-    ///
-    /// **Porque a alça não distingue nada, e a primeira versão deste teste
-    /// passava sem o guarda.** Um `Motor` de unidade não tem `Client`, então
-    /// `ponta_de_pares` devolve `None` e `assistir_por_par` sai cedo de
-    /// qualquer maneira — `caminhos` fica vazio nos dois casos, e o teste
-    /// media um estado idêntico chamando-o de prova. Medido revertendo o
-    /// guarda: a suíte continuava verde.
-    ///
-    /// O que **de fato** difere é o relato. A saída por falta de ponta manda
-    /// `ParFalhou { NaoAlcancou }` ao servidor; a saída por consentimento
-    /// retirado não manda nada, e não deve mandar — nada falhou na rede, esta
-    /// máquina é que recusou. Um relato de falha aqui seria o produto dizendo
-    /// ao servidor uma coisa que não aconteceu.
-    /// **Quem pede precisa saber o que valeu, e não o que pediu.**
-    ///
-    /// O teto desta versão do cliente é um par
-    /// ([`PARES_QUE_ESTA_VERSAO_ATENDE`]), e um pedido acima dele é **baixado**
-    /// antes de virar declaração — declarar o que esta máquina não atende faria
-    /// a segunda pessoa esperar o prazo do par vencer por uma promessa que
-    /// nunca teve como ser cumprida.
-    ///
-    /// Se essa correção fosse calada, a casca desenharia um deslizante em
-    /// quatro e o servidor trabalharia com um, sem nada em lugar nenhum
-    /// dizendo qual dos dois números vale. É a forma do defeito que mais custou
-    /// caro neste repositório: o produto sabe e não conta. Por isso
-    /// [`Enlace::consentir_no_caminho_entre_pares`] **devolve** o que valeu.
-    ///
-    /// # Por que o teste entra por [`cabivel`], e por que isso basta aqui
-    ///
-    /// Porque construir um [`Enlace`] de mentira exigiria um construtor que só
-    /// os testes usam, dentro de um tipo de produção — e a casa já pagou por
-    /// um guarda que existia e não funcionava porque o teste entrava por uma
-    /// porta que a produção não usa.
-    ///
-    /// O que sobraria para aquele teste provar — que o valor devolvido é o
-    /// mesmo que saiu no fio — **não é uma propriedade testável, é uma
-    /// propriedade estrutural**: os dois saem do mesmo `let`, e não há caminho
-    /// no código em que possam diferir. Uma asserção sobre isso mediria o
-    /// compilador.
-    #[test]
-    fn o_teto_pedido_acima_do_que_esta_versao_atende_e_baixado() {
-        assert_eq!(
-            cabivel(ConsentimentoDePar {
-                pares_que_atende: 9,
-                assiste_por_par: true,
-            }),
-            ConsentimentoDePar {
-                pares_que_atende: PARES_QUE_ESTA_VERSAO_ATENDE,
-                assiste_por_par: true,
-            },
-            "o teto pedido não foi baixado para o que esta versão atende"
-        );
-    }
-
-    #[test]
-    fn um_teto_que_cabe_atravessa_intacto() {
-        // A outra metade: um guarda que baixasse tudo para zero passaria no
-        // teste acima e desligaria a malha inteira sem um erro em lugar
-        // nenhum. E a retirada — `de_ninguem` — tem de atravessar como está,
-        // senão retirar o consentimento viraria um pedido de emprestar.
-        for cabe in [
-            ConsentimentoDePar::de_ninguem(),
-            ConsentimentoDePar {
-                pares_que_atende: PARES_QUE_ESTA_VERSAO_ATENDE,
-                assiste_por_par: false,
-            },
-            ConsentimentoDePar {
-                pares_que_atende: 0,
-                assiste_por_par: true,
-            },
-        ] {
-            assert_eq!(cabivel(cabe), cabe, "{cabe:?} foi alterado sem precisar");
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn um_pedido_para_assistir_por_par_que_chega_depois_da_retirada_nao_e_atendido() {
-        let mut motor = motor_de_teste();
-        motor.consentimento = ConsentimentoDePar::de_ninguem();
-
-        motor.assistir_por_par(ScreenId(1), vec![endereco_qualquer()], impressao_qualquer());
-
-        assert!(
-            motor.resultados_do_par.try_recv().is_err(),
-            "um `AssistaTelaPor` que chegou depois da retirada foi atendido: a discagem correu e \
-             relatou uma falha de rede que não aconteceu"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn deixar_de_emprestar_cancela_o_repasse_que_ja_estava_em_curso() {
-        // **A retirada alcança o que já está no ar, e não só o pedido
-        // seguinte.** Sem isto, desligar o empréstimo pararia de aceitar
-        // pedidos novos e deixaria a cópia em curso subindo — a pessoa
-        // continuaria pagando pela decisão que acabou de desfazer, e o único
-        // aviso seria a conta de internet dela.
-        //
-        // A vaga voltar **antes** de `PRAZO_DO_PAR` é o discriminador, e ele é
-        // escolhido e não arbitrário: o alvo é um buraco negro (uma ponta sem
-        // `ServerConfig`, que nunca responde), contra o qual a tarefa gasta os
-        // três segundos inteiros antes de desistir pelo fim do corpo.
-        let mut motor = motor_de_teste();
-        let punho = Arc::clone(&motor.atendendo_pares);
-        let vaga = VagaDeAtendimento::tomar(&punho).expect("a vaga nasce livre");
-
-        let ponta = ponta_de_sessao_de_teste();
-        let buraco_negro = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let onde_ninguem_atende = buraco_negro.local_addr().unwrap();
-        let impressao = par::impressao(&par::identidade_efemera().unwrap());
-        motor.passar_a_servir(
-            vaga,
-            ponta,
-            ScreenId(1),
-            vec![onde_ninguem_atende],
-            impressao,
-        );
-
-        motor
-            .passar_a_consentir(ConsentimentoDePar::de_ninguem())
-            .await;
-
-        ate_que(
-            "a vaga de quem servia um par voltar depois da retirada, antes de `PRAZO_DO_PAR`",
-            Duration::from_secs(1),
-            || !punho.load(std::sync::atomic::Ordering::Acquire),
-        )
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn deixar_de_assistir_por_par_derruba_os_caminhos_de_par_abertos() {
-        // A retirada do outro consentimento, e o mesmo princípio: quem diz
-        // «não quero mais o meu endereço no ar» tem o caminho que existe por
-        // causa daquele endereço desfeito agora, e não na próxima tela que
-        // pedir. Quem reabre o cano do servidor é o servidor, ao receber a
-        // declaração nova — ver `session::devolver_ao_servidor`.
-        let mut motor = motor_de_teste();
-        motor.tarefas_de_par.assistir(
-            ScreenId(1),
-            tokio::spawn(async { std::future::pending::<()>().await }),
-        );
-        assert_eq!(motor.tarefas_de_par.caminhos.len(), 1);
-
-        motor
-            .passar_a_consentir(ConsentimentoDePar {
-                pares_que_atende: 1,
-                assiste_por_par: false,
-            })
-            .await;
-
-        assert!(
-            motor.tarefas_de_par.caminhos.is_empty(),
-            "retirar o consentimento de assistir por par deixou o caminho aberto de pé"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn continuar_consentindo_no_mesmo_nao_derruba_nada() {
-        // O guarda contra o oposto, e ele é o que impede a malha de morrer na
-        // primeira bateria interna: a declaração é repetida a **cada
-        // reconexão** (`Motor::declarar_identidade_de_par`), e uma retirada
-        // escrita larga demais derrubaria todo caminho vivo a cada volta.
-        let mut motor = motor_de_teste();
-        motor.consentimento = CONSENTE_TUDO;
-        motor.tarefas_de_par.assistir(
-            ScreenId(1),
-            tokio::spawn(async { std::future::pending::<()>().await }),
-        );
-
-        motor.passar_a_consentir(CONSENTE_TUDO).await;
-
-        assert_eq!(
-            motor.tarefas_de_par.caminhos.len(),
-            1,
-            "redeclarar o mesmo consentimento derrubou um caminho de par vivo"
-        );
-    }
-
-    fn endereco_qualquer() -> SocketAddr {
-        SocketAddr::from(([192, 168, 1, 10], 4444))
-    }
-
-    fn impressao_qualquer() -> String {
-        "a".repeat(64)
-    }
-
-    /// Quem consentiu nas duas metades, com o teto desta versão.
-    const CONSENTE_TUDO: ConsentimentoDePar = ConsentimentoDePar {
-        pares_que_atende: PARES_QUE_ESTA_VERSAO_ATENDE,
-        assiste_por_par: true,
-    };
-
-    /// **A fila da conexão que caiu não fala pela que a substitui.**
-    ///
-    /// # Por que um relato velho é pior do que um relato perdido
-    ///
-    /// `resultados_do_par` é um canal sem fundo, e o braço que o lê em
-    /// `Motor::rodar` só existe **quando há cliente**. Durante a bateria não há:
-    /// tudo o que as tarefas de par mandaram fica parado na fila. Quando
-    /// `Motor::tentar` põe um cliente novo no lugar do que morreu, o primeiro
-    /// braço a rodar entrega esses relatos **à conexão nova** — um `ParFalhou`
-    /// de uma nomeação que morreu com a sessão anterior, pedindo ao servidor
-    /// que desfaça um caminho que ele acabou de montar para a substituta.
-    ///
-    /// A segunda metade é a que impede o conserto de virar mudez: o que
-    /// acontecer **depois** da queda continua tendo de chegar. Esvaziar a fila
-    /// não pode ser fechá-la.
-    #[tokio::test]
-    async fn cair_nao_deixa_a_fila_da_conexao_velha_alcancar_a_substituta() {
-        let mut motor = motor_de_teste();
-
-        // O relato da conexão que está morrendo, ainda em voo quando ela morre.
-        let _ = motor.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
-            screen: ScreenId(1),
-            motivo: MotivoDeFalhaDePar::ParouDeMandar,
-        });
-
-        motor.cair();
-
-        assert!(
-            motor.resultados_do_par.try_recv().is_err(),
-            "o relato da conexão que caiu continuou na fila: a próxima conexão o receberia como \
-             se fosse dela, e mandaria o servidor desfazer um caminho que ele montou depois"
-        );
-
-        // E a atividade nova passa: a fila foi esvaziada, não fechada.
-        let _ = motor.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
-            screen: ScreenId(2),
-            motivo: MotivoDeFalhaDePar::CaiuNoMeio,
-        });
-        assert!(
-            matches!(
-                motor.resultados_do_par.try_recv(),
-                Ok(ResultadoDoPar::ParFalhou {
-                    screen: ScreenId(2),
-                    ..
-                })
-            ),
-            "esvaziar a fila da conexão velha calou também o que veio depois da queda"
-        );
-    }
-
-    /// Espera a condição valer, ou desiste com a mensagem de quem esperava.
-    ///
-    /// Dormir um tanto e afirmar é o que produz o teste que passa só na máquina
-    /// de quem o escreveu.
-    ///
-    /// A paciência é de quem chama, e não uma constante daqui: em
-    /// [`cair_devolve_a_vaga_de_quem_estava_servindo_um_par`] ela **é** a
-    /// afirmação — esperar mais que [`PRAZO_DO_PAR`] deixaria o fim natural da
-    /// tarefa passar por cancelamento.
-    async fn ate_que<F: FnMut() -> bool>(o_que: &str, paciencia: Duration, mut condicao: F) {
-        let fim = Instant::now() + paciencia;
-        while Instant::now() < fim {
-            if condicao() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("a paciência acabou esperando: {o_que}");
-    }
-
-    /// O ponto de chamada de `par::parar_de_atender` dentro de `servir_um_par`
-    /// desarma a ponta de quem empresta depois de servir.
-    ///
-    /// O sinal mora do lado de quem **atende**: pôr alguém pronto para aceitar
-    /// (`par::atender`) depois do desarme, e só então discar. Armada, o aperto
-    /// completa; desarmada, o portão recusa o Binding antes de criar estado e
-    /// quem disca esgota o próprio prazo. Contra `servir_um_par`, o ponto de
-    /// chamada de produção, e não a função pura.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn servir_um_par_desarma_a_ponta_de_quem_empresta_depois_de_servir() {
-        let ponta_empresta = ponta_de_sessao_de_teste();
-        let onde_empresta = ponta_empresta.ponta().local_addr();
-        let impressao_empresta = par::impressao(ponta_empresta.identidade());
-
-        // Quem "assiste": só disca — o papel de `Motor::assistir_por_par`.
-        let ponta_assiste = ponta_de_sessao_de_teste();
-        let impressao_assiste = par::impressao(ponta_assiste.identidade());
-
-        // O furo de quem empresta vai a um endereço onde ninguém responde: ele
-        // só abre o NAT, e não decide nada.
-        let buraco_negro = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let onde_buraco_negro = buraco_negro.local_addr().unwrap();
-
-        let servindo = tokio::spawn(servir_um_par(
-            ponta_empresta.clone(),
-            vec![onde_buraco_negro],
-            impressao_assiste.clone(),
-        ));
-
-        let ligado = par::ligar(
-            &ponta_assiste,
-            &[onde_empresta],
-            impressao_empresta.clone(),
-            Duration::from_secs(3),
-        )
-        .await
-        .expect("a discagem de quem assiste tinha tudo para fechar e não fechou");
-
-        let resultado = servindo.await.expect("a tarefa de servir_um_par");
-        assert!(
-            resultado.is_some(),
-            "servir_um_par não serviu ninguém, e o resto deste teste não prova nada"
-        );
-        drop(ligado);
-        assert!(
-            !ponta_empresta.armada(),
-            "servir_um_par devolveu com a ponta de quem empresta ainda armada"
-        );
-
-        // **O discriminador.** Alguém pronto para aceitar, depois de
-        // `servir_um_par` já ter devolvido: se a ponta continuasse armada, é
-        // este `atender` quem completaria o aperto.
-        let _atendendo = {
-            let ponta_empresta = ponta_empresta.clone();
-            let impressao_assiste = impressao_assiste.clone();
-            tokio::spawn(async move {
-                par::atender(
-                    &ponta_empresta,
-                    &impressao_assiste,
-                    Duration::from_secs(3),
-                    Duration::from_secs(2),
-                )
-                .await
-            })
-        };
-        let tentou = par::ligar(
-            &ponta_assiste,
-            &[onde_empresta],
-            impressao_empresta,
-            Duration::from_millis(800),
-        )
-        .await;
-        assert!(
-            matches!(tentou, Err(par::ErroDePar::NaoAlcancou)),
-            "a ponta de quem empresta continuou atendendo depois de servir_um_par devolver: \
-             {tentou:?}"
-        );
-    }
-
-    /// **Duas telas na mesma sala: a segunda não é repassada, e a primeira
-    /// sobrevive ao fim dela.**
-    ///
-    /// O cenário é o do §0 do desenho — «numa call de 5 pessoas, 2 querem
-    /// transmitir a tela» —, e antes deste guarda ele produzia o pior defeito
-    /// que este repositório sabe nomear: a segunda `abriu()` sobrescrevia a
-    /// primeira, os quadros das duas entravam intercalados no mesmo fluxo do
-    /// par, quem recebia rotulava tudo com o `screen` do fluxo, e o primeiro
-    /// `fechou()` matava o repasse da outra. Duas telas fundidas numa só, sem
-    /// erro em lugar nenhum.
-    #[tokio::test]
-    async fn so_uma_tela_por_vez_e_repassada_e_o_fim_da_outra_nao_a_derruba() {
-        let repasse = RepasseDeTela::default();
-        let primeira = ScreenId(1);
-        let segunda = ScreenId(2);
-        let (para_o_par, mut do_par) = mpsc::channel(8);
-
-        repasse.abriu(primeira, b"abertura-da-primeira".to_vec());
-        repasse.ligar(para_o_par);
-
-        // A segunda transmissão chega e **não** assume.
-        repasse.abriu(segunda, b"abertura-da-segunda".to_vec());
-        assert_eq!(
-            repasse.abertura_de(primeira),
-            Some(b"abertura-da-primeira".to_vec()),
-            "a segunda tela assumiu o repasse da primeira"
-        );
-        assert_eq!(
-            repasse.abertura_de(segunda),
-            None,
-            "o repasse aceitou servir a segunda tela com a abertura de outra"
-        );
-
-        // E os quadros dela não entram no fluxo do par.
-        repasse.pedaco(segunda, b"quadro-da-segunda".to_vec());
-
-        // O fim da segunda não derruba o repasse da primeira.
-        repasse.fechou(segunda);
-        repasse.pedaco(primeira, b"quadro-da-primeira".to_vec());
-
-        assert_eq!(
-            do_par.try_recv().ok(),
-            Some(b"quadro-da-primeira".to_vec()),
-            "o fim da segunda tela derrubou o repasse da primeira"
-        );
-        assert!(
-            do_par.try_recv().is_err(),
-            "um quadro da segunda tela entrou no fluxo do par da primeira — as duas chegam \
-             fundidas a quem assiste"
-        );
-
-        // E o fim da primeira, esse sim, encerra o repasse.
-        repasse.fechou(primeira);
-        assert_eq!(repasse.abertura_de(primeira), None);
-    }
-
-    /// **Sem endereço nenhum para furar, `atender` ainda serve.**
-    ///
-    /// O furo de quem empresta existe por um efeito só, abrir o mapeamento de
-    /// NAT desta ponta, e uma lista vazia de endereços (o servidor não soube de
-    /// nenhum) não pode desistir de servir quem está chegando por outro
-    /// caminho.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn sem_endereco_para_furar_quem_empresta_ainda_atende() {
-        let ponta_empresta = ponta_de_sessao_de_teste();
-        let onde_empresta = ponta_empresta.ponta().local_addr();
-        let impressao_empresta = par::impressao(ponta_empresta.identidade());
-        let ponta_assiste = ponta_de_sessao_de_teste();
-        let impressao_assiste = par::impressao(ponta_assiste.identidade());
-
-        let servindo = tokio::spawn(servir_um_par(
-            ponta_empresta.clone(),
-            Vec::new(),
-            impressao_assiste,
-        ));
-        let ligado = par::ligar(
-            &ponta_assiste,
-            &[onde_empresta],
-            impressao_empresta,
-            Duration::from_secs(3),
-        )
-        .await;
-
-        let resultado = servindo.await.expect("a tarefa de servir_um_par");
-        assert!(
-            resultado.is_some(),
-            "sem endereço para furar, quem empresta desistiu de servir alguém que chegava"
-        );
-        assert!(
-            ligado.is_ok(),
-            "quem assiste discou para uma ponta que devia estar atendendo e não fechou: {:?}",
-            ligado.err()
-        );
-    }
-
-    /// A ponta de uma sessão em `127.0.0.1`.
-    fn ponta_de_sessao_de_teste() -> crate::transporte::PontaDaSessao {
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
-        crate::transporte::abrir_ponta(Some(socket)).expect("ponta da sessão")
-    }
-}
+mod tests;
 
 #[cfg(test)]
-mod o_debug_do_destino {
-    use super::Destino;
-
-    /// O segredo de um destino é o convite de uso único ou a senha do servidor,
-    /// e o `Debug` é por onde um `tracing::debug!(?destino)` o levaria ao
-    /// `seele.log`. Lote R da F5, rodada 1.
-    #[test]
-    fn o_debug_do_destino_esconde_o_segredo_e_mostra_o_resto() {
-        let segredo = "segredo-do-teste-do-debug-do-destino";
-        let destino = Destino {
-            servidor: "127.0.0.1:8384".parse().expect("endereço"),
-            nome_tls: "localhost".into(),
-            chave_do_pin: "casa".into(),
-            apelido: "bia".into(),
-            segredo: Some(segredo.to_owned()),
-            esperada: None,
-            o_pino_prova_o_servidor: true,
-            aceito: None,
-        };
-        for impresso in [format!("{destino:?}"), format!("{destino:#?}")] {
-            assert!(
-                !impresso.contains(segredo),
-                "o `Debug` de `Destino` imprime o segredo — o convite de uso único ou a \
-                 senha do servidor —, e um `tracing::debug!(?destino)` o levaria ao \
-                 `seele.log`:\n{impresso}"
-            );
-            assert!(
-                impresso.contains("<oculto>"),
-                "o `Debug` de `Destino` não diz que há segredo, e quem investiga uma \
-                 recusa não sabe se a entrada levou um:\n{impresso}"
-            );
-            assert!(
-                impresso.contains("bia") && impresso.contains("casa"),
-                "o `Debug` de `Destino` escondeu mais que o segredo:\n{impresso}"
-            );
-        }
-        let sem = Destino {
-            segredo: None,
-            ..destino
-        };
-        let impresso = format!("{sem:?}");
-        assert!(
-            impresso.contains("segredo: None"),
-            "sem segredo, o `Debug` de `Destino` não diz `None`:\n{impresso}"
-        );
-    }
-}
+mod o_debug_do_destino;
 
 /// A máquina de jogo do lado de quem a opera (API 8 parte 3), contra um
 /// servidor de mentira que aperta a mão, manda o que o teste pede e devolve o
 /// que ouve.
 #[cfg(test)]
-mod a_maquina {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod a_maquina;
 
-    use super::*;
-    use seele_proto::maquina::{
-        resumo_da_oferta, resumo_em_hex, ComandoOferecido, MotivoDaDispensa,
-        MotivoDaRecusaDeMaquina, OfertaDeMaquina, PapelDaMaquina, TunelOferecido,
-    };
-
-    const MOD: &str = "seele/jogo";
-    const SERVIDOR: &str = "mundo";
-
-    fn hash() -> String {
-        "ab".repeat(32)
-    }
-
-    fn oferta() -> OfertaDeMaquina {
-        OfertaDeMaquina {
-            titulo: "Minecraft".into(),
-            receita: "minecraft-java".into(),
-            versao_da_receita: "1.0.0".into(),
-            versao_do_jogo: "1.21.4".into(),
-            tuneis: vec![TunelOferecido {
-                nome: "mc".into(),
-                protocolo: ProtocoloDeTunel::Tcp,
-                porta: 25565,
-            }],
-            artefatos: vec![],
-            pack: None,
-            origens: vec![],
-            dominios_do_jogo: vec![],
-            rodar: Some(ComandoOferecido {
-                comando: "java".into(),
-                argumentos: vec!["-jar".into(), "server.jar".into()],
-            }),
-            disco_maximo: 1024,
-            termos: vec![],
-            instalar: None,
-            por_sistema: vec![],
-        }
-    }
-
-    fn pedido() -> ServerMessage {
-        ServerMessage::PedidoDeMaquina {
-            mod_id: MOD.into(),
-            hash: hash(),
-            servidor: SERVIDOR.into(),
-            pedido_por: PersonId(3),
-            oferta: Box::new(oferta()),
-            papel: PapelDaMaquina::Reserva,
-        }
-    }
-
-    /// O servidor de mentira: `manda` escreve no fio, `ouvidos` é o que o
-    /// cliente escreveu depois do aperto de mão.
-    struct Servidor {
-        manda: mpsc::UnboundedSender<ServerMessage>,
-        ouvidos: mpsc::UnboundedReceiver<ClientMessage>,
-    }
-
-    impl Servidor {
-        /// A próxima mensagem da máquina que o cliente escreveu, pulando o
-        /// resto (pings, declarações), ou `None` se nada veio em `prazo`.
-        async fn ouvir_da_maquina(&mut self, prazo: Duration) -> Option<ClientMessage> {
-            tokio::time::timeout(prazo, async {
-                loop {
-                    let mensagem = self.ouvidos.recv().await?;
-                    if matches!(
-                        mensagem,
-                        ClientMessage::AceiteDeMaquina { .. }
-                            | ClientMessage::RecusaDeMaquina { .. }
-                            | ClientMessage::MaquinaParada { .. }
-                            | ClientMessage::PedidoDaMaquina { .. }
-                    ) {
-                        return Some(mensagem);
-                    }
-                }
-            })
-            .await
-            .ok()
-            .flatten()
-        }
-    }
-
-    async fn enlace_com_servidor() -> (Enlace, Servidor) {
-        let certificado = crate::transporte::CertificadoDtls::efemero().expect("certificado");
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
-        let endereco = socket.local_addr().expect("endereço");
-        let escuta = crate::transporte::Ponta::de_socket(
-            socket,
-            Some(crate::transporte::ConfigDoAnfitriao::novo(certificado)),
-        )
-        .expect("ponta");
-        let (manda, mut a_mandar) = mpsc::unbounded_channel::<ServerMessage>();
-        let (ouviu, ouvidos) = mpsc::unbounded_channel::<ClientMessage>();
-        tokio::spawn(async move {
-            let Some(conexao) = escuta.aceitar().await else {
-                return;
-            };
-            let Some((mut envio, mut recebe)) = conexao.controle() else {
-                return;
-            };
-            // `Hello` e `Response` ignorados: não há assinatura a conferir.
-            let _ = crate::frame::read::<ClientMessage>(&mut recebe).await;
-            let _ =
-                crate::frame::write(&mut envio, &ServerMessage::Challenge { nonce: vec![0; 32] })
-                    .await;
-            let _ = crate::frame::read::<ClientMessage>(&mut recebe).await;
-            let _ = crate::frame::write(
-                &mut envio,
-                &ServerMessage::Session {
-                    id: seele_proto::ids::SessionId(1),
-                    person: PersonId(1),
-                    ssrc: seele_proto::ids::Ssrc(1),
-                    server: "servidor de teste".into(),
-                    voice_rooms: vec![],
-                    channels: vec![],
-                    roles: vec![],
-                    permissions: vec![],
-                },
-            )
-            .await;
-            tokio::spawn(async move {
-                while let Ok(mensagem) = crate::frame::read::<ClientMessage>(&mut recebe).await {
-                    if ouviu.send(mensagem).is_err() {
-                        break;
-                    }
-                }
-            });
-            while let Some(mensagem) = a_mandar.recv().await {
-                if crate::frame::write(&mut envio, &mensagem).await.is_err() {
-                    break;
-                }
-            }
-            drop((conexao, escuta));
-        });
-
-        let ponta = crate::transporte::abrir_ponta(None).expect("ponta");
-        let conexao = crate::client::discar(
-            ponta.ponta(),
-            vec![endereco],
-            None,
-            seele_proto::transport::HANDSHAKE_TIMEOUT,
-        )
-        .await
-        .expect("discar");
-        let destino = Destino {
-            servidor: endereco,
-            nome_tls: "localhost".into(),
-            chave_do_pin: endereco.to_string(),
-            apelido: "pessoa".into(),
-            segredo: None,
-            esperada: None,
-            o_pino_prova_o_servidor: true,
-            aceito: None,
-        };
-        let enlace = Enlace::conectar_sobre(
-            ponta,
-            conexao,
-            None,
-            destino,
-            SigningKey::from_bytes(&[5; 32]),
-            Arc::new(crate::tofu::MemoryPinStore::new()),
-            None,
-        )
-        .await
-        .expect("o aperto de mão com o servidor de mentira");
-        (enlace, Servidor { manda, ouvidos })
-    }
-
-    /// Os avisos da máquina que chegaram em `prazo`, sem os de estado.
-    async fn avisos_da_maquina(enlace: &mut Enlace, prazo: Duration) -> Vec<Aviso> {
-        let mut vistos = Vec::new();
-        let fim = tokio::time::Instant::now() + prazo;
-        while let Ok(aviso) = tokio::time::timeout_at(fim, enlace.proximo()).await {
-            match aviso {
-                Aviso::PedidoDeMaquina { .. }
-                | Aviso::AvisoParaMaquina { .. }
-                | Aviso::MaquinaDispensada { .. } => vistos.push(aviso),
-                Aviso::Mensagem(mensagem)
-                    if matches!(
-                        *mensagem,
-                        ServerMessage::PedidoDeMaquina { .. }
-                            | ServerMessage::AvisoParaMaquina { .. }
-                            | ServerMessage::MaquinaDispensada { .. }
-                            | ServerMessage::ModReply { .. }
-                    ) =>
-                {
-                    vistos.push(Aviso::Mensagem(mensagem));
-                }
-                _ => {}
-            }
-        }
-        vistos
-    }
-
-    /// Desvio 5: um enlace sem tela — o CLI, um teste, qualquer uso do núcleo
-    /// que não seja o app — não tem como mostrar a oferta, e diz isso ao
-    /// servidor na hora em vez de deixá-lo esperando. A casca não recebe nada.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn sem_tela_o_pedido_e_recusado_sozinho() {
-        let (mut enlace, mut servidor) = enlace_com_servidor().await;
-        servidor.manda.send(pedido()).unwrap();
-
-        let ouvido = servidor.ouvir_da_maquina(Duration::from_secs(5)).await;
-        assert_eq!(
-            ouvido,
-            Some(ClientMessage::RecusaDeMaquina {
-                mod_id: MOD.into(),
-                servidor: SERVIDOR.into(),
-                motivo: MotivoDaRecusaDeMaquina::SemTela,
-            }),
-            "o enlace sem tela não recusou o pedido sozinho"
-        );
-        let avisos = avisos_da_maquina(&mut enlace, Duration::from_millis(300)).await;
-        assert!(
-            avisos.is_empty(),
-            "o pedido recusado sozinho chegou à casca mesmo assim: {avisos:?}"
-        );
-    }
-
-    /// Com tela, o pedido vira aviso uma vez só, com o resumo já calculado — e
-    /// é esse resumo que volta no aceite, sem ninguém o recalcular.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn com_tela_o_pedido_vira_aviso_com_o_resumo() {
-        let (mut enlace, mut servidor) = enlace_com_servidor().await;
-        enlace.aceitar_pedidos_de_maquina(true);
-        // O mesmo pedido duas vezes na mesma conexão (o servidor pode
-        // mandá-lo de novo enquanto espera): a casca o vê uma vez.
-        servidor.manda.send(pedido()).unwrap();
-        servidor.manda.send(pedido()).unwrap();
-
-        let avisos = avisos_da_maquina(&mut enlace, Duration::from_secs(2)).await;
-        let esperado = resumo_em_hex(&resumo_da_oferta(
-            MOD,
-            &hash(),
-            SERVIDOR,
-            PapelDaMaquina::Reserva,
-            &oferta(),
-        ));
-        let [Aviso::PedidoDeMaquina {
-            mod_id,
-            hash: hash_do_aviso,
-            servidor: servidor_do_aviso,
-            pedido_por,
-            oferta: oferta_do_aviso,
-            papel,
-            resumo,
-        }] = avisos.as_slice()
-        else {
-            panic!("esperava um só aviso de pedido, vieram: {avisos:?}");
-        };
-        assert_eq!(mod_id, MOD);
-        assert_eq!(*hash_do_aviso, hash());
-        assert_eq!(servidor_do_aviso, SERVIDOR);
-        assert_eq!(*pedido_por, PersonId(3));
-        assert_eq!(**oferta_do_aviso, oferta());
-        assert_eq!(
-            *papel,
-            PapelDaMaquina::Reserva,
-            "o papel do fio não chegou à casca"
-        );
-        assert_eq!(*resumo, esperado);
-        assert_eq!(
-            servidor.ouvir_da_maquina(Duration::from_millis(300)).await,
-            None,
-            "com tela, o enlace respondeu sozinho"
-        );
-
-        enlace.aceitar_maquina(MOD, SERVIDOR, resumo).await.unwrap();
-        assert_eq!(
-            servidor.ouvir_da_maquina(Duration::from_secs(5)).await,
-            Some(ClientMessage::AceiteDeMaquina {
-                mod_id: MOD.into(),
-                servidor: SERVIDOR.into(),
-                resumo: esperado,
-            })
-        );
-    }
-
-    /// O pedido da máquina volta inteiro, montado das partes do `ModReply`
-    /// com o número que ele levou; e quem não é a máquina fica sabendo na
-    /// hora, em vez de esperar o prazo.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn o_pedido_da_maquina_volta_inteiro_e_o_sem_aceite_e_dito() {
-        let (mut enlace, mut servidor) = enlace_com_servidor().await;
-
-        let (resultado, ouvido) = tokio::join!(
-            enlace.pedido_da_maquina(MOD, SERVIDOR, "{\"oi\":1}".into()),
-            async {
-                let ouvido = servidor.ouvir_da_maquina(Duration::from_secs(5)).await;
-                let Some(ClientMessage::PedidoDaMaquina { request, .. }) = ouvido.clone() else {
-                    panic!("o pedido não chegou ao servidor: {ouvido:?}");
-                };
-                for (part, payload) in ["{\"ok\":", "true}"].into_iter().enumerate() {
-                    servidor
-                        .manda
-                        .send(ServerMessage::ModReply {
-                            request,
-                            part: u32::try_from(part).unwrap(),
-                            total: 2,
-                            payload: payload.into(),
-                        })
-                        .unwrap();
-                }
-                ouvido
-            }
-        );
-        assert_eq!(resultado, Ok("{\"ok\":true}".to_owned()));
-        let Some(ClientMessage::PedidoDaMaquina {
-            mod_id,
-            servidor: servidor_ouvido,
-            payload,
-            ..
-        }) = ouvido
-        else {
-            unreachable!()
-        };
-        assert_eq!(
-            (mod_id.as_str(), servidor_ouvido.as_str(), payload.as_str()),
-            (MOD, SERVIDOR, "{\"oi\":1}")
-        );
-
-        let (resultado, ()) = tokio::join!(
-            enlace.pedido_da_maquina(MOD, SERVIDOR, "{}".into()),
-            async {
-                servidor
-                    .ouvir_da_maquina(Duration::from_secs(5))
-                    .await
-                    .expect("o pedido");
-                servidor
-                    .manda
-                    .send(ServerMessage::MaquinaDispensada {
-                        mod_id: MOD.into(),
-                        servidor: SERVIDOR.into(),
-                        motivo: MotivoDaDispensa::SemAceite,
-                    })
-                    .unwrap();
-            }
-        );
-        assert_eq!(resultado, Err(FalhaDoPedidoDaMaquina::SemAceite));
-        // A resposta montada não vazou para a casca como `ModReply`, e a
-        // dispensa chegou como aviso próprio.
-        let avisos = avisos_da_maquina(&mut enlace, Duration::from_millis(300)).await;
-        assert!(
-            matches!(
-                avisos.as_slice(),
-                [Aviso::MaquinaDispensada {
-                    motivo: MotivoDaDispensa::SemAceite,
-                    ..
-                }]
-            ),
-            "{avisos:?}"
-        );
-    }
-}
+#[cfg(test)]
+mod a_medida_do_teto_pela_midia;

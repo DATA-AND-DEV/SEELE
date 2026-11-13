@@ -243,6 +243,50 @@ input:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* ---------- o teste de conexão ----------
+   O caminho de quem leu que não conectou por causa de rede: um botão, a nota
+   que diz o que ele abre, e a linha que diz o que aconteceu com o aperto
+   (`ofertaDoTesteDeConexao`, em `base.js`). Comum porque três telas a mostram:
+   a entrada, o fim da sessão e a entrada do celular.
+
+   Coluna, e o botão à esquerda: o `margin-left: auto` de `.botao-fantasma`
+   existe para empurrá-lo numa fileira, e aqui ele é o começo de um bloco.
+
+   O estado nasce vazio e some enquanto está vazio: é uma região viva, e tem
+   de existir antes de ter o que dizer. Osso quando abriu, vermelho quando não:
+   a cor de alerta é do que impede, e um teste que não abriu impede. */
+.teste-de-conexao {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+/* Com a classe do bloco na frente: a regra de `.botao-fantasma` vem depois
+   nesta folha, e empataria com uma classe só. */
+.teste-de-conexao .teste-de-conexao-abrir { margin-left: 0; }
+.teste-de-conexao-nota {
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
+  overflow-wrap: anywhere;
+}
+/* Uma regra inteira, e não a de cima mais a diferença: a classe desenhada em
+   dois lugares é o defeito que o guarda de `tests/frontend.rs` registra. */
+.teste-de-conexao-estado {
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-osso);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.teste-de-conexao-estado:empty { display: none; }
+.teste-de-conexao-estado[data-tipo="erro"] { color: var(--seele-vermelho-alerta); }
+
 .botao:disabled { opacity: 0.5; cursor: default; }
 .botao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 

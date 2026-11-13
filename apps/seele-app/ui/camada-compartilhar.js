@@ -412,6 +412,61 @@ function desenharPermissaoDeTela(permissao) {
  * não ofereceu nada» não tem, e «o pedido falhou» já está escrito na linha de
  * erro. As três embaixo de uma lista vazia são indistinguíveis.
  */
+/**
+ * **As prévias das fontes**: a imagem de cada monitor e de cada janela, para
+ * escolher pelo que se vê e não só pelo título (duas janelas do mesmo programa
+ * têm o mesmo nome).
+ *
+ * Elas chegam uma a uma, depois da lista (`seele://previa-de-tela`): capturar
+ * uma imagem de cada janela leva tempo, e a lista não espera por isso. Cada uma
+ * vem com o `id` **e o nome** da fonte na lista de que saiu: o `id` é a posição
+ * naquela lista, e uma relista o troca de dono — a prévia só é posta no cartão
+ * cujo nome também bate.
+ */
+const previasDasFontes = new Map();
+const chaveDaPrevia = (id, nome) => `${id}\u0000${nome}`;
+let previasPedidasPara = null;
+
+/** Pede as prévias da lista de agora, uma vez por lista. */
+function pedirAsPrevias(fontes) {
+  const desta = fontes.map((fonte) => chaveDaPrevia(fonte.id, fonte.nome)).join("\u0001");
+  if (desta === previasPedidasPara || fontes.length === 0) return;
+  previasPedidasPara = desta;
+  // Uma prévia de uma lista que já não é esta não tem a quem servir.
+  for (const chave of [...previasDasFontes.keys()]) {
+    if (!fontes.some((fonte) => chaveDaPrevia(fonte.id, fonte.nome) === chave)) previasDasFontes.delete(chave);
+  }
+  invoke("previas_de_tela").catch((falha) => {
+    // Sem prévia a caixa segue como sempre foi: o nome e as medidas.
+    previasPedidasPara = null;
+    console.warn("previas_de_tela:", falha);
+  });
+}
+
+/** Põe a prévia num cartão (ou tira a que ele tinha). */
+function vestirAPrevia(botao, url) {
+  // Sem prévia e sem nada posto antes: não há o que mexer no cartão.
+  if (!url && botao.dataset.comPrevia !== "sim") return;
+  if (url) {
+    botao.style.setProperty("--previa-da-fonte", `url(${url})`);
+    botao.dataset.comPrevia = "sim";
+  } else {
+    botao.style.removeProperty("--previa-da-fonte");
+    delete botao.dataset.comPrevia;
+  }
+}
+
+listen("seele://previa-de-tela", ({ payload }) => {
+  if (!payload || typeof payload.url !== "string" || !payload.url.startsWith("data:image/")) return;
+  previasDasFontes.set(chaveDaPrevia(payload.id, payload.nome), payload.url);
+  if ($("compartilhar").hidden) return;
+  for (const botao of $("compartilhar-fontes").querySelectorAll(".compartilhar-fonte")) {
+    if (botao.dataset.fonte === String(payload.id) && botao.dataset.nomeDaFonte === payload.nome) {
+      vestirAPrevia(botao, payload.url);
+    }
+  }
+});
+
 function desenharFontesDeTela(fontes, permissao, listou) {
   fontes = fontes.filter(fonte => fonte.largura > 0 && fonte.altura > 0
     && !/^(WindowManager|StatusIndicator|Control Center|Notification Center)$/i.test(fonte.nome));
@@ -433,6 +488,7 @@ function desenharFontesDeTela(fontes, permissao, listou) {
   }
 
   vazio.hidden = true;
+  pedirAsPrevias(fontes);
   // Rede: a lista é a mesma em que se escolheu (só uma relista a troca, e ela já
   // desarmou), mas um `id` que não está nela nunca vai ao `compartilhar_tela`.
   if (fonteArmada !== null && !fontes.some((fonte) => fonte.id === fonteArmada)) {
@@ -446,6 +502,8 @@ function desenharFontesDeTela(fontes, permissao, listou) {
       const botao = elemento("button", "compartilhar-fonte");
       botao.type = "button";
       botao.dataset.fonte = String(fonte.id);
+      botao.dataset.nomeDaFonte = fonte.nome;
+      vestirAPrevia(botao, previasDasFontes.get(chaveDaPrevia(fonte.id, fonte.nome)) ?? null);
       const armada = fonte.id === fonteArmada;
       // `aria-pressed` e a palavra `ESCOLHIDA` dizem a mesma coisa que a cor de
       // fundo diz. `specs/06-clientes-gui.md` proíbe informação transmitida só
@@ -704,6 +762,9 @@ async function abrirCompartilhar() {
 /** Fecha, devolvendo o teclado a quem abriu. */
 function fecharCompartilhar() {
   $("compartilhar").hidden = true;
+  // As prévias são da caixa aberta: a próxima abertura pede as de então.
+  previasDasFontes.clear();
+  previasPedidasPara = null;
   // A mesma conferência de `voltarParaTela`: a tela de baixo pode ter trocado
   // enquanto a caixa estava aberta, e `focus()` num nó fora da árvore não faz
   // nada e não reporta nada.
@@ -818,6 +879,8 @@ $("compartilhar-comecar").addEventListener("click", async () => {
           await invoke("parar_de_compartilhar");
         }
         await invoke("compartilhar_tela", { fonte, limites });
+        // Recomeçou: a queda de antes já disse o que tinha a dizer.
+        esquecerAQuedaDaTela();
         return true;
       } finally {
         // Deu certo ou não: a lista foi consumida, e o próximo início espera a nova.
@@ -887,6 +950,121 @@ $("compartilhar-parar").addEventListener("click", async () => {
 listen("seele://event", (evento) => {
   if (evento.payload !== "ScreenChanged" || $("compartilhar").hidden) return;
   desenharCompartilhar().catch((falha) => console.warn("ScreenChanged:", falha));
+});
+
+// ------------------------------------------------- a transmissão que caiu
+//
+// **O produto sabia e não contava.** Quando a transmissão de tela desta pessoa
+// morria no meio — o codificador recusando um quadro, a captura parando, o
+// fluxo fechando —, o núcleo escrevia uma linha no `seele.log` e mais nada: o
+// botão seguia em PARAR DE COMPARTILHAR, a sala seguia vendo uma transmissão
+// anunciada e sem imagem, e a pessoa só descobria quando alguém perguntava
+// «cadê a sua tela?».
+//
+// Agora o núcleo a encerra (o servidor ouve o mesmo `StopScreenShare` de quem
+// aperta parar, e o retrato perde a transmissão — o botão volta a
+// COMPARTILHAR sozinho) e manda um `ScreenShareFell` com o que ela mostrava e
+// o motivo. O que mora aqui é a metade que o botão não diz: a frase, ao lado
+// dele, até a pessoa recomeçar ou sair da sala.
+//
+// Na página do navegador quem captura e codifica é a própria página
+// (`compartilhar-web.js`), e a queda chega como um `ScreenClosed` com `erro`:
+// a frase já vem escrita de lá, e é dita no mesmo lugar.
+//
+// Nada recomeça sozinho: recomeçar é pôr a tela de alguém no ar sem aperto.
+
+/**
+ * A queda dita de cada sessão: `sessão → { tela, frase }`. Por sessão porque a
+ * transmissão de uma sessão fora da vista continua indo — e pode cair lá; a
+ * volta à vista tem de achar a frase (`palcoDeFora`, em `palco-imagem.js`).
+ */
+const quedasDaTela = new Map();
+
+/** A sessão que a janela mostra agora, ou `null` numa janela de sessão única. */
+function sessaoDaVistaDaTela() {
+  return typeof vistaDaJanela !== "undefined" ? vistaDaJanela.sessao ?? null : null;
+}
+
+/**
+ * A queda da transmissão de **tela** desta pessoa que um evento conta, ou
+ * `null`. A da câmera não é daqui: ela é dita no controle da câmera.
+ */
+function quedaDaTelaNoEvento(evento) {
+  if (!evento || typeof evento !== "object") return null;
+  const caiu = evento.ScreenShareFell;
+  if (caiu) {
+    if (caiu.source === "camera") return null;
+    return { tela: caiu.screen, frase: fraseDaQuedaDaTransmissao(caiu.source, caiu.reason) };
+  }
+  const fechou = evento.ScreenClosed;
+  if (fechou && typeof fechou.erro === "string" && fechou.erro && !fechou.camera) {
+    return { tela: fechou.screen, frase: fechou.erro };
+  }
+  return null;
+}
+
+/** Anota a queda que o evento de uma sessão conta. Devolve se havia uma. */
+function anotarAQuedaDaTela(sessao, evento) {
+  const queda = quedaDaTelaNoEvento(evento);
+  if (!queda) return false;
+  quedasDaTela.set(sessao ?? null, queda);
+  return true;
+}
+
+/** A pessoa recomeçou nesta sessão: a frase de antes sai. */
+function esquecerAQuedaDaTela() {
+  if (quedasDaTela.delete(sessaoDaVistaDaTela())) desenharAQuedaDaTela();
+}
+
+/**
+ * A frase da queda, ao lado do COMPARTILHAR e na bandeja da chamada.
+ *
+ * Com argumentos é o desenho de um retrato (`desenharORodapeDoOperador`): a
+ * sala e a transmissão desta pessoa, como ele as trouxe. Sem argumentos é uma
+ * mudança daqui, que redesenha com o que o último retrato disse — o mesmo
+ * idioma de `desenharACamera`.
+ *
+ * A frase sai quando o retrato mostra **outra** transmissão desta pessoa (ela
+ * recomeçou) ou quando ela não está em sala nenhuma. A mesma transmissão ainda
+ * no retrato não a apaga: o `ScreenShareFell` chega antes de o servidor
+ * devolver o fim dela.
+ */
+function desenharAQuedaDaTela(voice_room, minha) {
+  if (voice_room !== undefined) {
+    desenharAQuedaDaTela.sala = voice_room;
+    desenharAQuedaDaTela.minha = minha ?? null;
+  }
+  const dentro = (desenharAQuedaDaTela.sala ?? null) != null;
+  const noRetrato = desenharAQuedaDaTela.minha ?? null;
+  const sessao = sessaoDaVistaDaTela();
+  const queda = quedasDaTela.get(sessao);
+  if (queda && voice_room !== undefined && (!dentro || (noRetrato && noRetrato.tela !== queda.tela))) {
+    quedasDaTela.delete(sessao);
+  }
+  // **A pausa pelo sinal, na mesma linha.** O teto parou o vídeo para a voz
+  // não picotar: a transmissão continua anunciada e volta sozinha, e quem
+  // transmite era a única pessoa da sala sem como saber que a imagem parou. O
+  // retrato traz o motivo (`minha_transmissao.parada`).
+  //
+  // A queda vem antes: ela é o que a pessoa tem de resolver, e uma transmissão
+  // que caiu não está pausada. A da câmera não é daqui — ela é dita no
+  // controle da câmera, como a queda dela.
+  const daCamera = noRetrato && typeof ehAMinhaCamera === "function" && ehAMinhaCamera(noRetrato.tela);
+  const pausa = dentro && noRetrato && !daCamera ? fraseDaPausaDaMinhaTela(noRetrato) : "";
+  const frase = quedasDaTela.get(sessao)?.frase || pausa;
+  for (const onde of [$("tela-estado"), $("chamada-tela-estado")]) {
+    if (!onde) continue;
+    porOEscondido(onde, !frase);
+    porOTexto(onde, frase);
+  }
+}
+
+listen("seele://event", (evento) => {
+  if (!anotarAQuedaDaTela(sessaoDaVistaDaTela(), evento.payload)) return;
+  desenharAQuedaDaTela();
+  // O botão volta a COMPARTILHAR com o retrato; pedi-lo já poupa a meia volta
+  // do laço da chamada.
+  if (typeof atualizarChamada === "function") atualizarChamada().catch(() => {});
 });
 
 // Escape fecha, como em toda coisa que se põe por cima nesta janela. Só com a

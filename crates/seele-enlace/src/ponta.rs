@@ -2,7 +2,8 @@
 //!
 //! # A demultiplexação (RFC 7983)
 //!
-//! Pelo primeiro byte: STUN (0 a 3), DTLS (20 a 63), e o resto vai para
+//! Pelo primeiro byte: STUN (0 a 3), DTLS (20 a 63), RTP e RTCP (128 a 191,
+//! a mídia do ADR 0067, que vai ao `Rtc` da sessão ativa da origem), e o resto vai para
 //! [`Ponta::mensagens_enc`] — os datagramas de texto do ponto de encontro, que
 //! dividem a porta 8383 com o WebRTC. Um STUN ou um DTLS vai ao `Rtc` que o
 //! aceita (`Rtc::accepts`, que é como o str0m separa vários pares num socket).
@@ -64,6 +65,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use str0m::bwe::{Bitrate, BweKind};
 use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::config::Fingerprint;
 use str0m::net::{Protocol, Receive};
@@ -180,6 +182,20 @@ pub struct Discagem {
     pub prazo: Duration,
     /// O certificado DTLS deste lado; `None` gera um efêmero.
     pub certificado: Option<CertificadoDtls>,
+    /// Aceitar a checagem ICE do anfitrião em IPv6 mesmo sem alvo IPv6.
+    ///
+    /// O candidato local de uma família só existe quando há alvo nela, e sem
+    /// candidato local o agente larga a checagem que chega («unknown
+    /// interface»). Com isto, numa ponta que fala IPv6, o candidato local IPv6
+    /// entra de qualquer jeito: é para a discagem que segue um `CHAMA` que
+    /// levou o IPv6 deste lado. O anfitrião o checa do IPv6 dele, que o `AQUI`
+    /// não diz, e é dessa checagem que este lado aprende o endereço (o
+    /// peer-reflexive, RFC 8445 7.3.1.3).
+    ///
+    /// **Só quando nenhuma outra discagem desta ponta fala com esse
+    /// anfitrião**: duas (dois `U`) da mesma porta no mesmo endereço dele
+    /// disputam o DTLS uma da outra, e quem sabe se há outra é quem chama.
+    pub espera_checagem_ipv6: bool,
 }
 
 impl Discagem {
@@ -192,6 +208,7 @@ impl Discagem {
             credencial: None,
             prazo: crate::APERTO,
             certificado: None,
+            espera_checagem_ipv6: false,
         }
     }
 }
@@ -246,6 +263,9 @@ pub struct ContadoresDaPonta {
     pub recusa_de_quem_hospeda: u64,
     /// Bindings com o U de uma conexão que terminou há pouco (a lápide).
     pub bindings_em_lapide: u64,
+    /// Pacotes de RTP ou RTCP de uma origem sem sessão pronta, ou para uma
+    /// sessão que não ligou a mídia: largados.
+    pub midia_sem_dono: u64,
     /// Pares de anfitrião criados desde que a ponta abriu.
     pub pares_criados: u64,
     /// Pendentes aposentados por um aperto novo da mesma origem.
@@ -279,6 +299,7 @@ struct ContadoresDaPontaVivos {
     recusa_pelo_teto_por_ip: std::sync::atomic::AtomicU64,
     recusa_de_quem_hospeda: std::sync::atomic::AtomicU64,
     bindings_em_lapide: std::sync::atomic::AtomicU64,
+    midia_sem_dono: std::sync::atomic::AtomicU64,
     pares_criados: std::sync::atomic::AtomicU64,
     pendentes_superados: std::sync::atomic::AtomicU64,
     bindings_com_sessao_ativa: std::sync::atomic::AtomicU64,
@@ -294,9 +315,11 @@ struct ContadoresDaPontaVivos {
 struct Interno {
     cmd: mpsc::UnboundedSender<Comando>,
     local: SocketAddr,
-    /// O descritor de envio. `fechar()` o solta, para o socket voltar ao sistema
-    /// sem esperar a última cópia da `Ponta` cair (pedido do E).
-    socket: Mutex<Option<Arc<std::net::UdpSocket>>>,
+    /// O socket, para mandar por fora da tarefa (`mandar`). `fechar()` o
+    /// solta, para ele voltar ao sistema sem esperar a última cópia da `Ponta`
+    /// cair (pedido do E). É **o mesmo** da tarefa, e não uma cópia do
+    /// descritor: ver `Ponta::de_socket_pedindo`.
+    socket: Mutex<Option<Arc<UdpSocket>>>,
     /// Vira `true` quando a tarefa da ponta saiu e soltou os descritores dela.
     parada: watch::Receiver<bool>,
     chegadas: tokio::sync::Mutex<mpsc::Receiver<Conexao>>,
@@ -399,22 +422,25 @@ impl Ponta {
     ) -> io::Result<Self> {
         socket.set_nonblocking(true)?;
         ajustar_buffers(&socket, recepcao);
-        // Um segundo descritor do mesmo socket, só para mandar. O `try_send_to`
-        // do Tokio depende da prontidão registrada, e o primeiro envio de um
-        // socket recém-registrado voltava `WouldBlock` (medido: a primeira
-        // Indication de um furo se perdia). O `send_to` do descritor não
-        // bloqueante só falha com o buffer do sistema cheio.
-        let saida = Arc::new(socket.try_clone()?);
-        Self::com_socket(UdpSocket::from_std(socket)?, saida, anfitriao)
+        // **Um descritor só.** Havia um segundo, do `try_clone`, só para
+        // mandar — e **no Windows um processo filho herda a cópia que o
+        // `try_clone` devolve** (medido em 12/11/2026: com o filho vivo, a
+        // porta de um socket da `std` volta ao sistema quando ele é solto, e a
+        // de um socket com `try_clone` não volta, `os error 10048`, até o
+        // filho morrer). Todo processo que subia com a ponta aberta — o
+        // servidor de jogo do `programa.rodar` — levava a cópia, e a porta
+        // ficava presa enquanto ele vivesse: `fechar()` não a devolvia, e quem
+        // hospeda não subia de novo na mesma porta com o jogo aberto. Agora
+        // quem manda usa o socket da tarefa ([`mandar`]), e não há cópia a
+        // herdar. A prova é
+        // `fechar_solta_a_porta_mesmo_com_um_processo_filho_vivo`.
+        Self::com_socket(UdpSocket::from_std(socket)?, anfitriao)
     }
 
-    fn com_socket(
-        socket: UdpSocket,
-        saida: Arc<std::net::UdpSocket>,
-        anfitriao: Option<ConfigDoAnfitriao>,
-    ) -> io::Result<Self> {
+    fn com_socket(socket: UdpSocket, anfitriao: Option<ConfigDoAnfitriao>) -> io::Result<Self> {
         let local = socket.local_addr()?;
         let socket = Arc::new(socket);
+        let saida = Arc::clone(&socket);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (chegadas_tx, chegadas_rx) = mpsc::channel(16);
         let (enc_tx, enc_rx) = mpsc::channel(64);
@@ -423,7 +449,6 @@ impl Ponta {
         let (parada_tx, parada_rx) = watch::channel(false);
         let motor = Motor {
             socket,
-            saida: Arc::clone(&saida),
             local,
             anfitriao,
             pares: HashMap::new(),
@@ -441,7 +466,7 @@ impl Ponta {
         };
         tokio::spawn(async move {
             motor.rodar(cmd_rx).await;
-            // O `motor` (com o socket de leitura e o de envio) já caiu aqui.
+            // O `motor` (com o socket) já caiu aqui.
             let _ = parada_tx.send(true);
         });
         Ok(Self {
@@ -484,10 +509,24 @@ impl Ponta {
         espera.await.map_err(|_| FalhaAoDiscar::PontaFechada)?
     }
 
-    /// Os datagramas que não são STUN nem DTLS (o ENC/3). Entregue uma vez.
+    /// Os datagramas que não são STUN nem DTLS (o ENC/3). Entregue a um leitor
+    /// só, até ele devolver ([`Ponta::devolver_mensagens_enc`]).
     #[must_use]
     pub fn mensagens_enc(&self) -> Option<mpsc::Receiver<(SocketAddr, Vec<u8>)>> {
         self.interno.enc.lock().ok().and_then(|mut enc| enc.take())
+    }
+
+    /// Devolve a fila de [`Ponta::mensagens_enc`], para ser tomada de novo:
+    /// quem liga chama o ponto, disca, e pode chamar outra vez pela mesma
+    /// ponta. O que chegou enquanto ninguém lia continua na fila, até o teto
+    /// dela; quem a toma decide o que é dele. Com outra já devolvida, esta é
+    /// largada.
+    pub fn devolver_mensagens_enc(&self, fila: mpsc::Receiver<(SocketAddr, Vec<u8>)>) {
+        if let Ok(mut enc) = self.interno.enc.lock() {
+            if enc.is_none() {
+                *enc = Some(fila);
+            }
+        }
     }
 
     /// Manda um datagrama cru por este socket (o ENC/3).
@@ -497,10 +536,10 @@ impl Ponta {
     /// O socket que não aceitou.
     pub fn enviar_bruto(&self, destino: SocketAddr, bytes: &[u8]) -> io::Result<()> {
         let destino = para_o_socket(destino, self.interno.local);
-        self.saida()?.send_to(bytes, destino).map(|_| ())
+        mandar(&*self.saida()?, bytes, destino).map(|_| ())
     }
 
-    fn saida(&self) -> io::Result<Arc<std::net::UdpSocket>> {
+    fn saida(&self) -> io::Result<Arc<UdpSocket>> {
         self.interno
             .socket
             .lock()
@@ -567,7 +606,7 @@ impl Ponta {
                     return;
                 };
                 for destino in &validos {
-                    let _ = socket.send_to(&indicacao(), para_o_socket(*destino, local));
+                    let _ = mandar(&socket, &indicacao(), para_o_socket(*destino, local));
                 }
                 drop(socket);
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -662,6 +701,7 @@ impl Ponta {
             recusa_pelo_teto_por_ip: c.recusa_pelo_teto_por_ip.load(Ordering::Relaxed),
             recusa_de_quem_hospeda: c.recusa_de_quem_hospeda.load(Ordering::Relaxed),
             bindings_em_lapide: c.bindings_em_lapide.load(Ordering::Relaxed),
+            midia_sem_dono: c.midia_sem_dono.load(Ordering::Relaxed),
             pares_criados: c.pares_criados.load(Ordering::Relaxed),
             pendentes_superados: c.pendentes_superados.load(Ordering::Relaxed),
             bindings_com_sessao_ativa: c.bindings_com_sessao_ativa.load(Ordering::Relaxed),
@@ -775,6 +815,19 @@ fn para_o_socket(endereco: SocketAddr, local: SocketAddr) -> SocketAddr {
         }
         _ => endereco,
     }
+}
+
+/// Manda um datagrama pelo socket da ponta, **na hora e sem esperar
+/// prontidão**: a chamada do sistema direto no descritor não bloqueante.
+///
+/// O `try_send_to` do Tokio depende da prontidão registrada, e o primeiro
+/// envio de um socket recém-registrado voltava `WouldBlock` (medido: a primeira
+/// Indication de um furo se perdia). Este só falha com o buffer do sistema
+/// cheio. É o que o segundo descritor fazia até 12/11/2026 — pelo mesmo socket,
+/// e sem a cópia que um processo filho herdava no Windows
+/// (`Ponta::de_socket_pedindo`).
+fn mandar(socket: &UdpSocket, bytes: &[u8], destino: SocketAddr) -> io::Result<usize> {
+    socket2::SockRef::from(socket).send_to(bytes, &destino.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -957,11 +1010,12 @@ struct Par {
     lado: Option<LadoDaTarefa>,
     revezamento: usize,
     apresentacao: Vec<u8>,
+    /// A mídia RTP, depois de `Conexao::ligar_midia`.
+    midia: Option<crate::midia::MidiaDoPar>,
 }
 
 struct Motor {
     socket: Arc<UdpSocket>,
-    saida: Arc<std::net::UdpSocket>,
     local: SocketAddr,
     anfitriao: Option<ConfigDoAnfitriao>,
     pares: HashMap<usize, Par>,
@@ -1013,6 +1067,9 @@ impl Motor {
         let mut buf = vec![0_u8; 2048];
         let mut revisar_em = Instant::now();
         let mut acordar = revisar_em;
+        // No Windows o relógio do `tokio` acorda de 15,6 em 15,6 ms, e o
+        // cadenciador da mídia pede prazos de poucos milissegundos.
+        let mut despertador = crate::despertador::Despertador::desta_plataforma();
         loop {
             let agora = Instant::now();
             // O fan-out gera um comando por destinatário. Varrer todos os pares
@@ -1024,7 +1081,9 @@ impl Motor {
                 acordar = self.proximo_acordar(agora);
                 revisar_em = agora + Duration::from_millis(1);
             }
+            despertador.armar(agora, acordar);
             tokio::select! {
+                () = despertador.tocou() => {}
                 lido = self.socket.recv_from(&mut buf) => {
                     // A entrada pode antecipar um prazo antes distante.
                     acordar = acordar.min(revisar_em);
@@ -1108,6 +1167,13 @@ impl Motor {
         };
         let e_stun = primeiro <= 3;
         let e_dtls = (20..=63).contains(&primeiro);
+        // RTP e RTCP (RFC 7983). Os datagramas do ponto de encontro são texto
+        // (`SEELE-ENC/…`, primeiro byte 83) e nunca caem nesta faixa.
+        let e_midia = (128..=191).contains(&primeiro);
+        if e_midia {
+            self.chegou_midia(agora, origem, bytes);
+            return;
+        }
         if !e_stun && !e_dtls {
             let _ = self.enc.try_send((origem, bytes.to_vec()));
             return;
@@ -1195,6 +1261,33 @@ impl Motor {
             }
             self.entregar(id, agora, entrada, bytes.len(), e_dtls.then_some(origem));
         }
+    }
+
+    /// **A mídia só entra na sessão ativa da origem, e só se ela ligou a
+    /// mídia.** Um pacote RTP de uma origem sem sessão pronta, ou para uma
+    /// sessão que não declarou mídia, é contado e largado: nunca cria par,
+    /// nunca vai à fila do ponto de encontro.
+    fn chegou_midia(&mut self, agora: Instant, origem: SocketAddr, bytes: &[u8]) {
+        let dono = self
+            .ativa_da_origem(origem)
+            .filter(|id| self.pares.get(id).is_some_and(|par| par.midia.is_some()));
+        let Some(id) = dono else {
+            self.contadores
+                .midia_sem_dono
+                .fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        let destino = self.virtual_local(origem.is_ipv4());
+        let Ok(recebido) = Receive::new(Protocol::Udp, origem, destino, bytes) else {
+            return;
+        };
+        self.entregar(
+            id,
+            agora,
+            Input::Receive(agora, recebido),
+            bytes.len(),
+            None,
+        );
     }
 
     /// **Um registro DTLS de outra sessão da mesma 5-tupla nunca entra num par
@@ -1439,7 +1532,11 @@ impl Motor {
             })
         };
         if let Err(erro) = resultado {
-            self.falhou(id, &erro);
+            if self.e_so_um_pacote_de_midia(id, &erro) {
+                self.drenar(id);
+            } else {
+                self.falhou(id, &erro);
+            }
             return;
         }
         self.drenar(id);
@@ -1656,7 +1753,7 @@ impl Motor {
         // **ICE completo e controlado** (e não mais ICE-lite): o anfitrião checa
         // os candidatos que conhece, aprende o peer-reflexive de quem liga e
         // responde. Quem liga (o nativo ou a página) segue controlador e nomeia.
-        let mut config = Rtc::builder()
+        let mut config = crate::midia::configurar(Rtc::builder())
             .set_crypto_provider(crate::cripto::provedor())
             .set_local_ice_credentials(IceCreds {
                 ufrag: u.clone(),
@@ -1749,7 +1846,10 @@ impl Motor {
             bytes_recebidos: Default::default(),
             rtt_us: Default::default(),
             perda_na_saida: Mutex::new(None),
+            perda_na_entrada: Mutex::new(None),
             voz_na_fila: Default::default(),
+            midia_na_fila: Default::default(),
+            estimativa_bps: Default::default(),
             filas_vivas: Default::default(),
             credito_em_aberto: Default::default(),
             pausa_de_teste: Default::default(),
@@ -1793,6 +1893,7 @@ impl Motor {
                 lado: None,
                 revezamento: 0,
                 apresentacao: Vec::new(),
+                midia: None,
             },
         );
         self.vivas.store(self.pares.len(), Ordering::Relaxed);
@@ -1852,6 +1953,66 @@ impl Motor {
                         .contadores
                         .voz_nao_saiu
                         .fetch_add(1, Ordering::Relaxed);
+                }
+                self.drenar(par);
+            }
+            Comando::LigarMidia { par, fila } => {
+                let Some(p) = self.pares.get_mut(&par) else {
+                    return;
+                };
+                if let Some(midia) = p.midia.as_mut() {
+                    midia.trocar_a_fila(fila);
+                } else {
+                    let anfitriao = p.papel == Papel::Anfitriao;
+                    p.midia = crate::midia::declarar(&mut p.rtc, anfitriao, fila);
+                }
+                self.drenar(par);
+            }
+            Comando::Midia {
+                par,
+                faixa,
+                trilha,
+                tempo,
+                bytes,
+            } => {
+                let Some(p) = self.pares.get_mut(&par) else {
+                    return;
+                };
+                p.comp.midia_na_fila.fetch_sub(1, Ordering::Relaxed);
+                let escrito = p.pronto
+                    && p.midia.as_ref().is_some_and(|m| {
+                        m.escrever(&mut p.rtc, agora, faixa, trilha, tempo, bytes)
+                    });
+                if !escrito {
+                    p.comp
+                        .contadores
+                        .midia_nao_saiu
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                self.drenar(par);
+            }
+            Comando::PedirChave { par, faixa } => {
+                if let Some(p) = self.pares.get_mut(&par) {
+                    if p.midia.is_some() {
+                        crate::midia::MidiaDoPar::pedir_chave(&mut p.rtc, faixa);
+                    }
+                }
+                self.drenar(par);
+            }
+            Comando::SemearEstimativa { par, bps } => {
+                if let Some(p) = self.pares.get_mut(&par) {
+                    if p.midia.is_some() {
+                        p.rtc.bwe().reset(Bitrate::bps(bps));
+                        p.comp.estimativa_bps.store(bps.max(1), Ordering::Relaxed);
+                    }
+                }
+                self.drenar(par);
+            }
+            Comando::TaxaDaMidia { par, desejada_bps } => {
+                if let Some(p) = self.pares.get_mut(&par) {
+                    if p.midia.is_some() {
+                        p.rtc.bwe().set_desired_bitrate(Bitrate::bps(desejada_bps));
+                    }
                 }
                 self.drenar(par);
             }
@@ -2000,7 +2161,7 @@ impl Motor {
             }
         };
         let conferir = matches!(discagem.pino, crate::Pino::Impressao(_));
-        let mut config = Rtc::builder()
+        let mut config = crate::midia::configurar(Rtc::builder())
             .set_crypto_provider(crate::cripto::provedor())
             .set_local_ice_credentials(IceCreds {
                 ufrag: u.clone(),
@@ -2039,7 +2200,11 @@ impl Motor {
         }
         let (ctl, voz) = configurar_canais(&mut rtc);
         for ipv4 in [true, false] {
-            if alvos.iter().any(|a| a.is_ipv4() == ipv4) {
+            // O candidato local de uma família entra quando há alvo nela. O
+            // IPv6 entra também quando quem chama espera a checagem do
+            // anfitrião por ele (`Discagem::espera_checagem_ipv6`).
+            let espera_a_checagem = !ipv4 && discagem.espera_checagem_ipv6 && self.local.is_ipv6();
+            if espera_a_checagem || alvos.iter().any(|a| a.is_ipv4() == ipv4) {
                 if let Ok(candidato) = Candidate::host(self.virtual_local(ipv4), "udp") {
                     rtc.add_local_candidate(candidato);
                 }
@@ -2271,7 +2436,7 @@ impl Motor {
                 }
                 Ok(Output::Transmit(t)) => {
                     let destino = para_o_socket(t.destination, self.local);
-                    if self.saida.send_to(&t.contents, destino).is_err() {
+                    if mandar(&self.socket, &t.contents, destino).is_err() {
                         self.contadores
                             .datagramas_perdidos_na_saida
                             .fetch_add(1, Ordering::Relaxed);
@@ -2289,11 +2454,38 @@ impl Motor {
                 }
                 Ok(Output::Event(evento)) => self.evento(id, evento),
                 Err(erro) => {
+                    // Um pacote de mídia estragado custa o pacote; o laço
+                    // segue (e é contado pelo teto de voltas, como tudo aqui).
+                    if self.e_so_um_pacote_de_midia(id, &erro) {
+                        continue;
+                    }
                     self.falhou(id, &erro);
                     return;
                 }
             }
         }
+    }
+
+    /// **Um erro de empacotar ou desempacotar mídia não é da conexão.** É de
+    /// um quadro (que este lado escreveu) ou de um pacote (que o par mandou),
+    /// e derrubar a sessão por ele daria a qualquer um que manda vídeo o poder
+    /// de derrubar a voz e o controle de quem o recebe. É contado, e segue.
+    fn e_so_um_pacote_de_midia(&mut self, id: usize, erro: &str0m::RtcError) -> bool {
+        if !matches!(erro, str0m::RtcError::Packet(..)) {
+            return false;
+        }
+        if let Some(par) = self.pares.get(&id) {
+            let total = par
+                .comp
+                .contadores
+                .midia_malformada
+                .fetch_add(1, Ordering::Relaxed)
+                + 1;
+            if total == 1 || total.is_multiple_of(1000) {
+                tracing::warn!(par = id, %erro, total, "um pacote de mídia malformado foi largado");
+            }
+        }
+        true
     }
 
     fn falhou(&mut self, id: usize, erro: &str0m::RtcError) {
@@ -2340,6 +2532,23 @@ impl Motor {
             Event::ChannelData(dados) => self.dados(id, dados.id, dados.data),
             Event::ChannelClose(canal) => self.canal_fechou(id, canal),
             Event::ChannelBufferedAmountLow(_) => self.escrever(id),
+            Event::MediaData(dados) => {
+                if let Some(midia) = self.pares.get_mut(&id).and_then(|p| p.midia.as_mut()) {
+                    midia.chegou(dados);
+                }
+            }
+            Event::KeyframeRequest(pedido) => {
+                if let Some(midia) = self.pares.get(&id).and_then(|p| p.midia.as_ref()) {
+                    midia.pediram_chave(pedido.mid);
+                }
+            }
+            Event::EgressBitrateEstimate(BweKind::Twcc { estimate, .. }) => {
+                if let Some(par) = self.pares.get(&id) {
+                    par.comp
+                        .estimativa_bps
+                        .store(estimate.as_u64().max(1), Ordering::Relaxed);
+                }
+            }
             Event::PeerStats(stats) => {
                 if let Some(par) = self.pares.get(&id) {
                     let rtt = stats.rtt.or_else(|| {
@@ -2356,6 +2565,9 @@ impl Motor {
                     }
                     if let Ok(mut perda) = par.comp.perda_na_saida.lock() {
                         *perda = stats.egress_loss_fraction;
+                    }
+                    if let Ok(mut perda) = par.comp.perda_na_entrada.lock() {
+                        *perda = stats.ingress_loss_fraction;
                     }
                     if let Some(caminho) = &stats.selected_candidate_pair {
                         if let Ok(mut remoto) = par.comp.remoto.lock() {
@@ -3049,9 +3261,11 @@ impl Motor {
             for _ in 0..256 {
                 match blindar(&self.contadores.panicos_contidos, || par.rtc.poll_output()) {
                     Ok(Output::Transmit(t)) => {
-                        let _ = self
-                            .saida
-                            .send_to(&t.contents, para_o_socket(t.destination, self.local));
+                        let _ = mandar(
+                            &self.socket,
+                            &t.contents,
+                            para_o_socket(t.destination, self.local),
+                        );
                     }
                     Ok(Output::Event(_)) => {}
                     Ok(Output::Timeout(_)) | Err(_) => break,

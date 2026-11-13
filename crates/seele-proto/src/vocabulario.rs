@@ -166,6 +166,14 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         | ServerMessage::PerfilMudou(..)
         | ServerMessage::PerfilRecusado { .. }
         | ServerMessage::PendenciaDoPerfil { .. } => 12,
+        // A lista de banidos (10/11/2026): o 13. O 12 está publicado
+        // (v0.19.6), e um par 12 que recebesse isto leria uma variante que não
+        // conhece.
+        ServerMessage::Banidos { .. } => 13,
+        // O vídeo por RTP (ADR 0067): um par 12 não tem a mídia declarada.
+        ServerMessage::TelaPorMidia { .. } | ServerMessage::FimDaTelaPorMidia { .. } => {
+            crate::screen::PROTOCOLO_DA_MIDIA
+        }
     }
 }
 
@@ -260,6 +268,18 @@ pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
         // O perfil público nativo (0.19), no mesmo 12.
         | ClientMessage::GravarPerfil { .. }
         | ClientMessage::TirarImagemDoPerfil { .. } => 12,
+        // A mesa mínima de texto da 1.0 (10/11/2026): editar a própria
+        // mensagem, desbanir e listar os banidos. Um servidor 12 não os lê.
+        ClientMessage::EditMessage { .. }
+        | ClientMessage::UnbanPerson { .. }
+        | ClientMessage::ListBans => 13,
+        // O vídeo por RTP (ADR 0067): um servidor 12 espera a tela no canal.
+        ClientMessage::MidiaLigada | ClientMessage::TelaPorMidia { .. } => {
+            crate::screen::PROTOCOLO_DA_MIDIA
+        }
+        // O relato de recepção (11/11/2026), no mesmo 13: um servidor 12 o
+        // leria como variante desconhecida.
+        ClientMessage::RelatoDeRecepcao(_) => 13,
     }
 }
 
@@ -761,6 +781,104 @@ mod tests {
         // O que já existia não subiu.
         assert_eq!(desde_do_cliente(&ClientMessage::PedirCargos), 10);
         assert_eq!(desde_do_cliente(&ClientMessage::RecusarMods), 9);
+    }
+
+    /// **O vídeo por RTP é do 13** (ADR 0067): um par 12 não tem a mídia
+    /// declarada, não recebe a faixa de uma transmissão e não ouve de um
+    /// cliente que a mídia foi ligada. Baixar um destes braços reprova aqui.
+    #[test]
+    fn o_video_por_rtp_nao_vai_a_quem_fala_menos_que_o_treze() {
+        let abertura = [0_u8; crate::screen::SCREEN_HEADER_LEN];
+        assert_eq!(crate::screen::PROTOCOLO_DA_MIDIA, 13);
+        assert_eq!(
+            desde(&ServerMessage::TelaPorMidia { faixa: 0, abertura }),
+            13
+        );
+        assert_eq!(
+            desde(&ServerMessage::FimDaTelaPorMidia {
+                faixa: 0,
+                limpo: true
+            }),
+            13
+        );
+        assert_eq!(desde_do_cliente(&ClientMessage::MidiaLigada), 13);
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::TelaPorMidia { abertura }),
+            13
+        );
+    }
+
+    /// **O relato de recepção é do 13**: um servidor 12 (a v0.19.6 publicada)
+    /// não o conhece, e um cliente não o escreve para ele. Baixar o braço
+    /// reprova aqui.
+    #[test]
+    fn o_relato_de_recepcao_nao_vai_a_um_servidor_doze() {
+        let relato = ClientMessage::RelatoDeRecepcao(crate::signal::Recepcao {
+            perda: Some(0.02),
+            jitter_ms: Some(7.5),
+        });
+        assert_eq!(desde_do_cliente(&relato), 13);
+        assert!(desde_do_cliente(&relato) > 12);
+    }
+
+    /// **Um par 12 não recebe a lista de banidos, e um servidor 12 não recebe
+    /// os verbos do 13.** O 12 está publicado (v0.19.6): um `Banidos` escrito
+    /// a ele é uma variante que ele não conhece, e um `EditMessage` escrito a
+    /// um servidor 12 é pulado calado — a pessoa editaria e nada aconteceria.
+    /// Reverter um braço `=> 13` para o 12 reprova aqui.
+    #[test]
+    fn um_par_doze_nao_recebe_o_que_nasceu_no_treze() {
+        use crate::ids::{MessageId, PersonId};
+
+        let banidos = ServerMessage::Banidos {
+            banidos: vec![],
+            ultima: true,
+        };
+        assert_eq!(desde(&banidos), 13);
+        for verbo in [
+            ClientMessage::EditMessage {
+                id: MessageId(1),
+                body: "x".into(),
+            },
+            ClientMessage::UnbanPerson {
+                person: PersonId(1),
+            },
+            ClientMessage::ListBans,
+        ] {
+            assert_eq!(desde_do_cliente(&verbo), 13, "{verbo:?}");
+        }
+        // O que a edição e o desbanimento usam para avisar os outros é do 9:
+        // um par 12 vê a mensagem editada e o membro de volta.
+        assert_eq!(
+            desde(&ServerMessage::MessageEdited {
+                channel: crate::ids::ChannelId(1),
+                id: MessageId(1),
+                body: String::new(),
+            }),
+            9
+        );
+        assert_eq!(
+            desde(&ServerMessage::MembroNovo {
+                membro: crate::control::Membro {
+                    id: PersonId(1),
+                    nickname: String::new(),
+                },
+            }),
+            9
+        );
+        // E o que já existia não subiu.
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::RemoveMessage {
+                message: MessageId(1)
+            }),
+            9
+        );
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::TirarImagemDoPerfil {
+                lado: crate::perfil::LadoDoPerfil::Foto
+            }),
+            12
+        );
     }
 
     #[test]

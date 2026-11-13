@@ -82,6 +82,35 @@ where
     encode(mensagem).expect("uma semente é um quadro que o próprio `encode` aceita")
 }
 
+/// O que o alvo `control_frame` confere de cada entrada: o mesmo arquivo que o
+/// alvo compila, e não uma cópia. Ver o cabeçalho dele.
+#[path = "../../../fuzz/propriedades/control_frame.rs"]
+mod propriedade_do_control_frame;
+
+/// O nome da semente de [`relato_com_nan`].
+const NOME_DO_RELATO_COM_NAN: &str = "cliente-relato-de-recepcao-com-nan";
+
+/// **A entrada com que o fuzz do `ci.yml` reprovou** na primeira vez em que
+/// rodou (12/11/2026, execução 43264412497; em base64,
+/// `DT0AAQAAw//+AAAAIQAAAAAhugAAAAA=`): um relato de recepção com `NaN` no
+/// jitter, seguido de quinze bytes que o `decode` não lê.
+///
+/// O defeito era do arnês, que comparava as mensagens, e `NaN != NaN` — ver
+/// `fuzz/propriedades/control_frame.rs`. O quadro é montado pelo `encode`, como
+/// os outros, com o mesmo `NaN` bit a bit; a cauda é a que o libFuzzer achou.
+fn relato_com_nan() -> Vec<u8> {
+    let mut achado = quadro(&ClientMessage::RelatoDeRecepcao(
+        seele_proto::signal::Recepcao {
+            perda: None,
+            jitter_ms: Some(f32::from_bits(0xFFC3_0000)),
+        },
+    ));
+    achado.extend_from_slice(&[
+        0xFE, 0x00, 0x00, 0x00, 0x21, 0x00, 0x00, 0x00, 0x00, 0x21, 0xBA, 0x00, 0x00, 0x00, 0x00,
+    ]);
+    achado
+}
+
 /// O que cada alvo recebe, montado agora pelo código de verdade.
 fn sementes() -> BTreeMap<&'static str, DoAlvo> {
     let mut todas = BTreeMap::new();
@@ -240,6 +269,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             resumo: "3c".repeat(32),
         }),
     );
+    controle.insert(NOME_DO_RELATO_COM_NAN.to_owned(), relato_com_nan());
     todas.insert("control_frame", controle);
 
     let mut midia = DoAlvo::new();
@@ -433,6 +463,19 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             id,
             endereco: publico,
             dicas: vec![dica],
+            impressao: None,
+        }),
+    );
+    // O `ATENDE` da sala pessoal da 1.0, com a impressão DTLS na segunda linha
+    // (ADR 0068).
+    do_encontro.insert(
+        "atende-com-impressao".to_owned(),
+        encontro::atende(&encontro::Atende {
+            escuta: livres.escuta().clone(),
+            id,
+            endereco: publico,
+            dicas: vec![dica],
+            impressao: Some([0x5A; 32]),
         }),
     );
     for (nome, resposta) in [
@@ -506,6 +549,15 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             encontro::RespostaDoSinal::Aqui {
                 endereco: publico,
                 dicas: vec![dica],
+                impressao: None,
+            },
+        ),
+        (
+            "aqui-com-impressao",
+            encontro::RespostaDoSinal::Aqui {
+                endereco: publico,
+                dicas: vec![dica],
+                impressao: Some([0x5A; 32]),
             },
         ),
         ("ninguem", encontro::RespostaDoSinal::Ninguem),
@@ -749,6 +801,67 @@ fn toda_semente_e_uma_entrada_que_o_alvo_aceita() {
             .iter()
             .any(|(_, bytes)| bytes.first() == Some(&0x04)),
         "o alvo envelope não tem semente do crédito 0x04"
+    );
+}
+
+#[test]
+fn toda_semente_do_control_frame_passa_pela_propriedade_do_alvo() {
+    // **O alvo reprovou no CI com uma entrada que ninguém tinha visto**, porque
+    // o fuzz não rodava em lugar nenhum. As sementes passam aqui pela mesma
+    // propriedade que o alvo confere — o mesmo arquivo —, no `cargo test` dos
+    // três sistemas, sem o nightly: a entrada que reprovou é uma delas.
+    let todas = sementes();
+    let do_controle = do_alvo(&todas, "control_frame");
+    assert!(
+        do_controle.contains_key(NOME_DO_RELATO_COM_NAN),
+        "a semente control_frame/{NOME_DO_RELATO_COM_NAN} saiu de `sementes()`, e é ela que \
+         prende a propriedade do alvo ao caso que o fuzz achou"
+    );
+    for (nome, bytes) in do_controle {
+        let conferida = std::panic::catch_unwind(|| propriedade_do_control_frame::conferir(bytes));
+        assert!(
+            conferida.is_ok(),
+            "a semente control_frame/{nome} reprova na propriedade do alvo \
+             (fuzz/propriedades/control_frame.rs): o `cargo +nightly fuzz run control_frame` \
+             do ci.yml reprovaria com ela na primeira entrada. O pânico está logo acima"
+        );
+    }
+}
+
+#[test]
+fn o_relato_com_nan_e_lido_e_e_o_servidor_que_o_recusa() {
+    // O que a propriedade do alvo supõe, dito aqui para o dia em que mudar: o
+    // `decode` **aceita** um relato com `NaN`, a mensagem não é igual a ela
+    // mesma, e quem recusa o número é `Recepcao::confere`, no servidor.
+    let achado = relato_com_nan();
+    let Ok(ClientMessage::RelatoDeRecepcao(relato)) = decode::<ClientMessage>(&achado) else {
+        panic!("a entrada que o fuzz achou deixou de ser lida como um relato de recepção");
+    };
+    assert!(
+        relato.jitter_ms.is_some_and(f32::is_nan),
+        "o relato lido não tem mais `NaN` no jitter: {relato:?}"
+    );
+    #[allow(
+        clippy::eq_op,
+        reason = "a mensagem comparada com ela mesma é a pergunta"
+    )]
+    let igual_a_si = relato == relato;
+    assert!(
+        !igual_a_si,
+        "um relato com `NaN` passou a ser igual a si mesmo, e a propriedade do alvo pode \
+         voltar a comparar as mensagens"
+    );
+    assert_eq!(
+        relato.confere(),
+        Err(seele_proto::signal::RecepcaoRecusada::Jitter),
+        "o `confere` do servidor deixou de recusar o `NaN` que o `decode` aceita"
+    );
+    // E os bytes voltam iguais: o `NaN` atravessa a ida e volta bit a bit.
+    let quadro_de_novo = quadro(&ClientMessage::RelatoDeRecepcao(relato));
+    assert_eq!(
+        achado.get(..quadro_de_novo.len()),
+        Some(quadro_de_novo.as_slice()),
+        "o relato lido não se escreve de volta como os bytes de que saiu"
     );
 }
 

@@ -339,6 +339,121 @@ fn o_orquestrador_nao_pode_ganhar_bom() {
     );
 }
 
+/// O que há de errado no `mktemp` desta linha, se houver.
+///
+/// Duas formas reprovam, e são as duas que só o `mktemp` do BSD aceita:
+///
+/// - **`-t`**: no BSD é «prefixo, dentro de `$TMPDIR`»; no GNU é «molde, dentro de
+///   `$TMPDIR`», e molde sem `XXXXXX` sai com «too few X's in template»;
+/// - **molde sem `XXXXXX`**: o BSD cria a pasta com o nome literal, o GNU recusa.
+///
+/// Passam o `mktemp` sem molde nenhum (`mktemp -d`) e o molde inteiro com os
+/// seis `X` (`mktemp -d "${TMPDIR:-/tmp}/nome.XXXXXX"`), que os dois entendem
+/// igual.
+fn defeito_do_mktemp(linha: &str) -> Option<&'static str> {
+    let mut palavras = linha.split_whitespace();
+    // `$(mktemp`, `"$(mktemp`, `mktemp`: a palavra termina no nome do comando.
+    palavras.find(|palavra| palavra.ends_with("mktemp"))?;
+    for palavra in palavras {
+        // O comando acabou: o que vem depois é de outro.
+        if matches!(palavra, "||" | "&&" | "|" | ";") {
+            break;
+        }
+        let argumento = palavra.trim_end_matches(')').trim_end_matches(';');
+        if argumento == "-t" {
+            return Some("usa «-t», que no mktemp do GNU pede um molde com XXXXXX");
+        }
+        if argumento.starts_with('-') || argumento.starts_with("2>") {
+            continue;
+        }
+        if !argumento.contains("XXXXXX") {
+            return Some("dá um molde sem «XXXXXX», que o mktemp do GNU recusa");
+        }
+        if palavra.ends_with(')') {
+            break;
+        }
+    }
+    None
+}
+
+#[test]
+fn nenhum_script_usa_o_mktemp_que_so_o_bsd_entende() {
+    // `mktemp -d -t seele-sinal` criava a pasta no macOS e, no Linux e no `sh.exe`
+    // do Git no Windows, saía com «mktemp: too few X's in template» — e com ele
+    // 64 dos testes deste arquivo, que rodam o `publicar.sh` de verdade, em
+    // 12/11/2026. No Mac de quem publica nada acusava: os 147 passavam.
+    //
+    // Primeiro a régua contra as duas formas de verdade, a que quebrou e a que
+    // entrou no lugar: uma régua que não reprova a linha de 12/11 não guarda nada.
+    for (linha, passa) in [
+        (
+            r#"csp_dir=$(mktemp -d -t seele-sinal) || morrer "x""#,
+            false,
+        ),
+        (
+            r#"pda_dir=$(mktemp -d -t seele-preflight) || morrer "x""#,
+            false,
+        ),
+        ("x=$(mktemp -t seele.XXXXXX)", false),
+        ("x=$(mktemp -d /tmp/seele-sinal)", false),
+        (
+            r#"csp_dir=$(mktemp -d "${TMPDIR:-/tmp}/seele-sinal.XXXXXX") || morrer "x""#,
+            true,
+        ),
+        (
+            r#"TEMPORARIO=$(mktemp -d "${TMPDIR:-/tmp}/seele-publicar.XXXXXX" 2>/dev/null)"#,
+            true,
+        ),
+        ("TRABALHO=$(mktemp -d)", true),
+        ("printf 'sem o comando nesta linha'", true),
+    ] {
+        assert_eq!(
+            defeito_do_mktemp(linha).is_none(),
+            passa,
+            "a régua do mktemp errou nesta linha ({:?}):\n  {linha}",
+            defeito_do_mktemp(linha)
+        );
+    }
+
+    // Todo `.sh` de `empacotar/`, achado e não listado, e o instalador que o
+    // usuário de Linux roda. Um script novo entra na conferência por existir.
+    let mut scripts = vec![raiz().join("install.sh")];
+    for entrada in std::fs::read_dir(raiz().join("empacotar")).expect("empacotar/ é legível") {
+        let caminho = entrada.expect("entrada legível").path();
+        if caminho.extension().is_some_and(|e| e == "sh") {
+            scripts.push(caminho);
+        }
+    }
+    scripts.sort();
+
+    let mut vistos = 0;
+    for caminho in &scripts {
+        let corpo = std::fs::read_to_string(caminho).expect("o script tem que ser legível");
+        for (numero, linha) in sem_comentario(&corpo).lines().enumerate() {
+            if !linha.contains("mktemp") {
+                continue;
+            }
+            vistos += 1;
+            if let Some(defeito) = defeito_do_mktemp(linha) {
+                panic!(
+                    "{}:{} {defeito}.\n\
+                     No macOS passa; no Linux e no sh.exe do Git no Windows o script morre ali.\n\
+                     Escreva o molde inteiro: mktemp -d \"${{TMPDIR:-/tmp}}/seele-nome.XXXXXX\"\n  {}",
+                    caminho.display(),
+                    numero + 1,
+                    linha.trim()
+                );
+            }
+        }
+    }
+    // O `publicar.sh` tem três e o `install.sh` tem um. Se a conta cair a zero,
+    // foi a busca que parou de achar, e não os scripts que pararam de usar.
+    assert!(
+        vistos >= 4,
+        "só {vistos} linha(s) com mktemp em {scripts:?}: a busca deixou de ver os scripts"
+    );
+}
+
 #[test]
 fn nenhum_segredo_atravessa_por_argumento() {
     // A chave privada vai para o Windows pela **entrada padrão** do SSH, e é
@@ -567,6 +682,18 @@ fn marcar_executavel(_caminho: &PathBuf, _executavel: bool) {}
 /// como texto e continuam rodando lá — e são eles que pegam fim de linha, que é
 /// o defeito que só o Windows mostra.
 fn falta_ao_banco() -> Option<String> {
+    // **No Windows o script não é executado, e isto é dito a cada teste.** No
+    // runner do GitHub há `sh` (o do Git) e há Python de verdade, então a
+    // verificação de baixo passava e 64 testes reprovavam (rodada 43341701057):
+    // a bancada monta caminhos do Windows, o `sh` do Git os vê como `/tmp/…`, e
+    // os dois lados não acham os arquivos um do outro. Quem publica é um Mac;
+    // portar a bancada para o MSYS seria testar o MSYS.
+    if cfg!(windows) {
+        return Some(
+            "o publicar.sh é a ferramenta de um Mac, e a bancada dele não roda sob o sh do Git no Windows"
+                .to_owned(),
+        );
+    }
     let interpretador = interpretador();
     if Command::new(&interpretador)
         .arg("-c")
@@ -1182,11 +1309,20 @@ esac
     /// `--list` só pega o `git tag --list`, e `--format=%s` só pega o `git log`
     /// que classifica os assuntos, e não o que lista os commits.
     fn git_que_falha(&self, falha: &str, deixa_passar: usize) {
+        // Com o sufixo do sistema: no Windows o arquivo é `git.exe`, e procurar
+        // `git` não achava nada num `PATH` que tinha o git — quatro testes
+        // morriam aqui, antes de rodar o que vieram provar (CI de 12/11/2026).
+        let nome = format!("git{}", std::env::consts::EXE_SUFFIX);
         let caminho = std::env::var_os("PATH").unwrap_or_default();
         let de_verdade = std::env::split_paths(&caminho)
-            .map(|pasta| pasta.join("git"))
+            .map(|pasta| pasta.join(&nome))
             .find(|git| git.is_file())
-            .expect("o git de verdade tem que estar no PATH");
+            .unwrap_or_else(|| {
+                panic!(
+                    "o git de verdade tem que estar no PATH: procurei «{nome}» em {}",
+                    caminho.to_string_lossy()
+                )
+            });
         let ferramentas = self.base.join("ferramentas");
         escrever(&ferramentas.join("git.falha"), falha, false);
         escrever(
@@ -4341,8 +4477,13 @@ fn a_bateria_confere_aviso_de_seguranca_e_nao_so_licenca() {
 /// guarda são todos de uma linha só: é o que deixa o guarda ler o comando, e
 /// não a prosa que o explica.
 fn comandos_do_ci() -> Vec<String> {
-    let ci = std::fs::read_to_string(raiz().join(".github/workflows/ci.yml"))
-        .expect("o ci.yml é legível");
+    comandos_do_workflow(".github/workflows/ci.yml")
+}
+
+/// Como [`comandos_do_ci`], para qualquer workflow.
+fn comandos_do_workflow(arquivo: &str) -> Vec<String> {
+    let ci = std::fs::read_to_string(raiz().join(arquivo))
+        .unwrap_or_else(|erro| panic!("{arquivo} é legível: {erro}"));
     sem_comentario(&ci)
         .lines()
         .filter_map(|linha| {
@@ -4500,8 +4641,76 @@ fn dependencias_no_lock(lock: &str, pacote: &str) -> Option<std::collections::BT
     Some(nomes)
 }
 
+/// Os crates deste repositório de que o `fuzz/` depende por caminho, lidos do
+/// `fuzz/Cargo.toml` — e não uma lista escrita aqui: o guarda de baixo lia só o
+/// `seele-proto` quando o `seele-enlace` entrou no manifesto, e foi por ele que
+/// o lock ficou atrás.
+fn crates_da_casa_no_fuzz() -> Vec<String> {
+    let manifesto = std::fs::read_to_string(raiz().join("fuzz/Cargo.toml"))
+        .expect("o fuzz/Cargo.toml é legível");
+    manifesto
+        .lines()
+        .map(str::trim)
+        .filter(|linha| !linha.starts_with('#'))
+        .filter_map(|linha| {
+            let caminho = linha.split("path = \"../crates/").nth(1)?;
+            Some(caminho.split('"').next()?.to_owned())
+        })
+        .collect()
+}
+
+/// O conserto de um `fuzz/Cargo.lock` atrasado, dito pelos dois guardas de
+/// baixo. A cópia vem antes porque o `cargo metadata` sozinho resolve o que
+/// falta na versão mais nova que achar (em 12/11/2026 ele pôs o `aws-lc-sys`
+/// 0.47.0, e o produto sai com o 0.46.0): partindo do lock do workspace, o
+/// cargo mantém as versões do produto e só tira o que o fuzz não usa.
+const CONSERTO_DO_LOCK_DO_FUZZ: &str =
+    "Atualize sem rede, no próprio repositório: `cp Cargo.lock fuzz/Cargo.lock` e \
+     `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null` \
+     (o cargo tira o que o fuzz não usa e mantém as versões do workspace), e comite o lock";
+
+/// Os pacotes de um `Cargo.lock`: de `(nome, versão)` para os nomes das
+/// dependências. Como em [`dependencias_no_lock`], um nome que o lock
+/// desambigua com a versão (`"sha2 0.11.0"`) entra só pelo nome.
+fn pacotes_do_lock(
+    lock: &str,
+) -> std::collections::BTreeMap<(String, String), std::collections::BTreeSet<String>> {
+    let mut pacotes = std::collections::BTreeMap::new();
+    for bloco in lock.split("[[package]]").skip(1) {
+        let campo = |nome: &str| {
+            bloco
+                .lines()
+                .find_map(|linha| linha.trim().strip_prefix(nome))
+                .map(|valor| valor.trim().trim_matches('"').to_owned())
+        };
+        let (Some(nome), Some(versao)) = (campo("name = "), campo("version = ")) else {
+            continue;
+        };
+        let mut dependencias = std::collections::BTreeSet::new();
+        let mut dentro = false;
+        for linha in bloco.lines().map(str::trim) {
+            if linha.starts_with("dependencies = [") {
+                dentro = true;
+                continue;
+            }
+            if !dentro {
+                continue;
+            }
+            if linha == "]" {
+                break;
+            }
+            let item = linha.trim_matches(|c| c == '"' || c == ',');
+            if let Some(dependencia) = item.split_whitespace().next() {
+                dependencias.insert(dependencia.to_owned());
+            }
+        }
+        pacotes.insert((nome, versao), dependencias);
+    }
+    pacotes
+}
+
 #[test]
-fn o_lock_do_fuzz_lista_o_que_o_seele_proto_declara() {
+fn o_lock_do_fuzz_lista_o_que_os_crates_da_casa_declaram() {
     // **O lock do fuzz ficou atrás do `seele-proto`, e o job não tinha como dizer.**
     //
     // O que o histórico mostra: o `serde_json` entrou no
@@ -4513,33 +4722,131 @@ fn o_lock_do_fuzz_lista_o_que_o_seele_proto_declara() {
     // mediu se o job rodou, nem com que resultado, entre 05/10 e 08/10. Agora o
     // job confere o lock com `--locked`, e este teste diz o mesmo sem rede e sem
     // o nightly, na máquina de quem mexeu no manifesto.
-    let manifesto = std::fs::read_to_string(raiz().join("crates/seele-proto/Cargo.toml"))
-        .expect("o manifesto do seele-proto é legível");
+    //
+    // Para todo crate da casa que o `fuzz/Cargo.toml` nomeia, e não só o
+    // `seele-proto`: o fuzz depende também do `seele-enlace`.
     let lock = std::fs::read_to_string(raiz().join("fuzz/Cargo.lock"))
         .expect("o fuzz/Cargo.lock é legível");
-
-    let declaradas = dependencias_declaradas(&manifesto);
-    assert!(
-        declaradas.contains("serde"),
-        "o teste não leu as dependências do `seele-proto` — leu {declaradas:?} —, e sem elas a \
-         comparação abaixo passaria sem conferir nada"
-    );
-    let Some(no_lock) = dependencias_no_lock(&lock, "seele-proto") else {
-        panic!(
-            "o fuzz/Cargo.lock não tem o pacote `seele-proto`: o fuzz compila contra ele, e o \
-             lock não sabe disso"
+    let da_casa = crates_da_casa_no_fuzz();
+    for esperado in ["seele-proto", "seele-enlace"] {
+        assert!(
+            da_casa.iter().any(|nome| nome == esperado),
+            "o teste não achou o `{esperado}` entre os crates de que o fuzz depende por caminho \
+             — leu {da_casa:?} do fuzz/Cargo.toml —, e sem ele a comparação abaixo deixaria de \
+             conferi-lo"
         );
-    };
+    }
 
-    let faltam: Vec<&String> = declaradas.difference(&no_lock).collect();
-    let sobram: Vec<&String> = no_lock.difference(&declaradas).collect();
+    for nome in &da_casa {
+        let manifesto = std::fs::read_to_string(raiz().join(format!("crates/{nome}/Cargo.toml")))
+            .unwrap_or_else(|erro| panic!("o manifesto do `{nome}` é legível: {erro}"));
+        let declaradas = dependencias_declaradas(&manifesto);
+        assert!(
+            !declaradas.is_empty(),
+            "o teste não leu as dependências do `{nome}`, e sem elas a comparação abaixo passaria \
+             sem conferir nada"
+        );
+        let Some(no_lock) = dependencias_no_lock(&lock, nome) else {
+            panic!(
+                "o fuzz/Cargo.lock não tem o pacote `{nome}`: o fuzz compila contra ele, e o \
+                 lock não sabe disso"
+            );
+        };
+
+        let faltam: Vec<&String> = declaradas.difference(&no_lock).collect();
+        let sobram: Vec<&String> = no_lock.difference(&declaradas).collect();
+        assert!(
+            faltam.is_empty() && sobram.is_empty(),
+            "o fuzz/Cargo.lock está atrasado em relação ao `{nome}`: faltam {faltam:?} e \
+             sobram {sobram:?}. O job `fuzz curto` roda `cargo metadata --locked` e reprovaria \
+             antes do primeiro alvo. {CONSERTO_DO_LOCK_DO_FUZZ}"
+        );
+    }
+}
+
+#[test]
+fn o_lock_do_fuzz_resolve_como_o_do_workspace() {
+    // **O lock do fuzz ficou atrás de novo, e o guarda de cima não viu.**
+    //
+    // O `seele-enlace` passou a ligar o `dimpl` com `features = ["aws-lc-rs"]`
+    // (ADR 0063, emenda do RUSTSEC-2026-0387). A lista de dependências do
+    // `seele-enlace` não mudou — o `dimpl` continuou nela —, e o que mudou foi
+    // o que o `dimpl` arrasta: o `fuzz/Cargo.lock` ficou com o `dimpl` sobre o
+    // RustCrypto (`aes-gcm`, `p256`, `x25519-dalek`…) e sem `aws-lc-rs`,
+    // `aws-lc-sys`, `cmake`, `dunce`, `fs_extra` e `pkg-config`. O
+    // `cargo metadata --locked` do job `fuzz curto` reprovou em 12/11/2026
+    // (execução 43264412497), na primeira vez em que alguém o disparou.
+    //
+    // O que este guarda confere, só com os dois arquivos:
+    //
+    // 1. todo pacote do lock do fuzz que o lock do workspace também nomeia
+    //    está **numa versão que o workspace tem** — o fuzz exercita o que o
+    //    produto leva, e não uma versão ao lado;
+    // 2. nessa versão, o pacote **não depende de nada a mais** do que no
+    //    workspace. O fuzz liga os crates da casa sem pedir recurso nenhum, e
+    //    o workspace os liga com tudo o que os outros membros pedem: o que o
+    //    lock do fuzz lista é sempre um pedaço do que o do workspace lista. Um
+    //    pacote com dependência a mais é um lock resolvido para um manifesto
+    //    que já mudou.
+    //
+    // **O que ele não vê**, dito para ninguém ler mais do que há: um recurso
+    // novo que só **acrescenta** uma dependência a um pacote. Do lado do
+    // workspace, «a mais» é também o que os outros membros ligam (o `tokio`
+    // tem `parking_lot` lá e não aqui), e os dois arquivos não distinguem um
+    // caso do outro. Quem pega esse é o `cargo metadata --locked` do job.
+    let fuzz = pacotes_do_lock(
+        &std::fs::read_to_string(raiz().join("fuzz/Cargo.lock"))
+            .expect("o fuzz/Cargo.lock é legível"),
+    );
+    let casa = pacotes_do_lock(
+        &std::fs::read_to_string(raiz().join("Cargo.lock"))
+            .expect("o Cargo.lock do workspace é legível"),
+    );
+    let nomes_da_casa: std::collections::BTreeSet<&str> =
+        casa.keys().map(|(nome, _)| nome.as_str()).collect();
+
+    let mut comparados = 0_usize;
+    let mut outra_versao = Vec::new();
+    let mut a_mais = Vec::new();
+    for ((nome, versao), dependencias) in &fuzz {
+        // O `seele-fuzz`, o `libfuzzer-sys` e o `arbitrary`: só o fuzz os tem.
+        if !nomes_da_casa.contains(nome.as_str()) {
+            continue;
+        }
+        let Some(na_casa) = casa.get(&(nome.clone(), versao.clone())) else {
+            let da_casa: Vec<&str> = casa
+                .keys()
+                .filter(|(outro, _)| outro == nome)
+                .map(|(_, versao)| versao.as_str())
+                .collect();
+            outra_versao.push(format!(
+                "{nome} {versao} (o workspace tem {})",
+                da_casa.join(", ")
+            ));
+            continue;
+        };
+        comparados += 1;
+        let sobram: Vec<&str> = dependencias
+            .difference(na_casa)
+            .map(String::as_str)
+            .collect();
+        if !sobram.is_empty() {
+            a_mais.push(format!("{nome} {versao}: {}", sobram.join(", ")));
+        }
+    }
+
     assert!(
-        faltam.is_empty() && sobram.is_empty(),
-        "o fuzz/Cargo.lock está atrasado em relação ao `seele-proto`: faltam {faltam:?} e \
-         sobram {sobram:?}. O job `fuzz curto` roda `cargo metadata --locked` e reprovaria \
-         antes do primeiro alvo. Atualize sem rede, no próprio repositório: \
-         `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1 > \
-         /dev/null`, e comite o lock"
+        comparados > crates_da_casa_no_fuzz().len(),
+        "o teste comparou {comparados} pacotes entre o fuzz/Cargo.lock e o Cargo.lock, e isso \
+         não é aprovação: ele não leu os arquivos como esperava"
+    );
+    assert!(
+        outra_versao.is_empty() && a_mais.is_empty(),
+        "o fuzz/Cargo.lock não resolve como o Cargo.lock do workspace.\n\
+         Numa versão que o workspace não tem: {outra_versao:#?}\n\
+         Com dependência que o workspace não lista para o mesmo pacote: {a_mais:#?}\n\
+         O job `fuzz curto` roda `cargo metadata --locked` e reprova antes do primeiro alvo \
+         quando o lock precisa mudar. {CONSERTO_DO_LOCK_DO_FUZZ}"
     );
 }
 
@@ -5152,6 +5459,191 @@ fn o_build_falho_da_portaria_reprova_a_bateria_nomeando_a_portaria() {
         saida.texto.contains("portaria-da-bancada"),
         "o fim da etapa não nomeia a portaria:\n{}",
         saida.texto
+    );
+}
+
+/// O `printf '<formato>' "<raiz>" > "<destino>"` que escreve o `Cargo.toml`
+/// da `portaria-da-bancada`: o formato e a variável da raiz, da primeira linha
+/// de `linhas` que termina escrevendo em `destino`.
+fn printf_do_manifesto_da_portaria<'a>(
+    linhas: impl IntoIterator<Item = &'a str>,
+    destino: &str,
+) -> Option<(String, String)> {
+    let linha = linhas.into_iter().map(str::trim).find(|linha| {
+        linha
+            .trim_end_matches("&&")
+            .trim_end()
+            .ends_with(&format!("> \"{destino}\""))
+    })?;
+    let resto = linha.strip_prefix("printf '")?;
+    let (formato, resto) = resto.split_once('\'')?;
+    let raiz = resto.trim().strip_prefix('"')?.split('"').next()?;
+    Some((formato.to_owned(), raiz.to_owned()))
+}
+
+#[test]
+fn o_ci_e_o_publicar_escrevem_o_mesmo_manifesto_da_portaria() {
+    // **O passo do `ci.yml` escrevia a palavra `PLACEHOLDER` no `Cargo.toml`**
+    // da `portaria-da-bancada` (desde `fec5e0c4`), e ninguém viu até o workflow
+    // rodar, em 12/11/2026 (execução 43264412497): o cargo recusou o manifesto
+    // e a `portaria-no-navegador.cjs` ficou sem binário. O manifesto de verdade
+    // estava no `empacotar/publicar.sh`, que monta a mesma ferramenta do mesmo
+    // fonte. Os dois escrevem o mesmo arquivo, cada um com a raiz dele.
+    let passos = passos_do_job_do_ci("bancadas-de-mod");
+    let Some(passo) = passos
+        .iter()
+        .find(|passo| passo.first().map(String::as_str) == Some("name: a portaria-da-bancada"))
+    else {
+        panic!(
+            "o job `bancadas-de-mod` do ci.yml não tem mais o passo `a portaria-da-bancada`, \
+             e a `portaria-no-navegador.cjs` roda sem a ferramenta que decide por ela"
+        );
+    };
+    let Some((do_ci, raiz_do_ci)) =
+        printf_do_manifesto_da_portaria(passo.iter().map(String::as_str), "$pasta/Cargo.toml")
+    else {
+        panic!(
+            "não achei, no passo `a portaria-da-bancada` do ci.yml, o `printf` que escreve o \
+             `$pasta/Cargo.toml`: {passo:#?}"
+        );
+    };
+
+    let publicar = std::fs::read_to_string(raiz().join("empacotar/publicar.sh"))
+        .expect("o publicar.sh é legível");
+    let Some((do_publicar, raiz_do_publicar)) =
+        printf_do_manifesto_da_portaria(publicar.lines(), "$pasta_portaria/Cargo.toml")
+    else {
+        panic!(
+            "não achei, no empacotar/publicar.sh, o `printf` que escreve o \
+             `$pasta_portaria/Cargo.toml`"
+        );
+    };
+
+    // O que o manifesto tem de ter para ser o desta ferramenta: sem isto, dois
+    // formatos iguais e vazios passariam pela comparação.
+    for trecho in [
+        "name = \"portaria-da-bancada\"",
+        "[workspace]",
+        "seele-server = { path = \"%s/crates/seele-server\" }",
+    ] {
+        assert!(
+            do_publicar.contains(trecho),
+            "o manifesto da portaria no publicar.sh não tem `{trecho}`: {do_publicar}"
+        );
+    }
+    assert_eq!(
+        do_ci, do_publicar,
+        "o ci.yml e o publicar.sh escrevem manifestos diferentes para a `portaria-da-bancada` \
+         (à esquerda o do ci.yml, à direita o do publicar.sh): os dois compilam o mesmo fonte, \
+         e o que um monta o outro tem de montar"
+    );
+    assert_eq!(
+        (raiz_do_ci.as_str(), raiz_do_publicar.as_str()),
+        ("$GITHUB_WORKSPACE", "$RAIZ"),
+        "o `%s` do manifesto da portaria é a raiz do repositório: `$GITHUB_WORKSPACE` no \
+         ci.yml e `$RAIZ` no publicar.sh"
+    );
+}
+
+#[test]
+fn a_bancada_do_celular_vermelha_sobe_as_fotos() {
+    // **A bancada do celular grava as fotos na temporária do runner, que some
+    // no fim do job.** Em 12/11/2026 (execução 43264412497) o G3 disse «o
+    // desktop mudou em (1308, 8, 1399, 15)», e as duas fotos que ele comparou
+    // não existiam mais: só o `target/area-util` subia como artefato.
+    let passos = passos_do_job_do_ci("bancadas");
+    let achada = passos.iter().enumerate().find(|(_, passo)| {
+        comando_do_passo(passo)
+            .is_some_and(|comando| comando.starts_with("python3 tools/bancada-do-celular.py "))
+    });
+    let Some((posicao_da_bancada, bancada)) = achada else {
+        panic!("o job `bancadas` do ci.yml não roda mais a `tools/bancada-do-celular.py`");
+    };
+    let comando = comando_do_passo(bancada).unwrap_or_default();
+    // A pasta das fotos, como o passo a escreve: `"$RUNNER_TEMP/<pasta>"`.
+    let Some(pasta) = comando
+        .split_whitespace()
+        .nth(2)
+        .map(|argumento| argumento.trim_matches('"'))
+        .and_then(|argumento| argumento.strip_prefix("$RUNNER_TEMP/"))
+    else {
+        panic!(
+            "a bancada do celular não grava mais numa pasta de `$RUNNER_TEMP` — `{comando}` —, e \
+             este guarda não sabe que pasta o artefato tem de levar"
+        );
+    };
+    let Some(id) = bancada
+        .iter()
+        .find_map(|linha| linha.strip_prefix("id:").map(str::trim))
+    else {
+        panic!(
+            "o passo da bancada do celular não tem `id:`, e o passo do artefato não tem como \
+             perguntar se ela reprovou: {bancada:?}"
+        );
+    };
+
+    let caminho = format!("path: ${{{{ runner.temp }}}}/{pasta}");
+    let achado = passos.iter().enumerate().find(|(_, passo)| {
+        passo
+            .iter()
+            .any(|linha| linha == "uses: actions/upload-artifact@v4")
+            && passo.contains(&caminho)
+    });
+    let Some((posicao_do_upload, upload)) = achado else {
+        panic!(
+            "o job `bancadas` do ci.yml não sobe a pasta das fotos da bancada do celular com \
+             `actions/upload-artifact@v4` e `{caminho}` (o `path` de uma ação não expande \
+             `$RUNNER_TEMP`): uma bancada vermelha fica sem as fotos que a explicam"
+        );
+    };
+    assert!(
+        posicao_do_upload > posicao_da_bancada,
+        "o artefato da bancada do celular sobe antes de ela rodar, e leva uma pasta vazia"
+    );
+    let condicao = condicao_do_passo(upload).unwrap_or_default();
+    assert!(
+        condicao.contains(&format!("steps.{id}.outcome == 'failure'"))
+            && condicao.contains("!cancelled()"),
+        "o artefato da bancada do celular tem de subir quando **ela** reprova, mesmo com outro \
+         passo vermelho antes: `if: ${{{{ !cancelled() && steps.{id}.outcome == 'failure' }}}}`, \
+         e a condição é `{condicao}`. Sem `if:`, um passo vermelho de antes pula o artefato"
+    );
+}
+
+#[test]
+fn os_testes_do_workspace_nao_param_no_primeiro_binario_vermelho() {
+    // **O `cargo test --workspace` para no primeiro binário de teste que
+    // reprova**, e os que viriam depois não ficam nem verdes nem vermelhos. Na
+    // primeira execução do `ci.yml` em meses (43264412497, 12/11/2026) o Linux
+    // parou no `seele-audio` e o Windows no `reserva` do `seele-conformance`:
+    // de tudo o que vinha depois, nos dois, não se soube nada, e cada conserto
+    // custaria uma execução inteira para mostrar o vermelho seguinte.
+    let mut conferidos = 0_usize;
+    for arquivo in [".github/workflows/ci.yml", ".github/workflows/release.yml"] {
+        for comando in comandos_do_workflow(arquivo) {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            if !partes.starts_with(&["cargo", "test", "--workspace"]) {
+                continue;
+            }
+            conferidos += 1;
+            // Antes do `--`: depois dele o argumento é do binário de teste, e
+            // não do cargo.
+            let do_cargo: Vec<&str> = partes
+                .iter()
+                .copied()
+                .take_while(|parte| *parte != "--")
+                .collect();
+            assert!(
+                do_cargo.contains(&"--no-fail-fast"),
+                "{arquivo}: `{comando}` para no primeiro binário de teste vermelho e esconde \
+                 os seguintes; falta o `--no-fail-fast`, antes do `--`"
+            );
+        }
+    }
+    assert_eq!(
+        conferidos, 2,
+        "esperava um `cargo test --workspace` no ci.yml e um no release.yml, e achei \
+         {conferidos}: o guarda não leu os passos que devia"
     );
 }
 

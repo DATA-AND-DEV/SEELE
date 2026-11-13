@@ -45,6 +45,54 @@ fn read(relative: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+/// Os módulos de teste do `main.rs`, que moram em `src/testes/`, um arquivo
+/// por módulo, na ordem dos nomes.
+///
+/// A pasta inteira, lida do disco: um módulo novo entra sem ser listado. E com
+/// pelo menos um arquivo, para que a pasta que mudou de lugar reprove em vez de
+/// deixar cego quem a lê.
+fn testes_do_main() -> String {
+    let pasta = app_dir().join("src/testes");
+    let mut nomes: Vec<String> = std::fs::read_dir(&pasta)
+        .unwrap_or_else(|erro| panic!("{}: {erro}", pasta.display()))
+        .map(|entrada| entrada.expect("uma entrada de src/testes").path())
+        .filter(|caminho| caminho.extension().is_some_and(|extensao| extensao == "rs"))
+        .map(|caminho| {
+            caminho
+                .file_name()
+                .and_then(|nome| nome.to_str())
+                .expect("um nome de arquivo")
+                .to_owned()
+        })
+        .collect();
+    nomes.sort();
+    assert!(
+        !nomes.is_empty(),
+        "`src/testes/` não tem mais os módulos de teste do `main.rs`: o guarda que os lê \
+         ficou cego"
+    );
+    nomes
+        .iter()
+        .map(|nome| read(&format!("src/testes/{nome}")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// O `main.rs` e os módulos de teste dele juntos, que é o texto que o
+/// `main.rs` tinha antes de eles saírem para `src/testes/`.
+///
+/// Para o guarda que **proíbe** um texto no arquivo inteiro, ou conta quantas
+/// vezes ele aparece: lendo só o `main.rs`, ele deixaria de ver o que um teste
+/// escreve, que antes via, e passaria calado. O `main.rs` vem primeiro, e quem
+/// corta o corpo de uma função pela primeira ocorrência continua achando a de
+/// produção.
+fn main_com_os_testes() -> String {
+    let mut fonte = read("src/main.rs");
+    fonte.push('\n');
+    fonte.push_str(&testes_do_main());
+    fonte
+}
+
 /// Os tipos que atravessam a ponte, nos dois arquivos em que moram.
 ///
 /// O `Snapshot` e o resto ficam em `seele-ffi/src/types.rs`. Os tipos de vista
@@ -1084,7 +1132,7 @@ fn neither_side_of_the_bridge_collapses_whitespace() {
     // The test above proves the arithmetic on raw bodies. This is what keeps
     // both callers on raw bodies — the failure it guards is a silent one-per-run
     // offset drift, invisible until somebody pastes a message with two channels.
-    let source = read("src/main.rs");
+    let source = main_com_os_testes();
     let script = scripts();
 
     assert!(
@@ -2731,6 +2779,185 @@ fn every_reason_a_screen_share_can_stop_for_has_a_sentence() {
 }
 
 #[test]
+fn the_person_sharing_is_told_when_the_signal_pauses_their_screen() {
+    // `TelaEmCurso::parada` was always `None` until 1.0: the ceiling stopped the
+    // video so the voice would not stutter, and the person sharing was the one
+    // person in the room with no way to know — their own mirror frozen on the
+    // last frame, the button on «PARAR DE COMPARTILHAR». The core now carries
+    // the pause to the portrait (`minha_transmissao.parada`), and this window
+    // says it beside the share button.
+    let file = without_comments(&read("ui/frases.js"));
+    let written: BTreeSet<String> = sentences_of(&file, "PAUSAS_DA_MINHA_TELA")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    let reasons: BTreeSet<String> = seele_ffi::motivos_de_parada_da_tela()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        !reasons.is_empty(),
+        "`seele_ffi::motivos_de_parada_da_tela` came back empty, so this guard is \
+         asserting over nothing"
+    );
+    // Both directions, like `QUEDAS`: a reason with no sentence is the silence,
+    // and a sentence with no reason is a cause this window would be inventing.
+    assert_eq!(
+        written, reasons,
+        "`PAUSAS_DA_MINHA_TELA` and `seele_ffi::motivos_de_parada_da_tela` no longer name \
+         the same reasons"
+    );
+    // A pause comes back by itself and nobody is watching meanwhile: the two
+    // things the person sharing cannot see from their side. And it is not a
+    // fall — it must not tell them to share again.
+    for (variant, sentence) in sentences_of(&file, "PAUSAS_DA_MINHA_TELA") {
+        let baixa = sentence.to_lowercase();
+        assert!(
+            baixa.contains("volta sozinha"),
+            "`PAUSAS_DA_MINHA_TELA.{variant}` does not say the screen comes back by \
+             itself: {sentence}"
+        );
+        assert!(
+            baixa.contains("ninguém a está vendo"),
+            "`PAUSAS_DA_MINHA_TELA.{variant}` does not say nobody is watching: {sentence}"
+        );
+        assert!(
+            !baixa.contains("compartilhe de novo"),
+            "`PAUSAS_DA_MINHA_TELA.{variant}` tells the person to share again, and a \
+             paused share is still on: {sentence}"
+        );
+    }
+    // Somebody says it: the line beside the share button reads the portrait.
+    let compartilhar = without_comments(&read("ui/camada-compartilhar.js"));
+    assert!(
+        compartilhar.contains("fraseDaPausaDaMinhaTela(noRetrato)"),
+        "o `camada-compartilhar.js` não diz a pausa da transmissão desta pessoa: o retrato a \
+         traz em `minha_transmissao.parada` e ninguém a leria"
+    );
+    // And the portrait carries it: the bridge lays the pause over the photo.
+    let ponte = without_comments(&read("../../crates/seele-ffi/src/lib.rs"));
+    assert!(
+        ponte.contains(".com_a_parada_da_minha_tela(parada)")
+            && ponte.contains("seele_core::enlace::Aviso::TelaParou {"),
+        "a ponte deixou de levar a pausa do motor ao retrato: `minha_transmissao.parada` \
+         voltaria a ser sempre `null`"
+    );
+}
+
+#[test]
+fn every_reason_a_screen_share_can_fall_for_has_a_sentence_and_somebody_says_it() {
+    // The twin of the guard above for the transmission that **falls** instead
+    // of pausing: the encoder refused a frame, the capture stopped, the stream
+    // closed. Until 1.0 that was the costliest silence in this repository — the
+    // core wrote one `warn` to `seele.log`, the button stayed on «PARAR DE
+    // COMPARTILHAR», and the room kept looking at an announced share with no
+    // picture.
+    //
+    // The core now ends it and sends `ScreenShareFell` with a stable reason
+    // name. A name with no sentence here would fall back to «A TRANSMISSÃO DA
+    // SUA TELA CAIU» and nothing else — the shell knowing that it fell and not
+    // why, which is half of the silence coming back.
+    let file = without_comments(&read("ui/frases.js"));
+    let written: BTreeSet<String> = sentences_of(&file, "QUEDAS")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    let reasons: BTreeSet<String> = seele_ffi::motivos_de_queda_da_tela()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        !reasons.is_empty(),
+        "`seele_ffi::motivos_de_queda_da_tela` came back empty, so this guard is \
+         asserting over nothing"
+    );
+    // Both directions: a reason with no sentence is the silence, and a sentence
+    // with no reason is a cause this window would be inventing.
+    assert_eq!(
+        written, reasons,
+        "`QUEDAS` and `seele_ffi::motivos_de_queda_da_tela` no longer name the same \
+         reasons"
+    );
+    // A fall does not come back by itself, and the sentence must not promise it
+    // does — that is what `PARADAS` says, and the two ask opposite things.
+    for (variant, sentence) in sentences_of(&file, "QUEDAS") {
+        let baixa = sentence.to_lowercase();
+        assert!(
+            !baixa.contains("volta sozinha"),
+            "`QUEDAS.{variant}` promises the share comes back by itself, and nothing \
+             restarts it: {sentence}"
+        );
+        assert!(
+            baixa.contains("compartilhe de novo"),
+            "`QUEDAS.{variant}` does not say what to do — share again: {sentence}"
+        );
+    }
+
+    // The camera says the same reasons in its own words.
+    let da_camera = file
+        .split("const FRASES_DA_CAMERA = Object.freeze({")
+        .nth(1)
+        .and_then(|camera| camera.split("  quedas: Object.freeze({").nth(1))
+        .and_then(|resto| resto.split("  }),").next())
+        .expect("`FRASES_DA_CAMERA.quedas` saiu do frases.js");
+    for reason in &reasons {
+        assert!(
+            da_camera.contains(&format!("{reason}: \"")),
+            "the camera can fall for `{reason}` and `FRASES_DA_CAMERA.quedas` has no \
+             sentence for it"
+        );
+    }
+
+    // The event exists, and both listeners are there: the screen's, beside the
+    // share button, and the camera's, on its own control.
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    assert!(
+        tipos.contains("    ScreenShareFell {"),
+        "`ScreenShareFell` saiu do `Event`"
+    );
+    let compartilhar = without_comments(&read("ui/camada-compartilhar.js"));
+    assert!(
+        compartilhar.contains("evento.ScreenShareFell")
+            && compartilhar.contains("fraseDaQuedaDaTransmissao("),
+        "o `camada-compartilhar.js` não ouve `ScreenShareFell`: a queda da tela voltaria a \
+         ser muda"
+    );
+    assert!(
+        without_comments(&read("ui/camera.js")).contains("carga.ScreenShareFell"),
+        "o `camera.js` não ouve `ScreenShareFell`: a câmera que caiu ficaria sem o motivo"
+    );
+    let html = read("ui/index.html");
+    assert!(
+        html.contains("<p id=\"tela-estado\" class=\"operador-frase tela-estado\" role=\"status\" hidden></p>"),
+        "o index.html perdeu a linha `tela-estado`, onde a queda é dita — ou ela deixou de ser \
+         uma região viva, e quem não vê não ficaria sabendo"
+    );
+    // The view of a session that is not on screen records it too: a share goes
+    // on while the person looks at another server, and can fall there.
+    assert!(
+        js_function(&read("ui/palco-imagem.js"), "function palcoDeFora(")
+            .contains("anotarAQuedaDaTela(sessao, evento)"),
+        "`palcoDeFora` deixou de anotar a queda de uma sessão fora da vista"
+    );
+
+    // **Nothing restarts by itself.** Putting somebody's screen back on air
+    // without a press is a product decision this code does not take: the three
+    // functions that handle a fall only write, and never call the bridge.
+    for funcao in [
+        "function quedaDaTelaNoEvento(",
+        "function anotarAQuedaDaTela(",
+        "function desenharAQuedaDaTela(",
+    ] {
+        let corpo = js_function(&compartilhar, funcao);
+        assert!(
+            !corpo.contains("invoke("),
+            "`{funcao}` chama a ponte: a queda de uma transmissão só é dita, e quem \
+             recomeça é a pessoa"
+        );
+    }
+}
+
+#[test]
 fn the_screen_never_invents_a_word_for_a_path_it_does_not_know() {
     // «DIRECT» is not sayable, and this is the guard that keeps it unsaid. The
     // ladder has five rungs and the distinction that word would erase is the
@@ -3230,7 +3457,7 @@ fn the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_
          moderate anybody, so it offers what the Server will refuse:\n{porta}"
     );
     assert!(
-        porta.contains("title"),
+        porta.contains("porOTitulo(porta, "),
         "`alerta-ejetar` can be left disabled without the reason being rewritten, \
          so the `title` in the markup outlives the state it explains:\n{porta}"
     );
@@ -5848,6 +6075,11 @@ const VERBOS_DE_MODERACAO: &[&str] = &[
     // people wrote with nothing anywhere that brings it back.
     "apagar_voice_room",
     "apagar_linha",
+    // The mesa de texto of 1.0 (protocol 13). Unbanning *is* undone — by
+    // banning again — and it still goes through the same machine: it puts back
+    // inside the server somebody that another person put out, and whoever
+    // presses has to read that with the name in it before it leaves.
+    "desbanir_pessoa",
 ];
 
 #[test]
@@ -5929,24 +6161,55 @@ fn no_moderation_act_reaches_the_server_without_a_sentence_that_says_what_it_cos
 }
 
 #[test]
-fn the_ban_says_that_nothing_in_this_product_undoes_it() {
-    // The sharpest edge of the four, and the one a screen can hide by accident.
-    // There is no `unban` verb in this protocol: a permanent ban is undone only
-    // by somebody with the server's own file, by hand, on the machine hosting it.
-    // A confirmation that says «bar this person?» and stops there is describing a
-    // reversible act, and this one is not.
+fn the_ban_says_whether_anything_undoes_it_and_where() {
+    // The sharpest edge of the moderation verbs, and the one a screen can hide
+    // by accident. **What is true changed with protocol 13**, and the sentence
+    // has to say which of the two worlds this server is in:
+    //
+    // - a server that knows `UnbanPerson` (1.0 on): a permanent ban is undone
+    //   by whoever may ban, in the BANIDOS list of this layer — and the
+    //   sentence says where that list is;
+    // - a server from before 1.0: there is no unban verb, and a permanent ban
+    //   is undone only by somebody with the server's own file, by hand, on the
+    //   machine hosting it. That used to be the only case, and this guard was
+    //   `the_ban_says_that_nothing_in_this_product_undoes_it`.
+    //
+    // Either sentence said about the other server is a lie in the one box that
+    // exists to say what an act costs. So the function is *run*, both ways,
+    // with the real `frases.js` — a search for the words would pass with the
+    // branches swapped.
     //
     // The timed ban is in the same sentence for the same reason, from the other
-    // side: it *is* the one that undoes itself, and that is exactly the fact
-    // that makes it worth offering. Whoever is about to press has to be told
-    // which of the two is about to happen.
+    // side: it *is* the one that undoes itself.
     let body = body_of(&scripts(), "function consequenciaDeBanir");
-
     assert!(
-        body.contains("ate === null") || body.contains("ate == null"),
-        "the ban sentence does not branch on whether there is an expiry, so a \
-         ban that lifts itself and a ban that never does read the same:\n{body}"
+        body.contains("quem.nome"),
+        "the ban confirmation does not name who it is about:\n{body}"
     );
+    let fontes = format!(
+        "{}\n{}\nglobalThis.consequenciaDeBanir = consequenciaDeBanir;",
+        read("ui/frases.js"),
+        funcao_js(&read("ui/camada-moderar.js"), "consequenciaDeBanir"),
+    );
+    let Some(saida) = no_node(
+        "a frase de banir",
+        &fontes,
+        r#"
+const quem = { nome: "Lia", voice_room: "Sala" };
+console.log(JSON.stringify({
+  semVolta: consequenciaDeBanir(quem, null, false),
+  comVolta: consequenciaDeBanir(quem, null, true),
+  porOmissao: consequenciaDeBanir(quem, null),
+  comPrazo: consequenciaDeBanir(quem, 1900000000, true),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let frases: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das frases");
+    let frase = |qual: &str| frases[qual].as_str().unwrap_or_default().to_owned();
+
+    let sem_volta = frase("semVolta");
     for (what, needle) in [
         ("that it is forever", "para sempre"),
         (
@@ -5954,21 +6217,50 @@ fn the_ban_says_that_nothing_in_this_product_undoes_it() {
             "Nenhuma tela deste produto desfaz",
         ),
         ("who can undo it, and how", "arquivo do servidor"),
-        ("when a timed one lifts", "cai sozinha"),
+        ("why: the server is older than 1.0", "antes da 1.0"),
     ] {
         assert!(
-            body.contains(needle),
-            "the ban confirmation never says {what}. Without it the sentence \
-             describes a reversible act, and this is the one act in this product \
-             that no screen of it can take back:\n{body}"
+            sem_volta.contains(needle),
+            "on a server with no unban verb, the ban confirmation never says \
+             {what}. Without it the sentence describes a reversible act, and \
+             there this one is not:\n{sem_volta}"
         );
     }
+    assert_eq!(
+        frase("porOmissao"),
+        sem_volta,
+        "a caller that does not know whether the server can unban gets the \
+         sentence that promises a way back"
+    );
 
-    // The name of the person, in the sentence. A consequence written about
-    // nobody is a consequence about the wrong person just as easily.
+    let com_volta = frase("comVolta");
+    for (what, needle) in [
+        ("that it is forever until undone", "para sempre"),
+        ("who undoes it", "pode banir"),
+        ("where it is undone", "BANIDOS"),
+    ] {
+        assert!(
+            com_volta.contains(needle),
+            "on a server that can unban, the ban confirmation never says \
+             {what}:\n{com_volta}"
+        );
+    }
     assert!(
-        body.contains("quem.nome"),
-        "the ban confirmation does not name who it is about:\n{body}"
+        !com_volta.contains("Nenhuma tela deste produto desfaz")
+            && !com_volta.contains("arquivo do servidor"),
+        "on a server that can unban, the ban confirmation still says nothing \
+         in this product undoes it — which stopped being true:\n{com_volta}"
+    );
+    for (qual, texto) in [("semVolta", &sem_volta), ("comVolta", &com_volta)] {
+        assert!(
+            texto.starts_with("Lia sai desta sessão agora"),
+            "the `{qual}` sentence does not open with who it is about:\n{texto}"
+        );
+    }
+    let com_prazo = frase("comPrazo");
+    assert!(
+        com_prazo.contains("cai sozinha") && !com_prazo.contains("para sempre"),
+        "a timed ban does not say it lifts by itself:\n{com_prazo}"
     );
 }
 
@@ -6163,6 +6455,1154 @@ fn opening_the_moderation_carries_the_keyboard_and_closing_gives_it_back() {
         "the end-of-session screen leaves the moderation box open, so it comes \
          back over the *next* session armed with an act on somebody from the \
          previous Server:\n{fim}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A mesa de texto da 1.0: editar, responder, ser chamado, o `@`, as não lidas
+// de cada canal e a lista de banidos. O que se vê na tela está na
+// `bancada/mesa-de-texto.cjs` (Chromium e WebKit, e a casca do celular); o que
+// mora aqui roda a fonte real no node, sem navegador, e é o que o CI roda.
+// ---------------------------------------------------------------------------
+
+/// O texto inteiro de uma função de topo de um script (`function nome(…) {…}`,
+/// com o `async` na frente quando ela é uma), para rodá-la no node como ela é.
+fn funcao_js(fonte: &str, nome: &str) -> String {
+    let assinatura = format!("function {nome}(");
+    let Some((antes, depois)) = fonte.split_once(&assinatura) else {
+        panic!("`{nome}` sumiu do script");
+    };
+    let Some(corpo) = depois.split("\n}\n").next() else {
+        panic!("`{nome}` não fecha");
+    };
+    let prefixo = if antes.ends_with("async ") {
+        "async "
+    } else {
+        ""
+    };
+    format!("{prefixo}{assinatura}{corpo}\n}}\n")
+}
+
+/// Roda `fontes` (a fonte real, entregue pela entrada padrão) e depois
+/// `conferencia` num `vm` do node, e devolve o que ela escreveu. `None` quando
+/// não há `node` nesta máquina (e reprova no CI, onde há).
+///
+/// O mundo é o mínimo que as funções de desenho pedem: `elemento` devolve um
+/// nó de mentira que guarda a etiqueta, a classe, o texto, os atributos, o
+/// `dataset` e os filhos; nada de `document`.
+fn no_node(titulo: &str, fontes: &str, conferencia: &str) -> Option<String> {
+    use std::io::Write;
+    let script = format!(
+        r#"
+const fs = require("fs"), vm = require("vm");
+const fontes = fs.readFileSync(0, "utf8");
+function no(tag, classe, texto) {{
+  const n = {{ tag, className: classe ?? "", textContent: texto ?? "", dataset: {{}}, atributos: {{}}, filhos: [],
+    type: "", hidden: false,
+    get childElementCount() {{ return this.filhos.length; }},
+    classList: {{ add(c) {{ n.className = (n.className + " " + c).trim(); }}, contains(c) {{ return n.className.split(" ").includes(c); }} }},
+    append(...f) {{ n.filhos.push(...f); }},
+    setAttribute(k, v) {{ n.atributos[k] = String(v); }}, getAttribute(k) {{ return n.atributos[k] ?? null; }} }};
+  return n;
+}}
+const ctx = vm.createContext({{ console, JSON, Map, Set, Number, String, Boolean, Array, Object, Math, Date, RegExp,
+  elemento: no, relogio: (s) => "10:" + String(s % 60).padStart(2, "0") }});
+vm.runInContext(fontes, ctx);
+vm.runInContext({conferencia:?}, ctx);
+"#
+    );
+    let mut filho = match std::process::Command::new("node")
+        .args(["-e", &script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(filho) => filho,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda «{titulo}» não rodou");
+            return None;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    filho
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(fontes.as_bytes())
+        .expect("as fontes ao node");
+    let saida = filho.wait_with_output().expect("node");
+    assert!(
+        saida.status.success(),
+        "{titulo}: o node não rodou a fonte:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+    Some(String::from_utf8_lossy(&saida.stdout).into_owned())
+}
+
+/// **O número em que a tela passa a oferecer editar, desbanir e a lista de
+/// banidos é o do protocolo**, e ele chega à tela pelas duas pontes.
+///
+/// A tela não oferece o que o servidor não conhece: num servidor da 0.19 o
+/// EDITAR e o BANIDOS somem, em vez de aparecerem e responderem
+/// `ServidorAntigo`. Para isso ela compara o `protocolo` do retrato com uma
+/// constante do `base.js` — e uma constante escrita à mão num script é um
+/// número que fica para trás calado. Com 12 no lugar de 13 o EDITAR aparece
+/// num servidor que pula o verbo; com 14, some de todo servidor da 1.0.
+///
+/// E o campo tem de existir dos dois lados: sem ele o retrato chega com
+/// `undefined`, a conta dá zero, e a mesa de texto inteira some sem erro.
+#[test]
+fn o_numero_da_mesa_de_texto_e_o_do_protocolo() {
+    use seele_proto::control::ClientMessage;
+    use seele_proto::ids::{MessageId, PersonId};
+    use seele_proto::vocabulario::desde_do_cliente;
+
+    let base = without_comments(&read("ui/base.js"));
+    let escrito: u8 = base
+        .split("const PROTOCOLO_DA_MESA_DE_TEXTO = ")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .and_then(|numero| numero.trim().parse().ok())
+        .expect("`PROTOCOLO_DA_MESA_DE_TEXTO` saiu do base.js, ou deixou de ser um número");
+    for verbo in [
+        ClientMessage::EditMessage {
+            id: MessageId(1),
+            body: "x".into(),
+        },
+        ClientMessage::UnbanPerson {
+            person: PersonId(1),
+        },
+        ClientMessage::ListBans,
+    ] {
+        assert_eq!(
+            escrito,
+            desde_do_cliente(&verbo),
+            "o base.js oferece a mesa de texto a partir do protocolo {escrito}, e \
+             `{verbo:?}` nasceu noutro número"
+        );
+    }
+    let teste = body_of(&base, "function servidorTemAMesaDeTexto(");
+    assert!(
+        teste.contains("snapshot?.protocolo") && teste.contains(">= PROTOCOLO_DA_MESA_DE_TEXTO"),
+        "`servidorTemAMesaDeTexto` não compara o `protocolo` do retrato com a constante: {teste}"
+    );
+
+    // O desktop: o retrato achatado leva o número que a conexão negociou.
+    let rust = without_comments(&read("src/main.rs"));
+    let retrato = body_of(&rust, "fn snapshot(");
+    assert!(
+        retrato.contains("protocolo: conexao.protocolo_negociado()"),
+        "o comando `snapshot` não põe o protocolo negociado no retrato: {retrato}"
+    );
+    assert!(
+        read("src/sessoes.rs").contains("pub(crate) protocolo: u8,"),
+        "`RetratoNaSessao` perdeu o campo `protocolo`"
+    );
+    // O navegador: o `.wasm` o diz no retrato da ligação, e a ponte o repassa.
+    let fronteira = without_comments(&read("../../crates/seele-web/src/fronteira.rs"));
+    assert!(
+        body_of(&fronteira, "pub extern \"C\" fn ligacao_retrato(")
+            .contains("\"protocolo\": ligacao.carimbo()"),
+        "o `ligacao_retrato` do seele-web não diz o protocolo negociado"
+    );
+    assert!(
+        body_of(
+            &without_comments(&read("ui/ponte-web.js")),
+            "function retratoDaSessao("
+        )
+        .contains("protocolo: lido.protocolo ?? 0"),
+        "a ponte do navegador não repassa o `protocolo` ao retrato"
+    );
+    // E a conversa é redesenhada quando a resposta muda: o retrato da entrada
+    // não traz o número, e uma reconexão pode trazer outro.
+    let desenhar = body_of(&scripts(), "function desenhar(snapshot)");
+    assert!(
+        desenhar.contains("servidorTemAMesaDeTexto(snapshot)")
+            && desenhar.contains("mesaDeTextoNoServidor = temAMesa")
+            && desenhar.contains("mensagensPorDesenhar = true"),
+        "`desenhar` não redesenha a conversa quando o servidor passa a conhecer \
+         (ou deixa de conhecer) a edição: {desenhar}"
+    );
+}
+
+/// **RESPONDER em toda mensagem gravada; EDITAR só na própria, gravada, e num
+/// servidor que conhece a edição.**
+///
+/// Três maneiras de errar isto sem nada quebrar: oferecer EDITAR na mensagem
+/// de outra pessoa (o servidor recusa, e a pessoa lê «permissão negada» por um
+/// botão que a tela lhe deu); oferecer num servidor 12 (o core responde
+/// `ServidorAntigo` a cada clique); e oferecer numa pendente, que não tem `id`
+/// que o servidor conheça — o clique editaria «a mensagem 0».
+#[test]
+fn a_edicao_e_a_resposta_sao_oferecidas_pelo_que_a_mensagem_e() {
+    let sessao = read("ui/tela-sessao.js");
+    let fontes = format!(
+        "{}\nlet mesaDeTextoNoServidor = true;\n\
+         const apelidoApresentado = (id, legado) => String(legado).split('#')[0];\n{}{}{}{}",
+        read("ui/frases.js"),
+        funcao_js(&sessao, "mensagemGravada"),
+        funcao_js(&sessao, "botaoDeResponder"),
+        funcao_js(&sessao, "podeEditarMensagem"),
+        funcao_js(&sessao, "botaoDeEditar"),
+    );
+    let Some(saida) = no_node(
+        "responder e editar",
+        &fontes,
+        r#"
+const m = (extra) => ({ id: 7, author: 2, author_nickname: "Lia#K7Q2", at_seconds: 30, body: "oi", own: false, estado: "Confirmada", ...extra });
+const casos = {
+  deOutra: m({}),
+  propria: m({ own: true }),
+  propriaSemEstado: m({ own: true, estado: undefined }),
+  pendente: m({ own: true, id: 0, estado: "Enviando" }),
+  semResposta: m({ own: true, id: 0, estado: "SemResposta" }),
+  recusada: m({ own: true, id: 0, estado: { Recusada: "PermissionDenied" } }),
+};
+const ver = (b) => b && { classe: b.className, texto: b.textContent, tipo: b.type, dados: b.dataset, rotulo: b.atributos["aria-label"] };
+const saida = { responder: {}, editar: {}, editarNoDoze: {} };
+for (const [nome, caso] of Object.entries(casos)) {
+  saida.responder[nome] = ver(botaoDeResponder(caso));
+  saida.editar[nome] = ver(botaoDeEditar(caso));
+}
+mesaDeTextoNoServidor = false;
+for (const [nome, caso] of Object.entries(casos)) saida.editarNoDoze[nome] = ver(botaoDeEditar(caso));
+saida.responderNoDoze = ver(botaoDeResponder(casos.deOutra));
+console.log(JSON.stringify(saida));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON dos botões");
+    for gravada in ["deOutra", "propria", "propriaSemEstado"] {
+        assert_eq!(
+            v["responder"][gravada]["dados"]["responder"], "7",
+            "sem RESPONDER na mensagem gravada «{gravada}»: {}",
+            v["responder"][gravada]
+        );
+        assert_eq!(v["responder"][gravada]["tipo"], "button");
+    }
+    assert_eq!(
+        v["responder"]["deOutra"]["rotulo"], "responder à mensagem de Lia das 10:30",
+        "o RESPONDER não diz de quem é a mensagem nem de que hora: repetido em \
+         toda fileira, «responder» sozinho não diz a qual"
+    );
+    for pendente in ["pendente", "semResposta", "recusada"] {
+        assert!(
+            v["responder"][pendente].is_null() && v["editar"][pendente].is_null(),
+            "a mensagem «{pendente}», que o servidor não gravou, oferece responder ou editar"
+        );
+    }
+    assert!(
+        v["editar"]["deOutra"].is_null(),
+        "o EDITAR aparece na mensagem de outra pessoa"
+    );
+    for propria in ["propria", "propriaSemEstado"] {
+        assert_eq!(
+            v["editar"][propria]["dados"]["editar"], "7",
+            "sem EDITAR na própria mensagem gravada «{propria}»"
+        );
+    }
+    assert_eq!(
+        v["editar"]["propria"]["rotulo"],
+        "editar a sua mensagem das 10:30"
+    );
+    for (nome, botao) in v["editarNoDoze"].as_object().expect("os casos") {
+        assert!(
+            botao.is_null(),
+            "num servidor que não conhece a edição, o EDITAR aparece em «{nome}»"
+        );
+    }
+    assert!(
+        !v["responderNoDoze"].is_null(),
+        "responder é do protocolo 9, e sumiu junto com a edição num servidor antigo"
+    );
+}
+
+/// **O envio leva a citação, e a edição não publica nada.**
+///
+/// O `enviar` tem três caminhos, e a ordem deles é o conserto: editando, ele
+/// salva a edição **antes** do anexo e antes do «vazio não manda» (um corpo
+/// vazio numa edição é uma recusa com frase, e não um Enter mudo); e a
+/// resposta lê a citada antes de qualquer espera. O `repliesTo` vai escrito no
+/// `invoke`, e é por ele que `todo_argumento_que_o_frontend_manda_existe_no_comando`
+/// confere o nome contra o `replies_to` do comando.
+#[test]
+fn o_envio_leva_a_citacao_e_a_edicao_nao_publica_nada() {
+    let script = scripts();
+    let enviar = body_of(&script, "async function enviar(evento)");
+    let onde = |trecho: &str| {
+        enviar
+            .find(trecho)
+            .unwrap_or_else(|| panic!("o `enviar` perdeu `{trecho}`:\n{enviar}"))
+    };
+    let edicao = onde("if (modoDeCompor?.tipo === \"editar\") {");
+    assert!(
+        enviar[edicao..]
+            .trim_start()
+            .contains("await salvarAEdicao(corpo);\n    return;"),
+        "editando, o `enviar` não para depois de salvar a edição: publicaria o \
+         corpo editado como mensagem nova"
+    );
+    assert!(
+        edicao < onde("if (anexoPendente) {") && edicao < onde("if (!corpo) return;"),
+        "a edição é conferida depois do anexo ou do corpo vazio: uma edição \
+         vazia viraria um Enter que não faz nada"
+    );
+    assert!(
+        onde("const citada = modoDeCompor?.tipo === \"responder\" ? modoDeCompor.id : null;")
+            < onde("await invoke(\"send_message\""),
+        "a citada é lida depois do envio"
+    );
+    assert!(
+        enviar.contains(
+            "else await invoke(\"send_message\", { channel: linhaAberta, body: corpo, repliesTo: citada });"
+        ) && enviar.contains(
+            "if (citada === null) await invoke(\"send_message\", { channel: linhaAberta, body: corpo });"
+        ),
+        "o `send_message` não leva `repliesTo` quando há a quem responder, ou o \
+         leva sempre:\n{enviar}"
+    );
+
+    // O comando do desktop recebe a citada e escolhe o verbo do núcleo.
+    let rust = without_comments(&read("src/main.rs"));
+    let comando = body_of(&rust, "fn send_message(");
+    assert!(
+        comando.contains("replies_to: Option<u64>")
+            && comando.contains("Some(citada) => conexao.send_reply(channel, body, citada)")
+            && comando.contains("None => conexao.send_message(channel, body)"),
+        "o comando `send_message` não manda a resposta pelo `send_reply`:\n{comando}"
+    );
+
+    // A edição que não sai fica à vista, com a frase do erro, e o texto no campo.
+    let salvar = body_of(&script, "async function salvarAEdicao(corpo)");
+    assert!(
+        salvar.contains("await invoke(\"editar_mensagem\", { message: modo.id, body: corpo });"),
+        "a edição não sai pelo `editar_mensagem`:\n{salvar}"
+    );
+    let recusa = salvar
+        .split("} catch (falha) {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+        .expect("o `salvarAEdicao` não trata a recusa");
+    assert!(
+        recusa.contains("FRASES_DA_CONVERSA.edicaoNaoSaiu(fraseDeErro(falha))")
+            && recusa.contains("desenharOModoDeCompor(frase)")
+            && !recusa.contains("largarOModoDeCompor")
+            && !recusa.contains("console.warn"),
+        "a edição recusada some calada, ou tira a pessoa da edição: {recusa}"
+    );
+    // Editando, o que está no campo não é o rascunho do canal.
+    let rascunho = body_of(&script, "function guardarRascunho()");
+    assert!(
+        rascunho.contains("if (modoDeCompor?.tipo === \"editar\") return;"),
+        "editando, o corpo de uma mensagem já gravada é guardado como rascunho \
+         do canal, e volta como texto a enviar de novo:\n{rascunho}"
+    );
+    // E a troca de sessão larga o modo antes de guardar o campo.
+    let guardar = body_of(&script, "function guardarOEstadoDaVista(sessao)");
+    let largar = guardar
+        .find("largarOModoDeCompor();")
+        .expect("a troca de sessão não larga a edição em andamento");
+    assert!(
+        largar
+            < guardar
+                .find("campo: $(\"campo-mensagem\").value")
+                .expect("o campo guardado"),
+        "a troca de sessão guarda o campo antes de largar a edição"
+    );
+}
+
+/// **A citação de uma resposta mostra a original quando ela está carregada, e
+/// não inventa a que não está.**
+///
+/// O fio só traz o número (`replies_to`). Com a original na página, a citação
+/// é um botão que rola até ela, com o autor e o começo do corpo; sem ela (é
+/// mais antiga, ou foi apagada), é texto, «mensagem anterior» — nunca um botão
+/// que não leva a lugar nenhum, e nunca um corpo que a tela não leu.
+#[test]
+fn a_resposta_cita_a_original_carregada_e_nao_inventa_a_que_nao_esta() {
+    let sessao = read("ui/tela-sessao.js");
+    let fontes = format!(
+        "{}\nlet mensagens = [];\n\
+         const apelidoApresentado = (id, legado) => String(legado).split('#')[0];\n{}{}",
+        read("ui/frases.js"),
+        funcao_js(&sessao, "citacaoDaResposta"),
+        funcao_js(&sessao, "resumoDoCorpo"),
+    );
+    let Some(saida) = no_node(
+        "a citação de uma resposta",
+        &fontes,
+        r#"
+mensagens = [
+  { id: 1, author: 2, author_nickname: "Lia#K7Q2", body: "primeira\n  fileira   e a segunda", attachment: null },
+  { id: 2, author: 3, author_nickname: "Rafa", body: "", attachment: { file_name: "mapa.png" } },
+  { id: 3, author: 3, author_nickname: "Rafa", body: "x".repeat(900), attachment: null },
+  { id: 4, author: 3, author_nickname: "Rafa", body: "  ", attachment: null },
+];
+const ver = (n) => n && { tag: n.tag, classe: n.className, texto: n.textContent, dados: n.dataset, rotulo: n.atributos["aria-label"] ?? null,
+  filhos: n.filhos.map((f) => [f.className, f.textContent]) };
+console.log(JSON.stringify({
+  semResposta: ver(citacaoDaResposta({ replies_to: null })),
+  carregada: ver(citacaoDaResposta({ replies_to: 1 })),
+  soArquivo: ver(citacaoDaResposta({ replies_to: 2 })),
+  longa: citacaoDaResposta({ replies_to: 3 }).filhos[1].textContent.length,
+  vazia: ver(citacaoDaResposta({ replies_to: 4 })),
+  ausente: ver(citacaoDaResposta({ replies_to: 99 })),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON da citação");
+    assert!(
+        v["semResposta"].is_null(),
+        "uma mensagem que não responde ganhou citação"
+    );
+    assert_eq!(v["carregada"]["tag"], "button");
+    assert_eq!(v["carregada"]["dados"]["citada"], "1");
+    assert_eq!(
+        v["carregada"]["filhos"],
+        serde_json::json!([
+            ["mensagem-citacao-autor", "Lia"],
+            ["mensagem-citacao-corpo", "primeira fileira e a segunda"]
+        ]),
+        "a citação não é o autor e o começo do corpo, numa fileira só"
+    );
+    assert_eq!(
+        v["carregada"]["rotulo"],
+        "ir para a mensagem de Lia, a que esta responde"
+    );
+    assert_eq!(v["soArquivo"]["filhos"][1][1], "mapa.png");
+    assert_eq!(v["vazia"]["filhos"][1][1], "mensagem sem texto");
+    assert!(
+        v["longa"].as_u64().is_some_and(|n| n <= 140),
+        "a citação carrega o corpo inteiro de uma mensagem longa: {}",
+        v["longa"]
+    );
+    assert_eq!(
+        (v["ausente"]["tag"].as_str(), v["ausente"]["texto"].as_str()),
+        (Some("span"), Some("mensagem anterior")),
+        "a original que não está carregada virou um botão, ou ganhou um corpo: {}",
+        v["ausente"]
+    );
+    // O clique rola pelo `id` de agora, e não por um nó guardado.
+    let script = scripts();
+    let ir = body_of(&script, "function irParaACitada(id)");
+    assert!(
+        ir.contains("li[data-mensagem-id=\"${id}\"]") && ir.contains("scrollIntoView("),
+        "o clique na citação não procura a original pelo id e rola até ela: {ir}"
+    );
+    assert!(
+        body_of(&script, "function itemDeMensagem(mensagem, indice, segue)")
+            .contains("item.setAttribute(\"data-mensagem-id\", String(mensagem.id))"),
+        "a fileira da mensagem não leva o id que a citação procura"
+    );
+}
+
+/// **O que o `@` escreve é o que a regra da menção lê.**
+///
+/// A regra mora no `seele-sessao` (`mencao::menciona`), e é ela que decide,
+/// do outro lado, quem foi chamado. O autocompletar não a repete: ele só
+/// escreve `@apelido`, e `@apelido#MARCA` quando há duas pessoas com o mesmo
+/// apelido. Este guarda fecha o laço — o texto que a lista insere é passado à
+/// regra de verdade, e tem de chamar quem foi escolhido e ninguém mais.
+///
+/// E a detecção do `@` segue a regra 1: em `x@ana.com` não há menção, e a
+/// lista não abre.
+#[test]
+fn o_autocompletar_escreve_o_que_a_regra_da_mencao_le() {
+    let sessao = read("ui/tela-sessao.js");
+    let fontes = format!(
+        "const TETO_DE_MENCOES = 8;\nlet desenhado = null, foraDoAr = [], identidadesApresentadas = {{}};\n{}{}{}",
+        funcao_js(&sessao, "nomeParaChamar"),
+        funcao_js(&sessao, "pessoasParaChamar"),
+        funcao_js(&sessao, "mencaoEmCurso"),
+    );
+    let Some(saida) = no_node(
+        "o autocompletar do @",
+        &fontes,
+        r#"
+desenhado = { me: 1, presentes: [
+  { id: 1, nickname: "Alex#A1B2", is_self: true },
+  { id: 2, nickname: "Lia#K7Q2" }, { id: 3, nickname: "Rafa#R4F4" }, { id: 4, nickname: "LIA#Z9Z9" },
+  { id: 6, nickname: "Ana Maria#AM01" }, { id: 7, nickname: "legado" }, { id: 8, nickname: "antigo#QQ11" },
+] };
+identidadesApresentadas = { 1: ["Alex", "A1B2"], 2: ["Lia", "K7Q2"], 3: ["Rafa", "R4F4"], 4: ["LIA", "Z9Z9"], 5: ["Marina", "M4R1"], 6: ["Ana Maria", "AM01"] };
+foraDoAr = [{ id: 5, nickname: "Marina#M4R1" }, { id: 1, nickname: "Alex#A1B2" }];
+const campo = (texto, cursor = texto.length) => ({ value: texto, selectionStart: cursor, selectionEnd: cursor });
+console.log(JSON.stringify({
+  todas: pessoasParaChamar(""),
+  li: pessoasParaChamar("LI").map((p) => p.texto),
+  ma: pessoasParaChamar("ma").map((p) => [p.texto, p.fora]),
+  nada: pessoasParaChamar("zzz"),
+  curso: {
+    comeco: mencaoEmCurso(campo("@li")),
+    meio: mencaoEmCurso(campo("oi @Ana M")),
+    endereco: mencaoEmCurso(campo("escreva para x@ana")),
+    sublinhado: mencaoEmCurso(campo("a_@ana")),
+    pontuacao: mencaoEmCurso(campo("(@ra")),
+    outraFileira: mencaoEmCurso(campo("@ana\nmais")),
+    selecao: mencaoEmCurso({ value: "@ana", selectionStart: 1, selectionEnd: 4 }),
+    cursorNoMeio: mencaoEmCurso(campo("oi @rafa tudo", 6)),
+    semArroba: mencaoEmCurso(campo("oi")),
+  },
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON do autocompletar");
+    let todas = v["todas"].as_array().expect("a lista inteira");
+    let textos: Vec<&str> = todas
+        .iter()
+        .map(|p| p["texto"].as_str().unwrap_or_default())
+        .collect();
+    // Quem está aqui (em ordem), e depois o FORA DO AR; os homônimos com a
+    // marca; quem não tem identidade apresentada, pelo apelido partido; e
+    // nunca a própria pessoa, nem pela lista de membros.
+    assert_eq!(
+        textos,
+        [
+            "Ana Maria",
+            "antigo",
+            "legado",
+            "Lia#K7Q2",
+            "LIA#Z9Z9",
+            "Rafa",
+            "Marina"
+        ],
+        "a lista do @ não é a das pessoas do servidor, ou os homônimos saem sem a marca"
+    );
+    assert_eq!(
+        v["li"],
+        serde_json::json!(["Lia#K7Q2", "LIA#Z9Z9"]),
+        "o filtro diferencia maiúsculas, ou dois apelidos iguais sem contar a caixa saem sem a marca"
+    );
+    assert_eq!(
+        v["ma"],
+        serde_json::json!([["Ana Maria", false], ["Marina", true]]),
+        "quem começa pelo termo não vem antes, ou o fora do ar vem antes de quem está aqui"
+    );
+    assert_eq!(v["nada"], serde_json::json!([]));
+
+    // **A regra de verdade**: cada texto que a lista insere chama a pessoa
+    // escolhida, e só ela entre as outras.
+    for escolhida in todas {
+        let corpo = format!(
+            "oi @{} vem cá",
+            escolhida["texto"].as_str().unwrap_or_default()
+        );
+        for outra in todas {
+            let base = outra["base"].as_str().unwrap_or_default();
+            let marca = outra["marca"].as_str().filter(|marca| !marca.is_empty());
+            let chamada = seele_ffi::menciona(&corpo, base, marca);
+            assert_eq!(
+                chamada,
+                outra["id"] == escolhida["id"],
+                "«{corpo}» {} {base}#{}: o que o @ escreve e o que a regra lê discordam",
+                if chamada { "chama" } else { "não chama" },
+                marca.unwrap_or("—"),
+            );
+        }
+    }
+
+    let curso = &v["curso"];
+    assert_eq!(
+        curso["comeco"],
+        serde_json::json!({ "arroba": 0, "termo": "li" })
+    );
+    assert_eq!(
+        curso["meio"],
+        serde_json::json!({ "arroba": 3, "termo": "Ana M" }),
+        "um apelido com espaço não pode ser procurado"
+    );
+    assert_eq!(
+        curso["pontuacao"],
+        serde_json::json!({ "arroba": 1, "termo": "ra" })
+    );
+    assert_eq!(
+        curso["cursorNoMeio"],
+        serde_json::json!({ "arroba": 3, "termo": "ra" })
+    );
+    for (nome, porque) in [
+        (
+            "endereco",
+            "o @ de um endereço abre a lista (a regra 1 de `mencao.rs`)",
+        ),
+        ("sublinhado", "o @ depois de `_` abre a lista"),
+        ("outraFileira", "o termo atravessa uma quebra de fileira"),
+        ("selecao", "a lista abre com texto selecionado"),
+        ("semArroba", "a lista abre sem @"),
+    ] {
+        assert!(curso[nome].is_null(), "{porque}: {}", curso[nome]);
+    }
+
+    // A lista é um `listbox` que o campo aponta, e as teclas dela vêm antes
+    // do Enter que envia.
+    let pagina = read("ui/index.html");
+    assert!(
+        tag_with_id(&pagina, "mencoes-lista").contains("role=\"listbox\""),
+        "a lista do @ não é um `listbox`"
+    );
+    let campo = tag_with_id(&pagina, "campo-mensagem");
+    assert!(
+        campo.contains("aria-controls=\"mencoes-lista\"")
+            && campo.contains("aria-autocomplete=\"list\""),
+        "o campo não diz a quem escuta que tem uma lista de sugestões: {campo}"
+    );
+    let script = without_comments(&scripts());
+    let desenho = body_of(&script, "function desenharAsMencoes()");
+    for o_que in [
+        "setAttribute(\"role\", \"option\")",
+        "setAttribute(\"aria-selected\", indice === escolhida ? \"true\" : \"false\")",
+        "campo.setAttribute(\"aria-activedescendant\", `mencao-${escolhida}`)",
+        "FRASES_DA_CONVERSA.ninguemComEsseNome",
+    ] {
+        assert!(
+            desenho.contains(o_que),
+            "a lista do @ perdeu `{o_que}`:\n{desenho}"
+        );
+    }
+    let teclas = script
+        .split("$(\"campo-mensagem\").addEventListener(\"keydown\", (evento) => {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .expect("o campo de escrever não escuta teclas");
+    let onde = |trecho: &str| {
+        teclas
+            .find(trecho)
+            .unwrap_or_else(|| panic!("o teclado do campo perdeu `{trecho}`:\n{teclas}"))
+    };
+    assert!(
+        onde("if (teclaNasMencoes(evento)) {") < onde("evento.key === \"Escape\" && modoDeCompor")
+            && onde("evento.key === \"Escape\" && modoDeCompor")
+                < onde("evento.key === \"ArrowUp\"")
+            && onde("evento.key === \"ArrowUp\"") < onde("if (evento.key !== \"Enter\""),
+        "as teclas do campo saíram da ordem: a lista do @, o Esc do modo, a seta \
+         para cima e só então o Enter que envia"
+    );
+    let lista = body_of(&script, "function teclaNasMencoes(evento)");
+    for tecla in [
+        "\"Escape\"",
+        "\"ArrowDown\"",
+        "\"ArrowUp\"",
+        "\"Enter\"",
+        "\"Tab\"",
+    ] {
+        assert!(
+            lista.contains(tecla),
+            "a lista do @ não atende a tecla {tecla}"
+        );
+    }
+    assert!(
+        lista.contains("evento.isComposing"),
+        "a lista do @ come o Enter de quem confirma uma palavra no IME"
+    );
+}
+
+/// **As não lidas de um canal são contadas, ditas, e somem no canal aberto.**
+///
+/// O número é o que se vê; a frase inteira é o que um leitor de tela anuncia
+/// com o nome do canal, porque «3» sozinho não diz do que é a conta. E quem
+/// foi chamado lê um `@` antes do número: a pastilha muda de cor, e a
+/// `specs/06` não deixa a cor dizer nada sozinha.
+#[test]
+fn as_nao_lidas_de_um_canal_sao_ditas_e_nao_so_contadas() {
+    let fontes = format!(
+        "{}\n{}",
+        read("ui/frases.js"),
+        funcao_js(&read("ui/tela-sessao.js"), "marcaDeNaoLidas"),
+    );
+    let Some(saida) = no_node(
+        "as não lidas de um canal",
+        &fontes,
+        r#"
+const ver = (n) => n && { classe: n.className, visto: [n.filhos[0].className, n.filhos[0].textContent, n.filhos[0].atributos["aria-hidden"]],
+  dito: [n.filhos[1].className, n.filhos[1].textContent] };
+const c = (extra) => ver(marcaDeNaoLidas({ id: 2, name: "avisos", open: false, nao_lidas: 0, mencoes: 0, ...extra }));
+console.log(JSON.stringify({
+  nenhuma: c({}), semCampos: ver(marcaDeNaoLidas({ id: 2, name: "antigo", open: false })),
+  aberto: c({ open: true, nao_lidas: 4, mencoes: 1 }),
+  uma: c({ nao_lidas: 1 }), tres: c({ nao_lidas: 3 }), chamada: c({ nao_lidas: 5, mencoes: 2 }),
+  umaChamada: c({ nao_lidas: 1, mencoes: 1 }), muitas: c({ nao_lidas: 250, mencoes: 0 }),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das não lidas");
+    for sem in ["nenhuma", "semCampos", "aberto"] {
+        assert!(
+            v[sem].is_null(),
+            "o canal «{sem}» ganhou marca de não lidas: {}",
+            v[sem]
+        );
+    }
+    let marca = |caso: &str| {
+        (
+            v[caso]["classe"].as_str().unwrap_or_default().to_owned(),
+            v[caso]["visto"][1].as_str().unwrap_or_default().to_owned(),
+            v[caso]["dito"][1].as_str().unwrap_or_default().to_owned(),
+        )
+    };
+    assert_eq!(
+        marca("tres"),
+        (
+            "linha-nao-lidas".into(),
+            "3".into(),
+            "3 mensagens não lidas".into()
+        )
+    );
+    assert_eq!(marca("uma").2, "1 mensagem não lida");
+    assert_eq!(
+        marca("chamada"),
+        (
+            "linha-nao-lidas com-chamada".into(),
+            "@ 5".into(),
+            "5 mensagens não lidas, 2 chamam você".into()
+        ),
+        "o canal em que a pessoa foi chamada não o diz com texto"
+    );
+    assert_eq!(marca("umaChamada").2, "1 mensagem não lida, 1 chama você");
+    assert_eq!(
+        marca("muitas").1,
+        "99+",
+        "a conta não tem teto, e a fileira cresce com ela"
+    );
+    assert_eq!(
+        marca("muitas").2,
+        "250 mensagens não lidas",
+        "o teto escondeu a conta de quem escuta"
+    );
+    assert_eq!(
+        v["tres"]["visto"][2], "true",
+        "o número e a frase são lidos os dois, e o leitor de tela diz a conta duas vezes"
+    );
+
+    // A frase sai da vista e fica na árvore: `display: none` a tiraria das duas.
+    let css = without_comments(&styles());
+    let regra = css
+        .split(".linha-nao-lidas-frase {")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("`.linha-nao-lidas-frase` não tem regra");
+    assert!(
+        regra.contains("clip-path: inset(50%)")
+            && regra.contains("position: absolute")
+            && !regra.contains("display: none")
+            && !regra.contains("visibility: hidden"),
+        "a frase das não lidas saiu da árvore de acessibilidade, ou está à vista: {regra}"
+    );
+    // E a marca entra no botão do canal, nas duas cascas (a lista é uma só).
+    let canais = body_of(&scripts(), "function desenharCanais(snapshot)");
+    assert!(
+        canais.contains("const marca = marcaDeNaoLidas(linha);")
+            && canais.contains("if (marca) botao.append(marca);"),
+        "a lista de canais não desenha a marca de não lidas"
+    );
+    assert!(
+        !canais.contains("não há contagem de não-lidas"),
+        "o comentário de que não há contagem de não lidas continua na lista de canais"
+    );
+}
+
+/// **A mensagem que chama é destacada e dita, e o som é o de mensagem.**
+///
+/// O destaque é fundo e barra; a marca «chamou você» é o que sobrevive sem
+/// cor. E o som: o módulo dos alertas é um `const` do topo de um script
+/// clássico, que **não** vira propriedade de `globalThis` — medido em
+/// 10/11/2026, `globalThis.alertasSonoros` é `undefined` no Chromium e no
+/// WebKit, e um `globalThis.alertasSonoros?.tocar(…)` é um som que nunca toca,
+/// calado. O da menção chama pelo nome.
+#[test]
+fn a_mensagem_que_chama_e_destacada_dita_e_toca_o_som_de_mensagem() {
+    let script = without_comments(&scripts());
+    let item = body_of(&script, "function itemDeMensagem(mensagem, indice, segue)");
+    assert!(
+        item.contains("if (mensagem.mentions_me) item.classList.add(\"mensagem-chamou\");"),
+        "a mensagem que chama não é destacada"
+    );
+    assert!(
+        item.contains(
+            "if (mensagem.mentions_me) cabeca.append(elemento(\"span\", \"mensagem-chamou-marca\", FRASES_DA_CONVERSA.chamouVoce));"
+        ),
+        "a mensagem que chama só o diz pela cor"
+    );
+    let css = without_comments(&styles());
+    assert!(
+        css.contains(".mensagem.mensagem-chamou {") && css.contains(".mensagem-chamou-marca {"),
+        "o destaque da mensagem que chama não tem regra"
+    );
+
+    let Some(mencao) = script
+        .split("payload.NoticeRaised?.notice?.reason === \"Mentioned\"")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+    else {
+        panic!("ser chamado não faz nada além do aviso escrito: nenhum ouvinte olha o `Mentioned`");
+    };
+    assert!(
+        mencao.contains(
+            "if (typeof alertasSonoros === \"object\") alertasSonoros.tocar(\"mensagem\");"
+        ),
+        "ser chamado não toca o som de mensagem pelo nome do módulo: {mencao}"
+    );
+    assert!(
+        !mencao.contains("globalThis.alertasSonoros"),
+        "o som da menção voltou a passar por `globalThis.alertasSonoros`, que é \
+         `undefined` no navegador: {mencao}"
+    );
+    // As preferências são do módulo: o som «mensagem» é do grupo «mensagens».
+    let alertas = without_comments(&read("ui/alertas-sonoros.js"));
+    assert!(
+        alertas.contains("mensagem: \"mensagens\","),
+        "o som de mensagem saiu do grupo que a pessoa liga e desliga"
+    );
+    // E o aviso escrito tem frase.
+    assert!(
+        without_comments(&read("ui/frases.js")).contains("Mentioned: \"VOCÊ FOI CHAMADO\","),
+        "o aviso de quem foi chamado perdeu a frase"
+    );
+    // **E a menção não abre a caixa modal de ALERTA**, que cobre a conversa e
+    // oferece MODERAR UMA PESSOA. Visto na captura de 10/11/2026.
+    assert!(
+        without_comments(&read("ui/tela-sessao.js"))
+            .contains("if (!snapshot.notice || snapshot.notice.reason === \"Mentioned\") {"),
+        "ser chamado voltou a abrir a caixa de ALERTA por cima da conversa"
+    );
+}
+
+/// **As ações de uma mensagem recebem o foco do teclado.**
+///
+/// Um botão com `visibility: hidden` não recebe o foco: o Tab passa por cima
+/// dele, e o `:focus-visible` que deveria revelá-lo nunca acontece — o
+/// controle fica só para quem tem ponteiro (medido na bancada: `focus()` num
+/// botão assim não pega). O grupo é apagado com `opacity`, o foco em qualquer
+/// um dos três acende os três, e o `remover`, que mora nele, entra na regra.
+#[test]
+fn as_acoes_de_uma_mensagem_recebem_o_foco_do_teclado() {
+    let css = without_comments(&read("ui/tela-sessao.css"));
+    let bloco = |seletor: &str| {
+        css.split(&format!("\n{seletor} {{"))
+            .nth(1)
+            .and_then(|resto| resto.split('}').next())
+            .unwrap_or_else(|| panic!("`{seletor}` não tem regra em tela-sessao.css"))
+            .to_owned()
+    };
+    assert!(
+        !bloco(".mensagem-acao").contains("visibility"),
+        "o RESPONDER e o EDITAR voltaram a ser escondidos com `visibility`, e o Tab os pula"
+    );
+    assert!(
+        bloco(".mensagem-acoes :is(.mensagem-acao, .moderar-remover)").contains("opacity: 0"),
+        "as ações de uma mensagem não são apagadas com `opacity`"
+    );
+    assert!(
+        bloco(".mensagem-acoes .moderar-remover").contains("visibility: visible"),
+        "o REMOVER dentro do grupo continua com o `visibility: hidden` da folha \
+         da moderação, e o Tab o pula"
+    );
+    assert!(
+        css.contains(
+            ".mensagem-acoes:focus-within :is(.mensagem-acao, .moderar-remover) {\n  opacity: 1;"
+        ),
+        "o foco num dos três não revela o grupo"
+    );
+    // Os três moram no mesmo grupo, e o grupo na cabeça da mensagem.
+    let item = body_of(
+        &scripts(),
+        "function itemDeMensagem(mensagem, indice, segue)",
+    );
+    for botao in ["responder", "editar", "remover"] {
+        assert!(
+            item.contains(&format!("if ({botao}) acoes.append({botao});")),
+            "o `{botao}` saiu do grupo de ações da mensagem"
+        );
+    }
+}
+
+/// **As frases da mesa de texto cabem na régua, e nenhuma falha dela chega
+/// crua.**
+///
+/// Os dois dicionários novos de `frases.js` não estão entre os que
+/// `LIMITE_DE_FRASE` mede (ele lê `Nome: "texto"` de seis dicionários planos),
+/// e metade das entradas é função. Aqui elas são **rodadas**, com nomes de
+/// tamanho real, e medidas: 180 caracteres, como o resto.
+///
+/// E as três recusas da edição que o core dá na hora têm frase pelo
+/// `fraseDeErro` — duas chegam como objeto, e sem os ramos delas caíam em
+/// «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ».
+#[test]
+fn as_frases_da_mesa_de_texto_cabem_e_as_falhas_dela_tem_frase() {
+    let Some(saida) = no_node(
+        "as frases da mesa de texto",
+        &read("ui/frases.js"),
+        r#"
+const nome = "Maria Antonieta das Neves";
+const medir = (dicionario) => Object.entries(dicionario).map(([chave, valor]) =>
+  [chave, typeof valor === "function" ? valor(...[nome, "23:59", 120].slice(0, Math.max(valor.length, 1))) : valor]);
+console.log(JSON.stringify({
+  conversa: medir(FRASES_DA_CONVERSA).concat([["naoLidasComMencao(250, 99)", FRASES_DA_CONVERSA.naoLidasComMencao(250, 99)], ["naoLidas(250)", FRASES_DA_CONVERSA.naoLidas(250)]]),
+  banidos: medir(FRASES_DOS_BANIDOS),
+  falhas: {
+    MensagemVazia: fraseDeErro("MensagemVazia"),
+    MensagemGrandeDemais: fraseDeErro({ MensagemGrandeDemais: { limite_bytes: 4096 } }),
+    ServidorAntigo: fraseDeErro({ ServidorAntigo: { negociado: 12, exige: 13 } }),
+    UnknownMessage: fraseDeErro("UnknownMessage"),
+  },
+  celular: [FRASES_DO_CELULAR.folhas.responder, FRASES_DO_CELULAR.folhas.editarMinha],
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das frases");
+    let mut medidas = 0;
+    for dicionario in ["conversa", "banidos"] {
+        for par in v[dicionario].as_array().expect("as entradas") {
+            let (chave, texto) = (par[0].as_str().unwrap_or_default(), &par[1]);
+            let Some(texto) = texto.as_str() else {
+                panic!("`{dicionario}.{chave}` não devolve uma frase: {texto}");
+            };
+            assert!(
+                !texto.trim().is_empty(),
+                "`{dicionario}.{chave}` está vazia"
+            );
+            let tamanho = texto.chars().count();
+            assert!(
+                tamanho <= LIMITE_DE_FRASE,
+                "`{dicionario}.{chave}` tem {tamanho} caracteres, e a régua é {LIMITE_DE_FRASE}:\n{texto}"
+            );
+            assert!(
+                !texto.contains("undefined") && !texto.contains("[object"),
+                "`{dicionario}.{chave}` escreve um valor que não chegou: {texto}"
+            );
+            medidas += 1;
+        }
+    }
+    assert!(
+        medidas >= 45,
+        "só {medidas} frases medidas: a leitura dos dicionários encolheu"
+    );
+
+    for (falha, frase) in v["falhas"].as_object().expect("as falhas") {
+        let frase = frase.as_str().unwrap_or_default();
+        assert!(
+            !frase.contains("ALGO FALHOU") && frase != falha && !frase.contains('{'),
+            "a falha `{falha}` da edição chega à tela sem frase: {frase}"
+        );
+        assert!(
+            frase.chars().count() <= LIMITE_DE_FRASE,
+            "`{falha}`: {frase}"
+        );
+    }
+    // Sem número de protocolo nem de bytes na frase: não é palavra de quem usa.
+    for falha in ["ServidorAntigo", "MensagemGrandeDemais"] {
+        let frase = v["falhas"][falha].as_str().unwrap_or_default();
+        assert!(
+            !frase
+                .chars()
+                .any(|c| c.is_ascii_digit() && c != '1' && c != '0'),
+            "a frase de `{falha}` traz um número do fio: {frase}"
+        );
+    }
+    assert_eq!(
+        v["celular"],
+        serde_json::json!(["RESPONDER", "EDITAR A MINHA MENSAGEM"])
+    );
+    // As três variantes existem no `ConnectionError`, com estes nomes.
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    for variante in [
+        "    ServidorAntigo {",
+        "    MensagemVazia,",
+        "    MensagemGrandeDemais {",
+    ] {
+        assert!(
+            tipos.contains(variante),
+            "`{}` saiu do `ConnectionError`",
+            variante.trim()
+        );
+    }
+}
+
+/// **A lista de banidos: de quem pode banir, num servidor que a tem, pedida ao
+/// abrir, e nunca muda.**
+///
+/// - a porta é do `may_ban` (quem pode pôr para fora é quem pode trazer de
+///   volta, e é o que o servidor confere) **e** do protocolo: num servidor da
+///   0.19 ela não aparece, em vez de abrir uma lista que nunca chega;
+/// - abrir pede a lista **toda vez**: ela não anda sozinha quando outra
+///   pessoa bane, e a de uma abertura anterior ofereceria desbanir quem já
+///   voltou;
+/// - três estados sem fileira, e cada um com a frase dele — lendo, vazia, e a
+///   que não chegou. Uma lista em branco não diz qual dos três é;
+/// - o DESBANIR volta à lista, e não fecha a caixa: a confirmação de que saiu
+///   é a pessoa sair dela.
+///
+/// (Que o DESBANIR só sai armado, com a consequência escrita, é do
+/// `no_moderation_act_reaches_the_server_without_a_sentence_that_says_what_it_costs`.)
+#[test]
+fn a_lista_de_banidos_e_de_quem_pode_banir_e_nunca_fica_muda() {
+    let script = without_comments(&scripts());
+    let pode = body_of(&script, "function podeVerBanidos(snapshot)");
+    assert!(
+        pode.contains("snapshot.may_ban") && pode.contains("servidorTemAMesaDeTexto(snapshot)"),
+        "a lista de banidos não é oferecida pela permissão de banir e pelo protocolo: {pode}"
+    );
+    assert!(
+        !pode.contains("may_kick") && !pode.contains("may_manage"),
+        "a lista de banidos é oferecida por outra permissão: {pode}"
+    );
+    let porta = body_of(&script, "function atualizarPortaDosBanidos(snapshot)");
+    assert!(
+        porta.contains("porOEscondido(porta, !podeVerBanidos(snapshot));"),
+        "a porta dos banidos não segue o retrato: {porta}"
+    );
+    assert!(
+        tag_with_id(&read("ui/index.html"), "abrir-banidos").contains(" hidden"),
+        "a porta dos banidos nasce à vista, antes de o retrato dizer quem pode banir"
+    );
+    assert!(
+        without_comments(&read("ui/celular-sessao.css"))
+            .contains(":root[data-casca=\"celular\"] .roster-banidos {\n  display: none;"),
+        "a porta dos banidos aparece no celular, onde moderar é pelo computador"
+    );
+
+    let abrir = body_of(&script, "async function abrirBanidos()");
+    assert!(
+        abrir.contains("if (!snapshot || !podeVerBanidos(snapshot)) return;")
+            && abrir.contains("pedirOsBanidos({ pedir: true });"),
+        "abrir a lista de banidos não a pede ao servidor, ou a abre para quem não pode: {abrir}"
+    );
+    let pedir = body_of(&script, "function pedirOsBanidos({ pedir })");
+    assert!(
+        pedir.contains("banidosLidos = null;") && pedir.contains("invoke(\"listar_banidos\")"),
+        "pedir a lista não esquece a anterior, ou não a pede: {pedir}"
+    );
+    assert!(
+        pedir.contains("FRASES_DOS_BANIDOS.naoChegou")
+            && pedir.contains("desenharBanidos(fraseDeErro(falha))"),
+        "a lista que não chega, ou que o core recusa, fica em «lendo» para sempre: {pedir}"
+    );
+    let desenho = body_of(&script, "function desenharBanidos(falha = null)");
+    for estado in [
+        "FRASES_DOS_BANIDOS.lendo",
+        "FRASES_DOS_BANIDOS.vazio",
+        "falha ??",
+    ] {
+        assert!(
+            desenho.contains(estado),
+            "a lista de banidos perdeu o estado `{estado}`: {desenho}"
+        );
+    }
+    for dado in [
+        "apelidoApresentado(banido.person, banido.nickname)",
+        "FRASES_DOS_BANIDOS.semMotivo",
+        "prazoDoBanimento(banido)",
+        "dataset.desbanir",
+    ] {
+        assert!(
+            desenho.contains(dado),
+            "a fileira de um banido perdeu `{dado}`: {desenho}"
+        );
+    }
+    let prazo = body_of(&script, "function prazoDoBanimento(banido)");
+    assert!(
+        prazo.contains("FRASES_DOS_BANIDOS.permanente") && prazo.contains("expires_at * 1000"),
+        "o prazo de um banimento não diz «permanente», ou lê os segundos como milissegundos: {prazo}"
+    );
+
+    // O evento, e a volta à lista depois do ato.
+    assert!(
+        script.contains("if (evento.payload === \"BanidosChanged\") lerOsBanidos();"),
+        "ninguém escuta a lista de banidos chegar"
+    );
+    let confirmar = script
+        .split("$(\"moderar-confirmar\").addEventListener")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .expect("o CONFIRMAR da moderação");
+    let dos_banidos = confirmar
+        .split("if (caixaDosBanidos) {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+        .expect("o CONFIRMAR não sabe voltar à lista de banidos");
+    assert!(
+        dos_banidos.contains("mostrarOPainelDosBanidos();")
+            && !dos_banidos.contains("fecharModeracao"),
+        "o DESBANIR fecha a caixa em vez de voltar à lista: {dos_banidos}"
+    );
+    let cancelar = body_of(&script, "function desarmarAto()");
+    assert!(
+        cancelar.find("if (caixaDosBanidos) {") < cancelar.find("if (!caixaComEscolha) {"),
+        "cancelar um DESBANIR fecha a caixa, ou volta à escolha de uma pessoa"
+    );
+    // Os tipos: os nomes que a fileira lê são os que o `Banido` serializa.
+    let tipos = tipos_da_ponte();
+    let banido = tipos
+        .split("pub struct Banido {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+        .expect("`Banido` saiu dos tipos da ponte");
+    for campo in [
+        "pub person: u64",
+        "pub nickname: String",
+        "pub reason: Option<String>",
+        "pub expires_at: Option<i64>",
+    ] {
+        assert!(
+            banido.contains(campo),
+            "`Banido` não tem mais `{campo}`, que a lista lê"
+        );
+    }
+}
+
+/// **Toda falha unitária de `ConnectionError` tem frase em `FRASES`.**
+///
+/// Uma variante sem campos atravessa a ponte como o próprio nome, e
+/// `fraseDeErro` devolve `FRASES[nome] ?? nome`: sem a entrada, quem lê recebe
+/// o identificador cru. Foi assim que `NatNaoAbriu`, a falha de quem tenta
+/// entrar atrás de dois NATs, chegou à tela na 0.19 como «NatNaoAbriu», no
+/// momento em que a pessoa mais precisava saber o que fazer.
+///
+/// A lista é lida do próprio `enum`, e não repetida aqui: uma variante nova
+/// sem frase acende este teste sozinha.
+#[test]
+fn toda_falha_unitaria_da_conexao_tem_frase() {
+    let tipos = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
+        .expect("crates/seele-ffi/src/types.rs");
+    let Some(corpo) = tipos.split("pub enum ConnectionError {").nth(1) else {
+        panic!("`ConnectionError` saiu de seele-ffi/src/types.rs");
+    };
+    let corpo = corpo.split("\n}").next().unwrap_or_default();
+    let unitarias: Vec<&str> = corpo
+        .lines()
+        .filter_map(|linha| linha.strip_prefix("    ")?.strip_suffix(','))
+        .filter(|nome| {
+            nome.starts_with(|c: char| c.is_ascii_uppercase())
+                && nome.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+        .collect();
+    assert!(
+        unitarias.len() >= 20 && unitarias.contains(&"NotConnected"),
+        "só {} variantes unitárias lidas de `ConnectionError`: o enum não está \
+         mais sendo lido direito, e este teste deixou de guardar: {unitarias:?}",
+        unitarias.len()
+    );
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(tabela) = frases.split("\nconst FRASES = {").nth(1) else {
+        panic!("`FRASES` saiu de ui/frases.js");
+    };
+    let sem_frase: Vec<&&str> = unitarias
+        .iter()
+        .filter(|nome| !tabela.contains(&format!("\n    {nome}:")))
+        .collect();
+    assert!(
+        sem_frase.is_empty(),
+        "estas falhas chegam à tela com o nome cru, porque `FRASES` não tem \
+         frase para elas: {sem_frase:?}"
     );
 }
 
@@ -7281,7 +8721,7 @@ fn there_is_no_blocklist_of_extensions_anywhere_in_the_frontend() {
     for name in ui_files(".js") {
         fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
     }
-    fonte.push_str(&without_comments(&read("src/main.rs")));
+    fonte.push_str(&without_comments(&main_com_os_testes()));
 
     // **Uma lista, e não um nome.**
     //
@@ -8064,6 +9504,35 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
              like the other one:\n{frase}"
         );
     }
+}
+
+/// **O motor que morreu tem frase, e ela não culpa a rede.**
+///
+/// `EndReason::MotorCaiu` é o fim que o `seele-ffi` dá quando a thread da
+/// conexão entra em pânico. A tela de fim lê `MOTIVOS[motivo]`: sem a frase
+/// ela cai no texto genérico, e a queda volta a não dizer o que houve. O nome
+/// é o que a FFI escreve, lido da variante.
+#[test]
+fn o_motor_que_caiu_tem_frase_e_ela_nao_culpa_a_rede() {
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let motivos = sentences_of(&arquivo, "MOTIVOS");
+    let nome = nome_no_fio(&seele_ffi::EndReason::MotorCaiu);
+    let Some((_, frase)) = motivos.iter().find(|(variante, _)| *variante == nome) else {
+        panic!(
+            "`EndReason::{nome}` não tem frase em `MOTIVOS`: a thread da conexão que entra em \
+             pânico derruba a sessão e a tela de fim não diz o que houve"
+        );
+    };
+    for dito in ["SESSÃO CAIU", "seele.log"] {
+        assert!(
+            frase.contains(dito),
+            "a frase de `{nome}` não diz «{dito}»:\n{frase}"
+        );
+    }
+    assert!(
+        !frase.contains("ENLACE"),
+        "a frase de `{nome}` fala em enlace, e manda procurar na rede um defeito do app:\n{frase}"
+    );
 }
 
 #[test]
@@ -9744,12 +11213,13 @@ const LIMITE_DE_FRASE: usize = 180;
 /// mede, porque ela não está em dicionário. O que ela tem de dizer é cobrado
 /// por `saving_says_out_loud_what_this_product_does_not_promise`; o tamanho, por
 /// ninguém.
-const DICIONARIOS: [&str; 10] = [
+const DICIONARIOS: [&str; 11] = [
     "MOTIVOS",
     "AVISOS",
     "ETAPAS",
     "CAMINHOS",
     "PARADAS",
+    "QUEDAS",
     "FRASES",
     "ANEXOS",
     "TRANSFERENCIAS",
@@ -10174,9 +11644,12 @@ fn a_ajuda_escreve_a_tecla_de_falar_que_esta_gravada() {
     assert_eq!(
         diz.split_whitespace().collect::<Vec<_>>().join(" "),
         "Segure para falar, no modo tecla. Vale com a janela do SEELE na frente \
-         e fora da caixa de mensagem.",
+         e fora da caixa de mensagem. Com outra janela na frente, só ligando em \
+         CONFIGURAÇÕES · ATALHOS.",
         "a ajuda não diz mais onde a tecla de falar vale; quem a segura na caixa \
-         de mensagem ou com outra janela na frente acha que o microfone quebrou"
+         de mensagem ou com outra janela na frente acha que o microfone quebrou \
+         (a segunda frase entrou com a tecla de falar fora da janela, que nasce \
+         desligada: `tecla_global.rs`)"
     );
 }
 
@@ -11305,12 +12778,13 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          com `code: None` ainda sai do `Destroyed` da última janela, com ela já fora da \
          lista, e então troque `RUNTIME_MEDIDO`"
     );
-    let main = without_comments(&read("src/main.rs"));
+    let main = without_comments(&main_com_os_testes());
     // **Em qualquer arquivo de `src/`, e não só no `main.rs`.** Medido na
     // reversão (lote 58-4): um `prevent_close` ou um `prevent_exit` em outro
     // módulo do app (`sala.rs`, na reversão) passava calado, porque o guarda só
-    // lia o `main.rs`.
-    let mut fontes = String::new();
+    // lia o `main.rs`. E os módulos de teste do `main.rs`, que eram texto dele
+    // e moram em `src/testes/`: a leitura de `src/` não desce em pasta.
+    let mut fontes = without_comments(&testes_do_main());
     for entrada in std::fs::read_dir(app_dir().join("src")).expect("a pasta src") {
         let caminho = entrada.expect("uma entrada de src").path();
         if caminho.extension().is_some_and(|extensao| extensao == "rs") {
@@ -13864,7 +15338,7 @@ fn o_rodape_do_operador_muda_de_oficio_com_a_sala() {
         );
     }
     assert!(
-        desenho.contains("hidden"),
+        desenho.contains("porOEscondido(outro, !dentro);"),
         "o botão de compartilhar deixou de sumir fora de sala, e compartilhar \
          fora de sala é uma promessa que o produto não cumpre:\n{desenho}"
     );
@@ -13918,7 +15392,8 @@ fn compartilhar_a_tela_tem_uma_porta_so_e_ela_e_a_barra_da_chamada() {
         .and_then(|resto| resto.split("const comGlifo").next())
         .unwrap_or_default();
     assert!(
-        espelhar.contains("aria-disabled") && espelhar.contains("botao.title"),
+        espelhar.contains("aria-disabled")
+            && espelhar.contains("porOTitulo(botao, original.title)"),
         "a barra não repassa o `aria-disabled` e o `title` do operador: o COMPARTILHAR \
          indisponível ficaria mudo, sem dizer por quê:\n{espelhar}"
     );
@@ -14402,7 +15877,7 @@ fn the_mod_commands_the_page_invokes_exist_in_rust() {
 /// command».
 #[test]
 fn the_shell_reaches_mods_through_the_ffi_and_not_past_it() {
-    let rust = read("src/main.rs");
+    let rust = main_com_os_testes();
     assert!(
         !rust.contains("seele_core::mods"),
         "a casca alcançou `seele_core::mods` por cima do `seele-ffi`"
@@ -16352,7 +17827,7 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
 /// dia em que alguém puser a diretiva de volta «para destravar um MOD».
 #[test]
 fn o_esquema_dos_mods_nao_ficou_registrado_sem_ninguem_para_usa_lo() {
-    let rust = read("src/main.rs");
+    let rust = main_com_os_testes();
     assert!(
         !rust.contains("register_uri_scheme_protocol(\"mod\""),
         "o esquema `mod://` continua registrado, e desde o ADR 0049 não há \
@@ -16915,7 +18390,7 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
 /// portaria, a linha de ESTE SERVIDOR) e continua no `estado_do_servidor`.
 #[test]
 fn estou_no_meu_servidor_tem_uma_resposta_so() {
-    let app = without_comments(&read("src/main.rs"));
+    let app = without_comments(&main_com_os_testes());
     assert!(
         !app.contains("hospedado_aqui"),
         "o `hospedado_aqui` voltou ao `main.rs`: é a segunda resposta a «estou no \
@@ -17984,13 +19459,8 @@ fn toda_recusa_do_registro_de_contribuicoes_tem_nome() {
             "«{nome}» é usado como recusa e não está em `RECUSAS_DAS_CONTRIBUICOES`"
         );
     }
-    let rascunho = read("../../docs/superpowers/specs/2026-10-08-api-6-rascunho.md");
-    for nome in &nomes {
-        assert!(
-            rascunho.contains(&format!("`{nome}`")),
-            "«{nome}» é uma recusa que o MOD da 6 recebe, e o rascunho §7.1 não a lista"
-        );
-    }
+    // (A segunda metade conferia cada nome contra o rascunho da API 6, em
+    // `docs/superpowers`. O rascunho saiu do repositório na limpeza da 1.0.)
 }
 
 /// **Todo `perfil` da tabela de pontos é o orçamento com que o ponto monta.**
@@ -19277,6 +20747,8 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
         ("volumesLidos", "esquecerVolumes()"),
         ("geracaoDosVolumes", "esquecerVolumes()"),
         ("campoPrecisaMedir", "restaurarRascunho()"),
+        // A lista do `@` aberta é das pessoas do servidor que ficou para trás.
+        ("mencoesAbertas", "fecharAsMencoes()"),
     ];
     // Os que **atravessam** sessões de propósito, cada um com o motivo. Conferidos
     // um por um na rodada 1: nenhum guarda nada que um servidor tenha dito.
@@ -19293,6 +20765,11 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
         (
             "teclaDeFalar",
             "da preferência desta máquina, lida do disco, e não de um servidor",
+        ),
+        (
+            "teclaGlobal",
+            "desta máquina: o que o Rust contou por último da tecla de falar fora da \
+             janela (`seele://tecla-global`); é da opção e do sistema, e não de um servidor",
         ),
         (
             "foneJaAvisado",
@@ -20045,11 +21522,23 @@ fn quem_hospeda_ve_as_mensagens_de_apps_mais_novos_e_o_zero_tambem() {
 /// módulos `#[cfg(test)]`, que no `main.rs` ficam espalhados entre funções de
 /// produção. Cada módulo de teste é de primeiro nível e fecha numa linha `}`
 /// sozinha, que é onde a produção recomeça.
+///
+/// **Um módulo de teste sem corpo não leva a produção junto.** Os do `main.rs`
+/// moram em `src/testes/`, e o que fica nele é `#[cfg(test)]` e, na linha de
+/// baixo, `mod x;`: não há `}` dele para achar, e o corte ia até a `}` da
+/// próxima função de produção, que saía da leitura sem ninguém ver. Só a linha
+/// do `mod` sai.
 fn producao_rust(fonte: &str) -> String {
     let marca = "\n#[cfg(test)]\n";
     let mut pedacos = fonte.split(marca);
     let mut producao = pedacos.next().unwrap_or_default().to_owned();
     for pedaco in pedacos {
+        let (primeira, resto) = pedaco.split_once('\n').unwrap_or((pedaco, ""));
+        if primeira.starts_with("mod ") && primeira.trim_end().ends_with(';') {
+            producao.push('\n');
+            producao.push_str(resto);
+            continue;
+        }
         if let Some(fim) = pedaco.find("\n}\n") {
             producao.push_str(&pedaco[fim + 3..]);
         }
@@ -21959,6 +23448,10 @@ const funcao = (arquivo, nome) => {
   if (!m) { console.log("sumiu " + nome + " de " + arquivo); process.exit(1); }
   return m[0];
 };
+// Os «só o que mudou» de `base.js` (`porOEscondido` e as irmãs), da fonte real:
+// as funções extraídas de `ui/` os chamam, e o mundo tem de trazê-los.
+const SO_O_QUE_MUDOU = ["porOEscondido", "porOTexto", "porOTitulo", "porOAtributo", "porODado", "porAClasse"]
+  .map((nome) => funcao("base.js", nome)).join("\n");
 class El {
   constructor(id) { this.id = id; this.children = []; this.dataset = {}; this.handlers = {}; this.attrs = {};
     this.hidden = false; this.textContent = ""; this.value = ""; this.checked = true; this.disabled = false;
@@ -21995,6 +23488,7 @@ function mundo(comandos) {
     copiarLink: async (campo, botao) => { chamadas.push({ cmd: "copiarLink", args: { campo: campo.id, botao: botao.id } }); },
     irParaOServidor: (...a) => chamadas.push({ cmd: "irParaOServidor", args: a }),
   });
+  vm.runInContext(SO_O_QUE_MUDOU, ctx, { filename: "base.js" });
   return { els, chamadas, ouvintes, ctx, $, invoke };
 }
 const carregar = (m, ...arquivos) => { for (const a of arquivos) vm.runInContext(ler(a), m.ctx, { filename: a }); };
@@ -22417,6 +23911,363 @@ m.ctx.irParaOServidor("@K9", null, null, "Ana", null, true);
 confere("sem várias sessões a troca deixou de confirmar", so(m, "pedirTroca").length === 1 && so(m, "conectar").length === 0);
 "##,
     );
+}
+
+/// **A faixa do toque com uma ligação em curso, e a ligação cheia** (ADR 0068,
+/// decisão 4: a terceira pessoa entra ligando para o código de quem hospeda).
+///
+/// Quem recebe já está na própria sala (`onde_estou` em `Pessoal`), e a faixa
+/// dizia «está ligando» com ATENDER, como se fosse outra ligação. Agora ela diz
+/// que a pessoa quer entrar na ligação em curso, e o botão, que a adiciona; o
+/// atender não passa pelo `conectar` (quem recebe já está dentro). E quando a
+/// campainha responde `cheia` (o teto da ligação, `TETO_DA_LIGACAO`), a faixa
+/// fica à vista dizendo quem não entrou e por quê, em vez de sumir como se a
+/// pessoa tivesse entrado. O `node` roda a fonte real de `camada-toque.js` e do
+/// `frases.js`.
+#[test]
+fn a_faixa_do_toque_diz_a_ligacao_em_curso_e_a_ligacao_cheia() {
+    // O número da frase é o teto da campainha: mudar um sem o outro reprova.
+    let campainha = read("../../crates/seele-server/src/campainha.rs");
+    let teto = campainha
+        .split("pub const TETO_DA_LIGACAO: usize = ")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .unwrap_or_else(|| panic!("a campainha não tem mais o `TETO_DA_LIGACAO`"));
+    let frases = without_comments(&read("ui/frases.js"));
+    for frase in ["  conversaCheia:", "    cheia:"] {
+        let dita = frases
+            .split(&format!("\n{frase}"))
+            .nth(1)
+            .unwrap_or_default();
+        let linhas: String = dita.lines().take(4).collect();
+        assert!(
+            linhas.contains(&format!("({teto} PESSOAS)")),
+            "a frase `{frase}` não diz o teto da ligação ({teto}, da campainha): {linhas}"
+        );
+    }
+    rodar_node(
+        "a faixa com a ligação em curso",
+        r##"
+const ANA = { evento: "Tocou", quem: "aa11", apelido: "ana", codigo: "K9P2-CSM7-NBFR-AYQ3", nome_na_agenda: null, com_som: true };
+function cenario(onde, atender = { ja_na_sala: onde === "Pessoal", alvo: "127.0.0.1:8385" }) {
+  const m = mundo({ onde_estou: onde, toques_agora: [], atender, recusar: null });
+  const ditas = [];
+  const raiz = new El("html");
+  raiz.style = { setProperty() {}, removeProperty() {} };
+  raiz.removeAttribute = () => {};
+  m.ctx.document.documentElement = raiz;
+  m.$("toque").hidden = true;
+  m.$("toque").getBoundingClientRect = () => ({ bottom: 40 });
+  Object.assign(m.ctx, {
+    ResizeObserver: class { observe() {} },
+    anunciar: (frase) => ditas.push(frase),
+    nomeDesteServidor: () => "CASA",
+    conectar: async (...a) => { m.chamadas.push({ cmd: "conectar", args: a }); },
+    irParaAEntradaSemSair: () => {},
+  });
+  carregar(m, "frases.js", "camada-toque.js");
+  const toque = (payload) => { m.ouvintes["seele://toque"]({ payload }); return tick(); };
+  return { m, ditas, toque };
+}
+
+// Sem ligação nenhuma: a faixa de sempre.
+let c = cenario("Nenhum");
+await tick();
+await c.toque(ANA);
+confere("fora de ligação, a faixa não diz que está ligando: " + c.m.$("toque-texto").textContent,
+  c.m.$("toque").hidden === false && /«ana» · K9P2-CSM7-NBFR-AYQ3 está ligando/.test(c.m.$("toque-texto").textContent));
+confere("fora de ligação, o botão não é ATENDER", c.m.$("toque-atender").textContent === "ATENDER");
+
+// Com uma ligação em curso: a faixa e o botão dizem que a pessoa entra nela.
+c = cenario("Pessoal");
+await tick();
+await c.toque(ANA);
+confere("com a ligação em curso, a faixa não diz que a pessoa quer entrar nela: " + c.m.$("toque-texto").textContent,
+  /«ana» · K9P2-CSM7-NBFR-AYQ3 quer entrar na ligação em curso/.test(c.m.$("toque-texto").textContent));
+confere("com a ligação em curso, o botão não diz que adiciona: " + c.m.$("toque-atender").textContent,
+  c.m.$("toque-atender").textContent === "ADICIONAR À LIGAÇÃO");
+confere("a faixa não foi dita uma vez", c.ditas.length === 1 && /quer entrar na ligação em curso/.test(c.ditas[0]));
+await c.m.$("toque-atender").click();
+confere("adicionar não atendeu quem tocava", so(c.m, "atender").length === 1 && so(c.m, "atender")[0].args.quem === "aa11");
+confere("adicionar passou pelo conectar, com quem recebe já na sala", so(c.m, "conectar").length === 0);
+await c.toque({ evento: "Parou", quem: "aa11", desfecho: "atendida" });
+confere("atendida, a faixa não saiu", c.m.$("toque").hidden === true);
+
+// A ligação no teto: atender não põe ninguém dentro, e a faixa fica dizendo.
+c = cenario("Pessoal");
+await tick();
+await c.toque(ANA);
+await c.m.$("toque-atender").click();
+await c.toque({ evento: "Parou", quem: "aa11", desfecho: "cheia" });
+const cheia = c.m.$("toque-texto").textContent;
+confere("cheia, a faixa sumiu como se a pessoa tivesse entrado", c.m.$("toque").hidden === false);
+confere("cheia, a faixa não diz quem não entrou nem o teto: " + cheia, /A LIGAÇÃO ESTÁ CHEIA \(6 PESSOAS\): «ana» não entrou/.test(cheia));
+confere("cheia, ainda há o que atender", c.m.$("toque-atender").hidden === true);
+confere("cheia, o segundo botão não fecha", c.m.$("toque-recusar").textContent === "FECHAR");
+confere("cheia, o desfecho não foi dito", c.ditas.some((d) => /A LIGAÇÃO ESTÁ CHEIA \(6 PESSOAS\)/.test(d)));
+await c.m.$("toque-recusar").click();
+confere("FECHAR não fechou a faixa de quem não coube", c.m.$("toque").hidden === true);
+confere("FECHAR recusou alguém", so(c.m, "recusar").length === 0);
+
+// Outra pessoa toca com a faixa de «não coube» à vista: a pergunta vem antes.
+c = cenario("Pessoal");
+await tick();
+await c.toque(ANA);
+await c.toque({ evento: "Parou", quem: "aa11", desfecho: "cheia" });
+await c.toque({ ...ANA, quem: "bb22", apelido: "caio" });
+confere("quem toca não tomou o lugar da faixa de quem não coube: " + c.m.$("toque-texto").textContent,
+  /«caio»/.test(c.m.$("toque-texto").textContent) && c.m.$("toque-atender").hidden === false);
+"##,
+    );
+}
+
+/// **`@CÓDIGO` disca a sala pessoal primeiro** (ADR 0068), nas duas cascas, e a
+/// conversa direta só é tentada **na página**, quando o ponto de encontro diz
+/// que a sala não mora lá (`NaoLocalizou`).
+///
+/// A ordem era a contrária: a direta primeiro, e a sala só quando a direta
+/// respondia «ausente». Entre dois apps a direta sempre respondia, e a sala (o
+/// motor nativo, até seis pessoas) nunca era usada. Agora o app só disca a
+/// sala, e a página entra nela como convidada; a direta ficou na página, para o
+/// código de quem também só tem a página. O `node` roda a fonte real
+/// de `irParaOServidor` e do recuo; o `conectar` é o duble de sempre, que chama o
+/// `connect` e, na falha, chama o recuo como o `catch` real faz (conferido na
+/// fonte logo abaixo).
+#[test]
+fn o_codigo_disca_a_sala_primeiro_e_so_sem_sala_recua_para_a_direta() {
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    assert!(
+        boot.contains("recuarParaAConversaDireta(alvo, apelido, motivo,"),
+        "o `catch` do `conectar` deixou de oferecer a falha ao recuo da conversa direta"
+    );
+    rodar_node(
+        "a sala primeiro, a direta como recuo da página",
+        r##"
+const CODIGO = "@K9P2-CSM7-NBFR-AYQ3";
+function cenario({ connect = null, direta, pagina = false }) {
+  const m = mundo({ connect });
+  // Antes das frases: a de «não está disponível» depende da casca.
+  m.ctx.PONTE_NO_LUGAR_DO_TAURI = pagina;
+  carregar(m, "frases.js");
+  const ordem = [];
+  m.$("tela-sessao").hidden = true;
+  m.$("boot-erro").hidden = true;
+  if (direta) m.ctx.window.seelePessoalWeb = { chamarCodigo: async (pedido) => { ordem.push("direta:" + pedido.codigo); return direta(); } };
+  Object.assign(m.ctx, {
+    conectar: async (alvo, apelido, token, link, ligacao) => {
+      ordem.push("sala:" + alvo);
+      try { await m.invoke("connect", { server: alvo }); }
+      catch (motivo) {
+        const dizer = () => {
+          m.$("boot-erro").hidden = false;
+          m.$("boot-erro").textContent = m.ctx.fraseDaLigacao(motivo, ligacao?.nome, []) ?? JSON.stringify(motivo);
+        };
+        if (!m.ctx.recuarParaAConversaDireta(alvo, apelido, motivo, dizer)) dizer();
+      }
+    },
+    variasSessoes: () => true, pedirTrocaDeServidor: () => {},
+  });
+  vm.runInContext(`
+    ${funcao("camada-servidores.js", "dizerQueALigacaoNaoComecou")}
+    ${funcao("camada-servidores.js", "recuarParaAConversaDireta")}
+    ${funcao("camada-servidores.js", "irParaOServidorNativo")}
+    ${funcao("camada-servidores.js", "irParaOServidor")}`, m.ctx);
+  return { m, ordem };
+}
+const SEM_SALA = () => Promise.reject({ NaoLocalizou: { motivo: "NinguemMora" } });
+const ligar = async (c) => { c.m.ctx.irParaOServidor(CODIGO, null, null, "Ana", null, true); await tick(); await tick(); };
+const SO_A_SALA = "sala:" + CODIGO;
+const SALA_E_DIRETA = "sala:" + CODIGO + ",direta:" + CODIGO;
+
+for (const pagina of [false, true]) {
+  const onde = pagina ? "na página" : "no app";
+  // A sala atende: a direta nem é tentada.
+  let c = cenario({ direta: async () => ({}), pagina });
+  await ligar(c);
+  confere(onde + ", com a sala no ar, a direta foi tentada: " + c.ordem, c.ordem.join() === SO_A_SALA);
+  confere(onde + ", com a sala no ar, apareceu erro", c.m.$("boot-erro").hidden === true);
+
+  // Uma recusa da sala não é «sem sala»: quem recebe recusou, e a direta não entra.
+  for (const reason of ["ChamadaRecusada", "NinguemAtendeu", "ServerFull"]) {
+    c = cenario({ connect: () => Promise.reject({ Refused: { reason } }), direta: async () => ({}), pagina });
+    await ligar(c);
+    confere(onde + ", " + reason + ": a direta foi tentada depois de a sala responder: " + c.ordem, c.ordem.join() === SO_A_SALA);
+    confere(onde + ", " + reason + ": a frase não apareceu", c.m.$("boot-erro").hidden === false);
+  }
+
+  // Um endereço não é um código: nada de conversa direta.
+  c = cenario({ connect: SEM_SALA, direta: async () => ({}), pagina });
+  c.m.ctx.irParaOServidor("10.0.0.2:8383", null, null, undefined, null, false);
+  await tick(); await tick();
+  confere(onde + ", um endereço recuou para a conversa direta: " + c.ordem, c.ordem.join() === "sala:10.0.0.2:8383");
+}
+
+// **No app não há conversa direta** (ADR 0068), nem com um serviço dela ao
+// alcance: sem sala, a frase diz que a pessoa não está disponível e orienta
+// quem só tem a página a ligar de volta.
+let c = cenario({ connect: SEM_SALA, direta: async () => ({}) });
+await ligar(c);
+confere("no app, sem sala, a conversa direta foi tentada: " + c.ordem, c.ordem.join() === SO_A_SALA);
+confere("no app, sem sala, a frase não orienta quem só tem a página: " + c.m.$("boot-erro").textContent,
+  c.m.$("boot-erro").hidden === false &&
+  /ANA NÃO ESTÁ DISPONÍVEL/.test(c.m.$("boot-erro").textContent) &&
+  /peça para ela ligar para o seu código/.test(c.m.$("boot-erro").textContent));
+
+// **Na página**, a sala não mora no ponto: só então a direta, e depois da sala.
+c = cenario({ connect: SEM_SALA, direta: async () => ({}), pagina: true });
+await ligar(c);
+confere("na página, sem sala, a ordem não foi sala e depois direta: " + c.ordem, c.ordem.join() === SALA_E_DIRETA);
+confere("a direta assumiu e a linha vermelha apareceu", c.m.$("boot-erro").hidden === true);
+
+// Nem sala nem caixa direta: a frase da sala, sem mandar ligar de volta (a
+// outra pessoa não tem como: quem liga também só tem a página).
+c = cenario({ connect: SEM_SALA, direta: async () => ({ ausente: true }), pagina: true });
+await ligar(c);
+confere("na página, sem ninguém, a frase de quem liga não apareceu: " + c.m.$("boot-erro").textContent,
+  c.m.$("boot-erro").hidden === false && /ANA NÃO ESTÁ DISPONÍVEL/.test(c.m.$("boot-erro").textContent) &&
+  !/ligar para o seu código/.test(c.m.$("boot-erro").textContent));
+
+// A direta que não começa diz isso, e não some.
+c = cenario({ connect: SEM_SALA, direta: () => Promise.reject(new Error("caiu")), pagina: true });
+await ligar(c);
+confere("a direta que falhou ficou muda", c.m.$("boot-erro").hidden === false && /Não foi possível iniciar a ligação/.test(c.m.$("boot-erro").textContent));
+
+// A sala existe e a página não consegue fechar a conexão com ela (o ponto, ou o
+// SEELE de quem hospeda, é de antes da 1.0): a direta é tentada, e sem ela a
+// frase diz o porquê e o que fazer.
+c = cenario({ connect: () => Promise.reject({ NaoLocalizou: { motivo: "SemImpressao" } }), direta: async () => ({ ausente: true }), pagina: true });
+await ligar(c);
+confere("sem a impressão da sala, a direta não foi tentada: " + c.ordem, c.ordem.join() === SALA_E_DIRETA);
+confere("sem a impressão da sala, a frase não orienta: " + c.m.$("boot-erro").textContent,
+  /ANA ESTÁ NO AR, MAS ESTA PÁGINA NÃO CONSEGUE ENTRAR NA LIGAÇÃO/.test(c.m.$("boot-erro").textContent));
+"##,
+    );
+}
+
+/// **A casca nativa não registra caixa de chamada direta** (ADR 0068, decisão
+/// 1): entre apps a conversa pessoal é a sala pessoal, e a direta saiu do app.
+/// Ela continua na página, que é o único caminho entre duas pessoas sem o app.
+///
+/// Três provas:
+///
+/// 1. o `node` roda a fonte real de `pessoal-web-entrada.js` como o app a
+///    carrega (com `PONTE_NO_LUGAR_DO_TAURI` falso): nada se instala, nenhum
+///    serviço de chamadas nasce (é ele que registra a caixa no ponto), e
+///    `window.seelePessoalWeb` não existe. Com a ponte no lugar do Tauri (a
+///    página) a mesma fonte instala, e é isso que diz que a prova não é vazia;
+/// 2. o app não tem mais os comandos que serviam a direta (`pessoal_*`), nem o
+///    módulo que assinava por ela no núcleo e na fachada, nem os eventos que a
+///    acordavam; e a ponte não guarda os nomes deles;
+/// 3. nada do que roda no app fala com a caixa do ponto (`/chamada/1`).
+#[test]
+fn a_casca_nativa_nao_registra_caixa_de_chamada_direta() {
+    rodar_node(
+        "a casca nativa sem conversa direta",
+        r##"
+function carga(pagina) {
+  const m = mundo({});
+  const chamados = [];
+  const anotar = (nome, volta) => (...args) => { chamados.push(nome); return volta?.(...args); };
+  m.ctx.PONTE_NO_LUGAR_DO_TAURI = pagina;
+  m.ctx.document.readyState = "complete";
+  m.ctx.document.getElementById = anotar("getElementById", () => null);
+  Object.assign(m.ctx, {
+    // É este o serviço que registra a caixa no ponto de encontro.
+    criarServicoDeChamadasWeb: anotar("criarServicoDeChamadasWeb", async () => { throw new Error("não devia nascer"); }),
+    criarVistaDaConversaPessoal: anotar("criarVistaDaConversaPessoal"),
+    fetch: anotar("fetch", async () => { throw new Error("sem rede"); }),
+  });
+  carregar(m, "pessoal-web-entrada.js");
+  return { m, chamados };
+}
+let c = carga(false);
+await tick();
+confere("no app, a conversa direta se instalou: " + c.chamados, c.chamados.length === 0);
+confere("no app, existe um serviço de conversa direta", c.m.ctx.window.seelePessoalWeb === undefined);
+// O controle: na página a mesma fonte procura o botão dela para se instalar.
+c = carga(true);
+await tick();
+confere("na página, a conversa direta deixou de se instalar: a prova de cima não mede nada", c.chamados.includes("getElementById"));
+
+// E um serviço que sobrasse ao alcance não seria discado pelo app.
+const m = mundo({});
+m.ctx.window.seelePessoalWeb = { chamarCodigo: async () => { m.chamadas.push({ cmd: "chamarCodigo" }); return {}; } };
+vm.runInContext(`
+  ${funcao("camada-servidores.js", "dizerQueALigacaoNaoComecou")}
+  ${funcao("camada-servidores.js", "recuarParaAConversaDireta")}`, m.ctx);
+const recuou = m.ctx.recuarParaAConversaDireta("@K9P2-CSM7-NBFR-AYQ3", "ana", { NaoLocalizou: { motivo: "NinguemMora" } }, () => {});
+await tick();
+confere("o app recuou para a conversa direta", recuou === false && so(m, "chamarCodigo").length === 0);
+"##,
+    );
+
+    // 2. Os comandos, o módulo e os eventos saíram do app.
+    let main = without_comments(&main_com_os_testes());
+    let toque = without_comments(&read("src/toque.rs"));
+    for sobra in [
+        "fn pessoal_",
+        "pessoal_identidade",
+        "pessoal_assinar",
+        "pessoal_conferir_par",
+        "pessoal_reservar",
+        "chamada_pessoal",
+        "seele://preferencia-pessoal",
+        "seele://foco-pessoal",
+        "pessoal_web",
+    ] {
+        assert!(
+            !main.contains(sobra) && !toque.contains(sobra),
+            "o app ainda tem `{sobra}`, que só servia à conversa direta"
+        );
+    }
+    for modulo in [
+        "../../crates/seele-core/src/chamada_pessoal.rs",
+        "../../crates/seele-ffi/src/chamada_pessoal.rs",
+    ] {
+        assert!(
+            !app_dir().join(modulo).exists(),
+            "`{modulo}` voltou: é o que assinava a conversa direta pelo app"
+        );
+    }
+    let ponte = without_comments(&read("ui/ponte-web.js"));
+    assert!(
+        !ponte.contains("\"pessoal_"),
+        "a ponte ainda guarda o nome de um comando `pessoal_*`, que casca nenhuma chama"
+    );
+    let entrada = without_comments(&read("ui/pessoal-web-entrada.js"));
+    assert!(
+        !entrada.contains("__TAURI__") && !entrada.contains("pessoal_"),
+        "a conversa direta voltou a falar com o app (um comando ou um evento do Tauri)"
+    );
+
+    // 3. Nada do que roda no app conhece a caixa do ponto.
+    fn fontes(pasta: &std::path::Path, achados: &mut Vec<std::path::PathBuf>) {
+        for entrada in std::fs::read_dir(pasta).into_iter().flatten().flatten() {
+            let caminho = entrada.path();
+            if caminho.is_dir() {
+                fontes(&caminho, achados);
+            } else if caminho.extension().is_some_and(|ext| ext == "rs") {
+                achados.push(caminho);
+            }
+        }
+    }
+    let mut do_app = Vec::new();
+    for pasta in [
+        "src",
+        "../../crates/seele-core/src",
+        "../../crates/seele-ffi/src",
+    ] {
+        fontes(&app_dir().join(pasta), &mut do_app);
+    }
+    assert!(do_app.len() > 20, "a leitura das fontes do app quebrou");
+    for arquivo in do_app {
+        let texto = std::fs::read_to_string(&arquivo).unwrap_or_default();
+        assert!(
+            !texto.contains("/chamada/1") && !texto.contains("seele_proto::chamada"),
+            "{} fala com a caixa de chamada direta do ponto de encontro",
+            arquivo.display()
+        );
+    }
 }
 
 /// 0.17, achado do mobile: ao entrar no 2º servidor aparecia UMA vez «Não foi
@@ -22892,6 +24743,14 @@ Object.assign(ctx, {
   CASCA: {},
   PAGINA_DO_APP: "https://exemplo.invalido/app",
 });
+// A oferta do teste de conexão é do `base.js`, que este mundo não carrega
+// inteiro: a entrada do celular a chama no `sem-rede`, e aqui ela é a FONTE
+// REAL (com o `elemento` de que precisa), sobre o `No` deste DOM. O `invoke`
+// grava o que ela pede.
+const pedidosDaOferta = [];
+ctx.document.createElement = (tag) => new No(tag);
+ctx.invoke = async (cmd, args) => { pedidosDaOferta.push({ cmd, args }); return null; };
+vm.runInContext(funcao("base.js", "elemento") + funcao("base.js", "ofertaDoTesteDeConexao"), ctx, { filename: "base.js" });
 try {
   carregar({ ctx }, "frases.js", "celular-entrada.js");
 } catch (e) { confere("a tela de entrada não carregou: " + String(e.message).split("\n")[0], false); }
@@ -23334,6 +25193,42 @@ confere("a espera não devolveu a espera: " + JSON.stringify(re).slice(0, 60), r
 confere("a espera apagou o apelido guardado: " + JSON.stringify(e.registros.get(IMPRESSAO).apelido), e.registros.get(IMPRESSAO).apelido === "iphone5g");
 "##
         ),
+    );
+}
+
+/// **Toda falha do enlace da página chega à tela com a frase dela.**
+///
+/// O enlace WebRTC da página falha com `{ FalhaDoEnlace: { motivo, detalhe } }`
+/// (`rtc-web.js`, pela `motivoDaFalhaDoEnlace` da `sessao-web.js`), e cada
+/// motivo tem frase no bloco do transporte de `frases.js`. A casca do celular
+/// passa pelo `desfecho` da identidade; a casca larga recebe o objeto inteiro
+/// no `catch` do `conectar` e o entrega à `fraseDeErro`, que não tinha ramo
+/// para ele: «AS DUAS REDES NÃO SE ALCANÇARAM» existia, e o que a pessoa lia
+/// era «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ», com o JSON embaixo
+/// (medido em 12/11/2026).
+///
+/// A lista é lida do `FALHA_DO_ENLACE`, e não repetida aqui: um motivo novo
+/// sem frase acende este teste sozinho. A fonte é a real, no `node`.
+#[test]
+fn toda_falha_do_enlace_da_pagina_chega_a_tela_com_a_frase_dela() {
+    rodar_node(
+        "as falhas do enlace da página",
+        r##"
+const tabela = ler("rtc-web.js").split("const FALHA_DO_ENLACE = Object.freeze({")[1]?.split("\n});")[0] ?? "";
+const motivos = [...tabela.matchAll(/^  \w+: "(\w+)",$/gm)].map((m) => m[1]);
+confere("só " + motivos.length + " motivos lidos de FALHA_DO_ENLACE: o guarda ficou cego (" + motivos.join(", ") + ")",
+  motivos.length >= 10 && motivos.includes("CaminhoNaoAbriu") && motivos.includes("SemWebRtc"));
+const m = mundo({});
+carregar(m, "frases.js");
+const frase = (erro) => vm.runInContext("fraseDeErro(" + JSON.stringify(erro) + ")", m.ctx);
+for (const motivo of motivos) {
+  const dita = frase({ FalhaDoEnlace: { motivo, detalhe: { ice: "failed", conexao: "failed" } } });
+  confere(motivo + " chega à tela como «" + dita.split("\n")[0] + "»", !/ALGO FALHOU/.test(dita) && !dita.includes("FalhaDoEnlace") && dita.length > 20);
+}
+// Um motivo que este arquivo não conhece continua dizendo o que era, em vez de sumir.
+const nova = frase({ FalhaDoEnlace: { motivo: "UmMotivoQueAindaNaoExiste", detalhe: null } });
+confere("um motivo desconhecido ficou sem dizer o que era: " + nova, /ALGO FALHOU/.test(nova) && nova.includes("UmMotivoQueAindaNaoExiste"));
+"##,
     );
 }
 
@@ -24521,7 +26416,7 @@ const montar = ({ segurarGum = [] } = {}) => {
     sessaoCom: (voz) => ({ acabou: false, transporteDaVoz: { ouvir: () => () => {}, enviar: () => true }, atender: () => ({ resposta: { sala: 1, voz } }) }),
     pagehide: () => (janela.ouvintes?.pagehide ?? []).slice().forEach((f) => f({ type: "pagehide", persisted: true })),
     pageshow: () => (janela.ouvintes?.pageshow ?? []).slice().forEach((f) => f({ type: "pageshow", persisted: true })),
-    estado: () => roda("({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null, abertura: vozDaSessao.abertura, numero: vozDaSessao.numero })"),
+    estado: () => roda("({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null && !vozDaSessao.aberturaFalhou, abertura: vozDaSessao.abertura, numero: vozDaSessao.numero })"),
   };
 };
 const vivas = (m) => m.faixas.length > 0 && m.faixas.every((f) => f.readyState === "live");
@@ -24982,7 +26877,7 @@ async function cenario(codigo) {
       super("");
       this.classes = new Set();
       this.tagName = "DIV";
-      this.classList = { toggle: (c, on) => { if (on) this.classes.add(c); else this.classes.delete(c); }, remove: c => this.classes.delete(c) };
+      this.classList = { toggle: (c, on) => { if (on) this.classes.add(c); else this.classes.delete(c); }, remove: c => this.classes.delete(c), contains: c => this.classes.has(c) };
     }
     set id(v) { this._id = v; if (v) reg[v] = this; }
     get id() { return this._id; }
@@ -25602,7 +27497,7 @@ const manipuladores = fonte.slice(iniH, fimH);
 if (!declaracao.includes("ligando") || iniH < 0 || fimH < 0) { console.log("a ponte mudou de forma: o guarda ficou cego"); process.exit(1); }
 const pecas = {
   conferir: pegar("conferirAVozDaSessao"), ligar: pegar("ligarOAudioNoGesto"), sair: pegar("sairDaVozDaSessao"),
-  manter: pegar("sairDaVozMantendoOMicrofone"), soltar: pegar("soltarOMicrofoneDaVoz"), mudar: pegar("mudarAAbertura"),
+  manter: pegar("sairDaVozMantendoOMicrofone"), soltar: pegar("soltarOMicrofoneDaVoz"), mudar: pegar("mudarAAbertura"), evento: pegar("aoEventoDaVoz"),
   trocar: pegar("trocarOFocoDaPonte"), manipuladores,
   voltar: fonte.match(/  sessao\.aoVoltar = \(\) => \{[\s\S]*?\n  \};/)[0],
 };
@@ -25648,10 +27543,10 @@ async function cenarios(pecas) {
     });
     ctx.__recusar = false;
     ctx.__remoto = async (nome) => { if (ctx.__recusar && nome === "enter_voice_room") throw "Recusada"; return {}; };
-    vm.runInContext(`${declaracao}\n${pecas.mudar}\n${pecas.soltar}\n${pecas.sair}\n${pecas.manter}\n${pecas.conferir}\n${pecas.ligar}\n${pecas.trocar}
+    vm.runInContext(`${declaracao}\n${pecas.mudar}\n${pecas.soltar}\n${pecas.sair}\n${pecas.manter}\n${pecas.conferir}\n${pecas.ligar}\n${pecas.trocar}\n${pecas.evento}
       const manipuladores = {\n${pecas.manipuladores}\n};
-      globalThis.__estado = () => ({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null, abertura: vozDaSessao.abertura, geracao: vozDaSessao.geracao });
-      globalThis.__M = manipuladores; globalThis.__conferir = conferirAVozDaSessao; globalThis.__ligar = ligarOAudioNoGesto; globalThis.__soltar = soltarOMicrofoneDaVoz;`, ctx, { filename: "ponte-recortada.js" });
+      globalThis.__estado = () => ({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null && !vozDaSessao.aberturaFalhou, abertura: vozDaSessao.abertura, geracao: vozDaSessao.geracao });
+      globalThis.__M = manipuladores; globalThis.__conferir = conferirAVozDaSessao; globalThis.aoEventoDaVoz = aoEventoDaVoz; globalThis.__ligar = ligarOAudioNoGesto; globalThis.__soltar = soltarOMicrofoneDaVoz;`, ctx, { filename: "ponte-recortada.js" });
     return {
       ctx, faixas, aberturas, chamadas, sessao, voz,
       voltar: () => { ctx.sessao = sessao; ctx.id = 1; vm.runInContext(pecas.voltar, ctx); sessao.aoVoltar(); },
@@ -25711,6 +27606,35 @@ async function cenarios(pecas) {
     const p = c.ctx.__M.enter_voice_room({}); c.pôrSala("Sala 1", 1); await p;
     c.aberturas[0].e(Object.assign(new Error("negado"), { name: "NotAllowedError" })); await tick(); await tick();
     chk("5. getUserMedia que falha: 0 faixas, voz fora, abertura coerente", c.vivas() === 0 && c.ctx.__estado().dentro === false && c.ctx.__estado().ligando === false); }
+  // 5b. **A falha que chega ANTES de o servidor confirmar a sala** (o Chrome do Android sem a permissão do sistema recusa na hora, sem perguntar):
+  // a do MICROFONE mantém a escuta (a saída já toca) e a tela diz SÓ OUVINDO; a da SAÍDA diz que o áudio não abriu. Antes, as duas viravam
+  // «SEM ÁUDIO» sem frase, com o erro engolido, e a pessoa não ouvia nem falava.
+  for (const [etapa, esperada, entra] of [["microfone", "so_ouvindo", true], ["saida", "nao_abriu_no_prazo", false]]) {
+    const c = montar();
+    c.ctx.__recusar = false;
+    const p = c.ctx.__M.enter_voice_room({});
+    // A recusa na hora, no mesmo passo do pedido: ela chega antes de o servidor confirmar a entrada.
+    c.aberturas[0].e(Object.assign(new Error("negado"), { name: "NotAllowedError", etapaDaVoz: etapa }));
+    c.pôrSala("Sala 1", 1); await p; await tick(); await tick();
+    const estado = c.ctx.__estado();
+    chk(`5b. a falha de ${etapa} antes da confirmação: abertura ${estado.abertura}, dentro ${estado.dentro}`,
+      estado.abertura === esperada && estado.dentro === entra && c.chamadas.some((x) => x.startsWith("entrar:")) === entra);
+  }
+  // 5c. **O sistema pausa o som da sala** (outro aplicativo toma o áudio do celular): a tela diz SOM PAUSADO, e volta ao que era quando a saída
+  // volta a tocar. Fora de uma sala aberta, a pausa não muda nada.
+  { const c = montar();
+    c.ctx.__recusar = false;
+    const p = c.ctx.__M.enter_voice_room({}); c.pôrSala("Sala 1", 1); await p;
+    c.aberturas[0].r(); await tick(); await tick();
+    const aberta = c.ctx.__estado().abertura;
+    c.ctx.aoEventoDaVoz({ tipo: "saida", estado: "pausada" });
+    const pausada = c.ctx.__estado().abertura;
+    c.ctx.aoEventoDaVoz({ tipo: "saida", estado: "tocando" });
+    const voltou = c.ctx.__estado().abertura;
+    chk(`5c. a pausa do sistema: ${aberta} -> ${pausada} -> ${voltou}`, aberta === "aberto" && pausada === "som_pausado" && voltou === "aberto");
+    const fora = montar();
+    fora.ctx.aoEventoDaVoz({ tipo: "saida", estado: "pausada" });
+    chk("5c. fora de sala a pausa não muda a abertura", fora.ctx.__estado().abertura === "fora_de_sala"); }
   { const c = montar();
     c.ctx.__recusar = true;
     let recusou = false;
@@ -26314,6 +28238,44 @@ confere("depois da volta, nada", e.iniciados.length === 4);
     );
 }
 
+/// **Os ganchos alcançam o motor.** Sete lugares do produto chamam
+/// `globalThis.alertasSonoros?.…`, e o motor é um `const` do topo de um script
+/// clássico, que **não** vira propriedade do objeto global: o `?.` engolia a
+/// falta e nenhum som de sala, de queda, de porta ou de toque tocava, da 0.19
+/// à 0.19.6. O guarda que havia conferia que o gancho estava escrito, e não
+/// que ele alcançava alguma coisa. Este roda o arquivo como script clássico e
+/// pergunta pelo caminho que os ganchos usam.
+#[test]
+fn os_ganchos_dos_alertas_sonoros_alcancam_o_motor() {
+    let script = r#"
+const vm = require("node:vm"), fs = require("node:fs"), path = require("node:path");
+const fonte = fs.readFileSync(path.join(process.env.SEELE_UI_DIR, "alertas-sonoros.js"), "utf8");
+const ctx = vm.createContext({ console, setTimeout, clearTimeout, localStorage: { getItem: () => null, setItem() {} } });
+vm.runInContext(fonte, ctx, { filename: "alertas-sonoros.js" });
+const tipo = vm.runInContext("typeof globalThis.alertasSonoros?.notarSala", ctx);
+if (tipo !== "function") { console.log("globalThis.alertasSonoros?.notarSala é " + tipo); process.exit(1); }
+"#;
+    let saida = match std::process::Command::new("node")
+        .args(["-e", script])
+        .env("SEELE_UI_DIR", app_dir().join("ui"))
+        .output()
+    {
+        Ok(saida) => saida,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda dos ganchos dos alertas não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    assert!(
+        saida.status.success(),
+        "os ganchos chamam `globalThis.alertasSonoros?.…` e não alcançam o motor: \
+         nenhum alerta sonoro toca.\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
 /// **O motor carrega antes de quem o chama.** Um `alertasSonoros.tocar` numa
 /// camada que carrega antes dele é um `ReferenceError` dentro do desenho da
 /// tela, e o desenho é o que o pagina inteiro espera.
@@ -26913,8 +28875,12 @@ fn o_app_diz_que_tem_tela_no_main_antes_de_qualquer_conexao() {
         "`este_processo_tem_tela(true)` vem depois do `tauri::Builder`: a conexão do arranque pode \
          chegar antes"
     );
+    // A conta é a do arquivo inteiro, com os módulos de teste dele, que moram
+    // em `src/testes/`: um teste também não pode dizer que o processo tem tela.
     assert_eq!(
-        fonte.matches("este_processo_tem_tela(").count(),
+        main_com_os_testes()
+            .matches("este_processo_tem_tela(")
+            .count(),
         1,
         "`este_processo_tem_tela` é chamado em mais de um lugar de main.rs; só o `main` pode"
     );
@@ -27189,7 +29155,7 @@ m.$("perfis-entrada").removeAttribute = () => {};
 m.$("perfis-diretorio").hidden = true;
 m.$("perfil-folha").hidden = true;
 carregar(m, "frases.js", "perfis.js");
-for (const nome of ["aplicarAvatar", "aplicarCapa", "capaDaPessoa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+for (const nome of ["fundos", "pintarOFundo", "fundoDe", "aplicarAvatar", "aplicarCapa", "capaDaPessoa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
 vm.runInContext("sincronizarPerfis({ perfis_revision: 1, me: 1 })", m.ctx);
 await tick();
 const quadrado = comEstilo(new El("q"));
@@ -27255,7 +29221,7 @@ const montar = (sessoes) => {
     desenhado: null,
     trilhaDesenhada: null,
   });
-  vm.runInContext(codigo + "\ndesenharSessoes();", ctx);
+  vm.runInContext(SO_O_QUE_MUDOU + codigo + "\ndesenharSessoes();", ctx);
   return nos;
 };
 const sozinho = montar([{ onde: "Outro", carimbo: { sessao: 1 } }]);
@@ -27264,6 +29230,45 @@ const junto = montar([{ onde: "Guardado", carimbo: { sessao: 2 } }]);
 confere("com a conversa no servidor hospedado aberta, NO AR repete o servidor", junto["trilha-hospedando"].hidden === true && junto["trilha-hospedando-titulo"].hidden === true);
 const encerrada = montar([{ onde: "Guardado", encerrada: true, carimbo: { sessao: 3 } }]);
 confere("uma conversa encerrada no hospedado escondeu o caminho até ele", encerrada["trilha-hospedando"].hidden === false);
+"##,
+    );
+}
+
+/// **A placa da trilha decide pela vista da janela, e não pelo desenho dela.**
+/// A trilha é um desenho da última leitura de `sessoes()`, e a leitura chega
+/// depois da troca de vista: depois de entrar num segundo servidor, a placa
+/// marcada como atual (`aria-current`) ainda era a do primeiro por 72 a 151 ms
+/// (medido em 11/11/2026). O clique nela era engolido como «já é a vista», com
+/// a vista noutra sessão — a `cargos-pela-tela.cjs` reprovava 8 de 24 rodadas.
+///
+/// O ouvinte REAL de `camada-sessoes.js`, com a vista em 2 e a placa de 1
+/// desenhada como a atual: o clique troca para 1. (A mesma cena, pela tela e
+/// contra o servidor de verdade, é o caso 9 da `cargos-pela-tela.cjs`.)
+#[test]
+fn a_placa_da_trilha_troca_a_vista_mesmo_com_o_desenho_de_antes() {
+    rodar_node(
+        "a placa da trilha decide pela vista",
+        r##"
+const fonte = ler("camada-sessoes.js");
+const inicio = fonte.indexOf('$("trilha-sessoes").addEventListener("click"');
+if (inicio < 0) { console.log("sumiu o clique da trilha de camada-sessoes.js"); process.exit(1); }
+const ouvinte = fonte.slice(inicio, fonte.indexOf("\n});\n", inicio) + 5);
+const m = mundo({});
+const trocas = [];
+Object.assign(m.ctx, { vistaDaJanela: { sessao: 2, geracao: 1 }, verSessao: async (sessao) => { trocas.push(sessao); } });
+vm.runInContext(ouvinte, m.ctx, { filename: "camada-sessoes.js" });
+const placa = (sessao, atual) => ({ dataset: { sessao: String(sessao) }, getAttribute: (nome) => (nome === "aria-current" && atual ? "true" : null) });
+const clicar = (botao) => m.$("trilha-sessoes").emitir("click", { target: { closest: () => botao } });
+// A vista é 2, e a trilha ainda é a de antes da troca: marca 1 como a atual.
+await clicar(placa(1, true));
+confere("com a vista em 2, o clique na placa de 1 (ainda desenhada como a atual) foi engolido: " + JSON.stringify(trocas), trocas.length === 1 && trocas[0] === 1);
+// A placa da sessão que já é a vista não faz nada, marcada ou não.
+await clicar(placa(2, false));
+await clicar(placa(2, true));
+confere("a placa da própria vista pediu uma troca: " + JSON.stringify(trocas), trocas.length === 1);
+// Fora de uma placa, nada.
+await clicar(null);
+confere("um clique fora de placa pediu uma troca: " + JSON.stringify(trocas), trocas.length === 1);
 "##,
     );
 }
@@ -27799,7 +29804,7 @@ Object.assign(m.ctx, {
   capaDaPessoa: () => capa,
   perfilOficial: (id) => perfis[String(id)] ?? null,
 });
-for (const nome of ["aplicarCapa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+for (const nome of ["fundos", "pintarOFundo", "fundoDe", "aplicarCapa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
 const quadro = comEstilo(new El("q"));
 quadro.dataset.pessoaDaCapa = "7";
 const aplicar = () => { m.ctx.q = quadro; vm.runInContext("aplicarCapa(q)", m.ctx); return quadro; };
@@ -28226,4 +30231,1497 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
         "fechar o SEELE com um pedido esperando na portaria não pergunta antes"
     );
     assert!(perguntar.contains("f.fecharMesmo") && perguntar.contains("f.fechar"));
+}
+
+// ---------------------------------------------------------------------------
+// A tecla de falar com outra janela na frente (lista da 1.0).
+//
+// Quem decide quando a tecla é do sistema é o Rust, e a decisão é testada lá
+// (`src/tecla_global.rs`, `mod testes`). Estes guardas seguram a outra metade:
+// que cada estado que o Rust conta tem frase, que a falha chega à tela e ao
+// anúncio, que a opção nasce desligada e escondida, e que a página não alcança
+// o plugin.
+// ---------------------------------------------------------------------------
+
+/// O `node` roda a fonte real: `frases.js` inteiro, o trecho da tecla global de
+/// `tela-sessao.js`, e as funções e o ouvinte de `tela-server.js`.
+const MUNDO_DA_TECLA_GLOBAL: &str = r##"
+const anuncios = [];
+function mundoDaTecla(comandos) {
+  const m = mundo(comandos);
+  m.ctx.anunciar = (frase) => anuncios.push(frase);
+  m.ctx.escreverOTexto = (nodo, texto) => { nodo.textContent = texto; };
+  carregar(m, "frases.js");
+  vm.runInContext(funcao("base.js", "nomeDaTecla"), m.ctx);
+  const sessao = ler("tela-sessao.js");
+  const inicio = sessao.indexOf("let teclaGlobal = null;");
+  const fim = sessao.indexOf('listen("seele://tecla-global"');
+  if (inicio < 0 || fim < inicio) { console.log("o trecho da tecla global sumiu de tela-sessao.js"); process.exit(1); }
+  vm.runInContext(sessao.slice(inicio, sessao.indexOf("\n", fim) + 1), m.ctx);
+  const server = ler("tela-server.js");
+  const ouvinte = server.match(/\$\("server-tecla-global"\)\?\.addEventListener\([\s\S]*?\n\}\);\n/);
+  if (!ouvinte) { console.log("o ouvinte da opção sumiu de tela-server.js"); process.exit(1); }
+  vm.runInContext(funcao("tela-server.js", "desenharTeclaGlobal") + funcao("tela-server.js", "atualizarTeclaGlobal") + ouvinte[0], m.ctx);
+  m.js = (codigo) => vm.runInContext(codigo, m.ctx);
+  return m;
+}
+"##;
+
+#[test]
+fn cada_estado_da_tecla_global_tem_frase_e_a_falha_chega_a_tela_e_ao_anuncio() {
+    let estados = variants_of(&read("src/tecla_global.rs"), "Estado");
+    assert!(
+        estados.len() >= 8,
+        "só {estados:?} lidos de `enum Estado`: o guarda mede quase nada"
+    );
+    let corpo = format!(
+        r##"{MUNDO_DA_TECLA_GLOBAL}
+const ESTADOS = {estados:?};
+const LIMITE = {LIMITE_DE_FRASE};
+
+// 1. Um estado, uma frase: com a tecla pelo nome, e dentro do limite com o
+//    nome mais comprido que `nomeDaTecla` escreve.
+{{
+  const m = mundoDaTecla({{ estado_da_tecla_global: {{ ligada: false, estado: "Desligada", tecla: "Space" }} }});
+  await tick();
+  const frases = new Set();
+  for (const estado of ESTADOS) {{
+    const frase = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "${{estado}}", tecla: "ControlRight" }})`);
+    confere(estado + " não tem frase própria", frase !== m.js("FRASES_DA_TECLA_GLOBAL.desconhecido") && frase.length > 20);
+    confere(estado + " passa do limite de frase: " + frase.length, frase.length <= LIMITE);
+    confere(estado + " repete a frase de outro estado", !frases.has(frase));
+    frases.add(frase);
+  }}
+  for (const sobra of Object.keys(m.js("FRASES_DA_TECLA_GLOBAL.estado"))) {{
+    confere("a frase de " + sobra + " não tem estado no Rust", ESTADOS.includes(sobra));
+  }}
+  for (const comTecla of ["SemAtalho", "Recusada", "Valendo"]) {{
+    const frase = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "${{comTecla}}", tecla: "KeyF" }})`);
+    confere(comTecla + " não diz qual tecla", /(^|\s)F(\s|$)/.test(frase));
+  }}
+  for (const falha of ["Indisponivel", "SemAtalho", "Recusada"]) {{
+    const frase = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "${{falha}}", tecla: "KeyF" }})`);
+    confere(falha + " não diz que fora da janela a tecla não vale", /fora da janela.*não abre|só vale com a janela do SEELE na frente/.test(frase));
+  }}
+  const estranho = m.js(`fraseDaTeclaGlobal({{ ligada: true, estado: "EstadoDeAmanha", tecla: "KeyF" }})`);
+  confere("um estado que a tela não conhece sai calado", estranho === m.js("FRASES_DA_TECLA_GLOBAL.desconhecido") && estranho.length > 20);
+}}
+
+// 2. No app: a opção aparece, desligada, com a frase do estado.
+{{
+  const m = mundoDaTecla({{ estado_da_tecla_global: {{ ligada: false, estado: "Desligada", tecla: "Space" }} }});
+  m.$("tecla-global-bloco").hidden = true;
+  await m.js("atualizarTeclaGlobal()");
+  confere("no app a opção continua escondida", m.$("tecla-global-bloco").hidden === false);
+  confere("a opção desligada aparece marcada", m.$("server-tecla-global").checked === false);
+  confere("desligada, a tela não diz que está desligada", /Desligada/.test(m.$("server-tecla-global-estado").textContent));
+}}
+
+// 3. No navegador a ponte responde `null` (e, se o comando faltar, recusa): nos
+//    dois a opção não aparece, e nada é dito em voz alta.
+for (const comandos of [{{ estado_da_tecla_global: () => null }}, {{}}]) {{
+  anuncios.length = 0;
+  const m = mundoDaTecla(comandos);
+  m.$("tecla-global-bloco").hidden = true;
+  await m.js("atualizarTeclaGlobal()");
+  confere("no navegador a opção apareceu", m.$("tecla-global-bloco").hidden === true);
+  confere("no navegador a linha do operador ganhou um pedaço", m.js("teclaGlobalNaLinha()") === null);
+  confere("no navegador houve anúncio", anuncios.length === 0);
+}}
+
+// 4. Ligar com uma tecla que não serve de atalho: o Rust responde `SemAtalho`,
+//    e a frase vai à tela e, uma vez, ao anúncio.
+{{
+  anuncios.length = 0;
+  let agora = {{ ligada: false, estado: "Desligada", tecla: "ShiftLeft" }};
+  const m = mundoDaTecla({{
+    estado_da_tecla_global: () => agora,
+    ligar_tecla_global: ({{ ligada }}) => (agora = {{ ligada, estado: ligada ? "SemAtalho" : "Desligada", tecla: "ShiftLeft" }}),
+  }});
+  await m.js("atualizarTeclaGlobal()");
+  m.$("server-tecla-global").checked = true;
+  await m.$("server-tecla-global").emitir("change", {{ target: m.$("server-tecla-global") }});
+  const pedidos = so(m, "ligar_tecla_global");
+  confere("ligar não chamou `ligar_tecla_global` com `ligada: true`", pedidos.length === 1 && pedidos[0].args.ligada === true);
+  const dito = m.$("server-tecla-global-estado").textContent;
+  confere("a tecla que não serve de atalho não é dita na tela: " + dito, /SHIFT ESQ não serve de atalho/.test(dito));
+  confere("a falha não foi ao anúncio uma vez: " + anuncios.length, anuncios.length === 1 && anuncios[0] === dito);
+  confere("a linha do operador não diz que fora da janela não vale", m.js("teclaGlobalNaLinha()") === m.js("FRASES_DA_TECLA_GLOBAL.linhaFalhou"));
+  await m.js("atualizarTeclaGlobal()");
+  await m.js("atualizarTeclaGlobal()");
+  confere("a mesma falha é anunciada a cada meio segundo: " + anuncios.length, anuncios.length === 1);
+}}
+
+// 5. O disco recusa: o interruptor volta ao que vale, e a tela diz por quê.
+{{
+  const m = mundoDaTecla({{
+    estado_da_tecla_global: {{ ligada: false, estado: "Desligada", tecla: "Space" }},
+    ligar_tecla_global: () => {{ throw "NaoGravei"; }},
+  }});
+  await m.js("atualizarTeclaGlobal()");
+  m.$("server-tecla-global").checked = true;
+  await m.$("server-tecla-global").emitir("change", {{ target: m.$("server-tecla-global") }});
+  confere("a gravação falhou e o interruptor ficou ligado", m.$("server-tecla-global").checked === false);
+  confere("a gravação falhou e a tela não disse", m.$("server-tecla-global-estado").textContent.startsWith(m.js("FRASES_DA_TECLA_GLOBAL.naoGravou")));
+}}
+
+// 6. O que o Rust conta pelo evento: a recusa do sistema chega com a janela
+//    atrás de outra, e é dita; valendo, a linha do operador diz que vale.
+{{
+  anuncios.length = 0;
+  const m = mundoDaTecla({{ estado_da_tecla_global: {{ ligada: true, estado: "ForaDeSala", tecla: "KeyF" }} }});
+  await tick();
+  confere("o trecho da tela não ouve `seele://tecla-global`", typeof m.ouvintes["seele://tecla-global"] === "function");
+  confere("esperando sala, a linha do operador ganhou um pedaço", m.js("teclaGlobalNaLinha()") === null);
+  m.ouvintes["seele://tecla-global"]({{ payload: {{ ligada: true, estado: "Valendo", tecla: "KeyF" }} }});
+  confere("valendo, a linha do operador não diz", m.js("teclaGlobalNaLinha()") === m.js("FRASES_DA_TECLA_GLOBAL.linhaValendo"));
+  confere("valer foi anunciado como falha", anuncios.length === 0);
+  m.ouvintes["seele://tecla-global"]({{ payload: {{ ligada: true, estado: "Recusada", tecla: "KeyF" }} }});
+  confere("a recusa do sistema não foi anunciada", anuncios.length === 1 && /O sistema recusou F/.test(anuncios[0]));
+  confere("recusada, a linha do operador não diz", m.js("teclaGlobalNaLinha()") === m.js("FRASES_DA_TECLA_GLOBAL.linhaFalhou"));
+}}
+"##
+    );
+    rodar_node("a tecla de falar fora da janela, na tela", &corpo);
+}
+
+#[test]
+fn a_tecla_global_nasce_desligada_escondida_e_fora_do_alcance_da_pagina() {
+    // **Desligada e escondida na marcação**: é o que se lê se o script não
+    // chegar a escrever, e no navegador ele nunca chega (a ponte recusa o
+    // comando). Uma opção marcada de fábrica seria um atalho do sistema que
+    // ninguém pediu.
+    let pagina = without_comments(&read("ui/index.html"));
+    assert!(
+        pagina.contains("<div class=\"server-bloco-corpo\" id=\"tecla-global-bloco\" hidden>"),
+        "o bloco da tecla de falar fora da janela não nasce escondido: no navegador, \
+         onde não há atalho do sistema, ele apareceria"
+    );
+    assert!(
+        pagina.contains("<input id=\"server-tecla-global\" type=\"checkbox\" role=\"switch\">"),
+        "a opção da tecla de falar fora da janela mudou de forma, ou nasce marcada"
+    );
+    let atalhos = pagina
+        .split("id=\"painel-atalhos\"")
+        .nth(1)
+        .and_then(|resto| resto.split("</section>").next())
+        .expect("o painel de atalhos");
+    assert!(
+        atalhos.contains("id=\"server-tecla-falar\"")
+            && atalhos.contains("id=\"tecla-global-bloco\""),
+        "a opção saiu do lado da tecla de falar: quem troca a tecla precisa ler ali \
+         se a nova serve de atalho"
+    );
+    assert!(
+        atalhos.contains("a tecla não chega ao outro programa"),
+        "a tela não avisa mais que, enquanto vale, a tecla é tirada dos outros programas"
+    );
+
+    // **A linha do operador** diz quando vale e quando está ligada e não vale.
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    assert!(
+        sessao.contains(
+            "!snapshot.muted && snapshot.voice_mode === \"PushToTalk\" ? teclaGlobalNaLinha() : null,"
+        ),
+        "a linha do operador não diz mais a tecla de falar fora da janela"
+    );
+
+    // **A página não alcança o plugin.** Quem registra tecla é o Rust, e só ele:
+    // uma permissão de `global-shortcut` deixaria qualquer script da janela (um
+    // MOD inclusive) tomar teclas do sistema.
+    let capacidade = read("capabilities/janela.json");
+    let permissoes = capacidade
+        .split("\"permissions\"")
+        .nth(1)
+        .expect("a lista de permissões da janela");
+    assert!(
+        !permissoes.contains("global-shortcut"),
+        "a janela ganhou permissão de `global-shortcut`: a página passa a poder \
+         registrar atalhos do sistema"
+    );
+
+    // **O plugin sobe pelo `iniciar`, e não pelo `Builder`**: no `Builder`, o
+    // serviço de atalhos que não sobe derruba a abertura do app.
+    let main = without_comments(&main_com_os_testes());
+    assert!(
+        !main.contains(".plugin(tauri_plugin_global_shortcut"),
+        "o plugin de atalhos voltou ao `Builder`: se ele não subir, o app não abre"
+    );
+    assert!(
+        main.contains("tecla_global::iniciar("),
+        "ninguém sobe mais a tecla de falar fora da janela"
+    );
+    // **E quem avisa que a situação mudou**: o foco da janela, a troca de modo,
+    // a troca de tecla e os eventos de sala. Sem um deles a tecla ficaria presa
+    // no sistema até a rede de segurança passar.
+    let avisos = main.matches("tecla_global::avisar(").count();
+    assert!(
+        avisos >= 4,
+        "só {avisos} avisos à tecla de falar fora da janela em main.rs: faltou o \
+         foco da janela, o modo, a tecla ou os eventos de sala"
+    );
+    assert!(
+        main.contains("tauri::WindowEvent::Focused(_) | tauri::WindowEvent::Destroyed"),
+        "a janela vir à frente, sair dela ou fechar não avisa mais a tecla de falar"
+    );
+}
+
+// ------------------------------------------------------------- a câmera (1.0)
+
+/// O que `camera.js` espera do resto da casca, para rodar sozinho no `node`:
+/// o `listen` e o `$` do `base.js`, a ponte que não está, e um navegador sem
+/// câmera. O que se mede com isto são as palavras e as contas, e não o DOM.
+const CASCA_MINIMA_DA_CAMERA: &str = r#"
+var ouvintesDaCamera = [];
+var listen = (nome, ouvinte) => { ouvintesDaCamera.push(ouvinte); };
+var $ = () => null;
+var PONTE_NO_LUGAR_DO_TAURI = false;
+var navigator = {};
+var vistaDaJanela = { sessao: null, geracao: 0 };
+"#;
+
+/// **O número da câmera é o do protocolo.** O controle confere o `protocolo`
+/// do retrato contra uma constante escrita em `camera.js`; com 12 no lugar de
+/// 13 a câmera é oferecida a um servidor que anunciaria a transmissão e
+/// recusaria o fluxo dela, e com 14 some de todo servidor da 1.0.
+#[test]
+fn o_numero_da_camera_e_o_do_protocolo() {
+    let camera = without_comments(&read("ui/camera.js"));
+    let escrito: u8 = camera
+        .split("const PROTOCOLO_DA_CAMERA = ")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .and_then(|numero| numero.trim().parse().ok())
+        .expect("`PROTOCOLO_DA_CAMERA` saiu do camera.js, ou deixou de ser um número");
+    assert_eq!(
+        escrito,
+        seele_proto::screen::PROTOCOLO_DA_CAMERA,
+        "o camera.js oferece a câmera a partir do protocolo {escrito}, e a fonte dela nasceu \
+         noutro número"
+    );
+    assert_eq!(
+        seele_proto::screen::ScreenSource::Camera.desde(),
+        seele_proto::screen::PROTOCOLO_DA_CAMERA
+    );
+    let teste = body_of(&camera, "function servidorTemACamera(");
+    assert!(
+        teste.contains("snapshot?.protocolo") && teste.contains(">= PROTOCOLO_DA_CAMERA"),
+        "`servidorTemACamera` não compara o `protocolo` do retrato com a constante: {teste}"
+    );
+    // E quem liga pergunta antes de pedir a câmera ao sistema: num servidor de
+    // antes da 1.0 a pergunta de permissão não chega a aparecer.
+    let ligar = body_of(&camera, "async function ligarACamera(");
+    let (portao, pedido) = (
+        ligar
+            .find("servidorTemACamera(")
+            .expect("`ligarACamera` não confere o servidor"),
+        ligar
+            .find("getUserMedia(PEDIDO_DA_CAMERA)")
+            .expect("`ligarACamera` não pede a câmera"),
+    );
+    assert!(
+        portao < pedido,
+        "`ligarACamera` pede a câmera ao sistema antes de saber se o servidor a conhece"
+    );
+}
+
+/// **Cada estado da câmera tem a frase dele, e todas cabem na régua.**
+///
+/// O `FRASES_DA_CAMERA` não está entre os dicionários planos que
+/// `LIMITE_DE_FRASE` mede, e parte das entradas é função: aqui elas são
+/// rodadas e medidas. Os estados que a decisão do produto pede estão todos
+/// lá — pedindo, negada, sem câmera, sem codificador, no ar, no lugar da tela,
+/// o servidor antigo —, cada parada do teto tem a frase dela, e as três falhas
+/// da câmera no `ConnectionError` não chegam cruas.
+#[test]
+fn cada_estado_da_camera_tem_a_frase_dele_e_todas_cabem() {
+    let Some(saida) = no_node(
+        "as frases da câmera",
+        &read("ui/frases.js"),
+        r#"
+const achatar = (prefixo, valor, fora) => {
+  if (typeof valor === "function") valor = valor(prefixo.endsWith("filaCheia") ? 12345 : "Maria Antonieta das Neves");
+  if (typeof valor === "string") fora.push([prefixo, valor]);
+  else for (const [chave, dentro] of Object.entries(valor)) achatar(`${prefixo}.${chave}`, dentro, fora);
+  return fora;
+};
+console.log(JSON.stringify({
+  frases: achatar("camera", FRASES_DA_CAMERA, []),
+  paradas: Object.keys(FRASES_DA_CAMERA.paradas),
+  falhasDoSistema: {
+    NotAllowedError: fraseDaFalhaDaCamera({ name: "NotAllowedError" }),
+    NotFoundError: fraseDaFalhaDaCamera({ name: "NotFoundError" }),
+    NotReadableError: fraseDaFalhaDaCamera({ name: "NotReadableError" }),
+  },
+  negada: FRASES_DA_CAMERA.negada, semCamera: FRASES_DA_CAMERA.semCamera, ocupada: FRASES_DA_CAMERA.ocupada,
+  falhas: {
+    CameraNotLive: fraseDeErro("CameraNotLive"),
+    CameraBadSize: fraseDeErro("CameraBadSize"),
+    CameraQueueFull: fraseDeErro({ CameraQueueFull: { dropped: 7 } }),
+  },
+  umQuadro: FRASES_DA_CAMERA.filaCheia(1),
+}));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON das frases");
+    let frases = v["frases"].as_array().expect("as frases");
+    assert!(
+        frases.len() >= 40,
+        "só {} frases da câmera medidas",
+        frases.len()
+    );
+    for par in frases {
+        let (chave, texto) = (
+            par[0].as_str().unwrap_or_default(),
+            par[1].as_str().unwrap_or_default(),
+        );
+        assert!(!texto.trim().is_empty(), "`{chave}` está vazia");
+        let tamanho = texto.chars().count();
+        assert!(
+            tamanho <= LIMITE_DE_FRASE,
+            "`{chave}` tem {tamanho} caracteres, e a régua é {LIMITE_DE_FRASE}:\n{texto}"
+        );
+        assert!(
+            !texto.contains("undefined") && !texto.contains("[object"),
+            "`{chave}` escreve um valor que não chegou: {texto}"
+        );
+        let minuscula = texto.to_lowercase();
+        for (palavra, virou) in APOSENTADOS {
+            assert!(
+                !minuscula
+                    .split(|c: char| !c.is_alphanumeric() && c != '.')
+                    .any(|pedaco| pedaco == *palavra),
+                "`{chave}` traz «{palavra}», que virou «{virou}»: {texto}"
+            );
+        }
+    }
+    let tem = |chave: &str| frases.iter().any(|par| par[0] == format!("camera.{chave}"));
+    for estado in [
+        "pedindo",
+        "ligando",
+        "noAr",
+        "noLugarDaTela",
+        "negada",
+        "semCamera",
+        "ocupada",
+        "semCaptura",
+        "semCodificador",
+        "servidorAntigo",
+        "semConfirmacao",
+        "encerrada",
+        "filaCheia",
+        "ligar",
+        "desligar",
+    ] {
+        assert!(
+            tem(estado),
+            "a câmera não tem frase para o estado `{estado}`"
+        );
+    }
+    // A negada diz o que fazer, e não só que foi negada.
+    let negada = v["negada"].as_str().unwrap_or_default().to_lowercase();
+    assert!(
+        negada.contains("ajustes") || negada.contains("permiss"),
+        "a frase da câmera negada não diz onde liberar: {negada}"
+    );
+    // As três recusas do sistema são três frases diferentes.
+    assert_eq!(v["falhasDoSistema"]["NotAllowedError"], v["negada"]);
+    assert_eq!(v["falhasDoSistema"]["NotFoundError"], v["semCamera"]);
+    assert_eq!(v["falhasDoSistema"]["NotReadableError"], v["ocupada"]);
+    assert!(v["negada"] != v["semCamera"] && v["semCamera"] != v["ocupada"]);
+    // Um quadro, no singular.
+    assert!(
+        v["umQuadro"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("1 quadro ficou"),
+        "{}",
+        v["umQuadro"]
+    );
+
+    // Cada parada que o núcleo pode mandar tem a frase da câmera.
+    let ditas: Vec<&str> = v["paradas"]
+        .as_array()
+        .expect("as paradas")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    for motivo in seele_ffi::motivos_de_parada_da_tela() {
+        assert!(
+            ditas.contains(&motivo),
+            "a parada `{motivo}` chega à câmera sem frase: {ditas:?}"
+        );
+    }
+
+    for (falha, frase) in v["falhas"].as_object().expect("as falhas") {
+        let frase = frase.as_str().unwrap_or_default();
+        assert!(
+            !frase.contains("ALGO FALHOU") && frase != falha && !frase.contains('{'),
+            "a falha `{falha}` da câmera chega à tela sem frase: {frase}"
+        );
+        assert!(
+            frase.chars().count() <= LIMITE_DE_FRASE,
+            "`{falha}`: {frase}"
+        );
+    }
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    for variante in [
+        "    CameraNotLive,",
+        "    CameraQueueFull {",
+        "    CameraBadSize,",
+    ] {
+        assert!(
+            tipos.contains(variante),
+            "`{}` saiu do `ConnectionError`",
+            variante.trim()
+        );
+    }
+}
+
+/// **O que se assiste é rotulado pelo que a abertura do fluxo declarou, e
+/// antes dela nenhuma frase afirma «tela» nem «câmera».**
+///
+/// O anúncio de uma transmissão no controle não diz o que ela mostra. Quem
+/// diz é o `source` do `ScreenOpened`, e `palavrasDaTransmissao` é o único
+/// lugar que o transforma em palavra. Os rótulos fixos que diziam «TELA» a
+/// respeito de qualquer transmissão saíram do `index.html` e da chamada.
+#[test]
+fn o_palco_rotula_pelo_tipo_do_fluxo_e_nao_afirma_tela_antes_dele() {
+    let fontes = format!(
+        "{}\n{CASCA_MINIMA_DA_CAMERA}\n{}",
+        read("ui/frases.js"),
+        read("ui/camera.js")
+    );
+    let Some(saida) = no_node(
+        "os rótulos da transmissão",
+        &fontes,
+        r#"
+const dizer = (tela) => { const p = palavrasDaTransmissao(tela); return { tipo: p.tipo, rotulo: p.rotulo, titulo: p.titulo, sua: p.sua, ver: p.ver("Ana") }; };
+const antes = dizer(7);
+const abrir = (screen, source) => ouvintesDaCamera.forEach((o) => o({ payload: { ScreenOpened: { screen, width: 1280, height: 720, source } } }));
+abrir(7, "camera"); abrir(8, "monitor"); abrir(9, "window");
+const depois = { camera: dizer(7), monitor: dizer(8), janela: dizer(9) };
+ouvintesDaCamera.forEach((o) => o({ payload: { ScreenClosed: { screen: 7 } } }));
+console.log(JSON.stringify({ antes, depois, fechada: dizer(7) }));
+"#,
+    ) else {
+        return;
+    };
+    let v: serde_json::Value = serde_json::from_str(&saida).expect("o JSON dos rótulos");
+    for (quando, palavras) in [
+        ("antes da abertura", &v["antes"]),
+        ("depois de fechar", &v["fechada"]),
+    ] {
+        assert!(palavras["tipo"].is_null(), "{quando}: {palavras}");
+        for campo in ["rotulo", "titulo", "sua", "ver"] {
+            let texto = palavras[campo].as_str().unwrap_or_default().to_uppercase();
+            assert!(
+                !texto.contains("TELA") && !texto.contains("CÂMERA"),
+                "{quando}, `{campo}` afirma o que a transmissão mostra sem saber: {texto}"
+            );
+        }
+    }
+    assert_eq!(v["depois"]["camera"]["rotulo"], "CÂMERA");
+    assert_eq!(v["depois"]["camera"]["titulo"], "CÂMERA");
+    assert_eq!(v["depois"]["camera"]["sua"], "SUA CÂMERA");
+    assert_eq!(v["depois"]["camera"]["ver"], "ver a câmera de Ana");
+    for tipo in ["monitor", "janela"] {
+        assert_eq!(v["depois"][tipo]["rotulo"], "TELA", "{tipo}");
+        assert_eq!(v["depois"][tipo]["sua"], "SUA TELA", "{tipo}");
+        assert_eq!(v["depois"][tipo]["ver"], "ver a tela de Ana", "{tipo}");
+    }
+
+    // Os rótulos fixos saíram: quem os escreve agora é `palavrasDaTransmissao`.
+    let html = read("ui/index.html");
+    for fixo in [
+        "<span>TELA COMPARTILHADA</span>",
+        "NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>",
+    ] {
+        assert!(
+            !html.contains(fixo),
+            "o index.html voltou a afirmar «tela» sobre qualquer transmissão: {fixo}"
+        );
+    }
+    let chamada = without_comments(&read("ui/tela-chamada.js"));
+    let palco = body_of(&chamada, "function desenharPalco(");
+    assert!(
+        palco.contains("palavrasDaTransmissao(")
+            && !palco.contains("\"SUA TELA\"")
+            && !palco.contains("· TELA`"),
+        "`desenharPalco` voltou a escrever «TELA» sem perguntar o tipo da transmissão"
+    );
+    let imagem = without_comments(&read("ui/palco-imagem.js"));
+    assert!(
+        !imagem.contains("`ver a tela de ${quem}`")
+            && imagem.contains("palavrasDaTransmissao(transmissao.tela).ver(quem)"),
+        "o botão de ver uma transmissão voltou a prometer «a tela» antes de saber o que ela é"
+    );
+    // E os dois produtores do evento mandam o `source`.
+    assert!(
+        read("../../crates/seele-ffi/src/types.rs").contains("        source: ScreenKind,"),
+        "o `ScreenOpened` do desktop deixou de dizer o que a transmissão mostra"
+    );
+    assert!(
+        without_comments(&read("ui/compartilhar-web.js")).contains("source: fonte }"),
+        "o `ScreenOpened` da página deixou de dizer o que a transmissão mostra"
+    );
+}
+
+/// **A câmera está registrada, é chamada, e está ligada à tela.**
+///
+/// - os três comandos existem no `generate_handler!` e a casca chama os três;
+/// - o quadro vai em **corpo cru**, com a sessão, a geração e a marca de chave
+///   nos cabeçalhos — e os nomes dos cabeçalhos são os mesmos dos dois lados;
+/// - os três pedidos do núcleo a quem codifica (`CameraKeyFrameRequested`,
+///   `CameraBudget`, `CameraPaused`) existem no `Event` e têm quem os ouça;
+/// - o controle, o estado e a prévia estão no `index.html`, e `camera.js`
+///   carrega antes de quem o usa;
+/// - a prévia vem da mídia (`srcObject`), e os quadros da própria câmera não
+///   vão ao decodificador do palco.
+#[test]
+fn a_camera_esta_registrada_chamada_e_ligada_a_tela() {
+    let rust = without_comments(&read("src/main.rs"));
+    let registrados = rust
+        .split("tauri::generate_handler![")
+        .nth(1)
+        .and_then(|resto| resto.split(']').next())
+        .expect("o `generate_handler!` saiu do main.rs");
+    let camera = without_comments(&read("ui/camera.js"));
+    for (comando, chamada) in [
+        ("codificacao_da_camera", "invoke(\"codificacao_da_camera\""),
+        ("compartilhar_camera", "invoke(\"compartilhar_camera\""),
+        (
+            "quadro_da_camera",
+            "invocarNaJanela(\"quadro_da_camera\", bytes, { headers: cabecalhos })",
+        ),
+    ] {
+        assert!(
+            registrados.split(',').any(|nome| nome.trim() == comando),
+            "o comando `{comando}` não está registrado: a casca o chamaria e o Tauri responderia \
+             que ele não existe"
+        );
+        assert!(
+            rust.contains(&format!("fn {comando}(")),
+            "`{comando}` está registrado e não existe"
+        );
+        assert!(
+            camera.contains(chamada),
+            "o `camera.js` não chama `{comando}` como o comando o recebe: {chamada}"
+        );
+    }
+
+    // O corpo cru e os cabeçalhos, com os mesmos nomes dos dois lados.
+    let quadro = body_of(&rust, "fn quadro_da_camera(");
+    assert!(
+        quadro.contains("tauri::ipc::Request") || rust.contains("request: tauri::ipc::Request<'_>"),
+        "`quadro_da_camera` deixou de receber o pedido cru"
+    );
+    assert!(
+        quadro.contains("InvokeBody::Raw(bytes)") && quadro.contains("InvokeBody::Json("),
+        "`quadro_da_camera` não lê o corpo cru, ou recusa o WebView que o manda como lista: {quadro}"
+    );
+    for cabecalho in ["seele-chave", "seele-sessao", "seele-geracao"] {
+        assert!(
+            rust.contains(&format!("\"{cabecalho}\"")),
+            "o main.rs não lê o cabeçalho `{cabecalho}`"
+        );
+        assert!(
+            camera.contains(&format!("\"{cabecalho}\"")),
+            "o camera.js não manda o cabeçalho `{cabecalho}`"
+        );
+    }
+
+    // Os três pedidos do núcleo a quem codifica.
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    for evento in ["CameraKeyFrameRequested", "CameraBudget", "CameraPaused"] {
+        assert!(
+            tipos.contains(&format!("    {evento} {{")),
+            "`{evento}` saiu do `Event`"
+        );
+        assert!(
+            camera.contains(&format!("carga.{evento}")),
+            "o `camera.js` não ouve `{evento}`: o pedido do núcleo morreria na casca"
+        );
+    }
+
+    // A tela.
+    let html = read("ui/index.html");
+    for id in [
+        "id=\"operador-camera\"",
+        "id=\"camera-estado\"",
+        "id=\"camera-previa\"",
+    ] {
+        assert!(html.contains(id), "o index.html perdeu `{id}`");
+    }
+    let ordem = |arquivo: &str| {
+        html.find(&format!("<script src=\"{arquivo}\"></script>"))
+            .unwrap_or_else(|| panic!("o index.html não carrega `{arquivo}`"))
+    };
+    for depois in [
+        "tela-chamada.js",
+        "palco-imagem.js",
+        "composicao-0174.js",
+        "pessoal-web.js",
+    ] {
+        assert!(
+            ordem("camera.js") < ordem(depois),
+            "`camera.js` carrega depois de `{depois}`, que o usa"
+        );
+    }
+    for antes in ["frases.js", "glifos.js", "compartilhar-web.js", "base.js"] {
+        assert!(
+            ordem(antes) < ordem("camera.js"),
+            "`camera.js` carrega antes de `{antes}`, de que ele precisa"
+        );
+    }
+    assert!(
+        without_comments(&read("ui/glifos.js")).contains("  camera: ["),
+        "o glifo da câmera saiu do glifos.js"
+    );
+    assert!(
+        without_comments(&read("ui/tela-chamada.js"))
+            .contains("desenharACamera(voice_room, transmissao)"),
+        "o rodapé do operador deixou de desenhar a câmera a cada retrato"
+    );
+
+    // A prévia é da mídia, e a própria câmera não vai ao decodificador.
+    let previa = body_of(&camera, "function desenharAPreviaDaCamera(");
+    assert!(
+        previa.contains("previa.srcObject = midia"),
+        "a prévia da câmera deixou de vir da própria mídia: {previa}"
+    );
+    let palco = without_comments(&read("ui/palco-imagem.js"));
+    assert!(
+        palco.contains("aAberturaEDaMinhaCamera(screen).then((minha) => { if (!minha) abrir(); })"),
+        "o palco voltou a armar o decodificador para a própria câmera, que não manda quadro de volta"
+    );
+    assert!(
+        without_comments(&read("ui/compartilhar-web.js"))
+            .contains("if (tipo !== 2 && !estaVez.camera) emitir({ ScreenFrame"),
+        "a página voltou a mandar à casca os quadros da própria câmera"
+    );
+
+    // No celular a câmera não é oferecida ainda, e a ponte recusa com frase.
+    let ponte = without_comments(&read("ui/ponte-web.js"));
+    assert!(
+        ponte.contains("[\"compartilhar_camera\", SO_NO_PC_CAMERA]"),
+        "a ponte deixou de recusar a câmera no celular com a frase"
+    );
+    assert!(
+        body_of(&camera, "function desenharACamera(").contains("cameraSoNoPc()"),
+        "o controle da câmera voltou a aparecer no celular, onde o pedido é recusado"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A notificação do sistema: `ui/notificacao-do-sistema.js`
+// ---------------------------------------------------------------------------
+//
+// O que se confere é a **regra**: quando um pedido chega ao sistema e quando
+// não chega, com um `invoke` de mentira que anota o que foi pedido. Que a
+// notificação apareça na tela não é coisa de teste, e não está aqui: no app o
+// plugin nem devolve isso (`src/notificacao.rs`).
+
+/// O mundo da notificação: um `document` com a visibilidade e o foco que o
+/// teste escolhe, um relógio de mentira, e o `invoke` que anota.
+const NOTIFICACAO_NODE: &str = r##"
+const montarNotificacao = ({ retrato = { ligadas: true, permissao: "NaoSeSabe" }, visivel = "visible", foco = false, sessoes = [], recusa = null } = {}) => {
+  const pedidos = [], infos = [], ouvintes = {};
+  const mundo = { visivel, foco, retrato, recusa, sessoes, agora: 1700000000000 };
+  class Relogio extends Date { static now() { return mundo.agora; } }
+  const sandbox = {
+    console: { info: (...a) => infos.push(a.join(" ")), warn() {}, log: console.log },
+    Date: Relogio, Promise, Object, Map, Set, Array, String, Boolean, Number, JSON, Math, Error,
+    document: { get visibilityState() { return mundo.visivel; }, hasFocus: () => mundo.foco },
+    invoke: async (cmd, args) => {
+      pedidos.push({ cmd, args });
+      if (cmd === "estado_das_notificacoes") return mundo.retrato;
+      if (cmd === "sessoes") return mundo.sessoes;
+      if (cmd === "notificar_no_sistema" && mundo.recusa) throw mundo.recusa;
+      if (cmd === "ligar_notificacoes") return { ligadas: args.ligadas, permissao: mundo.retrato.permissao };
+      return null;
+    },
+    ouvirNaJanela: (nome, f) => { ouvintes[nome] = f; return Promise.resolve(() => {}); },
+  };
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(ler("frases.js"), ctx, { filename: "frases.js" });
+  vm.runInContext(ler("notificacao-do-sistema.js"), ctx, { filename: "notificacao-do-sistema.js" });
+  const n = vm.runInContext("notificacaoDoSistema", ctx);
+  return { n, ctx, mundo, pedidos, infos, ouvintes, saidas: () => pedidos.filter((p) => p.cmd === "notificar_no_sistema") };
+};
+const mencaoEm = (sessao) => ({ sessao, geracao: 1, vista: false, evento: { NoticeRaised: { notice: { severity: "Info", reason: "Mentioned", operator_text: null } } } });
+"##;
+
+fn rodar_notificacao(titulo: &str, corpo: &str) {
+    rodar_node(titulo, &format!("{NOTIFICACAO_NODE}\n{corpo}"));
+}
+
+/// **A regra, pura**: cada motivo de não sair, pelo nome e na ordem escrita no
+/// topo de `notificacao-do-sistema.js`, e o único caso em que sai.
+#[test]
+fn a_regra_da_notificacao_do_sistema_recusa_pelo_nome_e_na_ordem() {
+    rodar_notificacao(
+        "a regra da notificação do sistema",
+        r##"
+const { n } = montarNotificacao();
+const agora = 5000;
+const pode = { ligadas: true, permissao: "NaoSeSabe", naFrente: false, agora, ditas: new Map() };
+const fato = { motivo: "mencao", chaves: ["a"], propria: false };
+const d = (estado, acontecimento) => n.decidir({ ...pode, ...estado }, { ...fato, ...acontecimento });
+
+const sai = d({}, {});
+confere("com tudo a favor não saiu: " + JSON.stringify(sai), sai.notificar === true && sai.novas.length === 1);
+
+// Um por vez: cada porta fecha sozinha, com o nome dela.
+const portas = [
+  [{}, { motivo: "mensagem" }, "motivo-desconhecido"],
+  [{}, { motivo: "toString" }, "motivo-desconhecido"],
+  [{}, { chaves: [] }, "sem-chave"],
+  [{}, { propria: true }, "propria"],
+  [{ ligadas: false }, {}, "desligadas"],
+  [{ ligadas: undefined }, {}, "desligadas"],
+  [{ ligadas: "sim" }, {}, "desligadas"],
+  [{ permissao: "Negada" }, {}, "sem-permissao"],
+  [{ permissao: "PorPedir" }, {}, "sem-permissao"],
+  [{ permissao: "NaoHa" }, {}, "sem-permissao"],
+  [{ permissao: undefined }, {}, "sem-permissao"],
+  [{ naFrente: true }, {}, "janela-na-frente"],
+  [{ naFrente: undefined }, {}, "janela-na-frente"],
+  [{ ditas: new Map([["a", Infinity]]) }, {}, "repetida"],
+  [{ ditas: new Map([["a", agora + 1]]) }, {}, "repetida"],
+];
+for (const [estado, acontecimento, porque] of portas) {
+  const r = d(estado, acontecimento);
+  confere(JSON.stringify([estado, acontecimento]) + " devia dar " + porque + " e deu " + JSON.stringify(r), r.notificar === false && r.porque === porque);
+}
+confere("a permissão concedida do navegador não deixou sair", d({ permissao: "Concedida" }, {}).notificar === true);
+
+// A ordem: o que a própria pessoa fez vem antes de tudo o que é do aparelho, e
+// a preferência desligada antes da permissão e da janela.
+confere("própria + desligada não disse «propria»", d({ ligadas: false }, { propria: true }).porque === "propria");
+confere("desligada + negada + na frente não disse «desligadas»", d({ ligadas: false, permissao: "Negada", naFrente: true }, {}).porque === "desligadas");
+confere("negada + na frente não disse «sem-permissao»", d({ permissao: "Negada", naFrente: true }, {}).porque === "sem-permissao");
+confere("na frente + repetida não disse «janela-na-frente»", d({ naFrente: true, ditas: new Map([["a", Infinity]]) }, {}).porque === "janela-na-frente");
+
+// A validade: vencida, a chave é nova de novo; e quem não deu validade lembra para sempre.
+confere("a chave vencida continuou calando", d({ ditas: new Map([["a", agora]]) }, {}).notificar === true);
+confere("a validade não foi somada ao agora", d({}, { validadeMs: 30000 }).lembrarAte === agora + 30000);
+confere("sem validade não é para sempre", d({}, {}).lembrarAte === Infinity);
+
+// Várias chaves (quem bate à porta): só é repetição se todas já foram ditas.
+const duas = d({ ditas: new Map([["a", Infinity]]) }, { motivo: "porta", chaves: ["a", "b"] });
+confere("uma batida nova entre as velhas não saiu: " + JSON.stringify(duas), duas.notificar === true && duas.novas.length === 1 && duas.novas[0] === "b");
+confere("todas velhas e saiu", d({ ditas: new Map([["a", Infinity], ["b", Infinity]]) }, { motivo: "porta", chaves: ["a", "b"] }).porque === "repetida");
+"##,
+    );
+}
+
+/// Com a janela na frente o aviso de dentro basta: nada chega ao sistema, e nem
+/// uma volta de IPC é gasta. Sem foco, ou escondida, chega.
+#[test]
+fn a_notificacao_so_sai_com_a_janela_sem_foco_ou_escondida() {
+    rodar_notificacao(
+        "a janela na frente",
+        r##"
+// À vista e com o foco: nada, e nenhum comando.
+const frente = montarNotificacao({ visivel: "visible", foco: true, sessoes: [{ carimbo: { sessao: 7 }, nome: "Casa" }] });
+const r0 = await frente.n.aoEventoDeSessao(mencaoEm(7));
+confere("com a janela na frente saiu notificação: " + JSON.stringify(frente.pedidos), frente.saidas().length === 0 && r0.porque === "janela-na-frente");
+confere("com a janela na frente gastou IPC: " + JSON.stringify(frente.pedidos), frente.pedidos.length === 0);
+
+// À vista, sem o foco (outra janela por cima): sai.
+const atras = montarNotificacao({ visivel: "visible", foco: false, sessoes: [{ carimbo: { sessao: 7 }, nome: "Casa" }] });
+const r1 = await atras.n.aoEventoDeSessao(mencaoEm(7));
+confere("sem foco não saiu: " + JSON.stringify(r1), atras.saidas().length === 1 && r1.notificou === true);
+
+// Escondida (minimizada, outra aba), mesmo que `hasFocus` diga que sim: sai.
+const escondida = montarNotificacao({ visivel: "hidden", foco: true });
+await escondida.n.aoEventoDeSessao(mencaoEm(7));
+confere("escondida não saiu", escondida.saidas().length === 1);
+
+// A janela veio à frente enquanto o estado era lido: a segunda leitura segura.
+const veio = montarNotificacao({ visivel: "visible", foco: false });
+const original = veio.ctx.invoke;
+veio.ctx.invoke = async (cmd, args) => { const r = await original(cmd, args); if (cmd === "estado_das_notificacoes") veio.mundo.foco = true; return r; };
+const r2 = await veio.n.aoEventoDeSessao(mencaoEm(7));
+confere("a janela veio à frente no meio e a notificação saiu: " + JSON.stringify(r2), veio.saidas().length === 0 && r2.porque === "janela-na-frente");
+
+// Um `document` que estoura ao ser lido: «está na frente», e nada sai.
+const quebrado = montarNotificacao();
+Object.defineProperty(quebrado.ctx.document, "visibilityState", { get() { throw new Error("sem documento"); } });
+confere("sem conseguir ler a janela, respondeu que não está na frente", quebrado.n.janelaNaFrente() === true);
+"##,
+    );
+}
+
+/// A preferência desligada e a permissão que não deixa: nada chega ao sistema.
+#[test]
+fn a_preferencia_desligada_e_a_permissao_negada_calam_a_notificacao() {
+    rodar_notificacao(
+        "a preferência e a permissão",
+        r##"
+for (const [retrato, porque] of [
+  [{ ligadas: false, permissao: "NaoSeSabe" }, "desligadas"],
+  [{ ligadas: false, permissao: "Concedida" }, "desligadas"],
+  [{ ligadas: true, permissao: "Negada" }, "sem-permissao"],
+  [{ ligadas: true, permissao: "PorPedir" }, "sem-permissao"],
+  [{ ligadas: true, permissao: "NaoHa" }, "sem-permissao"],
+  [null, "desligadas"],
+]) {
+  const m = montarNotificacao({ retrato });
+  const r = await m.n.aoEventoDeSessao(mencaoEm(3));
+  confere(JSON.stringify(retrato) + " deixou sair: " + JSON.stringify(m.saidas()), m.saidas().length === 0);
+  confere(JSON.stringify(retrato) + " devia dizer " + porque + " e disse " + JSON.stringify(r), r.notificou === false && r.porque === porque);
+  confere(JSON.stringify(retrato) + ": não contou o motivo: " + JSON.stringify(m.n.contas), m.n.contas.porque[porque] === 1);
+}
+// Sem permissão não é silêncio de todo dia: fica uma linha no console, uma vez.
+const negada = montarNotificacao({ retrato: { ligadas: true, permissao: "Negada" } });
+await negada.n.aoEventoDeSessao(mencaoEm(3));
+negada.mundo.agora += 60000;
+await negada.n.aoEventoDeSessao(mencaoEm(3));
+confere("a permissão negada não foi dita no console uma vez: " + JSON.stringify(negada.infos), negada.infos.length === 1 && negada.infos[0].includes("sem-permissao"));
+// Desligada é o estado de quase todo mundo: contada, e sem linha no console.
+const desligada = montarNotificacao({ retrato: { ligadas: false, permissao: "NaoSeSabe" } });
+await desligada.n.aoEventoDeSessao(mencaoEm(3));
+confere("a preferência desligada encheu o console: " + JSON.stringify(desligada.infos), desligada.infos.length === 0);
+// O comando do estado que falha: nada sai, e não estoura em quem chamou.
+const semEstado = montarNotificacao();
+semEstado.ctx.invoke = async () => { throw "IpcCaiu"; };
+const r = await semEstado.n.aoEventoDeSessao(mencaoEm(3));
+confere("sem conseguir ler o estado, não disse que falhou: " + JSON.stringify(r), r.notificou === false && r.porque === "falhou");
+"##,
+    );
+}
+
+/// A mesma notícia não sai duas vezes: a menção no mesmo servidor dentro de
+/// meio minuto, a mesma batida a cada leitura da porta, o mesmo toque.
+#[test]
+fn a_mesma_notificacao_nao_se_repete() {
+    rodar_notificacao(
+        "a repetição",
+        r##"
+// A menção: outra no mesmo servidor dentro do silêncio é a mesma notícia.
+const m = montarNotificacao({ sessoes: [{ carimbo: { sessao: 1 }, nome: "Casa" }, { carimbo: { sessao: 2 }, nome: "Trabalho" }] });
+await m.n.aoEventoDeSessao(mencaoEm(1));
+m.mundo.agora += 5000;
+const repetida = await m.n.aoEventoDeSessao(mencaoEm(1));
+confere("duas menções em 5 s deram " + m.saidas().length + " notificações", m.saidas().length === 1 && repetida.porque === "repetida");
+// Em outro servidor é outra notícia.
+await m.n.aoEventoDeSessao(mencaoEm(2));
+confere("a menção de outro servidor foi calada pela do primeiro", m.saidas().length === 2);
+// Passado o silêncio, a do primeiro sai de novo.
+m.mundo.agora += m.n.SILENCIO_DA_MENCAO_MS;
+await m.n.aoEventoDeSessao(mencaoEm(1));
+confere("depois do silêncio a menção não saiu de novo", m.saidas().length === 3);
+// Dois avisos da mesma menção que se cruzam na espera do IPC: uma só.
+const cruzadas = montarNotificacao();
+await Promise.all([cruzadas.n.aoEventoDeSessao(mencaoEm(9)), cruzadas.n.aoEventoDeSessao(mencaoEm(9))]);
+confere("duas menções cruzadas deram " + cruzadas.saidas().length, cruzadas.saidas().length === 1);
+
+// A porta é lida a cada cinco segundos: a mesma batida notifica uma vez.
+const p = montarNotificacao();
+const A = "casa#1#ab12#1700", B = "casa#1#cd34#1705";
+for (let i = 0; i < 4; i += 1) { await p.n.notarPorta([A], "Casa"); p.mundo.agora += 5000; }
+confere("a mesma batida em quatro leituras deu " + p.saidas().length, p.saidas().length === 1);
+// Uma batida nova ao lado da velha: outra notificação, com a conta de quem espera.
+await p.n.notarPorta([A, B], "Casa");
+confere("a batida nova não notificou", p.saidas().length === 2);
+confere("a conta não é de quem espera: " + p.saidas()[1].args.titulo, p.saidas()[1].args.titulo === "2 pessoas estão batendo à porta");
+// Ninguém esperando: nada, e nenhum comando.
+const antes = p.pedidos.length;
+await p.n.notarPorta([], "Casa");
+confere("a porta vazia fez pedido", p.pedidos.length === antes);
+
+// O toque: a mesma pessoa tocando de novo (outro candidato) é o mesmo toque.
+const t = montarNotificacao();
+const toque = { evento: "Tocou", quem: "ff00", apelido: "rafa", codigo: "K9P2", nome_na_agenda: null, com_som: true };
+await t.n.notarToque(toque);
+await t.n.notarToque(toque);
+confere("o mesmo toque duas vezes deu " + t.saidas().length, t.saidas().length === 1);
+// Parou, e ligou de novo: é outra ligação.
+t.n.notarToque({ evento: "Parou", quem: "ff00", desfecho: "ninguem_atendeu" });
+await t.n.notarToque(toque);
+confere("a ligação seguinte da mesma pessoa não notificou", t.saidas().length === 2);
+confere("o Parou notificou", t.saidas().every((s) => s.args.titulo === "Ligação chegando"));
+
+// **O que a janela avisou por dentro está dito**: a batida que chegou com a
+// janela na frente não vira notificação cinco segundos depois de a pessoa sair.
+const visto = montarNotificacao({ visivel: "visible", foco: true });
+await visto.n.notarPorta([A], "Casa");
+visto.mundo.foco = false;
+visto.mundo.agora += 5000;
+const depois = await visto.n.notarPorta([A], "Casa");
+confere("a batida já avisada na janela notificou depois: " + JSON.stringify(depois), visto.saidas().length === 0 && depois.porque === "repetida");
+// E a que chega depois, com a janela fora da frente, notifica.
+await visto.n.notarPorta([A, B], "Casa");
+confere("a batida que chegou com a janela atrás não notificou", visto.saidas().length === 1);
+
+// A notificação que o sistema não aceitou não fica lembrada: a próxima sai.
+const falha = montarNotificacao({ recusa: "NaoSaiu" });
+const f1 = await falha.n.notarPorta([A], "Casa");
+confere("a recusa do comando não voltou com o nome: " + JSON.stringify(f1), f1.notificou === false && f1.porque === "NaoSaiu");
+confere("a recusa do comando não foi dita no console: " + JSON.stringify(falha.infos), falha.infos.length === 1 && falha.infos[0].includes("NaoSaiu"));
+falha.mundo.recusa = null;
+const f2 = await falha.n.notarPorta([A], "Casa");
+confere("depois de uma falha a mesma batida ficou calada", f2.notificou === true);
+"##,
+    );
+}
+
+/// Nunca para o que a própria pessoa fez: a ligação que ela mesma faz passa
+/// pela regra como `propria`, e não chega ao sistema.
+#[test]
+fn a_notificacao_nunca_e_do_que_a_propria_pessoa_fez() {
+    rodar_notificacao(
+        "o que a própria pessoa fez",
+        r##"
+const m = montarNotificacao();
+// Ela liga: a fase é `chamando`.
+const minha = await m.n.notarFase("livre", { estado: "chamando", id: "c1", apelido: "ana", papel: "quem-liga" });
+confere("a ligação que a própria pessoa fez notificou: " + JSON.stringify(m.pedidos), m.saidas().length === 0 && minha.porque === "propria");
+confere("a própria ligação gastou IPC", m.pedidos.length === 0);
+// Alguém liga para ela: a fase é `tocando`.
+const dela = await m.n.notarFase("livre", { estado: "tocando", id: "c2", apelido: "ana", papel: "quem-recebe" });
+confere("a ligação que chega não notificou: " + JSON.stringify(dela), m.saidas().length === 1 && dela.notificou === true);
+// É a transição que avisa: a mesma fase de novo, e as outras fases, não.
+confere("a fase repetida notificou", m.n.notarFase("tocando", { estado: "tocando", id: "c2" }) === null);
+for (const fase of ["procurando", "conectando", "dentro", "encerrada", "livre"]) {
+  confere("a fase " + fase + " notificou", m.n.notarFase("tocando", { estado: fase, id: "c2" }) === null);
+}
+confere("as outras fases fizeram pedido", m.saidas().length === 1);
+// O que não é menção não notifica: mensagem comum de canal, telemetria, outro aviso.
+for (const evento of ["MessagesChanged", "RosterChanged", "TelemetryChanged", { NoticeRaised: { notice: { reason: "RateLimited" } } }, { Ended: { reason: "Kicked" } }, null]) {
+  confere(JSON.stringify(evento) + " notificou", m.n.aoEventoDeSessao({ sessao: 1, geracao: 1, evento }) === null);
+}
+confere("um evento que não é menção fez pedido", m.saidas().length === 1);
+"##,
+    );
+}
+
+/// O texto que vai ao sistema: quem e onde, e nunca o corpo de uma mensagem.
+#[test]
+fn o_texto_da_notificacao_diz_quem_e_onde_e_nunca_o_corpo() {
+    rodar_notificacao(
+        "o texto da notificação",
+        r##"
+const m = montarNotificacao({ sessoes: [{ carimbo: { sessao: 4 }, nome: "Casa do Rafa" }, { carimbo: { sessao: 5 }, nome: null }] });
+// A menção: o servidor, pela trilha. O evento não traz o corpo, e o texto não o inventa.
+await m.n.aoEventoDeSessao(mencaoEm(4));
+const mencao = m.saidas()[0].args;
+confere("a menção: " + JSON.stringify(mencao), mencao.motivo === "Mencao" && mencao.titulo === "Você foi chamado" && mencao.corpo === "em Casa do Rafa" && mencao.lugar.sessao === 4);
+// Sem nome de servidor, a frase não fica pela metade.
+await m.n.aoEventoDeSessao(mencaoEm(5));
+confere("a menção sem nome: " + m.saidas()[1].args.corpo, m.saidas()[1].args.corpo === "numa conversa do SEELE");
+// Uma ponte que não carimba (a de antes da 0.17, ou uma bancada): sem sessão, sem lugar.
+await m.n.aoEventoDeSessao({ NoticeRaised: { notice: { reason: "Mentioned" } } });
+confere("a menção sem carimbo: " + JSON.stringify(m.saidas()[2].args), m.saidas()[2].args.corpo === "numa conversa do SEELE" && m.saidas()[2].args.lugar === null);
+
+// A porta: uma pessoa, e o servidor.
+await m.n.notarPorta(["k1"], "Casa do Rafa");
+const porta = m.saidas()[3].args;
+confere("a porta: " + JSON.stringify(porta), porta.motivo === "Porta" && porta.titulo === "Alguém está batendo à porta" && porta.corpo === "do servidor Casa do Rafa");
+await m.n.notarPorta(["k2"], null);
+confere("a porta sem nome: " + m.saidas()[4].args.corpo, m.saidas()[4].args.corpo === "do servidor que você hospeda");
+
+// A ligação: o nome que EU dei na agenda; sem ele, o apelido entre aspas, que é o que a pessoa diz.
+await m.n.notarToque({ evento: "Tocou", quem: "a1", apelido: "rafa", codigo: "K9P2-CSM7", nome_na_agenda: "Rafael" });
+await m.n.notarToque({ evento: "Tocou", quem: "b2", apelido: "rafa", codigo: "K9P2-CSM7", nome_na_agenda: null });
+await m.n.notarFase("livre", { estado: "tocando", id: "x" });
+const [agenda, apelido, ninguem] = m.saidas().slice(5).map((s) => s.args);
+confere("a ligação da agenda: " + JSON.stringify(agenda), agenda.motivo === "Ligacao" && agenda.titulo === "Ligação chegando" && agenda.corpo === "Rafael está ligando");
+confere("a ligação sem agenda: " + apelido.corpo, apelido.corpo === "«rafa» está ligando");
+confere("a ligação sem nome: " + ninguem.corpo, ninguem.corpo === "Alguém está ligando para você");
+// O código de quem liga é a prova, e fica na janela: não vai à tela bloqueada.
+confere("o código de quem liga foi à notificação", !m.saidas().some((s) => JSON.stringify(s.args).includes("K9P2")));
+// Todo motivo da tabela tem frase, e nenhum outro.
+const comFrase = Object.keys(vm.runInContext("FRASES_DA_NOTIFICACAO.texto", m.ctx)).sort();
+confere("os motivos e as frases discordam: " + comFrase, JSON.stringify(comFrase) === JSON.stringify(Object.keys(m.n.MOTIVOS).sort()));
+"##,
+    );
+}
+
+/// Os motivos da casca são os do Rust, e a permissão que o Rust responde tem
+/// frase: um nome novo de um lado só seria o produto sabendo e não contando.
+#[test]
+fn os_motivos_e_as_permissoes_da_notificacao_sao_os_do_rust() {
+    let rust = read("src/notificacao.rs");
+    let modulo = read("ui/notificacao-do-sistema.js");
+    let frases = read("ui/frases.js");
+    for motivo in variants_of(&rust, "Motivo") {
+        assert!(
+            modulo.contains(&format!(": \"{motivo}\"")),
+            "o motivo `{motivo}` do Rust não está em `MOTIVOS`: a casca nunca o pede"
+        );
+    }
+    let tabela = modulo
+        .split("const MOTIVOS = Object.freeze({")
+        .nth(1)
+        .and_then(|resto| resto.split("});").next())
+        .unwrap_or_default();
+    assert_eq!(
+        tabela.matches(": \"").count(),
+        variants_of(&rust, "Motivo").len(),
+        "`MOTIVOS` tem um motivo que o Rust não desserializa: o comando o recusaria"
+    );
+    let estados = frases
+        .split("const FRASES_DA_NOTIFICACAO")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  estado: Object.freeze({").nth(1))
+        .and_then(|resto| resto.split("\n  }),").next())
+        .unwrap_or_default();
+    for permissao in variants_of(&rust, "Permissao") {
+        assert!(
+            estados.contains(&format!("\n    {permissao}: ")),
+            "a permissão `{permissao}` do Rust não tem frase em `FRASES_DA_NOTIFICACAO.estado`"
+        );
+    }
+    // As que só a página de navegador responde (`ponte-web.js`).
+    let ponte = read("ui/ponte-web.js");
+    for permissao in ["Concedida", "Negada", "PorPedir", "NaoHa"] {
+        assert!(
+            ponte.contains(&format!("\"{permissao}\"")),
+            "a ponte deixou de responder `{permissao}`"
+        );
+        assert!(
+            estados.contains(&format!("\n    {permissao}: ")),
+            "a permissão `{permissao}` da ponte não tem frase"
+        );
+    }
+}
+
+/// **A única porta do plugin é o comando, e ele confere antes de abrir.**
+///
+/// As duas conferências do Rust (`notificacao::conferir`) têm teste de unidade
+/// em `src/notificacao.rs`. O que um teste de unidade não vê é a fiação: se o
+/// comando deixa de ler a preferência do disco, ou passa a responder «a janela
+/// não está na frente» sem perguntar ao sistema, as funções continuam certas e
+/// o produto notifica com a opção desligada. `tests/permissoes.rs` segura o
+/// outro lado, que a página não alcança o plugin sem passar por aqui.
+#[test]
+fn o_comando_de_notificar_confere_a_preferencia_e_a_janela_antes_do_plugin() {
+    let main = without_comments(&main_com_os_testes());
+    let comando = main
+        .split("fn notificar_no_sistema(")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_else(|| panic!("o comando `notificar_no_sistema` saiu do main.rs"));
+    let compacto: String = comando.split_whitespace().collect();
+    assert!(
+        compacto.contains("Preferences::notificacoes_do_sistema"),
+        "o comando não lê a preferência do disco: com a opção desligada ele notificaria"
+    );
+    assert!(
+        compacto.contains(
+            "notificacao::pedir(ligadas,notificacao::janela_na_frente(&app),&titulo,&corpo,|titulo,corpo|notificacao::emitir(&app,titulo,corpo),)"
+        ),
+        "o comando não passa a preferência e o foco da janela a `notificacao::pedir`, ou emite \
+         por fora dele:\n{comando}"
+    );
+    assert_eq!(
+        main.matches("notificacao::emitir(").count(),
+        1,
+        "`notificacao::emitir` é chamado fora do comando: uma notificação sai sem as conferências"
+    );
+    assert_eq!(
+        main.matches("tauri_plugin_notification").count(),
+        1,
+        "o `main.rs` fala com o plugin de notificação por fora de `notificacao.rs`"
+    );
+    // E o módulo entrega ao plugin num lugar só.
+    let modulo = without_comments(&read("src/notificacao.rs"));
+    assert_eq!(
+        modulo.matches(".show()").count(),
+        1,
+        "`notificacao.rs` mostra notificação em mais de um lugar"
+    );
+    // A janela é perguntada ao sistema, e não à página.
+    let foco = modulo
+        .split("fn janela_na_frente")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default();
+    assert!(
+        foco.contains("is_focused()"),
+        "`janela_na_frente` deixou de perguntar o foco ao sistema"
+    );
+}
+
+/// **Os ganchos alcançam a regra, e a regra carrega antes deles.** Um gancho
+/// escrito numa camada que carrega antes do módulo, ou escrito depois de a fase
+/// já ter sido trocada, existe na fonte e não avisa ninguém.
+#[test]
+fn os_ganchos_da_notificacao_do_sistema_estao_onde_o_acontecimento_chega() {
+    let page = read("ui/index.html");
+    let loaded = linked_assets(&page, "src");
+    let posicao = |nome: &str| {
+        loaded
+            .iter()
+            .position(|f| f == nome)
+            .unwrap_or_else(|| panic!("index.html não carrega {nome}"))
+    };
+    let regra = posicao("notificacao-do-sistema.js");
+    assert!(
+        posicao("base.js") < regra,
+        "notificacao-do-sistema.js carrega antes do base.js, de quem é o `ouvirNaJanela` e o `invoke`"
+    );
+    for quem in [
+        "camada-portaria.js",
+        "camada-toque.js",
+        "pessoal-web-entrada.js",
+        "tela-server.js",
+    ] {
+        assert!(
+            regra < posicao(quem),
+            "notificacao-do-sistema.js carrega depois de {quem}, que a chama"
+        );
+    }
+
+    // A porta: a mesma leitura que acende a faixa, com as mesmas chaves.
+    let portaria = without_comments(&read("ui/camada-portaria.js"));
+    let porta = body_of(&portaria, "async function atualizarPorta(");
+    let faixa = porta.find("avisarQueBatem(esperando)");
+    let gancho = porta.find(
+        "globalThis.notificacaoDoSistema?.notarPorta(esperando, hospedagemDaPorta(estado).nome)",
+    );
+    assert!(
+        matches!((faixa, gancho), (Some(f), Some(g)) if f < g),
+        "a leitura da porta não entrega à notificação as chaves que entregou à faixa, depois dela:\n{porta}"
+    );
+
+    // O toque: a primeira coisa do ouvinte, antes de qualquer ramo.
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    let ouvinte = toque
+        .split("listen(\"seele://toque\", ({ payload }) => {")
+        .nth(1)
+        .unwrap_or_else(|| panic!("o ouvinte do toque saiu de camada-toque.js"));
+    assert!(
+        ouvinte
+            .trim_start()
+            .starts_with("globalThis.notificacaoDoSistema?.notarToque(payload);"),
+        "o ouvinte do toque não entrega o aviso à notificação antes de mais nada"
+    );
+    assert_eq!(
+        toque.matches("notificacaoDoSistema").count(),
+        1,
+        "o toque da sala chama a notificação em mais de um ponto"
+    );
+
+    // A conversa por link: com a fase de ANTES, isto é, antes de ela ser trocada.
+    let link = without_comments(&read("ui/pessoal-web-entrada.js"));
+    let estado = link
+        .split("aoEstado(estado) {")
+        .nth(1)
+        .and_then(|resto| resto.split("aoTexto(texto) {").next())
+        .unwrap_or_else(|| panic!("o `aoEstado` saiu de pessoal-web-entrada.js"));
+    let gancho = estado.find("globalThis.notificacaoDoSistema?.notarFase(fase, estado);");
+    let troca = estado.find("fase = estado.estado;");
+    assert!(
+        matches!((gancho, troca), (Some(g), Some(t)) if g < t),
+        "a conversa por link não avisa a notificação com a fase anterior: depois da troca, \
+         toda fase é «a mesma» e nenhuma ligação notifica"
+    );
+    assert_eq!(
+        link.matches("notificacaoDoSistema").count(),
+        1,
+        "a conversa por link chama a notificação em mais de um ponto"
+    );
+}
+
+/// A porta, do `estado_da_porta` até o pedido ao sistema: a função de verdade
+/// de `camada-portaria.js`, a regra de verdade, e um `invoke` que anota.
+#[test]
+fn quem_bate_a_porta_com_a_janela_atras_vira_um_pedido_ao_sistema() {
+    rodar_node(
+        "a porta até a notificação",
+        r##"
+const montar = ({ foco, estado, pedidos, retrato = { ligadas: true, permissao: "NaoSeSabe" } }) => {
+  const m = mundo({
+    estado_da_porta: () => estado.atual,
+    pedidos_da_portaria: () => pedidos.atual,
+    estado_das_notificacoes: () => retrato,
+    notificar_no_sistema: () => null,
+    sessoes: [],
+  });
+  m.ctx.document.visibilityState = "visible";
+  m.ctx.document.hasFocus = () => foco.atual;
+  m.ctx.ouvirNaJanela = async () => {};
+  m.ctx.rotuloDaPorta = () => "PORTA";
+  m.ctx.avisarQueBatem = (chaves) => { m.faixa = chaves; };
+  m.ctx.desenharMeuServidor = async () => {};
+  m.ctx.meuServidorNoAr = true;
+  carregar(m, "frases.js", "notificacao-do-sistema.js");
+  vm.runInContext("let geracaoDaHospedagemNaJanela = 0;\n" + ["hospedagemDaPorta", "chaveDoPedido", "chavesDosEsperando", "atualizarPorta"].map((f) => funcao("camada-portaria.js", f)).join("\n"), m.ctx);
+  m.ler = () => vm.runInContext("atualizarPorta()", m.ctx).then(tick);
+  return m;
+};
+const hospedando = (pendentes) => ({ hospedando: true, aberto: false, tem_senha: false, pendentes, hospedagem: { servidor: "s1", geracao: 3, nome: "Casa do Rafa" } });
+const ana = { impressao: "aa11", apelido: "ana", bateu_em: 1700, decidido_em: null };
+const bia = { impressao: "bb22", apelido: "bia", bateu_em: 1705, decidido_em: null };
+const decidida = { impressao: "cc33", apelido: "caio", bateu_em: 1600, decidido_em: 1650 };
+
+// Com a janela atrás: uma batida, um pedido, com o servidor e sem o apelido de quem bate.
+const foco = { atual: false }, estado = { atual: hospedando(1) }, pedidos = { atual: [ana, decidida] };
+const m = montar({ foco, estado, pedidos });
+await m.ler();
+let saidas = so(m, "notificar_no_sistema");
+confere("a batida com a janela atrás não virou pedido: " + JSON.stringify(m.chamadas.map((c) => c.cmd)), saidas.length === 1);
+confere("o pedido da porta: " + JSON.stringify(saidas[0]?.args), saidas[0]?.args.motivo === "Porta" && saidas[0].args.titulo === "Alguém está batendo à porta" && saidas[0].args.corpo === "do servidor Casa do Rafa");
+confere("o apelido de quem bate foi à notificação", !JSON.stringify(saidas[0]?.args).includes("ana"));
+confere("a faixa não recebeu as mesmas chaves: " + JSON.stringify(m.faixa), Array.isArray(m.faixa) && m.faixa.length === 1 && m.faixa[0] === "s1#3#aa11#1700");
+// A leitura seguinte, com a mesma batida: nada de novo.
+await m.ler(); await m.ler();
+confere("a mesma batida em três leituras deu " + so(m, "notificar_no_sistema").length + " pedidos", so(m, "notificar_no_sistema").length === 1);
+// Outra pessoa bate: outro pedido, e a conta é de quem espera.
+estado.atual = hospedando(2); pedidos.atual = [ana, bia, decidida];
+await m.ler();
+saidas = so(m, "notificar_no_sistema");
+confere("a segunda batida: " + JSON.stringify(saidas.map((s) => s.args.titulo)), saidas.length === 2 && saidas[1].args.titulo === "2 pessoas estão batendo à porta");
+// O servidor parou e subiu de novo (outra geração): a batida de lá é outra.
+estado.atual = { ...hospedando(1), hospedagem: { servidor: "s1", geracao: 4, nome: "Casa do Rafa" } }; pedidos.atual = [ana];
+await m.ler();
+confere("a batida de outra hospedagem ficou calada pela da anterior", so(m, "notificar_no_sistema").length === 3);
+
+// Com a janela na frente: a faixa acende, e nada vai ao sistema.
+const naFrente = montar({ foco: { atual: true }, estado: { atual: hospedando(1) }, pedidos: { atual: [ana] } });
+await naFrente.ler();
+confere("com a janela na frente a batida foi ao sistema", so(naFrente, "notificar_no_sistema").length === 0 && so(naFrente, "estado_das_notificacoes").length === 0);
+confere("com a janela na frente a faixa não acendeu", naFrente.faixa?.length === 1);
+
+// Sem hospedar, ou sem ninguém esperando: nem a pergunta pelo estado.
+for (const [rotulo, atual] of [["sem hospedar", { hospedando: false, pendentes: 0 }], ["sem pendentes", hospedando(0)]]) {
+  const vazio = montar({ foco: { atual: false }, estado: { atual }, pedidos: { atual: [] } });
+  await vazio.ler();
+  confere(rotulo + ": a notificação foi consultada: " + JSON.stringify(vazio.chamadas.map((c) => c.cmd)), so(vazio, "estado_das_notificacoes").length === 0 && so(vazio, "notificar_no_sistema").length === 0);
+}
+
+// Com a preferência desligada: a faixa acende, e nada vai ao sistema.
+const desligada = montar({ foco: { atual: false }, estado: { atual: hospedando(1) }, pedidos: { atual: [ana] }, retrato: { ligadas: false, permissao: "NaoSeSabe" } });
+await desligada.ler();
+confere("desligada, a batida foi ao sistema", so(desligada, "notificar_no_sistema").length === 0 && desligada.faixa?.length === 1);
+"##,
+    );
+}
+
+/// O toque da sala, do evento ao pedido: o ouvinte de verdade de
+/// `camada-toque.js` entrega o aviso à regra antes de desenhar a faixa.
+#[test]
+fn o_toque_da_sala_com_a_janela_atras_vira_um_pedido_ao_sistema() {
+    rodar_node(
+        "o toque até a notificação",
+        r##"
+const m = mundo({ estado_das_notificacoes: { ligadas: true, permissao: "NaoSeSabe" }, notificar_no_sistema: () => null, sessoes: [] });
+m.ctx.document.visibilityState = "hidden";
+m.ctx.document.hasFocus = () => false;
+m.ctx.ouvirNaJanela = async () => {};
+carregar(m, "frases.js", "notificacao-do-sistema.js");
+const fonte = ler("camada-toque.js");
+const ouvinte = fonte.match(/listen\("seele:\/\/toque", \(\{ payload \}\) => \{[\s\S]*?\n\}\)\.catch\([^\n]*\n/);
+if (!ouvinte) { console.log("o ouvinte do toque sumiu de camada-toque.js"); process.exit(1); }
+const desenhos = [];
+Object.assign(m.ctx, { tocandoNaFaixa: new Map(), anunciar() {}, desenharToque: async () => { desenhos.push(1); } });
+vm.runInContext("let ligacaoEncerrada = false; let atendimentoFalho = null;\n" + ouvinte[0], m.ctx);
+const tocar = (payload) => { m.ouvintes["seele://toque"]({ payload }); return tick(); };
+
+await tocar({ evento: "Tocou", quem: "ff00", codigo: "K9P2-CSM7", apelido: "rafa", nome_na_agenda: "Rafael", com_som: true });
+let saidas = so(m, "notificar_no_sistema");
+confere("o toque com a janela escondida não virou pedido: " + JSON.stringify(m.chamadas.map((c) => c.cmd)), saidas.length === 1);
+confere("o pedido do toque: " + JSON.stringify(saidas[0]?.args), saidas[0]?.args.motivo === "Ligacao" && saidas[0].args.titulo === "Ligação chegando" && saidas[0].args.corpo === "Rafael está ligando");
+confere("a faixa não foi desenhada", desenhos.length === 1);
+// O outro candidato da mesma ligação: a faixa troca, o sistema não é avisado de novo.
+await tocar({ evento: "Tocou", quem: "ff00", codigo: "K9P2-CSM7", apelido: "rafa", nome_na_agenda: "Rafael", com_som: true });
+confere("o mesmo toque virou dois pedidos", so(m, "notificar_no_sistema").length === 1);
+// Parou, e ligou de novo.
+await tocar({ evento: "Parou", quem: "ff00", desfecho: "ninguem_atendeu" });
+await tocar({ evento: "Tocou", quem: "ff00", codigo: "K9P2-CSM7", apelido: "rafa", nome_na_agenda: null, com_som: true });
+saidas = so(m, "notificar_no_sistema");
+confere("a ligação seguinte: " + JSON.stringify(saidas.map((s) => s.args.corpo)), saidas.length === 2 && saidas[1].args.corpo === "«rafa» está ligando");
+"##,
+    );
+}
+
+/// O mundo da opção em CONFIGURAÇÕES: as funções de verdade de
+/// `tela-server.js`, a regra de verdade e as frases de verdade.
+const OPCAO_DA_NOTIFICACAO_NODE: &str = r##"
+function mundoDaOpcao(comandos) {
+  const m = mundo(comandos);
+  m.ctx.escreverOTexto = (nodo, texto) => { nodo.textContent = texto; };
+  m.ctx.document.visibilityState = "visible";
+  m.ctx.document.hasFocus = () => true;
+  m.ctx.ouvirNaJanela = async () => {};
+  carregar(m, "frases.js", "notificacao-do-sistema.js");
+  const server = ler("tela-server.js");
+  const ouvinte = server.match(/\$\("notificacoes-ligadas"\)\?\.addEventListener\("change", \(evento\) => \{[\s\S]*?\n\}\);\n/);
+  if (!ouvinte) { console.log("o ouvinte da opção das notificações sumiu de tela-server.js"); process.exit(1); }
+  vm.runInContext(
+    "const NOTIFICACOES_A_CADA_MS = 5000; let notificacoesLidasEm = 0; let plataformaDasNotificacoes = null;\n" +
+      ["desenharNotificacoesDoSistema", "relerNotificacoesDoSistema", "atualizarNotificacoesDoSistema"].map((f) => funcao("tela-server.js", f)).join("\n") + ouvinte[0],
+    m.ctx,
+  );
+  m.js = (codigo) => vm.runInContext(codigo, m.ctx);
+  m.chave = m.$("notificacoes-ligadas");
+  m.estado = m.$("notificacoes-estado");
+  m.chave.checked = false;
+  /** O clique: marca, dispara, e devolve o que já tinha sido pedido ANTES de qualquer espera. */
+  m.clicar = (ligadas) => {
+    m.chave.checked = ligadas;
+    for (const f of m.chave.handlers.change ?? []) f({ target: m.chave });
+    const noGesto = so(m, "ligar_notificacoes").length;
+    return tick().then(() => noGesto);
+  };
+  return m;
+}
+"##;
+
+/// A opção em CONFIGURAÇÕES no app: nasce desligada, liga num gesto, e a frase
+/// diz onde olhar no sistema sem afirmar o que o app não consegue ler.
+#[test]
+fn a_opcao_das_notificacoes_liga_no_gesto_e_diz_o_caminho_do_sistema() {
+    rodar_node(
+        "a opção das notificações no app",
+        &format!(
+            "{OPCAO_DA_NOTIFICACAO_NODE}\n{}",
+            r##"
+for (const [plataforma, caminho] of [["macos", "Ajustes do Sistema › Notificações › SEELE"], ["windows", "Configurações › Sistema › Notificações › SEELE"], ["outro", "os ajustes de notificação do sistema"]]) {
+  let guardado = false;
+  const m = mundoDaOpcao({
+    plataforma,
+    estado_das_notificacoes: () => ({ ligadas: guardado, permissao: "NaoSeSabe" }),
+    ligar_notificacoes: ({ ligadas }) => { guardado = ligadas; return { ligadas, permissao: "NaoSeSabe" }; },
+  });
+  // Quem nunca escolheu: desligada, e a frase diz o que isso quer dizer.
+  await m.js("atualizarNotificacoesDoSistema()");
+  confere(plataforma + ": nasceu ligada", m.chave.checked === false && m.chave.disabled === false);
+  confere(plataforma + ": desligada, a frase: " + m.estado.textContent, m.estado.textContent === "Desligadas: o SEELE só avisa dentro da janela.");
+  confere(plataforma + ": abrir a tela pediu para ligar", so(m, "ligar_notificacoes").length === 0);
+
+  // Ligar: o pedido sai DENTRO do gesto, com `ligadas: true`.
+  const noGesto = await m.clicar(true);
+  const pedidos = so(m, "ligar_notificacoes");
+  confere(plataforma + ": o pedido não saiu dentro do gesto (" + noGesto + ")", noGesto === 1);
+  confere(plataforma + ": o pedido de ligar: " + JSON.stringify(pedidos[0]?.args), pedidos.length === 1 && pedidos[0].args.ligadas === true);
+  const dito = m.estado.textContent;
+  confere(plataforma + ": ligada, a frase não diz o caminho do sistema: " + dito, dito.startsWith("Ligadas.") && dito.includes(caminho));
+  confere(plataforma + ": a frase afirma o que o app não lê: " + dito, dito.includes("não consegue ler") && !/permitid|concedid|notificação (foi|saiu|enviada)/i.test(dito));
+  confere(plataforma + ": a permissão não ficou no nó", m.estado.dataset.permissao === "NaoSeSabe");
+  confere(plataforma + ": o interruptor não ficou ligado", m.chave.checked === true);
+
+  // Desligar.
+  await m.clicar(false);
+  confere(plataforma + ": desligar não desligou", guardado === false && m.chave.checked === false && m.estado.textContent.startsWith("Desligadas"));
+}
+
+// Não gravou: o interruptor volta ao que vale, e a tela diz.
+const m = mundoDaOpcao({
+  plataforma: "macos",
+  estado_das_notificacoes: { ligadas: false, permissao: "NaoSeSabe" },
+  ligar_notificacoes: () => { throw "NaoGravei"; },
+});
+await m.clicar(true);
+confere("a gravação falhou e o interruptor ficou ligado", m.chave.checked === false);
+confere("a gravação falhou e a tela não disse: " + m.estado.textContent, m.estado.textContent.startsWith(m.js("FRASES_DA_NOTIFICACAO.naoGravou")));
+
+// Ninguém respondeu o estado: o interruptor para, e a tela diz que não sabe.
+const mudo = mundoDaOpcao({ plataforma: "macos" });
+await mudo.js("relerNotificacoesDoSistema()");
+confere("sem estado, o interruptor não parou", mudo.chave.disabled === true && mudo.chave.checked === false);
+confere("sem estado, a tela não disse: " + mudo.estado.textContent, mudo.estado.textContent === mudo.js("FRASES_DA_NOTIFICACAO.desconhecido"));
+
+// A tela aberta relê de tempos em tempos, e não a cada meio segundo.
+const lento = mundoDaOpcao({ plataforma: "macos", estado_das_notificacoes: { ligadas: false, permissao: "NaoSeSabe" } });
+for (let i = 0; i < 6; i += 1) await lento.js("atualizarNotificacoesDoSistema()");
+confere("seis voltas da tela deram " + so(lento, "estado_das_notificacoes").length + " leituras", so(lento, "estado_das_notificacoes").length === 1);
+"##
+        ),
+    );
+}
+
+/// A opção na página de navegador: a recusa do navegador fica **dita**, com o
+/// caminho para mudar; onde não há notificação, a opção diz que não há.
+#[test]
+fn a_permissao_negada_e_a_falta_de_notificacao_ficam_ditas_na_tela() {
+    rodar_node(
+        "a opção das notificações na página",
+        &format!(
+            "{OPCAO_DA_NOTIFICACAO_NODE}\n{}",
+            r##"
+// O navegador recusou: a escolha fica, e a tela diz que nada vai aparecer e onde mudar.
+const negada = mundoDaOpcao({
+  plataforma: "web",
+  estado_das_notificacoes: { ligadas: false, permissao: "PorPedir" },
+  ligar_notificacoes: ({ ligadas }) => ({ ligadas, permissao: "Negada" }),
+});
+await negada.clicar(true);
+const dito = negada.estado.textContent;
+confere("negada, a tela não disse: " + dito, dito.startsWith("O NAVEGADOR NÃO DEIXA ESTA PÁGINA NOTIFICAR") && dito.includes("nada vai aparecer"));
+confere("negada, a tela não disse o caminho: " + dito, dito.includes("permissões do navegador"));
+confere("negada, a tela disse «ligadas»: " + dito, !/^Ligadas/.test(dito));
+confere("negada, a permissão não ficou no nó", negada.estado.dataset.permissao === "Negada");
+confere("a confirmação não foi junto do pedido: " + JSON.stringify(so(negada, "ligar_notificacoes")[0]?.args), so(negada, "ligar_notificacoes")[0]?.args.confirmacao?.titulo === negada.js("FRASES_DA_NOTIFICACAO.ligadasNaPagina.titulo"));
+
+// Concedida.
+const concedida = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: false, permissao: "PorPedir" }, ligar_notificacoes: ({ ligadas }) => ({ ligadas, permissao: "Concedida" }) });
+await concedida.clicar(true);
+confere("concedida: " + concedida.estado.textContent, concedida.estado.textContent === "Ligadas. O navegador deixa esta página notificar." && concedida.chave.checked === true);
+
+// A pergunta fechada sem resposta.
+const porPedir = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: false, permissao: "PorPedir" }, ligar_notificacoes: ({ ligadas }) => ({ ligadas, permissao: "PorPedir" }) });
+await porPedir.clicar(true);
+confere("por pedir: " + porPedir.estado.textContent, porPedir.estado.textContent.includes("ainda não respondeu") && porPedir.estado.textContent.includes("nada vai aparecer"));
+
+// Onde não há (o iPhone fora de página instalada): a opção para, desligada, e diz que não há.
+const semApi = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: false, permissao: "NaoHa" } });
+await semApi.js("atualizarNotificacoesDoSistema()");
+confere("sem a API, a opção não parou", semApi.chave.disabled === true && semApi.chave.checked === false);
+confere("sem a API, a tela não disse: " + semApi.estado.textContent, semApi.estado.textContent.startsWith("Este navegador não tem notificações para esta página"));
+
+// Uma permissão que a lista não conhece: dita, e não calada.
+const estranha = mundoDaOpcao({ plataforma: "web", estado_das_notificacoes: { ligadas: true, permissao: "Provisoria" } });
+await estranha.js("atualizarNotificacoesDoSistema()");
+confere("a permissão desconhecida ficou calada: " + estranha.estado.textContent, estranha.estado.textContent === estranha.js("FRASES_DA_NOTIFICACAO.desconhecido"));
+"##
+        ),
+    );
+}
+
+/// A marcação da opção: em MICROFONE E SOM, depois dos alertas sonoros, um
+/// interruptor que nasce desligado, e a frase do estado vazia na marcação.
+#[test]
+fn a_opcao_das_notificacoes_nasce_desligada_ao_lado_dos_alertas() {
+    let pagina = read("ui/index.html");
+    let audio = pagina
+        .split("<section id=\"painel-audio\"")
+        .nth(1)
+        .and_then(|resto| resto.split("</section>").next())
+        .unwrap_or_else(|| panic!("o painel de áudio saiu do index.html"));
+    let alertas = audio.find("id=\"alertas-bloco\"");
+    let notificacoes = audio.find("id=\"notificacoes-bloco\"");
+    assert!(
+        matches!((alertas, notificacoes), (Some(a), Some(n)) if a < n),
+        "a opção das notificações não está em MICROFONE E SOM, depois dos alertas sonoros: no \
+         celular ela sumiria de ÁUDIO"
+    );
+    assert!(
+        pagina.contains("<input id=\"notificacoes-ligadas\" type=\"checkbox\" role=\"switch\">"),
+        "o interruptor das notificações não nasce desligado (sem `checked`): quem nunca escolheu \
+         leria «ligadas» se o script não chegasse a escrever"
+    );
+    assert!(
+        pagina.contains("<p class=\"nota\" id=\"notificacoes-estado\" role=\"status\"></p>"),
+        "a frase do estado das notificações está escrita na marcação: seria uma afirmação que \
+         ninguém conferiu"
+    );
+    // O ouvinte não espera nada antes de pedir: é o gesto que pede a permissão.
+    let server = without_comments(&read("ui/tela-server.js"));
+    let ouvinte = server
+        .split("$(\"notificacoes-ligadas\")?.addEventListener(\"change\", ")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .unwrap_or_else(|| panic!("o ouvinte da opção das notificações saiu de tela-server.js"));
+    assert!(
+        !ouvinte.trim_start().starts_with("async") && !ouvinte.contains("await "),
+        "o ouvinte da opção espera antes de `definir`: na página de navegador a permissão \
+         sairia do gesto, e o navegador não a pergunta:\n{ouvinte}"
+    );
 }

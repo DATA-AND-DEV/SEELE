@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # ADR 0057: nenhuma linha do protocolo é escrita em JavaScript. Este crate é
 # onde o `postcard` mora no celular; a casca fala JSON com ele, e só move bytes

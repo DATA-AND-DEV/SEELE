@@ -44,7 +44,7 @@ cargo --version
 cargo run --quiet --locked --package xtask -- wasi-sdk
 cargo run --quiet --locked --package xtask -- pacote-web
 [ "$(sha256sum Cargo.lock)" = "$lock_antes" ] || falhar 'Cargo.lock mudou durante o build'
-for arquivo in index.html seele_web.wasm seele_motor_web.wasm _headers; do
+for arquivo in index.html seele_web.wasm seele_motor_web.wasm _headers 404.html; do
   [ -s "target/pacote-web/$arquivo" ] || falhar "saída ausente: $arquivo"
 done
 echo 'cloudflare-web: pacote conferido em target/pacote-web (sem publicação)'

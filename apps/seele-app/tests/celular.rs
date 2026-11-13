@@ -719,6 +719,108 @@ fn o_texto_do_sistema_alcanca_todo_tamanho_do_desktop() {
     }
 }
 
+/// Os avatares de iniciais da sessão: marca numa caixa de tamanho fixo, e não
+/// texto de ler (`TEXTO_COM_TETO`, na bancada do celular).
+const AVATARES_DE_INICIAIS: &[&str] = &[
+    ".pessoa-avatar",
+    ".chamada-avatar",
+    ".mensagem-avatar",
+    // O retrato de SEU PERFIL (52 px) e o avatar da folha (56 px): a 2, a letra
+    // de 44 px media 54 px de alto numa caixa de 52, e duas letras 58,9 px de
+    // largo numa de 56 (medido na bancada do celular, a 390, 360 e 1280).
+    ".cel-perfil-retrato",
+    ".cel-folha-avatar",
+];
+
+/// O valor de uma propriedade no corpo de uma regra: a última declaração dela.
+fn declarado<'a>(corpo: &'a str, propriedade: &str) -> Option<&'a str> {
+    corpo
+        .split(';')
+        .filter_map(|declaracao| declaracao.split_once(':'))
+        .filter(|(nome, _)| nome.trim() == propriedade)
+        .map(|(_, valor)| valor.trim())
+        .next_back()
+}
+
+/// `<n>px`, como número.
+fn em_px(valor: &str) -> Option<f32> {
+    valor.trim().strip_suffix("px")?.trim().parse().ok()
+}
+
+/// **As iniciais numa caixa fixa têm teto.**
+///
+/// A regra do celular que dá a um avatar de iniciais a caixa dele, em px, e faz
+/// a letra crescer com o texto do sistema tem de parar a letra antes da caixa:
+/// `min(calc(<n>px * var(--cel-escala)), <teto>px)`, com o teto até metade da
+/// largura. A caixa não cresce, e duas letras na metade dela cabem nos dois
+/// motores.
+///
+/// O avatar da lista de PESSOAS não tinha: `calc(17px * var(--cel-escala))`
+/// numa caixa de 44 px. A 2, o «DA» media 46 px no Chromium do Linux e passava
+/// da caixa (execução 43264412497 do `ci.yml`, em 12/11/2026, a primeira em
+/// que a bancada do celular rodou lá). Quem via era só a bancada, pelo pixel,
+/// e a largura da letra é de cada sistema. Este guarda lê a regra.
+#[test]
+fn as_iniciais_numa_caixa_fixa_tem_teto() {
+    let mut conferidas = Vec::new();
+    let mut fora = Vec::new();
+    for (arquivo, css) in da_casca(CASCAS[0].0, ".css") {
+        for bloco in blocos(&css) {
+            let de_avatar = seletores(&bloco.preludio).iter().any(|seletor| {
+                AVATARES_DE_INICIAIS
+                    .iter()
+                    .any(|avatar| seletor.trim().ends_with(avatar))
+            });
+            let (Some(largura), Some(letra)) = (
+                declarado(&bloco.corpo, "width").and_then(em_px),
+                declarado(&bloco.corpo, "font-size"),
+            ) else {
+                continue;
+            };
+            if !de_avatar || !letra.contains("var(--cel-escala)") {
+                continue;
+            }
+            let onde = format!("{arquivo}: {}", bloco.preludio);
+            let teto = letra
+                .strip_prefix("min(")
+                .and_then(|resto| resto.strip_suffix(')'))
+                .and_then(|dentro| dentro.rsplit_once(','))
+                .and_then(|(_, teto)| em_px(teto));
+            match teto {
+                Some(teto) if teto <= largura / 2.0 => conferidas.push(onde),
+                Some(teto) => fora.push(format!(
+                    "{onde}: o teto de {teto} px passa da metade da caixa de {largura} px"
+                )),
+                None => fora.push(format!(
+                    "{onde}: `font-size: {letra}` cresce sem teto numa caixa de {largura} px"
+                )),
+            }
+        }
+    }
+    assert!(
+        fora.is_empty(),
+        "iniciais que crescem com o texto do sistema e passam da caixa fixa delas:\n{}",
+        fora.join("\n")
+    );
+    assert!(
+        conferidas
+            .iter()
+            .any(|onde| onde.contains(".pessoa-avatar"))
+            && conferidas
+                .iter()
+                .any(|onde| onde.contains(".chamada-avatar"))
+            && conferidas
+                .iter()
+                .any(|onde| onde.contains(".cel-perfil-retrato"))
+            && conferidas
+                .iter()
+                .any(|onde| onde.contains(".cel-folha-avatar")),
+        "o guarda não achou as regras do avatar da lista de PESSOAS, do cartão da CHAMADA, \
+         do retrato de SEU PERFIL e do avatar da folha com teto — achou {conferidas:?} —, e \
+         sem elas ele passa sem conferir nada"
+    );
+}
+
 // ---------------------------------------------------------------- as frases
 
 /// Os literais de texto de um código JS sem comentários, nas três aspas. Num
@@ -1308,5 +1410,75 @@ fn nenhum_nome_global_e_declarado_por_dois_scripts_da_mesma_pagina() {
     assert!(
         velhos.is_empty(),
         "estes nomes estão na lista dos repetidos de propósito e não se repetem mais; saem dela: {velhos:?}"
+    );
+}
+
+// ------------------------------------------------- a mesa de texto da 1.0
+
+/// **No celular, responder e editar moram na folha da mensagem** — e são os
+/// botões do desktop que ela aperta.
+///
+/// A fileira da mensagem não mostra botões no celular (um toque nela abre a
+/// folha), então sem estas duas ações na folha a resposta e a edição não
+/// existiriam ali. E quem decide se há o que oferecer continua sendo o
+/// `tela-sessao.js` (`botaoDeResponder`, `botaoDeEditar`): a folha pergunta
+/// pelo botão na fileira e o aperta. Uma segunda regra aqui — «é minha, então
+/// edita» — ofereceria EDITAR num servidor que não conhece a edição.
+///
+/// O que se vê está na `bancada/mesa-de-texto.cjs` (o caso do celular).
+#[test]
+fn responder_e_editar_moram_na_folha_da_mensagem_e_apertam_o_botao_do_desktop() {
+    let conversa = sem_comentarios_js(&ler("celular-conversa.js"));
+    for (acao, botao) in [
+        ("responder", "button[data-responder]"),
+        ("editar", "button[data-editar]"),
+    ] {
+        let passa = format!(
+            "{acao}: item.querySelector(\"{botao}\") ? () => item.querySelector(\"{botao}\")?.click() : null,"
+        );
+        assert!(
+            conversa.contains(&passa),
+            "a folha da mensagem não recebe o `{acao}` pelo botão do desktop (`{botao}`), \
+             ou o recebe mesmo quando o desktop não o oferece"
+        );
+    }
+    assert!(
+        !conversa.contains("podeEditarMensagem") && !conversa.contains("mesaDeTextoNoServidor"),
+        "o celular decide por conta própria se a mensagem pode ser editada: a regra é uma só, \
+         e mora no tela-sessao.js"
+    );
+
+    let folhas = sem_comentarios_js(&ler("celular-folhas.js"));
+    let folha = folhas
+        .split("function folhaDaMensagem(")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+        .expect("`folhaDaMensagem` saiu do celular-folhas.js");
+    for acao in [
+        "if (responder) acoes.push({ texto: PALAVRAS.responder, dados: { acao: \"responder\" }, fazer: responder });",
+        "if (editar) acoes.push({ texto: PALAVRAS.editarMinha, dados: { acao: \"editar\" }, fazer: editar });",
+    ] {
+        assert!(folha.contains(acao), "a folha da mensagem perdeu `{acao}`:\n{folha}");
+    }
+    // Os botões da fileira saem da vista no celular, e ficam no documento: é
+    // neles que a folha aperta. `display: none` não os tira da árvore do DOM.
+    let css = sem_comentarios_css(&ler("celular-sessao.css"));
+    assert!(
+        css.contains(
+            ":root[data-casca=\"celular\"] #lista-mensagens .mensagem-acoes {\n  display: none;"
+        ),
+        "os botões de responder e editar da fileira aparecem no celular, ao lado da folha"
+    );
+    // E o modo de escrever tem saída sem teclado físico: o botão da faixa.
+    let pagina = ler("index.html");
+    assert!(
+        pagina.contains("<button id=\"compor-modo-cancelar\""),
+        "a faixa do modo de escrever não tem botão de cancelar: no celular não há Esc"
+    );
+    assert!(
+        css.contains(
+            ":root[data-casca=\"celular\"] .compor-modo-cancelar {\n  min-height: var(--cel-alvo);"
+        ),
+        "o cancelar da faixa não tem o tamanho de um alvo de dedo no celular"
     );
 }

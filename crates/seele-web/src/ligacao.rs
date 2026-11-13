@@ -22,10 +22,23 @@
 //! §9, do lado de cá: o que se assina é a mensagem que o `seele-proto` monta,
 //! e nunca bytes vindos do fio.
 //!
+//! # A ligação pelo código (ADR 0068)
+//!
+//! Quando o pedido traz o código de uma pessoa, quem atende é a sala pessoal
+//! dela, e a página só sabe o código. A impressão DTLS veio do ponto de
+//! encontro, que não é confiável. Por isso **o `Hello` não existe até a
+//! apresentação conferir**: a ligação nasce em `Etapa::Apresentacao`, com a
+//! fila de saída vazia, e [`Ligacao::apresentada`] confere a assinatura da sala
+//! sobre a impressão DTLS desta conexão, o código contra a chave e o pino da
+//! chave inteira. É a conta do `seele_core::confere_codigo::ConfereCodigo`, com
+//! os mesmos 96 bytes de apresentação. Uma chave que não bate acaba a entrada
+//! sem que nada do que a página diria chegue a quem atendeu.
+//!
 //! Uma recusa sai no JSON do `seele_ffi::ConnectionError`, com as mesmas
 //! regras do `classify_connect_failure` da FFI: a casca diz a mesma frase nas
 //! duas, e a conformidade (`dois_produtores_de_recusa.rs`) confere.
 
+use seele_proto::codigo::Codigo;
 use seele_proto::control::{
     decode, decode_da_lista, encode_em, ClientMessage, ControlError, Lido, ServerMessage,
     MAX_NICKNAME_LEN, NONCE_LEN,
@@ -52,18 +65,26 @@ pub fn quem_sou_eu() -> String {
     )
 }
 
+/// Os bytes da apresentação de uma sala pessoal: a chave Ed25519 e a
+/// assinatura (o `APRESENTACAO_DA_SALA_LEN` do desktop).
+pub const APRESENTACAO_DA_SALA_LEN: usize = 32 + 64;
+
 /// O que a página sabe antes de discar.
 #[derive(Debug, Clone)]
 pub struct Pedido {
-    /// Habilitado apenas após autenticar o bootstrap da sala pessoal.
-    pub sala_pessoal: bool,
+    /// O código de quem se chama, numa ligação pelo código (ADR 0068). Com
+    /// ele, quem atende é uma sala pessoal: o `Hello` espera a apresentação
+    /// ([`Ligacao::apresentada`]), e o `Tocando` é uma resposta legítima.
+    pub codigo: Option<Codigo>,
     /// O apelido digitado.
     pub apelido: String,
     /// A chave pública Ed25519 desta identidade.
     pub chave_publica: [u8; 32],
     /// A impressão do certificado do servidor, o `fp=` do link: é a que a
     /// página escreveu como o `a=fingerprint` do anfitrião, e que o DTLS
-    /// conferiu (contrato da 0.17, D3).
+    /// conferiu (contrato da 0.17, D3). **Numa ligação pelo código ela não vem
+    /// da página**: é a da chave que a sala provou, posta por
+    /// [`Ligacao::apresentada`].
     pub impressao: [u8; 32],
     /// A impressão do certificado DTLS **desta** página nesta conexão (o
     /// `RTCCertificate` efêmero que ela gerou), que a prova D5 leva.
@@ -77,7 +98,9 @@ pub struct Pedido {
 impl Pedido {
     /// O pedido no JSON da página: `{"apelido", "chave_publica", "impressao",
     /// "impressao_dtls", "convite", "aceito"}`, com a chave e as impressões em
-    /// hex (64 dígitos) e os dois últimos podendo faltar.
+    /// hex (64 dígitos) e os dois últimos podendo faltar. Numa ligação pelo
+    /// código, `{"codigo": "XXXX-…"}` no lugar da `impressao`, que a página não
+    /// tem como saber.
     ///
     /// # Errors
     ///
@@ -95,15 +118,22 @@ impl Pedido {
             let hex = texto_de(campo)?.ok_or_else(|| format!("falta `{campo}`"))?;
             bytes_do_hex(&hex).ok_or_else(|| format!("`{campo}` não tem 32 bytes em hex"))
         };
+        let codigo = match texto_de("codigo")? {
+            None => None,
+            Some(texto) => Some(
+                Codigo::ler(&texto).map_err(|erro| format!("`codigo` não é um código: {erro}"))?,
+            ),
+        };
         Ok(Self {
-            sala_pessoal: match lido.get("sala_pessoal") {
-                None | Some(Value::Null) => false,
-                Some(Value::Bool(valor)) => *valor,
-                Some(_) => return Err("`sala_pessoal` não é booleano".into()),
-            },
+            codigo,
             apelido: texto_de("apelido")?.ok_or("falta `apelido`")?,
             chave_publica: trinta_e_dois("chave_publica")?,
-            impressao: trinta_e_dois("impressao")?,
+            // Com um código, a impressão é a da chave que a sala provar.
+            impressao: if codigo.is_some() {
+                [0; 32]
+            } else {
+                trinta_e_dois("impressao")?
+            },
             impressao_dtls: trinta_e_dois("impressao_dtls")?,
             convite: texto_de("convite")?,
             aceito: texto_de("aceito")?,
@@ -123,9 +153,24 @@ pub(crate) fn bytes_do_hex(hex: &str) -> Option<[u8; 32]> {
     Some(bytes)
 }
 
+/// 32 bytes em 64 dígitos hex minúsculos.
+#[must_use]
+pub(crate) fn hex_de(bytes: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    bytes
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
+}
+
 /// Em que ponto do aperto a ligação está.
 #[derive(Debug)]
 enum Etapa {
+    /// Uma ligação pelo código: o `Hello` está guardado, e nada sai antes de a
+    /// apresentação da sala conferir ([`Ligacao::apresentada`]).
+    Apresentacao(Box<Pedido>),
     /// O `Hello` saiu; a primeira resposta é o desafio.
     Desafio,
     /// O desafio chegou; a página está assinando.
@@ -242,7 +287,8 @@ impl Passo {
 /// O aperto de mão e a sessão de uma conexão do navegador.
 #[derive(Debug)]
 pub struct Ligacao {
-    sala_pessoal: bool,
+    /// O código de quem se chama, numa ligação pelo código.
+    codigo: Option<Codigo>,
     etapa: Etapa,
     apelido: String,
     impressao: [u8; 32],
@@ -300,7 +346,7 @@ impl Ligacao {
         }
         let mut ligacao = Self {
             etapa: Etapa::Desafio,
-            sala_pessoal: pedido.sala_pessoal,
+            codigo: pedido.codigo,
             apelido: pedido.apelido.clone(),
             impressao: pedido.impressao,
             impressao_dtls: pedido.impressao_dtls,
@@ -316,8 +362,110 @@ impl Ligacao {
             plataformas: None,
             anuncio_visto: false,
         };
-        ligacao.dizer_ola(pedido)?;
+        ligacao.comecar(pedido)?;
         Ok(ligacao)
+    }
+
+    /// O primeiro passo do aperto: o `Hello`, ou, numa ligação pelo código, a
+    /// espera pela apresentação da sala, com o `Hello` guardado.
+    fn comecar(&mut self, pedido: Pedido) -> Result<(), Value> {
+        if pedido.codigo.is_some() {
+            self.etapa = Etapa::Apresentacao(Box::new(pedido));
+            return Ok(());
+        }
+        self.etapa = Etapa::Desafio;
+        self.dizer_ola(pedido)
+    }
+
+    /// **Confere quem atendeu uma ligação pelo código, antes do `Hello`** (ADR
+    /// 0068; no desktop, `seele_core::confere_codigo::ConfereCodigo`).
+    ///
+    /// `apresentacao` é a mensagem `0x03` da sala (a chave Ed25519 e a
+    /// assinatura dela), e `impressao_dtls` é a impressão com que **o
+    /// navegador conferiu o DTLS desta conexão**: a que o ponto de encontro
+    /// disse, e que a página escreveu como o `a=fingerprint`. Confere, nesta
+    /// ordem:
+    ///
+    /// 1. a assinatura da chave sobre essa impressão
+    ///    (`seele_proto::assinatura::apresentacao_da_sala`), com
+    ///    `verify_strict`: prova que quem tem a chave é quem está do outro lado
+    ///    deste DTLS, e que a pista do ponto era verdadeira;
+    /// 2. o código contra a chave;
+    /// 3. o `pino`, a chave inteira de uma ligação completa anterior, quando há
+    ///    uma: 256 bits, e não os 75 do código.
+    ///
+    /// Com tudo certo, o `Hello` vai para a fila ([`Ligacao::para_o_fio`]), a
+    /// prova passa a amarrar a impressão da chave da sala, e a chave volta para
+    /// a página a fixar depois de uma ligação completa.
+    ///
+    /// # Errors
+    ///
+    /// O JSON do `ConnectionError` do desktop: `CodigoNaoBate` (com `veio:
+    /// null` quando nem era a chave de uma pessoa provada) ou
+    /// `SePassouPorCodigo`. **Depois de uma recusa a ligação acabou**: o
+    /// `Hello` foi largado, e nada sai. Fora de uma ligação pelo código,
+    /// `"Unreachable"`.
+    pub fn apresentada(
+        &mut self,
+        apresentacao: &[u8],
+        impressao_dtls: &[u8; 32],
+        pino: Option<&[u8; 32]>,
+    ) -> Result<[u8; 32], Value> {
+        // Só uma ligação pelo código, e antes do `Hello`, tem o que conferir.
+        // Em qualquer outro ponto a ligação fica como estava.
+        let pedido = match std::mem::replace(&mut self.etapa, Etapa::Fim) {
+            Etapa::Apresentacao(pedido) => pedido,
+            outra => {
+                self.etapa = outra;
+                return Err(json!("Unreachable"));
+            }
+        };
+        let Some(esperado) = pedido.codigo else {
+            return Err(json!("Unreachable"));
+        };
+        let nao_bate = |veio: Option<Codigo>| {
+            json!({ "CodigoNaoBate": {
+                "esperado": esperado.to_string(),
+                "veio": veio.map(|codigo| codigo.to_string()),
+            } })
+        };
+        let Some((chave, assinatura)) = apresentacao
+            .split_at_checked(32)
+            .filter(|_| apresentacao.len() == APRESENTACAO_DA_SALA_LEN)
+            .and_then(|(chave, assinatura)| {
+                Some((
+                    <[u8; 32]>::try_from(chave).ok()?,
+                    <[u8; 64]>::try_from(assinatura).ok()?,
+                ))
+            })
+        else {
+            return Err(nao_bate(None));
+        };
+        let provada = ed25519_dalek::VerifyingKey::from_bytes(&chave).is_ok_and(|verificadora| {
+            verificadora
+                .verify_strict(
+                    &seele_proto::assinatura::apresentacao_da_sala(impressao_dtls),
+                    &ed25519_dalek::Signature::from_bytes(&assinatura),
+                )
+                .is_ok()
+        });
+        if !provada {
+            return Err(nao_bate(None));
+        }
+        let veio = Codigo::da_chave(&chave);
+        if veio != esperado {
+            return Err(nao_bate(Some(veio)));
+        }
+        if pino.is_some_and(|pino| *pino != chave) {
+            return Err(json!({ "SePassouPorCodigo": { "codigo": esperado.to_string() } }));
+        }
+        // A impressão que a prova amarra é a da chave da sala, como no desktop
+        // (`conferir_quem_atendeu`): a sala confere pela dela, e não pelo DTLS
+        // efêmero.
+        self.impressao = seele_proto::transport::certificate_digest(&chave);
+        self.etapa = Etapa::Desafio;
+        self.dizer_ola(*pedido)?;
+        Ok(chave)
     }
 
     fn dizer_ola(&mut self, pedido: Pedido) -> Result<(), Value> {
@@ -365,8 +513,7 @@ impl Ligacao {
             Etapa::Dentro(sessao) => sessao,
             _ => self.guardada.take().ok_or_else(|| json!("NotConnected"))?,
         };
-        self.etapa = Etapa::Desafio;
-        self.sala_pessoal = pedido.sala_pessoal;
+        self.codigo = pedido.codigo;
         self.apelido.clone_from(&pedido.apelido);
         self.impressao = pedido.impressao;
         self.impressao_dtls = pedido.impressao_dtls;
@@ -377,7 +524,9 @@ impl Ligacao {
         // Uma conexão nova: o código da velha não contamina esta.
         self.ficou_para_tras = false;
         self.voltando = Some((sessao, escolhas));
-        self.dizer_ola(pedido)
+        // A volta de uma ligação pelo código confere de novo quem atendeu: a
+        // conexão é outra, e a apresentação de uma não vale na outra.
+        self.comecar(pedido)
     }
 
     /// Os bytes que esperam para ir ao fluxo de controle, já enquadrados. Sai
@@ -560,7 +709,8 @@ impl Ligacao {
                 }
                 vec![Passo::Perdida("o fluxo de controle acabou".into())]
             }
-            Etapa::Desafio
+            Etapa::Apresentacao(_)
+            | Etapa::Desafio
             | Etapa::Assinando
             | Etapa::Resposta
             | Etapa::Anuncio
@@ -589,6 +739,9 @@ impl Ligacao {
 
     fn um_quadro(&mut self, quadro: &[u8]) -> Vec<Passo> {
         match std::mem::replace(&mut self.etapa, Etapa::Fim) {
+            // Quem atendeu falou antes de ser conferido: a página nem disse
+            // `Hello`, e não há o que responder a isto.
+            Etapa::Apresentacao(_) => self.recusar(classificar_protocolo()),
             Etapa::Desafio => self.desafio(quadro),
             Etapa::Assinando => {
                 // O servidor não fala antes da prova: o desktop nem leria.
@@ -734,7 +887,7 @@ impl Ligacao {
     fn resposta(&mut self, resposta: ServerMessage) -> Vec<Passo> {
         match resposta {
             ServerMessage::Tocando { prazo_s }
-                if self.sala_pessoal && (1..=45).contains(&prazo_s) =>
+                if self.codigo.is_some() && (1..=45).contains(&prazo_s) =>
             {
                 self.etapa = Etapa::Tocando;
                 vec![Passo::Tocando { prazo_s }]
@@ -937,7 +1090,7 @@ mod tests {
 
     fn pedido() -> Pedido {
         Pedido {
-            sala_pessoal: false,
+            codigo: None,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -975,15 +1128,241 @@ mod tests {
         }
     }
 
+    /// A semente de quem é chamado pelo código.
+    const DONA: [u8; 32] = [42; 32];
+    /// A impressão do DTLS efêmero da sala, como o ponto a disse à página.
+    const DTLS_DA_SALA: [u8; 32] = [0x5A; 32];
+
+    fn chave_de(semente: [u8; 32]) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&semente)
+    }
+
+    fn codigo_de(semente: [u8; 32]) -> Codigo {
+        Codigo::da_chave(&chave_de(semente).verifying_key().to_bytes())
+    }
+
+    /// A apresentação que a sala de `semente` manda para o DTLS `impressao`:
+    /// os 96 bytes do `seele_server::tls::apresentacao_da_sala`.
+    fn apresentacao_de(semente: [u8; 32], impressao: &[u8; 32]) -> Vec<u8> {
+        use ed25519_dalek::Signer as _;
+        let chave = chave_de(semente);
+        let mut bytes = chave.verifying_key().to_bytes().to_vec();
+        bytes.extend_from_slice(
+            &chave
+                .sign(&seele_proto::assinatura::apresentacao_da_sala(impressao))
+                .to_bytes(),
+        );
+        bytes
+    }
+
+    /// O pedido de uma ligação pelo código de `DONA`.
+    fn pedido_pelo_codigo() -> Pedido {
+        Pedido {
+            codigo: Some(codigo_de(DONA)),
+            impressao: [0; 32],
+            convite: None,
+            ..pedido()
+        }
+    }
+
     fn aguardando_resposta(pessoal: bool) -> Ligacao {
-        let mut pedido = pedido();
-        pedido.sala_pessoal = pessoal;
-        let mut ligacao = Ligacao::abrir(pedido).unwrap();
+        let mut ligacao = if pessoal {
+            let mut ligacao = Ligacao::abrir(pedido_pelo_codigo()).unwrap();
+            ligacao
+                .apresentada(&apresentacao_de(DONA, &DTLS_DA_SALA), &DTLS_DA_SALA, None)
+                .unwrap();
+            ligacao
+        } else {
+            Ligacao::abrir(pedido()).unwrap()
+        };
         ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
             nonce: vec![3; 32],
         }));
         ligacao.assinado(&[9; 64]);
         ligacao
+    }
+
+    /// **Antes da apresentação, nada sai** (ADR 0068): a ligação pelo código
+    /// nasce com a fila vazia, e só a apresentação que confere põe o `Hello`
+    /// nela. A prova que vem depois amarra a impressão da chave da sala, como
+    /// no desktop, e não o DTLS efêmero.
+    #[test]
+    fn pelo_codigo_o_hello_so_existe_depois_de_a_apresentacao_conferir() {
+        let mut ligacao = Ligacao::abrir(pedido_pelo_codigo()).unwrap();
+        assert!(
+            ligacao.para_o_fio().is_empty(),
+            "o `Hello` saiu antes de quem atendeu provar que é o dono do código"
+        );
+        let chave = ligacao
+            .apresentada(&apresentacao_de(DONA, &DTLS_DA_SALA), &DTLS_DA_SALA, None)
+            .expect("a sala certa não foi aceita");
+        assert_eq!(chave, chave_de(DONA).verifying_key().to_bytes());
+        let escritos = escritos(&mut ligacao);
+        assert!(
+            matches!(escritos.as_slice(), [(_, ClientMessage::Hello { .. })]),
+            "depois da apresentação o `Hello` não saiu: {escritos:?}"
+        );
+        let passos = ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+            nonce: vec![3; 32],
+        }));
+        assert_eq!(
+            passos,
+            vec![Passo::Assinar(seele_proto::assinatura::prova_de_cliente_2(
+                &seele_proto::transport::certificate_digest(&chave),
+                &pedido().impressao_dtls,
+                &[3; 32],
+            ))],
+            "a prova não amarra a impressão da chave da sala"
+        );
+    }
+
+    /// **A apresentação de outra chave derruba a entrada** (ADR 0068, o teste
+    /// pedido): quem atendeu prova uma chave, e ela não é a do código discado.
+    /// Nada do que a página diria sai, nem depois.
+    #[test]
+    fn a_apresentacao_de_outra_chave_derruba_a_entrada_antes_do_hello() {
+        const OUTRA: [u8; 32] = [7; 32];
+        let mut ligacao = Ligacao::abrir(pedido_pelo_codigo()).unwrap();
+        let recusa = ligacao
+            .apresentada(&apresentacao_de(OUTRA, &DTLS_DA_SALA), &DTLS_DA_SALA, None)
+            .expect_err("a chave de outra pessoa foi aceita no lugar do dono do código");
+        assert_eq!(
+            recusa,
+            json!({ "CodigoNaoBate": {
+                "esperado": codigo_de(DONA).to_string(),
+                "veio": codigo_de(OUTRA).to_string(),
+            } })
+        );
+        assert!(
+            ligacao.para_o_fio().is_empty(),
+            "o `Hello` saiu para quem não é o dono do código"
+        );
+        // A entrada acabou: nem a apresentação certa a reabre, nem um quadro.
+        assert_eq!(
+            ligacao.apresentada(&apresentacao_de(DONA, &DTLS_DA_SALA), &DTLS_DA_SALA, None),
+            Err(json!("Unreachable"))
+        );
+        assert!(ligacao
+            .chegou(&do_servidor(&ServerMessage::Challenge {
+                nonce: vec![3; 32]
+            }))
+            .is_empty());
+        assert!(ligacao.para_o_fio().is_empty());
+    }
+
+    /// A chave certa, com a assinatura sobre **outro** DTLS: uma apresentação
+    /// copiada de outra conexão, ou uma impressão trocada no caminho pelo ponto.
+    /// E o que nem é a apresentação de uma sala (um servidor atendeu, ou o
+    /// tamanho não é o do formato).
+    #[test]
+    fn a_apresentacao_que_nao_prova_este_dtls_nao_entra() {
+        let de_outro_dtls = apresentacao_de(DONA, &[0x11; 32]);
+        let certa = apresentacao_de(DONA, &DTLS_DA_SALA);
+        let mut curta = certa.clone();
+        curta.pop();
+        let mut longa = certa.clone();
+        longa.push(0);
+        let mut assinatura_trocada = certa.clone();
+        *assinatura_trocada.last_mut().unwrap() ^= 1;
+        for (caso, apresentacao) in [
+            ("a assinatura é sobre outro DTLS", de_outro_dtls),
+            ("um servidor atendeu, sem apresentação", Vec::new()),
+            ("95 bytes", curta),
+            ("97 bytes", longa),
+            ("a assinatura não confere", assinatura_trocada),
+        ] {
+            let mut ligacao = Ligacao::abrir(pedido_pelo_codigo()).unwrap();
+            assert_eq!(
+                ligacao.apresentada(&apresentacao, &DTLS_DA_SALA, None),
+                Err(json!({ "CodigoNaoBate": {
+                    "esperado": codigo_de(DONA).to_string(),
+                    "veio": null,
+                } })),
+                "{caso}"
+            );
+            assert!(ligacao.para_o_fio().is_empty(), "{caso}: o `Hello` saiu");
+        }
+    }
+
+    /// **O pino é a chave inteira** (ADR 0060, «Força»): depois de uma ligação
+    /// completa, uma chave diferente com o mesmo código não entra. Não dá para
+    /// fabricar aqui uma colisão de 75 bits, então o pino é o de outra chave: o
+    /// que se prova é que ele é conferido, e contra a chave provada.
+    #[test]
+    fn o_pino_de_uma_ligacao_anterior_e_conferido_contra_a_chave_inteira() {
+        let da_dona = chave_de(DONA).verifying_key().to_bytes();
+        let mut ligacao = Ligacao::abrir(pedido_pelo_codigo()).unwrap();
+        assert_eq!(
+            ligacao.apresentada(
+                &apresentacao_de(DONA, &DTLS_DA_SALA),
+                &DTLS_DA_SALA,
+                Some(&da_dona)
+            ),
+            Ok(da_dona),
+            "a chave que é a do pino foi recusada"
+        );
+        let mut ligacao = Ligacao::abrir(pedido_pelo_codigo()).unwrap();
+        assert_eq!(
+            ligacao.apresentada(
+                &apresentacao_de(DONA, &DTLS_DA_SALA),
+                &DTLS_DA_SALA,
+                Some(&[9; 32])
+            ),
+            Err(json!({ "SePassouPorCodigo": { "codigo": codigo_de(DONA).to_string() } })),
+            "uma chave que não é a do pino entrou"
+        );
+        assert!(ligacao.para_o_fio().is_empty());
+    }
+
+    /// Quem atendeu fala antes de ser conferido, e a entrada acaba; e uma
+    /// ligação que não é pelo código não tem apresentação a conferir, e segue
+    /// como estava.
+    #[test]
+    fn a_apresentacao_so_vale_numa_ligacao_pelo_codigo_e_antes_do_hello() {
+        let mut ligacao = Ligacao::abrir(pedido_pelo_codigo()).unwrap();
+        assert!(matches!(
+            ligacao
+                .chegou(&do_servidor(&ServerMessage::Challenge {
+                    nonce: vec![3; 32]
+                }))
+                .as_slice(),
+            [Passo::Recusada(_)]
+        ));
+        assert!(ligacao.para_o_fio().is_empty());
+
+        let mut comum = Ligacao::abrir(pedido()).unwrap();
+        assert_eq!(
+            comum.apresentada(&apresentacao_de(DONA, &DTLS_DA_SALA), &DTLS_DA_SALA, None),
+            Err(json!("Unreachable"))
+        );
+        assert!(
+            matches!(
+                escritos(&mut comum).as_slice(),
+                [(_, ClientMessage::Hello { .. })]
+            ),
+            "uma apresentação a mais derrubou a ligação com um servidor"
+        );
+    }
+
+    /// O pedido no JSON da página: o código no lugar da impressão.
+    #[test]
+    fn o_pedido_pelo_codigo_dispensa_a_impressao_e_recusa_um_codigo_torto() {
+        let base = |extra: &str| {
+            format!(
+                r#"{{"apelido":"ana","chave_publica":"{}","impressao_dtls":"{}"{extra}}}"#,
+                "05".repeat(32),
+                "08".repeat(32),
+            )
+        };
+        let codigo = codigo_de(DONA);
+        let lido = Pedido::de_json(&base(&format!(r#","codigo":"{codigo}""#))).unwrap();
+        assert_eq!(lido.codigo, Some(codigo));
+        assert!(
+            Pedido::de_json(&base("")).is_err(),
+            "sem código, a impressão continua obrigatória"
+        );
+        assert!(Pedido::de_json(&base(r#","codigo":"AAAA-AAAA-AAAA-AAAA""#)).is_err());
+        assert!(Pedido::de_json(&base(r#","codigo":7"#)).is_err());
     }
 
     #[test]

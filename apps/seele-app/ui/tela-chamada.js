@@ -140,7 +140,7 @@ function desenharOPalcoDosMods(snapshot) {
   const acrescimos = naCasca ? conteudoDasContribuicoes("chamada.palco") : [];
   repovoar($("palco-de-mods-miolo"), desenho ? [desenho] : []);
   repovoar($("palco-de-mods-acrescimos"), acrescimos);
-  $("palco-de-mods-acrescimos").hidden = acrescimos.length === 0;
+  porOEscondido($("palco-de-mods-acrescimos"), acrescimos.length === 0);
 
   const tem = Boolean(desenho) || acrescimos.length > 0;
   if (!tem) palcoDosModsEscondido = true;
@@ -149,11 +149,11 @@ function desenharOPalcoDosMods(snapshot) {
     ...(desenho ? [escolhida.mod] : []),
     ...acrescimos.map((no) => no.dataset.mod),
   ])];
-  $("palco-de-mods-quem").textContent = tem ? `PALCO DE ${quem.join(" E ")}` : "";
+  porOTexto($("palco-de-mods-quem"), tem ? `PALCO DE ${quem.join(" E ")}` : "");
   const aFrente = tem && !palcoDosModsEscondido;
-  palco.hidden = !aFrente;
-  $("vista-chamada").toggleAttribute("data-palco-de-mods", aFrente);
-  $("palco-de-mods-ver-o-palco").hidden = !(tem && palcoDosModsEscondido);
+  porOEscondido(palco, !aFrente);
+  if ($("vista-chamada").hasAttribute("data-palco-de-mods") !== aFrente) $("vista-chamada").toggleAttribute("data-palco-de-mods", aFrente);
+  porOEscondido($("palco-de-mods-ver-o-palco"), !(tem && palcoDosModsEscondido));
 
   // Quem está no palco, e onde: a substituição no miolo, os acréscimos na
   // faixa. Um MOD que faz os dois mede pelo miolo.
@@ -264,6 +264,12 @@ function desenharPalco(snapshot, voice_room) {
   const palco = $("palco");
   const tela = snapshot ? snapshot.tela : null;
 
+  // **«Câmera» ou «tela», pelo que a abertura do fluxo declarou** — e nenhum
+  // dos dois antes de ela chegar (`palavrasDaTransmissao`, em `camera.js`).
+  const palavras = palavrasDaTransmissao(tela ? tela.tela : null);
+  $("palco-titulo-tipo").textContent = palavras.titulo;
+  palco.dataset.tipo = palavras.tipo ?? "";
+
   if (!tela) {
     palco.dataset.transmitindo = "nao";
     $("palco-razao").textContent = "";
@@ -296,10 +302,10 @@ function desenharPalco(snapshot, voice_room) {
   // alguém está, e não um nome que esta janela inventaria.
   const dono = voice_room ? voice_room.people.find((pessoa) => pessoa.id === tela.de) : null;
   $("palco-quem").textContent = tela.e_minha
-    ? "SUA TELA"
+    ? palavras.sua
     : dono
-      ? `${apelidoApresentado(dono.id, dono.nickname)} · TELA`
-      : "ALGUÉM DESTA SALA · TELA";
+      ? `${apelidoApresentado(dono.id, dono.nickname)} · ${palavras.rotulo}`
+      : `ALGUÉM DESTA SALA · ${palavras.rotulo}`;
 
   // Só a contagem, e ela é a do **servidor**: `ScreenViewers` conta assinaturas
   // de verdade. A resolução saiu daqui junto com as três caixas de métrica — ela
@@ -324,11 +330,18 @@ function desenharPalco(snapshot, voice_room) {
   // não inventa a causa.
   const parada = $("palco-parada");
   parada.hidden = !tela.parada;
-  parada.textContent = tela.parada ? (PARADAS[tela.parada] ?? "A TELA PAROU") : "";
+  parada.textContent = tela.parada
+    ? (palavras.tipo === "camera"
+      ? FRASES_DA_CAMERA.paradas[tela.parada] ?? FRASES_DA_CAMERA.paradaDesconhecida
+      : PARADAS[tela.parada] ?? "A TELA PAROU")
+    : "";
 
   desenharControlesDoPalco(tela);
   desenharSomDoPalco().catch((falha) => console.warn("som do palco:", falha));
-  botaoDeCinema(true);
+  // A TELA CHEIA é da imagem que chega pelo decodificador. A própria câmera
+  // não passa por ele — é a prévia da mídia —, e o botão abriria um quadro
+  // vazio em tela cheia.
+  botaoDeCinema(!ehAMinhaCamera(tela.tela));
 }
 
 /**
@@ -789,7 +802,7 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
   const dentro = voice_room != null;
 
   const sair = $("operador-sair");
-  sair.dataset.alvo = dentro ? "sala" : "servidor";
+  porODado(sair, "alvo", dentro ? "sala" : "servidor");
   const rotuloDaSaida = dentro ? "SAIR DA SALA" : "SAIR DO SERVIDOR";
   // **Ícone, e o rótulo em palavras para quem não vê** (0.19, pedido do dono):
   // por extenso, os dois botões ficavam fora de proporção ao lado do microfone
@@ -800,18 +813,27 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
     sair.setAttribute("aria-label", rotuloDaSaida);
     sair.replaceChildren(glifo(dentro ? "xis" : "porta"));
   }
-  sair.title = dentro
+  porOTitulo(sair, dentro
     ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
-    : "sair deste servidor e voltar à tela de entrada";
+    : "sair deste servidor e voltar à tela de entrada");
 
+  // **A câmera é uma transmissão, e não é a tela.** O que está no ar pela
+  // câmera desta janela não acende o COMPARTILHAR nem o TROCAR TELA: quem a
+  // desliga é o controle dela, ao lado. Com a câmera ligada o COMPARTILHAR
+  // volta a oferecer a tela — que entra no lugar da câmera.
+  desenharACamera(voice_room, transmissao);
+  // A queda dita fica até a pessoa recomeçar ou sair da sala: com a
+  // transmissão do retrato, antes de a câmera a tirar da conta do botão.
+  desenharAQuedaDaTela(voice_room, transmissao);
+  if (cameraLigada()) transmissao = null;
   const trocar = $("operador-trocar-tela");
-  trocar.hidden = !dentro || !transmissao;
+  porOEscondido(trocar, !dentro || !transmissao);
   const outro = $("operador-vista");
-  outro.dataset.modo = transmissao ? "parar" : "compartilhar";
-  outro.setAttribute("aria-pressed", transmissao ? "true" : "false");
+  porODado(outro, "modo", transmissao ? "parar" : "compartilhar");
+  porOAtributo(outro, "aria-pressed", transmissao ? "true" : "false");
   // `hidden`, e não um estilo: fora de sala este botão não tem ofício nenhum, e
   // um botão desabilitado prometeria que existe um jeito de habilitá-lo aqui.
-  outro.hidden = !dentro;
+  porOEscondido(outro, !dentro);
   if (dentro) {
     // **Ícone também** (0.19, pedido do dono): a fileira do operador é uma
     // linha só de ícones iguais, e «COMPARTILHAR» por extenso a quebrava. A
@@ -825,9 +847,9 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
     // a tem), o botão fica à vista, apagado, com o porquê; o clique abre a
     // caixa, que diz o mesmo — nada começa e quebra no meio.
     const semTela = transmissao ? null : porQueNaoHaTela();
-    outro.setAttribute("aria-disabled", semTela ? "true" : "false");
-    outro.dataset.indisponivel = semTela ? "sim" : "nao";
-    outro.title = transmissao ? "parar de compartilhar a tela" : semTela ?? `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`;
+    porOAtributo(outro, "aria-disabled", semTela ? "true" : "false");
+    porODado(outro, "indisponivel", semTela ? "sim" : "nao");
+    porOTitulo(outro, transmissao ? "parar de compartilhar a tela" : semTela ?? `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`);
   }
 }
 

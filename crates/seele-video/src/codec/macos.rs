@@ -61,6 +61,10 @@ const FORMATO_I420: u32 = u32::from_be_bytes(*b"y420");
 /// H.264, para o `codec_type` da sessão.
 const H264: CMVideoCodecType = u32::from_be_bytes(*b"avc1");
 
+/// O nome deste codificador, como a tela o mostra. Ver
+/// [`super::CodificaVideo::nome`].
+pub const NOME_DO_VIDEOTOOLBOX: &str = "VideoToolbox";
+
 /// A fila que o retorno de chamada enche e o [`Codificador`] esvazia.
 type Fila = Arc<Mutex<VecDeque<QuadroCodificado>>>;
 
@@ -595,6 +599,10 @@ impl Codificador {
 }
 
 impl super::CodificaVideo for Codificador {
+    fn nome(&self) -> &str {
+        NOME_DO_VIDEOTOOLBOX
+    }
+
     fn medidas(&self) -> (usize, usize) {
         self.medidas
     }
@@ -800,6 +808,13 @@ mod testes {
                 return;
             }
         };
+
+        // Pela costura, como a cola o lê: é o nome que sobe ao retrato.
+        assert_eq!(
+            super::super::CodificaVideo::nome(&codificador),
+            NOME_DO_VIDEOTOOLBOX,
+            "o codificador do sistema não diz o próprio nome a quem o armou"
+        );
 
         let saiu = codificador
             .codificar(&quadro(resolucao, 0), true)

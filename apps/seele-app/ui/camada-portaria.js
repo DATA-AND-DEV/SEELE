@@ -537,9 +537,11 @@ function fecharPortaria() {
  * hospedando, `estado_da_porta` responde `hospedando: false` na hora, o rótulo
  * volta a ser a palavra sem estado e a faixa some.
  *
- * O toque no ombro com a **janela fechada** — uma notificação do sistema — não
- * está aqui: ela é do `tauri-plugin-notification`, que não está nas
- * dependências. É o que sobrou da pendência 23, item 1.
+ * O toque no ombro com a **janela fora da frente** — a notificação do sistema,
+ * que era o que sobrava da pendência 23, item 1 — sai daqui também: a mesma
+ * leitura que acende a faixa entrega as chaves de quem espera a
+ * `notificacaoDoSistema.notarPorta`, e a regra de lá decide (só com a
+ * preferência ligada, só com a janela fora da frente, uma vez por batida).
  */
 async function atualizarPorta() {
   try {
@@ -559,7 +561,11 @@ async function atualizarPorta() {
     // pedido pela identidade dele — o servidor hospedado, a geração da
     // hospedagem, a impressão e o instante da batida —, e não por um número.
     const pedidos = await invoke("pedidos_da_portaria");
-    avisarQueBatem(chavesDosEsperando(estado, pedidos));
+    const esperando = chavesDosEsperando(estado, pedidos);
+    avisarQueBatem(esperando);
+    // Depois da faixa, e com as mesmas chaves: o que a janela avisa por dentro
+    // conta como dito, e uma batida não vira notificação duas vezes.
+    globalThis.notificacaoDoSistema?.notarPorta(esperando, hospedagemDaPorta(estado).nome);
   } catch (falha) {
     console.warn("estado_da_porta:", falha);
   }

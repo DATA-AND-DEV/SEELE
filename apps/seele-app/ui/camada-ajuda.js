@@ -34,6 +34,8 @@ function abrirAjuda() {
   // trocou em ATALHOS aprenderia aqui a tecla de antes. A cada abertura, porque
   // ela pode ter mudado desde a última.
   $("ajuda-tecla-falar").textContent = nomeDaTecla(teclaDeFalar);
+  // Uma falha de abrir o navegador é da abertura em que aconteceu.
+  $("ajuda-apoio-estado").hidden = true;
   $("ajuda").hidden = false;
   $("ajuda").focus();
   anunciar("Ajuda. O vocabulário do SEELE e as teclas. Escape fecha.");
@@ -55,6 +57,22 @@ function fecharAjuda() {
   focoAntesDaAjuda = null;
 }
 
+/**
+ * Abre a página de apoio (`PAGINA_DE_APOIO`, de `frases.js`) **fora desta janela**, pelo mesmo caminho do link de
+ * uma mensagem. Se o sistema não abrir, a ajuda diz o endereço: um botão que
+ * não faz nada e não conta é o defeito que este repositório mais pagou.
+ */
+function apoiarOSeele() {
+  const estado = $("ajuda-apoio-estado");
+  estado.hidden = true;
+  invoke("abrir_no_navegador", { url: PAGINA_DE_APOIO }).catch(() => {
+    estado.textContent = `Não deu para abrir o navegador. O endereço é ${PAGINA_DE_APOIO.replace("https://", "")}`;
+    estado.hidden = false;
+    anunciar(estado.textContent);
+  });
+}
+
+$("ajuda-apoiar").addEventListener("click", apoiarOSeele);
 $("ajuda-fechar").addEventListener("click", fecharAjuda);
 fecharAoClicarFora("ajuda", fecharAjuda);
 $("ajuda-abrir").addEventListener("click", abrirAjuda);

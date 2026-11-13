@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 # ADR 0002: a shell-facing crate sees `seele-core` and nothing else. ADR 0018:
 # the shape here is what `uniffi` requires, without the dependency until M6

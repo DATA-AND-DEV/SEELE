@@ -153,7 +153,7 @@ async fn conectar_e_falar(
         .await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace
-        .dizer(ChannelId(LINE), o_que.to_owned(), proxima_chave())
+        .dizer(ChannelId(LINE), o_que.to_owned(), None, proxima_chave())
         .await?;
 
     let ouviu = esperar(&mut enlace, Duration::from_secs(15), |aviso| {

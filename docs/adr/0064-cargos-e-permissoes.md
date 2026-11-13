@@ -85,3 +85,12 @@ manda e quem chegou primeiro não; o quadro novo chega a todas as sessões; o at
 a revisão velha, a autoconcessão do Comandante e a concessão do que não se tem são recusadas pelo
 servidor; tudo atravessa o reinício; dois servidores e duas sessões da mesma pessoa não se misturam. Não
 medido aqui: os datagramas de quem não lê o canal de controle (o teste é do servidor, no gancho acima).
+
+## Emenda de 10/11/2026: a câmera é da mesma permissão
+
+A 1.0 trouxe a câmera (protocolo 13, `ScreenSource::Camera`). Ela vai pelo caminho da tela — o mesmo
+`StartScreenShare`, o mesmo fluxo — e **no lugar dela**, e por isso não ganhou um bit: quem tem
+`ShareScreen` mostra a tela ou a câmera, e quem não tem não mostra nenhuma das duas. Revogar
+`ShareScreen` encerra na hora a transmissão que estiver no ar, seja qual for. Na tela de cargos a
+permissão diz «Mostrar a própria tela, ou a câmera».
+

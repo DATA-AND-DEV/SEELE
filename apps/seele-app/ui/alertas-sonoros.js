@@ -502,3 +502,11 @@ const alertasSonoros = (() => {
     notarEnlace,
   });
 })();
+
+// **O módulo também é propriedade do objeto global.** Um `const` do topo de um
+// script clássico não vira propriedade de `globalThis`, e sete ganchos do
+// produto chamam `globalThis.alertasSonoros?.…` (sala, enlace, porta, toque,
+// conversa por link): com o `?.` em cima de `undefined`, nenhum deles tocava
+// nada, calado, desde que os alertas nasceram na 0.19 (medido em 10/11/2026 no
+// Chromium e no WebKit). Dito aqui, uma vez, em vez de em cada gancho.
+globalThis.alertasSonoros = alertasSonoros;

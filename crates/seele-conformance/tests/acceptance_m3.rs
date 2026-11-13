@@ -99,7 +99,7 @@ async fn a_restarted_server_keeps_its_history() -> Result<()> {
         let mut marcela = connect(address, "marcela", &key(1)).await?;
         marcela.join_channel(LINE).await?;
         marcela
-            .send_message(LINE, "verificando harmônicos", ClientMessageId(1))
+            .send_message(LINE, "verificando harmônicos", None, ClientMessageId(1))
             .await?;
 
         // The broadcast is the confirmation: it happens after the commit.
@@ -185,7 +185,7 @@ async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     marcela
-        .send_message(LINE, "sync caiu aqui", ClientMessageId(1))
+        .send_message(LINE, "sync caiu aqui", None, ClientMessageId(1))
         .await?;
 
     let event = wait_for(&mut rafael, |event| {
@@ -215,7 +215,7 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
     marcela.join_channel(LINE).await?;
 
     marcela
-        .send_message(LINE, "uma vez", ClientMessageId(7))
+        .send_message(LINE, "uma vez", None, ClientMessageId(7))
         .await?;
     let first = wait_for(&mut marcela, |event| {
         matches!(event, ServerMessage::MessageReceived { .. })
@@ -223,7 +223,7 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
     .await?;
 
     marcela
-        .send_message(LINE, "uma vez", ClientMessageId(7))
+        .send_message(LINE, "uma vez", None, ClientMessageId(7))
         .await?;
     tokio::time::sleep(Duration::from_millis(600)).await;
 
@@ -277,7 +277,7 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
     let mut observer = connect(address, "observador", &key(3)).await?;
     observer.join_channel(LINE).await?;
     observer
-        .send_message(LINE, "não deveria passar", ClientMessageId(1))
+        .send_message(LINE, "não deveria passar", None, ClientMessageId(1))
         .await?;
 
     // **A recusa passou a dizer de qual mensagem ela fala.**
@@ -417,7 +417,12 @@ async fn history_pages_backwards_without_gaps() -> Result<()> {
     marcela.join_channel(LINE).await?;
     for index in 1..=6_u64 {
         marcela
-            .send_message(LINE, &format!("mensagem {index}"), ClientMessageId(index))
+            .send_message(
+                LINE,
+                &format!("mensagem {index}"),
+                None,
+                ClientMessageId(index),
+            )
             .await?;
     }
     tokio::time::sleep(Duration::from_millis(600)).await;

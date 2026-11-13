@@ -251,6 +251,94 @@ async function principal() {
     await esperar(1000);
     const escutaAposRecusa = await aba.evaluate(async () => ({ chamadas: window.bancada.pediuCaptura, ...(await window.bancada.ouvinte.contas()) }));
     confere("recusar captura preserva escuta", escutaAposRecusa.chamadas === 1 && escutaAposRecusa.contexto === "running" && escutaAposRecusa.pagina.decodificados > escutaSemMic.pagina.decodificados, JSON.stringify(escutaAposRecusa));
+    // **A saída que o sistema pausa volta sozinha com a página à vista**, e
+    // com a página escondida fica pausada até a volta. No celular, outro
+    // aplicativo que toca som toma o áudio e o navegador pausa a tag; ninguém
+    // a retomava, e quem voltava para a sala não ouvia mais nada.
+    const pausa = await aba.evaluate(async () => {
+      const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      const tags = [...document.querySelectorAll("audio")].filter((tag) => tag.srcObject && !tag.paused);
+      const fingir = (escondida) => {
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => escondida });
+        document.dispatchEvent(new Event("visibilitychange"));
+      };
+      // À vista: a pausa do sistema é desfeita na hora.
+      for (const tag of tags) tag.pause();
+      await esperar(300);
+      const aVista = tags.map((tag) => tag.paused);
+      // Escondida: a saída fica pausada (retomar seria tomar o áudio do outro aplicativo)…
+      fingir(true);
+      for (const tag of tags) tag.pause();
+      await esperar(300);
+      const escondida = tags.map((tag) => tag.paused);
+      // …e volta quando a página volta.
+      fingir(false);
+      await esperar(300);
+      const naVolta = tags.map((tag) => tag.paused);
+      delete document.hidden;
+      return { tags: tags.length, aVista, escondida, naVolta };
+    });
+    confere("saída pausada", pausa.tags > 0, `nenhuma tag de áudio tocando para pausar: ${JSON.stringify(pausa)}`);
+    confere("saída pausada", pausa.aVista.every((p) => !p), `com a página à vista, a saída pausada não voltou: ${JSON.stringify(pausa)}`);
+    confere("saída pausada", pausa.escondida.every((p) => p), `com a página escondida, a saída foi retomada: ${JSON.stringify(pausa)}`);
+    confere("saída pausada", pausa.naVolta.every((p) => !p), `na volta da página, a saída não voltou: ${JSON.stringify(pausa)}`);
+
+    // **A saída direta** (`?saida=direta`): o som da sala sai pelo contexto, sem
+    // a tag `<audio>` que o sistema pausa quando outro aplicativo toca. Ela
+    // toca; não cria tag; e o contexto que o sistema cala é dito como saída
+    // pausada, volta sozinho com a página à vista e espera a volta com ela
+    // escondida. O que a bancada **não** prova é o que só um celular prova:
+    // que o som direto não entra na disputa pela saída.
+    const direta = await aba.evaluate(async () => {
+      const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      const fingir = (escondida) => {
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => escondida });
+        document.dispatchEvent(new Event("visibilitychange"));
+      };
+      const tagsAntes = document.querySelectorAll("audio").length;
+      const eventos = [];
+      const Original = window.AudioContext;
+      let ctx = null;
+      window.AudioContext = class extends Original { constructor(...a) { super(...a); ctx = this; } };
+      const { instance } = await WebAssembly.instantiate(window.bancada.bytes, {});
+      const voz = criarVozDoNavegador({
+        wasm: instance.exports, bytesDoWasm: window.bancada.bytes, porOndeSai: "direta",
+        aoAcontecer: (evento) => { if (evento.tipo === "saida") eventos.push(evento.estado); },
+      });
+      try { await voz.ligar({ somenteOuvir: true }); } finally { window.AudioContext = Original; }
+      const doOuvinte = window.bancada.entregarAoOuvinte;
+      let entregar = null;
+      voz.entrar({ enviar: () => false, ouvir(fn) { entregar = fn; return () => { entregar = null; }; } }, 43);
+      window.bancada.entregarAoOuvinte = (...a) => { doOuvinte?.(...a); entregar?.(...a); };
+      await voz.reproducaoPronta();
+      await esperar(1000);
+      const tocando = await voz.contas();
+      const tagsDepois = document.querySelectorAll("audio").length;
+      // À vista: o sistema cala o contexto, e ele volta.
+      await ctx.suspend();
+      await esperar(400);
+      const aVista = ctx.state;
+      // Escondida: fica calado…
+      fingir(true);
+      await ctx.suspend();
+      await esperar(400);
+      const escondida = ctx.state;
+      // …e volta com a página.
+      fingir(false);
+      await esperar(400);
+      const naVolta = ctx.state;
+      delete document.hidden;
+      window.bancada.entregarAoOuvinte = doOuvinte;
+      await voz.desligar();
+      return { tagsAntes, tagsDepois, comSom: tocando.reproducao.blocosComSom, contexto: tocando.contexto, aVista, escondida, naVolta, eventos };
+    });
+    confere("saída direta", direta.tagsDepois === direta.tagsAntes, `a saída direta criou uma tag de áudio: ${JSON.stringify(direta)}`);
+    confere("saída direta", direta.comSom > 0 && direta.contexto === "running", `a saída direta não tocou: ${JSON.stringify(direta)}`);
+    confere("saída direta", direta.aVista === "running", `com a página à vista, o contexto calado não voltou: ${JSON.stringify(direta)}`);
+    confere("saída direta", direta.escondida === "suspended", `com a página escondida, o contexto foi retomado: ${JSON.stringify(direta)}`);
+    confere("saída direta", direta.naVolta === "running", `na volta da página, o contexto não voltou: ${JSON.stringify(direta)}`);
+    confere("saída direta", direta.eventos.includes("pausada") && direta.eventos.at(-1) === "tocando", `o contexto calado não foi dito como saída pausada: ${JSON.stringify(direta)}`);
+
     await aba.evaluate(async () => { window.bancada.restaurarCaptura(); await window.bancada.ouvinte.desligar(); });
 
     // 2. O mudo para o envio; o isolamento cala a saída.

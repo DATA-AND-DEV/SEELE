@@ -9,7 +9,12 @@
 //!   não há portaria, e o dono só conecta ao atender. Sem a conta do dono criada
 //!   antes de aceitar, o primeiro atendido viraria a Comandante (o achado A2);
 //! - a sala não manda a lista de membros (D-fio-4);
-//! - a sala se registra assinada no ponto, e quem liga a acha pelo código.
+//! - a sala se registra assinada no ponto, e quem liga a acha pelo código;
+//! - **a página acha a sala pelo sinal, com a impressão DTLS que ela apresenta**
+//!   (ADR 0068): o que o ponto devolve é o certificado com que a sala atende;
+//! - **três pessoas na mesma ligação** (ADR 0068): a terceira liga para o código
+//!   de quem hospeda, é atendida com a conversa em curso, os três se ouvem, e
+//!   todos leem o fim da chamada quando quem hospeda sai.
 //!
 //! Todo ponto daqui é `127.0.0.1`, e os guardas das duas pontas reprovariam um
 //! teste que perguntasse à VPS de produção.
@@ -27,10 +32,10 @@ use std::time::Duration;
 use ed25519_dalek::SigningKey;
 use seele_core::confere_codigo::chave_do_pino;
 use seele_core::encontro::{localizar3, Localizacao, PRAZO_DO_QUARTO};
-use seele_core::enlace::{Destino, Enlace, Esperada};
+use seele_core::enlace::{Aviso as AvisoDoEnlace, Destino, Enlace, Esperada};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::codigo::Codigo;
-use seele_proto::control::{Permission, ServerMessage};
+use seele_proto::control::{DisconnectReason, Permission, ServerMessage};
 use seele_proto::encontro::{Marcas, Vizinhanca};
 use seele_server::alcance::encontro::EstadoDoRegistro;
 use seele_server::hospedagem::Hospedagem;
@@ -45,6 +50,8 @@ mod vaga;
 const DONO: u8 = 1;
 /// A semente de quem liga.
 const CONVIDADO: u8 = 2;
+/// A semente da terceira pessoa, que liga com a conversa em curso.
+const TERCEIRA: u8 = 3;
 
 fn chave(semente: u8) -> SigningKey {
     SigningKey::from_bytes(&[semente; 32])
@@ -312,4 +319,306 @@ async fn a_sala_que_fecha_diz_chamada_encerrada_e_nao_servidor_encerrando() {
         )),
         "a sala se despediu sem dizer que a ligação acabou: {depois:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Três na mesma ligação (ADR 0068, decisão 4)
+// ---------------------------------------------------------------------------
+
+/// Liga para a sala de `DONO` pelo código, com o `Enlace` do produto. A chave
+/// de `DONO` entra sem tocar; qualquer outra toca e espera quem recebe.
+async fn ligar(sala: SocketAddr, semente: u8, apelido: &str) -> Enlace {
+    let codigo = codigo_de(DONO);
+    Enlace::conectar(
+        Destino {
+            servidor: sala,
+            nome_tls: seele_proto::transport::NOME_DA_SALA.into(),
+            chave_do_pin: chave_do_pino(&codigo),
+            apelido: apelido.into(),
+            segredo: None,
+            esperada: Some(Esperada::Codigo(codigo)),
+            o_pino_prova_o_servidor: false,
+            aceito: None,
+        },
+        chave(semente),
+        Arc::new(MemoryPinStore::new()) as Arc<dyn PinStore>,
+    )
+    .await
+    .unwrap_or_else(|falha| panic!("{apelido} não entrou na ligação: {falha:?}"))
+}
+
+/// Espera o toque de `semente` na recepção, e o atende.
+async fn atender_quem_toca(
+    recepcao: &seele_server::recepcao::Recepcao,
+    avisos: &mut tokio::sync::broadcast::Receiver<Aviso>,
+    semente: u8,
+) {
+    let toque = loop {
+        let aviso = tokio::time::timeout(Duration::from_secs(10), avisos.recv())
+            .await
+            .expect("quem recebe não ficou sabendo que tocava")
+            .unwrap();
+        if let Aviso::Tocou { toque, codigo, .. } = aviso {
+            if codigo == codigo_de(semente) {
+                break toque;
+            }
+        }
+    };
+    assert!(recepcao.atender(toque), "o toque não estava mais tocando");
+}
+
+/// Um datagrama de voz bem-formado de quem tem este `ssrc`.
+fn voz(de: &Enlace, seq: u16) -> Vec<u8> {
+    let cabecalho = seele_proto::MediaHeader {
+        ssrc: de.sessao().ssrc.get(),
+        seq,
+        timestamp: u32::from(seq) * 960,
+    };
+    let mut bytes = vec![0_u8; seele_proto::MAX_DATAGRAM_LEN];
+    let tamanho = cabecalho
+        .encode_datagram(b"tres na mesma ligacao", &mut bytes)
+        .expect("um datagrama bem-formado");
+    bytes.truncate(tamanho);
+    bytes
+}
+
+/// A voz de `de` chega a `para`? Tenta por até dez segundos, com sequências
+/// novas a cada volta: sentar na sala é confirmado por silêncio, e a primeira
+/// voz pode sair antes de o servidor ter sentado os dois. A máquina de quem
+/// valida roda outras baterias junto, e por isso a margem é larga.
+async fn ouve(de: &Enlace, para: &Enlace, base: u16) -> bool {
+    let canal = para.media();
+    let fim = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut seq = base;
+    while tokio::time::Instant::now() < fim {
+        let mandadas: Vec<Vec<u8>> = (0..3).map(|i| voz(de, seq.wrapping_add(i))).collect();
+        seq = seq.wrapping_add(3);
+        for uma in &mandadas {
+            de.media().send(uma.clone()).expect("mandar a voz");
+        }
+        let volta = tokio::time::Instant::now() + Duration::from_millis(400);
+        loop {
+            let falta = volta.saturating_duration_since(tokio::time::Instant::now());
+            if falta.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(falta, canal.next()).await {
+                Ok(Ok(bytes)) if mandadas.contains(&bytes) => return true,
+                Ok(Ok(_)) => {}
+                _ => break,
+            }
+        }
+    }
+    false
+}
+
+/// Lê o enlace até a despedida, e devolve a razão dela. `None` quando ele
+/// acaba sem dizer por quê, ou não diz nada em dez segundos.
+async fn despedida(enlace: &mut Enlace) -> Option<DisconnectReason> {
+    let fim = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let falta = fim.saturating_duration_since(tokio::time::Instant::now());
+        if falta.is_zero() {
+            return None;
+        }
+        match tokio::time::timeout(falta, enlace.proximo()).await {
+            Ok(AvisoDoEnlace::Mensagem(mensagem)) => {
+                if let ServerMessage::Disconnecting { reason } = *mensagem {
+                    return Some(reason);
+                }
+            }
+            Ok(AvisoDoEnlace::Encerrado(seele_core::enlace::Motivo::Moderado(razao))) => {
+                return Some(razao);
+            }
+            Ok(AvisoDoEnlace::Encerrado(_)) | Err(_) => return None,
+            Ok(_) => {}
+        }
+    }
+}
+
+/// **Três na mesma ligação** (ADR 0068, decisão 4): A liga para B, e B atende;
+/// C liga para o código de B com a conversa em curso, e B atende; os três
+/// recebem a voz uns dos outros; B sai, e A e C leem o fim da chamada.
+///
+/// É o grupo da 1.0, de ponta a ponta, com o `Enlace` do produto e a sala de
+/// verdade. O protocolo não mudou para isto: o `Tocando`, a campainha e o teto
+/// de 6 (`TETO_DA_LIGACAO`, ADR 0059) já existiam, e o que faltava era alguém
+/// passar por aqui. Baixar o teto para 2 reprova este teste na ligação de C.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tres_na_mesma_ligacao_se_ouvem_e_leem_o_fim_quando_quem_hospeda_sai() {
+    let _vaga = vaga::minha();
+    let sala = subir_a_sala(None).await;
+    let recepcao = sala.recepcao().expect("a sala subiu sem campainha");
+    let mut avisos = recepcao.assinar();
+    let onde = local(&sala);
+
+    // A liga para B. B atende, e entra na própria sala (o que o app faz ao
+    // atender): a chave de quem hospeda não toca.
+    let a_ligando = tokio::spawn(ligar(onde, CONVIDADO, "ana"));
+    atender_quem_toca(&recepcao, &mut avisos, CONVIDADO).await;
+    let mut b = ligar(onde, DONO, "dona").await;
+    let mut a = tokio::time::timeout(Duration::from_secs(10), a_ligando)
+        .await
+        .expect("quem foi atendido não entrou em 10 s")
+        .unwrap();
+
+    // C liga para o código de B com a conversa em curso, e B atende.
+    let c_ligando = tokio::spawn(ligar(onde, TERCEIRA, "caio"));
+    atender_quem_toca(&recepcao, &mut avisos, TERCEIRA).await;
+    let mut c = tokio::time::timeout(Duration::from_secs(10), c_ligando)
+        .await
+        .expect("a terceira pessoa foi atendida e não entrou em 10 s")
+        .unwrap();
+
+    // Os três sentam na sala de voz da ligação.
+    let sala_de_voz = b
+        .sessao()
+        .voice_rooms
+        .first()
+        .expect("a sala pessoal não tem sala de voz")
+        .id;
+    for enlace in [&a, &b, &c] {
+        enlace
+            .entrar_na_voice_room(sala_de_voz, None)
+            .await
+            .expect("sentar na sala da ligação");
+    }
+
+    // Os seis sentidos: cada um recebe a voz dos outros dois.
+    let pares: [(&Enlace, &Enlace, &str, u16); 6] = [
+        (&a, &b, "A → B", 100),
+        (&b, &a, "B → A", 1_100),
+        (&a, &c, "A → C", 2_100),
+        (&c, &a, "C → A", 3_100),
+        (&b, &c, "B → C", 4_100),
+        (&c, &b, "C → B", 5_100),
+    ];
+    for (de, para, sentido, base) in pares {
+        assert!(
+            ouve(de, para, base).await,
+            "numa ligação de três, a voz não chegou no sentido {sentido}"
+        );
+    }
+
+    // B sai: quem hospeda saindo encerra a ligação, e os dois leem isso.
+    b.sair().await;
+    for (enlace, quem) in [(&mut a, "A"), (&mut c, "C")] {
+        assert_eq!(
+            despedida(enlace).await,
+            Some(DisconnectReason::ChamadaEncerrada),
+            "quem hospeda saiu, e {quem} não leu o fim da chamada"
+        );
+    }
+    sala.encerrar().await;
+}
+
+// ---------------------------------------------------------------------------
+// A página acha a sala pelo sinal (ADR 0068)
+// ---------------------------------------------------------------------------
+
+/// O ponto de encontro com o sinal HTTP do navegador, sobre o mesmo quarto.
+fn subir_o_ponto_com_o_sinal() -> (SocketAddr, SocketAddr) {
+    let quarto = Arc::new(seele_encontro::Quarto::novo());
+    let ponto = seele_encontro::Ponto::abrir_com_quarto(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        Vizinhanca::TambemAqui,
+        Arc::clone(&quarto),
+    )
+    .expect("a escuta tem que abrir");
+    let onde = ponto.endereco().expect("o socket sabe onde ligou");
+    std::thread::spawn(move || {
+        let _ = ponto.servir();
+    });
+    let sinal = seele_encontro::sinal::Sinal::abrir(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        quarto,
+        Vizinhanca::TambemAqui,
+        vec!["*".to_owned()],
+    )
+    .expect("o sinal tem que abrir");
+    let do_sinal = sinal.endereco().expect("o sinal sabe onde ligou");
+    std::thread::spawn(move || {
+        let _ = sinal.servir();
+    });
+    (onde, do_sinal)
+}
+
+/// O `POST /sinal/1` de uma página, e o corpo da resposta.
+fn chamar_pelo_sinal(sinal: SocketAddr, corpo: &str) -> String {
+    use std::io::{Read as _, Write as _};
+    let mut conexao = std::net::TcpStream::connect(sinal).expect("o sinal não aceitou");
+    conexao
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(
+        conexao,
+        "POST /sinal/1 HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{corpo}",
+        corpo.len()
+    )
+    .unwrap();
+    let mut texto = String::new();
+    conexao.read_to_string(&mut texto).unwrap();
+    texto
+        .split_once("\r\n\r\n")
+        .map(|(_, corpo)| corpo.to_owned())
+        .unwrap_or_default()
+}
+
+/// **O que o sinal devolve para o código de uma pessoa é o certificado DTLS com
+/// que a sala dela atende** (ADR 0068), de ponta a ponta: a sala de verdade se
+/// registra, a página chama pelo sinal com as marcas do código, e a impressão
+/// que volta é a do certificado que a sala apresenta a quem disca.
+///
+/// É essa impressão que o navegador escreve como `a=fingerprint` antes de
+/// fechar o DTLS. Uma que não fosse a do certificado de verdade daria «a
+/// conexão segura não se verificou» em toda ligação da página.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_sinal_devolve_a_impressao_do_certificado_dtls_com_que_a_sala_atende() {
+    let _vaga = vaga::minha();
+    let (ponto, sinal) = subir_o_ponto_com_o_sinal();
+    let sala = subir_a_sala(Some(ponto.to_string())).await;
+    let mut registro = sala
+        .registro_no_quarto()
+        .expect("a sala subiu sem registro no ponto");
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        registro.wait_for(|estado| *estado == EstadoDoRegistro::Registrado),
+    )
+    .await
+    .expect("a sala não se registrou no ponto em 10 s")
+    .unwrap();
+
+    let marcas = Marcas::da_sala(&codigo_de(DONO));
+    let pedido = seele_proto::encontro::pedido_do_sinal(&seele_proto::encontro::Chama {
+        servidor: marcas.servidor().clone(),
+        escuta: marcas.escuta().clone(),
+        credencial: seele_proto::encontro::Credencial::nova(&"a".repeat(32)).unwrap(),
+        candidatos: vec![SocketAddr::from(([127, 0, 0, 1], 51_000))],
+    });
+    let corpo = tokio::task::spawn_blocking(move || chamar_pelo_sinal(sinal, &pedido))
+        .await
+        .unwrap();
+    let Some(seele_proto::encontro::RespostaDoSinal::Aqui {
+        endereco,
+        impressao,
+        ..
+    }) = seele_proto::encontro::ler_resposta_do_sinal(&corpo)
+    else {
+        panic!("a página não achou a sala pelo sinal: {corpo:?}");
+    };
+    assert_eq!(
+        endereco.port(),
+        sala.endereco().port(),
+        "o sinal deu outro endereço que o do servidor da sala"
+    );
+    let dita = impressao.expect("o sinal achou a sala e não devolveu a impressão DTLS dela");
+
+    // O certificado que a sala apresenta a quem disca, lido do próprio enlace.
+    let (_ponta, conexao) = par_cru::discar(local(&sala)).await;
+    assert_eq!(
+        dita,
+        conexao.impressao_dtls_do_par(),
+        "a impressão que o sinal devolve não é a do certificado DTLS com que a sala atende"
+    );
+    sala.encerrar().await;
 }

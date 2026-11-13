@@ -391,6 +391,17 @@ pub struct SourceTelemetry {
     /// The shell multiplies by 100 and decides how to render it. Silence from a
     /// talker who stopped is **not** counted — see [`crate::jitter`], task M1.9.
     pub loss_fraction: f64,
+    /// Slots that should have played a frame: played, concealed and silenced.
+    ///
+    /// The denominator of [`Self::loss_fraction`], kept as a count so that a
+    /// reader can difference two snapshots and get the loss **over a window**
+    /// — the fraction alone is cumulative since the buffer was created, and a
+    /// bad minute at the start of a long call never leaves it. See
+    /// [`AudioTelemetry::contagens_da_recepcao`].
+    pub expected_frames: u64,
+    /// Of [`Self::expected_frames`], the ones with no frame to play: concealed
+    /// and silenced. The numerator of [`Self::loss_fraction`].
+    pub missing_frames: u64,
     /// `quadros_ocultados` — slots filled by Opus PLC.
     pub concealed_frames: u64,
     /// Slots the talker was simply silent for. Not loss.
@@ -416,11 +427,16 @@ impl SourceTelemetry {
     /// `rtt_ms` is left empty; the protocol layer fills it in.
     #[must_use]
     pub fn assemble(ssrc: u32, jitter: JitterMetrics) -> Self {
+        // A mesma conta de `JitterMetrics::loss_fraction`, pela mesma porta
+        // que a janela da recepção usa: as duas não podem divergir.
+        let contagem = crate::recepcao::ContagemDaFonte::do_buffer(ssrc, &jitter);
         Self {
             ssrc,
             jitter_depth_ms: jitter.depth_ms,
             jitter_ms: jitter.jitter_ms,
             loss_fraction: jitter.loss_fraction(),
+            expected_frames: contagem.lugares,
+            missing_frames: contagem.faltaram,
             concealed_frames: jitter.frames_concealed,
             comfort_frames: jitter.frames_comfort,
             late_frames: jitter.late_discards,
@@ -484,6 +500,25 @@ impl AudioTelemetry {
             .iter()
             .map(|source| source.jitter_depth_ms)
             .fold(0.0, f64::max)
+    }
+
+    /// O que cada fonte contou até agora, para a janela da recepção
+    /// ([`crate::recepcao::JanelaDeRecepcao`]): é dela que sai o que este
+    /// cliente relata ao servidor sobre a voz que ouve.
+    ///
+    /// As contagens, e não [`Self::worst_loss_fraction`]: aquela é cumulativa
+    /// desde que cada buffer nasceu, e o relato é sobre os últimos segundos.
+    #[must_use]
+    pub fn contagens_da_recepcao(&self) -> Vec<crate::recepcao::ContagemDaFonte> {
+        self.sources
+            .iter()
+            .map(|fonte| crate::recepcao::ContagemDaFonte {
+                ssrc: fonte.ssrc,
+                lugares: fonte.expected_frames,
+                faltaram: fonte.missing_frames,
+                jitter_ms: fonte.jitter_ms,
+            })
+            .collect()
     }
 
     /// O pior jitter **de chegada** entre as fontes recebidas, em milissegundos.
@@ -914,6 +949,35 @@ mod tests {
         assert!((telemetry.worst_jitter_depth_ms() - 120.0).abs() < 1e-9);
         assert!((telemetry.source(1).map(|s| s.loss_fraction)).is_some_and(|l| l < 0.02));
         assert_eq!(telemetry.source(99), None);
+    }
+
+    /// As contagens que a telemetria leva são as do buffer, e a fração
+    /// cumulativa sai delas: a janela da recepção e a telemetria local contam
+    /// a mesma perda.
+    #[test]
+    fn as_contagens_da_recepcao_sao_as_do_buffer() {
+        let jitter = JitterMetrics {
+            frames_played: 180,
+            frames_concealed: 15,
+            frames_silenced: 5,
+            frames_comfort: 400,
+            jitter_ms: 2.5,
+            ..JitterMetrics::default()
+        };
+        let fonte = SourceTelemetry::assemble(9, jitter);
+        assert_eq!(fonte.expected_frames, 200);
+        assert_eq!(fonte.missing_frames, 20);
+        assert!((fonte.loss_fraction - 0.1).abs() < 1e-12);
+
+        let telemetria = AudioTelemetry {
+            local: LocalTelemetry::default(),
+            sources: vec![fonte],
+        };
+        assert_eq!(
+            telemetria.contagens_da_recepcao(),
+            vec![crate::recepcao::ContagemDaFonte::do_buffer(9, &jitter)]
+        );
+        assert!(AudioTelemetry::default().contagens_da_recepcao().is_empty());
     }
 
     #[test]

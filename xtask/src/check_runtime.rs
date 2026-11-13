@@ -100,7 +100,7 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 21] = [
+const BANCADAS: [&str; 22] = [
     "chamada-web-configuracao.cjs",
     "ciclo-captura-web.cjs",
     "ciclo-do-executor.cjs",
@@ -124,6 +124,9 @@ const BANCADAS: [&str; 21] = [
     // num `vm`, que nenhum lugar chamava (`toda_bancada_da_pasta_roda_em_algum_lugar`).
     "rtc-chamada-resiliencia.cjs",
     "rtc-diagnostico.cjs",
+    // O fecho de um "b": a página não fecha o canal que o anfitrião fecha (o
+    // `caiu` do caso 14 da `sessao-no-navegador`, CI de 12/11).
+    "rtc-fecho-do-b.cjs",
 ];
 
 fn raiz() -> PathBuf {
@@ -299,9 +302,14 @@ mod tests {
     /// E o `identidade-da-bancada.cjs`, que fixa a identidade da página nas
     /// bancadas de navegador com `.wasm` (`cargos-no-navegador.cjs` e
     /// `cargos-pela-tela.cjs` o importam) e não tem asserção própria.
+    ///
+    /// E o `diagnostico-rtc.cjs`, que as bancadas de duas páginas ligadas por
+    /// WebRTC importam para dizer, quando reprovam, em que estado o ICE ficou
+    /// e que candidatos cada página juntou e recebeu. Não tem asserção.
     // Lê a origem canônica para outras bancadas, sem prova independente.
-    const NAO_SAO_BANCADA: [&str; 5] = [
+    const NAO_SAO_BANCADA: [&str; 6] = [
         "origem-do-produto.cjs",
+        "diagnostico-rtc.cjs",
         "cabecalhos-da-origem.cjs",
         "identidade-da-bancada.cjs",
         "playwright.cjs",
@@ -532,6 +540,10 @@ mod tests {
             ),
             (
                 "voz-no-navegador.cjs",
+                "target/wasm32-unknown-unknown/release/seele_web.wasm",
+            ),
+            (
+                "recepcao-no-navegador.cjs",
                 "target/wasm32-unknown-unknown/release/seele_web.wasm",
             ),
             (

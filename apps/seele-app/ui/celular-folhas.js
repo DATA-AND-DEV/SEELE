@@ -156,8 +156,14 @@
    * na própria mensagem. Na dos outros, remover é moderar, e moderar é pelo
    * SEELE no computador: a frase aparece só para quem tem a permissão.
    */
-  function folhaDaMensagem({ autor, hora, texto, propria, podeRemoverDosOutros, remover }) {
-    const acoes = [{ texto: PALAVRAS.copiar, dados: { acao: "copiar" }, fazer: () => navigator.clipboard?.writeText(texto) }];
+  function folhaDaMensagem({ autor, hora, texto, propria, podeRemoverDosOutros, remover, responder = null, editar = null }) {
+    // RESPONDER primeiro: é o que mais se faz com a mensagem de outra pessoa.
+    // EDITAR só aparece na própria, e só quando o desktop a oferece (num
+    // servidor de antes da 1.0 a edição não existe).
+    const acoes = [];
+    if (responder) acoes.push({ texto: PALAVRAS.responder, dados: { acao: "responder" }, fazer: responder });
+    acoes.push({ texto: PALAVRAS.copiar, dados: { acao: "copiar" }, fazer: () => navigator.clipboard?.writeText(texto) });
+    if (editar) acoes.push({ texto: PALAVRAS.editarMinha, dados: { acao: "editar" }, fazer: editar });
     if (propria) acoes.push({ texto: PALAVRAS.apagarMinha, dados: { acao: "apagar" }, fazer: remover });
     const antes = [h("p", { class: "cel-folha-nota cel-folha-citacao", text: texto })];
     if (!propria && podeRemoverDosOutros) {

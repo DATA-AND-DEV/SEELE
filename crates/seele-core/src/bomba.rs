@@ -77,9 +77,11 @@ use seele_video::codec::{Cadencia, QuadroCodificado, Resolucao};
 use seele_video::BibliotecaDeVideo;
 use tokio::sync::mpsc as canal;
 
-use crate::tela::{intervalo_de_quadro, ErroDeTela, MotivoDeParada, TetoDeVideo, Transmissao};
+use crate::tela::{
+    intervalo_de_quadro, ErroDeTela, MotivoDeParada, MotivoDeQueda, TetoDeVideo, Transmissao,
+};
 use crate::video::{
-    Ajuste, Captura, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, FonteDeQuadros as _,
+    Ajuste, Captura, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, FonteDeQuadros,
     Passo,
 };
 
@@ -263,8 +265,83 @@ pub enum EventoDaBomba {
     /// A thread acabou, e com que erro se houve um.
     ///
     /// Sempre o último. `None` é o fim pedido — [`Ordem::Parar`], ou a
-    /// [`Bomba`] largada.
-    Fim(Option<String>),
+    /// [`Bomba`] largada. `Some` é a bomba que **morreu**: ninguém mandou, e
+    /// quem escoa devolve isto como [`ErroDeTela::Produtor`] para o motor do
+    /// enlace encerrar a transmissão de verdade e dizer por quê.
+    Fim(Option<QuedaDaBomba>),
+}
+
+/// Por que a bomba morreu sem ninguém mandar.
+///
+/// **O motivo é enumerado e o detalhe é texto**, e os dois têm leitores
+/// diferentes. O motivo atravessa até a casca, que escreve «o codificador
+/// recusou» ou «a captura parou» na língua da pessoa. O detalhe é o que o
+/// sistema disse, e vai ao `seele.log`: era só ele que existia, numa `String`,
+/// e uma `String` não deixa ninguém escolher a frase.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuedaDaBomba {
+    /// O que recusou: o codificador ou a captura.
+    pub motivo: MotivoDeQueda,
+    /// O que o sistema disse, cru. Serve a quem depura e não a quem usa.
+    pub detalhe: String,
+}
+
+impl QuedaDaBomba {
+    /// O codificador recusou: ao armar, num quadro, ou ao trocar de degrau.
+    fn do_codificador(erro: &impl std::fmt::Display) -> Self {
+        Self {
+            motivo: MotivoDeQueda::Codificador,
+            detalhe: erro.to_string(),
+        }
+    }
+
+    /// A captura recusou entregar a imagem.
+    fn da_captura(erro: &CapturaRecusou) -> Self {
+        Self {
+            motivo: MotivoDeQueda::Captura,
+            detalhe: erro.to_string(),
+        }
+    }
+
+    /// A captura acabou sozinha no meio: a janela transmitida fechou, ou o
+    /// sistema parou o fluxo.
+    fn da_captura_que_acabou(detalhe: String) -> Self {
+        Self {
+            motivo: MotivoDeQueda::Captura,
+            detalhe,
+        }
+    }
+}
+
+/// **A captura acabou → a transmissão cai, com o motivo `Captura`.**
+///
+/// A decisão inteira, fora do laço para ter teste sem codec e em qualquer
+/// sistema. `None` é seguir: não há fonte (o vídeo está pausado pelo sinal, e
+/// a captura foi largada de propósito), ou a fonte está viva — inclusive a que
+/// não entrega quadro porque a tela não muda.
+///
+/// # O defeito
+///
+/// Fechar a janela compartilhada deixava a transmissão «no ar» e congelada.
+/// As duas capturas sabiam (o `on_closed` da WGC, o `didStopWithError` da
+/// ScreenCaptureKit) e ninguém perguntava: para o laço, `tomar()` devolvendo
+/// `None` era só mais um tique de tela parada. O servidor seguia anunciando a
+/// tela, o botão seguia em PARAR DE COMPARTILHAR, e quem assistia ficava
+/// olhando o último quadro.
+///
+/// Daqui em diante o caminho é o que já existia para a bomba que morre:
+/// [`EventoDaBomba::Fim`] com erro, [`ErroDeTela::Produtor`], e o motor do
+/// enlace encerra de verdade, avisa o servidor e diz por quê.
+fn queda_se_a_captura_acabou(fonte: Option<&impl FonteDeQuadros>) -> Option<QuedaDaBomba> {
+    fonte
+        .and_then(FonteDeQuadros::acabou)
+        .map(QuedaDaBomba::da_captura_que_acabou)
+}
+
+impl std::fmt::Display for QuedaDaBomba {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detalhe)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +398,51 @@ pub struct Bomba {
     ordens: mpsc::Sender<Ordem>,
     thread: Option<JoinHandle<()>>,
     largados: Arc<AtomicU64>,
+    codificador: CodificadorEmUso,
+}
+
+/// Qual codificador de vídeo a bomba armou, dito pela thread dela a quem está
+/// do lado de fora.
+///
+/// **O motor sabia e a tela não contava.** O `armar` escolhe entre o
+/// codificador do sistema e o de software, e a escolha só ia ao `seele.log`:
+/// quem transmitia e via a CPU subir não tinha como saber que tinha caído para
+/// software. Esta placa é por onde o nome sai da thread.
+///
+/// Uma placa compartilhada, como os `largados`, e não um campo do
+/// [`EventoDaBomba::Fluxo`]: o nome é o da máquina (num Mac o VideoToolbox,
+/// noutra o de software), e o fluxo é comparado inteiro pelos testes do
+/// contrato de ordem, que não podem depender de em que máquina rodam.
+///
+/// **Escrita antes de o `Fluxo` sair**, na mesma thread: quem lê ao receber o
+/// fluxo acha o nome do codificador que o abriu, ou o de um mais novo.
+#[derive(Debug, Clone, Default)]
+pub struct CodificadorEmUso(Arc<std::sync::Mutex<Option<String>>>);
+
+impl CodificadorEmUso {
+    /// A thread da bomba diz qual armou.
+    fn dizer(&self, nome: &str) {
+        // Um cadeado envenenado fica com o nome de antes: é uma `String`, e
+        // quem a escreve não entra em pânico com ela na mão.
+        let mut guardado = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guardado.as_deref() != Some(nome) {
+            *guardado = Some(nome.to_owned());
+        }
+    }
+
+    /// O nome do codificador armado. `None` enquanto nenhum armou, e sempre
+    /// numa transmissão que a bomba não codifica (a câmera, que a janela
+    /// codifica: ver `crate::de_fora`).
+    #[must_use]
+    pub fn nome(&self) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 impl Bomba {
@@ -357,7 +479,13 @@ impl Bomba {
     /// [`PedidoDeChave`].
     #[must_use]
     pub fn pedido_de_chave(&self) -> PedidoDeChave {
-        PedidoDeChave(self.ordens.clone())
+        PedidoDeChave(self.ordens.clone(), self.codificador.clone())
+    }
+
+    /// Qual codificador de vídeo está armado. Ver [`CodificadorEmUso`].
+    #[must_use]
+    pub fn codificador(&self) -> Option<String> {
+        self.codificador.nome()
     }
 
     /// Quantos quadros foram largados por quem escreve estar atrasado.
@@ -419,21 +547,19 @@ where
     let (manda_ordem, recebe_ordem) = mpsc::channel();
     let (manda_evento, recebe_evento) = canal::channel(CAPACIDADE_DO_CANAL);
     let largados = Arc::new(AtomicU64::new(0));
+    let codificador = CodificadorEmUso::default();
 
     let laco = Laco {
-        // Um codificador por transmissão, com o teto de voz. `None` é uma
-        // máquina cujo Opus não abriu: a imagem continua indo, muda.
+        // Um codificador por transmissão, com o perfil de som de tela
+        // (`codificador_do_som`). `None` é uma máquina cujo Opus não abriu: a
+        // imagem continua indo, muda.
         //
         // **E `None` também quando quem envia escolheu não incluir áudio.** Não é
         // só não codificar: `escoar_som` desiste na primeira linha quando não há
         // codificador, então a captura de som nem é lida — que é o que «sem
         // áudio» tem de querer dizer numa máquina onde a captura leva a conversa
         // inteira. Ver `Arranjo::com_som`.
-        som: if arranjo.com_som {
-            seele_audio::codec::VoiceEncoder::with_defaults().ok()
-        } else {
-            None
-        },
+        som: codificador_do_som(arranjo.com_som),
         conta_do_som: (0, 0),
         sobra: VecDeque::new(),
         biblioteca,
@@ -450,6 +576,7 @@ where
         ordens: recebe_ordem,
         para: manda_evento,
         largados: Arc::clone(&largados),
+        codificador: codificador.clone(),
     };
 
     let thread = thread::Builder::new()
@@ -464,6 +591,7 @@ where
             ordens: manda_ordem,
             thread: Some(thread),
             largados,
+            codificador,
         },
         recebe_evento,
     ))
@@ -504,6 +632,9 @@ struct Laco<C: Captura> {
     ordens: mpsc::Receiver<Ordem>,
     para: canal::Sender<EventoDaBomba>,
     largados: Arc<AtomicU64>,
+    /// Por onde o nome do codificador de vídeo sai desta thread. Ver
+    /// [`CodificadorEmUso`].
+    codificador: CodificadorEmUso,
     /// O codificador do som da tela, quando esta máquina tem um.
     ///
     /// `None` é uma transmissão muda, e não uma transmissão que não sai: a
@@ -552,7 +683,7 @@ impl<C: Captura> Laco<C> {
     }
 
     /// O laço inteiro. Devolve o erro que o matou, se houve um.
-    fn girar(&mut self) -> Option<String> {
+    fn girar(&mut self) -> Option<QuedaDaBomba> {
         let mut pedido_de_chave = false;
 
         if let Err(erro) = self.armar() {
@@ -601,6 +732,12 @@ impl<C: Captura> Laco<C> {
                 continue;
             }
 
+            // Antes do tique, e a cada um: a captura que acabou não entrega
+            // mais quadro, e o tique leria isso como tela parada para sempre.
+            if let Some(queda) = queda_se_a_captura_acabou(self.fonte.as_ref()) {
+                return Some(queda);
+            }
+
             self.escoar_pendentes();
             // A captura já guarda só o quadro mais recente. Esperar aqui mantém
             // as referências H.264 intactas e continua escoando áudio e chave.
@@ -627,7 +764,9 @@ impl<C: Captura> Laco<C> {
                         pedido_de_chave = true;
                     }
                 }
-                Err(erro) => return Some(erro.to_string()),
+                // O tique só reprova no codificador: a captura sem quadro
+                // novo é `SemQuadro`, e não erro (`FonteDeQuadros`).
+                Err(erro) => return Some(QuedaDaBomba::do_codificador(&erro)),
             }
             // O som, a cada tique, e **fora** do `match` do quadro: um tique
             // sem imagem nova — a tela parada — não é um tique sem som.
@@ -682,7 +821,7 @@ impl<C: Captura> Laco<C> {
         while self.sobra.len() >= seele_audio::FRAME_SAMPLES {
             let quadro: Vec<f32> = self.sobra.drain(..seele_audio::FRAME_SAMPLES).collect();
             // Silêncio exato é o que uma máquina que não toca nada produz, e
-            // mandá-lo é gastar 32 kbps para dizer «nada».
+            // mandá-lo é gastar 96 kbps para dizer «nada».
             if quadro.iter().all(|amostra| *amostra == 0.0) {
                 continue;
             }
@@ -733,7 +872,11 @@ impl<C: Captura> Laco<C> {
         }
     }
 
-    fn aplicar(&mut self, ordem: Ordem, pedido_de_chave: &mut bool) -> Result<Andamento, String> {
+    fn aplicar(
+        &mut self,
+        ordem: Ordem,
+        pedido_de_chave: &mut bool,
+    ) -> Result<Andamento, QuedaDaBomba> {
         match ordem {
             Ordem::ConfirmarQuadros => {
                 self.confirmar_quadros = true;
@@ -781,7 +924,7 @@ impl<C: Captura> Laco<C> {
     }
 
     /// Reage a um teto novo, que é o §3.2 e o §5.1 virando movimento.
-    fn teto_andou(&mut self) -> Result<(), String> {
+    fn teto_andou(&mut self) -> Result<(), QuedaDaBomba> {
         let (teto, faixa) = (self.arranjo.teto, self.arranjo.faixa);
         let ajuste = match self.compartilhamento.as_mut() {
             Some(compartilhamento) => compartilhamento.ajustar(&teto, faixa),
@@ -825,11 +968,11 @@ impl<C: Captura> Laco<C> {
                 self.emitir(EventoDaBomba::Parou(motivo));
                 Ok(())
             }
-            Err(erro) => Err(erro.to_string()),
+            Err(erro) => Err(QuedaDaBomba::do_codificador(&erro)),
         }
     }
 
-    fn trocar_de_degrau(&mut self, para: Resolucao, teto_bps: u32) -> Result<(), String> {
+    fn trocar_de_degrau(&mut self, para: Resolucao, teto_bps: u32) -> Result<(), QuedaDaBomba> {
         let cadencia = self.arranjo.cadencia;
         self.fonte = None;
         let Some(compartilhamento) = self.compartilhamento.as_mut() else {
@@ -837,12 +980,15 @@ impl<C: Captura> Laco<C> {
         };
         compartilhamento
             .refazer_com(para)
-            .map_err(|erro| erro.to_string())?;
+            .map_err(|erro| QuedaDaBomba::do_codificador(&erro))?;
         let medidas = compartilhamento.medidas();
+        // O degrau novo refez o codificador, e o do sistema pode ter recusado
+        // este: o nome é dito de novo, antes de o fluxo sair.
+        self.codificador.dizer(compartilhamento.codificador());
         let fonte = self
             .captura
             .iniciar_com_medidas(para, cadencia, medidas)
-            .map_err(|erro: CapturaRecusou| erro.to_string())?;
+            .map_err(|erro: CapturaRecusou| QuedaDaBomba::da_captura(&erro))?;
         self.fonte = Some(fonte);
         self.geracao += 1;
         self.aguardando_quadro = None;
@@ -859,7 +1005,7 @@ impl<C: Captura> Laco<C> {
     ///
     /// Um teto que mandou parar **não** é erro: sai como
     /// [`EventoDaBomba::Parou`] e a bomba fica esperando o próximo teto.
-    fn armar(&mut self) -> Result<(), String> {
+    fn armar(&mut self) -> Result<(), QuedaDaBomba> {
         let arranjo = self.arranjo;
         let compartilhamento = match Compartilhamento::abrir_para_fonte(
             self.biblioteca.clone(),
@@ -877,18 +1023,21 @@ impl<C: Captura> Laco<C> {
                 self.emitir(EventoDaBomba::Parou(motivo));
                 return Ok(());
             }
-            Err(ErroDeCompartilhamento::Video(erro)) => return Err(erro.to_string()),
+            Err(ErroDeCompartilhamento::Video(erro)) => {
+                return Err(QuedaDaBomba::do_codificador(&erro));
+            }
         };
 
         let resolucao = compartilhamento.resolucao();
         let teto_bps = compartilhamento.teto().bps();
         let medidas = compartilhamento.medidas();
+        self.codificador.dizer(compartilhamento.codificador());
         // Depois do codificador: se o OpenH264 recusar a configuração, não vale
         // ter acendido o indicador de captura do sistema para nada.
         let fonte = self
             .captura
             .iniciar_com_medidas(resolucao, compartilhamento.cadencia(), medidas)
-            .map_err(|erro: CapturaRecusou| erro.to_string())?;
+            .map_err(|erro: CapturaRecusou| QuedaDaBomba::da_captura(&erro))?;
 
         self.compartilhamento = Some(compartilhamento);
         self.fonte = Some(fonte);
@@ -1010,10 +1159,30 @@ impl<C: Captura> Laco<C> {
 /// descarta um quadro que outros usariam de referência — um quadro acima do
 /// teto do fio ou do orçamento. A confirmação libera a próxima codificação
 /// somente depois de terminarem as fatias; geração e sequência recusam ACKs antigos.
+///
+/// E carrega a placa do codificador ([`CodificadorEmUso`]): é por esta alça
+/// que quem escoa diz ao espelho qual codificador abriu o fluxo.
 #[derive(Debug, Clone)]
-pub struct PedidoDeChave(mpsc::Sender<Ordem>);
+pub struct PedidoDeChave(mpsc::Sender<Ordem>, CodificadorEmUso);
 
 impl PedidoDeChave {
+    /// Uma alça para quem escoa uma transmissão que **não** vem da bomba, e o
+    /// lado que lê os pedidos dela (`crate::de_fora`: a câmera, codificada
+    /// pela casca). As confirmações de quadro chegam por ali também, e quem
+    /// está de fora as ignora: não há codificador deste lado a segurar.
+    pub(crate) fn de_fora() -> (Self, mpsc::Receiver<Ordem>) {
+        let (manda, recebe) = mpsc::channel();
+        // A placa fica vazia: quem codifica a câmera é a janela.
+        (Self(manda, CodificadorEmUso::default()), recebe)
+    }
+
+    /// Qual codificador de vídeo a bomba desta alça armou. Ver
+    /// [`CodificadorEmUso`].
+    #[must_use]
+    pub fn codificador(&self) -> Option<String> {
+        self.1.nome()
+    }
+
     fn ativar_confirmacao(&self) {
         let _ = self.0.send(Ordem::ConfirmarQuadros);
     }
@@ -1058,6 +1227,20 @@ pub struct Contagem {
 #[derive(Clone)]
 pub struct Escoadouro {
     conexao: crate::transporte::Conexao,
+    /// Com isto, a transmissão sobe pela mídia RTP da conexão (ADR 0067) em
+    /// vez de pelo canal `u`.
+    midia: Option<SaidaDeMidia>,
+}
+
+/// Por onde uma transmissão sobe pela mídia RTP: o remetente, e por onde a
+/// abertura de cada geração chega ao motor do enlace, que é quem a escreve no
+/// controle (`ClientMessage::TelaPorMidia`).
+#[derive(Clone, Debug)]
+pub struct SaidaDeMidia {
+    /// O remetente da mídia da conexão.
+    pub remetente: crate::transporte::RemetenteDeMidia,
+    /// A fila do que a mídia diz ao motor.
+    pub avisos: tokio::sync::mpsc::UnboundedSender<crate::client::DaMidia>,
 }
 
 impl std::fmt::Debug for Escoadouro {
@@ -1072,7 +1255,17 @@ impl Escoadouro {
     /// Um escoadouro sobre esta conexão.
     #[must_use]
     pub const fn nova(conexao: crate::transporte::Conexao) -> Self {
-        Self { conexao }
+        Self {
+            conexao,
+            midia: None,
+        }
+    }
+
+    /// O mesmo escoadouro, com a transmissão subindo pela mídia RTP.
+    #[must_use]
+    pub fn pela_midia(mut self, midia: SaidaDeMidia) -> Self {
+        self.midia = Some(midia);
+        self
     }
 
     /// O mesmo que [`escoar`], sobre a conexão que este punho segura.
@@ -1086,7 +1279,16 @@ impl Escoadouro {
         fonte: ScreenSource,
         eventos: &mut canal::Receiver<EventoDaBomba>,
     ) -> Result<Contagem, ErroDeTela> {
-        escoar(&self.conexao, tela, fonte, eventos).await
+        escoar_com_espelho(
+            &self.conexao,
+            self.midia.as_ref(),
+            tela,
+            fonte,
+            eventos,
+            |_| {},
+            None,
+        )
+        .await
     }
 
     /// O mesmo, com um espelho que vê o que está saindo.
@@ -1104,6 +1306,7 @@ impl Escoadouro {
     ) -> Result<Contagem, ErroDeTela> {
         escoar_com_espelho(
             &self.conexao,
+            self.midia.as_ref(),
             tela,
             fonte,
             eventos,
@@ -1134,6 +1337,10 @@ pub enum EspelhoDaTela<'a> {
         largura: u16,
         /// Altura em pixels.
         altura: u16,
+        /// Qual codificador abriu este fluxo, quando quem escoa sabe: a alça
+        /// da bomba o diz ([`PedidoDeChave::codificador`]). `None` sem alça, e
+        /// na câmera, que a janela codifica.
+        codificador: Option<String>,
     },
     /// Um quadro foi escrito no fio.
     Quadro {
@@ -1142,6 +1349,17 @@ pub enum EspelhoDaTela<'a> {
         /// O quadro, em Annex-B.
         bytes: &'a [u8],
     },
+    /// O teto parou o vídeo, e o fluxo fechou. A bomba segue viva: a volta é
+    /// um [`Self::Abriu`] novo.
+    ///
+    /// # O silêncio que isto fecha
+    ///
+    /// O [`EventoDaBomba::Parou`] chegava a quem escoa **com** o motivo, e quem
+    /// escoa o jogava fora (`Parou(_)`): fechava o fluxo e não contava a
+    /// ninguém. Quem transmitia ficava olhando o próprio espelho congelado, com
+    /// o botão em PARAR DE COMPARTILHAR, sem saber que a sala já não via nada
+    /// — nem que a tela volta sozinha. O produto sabia e não contava.
+    Parou(MotivoDeParada),
 }
 
 /// Escoa o que a bomba produz para dentro da conexão que já existe.
@@ -1164,7 +1382,7 @@ pub async fn escoar(
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
 ) -> Result<Contagem, ErroDeTela> {
-    escoar_com_espelho(conexao, tela, fonte, eventos, |_| {}, None).await
+    escoar_com_espelho(conexao, None, tela, fonte, eventos, |_| {}, None).await
 }
 
 /// [`escoar`], com alguém olhando o que passa. Ver [`EspelhoDaTela`].
@@ -1178,6 +1396,7 @@ pub async fn escoar(
 /// As mesmas de [`escoar`].
 pub async fn escoar_com_espelho(
     conexao: &crate::transporte::Conexao,
+    midia: Option<&SaidaDeMidia>,
     tela: ScreenId,
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
@@ -1217,8 +1436,26 @@ pub async fn escoar_com_espelho(
                     width: u16::try_from(medidas.0).unwrap_or(u16::MAX),
                     height: u16::try_from(medidas.1).unwrap_or(u16::MAX),
                 };
-                transmissao =
-                    Some(Transmissao::abrir(conexao, cabecalho, teto_bps, Instant::now()).await?);
+                transmissao = Some(match midia {
+                    Some(saida) => {
+                        let (nova, abertura) = Transmissao::abrir_por_midia(
+                            saida.remetente.clone(),
+                            cabecalho,
+                            teto_bps,
+                            Instant::now(),
+                        )?;
+                        // A abertura vai pelo controle, e quem escreve nele é
+                        // o motor. Sem motor para ouvir, a transmissão acabou.
+                        saida
+                            .avisos
+                            .send(crate::client::DaMidia::Abertura(abertura))
+                            .map_err(|_| ErroDeTela::Fluxo("o enlace acabou".into()))?;
+                        nova
+                    }
+                    None => {
+                        Transmissao::abrir(conexao, cabecalho, teto_bps, Instant::now()).await?
+                    }
+                });
                 geracao = nova;
                 chave_pendente = None;
                 precisa_chave = false;
@@ -1226,6 +1463,7 @@ pub async fn escoar_com_espelho(
                 espelho(EspelhoDaTela::Abriu {
                     largura: cabecalho.width,
                     altura: cabecalho.height,
+                    codificador: pedido_de_chave.and_then(PedidoDeChave::codificador),
                 });
             }
             EventoDaBomba::Teto { teto_bps } => {
@@ -1330,11 +1568,15 @@ pub async fn escoar_com_espelho(
             // §3.2: quem para é o vídeo. O fluxo fecha e a sala fica sabendo
             // pelo fim dele; a bomba continua viva esperando o teto voltar, e
             // quando voltar chega um `Fluxo` novo.
-            EventoDaBomba::Parou(_) => {
+            EventoDaBomba::Parou(motivo) => {
                 if let Some(velha) = transmissao.take() {
                     somar(&mut contagem, &velha);
                     velha.encerrar();
                 }
+                // Depois de fechar, pelo mesmo motivo de o espelho do quadro
+                // vir depois do byte: o que se diz a quem transmite é o que já
+                // aconteceu no fio.
+                espelho(EspelhoDaTela::Parou(motivo));
             }
             EventoDaBomba::Fim(erro) => {
                 if let Some(velha) = transmissao.take() {
@@ -1342,7 +1584,12 @@ pub async fn escoar_com_espelho(
                     velha.encerrar();
                 }
                 return match erro {
-                    Some(erro) => Err(ErroDeTela::Fluxo(erro)),
+                    // Com o motivo junto: é ele que o motor do enlace leva à
+                    // casca quando a transmissão cai sem ninguém mandar.
+                    Some(queda) => Err(ErroDeTela::Produtor {
+                        motivo: queda.motivo,
+                        detalhe: queda.detalhe,
+                    }),
                     None => Ok(contagem),
                 };
             }
@@ -1361,6 +1608,19 @@ fn somar(contagem: &mut Contagem, transmissao: &Transmissao) {
     contagem.enviados += enviados;
     contagem.descartados += descartados;
     contagem.bytes += bytes;
+}
+
+/// O codificador do som de uma transmissão, ou nenhum quando quem envia
+/// escolheu não incluir áudio.
+///
+/// **O de som de tela, e não o de voz.** Até a 0.19 era o de voz: modo `Voip`
+/// e 48 kbps, que é o certo para fala e o errado para o que a máquina toca.
+fn codificador_do_som(com_som: bool) -> Option<seele_audio::codec::VoiceEncoder> {
+    if com_som {
+        seele_audio::codec::VoiceEncoder::para_som_de_tela().ok()
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1591,6 +1851,154 @@ pub(crate) mod tests {
         ) -> Result<Self::Fonte, CapturaRecusou> {
             Ok(FonteComTom)
         }
+    }
+
+    /// A janela que fecha no meio: entrega `bons` quadros, e daí em diante
+    /// não entrega mais nada e diz que acabou — que é como as duas capturas de
+    /// verdade se apresentam.
+    #[derive(Debug)]
+    struct FonteQueFecha {
+        largura: usize,
+        altura: usize,
+        bons: usize,
+        passo: AtomicUsize,
+    }
+
+    impl FonteDeQuadros for FonteQueFecha {
+        fn tomar(&self) -> Option<QuadroI420> {
+            let passo = self.passo.fetch_add(1, Ordering::Relaxed);
+            (passo < self.bons).then(|| quadro(self.largura, self.altura, passo))
+        }
+
+        fn acabou(&self) -> Option<String> {
+            (self.passo.load(Ordering::Relaxed) >= self.bons)
+                .then(|| "the shared window was closed".to_owned())
+        }
+    }
+
+    #[derive(Debug)]
+    struct CapturaQueFecha;
+
+    impl Captura for CapturaQueFecha {
+        type Fonte = FonteQueFecha;
+
+        fn iniciar(
+            &mut self,
+            resolucao: Resolucao,
+            _cadencia: Cadencia,
+        ) -> Result<Self::Fonte, CapturaRecusou> {
+            Ok(FonteQueFecha {
+                largura: resolucao.largura(),
+                altura: resolucao.altura(),
+                bons: 3,
+                passo: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    /// **A captura que acabou vira queda com o motivo `Captura` — e a tela
+    /// parada não.**
+    ///
+    /// Sem codec e em qualquer sistema, de propósito: a decisão não pode morar
+    /// só num teste que pula onde o módulo do Cisco não está, nem num arquivo
+    /// `cfg(windows)` que não roda no Mac de quem escreve.
+    ///
+    /// **A caixa é metade do teste.** Toda transmissão do produto passa por
+    /// `CapturaEmCaixa`, cuja fonte é um `Box<dyn FonteDeQuadros>`; `acabou` tem
+    /// padrão no trait, e uma caixa que não o repassasse responderia «viva»
+    /// para sempre, com tudo compilando.
+    #[test]
+    fn a_captura_que_acabou_vira_queda_com_o_motivo_captura() {
+        let fechada = FonteQueFecha {
+            largura: 16,
+            altura: 16,
+            bons: 0,
+            passo: AtomicUsize::new(0),
+        };
+        let queda = queda_se_a_captura_acabou(Some(&fechada))
+            .expect("a captura disse que acabou e a bomba seguiria transmitindo o último quadro");
+        assert_eq!(queda.motivo, MotivoDeQueda::Captura);
+        assert_eq!(
+            queda.detalhe, "the shared window was closed",
+            "o detalhe é o que o `seele.log` tem para mostrar"
+        );
+
+        // Pela caixa, que é por onde o produto passa.
+        let mut em_caixa = crate::video::CapturaEmCaixa::nova(CapturaQueFecha);
+        let fonte = em_caixa
+            .iniciar(Resolucao::P720, Cadencia::Q30)
+            .expect("a captura de mentira abre");
+        assert_eq!(
+            queda_se_a_captura_acabou(Some(&fonte)),
+            None,
+            "a captura ainda tem quadros a entregar e já foi dada por acabada"
+        );
+        while fonte.tomar().is_some() {}
+        assert_eq!(
+            queda_se_a_captura_acabou(Some(&fonte)).map(|queda| queda.motivo),
+            Some(MotivoDeQueda::Captura),
+            "a fonte dentro da caixa disse que acabou e a caixa não repassou: é por ela que \
+             toda transmissão do produto passa, e a janela fechada ficaria no ar, congelada"
+        );
+
+        // A tela parada **não** é o fim: `None` atrás de `None`, e viva.
+        assert_eq!(queda_se_a_captura_acabou(Some(&FonteParada)), None);
+        // E pausado pelo sinal não há fonte: nada a derrubar.
+        assert_eq!(queda_se_a_captura_acabou(None::<&FonteParada>), None);
+    }
+
+    /// O mesmo, pela bomba de verdade: a janela fecha **no meio**, e a thread
+    /// acaba dizendo que foi a captura — em vez de girar para sempre sem
+    /// quadro, que era o defeito.
+    #[test]
+    fn a_janela_que_fecha_no_meio_derruba_a_bomba_com_o_motivo_captura() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
+            .com_espectadores(1);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            crate::video::CapturaEmCaixa::nova(CapturaQueFecha),
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P720),
+            || {},
+        )
+        .expect("criar a thread da tela");
+        assert!(matches!(
+            esperar(&mut eventos),
+            Some(EventoDaBomba::Fluxo { geracao: 1, .. })
+        ));
+        let mut quadros = 0_u32;
+        // **Com prazo, e não só com a paciência de `esperar`.** A bomba que
+        // segue de pé depois de a janela fechar não fica calada: ela pede
+        // escoamento a cada tique, e um laço que só esperasse o próximo evento
+        // giraria para sempre — o guarda penduraria em vez de reprovar.
+        let prazo = Instant::now() + Duration::from_secs(10);
+        let fim = loop {
+            let evento = esperar(&mut eventos);
+            assert!(
+                Instant::now() < prazo && evento.is_some(),
+                "a janela fechou e a bomba seguiu de pé, sem quadro e sem fim: é a \
+                 transmissão que fica no ar, congelada"
+            );
+            match evento {
+                Some(EventoDaBomba::Quadro(_)) => quadros += 1,
+                Some(EventoDaBomba::Fim(fim)) => break fim,
+                _ => {}
+            }
+        };
+        assert!(
+            quadros >= 1,
+            "a bomba caiu antes do primeiro quadro: o caso é o do meio da transmissão"
+        );
+        let queda = fim.expect("a janela fechou e a bomba disse que parou a pedido");
+        assert_eq!(
+            queda.motivo,
+            MotivoDeQueda::Captura,
+            "quem acabou foi a captura: {queda:?}"
+        );
+        drop(bomba);
     }
 
     /// O som que a captura entrega chega ao fio como pacote Opus.
@@ -1954,6 +2362,164 @@ pub(crate) mod tests {
         bomba.parar();
     }
 
+    /// **Uma bomba que morre diz o que a matou, e quem escoa repassa.**
+    ///
+    /// O fim com erro era uma `String`: «o codificador foi armado para 1280x720
+    /// e recebeu 640x360». Serve ao `seele.log` e não serve à pessoa — ninguém
+    /// escreve uma frase a partir dela sem adivinhar. O motor do enlace precisa
+    /// do motivo enumerado para a casca dizer «o codificador recusou» ou «a
+    /// captura parou» (`Aviso::TelaCaiu`), e este é o lugar em que ele nasce.
+    ///
+    /// Os dois casos são os de campo: o codificador recusando um quadro **no
+    /// meio** da transmissão, e a captura recusando recomeçar quando a pessoa
+    /// troca de degrau.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_bomba_que_morre_diz_se_foi_o_codificador_ou_a_captura() {
+        /// Entrega `bons` quadros do tamanho pedido e depois um do tamanho
+        /// errado, que o codificador recusa.
+        #[derive(Debug)]
+        struct FonteQueEntorta {
+            largura: usize,
+            altura: usize,
+            bons: usize,
+            passo: AtomicUsize,
+        }
+        impl FonteDeQuadros for FonteQueEntorta {
+            fn tomar(&self) -> Option<QuadroI420> {
+                let passo = self.passo.fetch_add(1, Ordering::Relaxed);
+                if passo < self.bons {
+                    Some(quadro(self.largura, self.altura, passo))
+                } else {
+                    Some(quadro(self.largura / 2, self.altura / 2, passo))
+                }
+            }
+        }
+        #[derive(Debug)]
+        struct CapturaQueEntorta;
+        impl Captura for CapturaQueEntorta {
+            type Fonte = FonteQueEntorta;
+            fn iniciar(
+                &mut self,
+                resolucao: Resolucao,
+                _cadencia: Cadencia,
+            ) -> Result<Self::Fonte, CapturaRecusou> {
+                Ok(FonteQueEntorta {
+                    largura: resolucao.largura(),
+                    altura: resolucao.altura(),
+                    bons: 3,
+                    passo: AtomicUsize::new(0),
+                })
+            }
+        }
+        /// Começa uma vez, e recusa recomeçar: a janela que fechou.
+        #[derive(Debug, Default)]
+        struct CapturaQueNaoRecomeca {
+            inicios: usize,
+        }
+        impl Captura for CapturaQueNaoRecomeca {
+            type Fonte = FonteDeMentira;
+            fn iniciar(
+                &mut self,
+                resolucao: Resolucao,
+                _cadencia: Cadencia,
+            ) -> Result<Self::Fonte, CapturaRecusou> {
+                self.inicios += 1;
+                if self.inicios > 1 {
+                    return Err(CapturaRecusou::nova(resolucao, "a janela fechou"));
+                }
+                Ok(FonteDeMentira {
+                    largura: resolucao.largura(),
+                    altura: resolucao.altura(),
+                    passo: AtomicUsize::new(0),
+                })
+            }
+        }
+
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
+            .com_espectadores(1);
+
+        // ---- o codificador recusa um quadro no meio
+        let (bomba, mut eventos) = ligar(
+            biblioteca.clone(),
+            CapturaQueEntorta,
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P720),
+            || {},
+        )
+        .expect("criar a thread da tela");
+        assert!(matches!(
+            esperar(&mut eventos),
+            Some(EventoDaBomba::Fluxo { geracao: 1, .. })
+        ));
+        let mut quadros = 0_u32;
+        let fim = loop {
+            match esperar(&mut eventos) {
+                Some(EventoDaBomba::Quadro(_)) => quadros += 1,
+                Some(EventoDaBomba::Fim(fim)) => break fim,
+                Some(_) => {}
+                None => panic!("a bomba não disse que acabou"),
+            }
+        };
+        assert!(
+            quadros >= 1,
+            "a bomba morreu antes do primeiro quadro: o caso é o do meio da transmissão"
+        );
+        let queda =
+            fim.expect("o codificador recusou um quadro e a bomba disse que parou a pedido");
+        assert_eq!(
+            queda.motivo,
+            MotivoDeQueda::Codificador,
+            "quem recusou foi o codificador: {queda:?}"
+        );
+        assert!(
+            !queda.detalhe.is_empty(),
+            "o detalhe é o que o `seele.log` tem para mostrar"
+        );
+        drop(bomba);
+
+        // ---- a captura recusa recomeçar, e quem escoa repassa o motivo
+        let (saida, _entrada) = par_paciente().await;
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            CapturaQueNaoRecomeca::default(),
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P1080),
+            || {},
+        )
+        .expect("criar a thread da tela");
+        let escoando = tokio::spawn(async move {
+            escoar(&saida, ScreenId(7), ScreenSource::Monitor, &mut eventos).await
+        });
+        // A pessoa baixa o próprio teto: a captura tem de recomeçar noutro
+        // degrau, e é aí que ela recusa. A ordem espera na fila da bomba até o
+        // primeiro fluxo armar.
+        assert!(bomba.escolha(Resolucao::P720, Cadencia::Q30));
+        let fim = tokio::time::timeout(PACIENCIA, escoando)
+            .await
+            .expect("quem escoa não voltou: a bomba morta não disse o fim")
+            .expect("a tarefa de escoar");
+        match fim {
+            Err(ErroDeTela::Produtor { motivo, detalhe }) => {
+                assert_eq!(
+                    motivo,
+                    MotivoDeQueda::Captura,
+                    "quem recusou foi a captura: {detalhe}"
+                );
+                assert_eq!(
+                    ErroDeTela::Produtor { motivo, detalhe }.motivo_de_queda(),
+                    MotivoDeQueda::Captura
+                );
+            }
+            outro => panic!(
+                "a captura recusou recomeçar e quem escoa devolveu {outro:?}: o motor do enlace \
+                 leria isto como um fim limpo, ou como um fluxo que caiu"
+            ),
+        }
+        drop(bomba);
+    }
+
     #[test]
     fn a_escolha_da_pessoa_troca_o_degrau_e_a_mesma_escolha_nao_troca_nada() {
         // Até a 0.7.14 este botão respondia erro. A bomba não tinha ordem que
@@ -2108,10 +2674,11 @@ pub(crate) mod tests {
             let (saida, _entrada) = crate::tela::tests::par().await;
             let (manda, mut eventos) = canal::channel(8);
             let (manda_ordem, recebe_ordem) = mpsc::channel();
-            let pedido = PedidoDeChave(manda_ordem);
+            let pedido = PedidoDeChave(manda_ordem, CodificadorEmUso::default());
             let escoando = tokio::spawn(async move {
                 escoar_com_espelho(
                     &saida,
+                    None,
                     ScreenId(1),
                     ScreenSource::Monitor,
                     &mut eventos,
@@ -2162,6 +2729,172 @@ pub(crate) mod tests {
         );
     }
 
+    /// **A pausa pelo sinal chega a quem transmite, com o motivo, e a volta
+    /// também.**
+    ///
+    /// Sem codec: os eventos são os que a bomba manda, postos à mão no canal.
+    /// O que se prende é quem escoa — era ele que recebia o `Parou(motivo)` e
+    /// o jogava fora.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_pausa_pelo_sinal_e_dita_ao_espelho_com_o_motivo_e_a_volta_tambem() {
+        let (saida, _entrada) = par_paciente().await;
+        let (manda, mut eventos) = canal::channel(16);
+        let fluxo = |geracao| EventoDaBomba::Fluxo {
+            geracao,
+            resolucao: Resolucao::P540,
+            medidas: (960, 540),
+            teto_bps: 1_000_000,
+        };
+        for evento in [
+            fluxo(1),
+            EventoDaBomba::Parou(MotivoDeParada::SinalCritico),
+            fluxo(2),
+            EventoDaBomba::Parou(MotivoDeParada::AbaixoDoPiso),
+            EventoDaBomba::Fim(None),
+        ] {
+            manda.send(evento).await.unwrap();
+        }
+        let mut vistos = Vec::new();
+        escoar_com_espelho(
+            &saida,
+            None,
+            ScreenId(44),
+            ScreenSource::Monitor,
+            &mut eventos,
+            |evento| {
+                vistos.push(match evento {
+                    EspelhoDaTela::Abriu { .. } => "abriu".to_owned(),
+                    EspelhoDaTela::Quadro { .. } => "quadro".to_owned(),
+                    EspelhoDaTela::Parou(motivo) => format!("parou: {motivo:?}"),
+                });
+            },
+            None,
+        )
+        .await
+        .expect("escoar até o fim pedido");
+        assert_eq!(
+            vistos,
+            [
+                "abriu",
+                "parou: SinalCritico",
+                "abriu",
+                "parou: AbaixoDoPiso"
+            ],
+            "o teto parou o vídeo e quem escoa não disse a quem transmite — ou disse sem o \
+             motivo, ou fora de ordem: a pessoa ficaria olhando o espelho congelado sem \
+             saber que a sala não vê nada"
+        );
+    }
+
+    /// **O espelho diz qual codificador abriu o fluxo**, pelo nome que a
+    /// thread da bomba escreveu na placa.
+    ///
+    /// É o caminho por onde o nome sai do motor: a thread o diz
+    /// ([`CodificadorEmUso::dizer`]), quem escoa o lê da alça ao abrir o fluxo, e
+    /// o espelho o leva ao `Aviso::TelaAbriu`. Sem alça, ou com a placa vazia (a
+    /// câmera), o espelho diz `None` em vez de um nome inventado.
+    ///
+    /// Sem o módulo do Cisco: os eventos são escritos à mão, e o nome também.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_espelho_diz_qual_codificador_abriu_o_fluxo() {
+        async fn aberto_com(pedido: Option<PedidoDeChave>) -> Vec<Option<String>> {
+            let (saida, _entrada) = par_paciente().await;
+            let (manda, mut eventos) = canal::channel(4);
+            for evento in [
+                EventoDaBomba::Fluxo {
+                    geracao: 1,
+                    resolucao: Resolucao::P720,
+                    medidas: (1280, 720),
+                    teto_bps: 4_000_000,
+                },
+                EventoDaBomba::Fim(None),
+            ] {
+                manda.send(evento).await.expect("o canal cabe os dois");
+            }
+            let mut ditos = Vec::new();
+            escoar_com_espelho(
+                &saida,
+                None,
+                ScreenId(1),
+                ScreenSource::Monitor,
+                &mut eventos,
+                |visto| {
+                    if let EspelhoDaTela::Abriu { codificador, .. } = visto {
+                        ditos.push(codificador);
+                    }
+                },
+                pedido.as_ref(),
+            )
+            .await
+            .expect("o laço acabou bem");
+            ditos
+        }
+
+        let (manda_ordem, _ordens) = mpsc::channel();
+        let placa = CodificadorEmUso::default();
+        placa.dizer(seele_video::codec::NOME_DO_OPENH264);
+        assert_eq!(
+            aberto_com(Some(PedidoDeChave(manda_ordem, placa))).await,
+            vec![Some(seele_video::codec::NOME_DO_OPENH264.to_owned())],
+            "a thread da bomba disse qual codificador armou, e o espelho abriu o fluxo sem \
+             o nome: a tela de quem transmite não tem como mostrá-lo"
+        );
+
+        let (manda_ordem, _ordens) = mpsc::channel();
+        assert_eq!(
+            aberto_com(Some(PedidoDeChave(
+                manda_ordem,
+                CodificadorEmUso::default()
+            )))
+            .await,
+            vec![None],
+            "com a placa vazia (a câmera, que a janela codifica) o espelho inventou um nome"
+        );
+        assert_eq!(
+            aberto_com(None).await,
+            vec![None],
+            "sem alça nenhuma o espelho inventou um nome"
+        );
+    }
+
+    /// **A bomba diz o codificador que armou antes de o fluxo sair.**
+    ///
+    /// Pela thread de verdade: quem recebe o primeiro `Fluxo` já acha o nome
+    /// na alça, e é o nome de um codificador desta casa. Precisa do módulo do
+    /// Cisco (`SEELE_OPENH264`), como os outros testes que armam a bomba.
+    #[test]
+    fn a_bomba_diz_o_codificador_que_armou_antes_de_o_fluxo_sair() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
+            .com_espectadores(1);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            CapturaParada,
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P720),
+            || {},
+        )
+        .expect("criar a thread da tela");
+        let alca = bomba.pedido_de_chave();
+        assert!(
+            matches!(esperar(&mut eventos), Some(EventoDaBomba::Fluxo { .. })),
+            "a bomba não abriu fluxo"
+        );
+        let nome = alca.codificador();
+        assert!(
+            nome.as_deref().is_some_and(|nome| !nome.trim().is_empty()),
+            "o fluxo abriu e a bomba não disse qual codificador o abriu: {nome:?}"
+        );
+        assert_eq!(
+            nome,
+            bomba.codificador(),
+            "a alça e a bomba dizem nomes diferentes"
+        );
+        bomba.parar();
+    }
+
     /// A bomba inteira, ligada num par QUIC de verdade: da captura ao byte que
     /// o outro lado lê.
     ///
@@ -2174,7 +2907,7 @@ pub(crate) mod tests {
         let (saida, _entrada) = par_paciente().await;
         let (manda, mut eventos) = canal::channel(16);
         let (manda_ordem, recebe_ordem) = mpsc::channel();
-        let pedido = PedidoDeChave(manda_ordem);
+        let pedido = PedidoDeChave(manda_ordem, CodificadorEmUso::default());
         manda
             .send(EventoDaBomba::Fluxo {
                 geracao: 1,
@@ -2211,6 +2944,7 @@ pub(crate) mod tests {
         let mut vistos = Vec::new();
         let contagem = escoar_com_espelho(
             &saida,
+            None,
             ScreenId(43),
             ScreenSource::Monitor,
             &mut eventos,
@@ -2266,6 +3000,7 @@ pub(crate) mod tests {
         let escoando = tokio::spawn(async move {
             escoar_com_espelho(
                 &saida,
+                None,
                 ScreenId(42),
                 ScreenSource::Monitor,
                 &mut eventos,
@@ -2417,5 +3152,18 @@ pub(crate) mod tests {
         assert_eq!(contagem.fluxos, 1);
         assert!(contagem.enviados >= 1, "nenhum quadro chegou ao fio");
         assert!(contagem.bytes > 0);
+    }
+
+    /// A transmissão codifica o som com o perfil de som de tela, e não com o
+    /// de voz; e «sem áudio» é codificador nenhum, não um que não é usado.
+    #[test]
+    fn o_som_da_transmissao_usa_o_perfil_de_som_de_tela() {
+        let com = codificador_do_som(true).expect("o Opus abre nesta máquina");
+        assert_eq!(
+            com.bitrate_bps(),
+            seele_audio::codec::BITRATE_DO_SOM_DE_TELA_BPS,
+            "o som da transmissão voltou para o codificador de voz"
+        );
+        assert!(codificador_do_som(false).is_none());
     }
 }

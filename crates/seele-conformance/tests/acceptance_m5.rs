@@ -190,10 +190,21 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
     // Here that is `spawn_blocking`, which is what the Tauri command does too.
     let connection = tokio::task::spawn_blocking(move || connect(address, "marcela")).await??;
 
+    // O apelido volta com a marca da chave desde a 0.18 (`marcela#XXXX`), e
+    // ela vem com a lista de presentes, um instante **depois** de `connect`
+    // devolver: até lá o retrato traz o apelido pedido. Ler o retrato na
+    // hora reprovava a maioria das rodadas (4 de 6 no Mac, 2 de 3 no Windows,
+    // medido em 11/11/2026) por uma corrida que a tela não tem — ela é
+    // redesenhada quando a lista chega.
+    assert!(
+        until(&connection, |c| apelido::marca(&c.snapshot().nickname)
+            .is_some()),
+        "a marca da chave não chegou ao apelido: {:?}",
+        connection.snapshot().nickname
+    );
     let snapshot = connection.snapshot();
     assert_eq!(snapshot.link_state, LinkTrust::Verified);
     assert_eq!(snapshot.server, "Casa");
-    // O apelido volta com a marca da chave desde a 0.18 (`marcela#XXXX`).
     assert_eq!(apelido::base(&snapshot.nickname), "marcela");
     assert!(
         apelido::marca(&snapshot.nickname).is_some(),
@@ -499,7 +510,12 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     terminal.join_channel(ChannelId(CHANNEL)).await?;
     room.open_channel(ChannelId(CHANNEL));
     terminal
-        .send_message(ChannelId(CHANNEL), "dito no terminal", ClientMessageId(1))
+        .send_message(
+            ChannelId(CHANNEL),
+            "dito no terminal",
+            None,
+            ClientMessageId(1),
+        )
         .await?;
 
     // Espera a mensagem voltar, que é quando ela está durável.

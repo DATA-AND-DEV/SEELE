@@ -3153,6 +3153,49 @@ mod testes {
         assert!(verbo_cabe(11, &ClientMessage::Ping { timestamp: 1 }));
     }
 
+    /// A segunda cerca do núcleo, para os verbos do protocolo 13
+    /// (`Client::edit_message`, `unban_person` e `list_bans` passam por
+    /// `escrever_com_portao`, que pergunta à mesma tabela): um servidor 12 —
+    /// a v0.19.6 publicada — pularia o verbo calado.
+    #[test]
+    fn um_servidor_doze_nao_recebe_os_verbos_do_treze() {
+        use seele_proto::ids::{MessageId, PersonId};
+        use seele_sessao::perfil::{portao_do_cliente, ErroDoPerfil};
+
+        for verbo in [
+            ClientMessage::EditMessage {
+                id: MessageId(1),
+                body: "x".into(),
+            },
+            ClientMessage::UnbanPerson {
+                person: PersonId(1),
+            },
+            ClientMessage::ListBans,
+        ] {
+            assert!(!verbo_cabe(12, &verbo), "{verbo:?}");
+            assert!(verbo_cabe(13, &verbo), "{verbo:?}");
+            assert_eq!(
+                portao_do_cliente(&verbo, 12),
+                Err(ErroDoPerfil::ServidorAntigo {
+                    negociado: 12,
+                    exige: 13
+                }),
+                "{verbo:?}"
+            );
+            assert_eq!(portao_do_cliente(&verbo, 13), Ok(()));
+        }
+        // Responder não precisou de número novo: o `replies_to` é do 9.
+        assert!(verbo_cabe(
+            10,
+            &ClientMessage::SendMessage {
+                channel: seele_proto::ids::ChannelId(1),
+                body: "x".into(),
+                replies_to: Some(MessageId(1)),
+                client_message_id: seele_proto::ids::ClientMessageId(1),
+            }
+        ));
+    }
+
     // ---- ajudantes
 
     async fn eco_tcp() -> (u16, tokio::task::JoinHandle<()>) {

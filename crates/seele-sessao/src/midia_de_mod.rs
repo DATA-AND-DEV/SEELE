@@ -21,23 +21,60 @@ pub struct MidiaPronta {
     pub decodificados: Option<u64>,
 }
 
-/// **Uma imagem reduzida ao uso que a janela nomeou** (`reducao`; rascunho da
-/// API 6, §4; tarefa 6, Step 5), e quanto ela pesa decodificada. Sem uso, ou
-/// para um som, os bytes seguem como vieram.
+/// O nome com que a imagem de um MOD que declara pixels demais é recusada. Os
+/// números vêm depois dele, no mesmo motivo, como no
+/// `som-grande-demais-decodificado`: «grande demais» sem número não diz a quem
+/// escreve o MOD se o que passou foi o arquivo ou a imagem aberta.
+pub const IMAGEM_GRANDE_DEMAIS_DECODIFICADA: &str = "imagem-grande-demais-decodificada";
+
+/// **Uma imagem de MOD reduzida ao lugar em que aparece** (`reducao`; rascunho
+/// da API 6, §4; tarefa 6, Step 5): ao uso que a janela nomeou, com o que ela
+/// pesa decodificada, ou, **sem uso conhecido, ao teto geral**
+/// ([`reducao::TETO_DA_MIDIA_DE_MOD`]). Um som segue como veio.
+///
+/// **Toda imagem de MOD passa por aqui antes do `data:`** — a do pacote
+/// (`midia_do_mod`) e as do servidor (`midia_em_bytes`, `ler_imagem_mod`), no
+/// desktop e no navegador. Até 11/11/2026 só a que nomeava uso era reduzida, e
+/// a do pacote nem chegava a esta função: o irmão do incidente da capa em 4K.
 ///
 /// # Errors
 ///
-/// `formato-desconhecido`, quando a imagem não decodifica.
+/// `formato-desconhecido`, quando a imagem não decodifica, e
+/// [`IMAGEM_GRANDE_DEMAIS_DECODIFICADA`] com as medidas e o teto, quando ela
+/// declara mais pixels que [`reducao::TETO_DE_PIXELS`]: recusada pelo
+/// cabeçalho, sem ser aberta aqui nem na janela.
 pub fn reduzir_ao_uso(
     bytes: Vec<u8>,
     teto: Option<&Teto>,
 ) -> Result<(Vec<u8>, Option<u64>), String> {
-    let Some(teto) = teto else {
-        return Ok((bytes, None));
-    };
     if !ler_tipo(&bytes).is_some_and(|tipo| tipo.papel == "imagem") {
         return Ok((bytes, None));
     }
+    let (largura, altura) = reducao::medidas(&bytes).map_err(|motivo| {
+        // O decodificador recusou a imagem por limite antes de dizer as
+        // medidas: é a mesma recusa, sem os números que ninguém conseguiu ler.
+        if motivo == reducao::GRANDE_DEMAIS {
+            format!(
+                "{IMAGEM_GRANDE_DEMAIS_DECODIFICADA}: a imagem declara mais pixels do que \
+                 se consegue medir, e o teto é de {} pixels",
+                reducao::TETO_DE_PIXELS
+            )
+        } else {
+            motivo
+        }
+    })?;
+    let pixels = u64::from(largura) * u64::from(altura);
+    if pixels > reducao::TETO_DE_PIXELS {
+        return Err(format!(
+            "{IMAGEM_GRANDE_DEMAIS_DECODIFICADA}: a imagem tem {largura} × {altura} \
+             ({pixels} pixels), e o teto é de {} pixels",
+            reducao::TETO_DE_PIXELS
+        ));
+    }
+    let Some(teto) = teto else {
+        return reducao::para_a_janela(bytes, &reducao::TETO_DA_MIDIA_DE_MOD)
+            .map(|reduzida| (reduzida, None));
+    };
     let reduzida = reducao::reduzir(&bytes, teto)?;
     Ok((reduzida.bytes, Some(reduzida.decodificados)))
 }
@@ -95,4 +132,81 @@ pub fn do_texto(base64: &str, teto: Option<&Teto>) -> Result<MidiaPronta, String
         return Err("arquivo-grande-demais".to_owned());
     }
     pronta(bytes, teto)
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use std::io::Cursor;
+
+    /// Um PNG liso: comprime a quase nada, com as medidas que se pedir.
+    fn png(largura: u32, altura: u32) -> Vec<u8> {
+        let mut saida = Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(largura, altura, image::Rgba([40, 80, 120, 255]))
+            .write_to(&mut saida, image::ImageFormat::Png)
+            .expect("grava");
+        saida.into_inner()
+    }
+
+    fn medidas_do_uri(uri: &str) -> (u32, u32) {
+        let (_, conteudo) = uri.split_once(',').expect("um data:");
+        let bytes = crate::base64::de_base64(conteudo).expect("base64");
+        reducao::medidas(&bytes).expect("imagem")
+    }
+
+    /// **A imagem de MOD que não nomeia uso vai à janela reduzida** (a
+    /// varredura do incidente da capa em 4K, 11/11/2026): sem uso, ela ia do
+    /// tamanho que veio. A que cabe continua com os bytes que tinha.
+    #[test]
+    fn a_imagem_sem_uso_vai_a_janela_dentro_do_teto_geral() {
+        let grande = pronta(png(3840, 2160), None).expect("pronta");
+        assert_eq!(grande.papel, "imagem");
+        assert_eq!(medidas_do_uri(&grande.uri), (1920, 1080));
+        assert!(
+            grande.decodificados.is_none(),
+            "só o uso nomeado conta o quadro"
+        );
+
+        let pequena = png(640, 360);
+        let pronta_pequena = pronta(pequena.clone(), None).expect("pronta");
+        assert_eq!(pronta_pequena.bytes, pequena.len());
+        assert_eq!(medidas_do_uri(&pronta_pequena.uri), (640, 360));
+    }
+
+    /// O fundo de uma caixa nomeia o uso, e chega com o teto da capa.
+    #[test]
+    fn o_fundo_vai_a_janela_com_o_teto_dele() {
+        let teto = reducao::teto_do_uso("fundo");
+        let fundo = pronta(png(3840, 2160), teto.as_ref()).expect("pronta");
+        assert_eq!(medidas_do_uri(&fundo.uri), (1280, 720));
+    }
+
+    /// **A imagem que declara pixels demais é recusada pelo nome, com os
+    /// números**, com uso ou sem: o arquivo é pequeno (cabe no teto de bytes),
+    /// e aberto pediria gigabytes à janela.
+    #[test]
+    fn a_imagem_com_pixels_demais_e_recusada_com_os_numeros() {
+        let bomba = png(9000, 5000);
+        assert!(bomba.len() < TETO_DE_MIDIA);
+        for teto in [None, reducao::teto_do_uso("capa")] {
+            let motivo = pronta(bomba.clone(), teto.as_ref()).unwrap_err();
+            assert!(
+                motivo.starts_with(IMAGEM_GRANDE_DEMAIS_DECODIFICADA),
+                "{motivo}"
+            );
+            assert!(motivo.contains("9000 × 5000"), "{motivo}");
+            assert!(motivo.contains("36000000"), "{motivo}");
+        }
+    }
+
+    /// Bytes que começam como imagem e não têm cabeçalho legível não vão à
+    /// janela: sem as medidas, não há como saber o que ela abriria.
+    #[test]
+    fn a_imagem_sem_cabecalho_legivel_e_formato_desconhecido() {
+        let so_a_assinatura = b"\x89PNG\r\n\x1a\n".to_vec();
+        assert_eq!(
+            pronta(so_a_assinatura, None).unwrap_err(),
+            "formato-desconhecido"
+        );
+    }
 }

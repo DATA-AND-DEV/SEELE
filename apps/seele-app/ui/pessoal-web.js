@@ -76,12 +76,18 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     el.textContent = texto;
     return el;
   };
-  const desenhos = { "SAÍDA DE ÁUDIO": "fone", VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "tela", "PARAR COMPARTILHAMENTO": "tela", "TROCAR TELA": "trocar", "SAIR DA CONVERSA": "xis", CANCELAR: "sair", "ENCERRAR CONVITE": "sair" };
+  const desenhos = { "SAÍDA DE ÁUDIO": "fone", VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "tela", "PARAR COMPARTILHAMENTO": "tela", "TROCAR TELA": "trocar", "SAIR DA CONVERSA": "xis", CANCELAR: "sair", "ENCERRAR CONVITE": "sair",
+    // A câmera tem o desenho dela: sem esta linha o botão caía no `avancar`, a seta de «entrar».
+    [FRASES_DA_CAMERA.pessoalLigar]: "camera", [FRASES_DA_CAMERA.pessoalDesligar]: "camera" };
   const rotular = (el, texto) => {
     if (el.getAttribute("aria-label") === texto && el.querySelector(".glifo")) return;
     el.setAttribute("aria-label", texto);
     const icone = texto === "LIGAR MICROFONE" ? glifoComEstado("microfone", true) : glifo(desenhos[texto] || "avancar");
-    const curto = { "LIGAR MICROFONE": "MICROFONE", "DESLIGAR MICROFONE": "MICROFONE", "COMPARTILHAR TELA": "TELA", "PARAR COMPARTILHAMENTO": "PARAR TELA", "SAIR DA CONVERSA": "SAIR" };
+    const curto = { "LIGAR MICROFONE": "MICROFONE", "DESLIGAR MICROFONE": "MICROFONE", "COMPARTILHAR TELA": "TELA", "PARAR COMPARTILHAMENTO": "PARAR TELA", "SAIR DA CONVERSA": "SAIR",
+      // No celular a palavra sob o círculo é o nome da coisa, como no microfone: o estado
+      // quem diz é o `aria-pressed` (o anel laranja), e o rótulo inteiro segue no `aria-label`.
+      [FRASES_DA_CAMERA.pessoalLigar]: FRASES_DA_CAMERA.rotulos.camera, [FRASES_DA_CAMERA.pessoalDesligar]: FRASES_DA_CAMERA.rotulos.camera,
+      "TROCAR TELA": "TROCAR", "SAÍDA DE ÁUDIO": "SAÍDA" };
     // Em janela larga o botão diz o rótulo inteiro (o canvas); em janela estreita, o curto.
     el.replaceChildren(icone, no("span", "pessoal-web-botao-texto", curto[texto] || texto), no("span", "pessoal-web-botao-longo", texto));
   };
@@ -196,6 +202,15 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   mic.setAttribute("aria-pressed", "false");
   let telaNoAr = false;
   const compartilhar = botao("COMPARTILHAR TELA", () => acoes.compartilhar());
+  // A câmera, no lugar da tela: uma imagem por vez também aqui. As frases são
+  // de `frases.js` (`FRASES_DA_CAMERA`), e a prévia vem da própria mídia.
+  let cameraNoAr = false;
+  const camera = botao(FRASES_DA_CAMERA.pessoalLigar, () => acoes.camera());
+  camera.setAttribute("aria-pressed", "false");
+  const previa = documento.createElement("video");
+  previa.className = "pessoal-web-previa";
+  previa.muted = true; previa.playsInline = true; previa.hidden = true;
+  previa.setAttribute("aria-label", FRASES_DA_CAMERA.previa);
   const trocarTela = botao("TROCAR TELA", () => acoes.trocarTela());
   const saida = botao("SAÍDA DE ÁUDIO", () => {
     painelDaSaida.hidden = !painelDaSaida.hidden;
@@ -225,8 +240,8 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   const erro = no("p", "pessoal-web-erro");
   erro.setAttribute("role", "alert");
   erro.hidden = true;
-  rodape.append(mic, compartilhar, trocarTela, saida, desligar);
-  raiz.append(topo, corpo, erro, rodape, painelDaSaida);
+  rodape.append(mic, compartilhar, camera, trocarTela, saida, desligar);
+  raiz.append(topo, corpo, previa, erro, rodape, painelDaSaida);
   // Em janela larga a barra de ações mora no painel do palco, no pé dele (o
   // canvas); na estreita ela segue sob os painéis, como a mão alcança.
   const janelaLarga = (documento.defaultView ?? window).matchMedia("(min-width: 701px) and (min-height: 501px)");
@@ -288,7 +303,11 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     entrar.hidden = !podeEntrar || !recebido;
     convite.hidden = fase !== "recebendo" || !link.value;
     atender.hidden = recusar.hidden = fase !== "tocando";
-    mic.hidden = compartilhar.hidden = !dentro;
+    mic.hidden = compartilhar.hidden = camera.hidden = !dentro;
+    camera.disabled = ocupado || (!cameraNoAr && !acoes.podeLigarCamera());
+    camera.title = cameraNoAr ? FRASES_DA_CAMERA.dicaDeDesligar
+      : acoes.podeLigarCamera() ? FRASES_DA_CAMERA.pessoalDica
+      : FRASES_DA_CAMERA.semCodificador.split("\n")[0];
     saida.hidden = !dentro || !estadoDaSaida.disponivel;
     saida.disabled = listaDaSaida.disabled = escolherSaida.disabled = ocupado;
     if (saida.hidden) { painelDaSaida.hidden = true; saida.setAttribute("aria-expanded", "false"); }
@@ -372,13 +391,25 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       rotular(mic, ligado ? "DESLIGAR MICROFONE" : "LIGAR MICROFONE");
       mic.setAttribute("aria-pressed", String(ligado));
     },
-    compartilhando(ligado) { telaNoAr = ligado; desenhar(); rotular(compartilhar, ligado ? "PARAR COMPARTILHAMENTO" : "COMPARTILHAR TELA"); compartilhar.setAttribute("aria-pressed", String(ligado)); },
+    /**
+     * O que esta ponta está mostrando: a tela, a câmera (com a mídia dela,
+     * para a prévia), ou nada. Uma das duas por vez.
+     */
+    compartilhando(ligado, { camera: eCamera = false, midia = null } = {}) {
+      telaNoAr = ligado && !eCamera; cameraNoAr = ligado && eCamera; desenhar();
+      rotular(compartilhar, telaNoAr ? "PARAR COMPARTILHAMENTO" : "COMPARTILHAR TELA"); compartilhar.setAttribute("aria-pressed", String(telaNoAr));
+      rotular(camera, cameraNoAr ? FRASES_DA_CAMERA.pessoalDesligar : FRASES_DA_CAMERA.pessoalLigar); camera.setAttribute("aria-pressed", String(cameraNoAr));
+      if (cameraNoAr && midia) { previa.srcObject = midia; previa.hidden = false; previa.play().catch(() => {}); }
+      else { previa.pause(); previa.srcObject = null; previa.hidden = true; }
+    },
     falha,
     limpar({ preservarOperacao = false } = {}) {
       // Criar/entrar limpam a conversa dentro da ação já em andamento.
       // Preservar seu dono mantém o botão bloqueado e a falha visível.
       if (!preservarOperacao) { ++operacao; ocupado = false; }
-      telaNoAr = false;
+      telaNoAr = false; cameraNoAr = false;
+      previa.pause(); previa.srcObject = null; previa.hidden = true;
+      rotular(camera, FRASES_DA_CAMERA.pessoalLigar); camera.setAttribute("aria-pressed", "false");
       retrato = { estado: "livre" };
       limparHistorico(); link.value = "";
       tela.replaceChildren(); tela.hidden = true; erro.hidden = true;

@@ -749,6 +749,16 @@
   border-color: var(--seele-vidro-borda);
 }
 
+/*
+ * A câmera de quem a ligou. A mesma moldura da imagem alheia, espelhada como
+ * um espelho — é assim que uma pessoa espera se ver —, e só aqui: o que vai
+ * para a sala não é espelhado.
+ */
+.chamada-palco-previa { transform: scaleX(-1); }
+/* Com a própria câmera no palco, o canvas da imagem alheia não tem o que
+   mostrar: fica a prévia, e não duas molduras. */
+.chamada-palco[data-camera="sim"] #palco-imagem { display: none; }
+
 .chamada-palco-cheia {
   margin-left: auto;
   padding: 4px 10px;

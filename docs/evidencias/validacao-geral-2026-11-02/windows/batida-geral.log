@@ -1,6 +1,0 @@
-
-running 1 test
-test session::batida_com_disco_ocupado::a_gravacao_da_batida_nao_bloqueia_o_executor_da_rede ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 759 filtered out; finished in 0.63s
-

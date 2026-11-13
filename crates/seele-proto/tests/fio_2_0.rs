@@ -47,7 +47,7 @@ use seele_proto::cargos::{
 };
 use seele_proto::control::{
     encode_em, recusa_por_versao, AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal,
-    AttachmentState, CausaDaRecusa, ChannelInfo, ClientMessage, ConsentimentoDePar,
+    AttachmentState, Banido, CausaDaRecusa, ChannelInfo, ClientMessage, ConsentimentoDePar,
     DisconnectReason, ListaDeCima, Membro, MessageRefusal, MotivoDeFalhaDePar, Permission,
     PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth,
     Telemetry, VoiceRoomInfo,
@@ -482,6 +482,42 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
             ClientMessage::TirarImagemDoPerfil {
                 lado: LadoDoPerfil::Capa,
             },
+        ),
+        (
+            "EditMessage",
+            ClientMessage::EditMessage {
+                id: MessageId(3),
+                body: "olá, linha (editada)".into(),
+            },
+        ),
+        (
+            "UnbanPerson",
+            ClientMessage::UnbanPerson {
+                person: PersonId(7),
+            },
+        ),
+        ("ListBans", ClientMessage::ListBans),
+        ("MidiaLigada", ClientMessage::MidiaLigada),
+        (
+            "TelaPorMidia",
+            ClientMessage::TelaPorMidia {
+                abertura: [1, 0, 0, 0, 7, 0, 0, 5, 0, 2, 208],
+            },
+        ),
+        (
+            "RelatoDeRecepcao",
+            ClientMessage::RelatoDeRecepcao(seele_proto::signal::Recepcao {
+                perda: Some(0.25),
+                jitter_ms: Some(12.5),
+            }),
+        ),
+        // O «não medido» de cada campo tem byte próprio no fio.
+        (
+            "RelatoDeRecepcao.SoPerda",
+            ClientMessage::RelatoDeRecepcao(seele_proto::signal::Recepcao {
+                perda: Some(1.0),
+                jitter_ms: None,
+            }),
         ),
     ]
 }
@@ -1137,6 +1173,42 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 faltou: vec![LadoDoPerfil::Capa],
             },
         ),
+        (
+            "Banidos",
+            ServerMessage::Banidos {
+                banidos: vec![
+                    Banido {
+                        person: PersonId(7),
+                        nickname: "kaworu".into(),
+                        reason: Some("spam".into()),
+                        expires_at: Some(1_800_000_000),
+                        issued_by: Some(PersonId(42)),
+                    },
+                    Banido {
+                        person: PersonId(8),
+                        nickname: "gendo".into(),
+                        reason: None,
+                        expires_at: None,
+                        issued_by: None,
+                    },
+                ],
+                ultima: true,
+            },
+        ),
+        (
+            "TelaPorMidia",
+            ServerMessage::TelaPorMidia {
+                faixa: 0,
+                abertura: [1, 0, 0, 0, 7, 2, 0, 5, 0, 2, 208],
+            },
+        ),
+        (
+            "FimDaTelaPorMidia",
+            ServerMessage::FimDaTelaPorMidia {
+                faixa: 0,
+                limpo: false,
+            },
+        ),
     ]
 }
 
@@ -1317,6 +1389,21 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
         })
         .unwrap(),
     ));
+
+    // A câmera (protocolo 13): a mesma abertura, com a fonte no código 2. No
+    // fim da lista, porque o arquivo está congelado e só cresce para baixo.
+    let mut camera = [0_u8; seele_proto::screen::SCREEN_HEADER_LEN];
+    ScreenHeader {
+        version: SCREEN_HEADER_VERSION,
+        screen: ScreenId(5),
+        source: ScreenSource::Camera,
+        codec: ScreenCodec::H264Baseline,
+        width: 1280,
+        height: 720,
+    }
+    .encode(&mut camera)
+    .unwrap();
+    todos.push(("fluxo:abertura-de-tela:camera".to_owned(), camera.to_vec()));
     todos
 }
 
@@ -1779,6 +1866,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
 fn os_codigos_de_um_byte_nao_mudam() {
     assert_eq!(ScreenSource::Monitor.code(), 0);
     assert_eq!(ScreenSource::Window.code(), 1);
+    assert_eq!(ScreenSource::Camera.code(), 2);
     assert_eq!(ScreenCodec::H264Baseline.code(), 0);
     assert_eq!(StreamType::Attachment.byte(), 1);
     assert_eq!(StreamType::Screen.byte(), 2);

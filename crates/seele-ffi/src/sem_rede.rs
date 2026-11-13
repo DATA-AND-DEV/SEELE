@@ -44,9 +44,12 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         pending_weights: Mutex::new(Vec::new()),
         tuneis: Mutex::new(crate::TabelaDeTuneis::default()),
         limites_da_tela: Mutex::new(None),
+        parada_da_tela: Mutex::new(Default::default()),
+        codificador_da_tela: Mutex::new(None),
         tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
         tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
         fontes_de_tela: Mutex::new(Vec::new()),
+        camera: std::sync::Mutex::new(None),
     })
 }
 

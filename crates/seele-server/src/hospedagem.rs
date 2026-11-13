@@ -437,7 +437,11 @@ impl Hospedagem {
                     ponta: server.ponta(),
                     enc,
                 };
-                convocar(pelo, server.fingerprint(), escuta)
+                // A sala diz a impressão do DTLS dela ao atender um chamado
+                // (ADR 0068); num servidor guardado não há o que dizer.
+                convocar(pelo, server.fingerprint(), escuta).map(|convocacao| {
+                    convocacao.com_a_impressao_dtls(server.impressao_dtls_da_sala())
+                })
             });
             // A segunda parede, só nos testes: um teste que chega aqui com o ponto
             // de produção — o ambiente apontando a VPS, ou

@@ -6,6 +6,7 @@ const http = require('node:http');
 const {spawn} = require('node:child_process');
 const engines = require('./playwright.cjs');
 const {origemDoProduto} = require('./origem-do-produto.cjs');
+const {registrarRtc,relatarRtc,pulaDuasPaginas} = require('./diagnostico-rtc.cjs');
 const raiz = path.resolve(__dirname, '../../..');
 const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unknown-unknown/release/seele_web.wasm');
 (async()=>{
@@ -26,8 +27,11 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
   for(let i=0;i<50;i++){try{await fetch('http://127.0.0.1:19885/chamada/1');break;}catch{await new Promise(r=>setTimeout(r,100));}}
   for(const [motor,tipo] of Object.entries({chromium:engines.chromium(),webkit:engines.webkit()})){
    const navegador=await tipo.launch({headless:true});
+   // As páginas desta volta, para o diagnóstico do WebRTC de quando ela reprova (`diagnostico-rtc.cjs`).
+   let paginas={};
    try{
-    const contexto=await navegador.newContext(); const a=await contexto.newPage(),b=await contexto.newPage();
+    const contexto=await navegador.newContext(); await registrarRtc(contexto);
+    const a=await contexto.newPage(),b=await contexto.newPage(); paginas={a,b};
     for(const pagina of [a,b]){
      pagina.on('pageerror',e=>console.error(motor,e));
      await pagina.goto(origem);
@@ -118,6 +122,9 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
     console.log(JSON.stringify({motor,origensDoConvite:'PASS'}));
     assert.equal(await b.evaluate(()=>servico.ler().estado),'livre');
     if(process.argv.includes('--so-origem')){await contexto.close();continue;}
+    // Daqui em diante as duas páginas se ligam por WebRTC, e no WebKit de Linux isso não acontece (`diagnostico-rtc.cjs` conta a
+    // medida). O que veio antes — a criptografia e as origens do convite — é de uma página só, e rodou neste motor.
+    if(pulaDuasPaginas('chamada-web.cjs',motor,'a chamada entre as duas páginas (convite, aceite, texto, perda do RTC, revogação, recusa e cancelamento). A criptografia e as origens do convite rodaram neste motor.')){await contexto.close();continue;}
     await b.evaluate(()=>servico.chamar({apelido:'Visitante'}));
     await a.waitForFunction(()=>servico.ler().estado==='tocando',{timeout:12000});
     assert.equal(await b.evaluate(()=>pares.includes(true)),false);
@@ -187,6 +194,11 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
     console.log(JSON.stringify({motor,recusa:true,cancelamentoAntesPost:true,cancelamentoAceiteProcessado:true}));
     for(const p of [a,b])await p.evaluate(()=>servico.destruir());
     console.log(JSON.stringify({motor,convite:true,aceite:true,textoBidirecional:true,revogadaAceitaContinua:true,encerramentoRemoto:true}));
+   }catch(e){
+    // **O prazo sozinho não diz por que duas páginas não se ligaram.** No runner de Linux de 12/11/2026 (execução 43264412497) o
+    // Chromium passou e o WebKit parou no «dentro» com «Timeout 20000ms exceeded», e mais nada. Antes de fechar o navegador,
+    // cada página diz o `iceConnectionState`, o `connectionState` e os candidatos que juntou e recebeu.
+    await relatarRtc(motor,paginas);throw e;
    }finally{await navegador.close();}
   }
  }catch(e){console.error(logs);throw e;}finally{encontro.kill();server.close();}

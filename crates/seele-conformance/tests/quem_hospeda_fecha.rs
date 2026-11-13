@@ -102,6 +102,7 @@ async fn de_pe(endereco: SocketAddr, semente: u8, apelido: &str) -> Result<Enlac
         .dizer(
             ChannelId(LINHA),
             dito.clone(),
+            None,
             ClientMessageId(u64::from(semente)),
         )
         .await?;

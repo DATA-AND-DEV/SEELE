@@ -615,6 +615,11 @@ pub enum Event {
     UplinkLoss {
         /// De quem é a subida medida.
         person: PersonId,
+        /// Em que sala ela fala. **Não vai a cliente nenhum**: é o que deixa a
+        /// sessão de quem a **ouve** descontar esta subida da perda que o
+        /// cliente dela relata (`crate::sinal`), sem perguntar à sala quem
+        /// está nela.
+        voice_room: VoiceRoomId,
         /// A fração perdida, de zero a um.
         fraction: f32,
     },
@@ -777,6 +782,20 @@ impl Telas {
             .into_iter()
             .map(|(_, _, screen)| screen)
             .collect()
+    }
+
+    /// Quem transmite esta tela, em qualquer sala.
+    ///
+    /// Para o pedido de quadro-chave que vem da mídia RTP de um espectador
+    /// (`crate::midia`): ali a tela é a que este servidor pôs na faixa dele,
+    /// e a sala já foi conferida no convite.
+    #[must_use]
+    pub fn dono(&self, screen: ScreenId) -> Option<PersonId> {
+        self.por_voice_room
+            .values()
+            .flatten()
+            .find(|(_, _, corrente)| *corrente == screen)
+            .map(|(person, _, _)| *person)
     }
 
     /// Quem está transmitindo nesta sala.

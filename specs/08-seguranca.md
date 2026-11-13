@@ -1,5 +1,16 @@
 # 08 — Segurança
 
+> **Estado na 1.0** (conferido contra o código em 10/11/2026). Este documento é o desenho original, com a seção de transporte da 0.17.
+>
+> - **Continua valendo:** a postura, o modelo de ameaça, TOFU, a identidade do servidor pelo certificado P-256, a prova do cliente, autenticação por chave Ed25519 com convite ou senha (ADRs 0004 e 0021), os dois baldes de taxa (ADR 0025), autorização sempre no servidor, sem E2EE na v1, anexos em claro no disco de quem hospeda.
+> - **Mudou:**
+>   - **não há TURN.** O item «TURN» abaixo descreve um relay opcional configurado por quem usa. A emenda de 26/10/2026 ao [ADR 0063](../docs/adr/0063-a-linha-2-fala-webrtc.md) o tirou: não há configuração de TURN, e a página apaga a chave que a guardava (`apps/seele-app/ui/rtc-web.js`);
+>   - **o anfitrião é ICE completo e controlado, e não ICE-lite** (mesma emenda; `crates/seele-enlace/src/ponta.rs`). O título «Riscos novos do anfitrião ICE-lite» ficou com o nome antigo;
+>   - **R2, R3 e R3b têm código hoje,** onde o texto diz «ainda não conferido». Os tetos de Indications e de furos são constantes do enlace (`INDICACOES_POR_CANDIDATO`, `CANDIDATOS_POR_FURO`, `FUROS_POR_MINUTO`) e o anfitrião limita os chamados por minuto (`crates/seele-server/src/alcance/encontro.rs`). O pendente mais velho sai quando o teto enche, e o que não começa o DTLS em 2 s sai: R3 (b) e (c). A mitigação (a) não foi feita, e o cabeçalho de `ponta.rs` diz por quê. Um `U` vivo nunca cria um segundo `Rtc`, e há lápide por `U` (R3b);
+>   - **R4 tem o escalonador** (o `ctl` e a voz saem na hora; `u` e `b` só escrevem abaixo de 64 KiB, `LIMIAR_DE_VOLUME`). Não conferi se a medida que o critério pede foi feita: continua como está escrito abaixo;
+>   - **as exceções ao `unsafe` não são «`seele-ffi` e bindings de áudio»:** o workspace proíbe (`unsafe_code = "forbid"`, que a `seele-ffi` herda), e seis crates trocam por `deny` com exceção nomeada no próprio `Cargo.toml`: `seele-audio`, `seele-core`, `seele-video` (ADR 0041), `seele-web`, `seele-motor-web` e `apps/seele-instalador`.
+> - **Manda agora:** o ADR 0063 com as duas emendas, e `crates/seele-enlace`.
+
 ## Postura
 
 Servidor auto-hospedado, comunidades pequenas, operador confiável mas não necessariamente especialista em segurança. O objetivo é ser **seguro por padrão sem configuração**, e nunca oferecer um caminho não criptografado "para facilitar".
@@ -36,6 +47,9 @@ O que a linha 1 garantia pelo TLS do QUIC continua, assim:
   - A sinalização (ENC/3 e `/sinal/1`) é terceiro não confiável. Ela só leva endereços e a credencial ICE, e uma resposta falsa custa não entrar.
   - Pendente no A: um banco antigo cuja chave guardada não seja P-256 é recusado com erro nomeado, e nunca regerado calado. Regerar troca a chave e dispara «A CHAVE MUDOU».
 - **A sala pessoal (Ed25519).** O DTLS P-256 da sala é efêmero. A identidade vai na apresentação `0x03` do `ctl`: a chave e a assinatura da sala sobre `rótulo ‖ fp_dtls`, conferidas pelo `ConfereCodigo` antes do `Hello`.
+  - **A página confere a mesma coisa** (1.0, ADR 0068), no `.wasm` (`seele_web::ligacao::Ligacao::apresentada`), com os mesmos 96 bytes. O `Hello` não existe até a conferência passar: a fila de saída nasce vazia.
+  - **A impressão DTLS que o ponto de encontro entrega à página é pista, e não prova.** O navegador só fecha o DTLS com a impressão escrita antes, e a da sala não está em convite nenhum: a sala a diz no `ATENDE`, e o ponto a repassa no `AQUI` do sinal. A assinatura da sala é sobre **essa** impressão, que o navegador exigiu: um ponto que a troque consegue «não entra» (a recusa é `CodigoNaoBate`, e a sala nem toca), e nada mais.
+  - **O pino é a chave inteira**, nos dois: depois de uma ligação completa, uma chave diferente com o mesmo código é `SePassouPorCodigo`. Na página ele mora no contato da conversa direta, no IndexedDB da origem.
 - **A prova do cliente.**
   - O rótulo novo é `SEELE/2 prova-de-cliente\0`, e a assinatura cobre `rótulo ‖ fp_servidor ‖ fp_dtls_cliente ‖ nonce`.
   - O servidor confere o `fp_dtls_cliente` contra o certificado DTLS que viu.

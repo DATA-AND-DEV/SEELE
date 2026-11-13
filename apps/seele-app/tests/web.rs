@@ -1431,16 +1431,30 @@ fn os_cabecalhos_da_origem_sao_um_so() {
         .unwrap_or(0);
     assert!(ano >= 31_536_000, "o HSTS vale menos de um ano: {hsts}");
 
-    // 4.
-    let passos = std::fs::read_to_string(
-        raiz_do_repositorio().join("docs/superpowers/sdd/2026-10-08-0.16/F4/origem-para-o-dono.md"),
-    )
-    .expect("os passos do dono");
-    assert!(
-        passos.contains(&texto),
-        "os passos do dono (`F4/origem-para-o-dono.md`) não trazem o `web/_headers` de hoje, \
-         inteiro: o dono configuraria outros cabeçalhos"
-    );
+    // 3b. **A página pode pedir a câmera e o microfone a si mesma, e mais
+    // ninguém pode** (a câmera, 1.0): com `camera=()` o `getUserMedia` da
+    // página é recusado pelo navegador sem pergunta nenhuma, e a pessoa lê
+    // «o sistema não deu a câmera» sobre uma recusa que é deste arquivo.
+    let permissoes: BTreeSet<String> = cabecalho(&regras, "/*", "permissions-policy")
+        .expect("sem Permissions-Policy")
+        .split(',')
+        .map(|parte| parte.trim().to_owned())
+        .collect();
+    for da_pagina in [
+        "camera=(self)",
+        "microphone=(self)",
+        "display-capture=(self)",
+    ] {
+        assert!(
+            permissoes.contains(da_pagina),
+            "a Permissions-Policy não traz `{da_pagina}`: a página não pode pedir isto ao \
+             navegador, e a recusa chega sem pergunta: {permissoes:?}"
+        );
+    }
+
+    // 4. (Conferia que os passos do dono, num documento de `docs/superpowers`,
+    // traziam o `web/_headers` de hoje. O documento saiu do repositório na
+    // limpeza da 1.0, e a conferência saiu com ele.)
 
     // 5.
     let bancada = app_dir().join("bancada");

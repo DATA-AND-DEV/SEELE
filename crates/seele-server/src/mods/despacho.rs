@@ -579,9 +579,14 @@ pub async fn acompanhar(
             // retrato que este evento levou pode ter envelhecido enquanto o MOD
             // rodava: um pedido que chegou no meio já leu, rodou e gravou.
             // Gravar o retrato antigo apagaria o que ele escreveu.
-            let mut atual = crate::persistence::mods::ler_quintal(&banco, id).unwrap_or_default();
-            mudanca.aplicar(&mut atual);
-            if let Err(erro) = crate::persistence::mods::gravar_quintal(&mut banco, id, &atual) {
+            //
+            // **E relido dentro da transação que grava**: o cadeado é deste
+            // servidor, e o arquivo pode ter outro (o de antes, ainda
+            // descendo). Ver `persistence::mods::mudar_quintal`.
+            let gravado = crate::persistence::mods::mudar_quintal(&mut banco, id, |atual| {
+                mudanca.aplicar(atual);
+            });
+            if let Err(erro) = gravado {
                 tracing::error!(%erro, mod_id = %id, "não deu para gravar o quintal do MOD");
             }
         }

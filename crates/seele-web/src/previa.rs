@@ -7,7 +7,8 @@
 //! o JSON contra o da FFI, motivo a motivo.
 
 use seele_proto::ids::AttachmentId;
-use seele_sessao::preview::{data_uri, judge, Verdict, PREVIEW_LIMIT};
+use seele_sessao::preview::{judge, Verdict, PREVIEW_LIMIT};
+use seele_sessao::reducao::{previa_na_janela, PreviaNaJanela, TETO_DE_PIXELS};
 use seele_sessao::state::Room;
 use serde_json::{json, Value};
 
@@ -40,13 +41,30 @@ pub fn previa_do_anexo(attachment: u64, claimed: &str, chegada: Chegada<'_>) -> 
             recusada(json!({ "kind": "TooBig", "limit": PREVIEW_LIMIT }), None)
         }
         Chegada::Bytes(bytes) => match judge(claimed, bytes) {
-            Verdict::Draw(formato) => json!({
-                "attachment": attachment,
-                "image": data_uri(formato, bytes),
-                "claimed": claimed,
-                "found": formato.media_type(),
-                "refusal": null,
-            }),
+            // **Reduzida ao lugar em que aparece antes de ir à página**, e
+            // recusada pelo cabeçalho quando declara pixels demais: o mesmo
+            // caminho do desktop (`seele_sessao::reducao::previa_na_janela`).
+            Verdict::Draw(formato) => match previa_na_janela(bytes.to_vec()) {
+                PreviaNaJanela::Pronta(uri) => json!({
+                    "attachment": attachment,
+                    "image": uri,
+                    "claimed": claimed,
+                    "found": formato.media_type(),
+                    "refusal": null,
+                }),
+                PreviaNaJanela::PixelsDemais { largura, altura } => recusada(
+                    json!({
+                        "kind": "TooManyPixels",
+                        "width": largura,
+                        "height": altura,
+                        "limit": TETO_DE_PIXELS,
+                    }),
+                    Some(formato.media_type()),
+                ),
+                PreviaNaJanela::Ilegivel => {
+                    recusada(json!({ "kind": "Unreadable" }), Some(formato.media_type()))
+                }
+            },
             Verdict::Disagrees { found, .. } => recusada(
                 json!({ "kind": "Disagrees" }),
                 found.map(|formato| formato.media_type()),
