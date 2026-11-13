@@ -100,7 +100,7 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 21] = [
+const BANCADAS: [&str; 22] = [
     "chamada-web-configuracao.cjs",
     "ciclo-captura-web.cjs",
     "ciclo-do-executor.cjs",
@@ -124,6 +124,9 @@ const BANCADAS: [&str; 21] = [
     // num `vm`, que nenhum lugar chamava (`toda_bancada_da_pasta_roda_em_algum_lugar`).
     "rtc-chamada-resiliencia.cjs",
     "rtc-diagnostico.cjs",
+    // O fecho de um "b": a página não fecha o canal que o anfitrião fecha (o
+    // `caiu` do caso 14 da `sessao-no-navegador`, CI de 12/11).
+    "rtc-fecho-do-b.cjs",
 ];
 
 fn raiz() -> PathBuf {

@@ -603,6 +603,60 @@ function criarAFilaDoVolume(limiar = LIMIAR_DO_VOLUME) {
   };
 }
 
+/**
+ * **Quanto a página espera o anfitrião fechar um "b"** depois de os dois fins
+ * passarem, antes de fechá-lo ela mesma. Não é espera de ninguém: a resposta já
+ * foi entregue a quem lia, e o prazo só existe para um canal não ficar aberto
+ * para sempre diante de um anfitrião que não fecha. Ver [`fechoDoB`].
+ */
+const PRAZO_DO_FECHO_DO_B_MS = 5000;
+
+/**
+ * **Quem fecha um "b" é o anfitrião, e não a página.** O anfitrião fecha o canal
+ * sozinho quando os dois fins passaram (`seele-enlace`, `ponta.rs`: «um "b"
+ * fecha quando os dois fins passaram»). A página também fechava, na mesma hora,
+ * e os dois fechos se cruzavam: o SCTP do anfitrião (`sctp-proto`) responde ao
+ * reset da página com um reset recíproco mesmo já tendo mandado o dele, e esse
+ * segundo reset chegava depois de o navegador dar o canal por fechado e soltar
+ * o número dele. O "b" SEGUINTE, aberto nesse instante, ganhava o mesmo número
+ * e morria com o reset do anterior, antes de abrir: `ler_imagem_mod` respondia
+ * `caiu` no lugar da imagem (ou da recusa do MOD). Medido em 12/11 na
+ * `sessao-no-navegador`, com pares de leituras em laço: 15 `caiu` em 1 400
+ * pares com a página fechando, 0 em 800 sem ela fechar.
+ *
+ * Por isso a página só anota os fins. Passados os dois, ela dá ao anfitrião
+ * [`PRAZO_DO_FECHO_DO_B_MS`]; se o canal ainda estiver aberto, fecha ela, e
+ * conta (`aoVencer`): um anfitrião que não fecha é um defeito que tem de aparecer.
+ */
+function fechoDoB(canal, { prazoMs = PRAZO_DO_FECHO_DO_B_MS, aoVencer = null } = {}) {
+  let dele = false;
+  let meu = false;
+  let relogio = null;
+  canal.addEventListener("close", () => {
+    if (relogio !== null) clearTimeout(relogio);
+  });
+  const ver = () => {
+    if (!dele || !meu || relogio !== null || canal.readyState !== "open") return;
+    relogio = setTimeout(() => {
+      if (canal.readyState !== "open") return;
+      aoVencer?.();
+      esvaziar(canal).then(() => canal.close());
+    }, prazoMs);
+  };
+  return {
+    /** O fim do anfitrião foi lido até o fim por quem lia. */
+    fimDele() {
+      dele = true;
+      ver();
+    },
+    /** O fim desta página saiu. */
+    fimMeu() {
+      meu = true;
+      ver();
+    },
+  };
+}
+
 /** Espera o canal esvaziar (para o fim não ser cortado pelo `close`). */
 function esvaziar(canal) {
   if (canal.readyState !== "open" || canal.bufferedAmount === 0) return Promise.resolve();
@@ -930,6 +984,7 @@ function criarEnlaceRtc({
   aoMudar = () => {},
   prazo = PRAZO_DO_ENLACE_MS,
   limiarDoVolume = LIMIAR_DO_VOLUME,
+  prazoDoFechoDoB = PRAZO_DO_FECHO_DO_B_MS,
   fetch: buscar = (...args) => globalThis.fetch(...args),
 }) {
   // O parâmetro com padrão, num nome declarado: o guarda das chamadas
@@ -959,6 +1014,9 @@ function criarEnlaceRtc({
     // Mensagens que chegaram num canal desta página antes de quem o lê se ligar
     // a ele (guardadas e entregues em ordem, e não perdidas).
     mensagensAntesDoOuvinte: 0,
+    // Os "b" que a página teve de fechar porque o anfitrião não fechou no
+    // prazo ([`fechoDoB`]). Fora de zero é um anfitrião que não fecha.
+    fechosPeloPrazo: 0,
     // O crédito (0x04): os anúncios desta página, os do anfitrião, e quantas
     // vezes um pedaço esperou crédito para sair.
     creditosAnunciados: 0,
@@ -1563,18 +1621,13 @@ function criarEnlaceRtc({
       });
       // Quem abre um "b" também o lê: anuncia a janela já aberto.
       janela.anunciar();
-      // No "b", cada lado manda o seu fim, e o canal fecha quando os dois
-      // passaram: quem escreve não fecha sozinho.
-      let fimDele = false;
-      let fimMeu = false;
-      const fecharSeAcabou = () => {
-        if (fimDele && fimMeu) esvaziar(canal).then(() => canal.close());
-      };
+      // No "b", cada lado manda o seu fim, e quem fecha o canal, passados os
+      // dois, é o anfitrião: a página só fecha se ele não fechar ([`fechoDoB`]).
+      const fecho = fechoDoB(canal, { prazoMs: prazoDoFechoDoB, aoVencer: () => (contas.fechosPeloPrazo += 1) });
       const leituraComFim = lado.leitura.pipeThrough(
         new TransformStream({
           flush() {
-            fimDele = true;
-            fecharSeAcabou();
+            fecho.fimDele();
           },
         }),
       );
@@ -1584,8 +1637,7 @@ function criarEnlaceRtc({
         write: (pedaco) => escritor.write(pedaco),
         async close() {
           await escritor.close();
-          fimMeu = true;
-          fecharSeAcabou();
+          fecho.fimMeu();
         },
         abort: (motivo) => escritor.abort(motivo),
       });
