@@ -4888,8 +4888,10 @@ mod testes {
         struct Matar(u32);
         impl Drop for Matar {
             fn drop(&mut self) {
+                // Com o `--`: sem ele o `kill` do procps lê `-1…` como
+                // `kill(-1)` (ver `matar` em `seele-core/tests/programa_sobras.rs`).
                 let _ = std::process::Command::new("kill")
-                    .args(["-KILL", &format!("-{}", self.0)])
+                    .args(["-KILL", "--", &format!("-{}", self.0)])
                     .stderr(std::process::Stdio::null())
                     .status();
             }
