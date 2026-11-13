@@ -90,6 +90,23 @@ pub trait FonteDeQuadros {
     fn tomar_som(&self) -> Vec<f32> {
         Vec::new()
     }
+
+    /// Se a captura **acabou sem ninguém mandar**, e o que o sistema disse.
+    ///
+    /// É a outra metade do «`None` não é morte» ali em cima: como
+    /// [`Self::tomar`] devolve `None` tanto para a tela parada quanto para a
+    /// janela que fechou, alguém tem de dizer qual das duas é — e só a captura
+    /// sabe. `None` aqui é «viva»; `Some` é o fim, com o detalhe cru para o
+    /// `seele.log`.
+    ///
+    /// Quem pergunta é a [`crate::bomba`], a cada tique, e a resposta `Some`
+    /// derruba a transmissão com [`crate::tela::MotivoDeQueda::Captura`].
+    ///
+    /// `None` por padrão: uma fonte que não sabe acabar sozinha — as de teste,
+    /// a câmera de fora — nunca acaba por aqui.
+    fn acabou(&self) -> Option<String> {
+        None
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -112,6 +129,12 @@ impl FonteDeQuadros for seele_video::captura::macos::CapturaDaTela {
         // pausa de captura não virar um buraco no som, e menos que a folga da
         // fila, para nunca esvaziá-la de uma vez.
         self.som().tomar(9_600)
+    }
+
+    /// O `didStopWithError` da ScreenCaptureKit: a janela fechou, a permissão
+    /// foi tirada, ou a pessoa parou pelo indicador do sistema.
+    fn acabou(&self) -> Option<String> {
+        Self::acabou(self)
     }
 }
 
@@ -217,6 +240,12 @@ impl FonteDeQuadros for CapturaComSom {
             // seguinte do codificador.
             SomDaTela::DoPrograma(captura) => captura.tomar(TETO),
         }
+    }
+
+    /// O `on_closed` da WGC, ou a thread dela que saiu sozinha. **Quem decide
+    /// é a imagem**: o som que some deixa a transmissão muda, e não a derruba.
+    fn acabou(&self) -> Option<String> {
+        self.imagem.acabou()
     }
 }
 
@@ -390,6 +419,14 @@ impl FonteDeQuadros for Box<dyn FonteDeQuadros + Send> {
 
     fn tomar_som(&self) -> Vec<f32> {
         (**self).tomar_som()
+    }
+
+    // **Repassado à mão, e não pode faltar.** O método tem padrão no trait, e
+    // um padrão numa caixa é a armadilha: sem esta linha tudo compila, a
+    // captura de verdade diz que acabou, e a caixa — que é por onde toda
+    // transmissão do produto passa — responde «viva» para sempre.
+    fn acabou(&self) -> Option<String> {
+        (**self).acabou()
     }
 }
 

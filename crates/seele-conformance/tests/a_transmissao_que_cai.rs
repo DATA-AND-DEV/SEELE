@@ -402,6 +402,48 @@ impl Captura for CapturaQueEntorta {
     }
 }
 
+/// A janela que fecha no meio: entrega `bons` quadros, depois não entrega mais
+/// nada e diz que acabou — como as duas capturas de verdade se apresentam.
+#[derive(Debug)]
+struct FonteQueFecha {
+    largura: usize,
+    altura: usize,
+    bons: usize,
+    passo: AtomicUsize,
+}
+
+impl FonteDeQuadros for FonteQueFecha {
+    fn tomar(&self) -> Option<seele_video::codec::QuadroI420> {
+        let passo = self.passo.fetch_add(1, Ordering::Relaxed);
+        (passo < self.bons).then(|| quadro(self.largura, self.altura, passo))
+    }
+
+    fn acabou(&self) -> Option<String> {
+        (self.passo.load(Ordering::Relaxed) >= self.bons)
+            .then(|| "the shared window was closed".to_owned())
+    }
+}
+
+#[derive(Debug)]
+struct CapturaQueFecha;
+
+impl Captura for CapturaQueFecha {
+    type Fonte = FonteQueFecha;
+
+    fn iniciar(
+        &mut self,
+        resolucao: Resolucao,
+        _cadencia: Cadencia,
+    ) -> std::result::Result<Self::Fonte, CapturaRecusou> {
+        Ok(FonteQueFecha {
+            largura: resolucao.largura(),
+            altura: resolucao.altura(),
+            bons: 6,
+            passo: AtomicUsize::new(0),
+        })
+    }
+}
+
 /// O módulo do Cisco, ou `None` com o motivo impresso. A mesma decisão de
 /// `seele_core::bomba`: pula em vez de falhar, e `SEELE_EXIGE_CODEC` faz
 /// faltar virar falha onde há módulo publicado.
@@ -458,6 +500,41 @@ async fn a_bomba_que_morre_no_meio_acaba_a_transmissao_e_diz_que_foi_o_codificad
         (ouvido.caiu[0].1, ouvido.caiu[0].2),
         (ScreenSource::Monitor, MotivoDeQueda::Codificador),
         "o codificador recusou um quadro, e o motivo dito foi outro"
+    );
+    assert!(
+        ouvido.caiu_depois_de_abrir,
+        "a queda veio antes de o fluxo abrir: o caso é o do meio da transmissão"
+    );
+    Ok(())
+}
+
+/// **Fechar a janela compartilhada acaba a transmissão, e diz que foi a
+/// captura.**
+///
+/// O defeito de campo: a janela fecha, a captura para de entregar quadro, e a
+/// transmissão fica «no ar» — o servidor anunciando, o botão em PARAR DE
+/// COMPARTILHAR, e quem assiste olhando o último quadro. A captura sabia (o
+/// `on_closed` da WGC, o `didStopWithError` da ScreenCaptureKit) e ninguém
+/// perguntava.
+///
+/// Aqui a pergunta é feita pela bomba de verdade, contra o servidor de
+/// verdade: os três itens do cabeçalho deste arquivo, com o motivo `Captura`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_janela_que_fecha_no_meio_acaba_a_transmissao_e_diz_que_foi_a_captura() -> Result<()> {
+    let _vaga = vaga::minha();
+    let Some(biblioteca) = biblioteca() else {
+        return Ok(());
+    };
+    let pedido = PedidoDeTela::DoSistema {
+        biblioteca,
+        captura: CapturaEmCaixa::nova(CapturaQueFecha),
+        origem: ScreenSource::Window,
+    };
+    let ouvido = a_transmissao_cai(pedido, LimitesDeTela::default()).await?;
+    assert_eq!(
+        (ouvido.caiu[0].1, ouvido.caiu[0].2),
+        (ScreenSource::Window, MotivoDeQueda::Captura),
+        "a janela fechou, e o motivo dito foi outro"
     );
     assert!(
         ouvido.caiu_depois_de_abrir,

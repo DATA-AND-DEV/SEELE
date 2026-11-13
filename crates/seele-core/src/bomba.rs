@@ -81,7 +81,7 @@ use crate::tela::{
     intervalo_de_quadro, ErroDeTela, MotivoDeParada, MotivoDeQueda, TetoDeVideo, Transmissao,
 };
 use crate::video::{
-    Ajuste, Captura, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, FonteDeQuadros as _,
+    Ajuste, Captura, CapturaRecusou, Compartilhamento, ErroDeCompartilhamento, FonteDeQuadros,
     Passo,
 };
 
@@ -302,6 +302,40 @@ impl QuedaDaBomba {
             detalhe: erro.to_string(),
         }
     }
+
+    /// A captura acabou sozinha no meio: a janela transmitida fechou, ou o
+    /// sistema parou o fluxo.
+    fn da_captura_que_acabou(detalhe: String) -> Self {
+        Self {
+            motivo: MotivoDeQueda::Captura,
+            detalhe,
+        }
+    }
+}
+
+/// **A captura acabou → a transmissão cai, com o motivo `Captura`.**
+///
+/// A decisão inteira, fora do laço para ter teste sem codec e em qualquer
+/// sistema. `None` é seguir: não há fonte (o vídeo está pausado pelo sinal, e
+/// a captura foi largada de propósito), ou a fonte está viva — inclusive a que
+/// não entrega quadro porque a tela não muda.
+///
+/// # O defeito
+///
+/// Fechar a janela compartilhada deixava a transmissão «no ar» e congelada.
+/// As duas capturas sabiam (o `on_closed` da WGC, o `didStopWithError` da
+/// ScreenCaptureKit) e ninguém perguntava: para o laço, `tomar()` devolvendo
+/// `None` era só mais um tique de tela parada. O servidor seguia anunciando a
+/// tela, o botão seguia em PARAR DE COMPARTILHAR, e quem assistia ficava
+/// olhando o último quadro.
+///
+/// Daqui em diante o caminho é o que já existia para a bomba que morre:
+/// [`EventoDaBomba::Fim`] com erro, [`ErroDeTela::Produtor`], e o motor do
+/// enlace encerra de verdade, avisa o servidor e diz por quê.
+fn queda_se_a_captura_acabou(fonte: Option<&impl FonteDeQuadros>) -> Option<QuedaDaBomba> {
+    fonte
+        .and_then(FonteDeQuadros::acabou)
+        .map(QuedaDaBomba::da_captura_que_acabou)
 }
 
 impl std::fmt::Display for QuedaDaBomba {
@@ -639,6 +673,12 @@ impl<C: Captura> Laco<C> {
             // vez de codificar sem teto.
             if self.compartilhamento.is_none() {
                 continue;
+            }
+
+            // Antes do tique, e a cada um: a captura que acabou não entrega
+            // mais quadro, e o tique leria isso como tela parada para sempre.
+            if let Some(queda) = queda_se_a_captura_acabou(self.fonte.as_ref()) {
+                return Some(queda);
             }
 
             self.escoar_pendentes();
@@ -1719,6 +1759,154 @@ pub(crate) mod tests {
         ) -> Result<Self::Fonte, CapturaRecusou> {
             Ok(FonteComTom)
         }
+    }
+
+    /// A janela que fecha no meio: entrega `bons` quadros, e daí em diante
+    /// não entrega mais nada e diz que acabou — que é como as duas capturas de
+    /// verdade se apresentam.
+    #[derive(Debug)]
+    struct FonteQueFecha {
+        largura: usize,
+        altura: usize,
+        bons: usize,
+        passo: AtomicUsize,
+    }
+
+    impl FonteDeQuadros for FonteQueFecha {
+        fn tomar(&self) -> Option<QuadroI420> {
+            let passo = self.passo.fetch_add(1, Ordering::Relaxed);
+            (passo < self.bons).then(|| quadro(self.largura, self.altura, passo))
+        }
+
+        fn acabou(&self) -> Option<String> {
+            (self.passo.load(Ordering::Relaxed) >= self.bons)
+                .then(|| "the shared window was closed".to_owned())
+        }
+    }
+
+    #[derive(Debug)]
+    struct CapturaQueFecha;
+
+    impl Captura for CapturaQueFecha {
+        type Fonte = FonteQueFecha;
+
+        fn iniciar(
+            &mut self,
+            resolucao: Resolucao,
+            _cadencia: Cadencia,
+        ) -> Result<Self::Fonte, CapturaRecusou> {
+            Ok(FonteQueFecha {
+                largura: resolucao.largura(),
+                altura: resolucao.altura(),
+                bons: 3,
+                passo: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    /// **A captura que acabou vira queda com o motivo `Captura` — e a tela
+    /// parada não.**
+    ///
+    /// Sem codec e em qualquer sistema, de propósito: a decisão não pode morar
+    /// só num teste que pula onde o módulo do Cisco não está, nem num arquivo
+    /// `cfg(windows)` que não roda no Mac de quem escreve.
+    ///
+    /// **A caixa é metade do teste.** Toda transmissão do produto passa por
+    /// `CapturaEmCaixa`, cuja fonte é um `Box<dyn FonteDeQuadros>`; `acabou` tem
+    /// padrão no trait, e uma caixa que não o repassasse responderia «viva»
+    /// para sempre, com tudo compilando.
+    #[test]
+    fn a_captura_que_acabou_vira_queda_com_o_motivo_captura() {
+        let fechada = FonteQueFecha {
+            largura: 16,
+            altura: 16,
+            bons: 0,
+            passo: AtomicUsize::new(0),
+        };
+        let queda = queda_se_a_captura_acabou(Some(&fechada))
+            .expect("a captura disse que acabou e a bomba seguiria transmitindo o último quadro");
+        assert_eq!(queda.motivo, MotivoDeQueda::Captura);
+        assert_eq!(
+            queda.detalhe, "the shared window was closed",
+            "o detalhe é o que o `seele.log` tem para mostrar"
+        );
+
+        // Pela caixa, que é por onde o produto passa.
+        let mut em_caixa = crate::video::CapturaEmCaixa::nova(CapturaQueFecha);
+        let fonte = em_caixa
+            .iniciar(Resolucao::P720, Cadencia::Q30)
+            .expect("a captura de mentira abre");
+        assert_eq!(
+            queda_se_a_captura_acabou(Some(&fonte)),
+            None,
+            "a captura ainda tem quadros a entregar e já foi dada por acabada"
+        );
+        while fonte.tomar().is_some() {}
+        assert_eq!(
+            queda_se_a_captura_acabou(Some(&fonte)).map(|queda| queda.motivo),
+            Some(MotivoDeQueda::Captura),
+            "a fonte dentro da caixa disse que acabou e a caixa não repassou: é por ela que \
+             toda transmissão do produto passa, e a janela fechada ficaria no ar, congelada"
+        );
+
+        // A tela parada **não** é o fim: `None` atrás de `None`, e viva.
+        assert_eq!(queda_se_a_captura_acabou(Some(&FonteParada)), None);
+        // E pausado pelo sinal não há fonte: nada a derrubar.
+        assert_eq!(queda_se_a_captura_acabou(None::<&FonteParada>), None);
+    }
+
+    /// O mesmo, pela bomba de verdade: a janela fecha **no meio**, e a thread
+    /// acaba dizendo que foi a captura — em vez de girar para sempre sem
+    /// quadro, que era o defeito.
+    #[test]
+    fn a_janela_que_fecha_no_meio_derruba_a_bomba_com_o_motivo_captura() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
+            .com_espectadores(1);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            crate::video::CapturaEmCaixa::nova(CapturaQueFecha),
+            arranjo(fibra, SignalBand::Nominal, Resolucao::P720),
+            || {},
+        )
+        .expect("criar a thread da tela");
+        assert!(matches!(
+            esperar(&mut eventos),
+            Some(EventoDaBomba::Fluxo { geracao: 1, .. })
+        ));
+        let mut quadros = 0_u32;
+        // **Com prazo, e não só com a paciência de `esperar`.** A bomba que
+        // segue de pé depois de a janela fechar não fica calada: ela pede
+        // escoamento a cada tique, e um laço que só esperasse o próximo evento
+        // giraria para sempre — o guarda penduraria em vez de reprovar.
+        let prazo = Instant::now() + Duration::from_secs(10);
+        let fim = loop {
+            let evento = esperar(&mut eventos);
+            assert!(
+                Instant::now() < prazo && evento.is_some(),
+                "a janela fechou e a bomba seguiu de pé, sem quadro e sem fim: é a \
+                 transmissão que fica no ar, congelada"
+            );
+            match evento {
+                Some(EventoDaBomba::Quadro(_)) => quadros += 1,
+                Some(EventoDaBomba::Fim(fim)) => break fim,
+                _ => {}
+            }
+        };
+        assert!(
+            quadros >= 1,
+            "a bomba caiu antes do primeiro quadro: o caso é o do meio da transmissão"
+        );
+        let queda = fim.expect("a janela fechou e a bomba disse que parou a pedido");
+        assert_eq!(
+            queda.motivo,
+            MotivoDeQueda::Captura,
+            "quem acabou foi a captura: {queda:?}"
+        );
+        drop(bomba);
     }
 
     /// O som que a captura entrega chega ao fio como pacote Opus.

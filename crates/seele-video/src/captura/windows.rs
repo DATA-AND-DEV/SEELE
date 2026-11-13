@@ -80,6 +80,7 @@ use windows_capture::settings::{
 };
 use windows_capture::window::Window;
 
+use super::fim::{fim_da_captura, SinalDeFim};
 use super::reamostragem::Mapa;
 use crate::codec::{Cadencia, QuadroI420, Resolucao};
 use crate::erro::ErroDeVideo;
@@ -301,6 +302,8 @@ struct Caixa {
     fora_de_ritmo: AtomicU64,
     falhas: AtomicU64,
     nanos_convertendo: AtomicU64,
+    /// Marcado pelo `on_closed`: a janela ou o monitor transmitido sumiu.
+    fim: SinalDeFim,
 }
 
 impl Caixa {
@@ -429,11 +432,20 @@ impl GraphicsCaptureApiHandler for Manipulador {
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        // A janela transmitida fechou. Não é erro — é o fim da transmissão, e
-        // quem retira da caixa descobre pelo `esta_viva`.
+        // A janela transmitida fechou. Não é erro **desta** thread — é o fim
+        // da transmissão, e quem retira da caixa o lê em [`Captura::acabou`].
+        //
+        // Aqui havia só o `Ok(())`, e um `esta_viva` que ninguém chamava: a
+        // captura sabia e não contava, e a transmissão ficava no ar, parada no
+        // último quadro. A marca é o que atravessa para a thread do
+        // codificador.
+        self.caixa.fim.marcar(O_ALVO_FECHOU);
         Ok(())
     }
 }
+
+/// O que o `on_closed` do [`Manipulador`] deixa escrito.
+const O_ALVO_FECHOU: &str = "the shared window or display was closed";
 
 /// Uma transmissão de tela em andamento.
 ///
@@ -613,6 +625,19 @@ impl Captura {
         self.controle
             .as_ref()
             .is_some_and(|controle| !controle.is_finished())
+    }
+
+    /// Se a captura acabou sem ninguém mandar, e o que se sabe do motivo.
+    ///
+    /// `None` enquanto ela vive — inclusive quando não entrega quadro porque a
+    /// tela não muda. `Some` quando a janela transmitida fechou (o `on_closed`
+    /// da WGC) ou quando a thread da captura saiu por conta própria, que é o
+    /// que acontece se um retorno de chamada devolve erro.
+    ///
+    /// A decisão é [`fim_da_captura`], que tem teste em qualquer sistema.
+    #[must_use]
+    pub fn acabou(&self) -> Option<String> {
+        fim_da_captura(self.caixa.fim.acabou(), self.esta_viva())
     }
 
     /// O nome do alvo, como ele foi listado.
