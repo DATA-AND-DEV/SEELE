@@ -133,3 +133,28 @@ nenhuma tentativa falhada em 42 rodadas.
 - **Entre duas máquinas de verdade** (um Mac e um Windows na mesma rede, o
   `seeled` no Mac, `tela_entre_maquinas`): ver o fim de `docs/teste-duas-maquinas.md`.
 - Os limites da medida são os de antes.
+
+## Repetição no código da entrega (12/11, commit `17647b27`)
+
+A mesma grade, variante **produto**, mediana de 3 rodadas, depois de tudo o que
+entrou desde a medida anterior (relato de recepção, transmissão que cai,
+codificador do Windows, sala pessoal). Brutos em
+`brutos-2026-11-12-rtp-no-produto/rtp5-20s.out` e `rtp5-regime.out`.
+
+| cenário | primeiros 20 s: congelado % · kbps oferecidos | em regime: congelado % · kbps oferecidos |
+|---|--:|--:|
+| 0% | 0,0 · 2003 | 0,0 · 2375 |
+| 0,3% | 0,0 · 2004 | 0,0 · 2375 |
+| 1% | 0,0 · 2006 | 0,0 · 2375 |
+| 3% | 0,0 · 1994 | 0,0 · 2375 |
+| 5% | 0,0 (0,0–1,1 entre rodadas) · 2005 | 0,0 (0,0–1,0) · 2375 |
+| 1,0 Mbps, 0% | 1,5 (1,5–2,1) · 220 | 0,0 · 444 |
+| 2,0 Mbps, 1% | 0,0 · 899 | 0,0 · 1266 |
+
+Um quadro-chave por rodada nos primeiros 20 s e nenhum em regime; nenhum pedido
+de chave, nenhuma pausa, nenhum quadro recusado ou perdido. Igual à medida de
+11/11 dentro da variação entre rodadas.
+
+**O que esta rodada não vale:** a parte «em regime» correu com outras
+compilações na mesma máquina (a de 20 s correu sozinha). Os números de regime
+não pioraram com isso, mas a rodada não serve de referência de latência.
