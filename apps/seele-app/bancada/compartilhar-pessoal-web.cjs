@@ -36,7 +36,7 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
    if(process.env.SEELE_PREVIEW_DIR){fs.mkdirSync(process.env.SEELE_PREVIEW_DIR,{recursive:true});await page.exposeFunction('preview',()=>page.screenshot({path:path.join(process.env.SEELE_PREVIEW_DIR,`${engine}-tela-pessoal-h264.png`)}));}
    await page.goto(`http://127.0.0.1:${server.address().port}`);
    const result=await comPrazo(page.evaluate(async ({sample,prazoDosEnlaces})=>{
-    const check=(v,m)=>{if(!v)throw new Error(m);};const tick=()=>new Promise(ok=>setTimeout(ok,20));
+    window.conferidos=[];const check=(v,m)=>{if(!v)throw new Error(m);window.conferidos.push(m);};const tick=()=>new Promise(ok=>setTimeout(ok,20));
     const until=async f=>{const start=performance.now();while(!f()){if(performance.now()-start>10000)throw new Error('prazo mídia: '+JSON.stringify(window.events));await tick();}};
     const wasmBytes=await(await fetch('/seele_web.wasm')).arrayBuffer();
     async function service(){const wasm=(await WebAssembly.instantiate(wasmBytes,{})).instance.exports;return {wasm,operar(input){const b=new TextEncoder().encode(JSON.stringify(input));const p=wasm.alocar(b.length);try{new Uint8Array(wasm.memory.buffer).set(b,p);wasm.chamada_operar(p,b.length);const r=JSON.parse(new TextDecoder().decode(new Uint8Array(wasm.memory.buffer,wasm.saida_ptr(),wasm.saida_len())));if(r.erro)throw Error(r.erro);return r;}finally{wasm.liberar(p,b.length);}}};}
@@ -213,7 +213,12 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
   }catch(erro){
    // Antes de fechar o navegador: o que a página sabe do WebRTC dela, e os eventos da prova até ali.
    if(page){
-    console.error(`${engine}: os eventos da prova até a falha:`,await page.evaluate(()=>JSON.stringify(window.events??null)).catch(falha=>`sem resposta: ${falha}`));
+    // **Onde parou**: a última conferência que passou. Em 13/11 o WebKit do
+    // Linux ficou 90 s num `await` sem prazo, com 1665 quadros chegando, e os
+    // eventos sozinhos não diziam em qual. E os eventos vão resumidos: a lista
+    // inteira de quadros afogava o resto do log.
+    console.error(`${engine}: a última conferência que passou:`,await page.evaluate(()=>JSON.stringify((window.conferidos??[]).slice(-3))).catch(falha=>`sem resposta: ${falha}`));
+    console.error(`${engine}: os eventos da prova até a falha:`,await page.evaluate(()=>{const e=window.events??[];const q=e.filter(x=>x.tipo==='quadro').length;return JSON.stringify({quadros:q,outros:e.filter(x=>x.tipo!=='quadro')});}).catch(falha=>`sem resposta: ${falha}`));
     await relatarRtc(engine,{pagina:page});
    }
    throw erro;
