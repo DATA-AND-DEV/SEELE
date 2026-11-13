@@ -175,13 +175,24 @@ function instalarConversasPessoaisWeb() {
    * não abre não fecha a escuta: a pessoa ouve, e a tela diz que não é ouvida.
    */
   function abrirAudioNoGesto() {
-    if (!voz) { vista.falha("O áudio está preparando. Toque no microfone depois de conectar para falar."); return; }
-    const aberta = voz.ligar();
+    // Com a voz pronta, a captura nasce dentro do gesto, que é o que o
+    // navegador do celular exige. Sem ela (a página acabou de abrir, ou a
+    // conversa anterior acabou de fechar), ESPERA por ela em vez de desistir:
+    // até a 1.1.0 esta função voltava aqui com uma frase que a própria
+    // abertura da tela apagava, e quem ligava conectava mudo sem saber.
+    const aberta = voz ? voz.ligar() : abrirAVozQueAindaNasce();
     capturaDoGesto = aberta;
     void aberta.then(() => { if (fase === "dentro") return selecaoDaSaida.restaurar(); }).catch(erro => {
       if (capturaDoGesto === aberta) capturaDoGesto = null;
+      // Trocada por outra tentativa ou pela saída: quem a trocou é que fala.
+      if (erro?.vozTrocada) return;
       vista.falha(erro?.etapaDaVoz === "microfone" ? FRASE_DO_MICROFONE_FECHADO : `Não foi possível abrir a escuta: ${erro.message || erro}`);
     });
+  }
+  async function abrirAVozQueAindaNasce() {
+    const pronta = voz ?? await prepararVoz(servico ?? await obterServico());
+    if (!pronta || pronta !== voz) throw Object.assign(new Error("a voz foi trocada antes de abrir"), { vozTrocada: true });
+    return pronta.ligar();
   }
   /** Liga o microfone do gesto quando o par chega, se ele abriu. */
   async function ligarMicrofoneDoGesto(estaVoz, enlace, meta, vez) {
@@ -227,6 +238,11 @@ function instalarConversasPessoaisWeb() {
     if (recebendoCodigo && servico) {
       globalThis.alertasSonoros?.notarFase(fase, "encerrada");
       fase = "encerrada"; vista.estado({ estado: fase });
+      // **O serviço fica, e a voz também.** `soltarMidia` acabou de soltá-la, e
+      // o serviço só avisa «encerrada» (que a refaz) quando havia conversa:
+      // fechar a tela depois que ela acabou deixava a página sem voz, e a
+      // ligação seguinte saía com o microfone fechado (medido em 13/11/2026).
+      void prepararVoz(servico).catch(() => {});
       return;
     }
     // Uma operação de criação ainda em voo não pode instalar um convite depois

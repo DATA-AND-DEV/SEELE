@@ -33,10 +33,14 @@ const ui = path.resolve(__dirname, '../ui');
           if (prova.falharFoco) throw new Error('foco recusado');
           if (prova.esperarFoco) await new Promise(ok => window.permitirFoco = ok);
         };
-        window.carregarOWasmDaPagina = async () => ({ bytes: new ArrayBuffer(0) });
+        window.carregarOWasmDaPagina = async () => {
+          if (prova.esperarWasm) await new Promise(ok => { window.entregarWasm = ok; });
+          return { bytes: new ArrayBuffer(0) };
+        };
         window.temCapturaParaCodificar = () => false;
         window.criarVozDoNavegador = () => {
           let geracao = 0;
+          prova.criouVoz = (prova.criouVoz || 0) + 1;
           return {
           ligar: pedido => {
             if (pedido?.somenteOuvir) return Promise.resolve();
@@ -62,15 +66,22 @@ const ui = path.resolve(__dirname, '../ui');
         };
         window.criarServicoDeChamadasWeb = async callbacks => {
           window.callbacksDaChamada = callbacks;
-          return {
+          // Como o serviço de verdade (`cancelarAtual` em `chamada-web.js`):
+          // encerrar só avisa «encerrada» quando HÁ uma conversa para encerrar.
+          // Um `encerrar` que avisava sempre escondia o defeito de 13/11.
+          let haConversa = false;
+          return window.servicoDeProva = {
             wasm: {}, receberPorCodigo: async () => { prova.recebeu++; if (prova.esperarRegistro) await new Promise((ok, nao) => { window.rejeitarRegistro = () => nao(new DOMException("Cancelada", "AbortError")); }); }, criarConvite: async () => {
               if (prova.esperarCriacao) await new Promise((ok, nao) => { window.rejeitarCriacao = () => nao(new Error('encontro indisponível')); });
-              callbacks.aoEstado({ estado: 'recebendo' }); return { link: 'https://example.test/#chamada/teste' };
+              haConversa = true; callbacks.aoEstado({ estado: 'recebendo' }); return { link: 'https://example.test/#chamada/teste' };
             },
+            chamarCodigo: async () => { haConversa = true; prova.chamouCodigo = (prova.chamouCodigo || 0) + 1; return {}; },
             abrirConvite: () => { prova.abriuConvite++; }, chamar: async () => {
+              haConversa = true;
               if (prova.esperarChamada) await new Promise((ok, nao) => { window.rejeitarChamada = () => nao(new Error('conexão recusada')); });
-            }, atender: async () => {},
-            destruir: () => { prova.destruiu++; }, encerrar: () => callbacks.aoEstado({ estado: 'encerrada' }),
+            }, atender: async () => { haConversa = true; },
+            destruir: () => { prova.destruiu++; },
+            encerrar: () => { if (!haConversa) return; haConversa = false; callbacks.aoEstado({ estado: 'encerrada' }); },
             revogarConvite: async () => {},
           };
         };
@@ -175,7 +186,67 @@ const ui = path.resolve(__dirname, '../ui');
       await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
       await page.waitForFunction(base => prova.recebeu > base, antesDeSuspender.recebeu);
       assert.equal(await page.evaluate(() => prova.capturas), capturasAntes + 4, 'BFCache não reabre microfone');
-      console.log(`${engine}: criação/entrada recusadas visíveis, cliques pendentes bloqueados, microfone pedido no gesto e ligado com o par, cancelamento, foco recusado, captura recusada, permissão tardia, saída e BFCache PASS`);
+      // **Quem liga pelo código fala também na segunda conversa.** Medido em
+      // página publicada em 13/11/2026 (1.1.0), com duas páginas: quem saía de
+      // uma conversa e fechava a tela (VOLTAR) ficava sem o objeto da voz, e a
+      // ligação seguinte dele conectava com o microfone fechado, 0 pacotes de
+      // voz em 4 s, e a frase que avisava era apagada na mesma hora.
+      const ligarPeloCodigo = async (volta) => {
+        const base = await page.evaluate(() => ({ capturas: prova.capturas, entrou: prova.entrouVoz }));
+        await page.evaluate(() => { window.ligacao = seelePessoalWeb.chamarCodigo({ codigo: 'AAAA-BBBB-CCCC-DDDD', apelido: 'Nome escolhido' }); });
+        await page.waitForFunction(b => prova.capturas > b, base.capturas, { timeout: 5000 })
+          .catch(() => { throw new Error(`${engine}: a ${volta} ligação pelo código não pediu o microfone: quem liga entra mudo`); });
+        await page.evaluate(async () => {
+          await ligacao;
+          callbacksDaChamada.aoEstado({ estado: 'dentro', papel: 'quem-liga' });
+          callbacksDaChamada.aoPar({ transporteDaVoz: {}, tela: {}, abortar() {} }, { papel: 'quem-liga' });
+        });
+        await page.waitForFunction(b => prova.entrouVoz > b, base.entrou);
+        await page.evaluate(() => permitirMicrofone());
+        await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).waitFor({ state: 'visible', timeout: 5000 })
+          .catch(() => { throw new Error(`${engine}: na ${volta} ligação pelo código o microfone não ligou com a chegada do par`); });
+        assert.equal(await page.evaluate(() => prova.trilhasVivas), 1, `${volta} ligação: o microfone do gesto não ficou vivo`);
+      };
+      // Fechar a tela sem conversa nenhuma: a voz é refeita, o serviço fica.
+      const vozesAntes = await page.evaluate(() => prova.criouVoz);
+      await page.getByRole('button', { name: 'VOLTAR', exact: true }).click();
+      await page.waitForFunction(b => prova.criouVoz > b, vozesAntes, { timeout: 5000 })
+        .catch(() => { throw new Error(`${engine}: fechar a tela da conversa deixou a página sem a voz, com o serviço de pé`); });
+      await ligarPeloCodigo('primeira');
+      // Sair e fechar a tela, como qualquer pessoa faz ao terminar de conversar.
+      await page.getByRole('button', { name: 'SAIR DA CONVERSA' }).click();
+      await page.getByRole('button', { name: 'VOLTAR', exact: true }).click();
+      await ligarPeloCodigo('segunda');
+      // E quando o OUTRO lado desliga, e esta pessoa só fecha a tela.
+      await page.evaluate(() => { callbacksDaChamada.aoPar(null, { papel: 'quem-liga' }); callbacksDaChamada.aoEstado({ estado: 'encerrada' }); servicoDeProva.encerrar(); });
+      await page.getByRole('button', { name: 'VOLTAR', exact: true }).click();
+      await ligarPeloCodigo('terceira');
+      // **Ligar enquanto a voz ainda nasce espera por ela**, em vez de entrar
+      // mudo: o `.wasm` demora, a pessoa já apertou, e a captura vem quando dá.
+      await page.getByRole('button', { name: 'SAIR DA CONVERSA' }).click();
+      await page.evaluate(() => { prova.esperarWasm = true; });
+      await page.getByRole('button', { name: 'VOLTAR', exact: true }).click();
+      await page.waitForFunction(() => typeof entregarWasm === 'function');
+      const antesDaEspera = await page.evaluate(() => ({ capturas: prova.capturas, entrou: prova.entrouVoz }));
+      await page.evaluate(() => { window.ligacao = seelePessoalWeb.chamarCodigo({ codigo: 'AAAA-BBBB-CCCC-DDDD', apelido: 'Nome escolhido' }); });
+      await page.waitForTimeout(200);
+      assert.equal(await page.evaluate(() => prova.capturas), antesDaEspera.capturas, 'a captura abriu antes de a voz existir');
+      const reclamou = await page.evaluate(() => [...document.querySelectorAll('[role=alert]')].filter(e => !e.hidden && e.textContent.trim()).map(e => e.textContent.trim()));
+      assert.deepEqual(reclamou, [], `${engine}: a voz ainda nasce e a tela já reclama em vez de esperar`);
+      await page.evaluate(() => { prova.esperarWasm = false; entregarWasm(); });
+      await page.waitForFunction(b => prova.capturas > b, antesDaEspera.capturas, { timeout: 5000 })
+        .catch(() => { throw new Error(`${engine}: quem ligou enquanto a voz nascia ficou sem o microfone depois que ela ficou pronta`); });
+      await page.evaluate(async () => {
+        await ligacao;
+        callbacksDaChamada.aoEstado({ estado: 'dentro', papel: 'quem-liga' });
+        callbacksDaChamada.aoPar({ transporteDaVoz: {}, tela: {}, abortar() {} }, { papel: 'quem-liga' });
+      });
+      await page.waitForFunction(b => prova.entrouVoz > b, antesDaEspera.entrou);
+      await page.evaluate(() => permitirMicrofone());
+      await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).waitFor({ state: 'visible', timeout: 5000 })
+        .catch(() => { throw new Error(`${engine}: a voz que nasceu depois do gesto não ligou o microfone com a chegada do par`); });
+      assert.deepEqual(await page.evaluate(() => prova.rejeicoes), []);
+      console.log(`${engine}: criação/entrada recusadas visíveis, cliques pendentes bloqueados, microfone pedido no gesto e ligado com o par, cancelamento, foco recusado, captura recusada, permissão tardia, saída, BFCache e microfone de quem liga pelo código em três conversas seguidas PASS`);
     } finally { await browser.close(); }
   } } finally { server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
