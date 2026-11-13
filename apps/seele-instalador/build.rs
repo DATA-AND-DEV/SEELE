@@ -14,8 +14,17 @@
 //! dependências nem uma superfície nova para auditar — que é o critério do ADR
 //! 0019 para o que entra.
 
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../empacotar/crt_estatico.rs"
+));
+
 fn main() {
     carga();
+    // O instalador é a primeira coisa que roda numa máquina que nunca viu o
+    // SEELE: não pode depender do Visual C++ estar lá. Ver `crt_estatico.rs`.
+    println!("cargo:rerun-if-changed=../../empacotar/crt_estatico.rs");
+    crt_estatico();
 
     // O recurso só existe no Windows. Fora dele o `build.rs` não faz nada, e a
     // crate continua compilando no Mac — que é onde a bateria roda primeiro.
