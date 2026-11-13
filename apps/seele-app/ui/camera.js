@@ -587,6 +587,16 @@ listen("seele://event", (evento) => {
     cameraDaJanela.prazo = null;
     cameraDaJanela.tela = screen;
     escreverEstadoDaCamera("parada", FRASES_DA_CAMERA.paradas[reason] ?? FRASES_DA_CAMERA.paradaDesconhecida);
+  } else if (carga.ScreenShareFell) {
+    // A transmissão da câmera caiu, e o núcleo já a encerrou. O `ScreenClosed`
+    // dela chega antes e já a desligou com a frase de quem não sabe o motivo
+    // («acabou do lado do servidor, ou a conexão caiu»); este traz o motivo,
+    // e a frase passa a dizê-lo.
+    const { screen, source, reason } = carga.ScreenShareFell;
+    if (source !== "camera") return;
+    const frase = fraseDaQuedaDaTransmissao("camera", reason);
+    if (ehAMinhaCamera(screen)) desligarACamera(frase).catch(() => {});
+    else if (!cameraLigada() && cameraDaJanela.frase === FRASES_DA_CAMERA.encerrada) escreverEstadoDaCamera("desligada", frase);
   }
 });
 

@@ -2779,6 +2779,119 @@ fn every_reason_a_screen_share_can_stop_for_has_a_sentence() {
 }
 
 #[test]
+fn every_reason_a_screen_share_can_fall_for_has_a_sentence_and_somebody_says_it() {
+    // The twin of the guard above for the transmission that **falls** instead
+    // of pausing: the encoder refused a frame, the capture stopped, the stream
+    // closed. Until 1.0 that was the costliest silence in this repository — the
+    // core wrote one `warn` to `seele.log`, the button stayed on «PARAR DE
+    // COMPARTILHAR», and the room kept looking at an announced share with no
+    // picture.
+    //
+    // The core now ends it and sends `ScreenShareFell` with a stable reason
+    // name. A name with no sentence here would fall back to «A TRANSMISSÃO DA
+    // SUA TELA CAIU» and nothing else — the shell knowing that it fell and not
+    // why, which is half of the silence coming back.
+    let file = without_comments(&read("ui/frases.js"));
+    let written: BTreeSet<String> = sentences_of(&file, "QUEDAS")
+        .into_iter()
+        .map(|(variant, _)| variant)
+        .collect();
+    let reasons: BTreeSet<String> = seele_ffi::motivos_de_queda_da_tela()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        !reasons.is_empty(),
+        "`seele_ffi::motivos_de_queda_da_tela` came back empty, so this guard is \
+         asserting over nothing"
+    );
+    // Both directions: a reason with no sentence is the silence, and a sentence
+    // with no reason is a cause this window would be inventing.
+    assert_eq!(
+        written, reasons,
+        "`QUEDAS` and `seele_ffi::motivos_de_queda_da_tela` no longer name the same \
+         reasons"
+    );
+    // A fall does not come back by itself, and the sentence must not promise it
+    // does — that is what `PARADAS` says, and the two ask opposite things.
+    for (variant, sentence) in sentences_of(&file, "QUEDAS") {
+        let baixa = sentence.to_lowercase();
+        assert!(
+            !baixa.contains("volta sozinha"),
+            "`QUEDAS.{variant}` promises the share comes back by itself, and nothing \
+             restarts it: {sentence}"
+        );
+        assert!(
+            baixa.contains("compartilhe de novo"),
+            "`QUEDAS.{variant}` does not say what to do — share again: {sentence}"
+        );
+    }
+
+    // The camera says the same reasons in its own words.
+    let da_camera = file
+        .split("const FRASES_DA_CAMERA = Object.freeze({")
+        .nth(1)
+        .and_then(|camera| camera.split("  quedas: Object.freeze({").nth(1))
+        .and_then(|resto| resto.split("  }),").next())
+        .expect("`FRASES_DA_CAMERA.quedas` saiu do frases.js");
+    for reason in &reasons {
+        assert!(
+            da_camera.contains(&format!("{reason}: \"")),
+            "the camera can fall for `{reason}` and `FRASES_DA_CAMERA.quedas` has no \
+             sentence for it"
+        );
+    }
+
+    // The event exists, and both listeners are there: the screen's, beside the
+    // share button, and the camera's, on its own control.
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    assert!(
+        tipos.contains("    ScreenShareFell {"),
+        "`ScreenShareFell` saiu do `Event`"
+    );
+    let compartilhar = without_comments(&read("ui/camada-compartilhar.js"));
+    assert!(
+        compartilhar.contains("evento.ScreenShareFell")
+            && compartilhar.contains("fraseDaQuedaDaTransmissao("),
+        "o `camada-compartilhar.js` não ouve `ScreenShareFell`: a queda da tela voltaria a \
+         ser muda"
+    );
+    assert!(
+        without_comments(&read("ui/camera.js")).contains("carga.ScreenShareFell"),
+        "o `camera.js` não ouve `ScreenShareFell`: a câmera que caiu ficaria sem o motivo"
+    );
+    let html = read("ui/index.html");
+    assert!(
+        html.contains("<p id=\"tela-estado\" class=\"operador-frase tela-estado\" role=\"status\" hidden></p>"),
+        "o index.html perdeu a linha `tela-estado`, onde a queda é dita — ou ela deixou de ser \
+         uma região viva, e quem não vê não ficaria sabendo"
+    );
+    // The view of a session that is not on screen records it too: a share goes
+    // on while the person looks at another server, and can fall there.
+    assert!(
+        js_function(&read("ui/palco-imagem.js"), "function palcoDeFora(")
+            .contains("anotarAQuedaDaTela(sessao, evento)"),
+        "`palcoDeFora` deixou de anotar a queda de uma sessão fora da vista"
+    );
+
+    // **Nothing restarts by itself.** Putting somebody's screen back on air
+    // without a press is a product decision this code does not take: the three
+    // functions that handle a fall only write, and never call the bridge.
+    for funcao in [
+        "function quedaDaTelaNoEvento(",
+        "function anotarAQuedaDaTela(",
+        "function desenharAQuedaDaTela(",
+    ] {
+        let corpo = js_function(&compartilhar, funcao);
+        assert!(
+            !corpo.contains("invoke("),
+            "`{funcao}` chama a ponte: a queda de uma transmissão só é dita, e quem \
+             recomeça é a pessoa"
+        );
+    }
+}
+
+#[test]
 fn the_screen_never_invents_a_word_for_a_path_it_does_not_know() {
     // «DIRECT» is not sayable, and this is the guard that keeps it unsaid. The
     // ladder has five rungs and the distinction that word would erase is the
@@ -11005,12 +11118,13 @@ const LIMITE_DE_FRASE: usize = 180;
 /// mede, porque ela não está em dicionário. O que ela tem de dizer é cobrado
 /// por `saving_says_out_loud_what_this_product_does_not_promise`; o tamanho, por
 /// ninguém.
-const DICIONARIOS: [&str; 10] = [
+const DICIONARIOS: [&str; 11] = [
     "MOTIVOS",
     "AVISOS",
     "ETAPAS",
     "CAMINHOS",
     "PARADAS",
+    "QUEDAS",
     "FRASES",
     "ANEXOS",
     "TRANSFERENCIAS",

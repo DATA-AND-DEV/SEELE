@@ -3564,6 +3564,18 @@ button.linha-nome:hover { text-decoration: underline; }
 }
 :root:not([data-casca="celular"]) .operador > #camera-estado[data-estado="desligada"],
 :root:not([data-casca="celular"]) .operador > #camera-estado[data-estado="parada"] { color: var(--seele-laranja-claro); }
+/* A queda da transmissão de tela, na mesma linha e com a mesma letra do
+   estado da câmera, e sempre na cor do aviso: só aparece quando algo caiu. */
+:root:not([data-casca="celular"]) .operador > #tela-estado {
+  order: 8;
+  flex: 1 0 100%;
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-line;
+  color: var(--seele-laranja-claro);
+}
 :root:not([data-casca="celular"]) .operador > #sala-estado { order: 8; flex: 1 0 100%; margin: 0; font-size: 11px; color: var(--seele-rotulo-painel); }
 /* **«microfone aberto · ouvindo» sai da vista** (0.19, pedido do dono): os
    ícones do microfone e do fone já dizem o estado, com a barra quando

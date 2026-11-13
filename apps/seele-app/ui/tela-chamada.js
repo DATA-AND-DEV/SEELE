@@ -822,6 +822,9 @@ function desenharORodapeDoOperador(voice_room, transmissao = null) {
   // desliga é o controle dela, ao lado. Com a câmera ligada o COMPARTILHAR
   // volta a oferecer a tela — que entra no lugar da câmera.
   desenharACamera(voice_room, transmissao);
+  // A queda dita fica até a pessoa recomeçar ou sair da sala: com a
+  // transmissão do retrato, antes de a câmera a tirar da conta do botão.
+  desenharAQuedaDaTela(voice_room, transmissao);
   if (cameraLigada()) transmissao = null;
   const trocar = $("operador-trocar-tela");
   porOEscondido(trocar, !dentro || !transmissao);

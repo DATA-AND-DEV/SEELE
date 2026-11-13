@@ -270,6 +270,18 @@
       estadoDaCamera.hidden = true;
       controles.append(estadoDaCamera);
       if (typeof desenharACamera === "function") desenharACamera();
+      // E a queda da transmissão de tela, pelo mesmo motivo: a linha que a
+      // diz mora no operador (`tela-estado`), que nesta vista sai de cena. A
+      // mesma letra do estado da câmera, na cor do aviso. Quem a escreve é
+      // `desenharAQuedaDaTela`, em `camada-compartilhar.js`.
+      const estadoDaTela = document.createElement("p");
+      estadoDaTela.id = "chamada-tela-estado";
+      estadoDaTela.className = "chamada-camera-estado";
+      estadoDaTela.dataset.estado = "desligada";
+      estadoDaTela.setAttribute("role", "status");
+      estadoDaTela.hidden = true;
+      controles.append(estadoDaTela);
+      if (typeof desenharAQuedaDaTela === "function") desenharAQuedaDaTela();
       chamada.append(controles);
     }
 

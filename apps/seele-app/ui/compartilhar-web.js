@@ -490,7 +490,12 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       fluxo.escrita.finally(() => fluxo.escritor.close().catch(() => {}));
     }
     for (const trilha of estaVez.midia.getTracks()) trilha.stop();
-    if (estaVez.tela !== null && (avisar || fluxo)) emitir({ ScreenClosed: { screen: estaVez.tela, ...(erro ? { erro } : {}) } });
+    // Com o erro vai o que a transmissão mostrava: a queda da tela é dita ao
+    // lado do COMPARTILHAR (`camada-compartilhar.js`), e a da câmera, no
+    // controle dela (`camera.js`).
+    if (estaVez.tela !== null && (avisar || fluxo)) {
+      emitir({ ScreenClosed: { screen: estaVez.tela, ...(erro ? { erro, camera: estaVez.camera } : {}) } });
+    }
   }
 
   /** Para: o fluxo fecha, a captura solta, e o servidor fica sabendo. Idempotente. */

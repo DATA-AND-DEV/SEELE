@@ -667,6 +667,11 @@ function esquecerAberturas(sessao) {
  */
 function palcoDeFora(sessao, geracao, evento) {
   if (!evento || typeof evento !== "object") return;
+  // A transmissão desta pessoa que caiu numa sessão de fora: anotada, para a
+  // volta dizer o que houve (`camada-compartilhar.js`). Sem isto o evento era
+  // desviado com os outros, e a volta achava o botão em COMPARTILHAR sem
+  // explicação.
+  if (typeof anotarAQuedaDaTela === "function") anotarAQuedaDaTela(sessao, evento);
   if (evento.ScreenOpened) {
     const { screen, width, height } = evento.ScreenOpened;
     registrarAbertura(sessao, geracao, { tela: screen, largura: width, altura: height });

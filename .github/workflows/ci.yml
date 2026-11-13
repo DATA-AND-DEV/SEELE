@@ -663,6 +663,9 @@ jobs:
       - run: node apps/seele-app/bancada/camera.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/transmissao-que-cai.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/previas-de-tela.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

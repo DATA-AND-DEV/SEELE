@@ -1570,6 +1570,16 @@
         -->
         <p id="camera-estado" class="operador-frase camera-estado" role="status" data-estado="desligada" hidden></p>
         <!--
+          **A transmissão de tela que caiu sozinha** (`ScreenShareFell`): o
+          codificador recusou, a captura parou, a conexão dela fechou. O núcleo
+          já a encerrou e o botão ao lado voltou a COMPARTILHAR; esta linha é o
+          que o botão não diz — que não foi a pessoa quem parou, e por quê.
+          Escrita por `desenharAQuedaDaTela`, em `camada-compartilhar.js`, e
+          por mais ninguém. Some quando a pessoa compartilha de novo ou sai da
+          sala.
+        -->
+        <p id="tela-estado" class="operador-frase tela-estado" role="status" hidden></p>
+        <!--
           **O seletor de modo saiu daqui.** A comp da 0.9.0 não o desenha no
           operador: ela o põe na configuração, sob `MODO DE VOZ`, e no operador
           deixa só a frase — «microfone aberto · ouvindo · sempre aberto». Os

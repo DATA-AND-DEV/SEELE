@@ -641,6 +641,45 @@ const PARADAS = {
 };
 
 /**
+ * Por que a transmissão **desta pessoa** caiu: acabou sem ela ter parado.
+ *
+ * Os nomes vêm de `seele_ffi::motivos_de_queda_da_tela`, no `reason` de um
+ * `ScreenShareFell`. É o contrário de `PARADAS`, e por isso é outro dicionário:
+ * uma parada volta sozinha e a frase diz para esperar; uma queda não volta, o
+ * núcleo já avisou o servidor e soltou a captura, e a frase diz que ninguém
+ * está vendo e que recomeçar é com a pessoa.
+ *
+ * Antes destas frases a queda era muda: o botão seguia em PARAR DE
+ * COMPARTILHAR sobre uma transmissão sem imagem, e a única linha que contava o
+ * que houve estava no `seele.log`.
+ */
+const QUEDAS = {
+  Codificador:
+    "A TRANSMISSÃO DA SUA TELA CAIU: O CODIFICADOR RECUSOU A IMAGEM.\n" +
+    "Ninguém está vendo a sua tela. Compartilhe de novo para recomeçar.",
+  Captura:
+    "A TRANSMISSÃO DA SUA TELA CAIU: A CAPTURA PAROU.\n" +
+    "Ninguém está vendo a sua tela. Confira se a janela continua aberta e compartilhe de novo.",
+  Fluxo:
+    "A TRANSMISSÃO DA SUA TELA CAIU: A CONEXÃO DELA FECHOU.\n" +
+    "Ninguém está vendo a sua tela; a voz continua. Compartilhe de novo para recomeçar.",
+};
+
+/** A queda cujo motivo esta janela não conhece: diz o que sabe, e não inventa a causa. */
+const QUEDA_DESCONHECIDA =
+  "A TRANSMISSÃO DA SUA TELA CAIU.\nNinguém está vendo a sua tela. Compartilhe de novo para recomeçar.";
+
+/**
+ * A frase de uma transmissão desta pessoa que caiu, pelo que ela mostrava
+ * (`source`) e pelo motivo (`reason`) do `ScreenShareFell`. A da câmera fala
+ * da câmera e manda ligá-la de novo (`FRASES_DA_CAMERA.quedas`).
+ */
+function fraseDaQuedaDaTransmissao(tipo, motivo) {
+  if (tipo === "camera") return FRASES_DA_CAMERA.quedas[motivo] ?? FRASES_DA_CAMERA.quedaDesconhecida;
+  return QUEDAS[motivo] ?? QUEDA_DESCONHECIDA;
+}
+
+/**
  * O nome do caminho, ou nada.
  *
  * `null` e não «DIRETO», e não «DESCONHECIDO»: **sem informação a tela não
@@ -2163,6 +2202,13 @@ const FRASES_DA_CAMERA = Object.freeze({
     AbaixoDoPiso: "A CÂMERA PAROU: O QUE SOBROU DA CONEXÃO NÃO SUSTENTA NEM A MENOR IMAGEM.\nEla volta sozinha quando o caminho abrir.",
   }),
   paradaDesconhecida: "A CÂMERA PAROU.\nEla volta sozinha.",
+  // As quedas (`QUEDAS`, da tela), ditas da câmera: ela não volta sozinha.
+  quedas: Object.freeze({
+    Codificador: "A TRANSMISSÃO DA SUA CÂMERA CAIU: O CODIFICADOR RECUSOU A IMAGEM.\nNinguém a está vendo. Ligue a câmera de novo para recomeçar.",
+    Captura: "A TRANSMISSÃO DA SUA CÂMERA CAIU: A CAPTURA PAROU.\nNinguém a está vendo. Ligue a câmera de novo para recomeçar.",
+    Fluxo: "A TRANSMISSÃO DA SUA CÂMERA CAIU: A CONEXÃO DELA FECHOU.\nNinguém a está vendo; a voz continua. Ligue a câmera de novo para recomeçar.",
+  }),
+  quedaDesconhecida: "A TRANSMISSÃO DA SUA CÂMERA CAIU.\nNinguém a está vendo. Ligue a câmera de novo para recomeçar.",
   // A transmissão desta página que parou sozinha, pelo passo em que parou
   // (`fraseDaTransmissaoQueParou`, em `compartilhar-web.js`).
   parou: Object.freeze({

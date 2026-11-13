@@ -879,6 +879,8 @@ $("compartilhar-comecar").addEventListener("click", async () => {
           await invoke("parar_de_compartilhar");
         }
         await invoke("compartilhar_tela", { fonte, limites });
+        // Recomeçou: a queda de antes já disse o que tinha a dizer.
+        esquecerAQuedaDaTela();
         return true;
       } finally {
         // Deu certo ou não: a lista foi consumida, e o próximo início espera a nova.
@@ -948,6 +950,111 @@ $("compartilhar-parar").addEventListener("click", async () => {
 listen("seele://event", (evento) => {
   if (evento.payload !== "ScreenChanged" || $("compartilhar").hidden) return;
   desenharCompartilhar().catch((falha) => console.warn("ScreenChanged:", falha));
+});
+
+// ------------------------------------------------- a transmissão que caiu
+//
+// **O produto sabia e não contava.** Quando a transmissão de tela desta pessoa
+// morria no meio — o codificador recusando um quadro, a captura parando, o
+// fluxo fechando —, o núcleo escrevia uma linha no `seele.log` e mais nada: o
+// botão seguia em PARAR DE COMPARTILHAR, a sala seguia vendo uma transmissão
+// anunciada e sem imagem, e a pessoa só descobria quando alguém perguntava
+// «cadê a sua tela?».
+//
+// Agora o núcleo a encerra (o servidor ouve o mesmo `StopScreenShare` de quem
+// aperta parar, e o retrato perde a transmissão — o botão volta a
+// COMPARTILHAR sozinho) e manda um `ScreenShareFell` com o que ela mostrava e
+// o motivo. O que mora aqui é a metade que o botão não diz: a frase, ao lado
+// dele, até a pessoa recomeçar ou sair da sala.
+//
+// Na página do navegador quem captura e codifica é a própria página
+// (`compartilhar-web.js`), e a queda chega como um `ScreenClosed` com `erro`:
+// a frase já vem escrita de lá, e é dita no mesmo lugar.
+//
+// Nada recomeça sozinho: recomeçar é pôr a tela de alguém no ar sem aperto.
+
+/**
+ * A queda dita de cada sessão: `sessão → { tela, frase }`. Por sessão porque a
+ * transmissão de uma sessão fora da vista continua indo — e pode cair lá; a
+ * volta à vista tem de achar a frase (`palcoDeFora`, em `palco-imagem.js`).
+ */
+const quedasDaTela = new Map();
+
+/** A sessão que a janela mostra agora, ou `null` numa janela de sessão única. */
+function sessaoDaVistaDaTela() {
+  return typeof vistaDaJanela !== "undefined" ? vistaDaJanela.sessao ?? null : null;
+}
+
+/**
+ * A queda da transmissão de **tela** desta pessoa que um evento conta, ou
+ * `null`. A da câmera não é daqui: ela é dita no controle da câmera.
+ */
+function quedaDaTelaNoEvento(evento) {
+  if (!evento || typeof evento !== "object") return null;
+  const caiu = evento.ScreenShareFell;
+  if (caiu) {
+    if (caiu.source === "camera") return null;
+    return { tela: caiu.screen, frase: fraseDaQuedaDaTransmissao(caiu.source, caiu.reason) };
+  }
+  const fechou = evento.ScreenClosed;
+  if (fechou && typeof fechou.erro === "string" && fechou.erro && !fechou.camera) {
+    return { tela: fechou.screen, frase: fechou.erro };
+  }
+  return null;
+}
+
+/** Anota a queda que o evento de uma sessão conta. Devolve se havia uma. */
+function anotarAQuedaDaTela(sessao, evento) {
+  const queda = quedaDaTelaNoEvento(evento);
+  if (!queda) return false;
+  quedasDaTela.set(sessao ?? null, queda);
+  return true;
+}
+
+/** A pessoa recomeçou nesta sessão: a frase de antes sai. */
+function esquecerAQuedaDaTela() {
+  if (quedasDaTela.delete(sessaoDaVistaDaTela())) desenharAQuedaDaTela();
+}
+
+/**
+ * A frase da queda, ao lado do COMPARTILHAR e na bandeja da chamada.
+ *
+ * Com argumentos é o desenho de um retrato (`desenharORodapeDoOperador`): a
+ * sala e a transmissão desta pessoa, como ele as trouxe. Sem argumentos é uma
+ * mudança daqui, que redesenha com o que o último retrato disse — o mesmo
+ * idioma de `desenharACamera`.
+ *
+ * A frase sai quando o retrato mostra **outra** transmissão desta pessoa (ela
+ * recomeçou) ou quando ela não está em sala nenhuma. A mesma transmissão ainda
+ * no retrato não a apaga: o `ScreenShareFell` chega antes de o servidor
+ * devolver o fim dela.
+ */
+function desenharAQuedaDaTela(voice_room, minha) {
+  if (voice_room !== undefined) {
+    desenharAQuedaDaTela.sala = voice_room;
+    desenharAQuedaDaTela.minha = minha ?? null;
+  }
+  const dentro = (desenharAQuedaDaTela.sala ?? null) != null;
+  const noRetrato = desenharAQuedaDaTela.minha ?? null;
+  const sessao = sessaoDaVistaDaTela();
+  const queda = quedasDaTela.get(sessao);
+  if (queda && voice_room !== undefined && (!dentro || (noRetrato && noRetrato.tela !== queda.tela))) {
+    quedasDaTela.delete(sessao);
+  }
+  const frase = quedasDaTela.get(sessao)?.frase ?? "";
+  for (const onde of [$("tela-estado"), $("chamada-tela-estado")]) {
+    if (!onde) continue;
+    porOEscondido(onde, !frase);
+    porOTexto(onde, frase);
+  }
+}
+
+listen("seele://event", (evento) => {
+  if (!anotarAQuedaDaTela(sessaoDaVistaDaTela(), evento.payload)) return;
+  desenharAQuedaDaTela();
+  // O botão volta a COMPARTILHAR com o retrato; pedi-lo já poupa a meia volta
+  // do laço da chamada.
+  if (typeof atualizarChamada === "function") atualizarChamada().catch(() => {});
 });
 
 // Escape fecha, como em toda coisa que se põe por cima nesta janela. Só com a
