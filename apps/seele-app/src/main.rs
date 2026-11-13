@@ -12423,6 +12423,10 @@ enum FalhaNaPortaria {
         /// A hospedagem de pé agora.
         agora: HospedagemDaPorta,
     },
+    /// **A senha digitada no painel A PORTA não serve**, e por quê: a mesma
+    /// regra da senha de um servidor novo (`senha_do_servidor::conferir`).
+    /// Nada foi gravado, e a senha de antes, se havia, continua valendo.
+    SenhaRecusada(senha_do_servidor::SenhaRecusada),
 }
 
 /// Em que estado está a porta do servidor que esta janela hospeda.
@@ -12657,15 +12661,31 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
 }
 
 /// Põe ou tira a senha do servidor. `None` tira. ADR 0021.
+///
+/// **A senha passa pela mesma regra da de um servidor novo**
+/// (`senha_do_servidor::conferir`), antes de qualquer outra coisa. O painel
+/// aceitava tudo que não fosse o campo vazio: uma senha só de espaços fechava
+/// o servidor com um segredo que nenhum app manda (o `connect` joga fora um
+/// segredo em branco), e quatro algarismos caem em horas para quem adivinha.
 #[tauri::command]
 async fn definir_senha_do_server(
     session: State<'_, Session>,
     senha: Option<String>,
 ) -> Result<(), FalhaNaPortaria> {
+    let senha = senha
+        .as_deref()
+        .map(senha_do_servidor::conferir)
+        .transpose()
+        .map_err(FalhaNaPortaria::SenhaRecusada)?;
     let persistence = persistence_hospedada(&session)?;
     let mut persistence = persistence.lock().await;
-    seele_server::admissao::definir_senha(&mut persistence, senha.as_deref())
-        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
+    seele_server::admissao::definir_senha(
+        &mut persistence,
+        senha
+            .as_ref()
+            .map(senha_do_servidor::SenhaDoServidor::texto),
+    )
+    .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
 }
 
 /// Gera um convite de uso único e devolve o link inteiro para mandar.

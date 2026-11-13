@@ -2055,10 +2055,17 @@ const FRASES_DA_SENHA_NA_ENTRADA = Object.freeze({
   nota: "Se este servidor tem senha, digite-a aqui. Ela não vem no link: quem hospeda é quem a passa.",
 });
 
-/** A frase de uma senha de servidor recusada, pelo nome da recusa. */
+/**
+ * A frase de uma senha de servidor recusada.
+ *
+ * `recusa` é o nome da recusa, quando quem recusou foi a tela (com o `minimo`
+ * da regra que o Rust mandou), ou a recusa como o Rust a manda: o nome, ou
+ * `{ Curta: { minimo } }`, que traz o número consigo.
+ */
 function fraseDaSenhaRecusada(recusa, minimo) {
-  const frase = FRASES_DA_PORTA_AO_HOSPEDAR.recusas[recusa];
-  return frase ? frase(minimo) : "ESTA SENHA NÃO SERVE.";
+  const nome = typeof recusa === "string" ? recusa : Object.keys(recusa ?? {})[0];
+  const frase = FRASES_DA_PORTA_AO_HOSPEDAR.recusas[nome];
+  return frase ? frase(Number(recusa?.[nome]?.minimo ?? minimo)) : "ESTA SENHA NÃO SERVE.";
 }
 
 /**

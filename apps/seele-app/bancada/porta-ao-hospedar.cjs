@@ -380,9 +380,10 @@ if (pasta) fs.mkdirSync(pasta, { recursive: true });
     // E a recusa do Rust tem frase, sem a senha dentro.
     {
       const { page, erros } = await abrir(JANELAS[1]);
-      const frases = await page.evaluate(() => ["Vazia", "ComEspacoNaPonta", "Curta", "Longa"].map((r) => fraseDeErro({ SenhaRecusada: r }))
+      const frases = await page.evaluate(() => ["Vazia", "ComEspacoNaPonta", { Curta: { minimo: 9 } }, "Longa"].map((r) => fraseDeErro({ SenhaRecusada: r }))
         .concat(fraseDeErro("PortaJaEscolhida")));
       for (const frase of frases) assert.match(frase, /SENHA/, `uma recusa do Rust ficou sem frase: ${frase}`);
+      assert.match(frases[2], /pelo menos 9 caracteres/, `a recusa por senha curta não diz o mínimo que o Rust mandou: ${frases[2]}`);
       assert.equal(new Set(frases).size, frases.length, "duas recusas diferentes dizem a mesma frase");
       assert.deepEqual(erros, []);
       await page.close();

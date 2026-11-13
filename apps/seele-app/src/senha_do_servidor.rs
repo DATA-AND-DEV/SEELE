@@ -67,8 +67,12 @@ pub(crate) enum SenhaRecusada {
     Vazia,
     /// Começa ou termina com espaço.
     ComEspacoNaPonta,
-    /// Menos de [`MINIMO`] caracteres.
-    Curta,
+    /// Menos de [`MINIMO`] caracteres. O mínimo vai junto, para a frase da
+    /// recusa dizer o número sem a tela o copiar.
+    Curta {
+        /// O mínimo de caracteres.
+        minimo: usize,
+    },
     /// Mais de [`MAXIMO_EM_BYTES`] bytes.
     Longa,
 }
@@ -107,7 +111,7 @@ pub(crate) fn conferir(digitada: &str) -> Result<SenhaDoServidor, SenhaRecusada>
         return Err(SenhaRecusada::ComEspacoNaPonta);
     }
     if digitada.chars().count() < MINIMO {
-        return Err(SenhaRecusada::Curta);
+        return Err(SenhaRecusada::Curta { minimo: MINIMO });
     }
     if digitada.len() > MAXIMO_EM_BYTES {
         return Err(SenhaRecusada::Longa);
@@ -129,8 +133,8 @@ mod testes {
             ("\t\n", SenhaRecusada::Vazia),
             (" terceiro impacto", SenhaRecusada::ComEspacoNaPonta),
             ("terceiro impacto ", SenhaRecusada::ComEspacoNaPonta),
-            ("1234", SenhaRecusada::Curta),
-            ("sétimo7", SenhaRecusada::Curta),
+            ("1234", SenhaRecusada::Curta { minimo: MINIMO }),
+            ("sétimo7", SenhaRecusada::Curta { minimo: MINIMO }),
         ] {
             assert_eq!(
                 conferir(digitada),

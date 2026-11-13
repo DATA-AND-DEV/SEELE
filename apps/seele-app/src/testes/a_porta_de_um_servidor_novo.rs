@@ -16,8 +16,9 @@
 
 use super::a_entrada_velha_que_chega_tarde::{app, runtime, vez};
 use super::{
-    config_dir, corpo_de, fonte_sem_comentarios, hospedar_em, parar_de_hospedar_em,
-    preparar_a_casa_de_quem_hospeda, Anfitriao, FalhaAoHospedar, PedidoDeHospedar, Session,
+    config_dir, corpo_de, definir_senha_do_server, fonte_sem_comentarios, hospedar_em,
+    parar_de_hospedar_em, preparar_a_casa_de_quem_hospeda, Anfitriao, FalhaAoHospedar,
+    FalhaNaPortaria, PedidoDeHospedar, Session,
 };
 use crate::senha_do_servidor::{self, SenhaRecusada};
 use seele_ffi::{ConnectConfig, Connection, ConnectionError, EndReason};
@@ -244,7 +245,12 @@ fn a_senha_que_nao_serve_e_recusada_antes_de_qualquer_coisa_subir() {
         for (digitada, motivo) in [
             ("", SenhaRecusada::Vazia),
             ("   ", SenhaRecusada::Vazia),
-            ("1234", SenhaRecusada::Curta),
+            (
+                "1234",
+                SenhaRecusada::Curta {
+                    minimo: senha_do_servidor::MINIMO,
+                },
+            ),
             (" ramiel octaedro", SenhaRecusada::ComEspacoNaPonta),
         ] {
             let resultado = hospedar(&session, &config, &servidor, Some(digitada)).await;
@@ -342,6 +348,43 @@ fn o_servidor_com_senha_continua_com_senha_e_sem_portaria_na_subida_seguinte() {
         Err(seele_server::admissao::Recusa::SegredoAusente),
         "sem a senha, a camada do segredo deixou passar"
     );
+}
+
+#[test]
+fn o_painel_a_porta_recusa_a_mesma_senha_que_o_hospedar_recusa() {
+    // A regra é uma só. Conferida antes de procurar o servidor: sem nada no
+    // ar, a senha que não serve é recusada pelo motivo dela, e a que serve
+    // chega a «não estou hospedando».
+    let _vez = vez();
+    runtime().block_on(async {
+        let app = app();
+        for (digitada, motivo) in [
+            ("   ", SenhaRecusada::Vazia),
+            (
+                "1234",
+                SenhaRecusada::Curta {
+                    minimo: senha_do_servidor::MINIMO,
+                },
+            ),
+            ("ramiel octaedro ", SenhaRecusada::ComEspacoNaPonta),
+        ] {
+            let resultado =
+                definir_senha_do_server(app.state::<Session>(), Some(digitada.to_owned())).await;
+            assert!(
+                matches!(&resultado, Err(FalhaNaPortaria::SenhaRecusada(m)) if *m == motivo),
+                "o painel A PORTA não recusou como {motivo:?} a senha de {} caracteres: \
+                 {resultado:?}",
+                digitada.chars().count()
+            );
+        }
+        for serve in [Some(SENHA.to_owned()), None] {
+            let resultado = definir_senha_do_server(app.state::<Session>(), serve).await;
+            assert!(
+                matches!(resultado, Err(FalhaNaPortaria::NaoEstaHospedando)),
+                "a senha que serve (ou tirar a senha) não chegou ao servidor: {resultado:?}"
+            );
+        }
+    });
 }
 
 #[test]
