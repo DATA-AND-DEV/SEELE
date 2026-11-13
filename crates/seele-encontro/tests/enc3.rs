@@ -352,6 +352,39 @@ fn o_sinal_do_navegador_chama_e_ouve_aqui_com_o_cors_exato() {
     );
 }
 
+/// A recusa sai sem o corpo ter sido lido, e ainda tem de chegar inteira. Com
+/// bytes por ler no soquete, fechar faz o sistema mandar um RST, e no Linux a
+/// leitura de quem pediu termina em «connection reset» em vez do fim da
+/// resposta — o que o CI viu em 12/11 com um corpo de 600 bytes que chegou
+/// num segmento à parte. Aqui o corpo é grande o bastante para sobrar sempre
+/// no soquete (passa do que o leitor do ponto guarda de uma vez).
+#[test]
+fn a_recusa_chega_inteira_com_o_corpo_ainda_por_ler() {
+    let (_, quarto) = ponto_no_ar();
+    let sinal = sinal_no_ar(quarto);
+    let corpo = "x".repeat(32 * 1024);
+    for rodada in 0..20 {
+        let mut conexao = TcpStream::connect(sinal).unwrap();
+        conexao.set_read_timeout(Some(PRAZO)).unwrap();
+        // O envio pode ser cortado pelo ponto, que já recusou: o que se cobra
+        // é a leitura.
+        let _ = write!(
+            conexao,
+            "POST /sinal/1 HTTP/1.1\r\nHost: x\r\nOrigin: {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{corpo}",
+            seele_encontro::sinal::origem_do_produto(),
+            corpo.len()
+        );
+        let mut texto = String::new();
+        conexao
+            .read_to_string(&mut texto)
+            .unwrap_or_else(|falha| panic!("rodada {rodada}: a recusa não pôde ser lida: {falha}"));
+        assert!(
+            texto.starts_with("HTTP/1.1 413"),
+            "rodada {rodada}: {texto}"
+        );
+    }
+}
+
 #[test]
 fn o_sinal_recusa_o_corpo_torto_e_o_caminho_errado() {
     let (_, quarto) = ponto_no_ar();

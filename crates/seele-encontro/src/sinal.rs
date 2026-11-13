@@ -320,7 +320,39 @@ fn escrever(
         }
         restante = restante.get(escritos..).ok_or(io::ErrorKind::InvalidData)?;
     }
-    conexao.flush()
+    conexao.flush()?;
+    despedir(conexao);
+    Ok(())
+}
+
+/// Quanto do pedido que sobrou sem ler o ponto ainda engole antes de fechar.
+const SOBRA_ENGOLIDA: usize = 64 * 1024;
+/// Por quanto tempo, no máximo, ele espera essa sobra.
+const PRAZO_DA_SOBRA: Duration = Duration::from_millis(250);
+
+/// **Fecha sem derrubar a resposta.** Uma recusa (o `413`, por exemplo) sai
+/// antes de o corpo do pedido ser lido; fechar o soquete com bytes por ler faz
+/// o sistema mandar um RST, e quem pediu pode ver «conexão reiniciada» no
+/// lugar da recusa (medido no Linux do CI, em `tests/enc3.rs`). O ponto avisa
+/// que acabou de escrever e engole a sobra, com teto de bytes e de tempo: é
+/// um serviço público, e ninguém o segura aberto por aqui.
+fn despedir(conexao: &mut TcpStream) {
+    if conexao.shutdown(std::net::Shutdown::Write).is_err() {
+        return;
+    }
+    let fim = Instant::now() + PRAZO_DA_SOBRA;
+    let mut balde = [0_u8; 4096];
+    let mut engolidos = 0_usize;
+    while engolidos < SOBRA_ENGOLIDA {
+        let prazo = fim.saturating_duration_since(Instant::now());
+        if prazo.is_zero() || conexao.set_read_timeout(Some(prazo)).is_err() {
+            return;
+        }
+        match conexao.read(&mut balde) {
+            Ok(0) | Err(_) => return,
+            Ok(lidos) => engolidos = engolidos.saturating_add(lidos),
+        }
+    }
 }
 
 fn atender(
