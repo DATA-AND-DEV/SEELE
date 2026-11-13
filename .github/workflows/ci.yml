@@ -873,6 +873,16 @@ jobs:
       - run: node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O passo de recorte da foto e da capa do perfil (1.0.1), com o mesmo
+      # `.wasm`: a página inteira, com a ponte, escolhe uma imagem gerada na
+      # hora, recorta, e confere pelos pixels do que o perfil padrão guardou
+      # que saiu o pedaço da moldura, na proporção e dentro do teto — nas três
+      # cascas e nos três tamanhos de janela. Quem recorta é o `.wasm`
+      # (`perfil_recortar`), e por isso ela mora aqui. O mesmo teste de ordem
+      # segura esta.
+      - run: node apps/seele-app/bancada/recorte-do-perfil.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # A sessão pelo navegador de ponta a ponta (Tarefa 2.6 da F4): a página
       # inteira entra pela WebTransport num servidor de verdade (o `Daemon`, pelo
       # exemplo `servidor_da_bancada`), conversa, a voz atravessa entre duas
