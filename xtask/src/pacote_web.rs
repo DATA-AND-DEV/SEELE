@@ -489,9 +489,21 @@ pub(crate) const PERFIL_DA_PAGINA: [&str; 4] = [
 ///   no aparelho. O teto deixa os mesmos ~2% sobre a medida, e não autoriza
 ///   o próximo crescimento sem nova medida.
 ///
+/// - **13/11/2026 (1.1.0, o recorte da foto e da capa), medido de novo antes
+///   de subir:** a v1.0.0 (`e3f9226b`) dá 2 497 827 bytes neste perfil, e esta
+///   linha 2 521 124 (+23 297, 0,93%); gzip -9 local, 731 033 → 735 290
+///   (+4 257, 0,58%). Nenhum crate novo no grafo: o que cresceu são as duas
+///   exportações do recorte (`perfil_previa_do_recorte` e `perfil_recortar`),
+///   que cortam cada quadro pelos mesmos tetos da redução e leem a orientação
+///   do EXIF. Estourou o teto de 2 515 000 por 6 124 bytes, e o build do
+///   Cloudflare Pages reprovou no ramo (foi assim que se soube). Brotli não
+///   medido (sem o binário nesta máquina), nem o download no aparelho. O teto
+///   deixa os mesmos ~2% sobre a medida, e não autoriza o próximo crescimento
+///   sem nova medida.
+///
 /// Passar dele é a hora de medir de novo o que chega ao celular, e não de
 /// subir o número calado.
-pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_515_000;
+pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_572_000;
 
 /// Os nomes das seções próprias (`custom`) de um `.wasm`, lidas do formato:
 /// o cabeçalho, e cada seção com o id e o tamanho em LEB128.
