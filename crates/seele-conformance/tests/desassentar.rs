@@ -214,6 +214,40 @@ async fn absorver(enlace: &mut Enlace, room: &mut Room, por: Duration) -> usize 
     piscadas
 }
 
+/// [`absorver`], contando também quantas vezes o servidor disse que `quem`
+/// **foi embora** (`PersonGone`).
+///
+/// Serve à encenação da queda silenciosa: uma pessoa que volta por outra
+/// conexão antes de a velha morrer nunca vai embora, e um `PersonGone` dela é
+/// a conexão velha tendo morrido **antes** da volta — isto é, despedindo-se.
+async fn absorver_vendo_quem_some(
+    enlace: &mut Enlace,
+    room: &mut Room,
+    por: Duration,
+    quem: PersonId,
+) -> (usize, usize) {
+    let fim = tokio::time::Instant::now() + por;
+    let mut piscadas = 0;
+    let mut sumicos = 0;
+    while tokio::time::Instant::now() < fim {
+        match tokio::time::timeout(Duration::from_millis(100), enlace.proximo()).await {
+            Ok(Aviso::Mensagem(mensagem)) => {
+                if matches!(mensagem.as_ref(), ServerMessage::PersonGone { person } if *person == quem)
+                {
+                    sumicos += 1;
+                }
+                let _ = room.apply(&mensagem);
+            }
+            Ok(Aviso::Reconectado { sessao, .. }) => {
+                piscadas += 1;
+                room.adopt(&sessao, "anfitriao");
+            }
+            _ => {}
+        }
+    }
+    (piscadas, sumicos)
+}
+
 /// Dobra tudo o que chegar durante um tempo, e conta quantas vezes o servidor
 /// disse que **esta** pessoa entrou **nesta** sala.
 ///
@@ -293,7 +327,7 @@ fn sentados(room: &Room, sala: VoiceRoomId) -> Vec<String> {
 /// Uma conexão viva num runtime próprio, para poder ser emudecida de fora.
 struct Emudecivel {
     quem: PersonId,
-    matar: std::sync::mpsc::Sender<()>,
+    matar: tokio::sync::oneshot::Sender<()>,
     fio: std::thread::JoinHandle<()>,
 }
 
@@ -302,17 +336,43 @@ impl Emudecivel {
     ///
     /// Num runtime próprio, em outra linha de execução, porque é o runtime que
     /// responde ao keepalive (desde a 0.17, a tarefa da `Ponta` do enlace; até
-    /// a 0.16, o driver do QUIC): desligá-lo é a única forma honesta de
+    /// a 0.16, o driver do QUIC): pará-lo é a única forma honesta de
     /// produzir **silêncio** em vez de uma despedida. Derrubar a conexão pelo
     /// `Drop` mandaria o fim (o `corte` do enlace, como era o
     /// `CONNECTION_CLOSE` do quinn), o servidor desmontaria a sessão na hora, e
     /// o teste mediria o caminho que já funciona.
+    ///
+    /// # Por que o runtime é de uma linha só, e é esquecido em vez de desligado
+    ///
+    /// Este teste oscilava, e a causa era esta encenação: o silêncio não era
+    /// garantido. O runtime tinha duas linhas e era **desligado**
+    /// (`shutdown_timeout(0)`), e desligar larga as tarefas dele. Entre elas
+    /// estão as que leem os canais da conexão, e largar uma leitura no meio é
+    /// parar o fluxo (`Drop` do `Recebe`, no `seele-enlace`: manda
+    /// `Comando::Parar`, que vira um `corte` no fio). Se a outra linha ainda
+    /// desse uma volta na tarefa da `Ponta` antes de largá-la, o `corte` saía:
+    /// a queda «silenciosa» se despedia, o servidor desmontava a sessão velha
+    /// na hora, **antes** de a nova subir, e o contador de conexões velhas
+    /// nunca andava.
+    ///
+    /// Medido em 12/11/2026, com a máquina carregada (quatro a seis cópias do
+    /// binário ao mesmo tempo): 10 falhas em 80 rodadas, todas na asserção (0);
+    /// nas que falharam, o anfitrião viu `PersonLeft` e `PersonGone` do
+    /// visitante no primeiro milissegundo depois da volta, e nas que passaram,
+    /// nunca. Sozinho, 0 em 10: a corrida precisa de a outra linha estar
+    /// atrasada.
+    ///
+    /// Num runtime de uma linha só nada roda fora de um `block_on`. Quando o
+    /// sinal chega, o `block_on` volta e **ninguém mais dá volta em tarefa
+    /// nenhuma**; a conexão e o runtime são esquecidos (`mem::forget`), então
+    /// nenhum `Drop` corre e nenhum descritor fecha. Para o servidor, o par
+    /// parou de responder, e só. Custa um socket e um runtime vazados por
+    /// teste, até o processo acabar.
     fn subir(endereco: SocketAddr, chave: SigningKey) -> Self {
         let (pronto_tx, pronto_rx) = std::sync::mpsc::channel();
-        let (matar, aviso_de_morte) = std::sync::mpsc::channel();
+        let (matar, aviso_de_morte) = tokio::sync::oneshot::channel::<()>();
         let fio = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
+            let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("um runtime próprio");
@@ -329,16 +389,18 @@ impl Emudecivel {
             pronto_tx
                 .send(cliente.session().person)
                 .expect("ninguém esperando pelo visitante");
-            // Vivo — e respondendo ao keepalive nas linhas de execução deste
-            // runtime — até o sinal.
-            let _ = aviso_de_morte.recv();
+            // Vivo — e respondendo ao keepalive, porque é este `block_on` que
+            // roda as tarefas do runtime — até o sinal. O `Err` do sinal é o
+            // punho largado sem emudecer (o teste acabou antes): cala igual.
+            let _ = rt.block_on(aviso_de_morte);
             // **A queda silenciosa, em duas partes.** O objeto é esquecido para
-            // que o `Drop` não enfileire a despedida, e o runtime é
-            // desligado para que ninguém mais responda a pacote nenhum. Do ponto
-            // de vista do servidor, este par simplesmente parou de existir — que
-            // é exactamente o que um Wi‑Fi que cai faz.
+            // que o `Drop` não enfileire a despedida, e o runtime é esquecido
+            // **sem ser desligado**: fora do `block_on` ninguém dá volta nas
+            // tarefas dele, e esquecido ele não larga nenhuma. Do ponto de
+            // vista do servidor, este par simplesmente parou de existir — que
+            // é exactamente o que um Wi‑Fi que cai faz. Ver o cabeçalho.
             std::mem::forget(cliente);
-            rt.shutdown_timeout(Duration::from_millis(0));
+            std::mem::forget(rt);
         });
         let quem = pronto_rx
             .recv_timeout(Duration::from_secs(20))
@@ -410,12 +472,27 @@ async fn quem_reconecta_antes_de_o_servidor_desistir_da_conexao_velha_continua_n
 
     // E agora o tempo ocioso inteiro, com o anfitrião ouvindo tudo o que o
     // servidor tiver a dizer. É aqui que a sessão velha morre.
-    let piscadas = absorver(
+    let (piscadas, sumicos) = absorver_vendo_quem_some(
         &mut anfitriao,
         &mut sala_do_anfitriao,
         seele_proto::transport::IDLE_TIMEOUT + MARGEM,
+        quem,
     )
     .await;
+
+    // (-1) **A queda foi mesmo silenciosa.** Quem volta por outra conexão antes
+    // de a velha morrer nunca vai embora: um `PersonGone` do visitante aqui é a
+    // conexão velha tendo se despedido ao ser emudecida, e o servidor a
+    // desmontado antes da volta. Era o que fazia este teste oscilar, e
+    // reprovava na asserção seguinte mandando aumentar a margem — que não era o
+    // problema. Ver [`Emudecivel::subir`].
+    assert_eq!(
+        sumicos, 0,
+        "o anfitrião viu o visitante ir embora {sumicos} vez(es): a conexão velha não \
+         morreu calada, ela se despediu ao ser emudecida, e o servidor a desmontou antes \
+         de a nova subir. É a encenação que falhou — a queda silenciosa não foi \
+         silenciosa —, e não o guarda nem a margem."
+    );
 
     // (0) **A sessão velha chegou mesmo a morrer, e morreu depois da volta.**
     // Antes das asserções de estado, esta: sem ela, as outras passariam também
