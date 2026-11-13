@@ -189,6 +189,9 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     // bateria e a repetição das pendentes.
     "ping_de_rotina",
     "reenviar_mensagem",
+    // O relato de recepção (protocolo 13), que a ponte chama por dentro, uma
+    // vez por segundo, com o que a voz que toca mediu.
+    "relatar_recepcao",
     "remover_mensagem",
     "renomear_linha",
     "renomear_server",
@@ -346,6 +349,21 @@ impl Ligacao {
                 return Some(Err(json!(erro)));
             }
         }
+        // **O relato de recepção não é erro quando não sai**, como o
+        // `Enlace::relatar_recepcao` do desktop: um servidor que negociou
+        // menos que o 13 não conhece a mensagem, e na bateria não há fio. A
+        // resposta diz `false`, nada é escrito, e o sinal desta pessoa segue,
+        // lá, como sempre foi. Sem este braço o portão geral de baixo
+        // devolveria `ServidorAntigo` uma vez por segundo.
+        if comando == "relatar_recepcao"
+            && (self.sessao_mut().is_none() || !o_servidor_ouve_o_relato(self.carimbo()))
+        {
+            return Some(Ok(Feito {
+                resposta: json!(false),
+                eventos: Vec::new(),
+                nao_saiu: None,
+            }));
+        }
         let mut saida = Saida::default();
         if self.sessao_mut().is_none() {
             // **Na bateria**, como o motor do desktop sem cliente: o comando
@@ -391,6 +409,18 @@ impl Ligacao {
             nao_saiu,
         }))
     }
+}
+
+/// Se um servidor que negociou `negociado` conhece o relato de recepção
+/// (`ClientMessage::RelatoDeRecepcao`): a mesma pergunta, pela mesma tabela,
+/// do `o_servidor_ouve_o_relato` do `seele-core`. Zero, o «ainda sem aperto de
+/// mão», também não ouve.
+fn o_servidor_ouve_o_relato(negociado: u8) -> bool {
+    let relato = ClientMessage::RelatoDeRecepcao(seele_proto::signal::Recepcao {
+        perda: None,
+        jitter_ms: None,
+    });
+    seele_sessao::perfil::portao_do_cliente(&relato, negociado).is_ok()
 }
 
 /// A frase do registro para uma mensagem que o fio não levou.
@@ -1006,6 +1036,28 @@ fn atender_na_sessao(
                 timestamp: sessao.pings,
             });
             Ok(Value::Null)
+        }
+        // **O relato de recepção** (protocolo 13): o que a voz que toca mediu
+        // na janela, com as unidades do desktop — a perda de 0 a 1 e o jitter
+        // em milissegundos. `null` ou ausente é «não medido». A forma é a do
+        // `Recepcao::medida`, a mesma porta do desktop: o que não é medida
+        // (não finito, negativo) vira «não medido», e sem nenhum dos dois não
+        // há relato — a resposta diz se saiu.
+        "relatar_recepcao" => {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "uma fração e milissegundos; f32 é o que o fio carrega"
+            )]
+            let numero = |nome: &str| a.campo(nome).and_then(Value::as_f64).map(|n| n as f32);
+            match seele_proto::signal::Recepcao::medida(numero("perda"), numero("jitter_ms")) {
+                Some(relato) => {
+                    saida
+                        .mensagens
+                        .push(ClientMessage::RelatoDeRecepcao(relato));
+                    Ok(json!(true))
+                }
+                None => Ok(json!(false)),
+            }
         }
         "pedir_quadro_chave" => {
             saida.mensagens.push(ClientMessage::RequestKeyFrame {
@@ -2792,6 +2844,73 @@ mod tests {
                 ClientMessage::ListBans,
             ]
         );
+    }
+
+    /// **O relato de recepção sai com as unidades do desktop** — a perda de 0
+    /// a 1, o jitter em milissegundos —, pela forma do `Recepcao::medida`: o
+    /// que não é medida vira «não medido», e sem medida nenhuma não há relato.
+    #[test]
+    fn o_relato_de_recepcao_sai_como_o_do_desktop() {
+        use seele_proto::signal::Recepcao;
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        for (args, saiu) in [
+            (json!({ "perda": 0.125, "jitter_ms": 3.5 }), true),
+            // Só o jitter foi medido: o `null` é «não medido», e não zero.
+            (json!({ "perda": null, "jitter_ms": 7.0 }), true),
+            // Nada medido: não há o que dizer.
+            (json!({ "perda": null, "jitter_ms": null }), false),
+            (json!({}), false),
+            // Fora da faixa: a perda é aparada, o negativo não é medida.
+            (json!({ "perda": 1.5, "jitter_ms": -2.0 }), true),
+        ] {
+            let feito = atender(&mut ligacao, &mut chaves, "relatar_recepcao", args.clone());
+            assert_eq!(feito.resposta, json!(saiu), "{args}");
+            assert!(feito.eventos.is_empty() && feito.nao_saiu.is_none());
+        }
+        let escritos = escritos(&mut ligacao);
+        assert_eq!(
+            escritos,
+            vec![
+                ClientMessage::RelatoDeRecepcao(Recepcao {
+                    perda: Some(0.125),
+                    jitter_ms: Some(3.5)
+                }),
+                ClientMessage::RelatoDeRecepcao(Recepcao {
+                    perda: None,
+                    jitter_ms: Some(7.0)
+                }),
+                ClientMessage::RelatoDeRecepcao(Recepcao {
+                    perda: Some(1.0),
+                    jitter_ms: None
+                }),
+            ]
+        );
+        for mensagem in &escritos {
+            let ClientMessage::RelatoDeRecepcao(relato) = mensagem else {
+                panic!("outra mensagem");
+            };
+            assert_eq!(relato.confere(), Ok(()), "o servidor recusaria {relato:?}");
+        }
+    }
+
+    /// **Um servidor 12 não recebe o relato, e isso não é erro**: a página
+    /// relata uma vez por segundo, e um `ServidorAntigo` por segundo seria um
+    /// defeito. A resposta diz `false`, como o `Enlace::relatar_recepcao`.
+    #[test]
+    fn um_servidor_doze_nao_recebe_o_relato_e_nao_e_erro() {
+        let mut ligacao = dentro_em(12);
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let feito = atender(
+            &mut ligacao,
+            &mut chaves,
+            "relatar_recepcao",
+            json!({ "perda": 0.1, "jitter_ms": 3.0 }),
+        );
+        assert_eq!(feito.resposta, json!(false));
+        assert!(escritos(&mut ligacao).is_empty());
+        assert!(!o_servidor_ouve_o_relato(0));
+        assert!(o_servidor_ouve_o_relato(13));
     }
 
     /// O que a edição recusa aqui, com os nomes do `ConnectionError` do
