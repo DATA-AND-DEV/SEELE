@@ -388,14 +388,40 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
 
   // ------------------------------------------------------ o que chega
 
-  /** O número de cada pedaço de Opus → o cabeçalho dele, até o som sair. */
-  const chegadas = new Map();
-  let proximaChegada = 0;
+  /**
+   * O decodificador de uma alça e, **só dele**, o número de cada pedaço de Opus
+   * → o cabeçalho desse pedaço, até o som sair.
+   *
+   * **A conta é por decodificador, e não uma só para a página.** O
+   * `AudioDecoder` do Chromium não devolve o instante do pedaço que entrou:
+   * ele guarda o do primeiro e soma 20 ms a cada som que sai (medido em
+   * 13/11/2026, no Chromium 151: entraram 0, 40 000, 80 000, 120 000 e
+   * 400 000 µs, saíram 0, 20 000, 40 000, 60 000 e 80 000). Com um contador só
+   * para todas as alças, o som de cada uma saía com o número seguido dela, e o
+   * cabeçalho guardado nesse número era o de outro pedaço, quase sempre de
+   * outra pessoa: com uma voz só os números coincidiam, e a partir da segunda
+   * metade dos quadros ficava sem cabeçalho e o resto ia ao buffer de jitter
+   * com a sequência e o carimbo de outra voz (o relato de 13/11/2026, «todos
+   * os áudios pipocados depois que alguém entrou»; a
+   * `bancada/varias-vozes-no-navegador.cjs` mediu 252 quadros sem cabeçalho em
+   * 504 com duas vozes, e a primeira muda). Contando de zero em cada
+   * decodificador, o número que sai é o que entrou nos dois jeitos de carimbar:
+   * o do Chromium, e o de um navegador que devolve o instante que recebeu.
+   */
+  function criarDecoder(alca) {
+    const dele = { decoder: null, chegadas: new Map(), proxima: 0 };
+    dele.decoder = new AudioDecoder({
+      output: (dados) => decodificado(alca, dele, dados),
+      error: (erro) => falha(`decodificador da alça ${alca}`, erro),
+    });
+    dele.decoder.configure(cfg.decoder);
+    return dele;
+  }
 
-  function decodificado(alca, dados) {
+  function decodificado(alca, dele, dados) {
     const numero = numeroDoQuadro(dados.timestamp);
-    const info = chegadas.get(numero);
-    chegadas.delete(numero);
+    const info = dele.chegadas.get(numero);
+    dele.chegadas.delete(numero);
     const pcm = new Float32Array(dados.numberOfFrames);
     try {
       // Mono: o plano 0 é o som inteiro, em `f32` ou `f32-planar`.
@@ -416,16 +442,26 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
   }
 
   function decoderDe(alca) {
-    let decoder = vivo.decoders.get(alca);
-    if (!decoder) {
-      decoder = new AudioDecoder({
-        output: (dados) => decodificado(alca, dados),
-        error: (erro) => falha(`decodificador da alça ${alca}`, erro),
-      });
-      decoder.configure(cfg.decoder);
-      vivo.decoders.set(alca, decoder);
+    let dele = vivo.decoders.get(alca);
+    if (!dele) {
+      dele = criarDecoder(alca);
+      vivo.decoders.set(alca, dele);
     }
-    return decoder;
+    return dele;
+  }
+
+  /**
+   * Um pedaço de Opus da alça `alca`, com o cabeçalho dele: o cabeçalho fica
+   * guardado no número do pedaço **neste decodificador**, e o pedaço entra com
+   * esse número como instante.
+   */
+  function decodificar(alca, info, opus) {
+    const dele = decoderDe(alca);
+    const numero = dele.proxima++;
+    dele.chegadas.set(numero, info);
+    // Um decodificador que engolisse pedaços sem saída deixaria o mapa crescer.
+    if (dele.chegadas.size > 500) dele.chegadas.delete(dele.chegadas.keys().next().value);
+    dele.decoder.decode(new EncodedAudioChunk({ type: "key", timestamp: numero * 20000, data: opus }));
   }
 
   /** Um pacote do transporte: bytes opacos, que só o `.wasm` lê. */
@@ -444,11 +480,8 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     const bytes = saida();
     const vista = new DataView(bytes.buffer);
     const alca = vista.getUint32(0, true);
-    const numero = proximaChegada++;
-    chegadas.set(numero, { seq: vista.getUint16(4, true), carimbo: vista.getUint32(6, true), chegada: agora });
-    if (chegadas.size > 500) chegadas.delete(chegadas.keys().next().value);
     try {
-      decoderDe(alca).decode(new EncodedAudioChunk({ type: "key", timestamp: numero * 20000, data: bytes.subarray(10) }));
+      decodificar(alca, { seq: vista.getUint16(4, true), carimbo: vista.getUint32(6, true), chegada: agora }, bytes.subarray(10));
     } catch (erro) {
       falha(`decodificador da alça ${alca}`, erro);
     }
@@ -476,14 +509,12 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
       somDaTela.tela = tela;
       aplicarOGanhoDaTela();
     }
-    const numero = proximaChegada++;
-    chegadas.set(numero, { seq: somDaTela.seq, carimbo: somDaTela.carimbo, chegada: performance.now() });
-    if (chegadas.size > 500) chegadas.delete(chegadas.keys().next().value);
+    const info = { seq: somDaTela.seq, carimbo: somDaTela.carimbo, chegada: performance.now() };
     somDaTela.seq = (somDaTela.seq + 1) & 0xffff;
     somDaTela.carimbo = (somDaTela.carimbo + cfg.quadro) >>> 0;
     somDaTela.quadros += 1;
     try {
-      decoderDe(ALCA_DA_TELA).decode(new EncodedAudioChunk({ type: "key", timestamp: numero * 20000, data: opus }));
+      decodificar(ALCA_DA_TELA, info, opus);
     } catch (erro) {
       falha("decodificador do som da tela", erro);
     }
@@ -514,9 +545,9 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
   }
 
   function fecharDecoder(alca) {
-    const decoder = vivo.decoders.get(alca);
+    const dele = vivo.decoders.get(alca);
     vivo.decoders.delete(alca);
-    if (decoder && decoder.state !== "closed") decoder.close();
+    if (dele && dele.decoder.state !== "closed") dele.decoder.close();
   }
 
   // --------------------------------------------------------- o worklet
@@ -999,7 +1030,6 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
 
   function fecharDecoders() {
     for (const alca of [...vivo.decoders.keys()]) fecharDecoder(alca);
-    chegadas.clear();
   }
 
   /**

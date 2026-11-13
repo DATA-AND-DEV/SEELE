@@ -1387,6 +1387,7 @@ todas_as_bancadas_de_navegador() {
     cargo build --quiet --package seele-server --example servidor_da_bancada ||
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS servidor_da_bancada"
     uma_bancada node apps/seele-app/bancada/sessao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm
+    uma_bancada node apps/seele-app/bancada/varias-vozes-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm
     # A portaria-da-bancada, fora do workspace, como o passo do ci.yml a monta.
     # **O binário é o recém-montado, e a falta do fonte é vermelho.** Um
     # `target/debug/portaria-da-bancada` de outra rodada seria executado e
