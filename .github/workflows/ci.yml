@@ -491,6 +491,12 @@ jobs:
       - run: node apps/seele-app/bancada/vista-pessoal-0-17.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1600x919
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1280x720
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/palco-depois-de-reconectar.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

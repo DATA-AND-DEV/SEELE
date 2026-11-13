@@ -1439,6 +1439,8 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/saida-hospedagem-navegacao.cjs
     uma_bancada node apps/seele-app/bancada/multi-sessao-na-ponte.cjs
     uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs
+    uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1600x919
+    uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs --janela=1280x720
     uma_bancada node apps/seele-app/bancada/palco-depois-de-reconectar.cjs
     uma_bancada node apps/seele-app/bancada/ciclo-de-reconectar-o-servidor.cjs
     uma_bancada node apps/seele-app/bancada/queda-que-volta-sozinha.cjs

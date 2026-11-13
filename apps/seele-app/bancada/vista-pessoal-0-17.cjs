@@ -168,6 +168,33 @@ const MEDIDOR = `
     for (const [quem, seletor] of Object.entries(FORA)) {
       assert.ok(!(await visivel(seletor)), `na vista pessoal ${quem} (${seletor}) ainda aparece`);
     }
+    // **A ligação ocupa a janela, e não uma coluna de 316 px.** A casca larga
+    // do 0.19 deixava cinco colunas em `.paineis` e a chamada inteira caía na
+    // segunda, com o resto vazio: o cabeçalho do servidor vazava para a borda
+    // direita, havia dois CHAT e a pílula da barra cortava o aviso de voz.
+    if (VIEWPORT.width > 700) {
+      const m = await page.evaluate(() => {
+        const r = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return { x: b.left, d: b.right, y: b.top, b: b.bottom, w: b.width }; };
+        const linha = r(".painel-linha"), barra = r(".operador"), aviso = r("#voz-foco"), desligar = r("#ligacao-desligar");
+        const botoes = [...document.querySelectorAll(".operador button")].filter((x) => x.id !== "voz-foco-trazer" && x.getBoundingClientRect().width > 0)
+          .map((x) => ({ id: x.id, ...(({ left, right, top }) => ({ left, right, top }))(x.getBoundingClientRect()) }));
+        return { linha, barra, aviso, desligar, botoes, largura: innerWidth, altura: innerHeight,
+          raio: parseFloat(getComputedStyle(document.querySelector(".operador")).borderTopLeftRadius) };
+      });
+      assert.ok(m.linha.w > m.largura * 0.75, `o centro da ligação tem ${m.linha.w}px numa janela de ${m.largura}px`);
+      assert.ok(m.barra.w > m.largura * 0.75, `a barra da ligação tem ${m.barra.w}px numa janela de ${m.largura}px`);
+      assert.ok(m.barra.b <= m.altura + 0.5 && m.barra.d <= m.largura + 0.5, `a barra sai da janela: ${JSON.stringify(m.barra)}`);
+      assert.ok(m.linha.b <= m.barra.y + 0.5, `o centro passa por baixo da barra: ${JSON.stringify([m.linha, m.barra])}`);
+      // As pontas redondas não comem o aviso: ele fica dentro da parte reta.
+      assert.ok(m.raio <= 32, `a barra de várias fileiras tem raio de pílula (${m.raio}px) e corta o aviso de voz`);
+      assert.ok(m.aviso.x >= m.barra.x && m.aviso.d <= m.barra.d, `o aviso de voz sai da barra: ${JSON.stringify([m.aviso, m.barra])}`);
+      // O DESLIGAR fecha a fileira: nada à direita dele na mesma linha.
+      const depois = m.botoes.filter((x) => x.id !== "ligacao-desligar" && Math.abs(x.top - m.desligar.y) < 30 && x.left >= m.desligar.d - 0.5);
+      assert.deepEqual(depois.map((x) => x.id), [], "há controle depois do DESLIGAR na barra");
+      assert.ok(!(await visivel(".canais-servidor")), "o cabeçalho do servidor aparece solto na ligação pessoal");
+      assert.ok(!(await visivel("#chamada-chat")), "há dois CHAT na ligação pessoal (o da barra de cima é o do servidor)");
+    }
+
     // Sem transmissão na ligação, sem a moldura do palco (0.19): uma caixa
     // preta numa ligação em que ninguém compartilha parecia tela travada.
     assert.equal(await page.evaluate(() => $("palco-quem").textContent.trim()), "SEM COMPARTILHAMENTO",
@@ -826,6 +853,8 @@ const MEDIDOR = `
       });
       return { cartoes, rolagemX: document.documentElement.scrollWidth > innerWidth + 1, caixaRola: document.querySelector(".boot-caixa").scrollWidth > document.querySelector(".boot-caixa").clientWidth + 1 };
     });
+    // A captura vem antes das cobranças: quando uma reprova, a imagem fica.
+    await entrada.screenshot({ path: path.join(capturas, `entrada-codigo-amigos-${navegador}-${tam}.png`) });
     assert.equal(medidas.cartoes.length, 2, "esperava dois amigos na entrada");
     for (const c of medidas.cartoes) {
       assert.equal(c.linhasDoCodigo, 1, `o código quebrou em ${c.linhasDoCodigo} linhas: ${JSON.stringify(c)}`);
@@ -835,7 +864,6 @@ const MEDIDOR = `
       assert.ok(c.cartaoAlto < 200, `o cartão do amigo ficou enorme: ${c.cartaoAlto}px`);
     }
     assert.ok(!medidas.rolagemX && !medidas.caixaRola, `a entrada rola na horizontal: ${JSON.stringify(medidas)}`);
-    await entrada.screenshot({ path: path.join(capturas, `entrada-codigo-amigos-${navegador}-${tam}.png`) });
 
     // A entrada v2 em largura total, em quatro janelas: as colunas lado a lado
     // onde cabem, nada sobreposto, nada fora da janela, e cada botão visível.
