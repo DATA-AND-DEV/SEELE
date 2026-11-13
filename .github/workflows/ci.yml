@@ -289,10 +289,36 @@ jobs:
         # `reserva` do `seele-conformance` — de tudo o que vinha depois, nos
         # dois, não se soube nada. O passo continua vermelho com um vermelho
         # só; o que muda é que ele diz todos.
+        if: matrix.name != 'linux'
         run: cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada
-        # O passo bom leva de 25 a 45 min nos três sistemas; um teste pendurado
-        # não segura a máquina até ela cair.
+        # O passo bom leva de 25 a 45 min; um teste pendurado não segura a
+        # máquina até ela cair.
         timeout-minutes: 60
+      # **No Linux a saída vai para um arquivo, com prazo.** O runner morreu
+      # três vezes aos 54 min cravados (13/11), com o vigia de memória ligado
+      # na terceira e sem ele ter o que dizer: o log do passo se perde junto.
+      # Os testes bons acabam em 27 min. Aqui o cargo tem 40; vencidos, o passo
+      # reprova **vivo** e mostra onde parou, o tamanho da saída e as linhas
+      # que mais se repetem (uma enxurrada de log é a suspeita que sobra).
+      - name: cargo test (workspace, Linux)
+        if: matrix.name == 'linux'
+        timeout-minutes: 50
+        run: |
+          saida=0
+          timeout -k 30 40m cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada > "$RUNNER_TEMP/testes.log" 2>&1 || saida=$?
+          echo "saída do cargo: $saida (124 é o prazo de 40 min)"
+          ls -la "$RUNNER_TEMP/testes.log"; df -h "$RUNNER_TEMP" | tail -1
+          echo "--- binários e resultados"
+          grep -aE "^ +Running |^test result|^test .* FAILED|^error" "$RUNNER_TEMP/testes.log" | cut -c1-200 | tail -400
+          echo "--- as falhas, com o que disseram"
+          grep -aE -B12 "^test .* FAILED" "$RUNNER_TEMP/testes.log" | cut -c1-400 | tail -200
+          if [ "$saida" -ne 0 ]; then
+            echo "--- as 15 linhas que mais se repetem"
+            cut -c1-120 "$RUNNER_TEMP/testes.log" | sort | uniq -c | sort -rn | head -15
+            echo "--- o fim da saída"
+            tail -c 6000 "$RUNNER_TEMP/testes.log"
+          fi
+          exit "$saida"
       - name: o que o vigia viu (Linux)
         if: ${{ always() && matrix.name == 'linux' }}
         run: |
