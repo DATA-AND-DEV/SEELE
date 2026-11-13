@@ -1456,6 +1456,12 @@ function fraseDeErro(erro, apelido, deOnde) {
     if (erro.NomeRecusado) {
       return NOMES_RECUSADOS[erro.NomeRecusado] ?? "ESTE NOME NÃO PODE VIRAR LINK";
     }
+    // `FalhaAoHospedar::SenhaRecusada`: o Rust conferiu de novo a senha que a
+    // tela de preparar já tinha conferido, e a recusou. O motivo, e nunca a
+    // senha: ela não vem no erro.
+    if (erro.SenhaRecusada) {
+      return fraseDaSenhaRecusada(erro.SenhaRecusada);
+    }
     if (erro.Refused) {
       // **O apelido recusado entra na frase**, e é conserto de uma coisa cruel.
       //
@@ -1716,6 +1722,11 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O SERVIDOR AQUI",
+    // A senha de um servidor novo chegou a um servidor que já tinha a porta
+    // dele (uma senha, ou a portaria decidida): o Rust recusa e não muda nada.
+    PortaJaEscolhida:
+      "ESTE SERVIDOR JÁ TINHA A PORTA DELE, E A SENHA ESCOLHIDA NÃO FOI GRAVADA.\n" +
+      "Nada subiu. Hospede-o pela lista e troque a senha em CONFIGURAÇÕES · A PORTA.",
     // ADR 0046: a lista de revogação que chegou não abriu, ou é mais velha que
     // a guardada nesta máquina — a forma de alguém esconder uma revogação é
     // servir uma lista antiga. O ato para em vez de seguir calado. A outra
@@ -1989,6 +2000,56 @@ const FRASES_DA_HOSPEDAGEM = Object.freeze({
     fechar: "FECHAR",
   }),
 });
+
+/**
+ * **Quem pode entrar num servidor novo**, escolhido na tela de preparar, antes
+ * de ele subir (`tela-boot.js`; pedido do dono, 13/11/2026).
+ *
+ * Cada linha diz o que o servidor faz de verdade (`admissao.rs` e
+ * `portaria.rs`, no `seele-server`):
+ *
+ * - **com a sua aprovação** é a portaria ligada, o que HOSPEDAR sempre fez:
+ *   quem chega fica pendente, quem hospeda decide uma vez por pessoa, e a
+ *   decisão vale nas próximas entradas;
+ * - **com senha** é a senha gravada e a portaria desligada: a senha certa entra
+ *   sem pedido nenhum, e sem ela a recusa vem antes de qualquer batida.
+ *
+ * As recusas têm os nomes de `senha_do_servidor::SenhaRecusada`, do Rust, que
+ * confere de novo o que a tela conferiu. `NaoConfere` é só daqui: os dois
+ * campos não chegam ao Rust. O mínimo vem da regra que o Rust manda
+ * (`regras_da_senha_do_server`), e nenhum número é escrito à mão.
+ */
+const FRASES_DA_PORTA_AO_HOSPEDAR = Object.freeze({
+  notaDoPortao:
+    "Quem chega pelo link bate à porta e espera. Você aprova cada pessoa uma vez, e depois ela entra sozinha.",
+  notaDaSenha:
+    "Quem tem a senha entra direto, sem esperar a sua aprovação. Sem a senha, ninguém entra.",
+  regra: (minimo) =>
+    (Number.isFinite(minimo) ? `Pelo menos ${minimo} caracteres. ` : "") +
+    "A senha não viaja no link: passe-a às pessoas por fora. Dá para trocá-la depois, em CONFIGURAÇÕES · A PORTA.",
+  mostrar: "MOSTRAR",
+  ocultar: "OCULTAR",
+  recusas: Object.freeze({
+    Vazia: () => "DIGITE A SENHA DO SERVIDOR.\nPara hospedar sem senha, escolha COM A SUA APROVAÇÃO.",
+    ComEspacoNaPonta: () =>
+      "A SENHA COMEÇA OU TERMINA COM ESPAÇO.\nQuem a recebe por mensagem não vê o espaço. Tire-o.",
+    Curta: (minimo) =>
+      "A SENHA É CURTA DEMAIS." + (Number.isFinite(minimo) ? `\nEla precisa de pelo menos ${minimo} caracteres.` : ""),
+    Longa: () => "A SENHA É LONGA DEMAIS.\nEncurte-a.",
+    NaoConfere: () => "AS DUAS SENHAS NÃO SÃO IGUAIS.\nDigite de novo, ou aperte MOSTRAR para conferir.",
+  }),
+  // O servidor não subiu, e a senha escolhida não foi gravada em lugar nenhum:
+  // ele já está na lista, e a subida seguinte, por ela, não pergunta de novo.
+  naoGravada:
+    "A senha escolhida não foi gravada: o servidor não chegou a subir. " +
+    "Hospedado de novo pela lista, ele nasce COM A SUA APROVAÇÃO, e a senha se põe em CONFIGURAÇÕES · A PORTA.",
+});
+
+/** A frase de uma senha de servidor recusada, pelo nome da recusa. */
+function fraseDaSenhaRecusada(recusa, minimo) {
+  const frase = FRASES_DA_PORTA_AO_HOSPEDAR.recusas[recusa];
+  return frase ? frase(minimo) : "ESTA SENHA NÃO SERVE.";
+}
 
 /**
  * **A sala de espera da portaria, e a saída dela** (`tela-auth.js`,

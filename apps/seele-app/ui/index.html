@@ -677,6 +677,64 @@
     </div>
     </div>
 
+    <!--
+      **QUEM PODE ENTRAR, escolhido antes de o servidor subir** (pedido do
+      dono, 13/11/2026: «quando você hospeda um servidor, já tem que mostrar se
+      ele quer senha ou não na hora de configurar»).
+
+      HOSPEDAR subia sempre no portão, e a senha só existia depois, em
+      CONFIGURAÇÕES · A PORTA, com o servidor já no ar. Aqui a escolha é feita
+      antes, e o `hospedar` a grava antes da primeira conexão
+      (`preparar_a_casa_de_quem_hospeda`, no `main.rs`): não há instante em que
+      um servidor pedido com senha esteja no ar sem ela.
+
+      Um grupo de opções de verdade: rádios nativos, com o mesmo `name`, dentro
+      de um `radiogroup` com nome. As setas trocam a escolha, e o leitor de tela
+      diz «1 de 2» e lê a linha que explica cada uma (`aria-describedby`). As
+      duas linhas e a regra da senha são escritas por `tela-boot.js`, das
+      frases de `frases.js` e da regra que o Rust manda.
+
+      Só de um servidor novo: mora em `#preparar-do-novo`, que some quando a
+      tela pergunta só a versão do servidor que já estava aqui. Aquele já tem
+      a porta dele.
+    -->
+    <div class="area-cartao preparar-porta">
+    <h2 id="preparar-porta-titulo" class="hospedagem-bloco-titulo">Quem pode entrar</h2>
+    <div class="preparar-porta-opcoes" role="radiogroup" aria-labelledby="preparar-porta-titulo">
+      <label class="preparar-porta-opcao">
+        <input type="radio" name="preparar-porta" id="preparar-porta-portao" value="portao" checked
+               aria-describedby="preparar-porta-portao-nota">
+        <span class="preparar-porta-nome">COM A SUA APROVAÇÃO</span>
+        <span id="preparar-porta-portao-nota" class="preparar-porta-nota"></span>
+      </label>
+      <label class="preparar-porta-opcao">
+        <input type="radio" name="preparar-porta" id="preparar-porta-senha" value="senha"
+               aria-describedby="preparar-porta-senha-nota">
+        <span class="preparar-porta-nome">COM SENHA</span>
+        <span id="preparar-porta-senha-nota" class="preparar-porta-nota"></span>
+      </label>
+    </div>
+    <!-- Os campos da senha só existem com COM SENHA escolhido. A regra é dita
+         antes de alguém digitar, e a recusa aparece aqui, logo abaixo do campo
+         (acima da regra, para caber com ele numa janela baixa), e não na barra
+         de baixo. -->
+    <div id="preparar-senha-campos" class="preparar-senha-campos" hidden>
+      <label class="preparar-senha-campo">
+        <span class="rotulo">SENHA DO SERVIDOR</span>
+        <input id="preparar-senha" type="password" autocomplete="new-password" spellcheck="false"
+               autocapitalize="none" aria-describedby="preparar-senha-regra preparar-senha-erro">
+      </label>
+      <label class="preparar-senha-campo">
+        <span class="rotulo">REPITA A SENHA</span>
+        <input id="preparar-senha-de-novo" type="password" autocomplete="new-password" spellcheck="false"
+               autocapitalize="none" aria-describedby="preparar-senha-erro">
+      </label>
+      <button id="preparar-senha-mostrar" class="botao-fantasma" type="button" aria-pressed="false">MOSTRAR</button>
+      <p id="preparar-senha-erro" class="erro" role="alert" hidden></p>
+      <p id="preparar-senha-regra" class="server-frase"></p>
+    </div>
+    </div>
+
     </div>
 
     <div id="preparar-versoes" class="server-campo area-cartao" hidden>

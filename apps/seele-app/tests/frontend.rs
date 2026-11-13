@@ -13021,11 +13021,17 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         .map(str::trim)
         .filter(|linha| names(linha, "join_secret"))
         .collect();
+    // As duas últimas são de `testes/a_porta_de_um_servidor_novo.rs`: quem bate
+    // de outra máquina num servidor hospedado com senha, pela FFI, com a senha
+    // ou sem ela, e quem hospeda, sem. Um teste, que confere no rastro
+    // capturado que a senha não foi a registro nenhum.
     assert_eq!(
         nomeiam,
         [
             "join_secret: Option<String>,",
             "join_secret: join_secret.filter(|s| !s.trim().is_empty()),",
+            "join_secret: segredo.map(str::to_owned),",
+            "join_secret: None,",
         ],
         "o `main.rs` passou a nomear o `join_secret` fora do parâmetro do `connect` \
          e do campo da configuração; confira que ele não vai a `tracing`, a arquivo \
@@ -32001,5 +32007,159 @@ fn a_opcao_das_notificacoes_nasce_desligada_ao_lado_dos_alertas() {
         !ouvinte.trim_start().starts_with("async") && !ouvinte.contains("await "),
         "o ouvinte da opção espera antes de `definir`: na página de navegador a permissão \
          sairia do gesto, e o navegador não a pergunta:\n{ouvinte}"
+    );
+}
+
+/// **Quem pode entrar num servidor novo se escolhe na tela de preparar, e a
+/// senha escolhida só vai ao `hospedar`** (pedido do dono, 13/11/2026).
+///
+/// O comportamento, com o teclado e as três janelas, é da bancada
+/// `porta-ao-hospedar.cjs`; que o servidor nasce com a senha antes da primeira
+/// conexão é de `a_porta_de_um_servidor_novo`, no `main.rs`. Aqui fica o que se
+/// lê do texto, e que uma edição distraída desfaz sem nenhuma delas rodar:
+///
+/// 1. **Um grupo de opções de verdade**, com o portão marcado: um `radiogroup`
+///    com nome, dois rádios nativos do mesmo `name`, cada um ligado à linha que
+///    o explica, e só o do portão com `checked`.
+/// 2. **Os campos da senha são de senha**, têm rótulo, não trazem valor nem
+///    `data-*` na marcação, e nascem escondidos.
+/// 3. **Cada linha de `tela-boot.js` que toca a senha está na lista.** Uma
+///    linha nova — um `console.warn`, um `dataset`, um `localStorage`, um
+///    `registrarNoAnfitriao` — reprova aqui até alguém olhar para ela.
+/// 4. **O `hospedar` leva `senha`, e nenhum outro `invoke` do arquivo leva.**
+#[test]
+fn a_porta_de_um_servidor_novo_e_um_grupo_de_opcoes_e_a_senha_so_vai_ao_hospedar() {
+    let pagina = without_comments(&read("ui/index.html"));
+    let cartao = pagina
+        .split("<div class=\"area-cartao preparar-porta\">")
+        .nth(1)
+        .and_then(|resto| resto.split("<div id=\"preparar-versoes\"").next())
+        .unwrap_or_else(|| panic!("o cartão QUEM PODE ENTRAR saiu da tela de preparar"));
+    let antes = pagina
+        .split("<div class=\"area-cartao preparar-porta\">")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        antes.rfind("id=\"preparar-do-novo\"") > antes.rfind("id=\"tela-preparar\""),
+        "o cartão QUEM PODE ENTRAR saiu de `#preparar-do-novo`: quem adota o servidor que já \
+         estava aqui passaria a ganhar a pergunta de um servidor novo"
+    );
+
+    // 1. O grupo de opções.
+    assert!(
+        cartao.contains("role=\"radiogroup\" aria-labelledby=\"preparar-porta-titulo\"")
+            && cartao.contains("<h2 id=\"preparar-porta-titulo\""),
+        "a escolha de quem pode entrar não é um `radiogroup` com nome"
+    );
+    let radios: Vec<&str> = cartao
+        .split("<input type=\"radio\"")
+        .skip(1)
+        .map(|resto| resto.split('>').next().unwrap_or_default())
+        .collect();
+    assert_eq!(radios.len(), 2, "o grupo não tem duas opções: {radios:?}");
+    for (radio, nota) in radios
+        .iter()
+        .zip(["preparar-porta-portao-nota", "preparar-porta-senha-nota"])
+    {
+        assert!(
+            radio.contains("name=\"preparar-porta\"")
+                && radio.contains(&format!("aria-describedby=\"{nota}\""))
+                && cartao.contains(&format!("<span id=\"{nota}\"")),
+            "uma opção saiu do grupo, ou perdeu a linha que a explica: {radio}"
+        );
+    }
+    assert!(
+        names(radios[0], "checked")
+            && radios[0].contains("value=\"portao\"")
+            && !names(radios[1], "checked")
+            && radios[1].contains("value=\"senha\""),
+        "COM A SUA APROVAÇÃO não é a opção que vem marcada: {radios:?}"
+    );
+
+    // 2. Os campos da senha.
+    assert!(
+        cartao
+            .contains("<div id=\"preparar-senha-campos\" class=\"preparar-senha-campos\" hidden>"),
+        "os campos da senha não nascem escondidos"
+    );
+    for campo in ["preparar-senha", "preparar-senha-de-novo"] {
+        let marca = cartao
+            .split(&format!("<input id=\"{campo}\""))
+            .nth(1)
+            .and_then(|resto| resto.split('>').next())
+            .unwrap_or_else(|| panic!("o campo `{campo}` saiu do cartão"));
+        assert!(
+            marca.contains("type=\"password\"") && marca.contains("autocomplete=\"new-password\""),
+            "`{campo}` não é um campo de senha nova: {marca}"
+        );
+        assert!(
+            !marca.contains("value=") && !marca.contains("data-") && !marca.contains("name="),
+            "`{campo}` traz valor, `data-*` ou nome de formulário na marcação: {marca}"
+        );
+        let rotulo = cartao
+            .split(&format!("<input id=\"{campo}\""))
+            .next()
+            .and_then(|antes| {
+                antes
+                    .rsplit("<label class=\"preparar-senha-campo\">")
+                    .next()
+            })
+            .unwrap_or_default();
+        assert!(
+            rotulo.contains("<span class=\"rotulo\">") && !rotulo.contains("</label>"),
+            "`{campo}` não está dentro de um rótulo com texto"
+        );
+    }
+
+    // 3. Cada linha que toca a senha.
+    let script = without_comments(&read("ui/tela-boot.js"));
+    let tocam: Vec<&str> = script
+        .lines()
+        .map(str::trim)
+        .filter(|linha| {
+            // Sem os textos entre aspas: `"preparar-senha"` é o nome de um
+            // campo, e não a senha.
+            let sem_literais: String = linha.split('"').step_by(2).collect();
+            names(&sem_literais, "senhaDoNovo")
+                || names(&sem_literais, "senha")
+                || linha.contains("$(\"preparar-senha\").value")
+                || linha.contains("$(\"preparar-senha-de-novo\").value")
+        })
+        .collect();
+    assert_eq!(
+        tocam,
+        [
+            "async function hospedar(senhaDoNovo = null) {",
+            "senha: senhaDoNovo,",
+            "if (senhaDoNovo !== null && !subiu) {",
+            "if (!$(\"preparar-porta-senha\").checked) return { senha: null };",
+            "const senha = $(\"preparar-senha\").value;",
+            "if (senha.trim() === \"\") return { recusa: \"Vazia\", campo: \"preparar-senha\" };",
+            "if (senha.trim() !== senha) return { recusa: \"ComEspacoNaPonta\", campo: \"preparar-senha\" };",
+            "if (Number.isFinite(regras?.minimo) && [...senha].length < regras.minimo) {",
+            "if (Number.isFinite(regras?.maximo_em_bytes) && bytesDe(senha) > regras.maximo_em_bytes) {",
+            "if ($(\"preparar-senha-de-novo\").value !== senha) {",
+            "return { senha };",
+            "await hospedar(porta.senha);",
+        ],
+        "uma linha de `tela-boot.js` passou a tocar a senha de um servidor novo (ou deixou de). \
+         Confira que ela não vai a console, a registro, a `data-*`, a evento nem a \
+         armazenamento, e acerte a lista"
+    );
+
+    // 4. Só o `hospedar` a leva pela ponte.
+    let hospedar = script
+        .split("invoke(\"hospedar\", {")
+        .nth(1)
+        .and_then(|resto| resto.split("});").next())
+        .unwrap_or_else(|| panic!("o `invoke(\"hospedar\")` saiu de tela-boot.js"));
+    assert!(
+        hospedar.contains("senha: senhaDoNovo,"),
+        "o `hospedar` não leva a senha escolhida: o servidor subiria no portão"
+    );
+    assert_eq!(
+        script.matches("senhaDoNovo").count(),
+        3,
+        "a senha de um servidor novo passou a ser lida em mais um lugar de tela-boot.js"
     );
 }

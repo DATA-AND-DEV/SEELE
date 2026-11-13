@@ -69,6 +69,8 @@
 :where(:root[data-casca="celular"]) #tela-servidores .mods-id { font-size: calc(28px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #tela-servidores .mods-versao { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #tela-preparar .hospedagem-bloco-titulo { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .preparar-porta-nome { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .preparar-porta-nota { font-size: calc(13px * var(--cel-escala)); }
 @media (max-width: 700px) {
   :where(:root[data-casca="celular"]) #tela-servidores .boot-titulo,
   :where(:root[data-casca="celular"]) #tela-preparar .boot-titulo { font-size: calc(30px * var(--cel-escala)); }

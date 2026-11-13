@@ -3206,10 +3206,8 @@ async fn hospedar(
     // Qual servidor guardado levantar. `None` é o banco de sempre — o que toda
     // máquina que já hospedou antes desta versão tem.
     servidor: Option<String>,
-    // **Como as pessoas entram num servidor novo**, escolhido na tela de
-    // preparar: `None` é o portão (a portaria semeada ligada, o padrão de
-    // sempre), e uma senha é o servidor nascendo com ela e sem a portaria.
-    // Aplicada antes da primeira conexão; ver `preparar_a_casa_de_quem_hospeda`.
+    // A senha de um servidor novo. `None` é o portão de sempre. Com ela o
+    // servidor nasce com senha e sem a portaria. Ver o `PedidoDeHospedar`.
     senha: Option<String>,
 ) -> Result<Anfitriao, FalhaAoHospedar> {
     let config = config_dir(&app);

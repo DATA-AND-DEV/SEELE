@@ -166,6 +166,9 @@ const RECUSAS_NOMEADAS = new Map([
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
   ["reabrir_o_app", RECUSA_GRAVACAO_DE_TELA],
   ["redefinir_permissao_de_tela", RECUSA_GRAVACAO_DE_TELA],
+  // A regra da senha de um servidor novo é da tela de preparar, que só existe
+  // em quem hospeda.
+  ["regras_da_senha_do_server", RECUSA_HOSPEDAR],
   ["remover_versao", RECUSA_VERSOES],
   // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
   // tarefa 13 do plano da F3, Step 5b): mexem no banco de um servidor guardado
