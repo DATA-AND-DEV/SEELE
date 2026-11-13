@@ -253,6 +253,22 @@ function instalarConversasPessoaisWeb() {
     fase = "encerrada"; vista.estado({ estado: fase });
     entrada.textContent = "CONVERSAR POR LINK";
   }
+  /**
+   * A frase de uma conversa que o transporte encerrou. Quem já estava dentro
+   * perdeu a conexão; quem ainda conectava não achou caminho, e a conta dos
+   * candidatos de cada lado (o `diagnostico` do enlace, que chega antes do
+   * estado) diz de que lado a rede fechou.
+   */
+  function porQueAConexaoAcabou(faseAnterior, apelidoDoPar) {
+    const frases = FRASES_DA_CONVERSA_DIRETA;
+    if (["dentro", "reconectando"].includes(faseAnterior)) return frases.caiu;
+    const d = diagnosticoDaConexao;
+    if (!d || !String(d.motivo || d.etapa || "").includes("ice")) return frases.semCombinar;
+    const quantos = tipos => Object.values(tipos || {}).reduce((soma, n) => soma + n, 0);
+    if (!quantos(d.candidatosLocais)) return frases.semCaminhoDaqui;
+    if (!quantos(d.candidatosRemotos)) return frases.semCaminhoDeLa(String(apelidoDoPar || "").trim());
+    return frases.semCaminho;
+  }
   async function obterServico() {
     if (servico) return servico;
     if (preparando) return preparando;
@@ -296,7 +312,10 @@ function instalarConversasPessoaisWeb() {
         globalThis.alertasSonoros?.notarFase(fase, estado.estado);
         // A notificação do sistema da ligação que chega: o único ponto da conversa por link que a chama.
         globalThis.notificacaoDoSistema?.notarFase(fase, estado);
+        const faseAnterior = fase;
         fase = estado.estado; vista.estado(estado);
+        // Acabou sem ninguém desligar: a tela diz por quê (`FRASES_DA_CONVERSA_DIRETA`).
+        if (fase === "encerrada" && estado.motivo === "conexao") vista.falha(porQueAConexaoAcabou(faseAnterior, estado.apelido));
         if (fase === "tocando") vista.abrir({ apelido: nomeLocal() });
         entrada.textContent = viva() ? "VOLTAR À CONVERSA" : "CONVERSAR POR LINK";
         if (fase === "encerrada") { soltarMidia(); if (servico) void prepararVoz(servico).catch(() => {}); }

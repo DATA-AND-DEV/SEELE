@@ -1910,6 +1910,32 @@ const FRASES = {
 // `const FRASES` do arquivo.
 
 /**
+ * **Por que a conversa direta acabou sem ninguém desligar** (a conversa pelo
+ * código ou pelo link, na página: `pessoal-web-entrada.js`).
+ *
+ * O SEELE não tem servidor no meio da conversa (ADR 0063: «o que o direto não
+ * alcança fica sem caminho, e isso é dito»). Até a 1.1.0 não era
+ * dito: medido na página publicada em 13/11/2026, com um dos dois navegadores
+ * sem UDP, eram 30 s de «Conectando…» e depois só «Conversa encerrada», nos
+ * dois lados. A página já tinha na mão a etapa em que parou e quantos
+ * candidatos cada lado juntou, e é isso que escolhe a frase: quem não juntou
+ * nenhum é quem está atrás da rede que bloqueia.
+ */
+const FRASES_DA_CONVERSA_DIRETA = Object.freeze({
+  semCaminhoDaqui:
+    "NÃO DEU PARA CONECTAR. Este navegador não achou por onde abrir uma conexão direta: a rede daqui bloqueia " +
+    "(acontece com VPN, rede de empresa e extensão de privacidade). Tente por outra rede.",
+  semCaminhoDeLa: (nome) =>
+    `NÃO DEU PARA CONECTAR. ${nome || "A outra pessoa"} não achou por onde abrir uma conexão direta: a rede de lá bloqueia ` +
+    "(acontece com VPN, rede de empresa e extensão de privacidade). Peça para tentar por outra rede.",
+  semCaminho:
+    "NÃO DEU PARA CONECTAR. As redes de vocês dois não deixam passar uma conexão direta entre elas, o que é comum em rede de celular e de empresa. " +
+    "O SEELE não passa a conversa por um servidor no meio: tente com um dos dois em outra rede.",
+  semCombinar: "NÃO DEU PARA CONECTAR. A ligação foi atendida, mas os dois lados não terminaram de combinar a conexão a tempo. Ligue de novo.",
+  caiu: "A CONEXÃO CAIU e não voltou. Ligue de novo.",
+});
+
+/**
  * O servidor que esta máquina hospeda, visto da entrada (`camada-hospedagem.js`).
  * O HOSPEDAR AQUI muda de rótulo com ele no ar: o clique leva a ele, e nunca
  * hospeda um segundo (revisão do Codex).

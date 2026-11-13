@@ -82,6 +82,7 @@ const ui = path.resolve(__dirname, '../ui');
             }, atender: async () => { haConversa = true; },
             destruir: () => { prova.destruiu++; },
             encerrar: () => { if (!haConversa) return; haConversa = false; callbacks.aoEstado({ estado: 'encerrada' }); },
+            esquecerConversa: () => { haConversa = false; },
             revogarConvite: async () => {},
           };
         };
@@ -245,8 +246,42 @@ const ui = path.resolve(__dirname, '../ui');
       await page.evaluate(() => permitirMicrofone());
       await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).waitFor({ state: 'visible', timeout: 5000 })
         .catch(() => { throw new Error(`${engine}: a voz que nasceu depois do gesto não ligou o microfone com a chegada do par`); });
+      // **A conversa que não conecta diz por quê.** Medido na página publicada
+      // em 13/11/2026, com um dos navegadores sem UDP: 30 s de «Conectando…» e
+      // depois só «Conversa encerrada», nos dois lados, com o motivo
+      // (`prazo-ice`) e a conta dos candidatos de cada lado já na mão.
+      const avisos = () => page.evaluate(() => [...document.querySelectorAll('[role=alert]')].filter(e => !e.hidden && e.textContent.trim()).map(e => e.textContent.trim()));
+      const acabar = async ({ ate, diagnostico, motivo }) => {
+        // A conversa anterior, se ainda houver, sai pelo caminho de sempre.
+        for (const nome of [/^(SAIR DA CONVERSA|CANCELAR)$/, /^VOLTAR$/]) {
+          const botao = page.getByRole('button', { name: nome });
+          if (await botao.isVisible()) await botao.click();
+        }
+        await page.evaluate(async ([fases, d, m]) => {
+          await seelePessoalWeb.chamarCodigo({ codigo: 'AAAA-BBBB-CCCC-DDDD', apelido: 'Nome escolhido' });
+          for (const estado of fases) callbacksDaChamada.aoEstado({ estado, papel: 'quem-liga', apelido: 'Ana' });
+          if (d) callbacksDaChamada.aoDiagnostico(d);
+          servicoDeProva.esquecerConversa();
+          callbacksDaChamada.aoEstado({ estado: 'encerrada', motivo: m, apelido: 'Ana' });
+        }, [ate, diagnostico, motivo]);
+        return avisos();
+      };
+      const ice = (locais, remotos) => ({ etapa: 'ice', motivo: 'prazo-ice', ice: 'closed', conexao: 'closed', reinicios: 0, candidatosLocais: locais, candidatosRemotos: remotos });
+      let dito = await acabar({ ate: ['chamando', 'conectando'], diagnostico: ice({ host: 4, srflx: 1 }, {}), motivo: 'conexao' });
+      assert.equal(dito.length, 1, `${engine}: a conversa não conectou e a tela não disse por quê: ${JSON.stringify(dito)}`);
+      assert.match(dito[0], /NÃO DEU PARA CONECTAR/); assert.match(dito[0], /Ana/, 'quem não achou caminho foi o outro lado, e a frase não diz quem');
+      dito = await acabar({ ate: ['chamando', 'conectando'], diagnostico: ice({}, { host: 4, srflx: 1 }), motivo: 'conexao' });
+      assert.match(dito[0] ?? '', /NÃO DEU PARA CONECTAR.*[Ee]ste navegador/s, `${engine}: quem não achou caminho foi este navegador: ${JSON.stringify(dito)}`);
+      dito = await acabar({ ate: ['chamando', 'conectando'], diagnostico: ice({ host: 2, srflx: 1 }, { host: 2, srflx: 1 }), motivo: 'conexao' });
+      assert.match(dito[0] ?? '', /NÃO DEU PARA CONECTAR.*outra rede/s, `${engine}: os dois lados tinham candidatos e nenhum par abriu: ${JSON.stringify(dito)}`);
+      assert.doesNotMatch(dito[0], /Este navegador|Ana não/);
+      dito = await acabar({ ate: ['chamando', 'conectando', 'dentro'], diagnostico: { etapa: 'aberta', motivo: 'prazo-recuperacao', candidatosLocais: { host: 2 }, candidatosRemotos: { host: 2 } }, motivo: 'conexao' });
+      assert.match(dito[0] ?? '', /A CONEXÃO CAIU/, `${engine}: a conversa caiu no meio e a tela não disse: ${JSON.stringify(dito)}`);
+      // Quem desliga de propósito não ganha aviso nenhum.
+      dito = await acabar({ ate: ['chamando', 'conectando', 'dentro'], diagnostico: null, motivo: 'encerrar' });
+      assert.deepEqual(dito, [], `${engine}: o outro lado desligou e a tela mostrou um aviso de falha`);
       assert.deepEqual(await page.evaluate(() => prova.rejeicoes), []);
-      console.log(`${engine}: criação/entrada recusadas visíveis, cliques pendentes bloqueados, microfone pedido no gesto e ligado com o par, cancelamento, foco recusado, captura recusada, permissão tardia, saída, BFCache e microfone de quem liga pelo código em três conversas seguidas PASS`);
+      console.log(`${engine}: criação/entrada recusadas visíveis, cliques pendentes bloqueados, microfone pedido no gesto e ligado com o par, cancelamento, foco recusado, captura recusada, permissão tardia, saída, BFCache e microfone de quem liga pelo código em três conversas seguidas, e o porquê de uma conversa que não conecta PASS`);
     } finally { await browser.close(); }
   } } finally { server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
