@@ -208,7 +208,15 @@ fn runtime() -> tokio::runtime::Runtime {
 /// Hospedar pelo corpo do comando, como o teste do item 8 (porta zero, modo
 /// local: sem a porta 8383 e sem a escada).
 async fn hospedar(session: &Session, config: &str) -> Result<super::Anfitriao, FalhaAoHospedar> {
-    hospedar_em(session, config, None, None, None, 0, true).await
+    hospedar_em(
+        session,
+        config,
+        None,
+        super::PedidoDeHospedar::default(),
+        0,
+        true,
+    )
+    .await
 }
 
 /// A recusa pela API 5: o que a pessoa lê quando nada foi escolhido.

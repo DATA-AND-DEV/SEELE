@@ -1519,7 +1519,7 @@ mod saidas_do_mod_antigo {
                 seele_server::persistence::Location::File(banco_a.clone()),
                 "Casa A",
                 Some(crate::servidores::raizes_dos_mods(&config, Some(&a))),
-                move |persistence| crate::preparar_a_casa_de_quem_hospeda(persistence, &dona),
+                move |persistence| crate::preparar_a_casa_de_quem_hospeda(persistence, &dona, None),
             )
             .await
             .expect("A não subiu depois do CTA");

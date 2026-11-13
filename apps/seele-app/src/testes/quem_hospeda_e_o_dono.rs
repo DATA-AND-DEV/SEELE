@@ -1,5 +1,5 @@
 use super::a_entrada_velha_que_chega_tarde::{app, runtime, vez};
-use super::{config_dir, connect, disconnect, hospedar_em, Session};
+use super::{config_dir, connect, disconnect, hospedar_em, PedidoDeHospedar, Session};
 use seele_proto::control::Permission;
 use seele_proto::ids::PersonId;
 use tauri::Manager;
@@ -11,9 +11,16 @@ fn hospedar_declara_a_chave_desta_maquina_dona_e_outra_conta_nao_e() {
         let app = app();
         let session = app.state::<Session>();
         let config = config_dir(app);
-        let anfitriao = hospedar_em(&session, &config, None, None, None, 0, true)
-            .await
-            .unwrap_or_else(|falha| panic!("o hospedar não subiu: {falha:?}"));
+        let anfitriao = hospedar_em(
+            &session,
+            &config,
+            None,
+            PedidoDeHospedar::default(),
+            0,
+            true,
+        )
+        .await
+        .unwrap_or_else(|falha| panic!("o hospedar não subiu: {falha:?}"));
 
         let entrada = tokio::time::timeout(
             std::time::Duration::from_secs(20),

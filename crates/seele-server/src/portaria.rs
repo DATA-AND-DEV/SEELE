@@ -127,6 +127,31 @@ pub fn ligada(persistence: &Persistence) -> Result<bool> {
     Ok(valor.as_deref() == Some("ligada"))
 }
 
+/// Se alguém **já decidiu** sobre a portaria deste servidor: ligada ou
+/// desligada, a chave existe no banco.
+///
+/// [`ligada`] responde `false` nos dois casos em que ela não pergunta — nunca
+/// decidida e desligada de propósito —, e para quem hospeda são coisas
+/// diferentes: só no primeiro o servidor ainda não tem porta escolhida. É o que
+/// a tela de preparar pergunta antes de aplicar a escolha de um servidor novo,
+/// para a senha escolhida ali não cair sobre um servidor que já tinha a
+/// configuração dele.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn decidida(persistence: &Persistence) -> Result<bool> {
+    let valor: Option<String> = persistence
+        .connection()
+        .query_row(
+            "SELECT valor FROM configuracao WHERE chave = ?1",
+            params![CHAVE],
+            |linha| linha.get(0),
+        )
+        .optional()?;
+    Ok(valor.is_some())
+}
+
 /// Liga ou desliga a portaria.
 ///
 /// # Errors
@@ -718,6 +743,32 @@ mod tests {
         semear_ligada(&mut c).expect("semear de novo");
 
         assert!(!ligada(&c).expect("ler"));
+    }
+
+    #[test]
+    fn so_um_banco_em_que_ninguem_escolheu_a_portaria_esta_por_decidir() {
+        // `ligada` responde `false` para «nunca decidida» e para «desligada de
+        // propósito». Quem hospeda um servidor novo com senha precisa da
+        // diferença: a escolha da tela de preparar só vale no primeiro caso.
+        let mut c = persistence();
+        assert!(
+            !decidida(&c).expect("ler"),
+            "um banco novo já veio decidido"
+        );
+
+        ligar(&mut c, false).expect("desligar");
+        assert!(
+            decidida(&c).expect("ler"),
+            "desligar de propósito não contou como decisão"
+        );
+        assert!(!ligada(&c).expect("ler"));
+
+        let mut outro = persistence();
+        semear_ligada(&mut outro).expect("semear");
+        assert!(
+            decidida(&outro).expect("ler"),
+            "a semente não contou como decisão"
+        );
     }
 
     #[test]
