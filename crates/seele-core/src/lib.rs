@@ -116,7 +116,7 @@ pub mod voice;
 pub use battery::{Battery, Link};
 pub use bomba::{
     escoar, ligar, Arranjo, Bomba, Contagem, Escoadouro, EventoDaBomba, Ordem, QuadroParaOFio,
-    NOME_DA_THREAD,
+    QuedaDaBomba, NOME_DA_THREAD,
 };
 /// A medida do caminho de subida de quem compartilha.
 ///
@@ -139,7 +139,7 @@ pub use state::{
 };
 pub use tela::{
     menor_resolucao, resolucao_estimada_para, Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada,
-    PernaQueAperta, QuadroRecebido, Recepcao, Teto, TetoDeVideo, Transmissao,
+    MotivoDeQueda, PernaQueAperta, QuadroRecebido, Recepcao, Teto, TetoDeVideo, Transmissao,
 };
 pub use tofu::{MemoryPinStore, PinDecision, PinStore, Verdict};
 /// A tela: o trait, quem o cumpre nesta máquina, e o que se escolhe.

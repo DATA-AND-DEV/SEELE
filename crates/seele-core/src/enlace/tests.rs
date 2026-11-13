@@ -2536,7 +2536,7 @@ fn a_bomba_so_nasce_quando_o_server_da_nome_a_transmissao() {
 
     // O servidor respondeu, e a transmissão ganhou nome.
     let mut canal = None;
-    motor.nascer_a_tela(ScreenId(7), |origem, eventos, _| {
+    motor.nascer_a_tela(ScreenId(7), |origem, eventos, _, _| {
         canal = Some((origem, eventos));
     });
 
@@ -2615,7 +2615,7 @@ async fn do_pedido_guardado_ao_quadro_lido_do_outro_lado() {
     // A mesma forma da produção: uma tarefa própria, porque escoar dura o
     // que a transmissão durar.
     let mut escoando = None;
-    motor.nascer_a_tela(tela, |origem, mut eventos, _| {
+    motor.nascer_a_tela(tela, |origem, mut eventos, _, _| {
         escoando = Some(tokio::spawn(async move {
             escoadouro.escoar(tela, origem, &mut eventos).await
         }));
@@ -2661,9 +2661,119 @@ fn sem_pedido_guardado_um_nome_de_transmissao_nao_liga_nada() {
     // tela.
     let mut motor = motor_de_teste();
     let mut chamou = false;
-    motor.nascer_a_tela(ScreenId(1), |_, _, _| chamou = true);
+    motor.nascer_a_tela(ScreenId(1), |_, _, _, _| chamou = true);
     assert!(!chamou, "ligou uma bomba que ninguém pediu");
     assert!(motor.tela_viva.is_none());
+}
+
+/// **Uma transmissão que cai acaba de verdade, e o motor diz por quê.**
+///
+/// O defeito: quando a tarefa que escoa acabava com erro — o codificador
+/// recusando um quadro, a captura recusando recomeçar, o fluxo que não abriu —
+/// só saía um `warn`. `tela_viva` continuava `Some` com um produtor morto
+/// dentro, e nenhum aviso ia à casca: o botão seguia em PARAR DE COMPARTILHAR
+/// sobre uma tela que ninguém via.
+///
+/// Sem codec nenhum, de propósito: a câmera entra por `crate::de_fora`, que não
+/// carrega o módulo do Cisco, e o que se mede aqui é o motor — o que ele faz
+/// com o fim com erro, e com qual transmissão. O servidor recebendo o
+/// `StopScreenShare` é de `seele-conformance` (`a_transmissao_que_cai.rs`),
+/// que é onde há um servidor.
+#[tokio::test]
+async fn uma_transmissao_que_cai_acaba_de_verdade_e_o_motor_diz_por_que() {
+    let mut motor = motor_de_teste();
+    let (avisos, mut ouvidos) = mpsc::unbounded_channel();
+    motor.avisos = avisos;
+    motor.protocolo.store(
+        seele_proto::screen::PROTOCOLO_DA_CAMERA,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
+    let (_entrada, quadros) = crate::de_fora::canal_de_fora(640, 360);
+    motor.tela_pedida = Some((
+        Box::new(PedidoDeTela::DeFora(quadros)),
+        crate::video::LimitesDeTela::default(),
+    ));
+    // O canal fica na mão do teste: quem escoa, aqui, é ninguém.
+    let mut canal = None;
+    motor.nascer_a_tela(ScreenId(9), |_, eventos, _, leitura| {
+        canal = Some((eventos, leitura));
+    });
+    let leitura = canal.as_ref().expect("quem escoa não foi chamado").1;
+    assert_eq!(
+        motor.tela_viva.as_ref().map(|viva| viva.leitura),
+        Some(leitura),
+        "a transmissão viva e quem a escoa têm números diferentes: um fim com erro nunca \
+         acharia a transmissão dele"
+    );
+    // O sinal de banda da abertura, que não é assunto deste teste.
+    while ouvidos.try_recv().is_ok() {}
+
+    // **O fim com erro de outra transmissão não derruba esta.** É o caso de
+    // toda parada decidida: o motor tira `tela_viva` antes, a tarefa da
+    // transmissão anterior acaba depois — às vezes com erro, porque o fluxo
+    // dela foi cortado —, e a esta altura já pode haver outra no ar.
+    motor
+        .a_tela_caiu(FimComErroDaTela {
+            leitura: leitura + 1_000_000,
+            motivo: crate::tela::MotivoDeQueda::Fluxo,
+        })
+        .await;
+    assert!(
+        motor.tela_viva.is_some(),
+        "o fim de uma transmissão que já tinha acabado derrubou a que está no ar"
+    );
+    assert!(
+        !matches!(ouvidos.try_recv(), Ok(Aviso::TelaCaiu { .. })),
+        "a casca ouviu «caiu» de uma transmissão que este motor encerrou por decisão"
+    );
+
+    // O desta: ela acaba, e o aviso leva qual, o que era e por quê.
+    motor
+        .a_tela_caiu(FimComErroDaTela {
+            leitura,
+            motivo: crate::tela::MotivoDeQueda::Codificador,
+        })
+        .await;
+    assert!(
+        motor.tela_viva.is_none(),
+        "a transmissão caiu e o motor continuou com ela «viva»: o botão ficaria em PARAR DE \
+         COMPARTILHAR sobre uma tela que ninguém vê"
+    );
+    let mut caiu = None;
+    while let Ok(aviso) = ouvidos.try_recv() {
+        if let Aviso::TelaCaiu {
+            tela,
+            origem,
+            motivo,
+        } = aviso
+        {
+            assert!(caiu.is_none(), "a mesma queda foi dita duas vezes");
+            caiu = Some((tela, origem, motivo));
+        }
+    }
+    assert_eq!(
+        caiu,
+        Some((
+            ScreenId(9),
+            seele_proto::screen::ScreenSource::Camera,
+            crate::tela::MotivoDeQueda::Codificador
+        )),
+        "a transmissão caiu e a casca não ficou sabendo qual, o que era ou por quê"
+    );
+
+    // Dito uma vez: o mesmo fim, de novo, não acha transmissão nenhuma.
+    motor
+        .a_tela_caiu(FimComErroDaTela {
+            leitura,
+            motivo: crate::tela::MotivoDeQueda::Codificador,
+        })
+        .await;
+    assert!(
+        !matches!(ouvidos.try_recv(), Ok(Aviso::TelaCaiu { .. })),
+        "a queda foi dita duas vezes"
+    );
+    drop(canal);
 }
 
 #[test]
@@ -2968,6 +3078,7 @@ async fn sem_sessao_o_pedido_de_tunel_e_sem_resposta_e_o_servidor_onze_e_antigo(
 fn motor_de_teste() -> Motor {
     let (avisos, _) = mpsc::unbounded_channel();
     let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
+    let (quedas_da_tela_tx, quedas_da_tela) = mpsc::unbounded_channel();
     let tuneis = crate::tunel::Tuneis::nova(avisos.clone());
     Motor {
         bilhete: None,
@@ -3011,6 +3122,8 @@ fn motor_de_teste() -> Motor {
         repasse: Arc::new(RepasseDeTela::default()),
         resultados_do_par,
         resultados_do_par_tx,
+        quedas_da_tela,
+        quedas_da_tela_tx,
         tarefas_de_par: TarefasDePar::default(),
         tuneis,
         lado_da_maquina: LadoDaMaquina::default(),

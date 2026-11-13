@@ -1332,6 +1332,33 @@ pub enum Event {
         /// Qual transmissão.
         screen: u32,
     },
+    /// **A transmissão desta pessoa caiu sozinha, e já foi encerrada.**
+    ///
+    /// # O silêncio que este evento fecha
+    ///
+    /// Quem produzia a imagem morreu no meio — o codificador recusou um
+    /// quadro, a captura recusou recomeçar, o fluxo não abriu —, e só o
+    /// `seele.log` ficava sabendo: o retrato continuava dizendo que esta pessoa
+    /// compartilhava, o botão continuava em PARAR DE COMPARTILHAR, e a sala
+    /// olhava uma transmissão anunciada e sem imagem.
+    ///
+    /// Quando ele chega, o núcleo **já encerrou**: o servidor ouviu o mesmo
+    /// `StopScreenShare` de quem aperta parar, e o `ScreenShareStopped` que
+    /// volta tira a transmissão do retrato ([`Self::ScreenChanged`]). O que
+    /// este evento carrega é o que o retrato não diz: que não foi a pessoa
+    /// quem parou, e por quê.
+    ///
+    /// **Nada recomeça sozinho.** A casca diz o que houve, e quem compartilha
+    /// de novo é a pessoa.
+    ScreenShareFell {
+        /// Qual transmissão.
+        screen: u32,
+        /// O que ela mostrava: a frase é «a tela» ou «a câmera» por isto.
+        source: ScreenKind,
+        /// O nome estável do motivo, dos de
+        /// [`crate::motivos_de_queda_da_tela`]. A frase é da casca.
+        reason: &'static str,
+    },
     /// Um túnel de jogo de quem joga mediu de novo, ou acabou.
     ///
     /// Grosso na medida do possível, mas o relatório inteiro vai junto: a faixa

@@ -3146,6 +3146,57 @@ fn todo_motivo_de_parada_tem_um_nome_na_lista() {
 }
 
 #[test]
+fn todo_motivo_de_queda_tem_um_nome_e_o_evento_o_leva_a_casca() {
+    // O irmão do teste de cima, para a transmissão que **cai** em vez de
+    // parar. A lista sai de `MotivoDeQueda::TODOS`, e `nome_da_queda` é um
+    // `match` exaustivo: um motivo novo reprova lá na compilação, e um motivo
+    // esquecido em `TODOS` reprova aqui, na contagem.
+    let nomes = motivos_de_queda_da_tela();
+    assert_eq!(
+        nomes,
+        vec!["Codificador", "Captura", "Fluxo"],
+        "a lista de motivos de queda andou: a casca cobra uma frase por nome"
+    );
+    let distintos: std::collections::BTreeSet<&str> = nomes.iter().copied().collect();
+    assert_eq!(
+        distintos.len(),
+        nomes.len(),
+        "dois motivos com o mesmo nome: a casca escreveria a mesma frase para os dois"
+    );
+    // Nenhum nome de queda é nome de parada: os dois dicionários da casca
+    // dizem coisas opostas («volta sozinha» e «compartilhe de novo»).
+    for parada in motivos_de_parada_da_tela() {
+        assert!(
+            !nomes.contains(&parada),
+            "`{parada}` é parada e queda ao mesmo tempo"
+        );
+    }
+
+    // E o evento atravessa com a forma que a casca lê: qual transmissão, o
+    // que ela mostrava, e o nome do motivo.
+    for (origem, tipo) in [
+        (seele_core::ScreenSource::Monitor, "monitor"),
+        (seele_core::ScreenSource::Window, "window"),
+        (seele_core::ScreenSource::Camera, "camera"),
+    ] {
+        for motivo in seele_core::MotivoDeQueda::TODOS {
+            let evento = evento_da_queda(seele_core::ScreenId(7), origem, motivo);
+            assert_eq!(
+                serde_json::to_value(&evento).unwrap(),
+                serde_json::json!({
+                    "ScreenShareFell": {
+                        "screen": 7,
+                        "source": tipo,
+                        "reason": nome_da_queda(motivo),
+                    }
+                }),
+                "a queda de uma transmissão chegaria à casca com outra forma"
+            );
+        }
+    }
+}
+
+#[test]
 fn esta_ponte_nao_decide_quem_perdeu_a_corrida_da_tela() {
     // `specs/08-seguranca.md`: a interface esconder é conveniência; o
     // servidor negar é a segurança. Uma transmissão por sala (§6.3) é regra

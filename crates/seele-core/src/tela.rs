@@ -133,6 +133,34 @@ pub enum MotivoDeParada {
     AbaixoDoPiso,
 }
 
+/// Por que uma transmissão desta pessoa **caiu**: acabou sem ninguém mandar.
+///
+/// # Não é uma parada
+///
+/// [`MotivoDeParada`] é o produto decidindo — o sinal apertou, o teto ficou
+/// abaixo do piso —, e volta sozinho. Isto é o que sobra quando quem produz a
+/// imagem morre: não volta, e a pessoa só recomeça apertando de novo. Por isso
+/// são dois enums, e não um com mais variantes: a casca escreve frases opostas
+/// para os dois («ela volta sozinha» e «compartilhe de novo»).
+///
+/// Enumerado pelo mesmo motivo do irmão: quem recebe escreve a frase na língua
+/// da pessoa. O que o sistema disse, cru, vai ao `seele.log` e não atravessa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MotivoDeQueda {
+    /// O codificador recusou: ao armar, num quadro, ou na troca de degrau.
+    Codificador,
+    /// A captura recusou entregar a imagem — ao começar, ou ao recomeçar noutro
+    /// degrau.
+    Captura,
+    /// O fluxo da transmissão não abriu ou morreu no meio, com a sessão de pé.
+    Fluxo,
+}
+
+impl MotivoDeQueda {
+    /// Todos, para quem prende uma lista de nomes a este enum.
+    pub const TODOS: [Self; 3] = [Self::Codificador, Self::Captura, Self::Fluxo];
+}
+
 /// O teto de banda do vídeo neste instante.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Teto {
@@ -981,6 +1009,34 @@ pub enum ErroDeTela {
     /// A conexão, o fluxo ou a leitura acabaram.
     #[error("screen stream: {0}")]
     Fluxo(String),
+    /// Quem produzia a imagem morreu: a captura ou o codificador recusaram.
+    ///
+    /// Separado de [`Self::Fluxo`] porque a frase é outra — «a conexão da
+    /// transmissão fechou» manda olhar a rede, e isto manda olhar a máquina. O
+    /// `motivo` é o que atravessa até a casca; o `detalhe` é o que o sistema
+    /// disse, para o registro.
+    #[error("screen producer died ({motivo:?}): {detalhe}")]
+    Produtor {
+        /// A captura ou o codificador.
+        motivo: MotivoDeQueda,
+        /// O que o sistema disse, cru. Serve a quem depura e não a quem usa.
+        detalhe: String,
+    },
+}
+
+impl ErroDeTela {
+    /// O motivo da queda que este erro é, para quem avisa a casca.
+    ///
+    /// Tudo o que não é quem produz é o fluxo: o cabeçalho que a abertura
+    /// recusou, o quadro que o fio recusou e a escrita que morreu deixam a
+    /// transmissão no mesmo lugar — anunciada, e sem imagem saindo.
+    #[must_use]
+    pub const fn motivo_de_queda(&self) -> MotivoDeQueda {
+        match self {
+            Self::Produtor { motivo, .. } => *motivo,
+            Self::Cabecalho(_) | Self::Quadro(_) | Self::Fluxo(_) => MotivoDeQueda::Fluxo,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

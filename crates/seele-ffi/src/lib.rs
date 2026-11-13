@@ -5425,6 +5425,46 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
     .collect()
 }
 
+/// O nome estável de um motivo de queda, para a casca escrever a frase.
+///
+/// Exaustivo de propósito, como [`nome_da_parada`]: um motivo novo em
+/// `seele-core` reprova aqui, em vez de chegar à casca com o nome de outro.
+const fn nome_da_queda(motivo: seele_core::MotivoDeQueda) -> &'static str {
+    match motivo {
+        seele_core::MotivoDeQueda::Codificador => "Codificador",
+        seele_core::MotivoDeQueda::Captura => "Captura",
+        seele_core::MotivoDeQueda::Fluxo => "Fluxo",
+    }
+}
+
+/// Os nomes de queda que podem chegar a uma casca em
+/// [`Event::ScreenShareFell`].
+///
+/// Pelo mesmo motivo de [`motivos_de_parada_da_tela`]: o guarda de cobertura
+/// de frase da casca lê esta lista. Derivada de `MotivoDeQueda::TODOS`, que
+/// mora ao lado do enum — uma variante nova que não entre lá reprova no teste
+/// que prende os dois.
+#[must_use]
+pub fn motivos_de_queda_da_tela() -> Vec<&'static str> {
+    seele_core::MotivoDeQueda::TODOS
+        .into_iter()
+        .map(nome_da_queda)
+        .collect()
+}
+
+/// O evento que diz à casca que a transmissão desta pessoa caiu.
+fn evento_da_queda(
+    tela: seele_core::ScreenId,
+    origem: seele_core::ScreenSource,
+    motivo: seele_core::MotivoDeQueda,
+) -> Event {
+    Event::ScreenShareFell {
+        screen: tela.0,
+        source: tipo_da_tela(origem),
+        reason: nome_da_queda(motivo),
+    }
+}
+
 /// Se o painel da tela precisa ser redesenhado.
 ///
 /// Duas causas e não uma, e a segunda é o §5.1: a contagem de espectadores é um
@@ -5978,6 +6018,19 @@ async fn drive(
                     }
                     seele_core::enlace::Aviso::TelaIlegivel { motivo } => {
                         shared.notify(&Event::ScreenUnreadable { reason: motivo });
+                    }
+                    // A transmissão desta pessoa caiu, e o núcleo já a
+                    // encerrou. O retrato se acerta sozinho — o
+                    // `ScreenShareStopped` que o servidor devolve tira a
+                    // transmissão dele e esquece o pedido (`fold`) —, e o que
+                    // falta à casca é o que ele não diz: que não foi a pessoa
+                    // quem parou, e por quê.
+                    seele_core::enlace::Aviso::TelaCaiu {
+                        tela,
+                        origem,
+                        motivo,
+                    } => {
+                        shared.notify(&evento_da_queda(tela, origem, motivo));
                     }
                     seele_core::enlace::Aviso::TelaQuadro {
                         tela,

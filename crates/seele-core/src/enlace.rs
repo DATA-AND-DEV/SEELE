@@ -363,6 +363,34 @@ pub enum Aviso {
         /// Qual leitura acabou: o número do [`Self::TelaAbriu`] dela.
         leitura: u64,
     },
+    /// **A transmissão desta pessoa caiu**: acabou sem ninguém mandar, e este
+    /// motor já a encerrou.
+    ///
+    /// # O silêncio que isto fecha
+    ///
+    /// Quando quem produz a imagem morria — o codificador recusando um quadro,
+    /// a captura recusando recomeçar, o fluxo que não abriu —, só a tarefa que
+    /// escoa ficava sabendo, e ela escrevia uma linha no `seele.log`. O motor
+    /// continuava com a transmissão «viva», o servidor continuava anunciando-a
+    /// à sala, e a casca continuava oferecendo PARAR DE COMPARTILHAR sobre uma
+    /// tela que ninguém via. O produto sabia e não contava.
+    ///
+    /// Quando este aviso sai, três coisas já aconteceram, nesta ordem: o
+    /// produtor foi largado, o `StopScreenShare` foi escrito no controle (o
+    /// mesmo de quem aperta parar — a sala recebe o `ScreenShareStopped` de
+    /// sempre), e o [`Self::TelaFechou`] do espelho já passou.
+    ///
+    /// **Não há recomeço automático.** Recomeçar é pôr a tela de alguém no ar
+    /// sem aperto; quem recomeça é a pessoa, e a casca diz isso na frase.
+    TelaCaiu {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// O que ela mostrava: é a casca que decide entre «a tela» e «a
+        /// câmera» na frase.
+        origem: seele_proto::screen::ScreenSource,
+        /// Por quê, enumerado. O detalhe do sistema ficou no `seele.log`.
+        motivo: crate::tela::MotivoDeQueda,
+    },
     /// A transmissão da **própria câmera** pede alguma coisa a quem a
     /// codifica, que está fora deste processo (`crate::de_fora`).
     ///
@@ -498,6 +526,16 @@ impl std::fmt::Debug for Aviso {
                 .debug_struct("TelaFechou")
                 .field("tela", tela)
                 .field("leitura", leitura)
+                .finish(),
+            Self::TelaCaiu {
+                tela,
+                origem,
+                motivo,
+            } => f
+                .debug_struct("TelaCaiu")
+                .field("tela", tela)
+                .field("origem", origem)
+                .field("motivo", motivo)
                 .finish(),
             Self::Camera { tela, sinal } => f
                 .debug_struct("Camera")
@@ -956,6 +994,25 @@ const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
 /// e o resto desta sessão até o par responder ou o prazo vencer. A tarefa roda
 /// solta (ver [`Motor::assistir_por_par`]) e devolve o que decidiu por aqui; só
 /// quem tem o `&mut Client` — o laço de `rodar` — pode falar com o servidor.
+/// O que a tarefa que escoa a transmissão desta pessoa devolve ao laço de
+/// [`Motor::rodar`] quando ela acaba **com erro**.
+///
+/// Pelo mesmo motivo de [`ResultadoDoPar`]: a tarefa roda solta, e só o laço —
+/// dono do `&mut Client` e de [`Motor::tela_viva`] — pode avisar o servidor e
+/// largar o produtor.
+///
+/// **`leitura` é a identidade, e não o [`ScreenId`].** Uma transmissão que o
+/// motor já encerrou por decisão (o botão, a queda do enlace, o
+/// `ScreenShareStopped`) também pode acabar com erro na tarefa — o fluxo dela
+/// foi cortado no meio —, e esse fim chega aqui depois de outra transmissão ter
+/// nascido. O número da leitura é único no processo; o nome que o servidor dá
+/// não precisa ser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FimComErroDaTela {
+    leitura: u64,
+    motivo: crate::tela::MotivoDeQueda,
+}
+
 #[derive(Debug)]
 enum ResultadoDoPar {
     /// Um verbo do túnel que uma tarefa solta quer mandar (`TunelFalhou`,
@@ -2452,6 +2509,7 @@ impl Enlace {
         let (comandos_tx, comandos_rx) = mpsc::channel(COMANDOS);
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
+        let (quedas_da_tela_tx, quedas_da_tela) = mpsc::unbounded_channel();
 
         let bateria = bateria_de(&destino);
         let tuneis = crate::tunel::Tuneis::nova(avisos_tx.clone());
@@ -2496,6 +2554,8 @@ impl Enlace {
             repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
+            quedas_da_tela,
+            quedas_da_tela_tx,
             tarefas_de_par: TarefasDePar::default(),
             tuneis,
             lado_da_maquina,
@@ -4049,6 +4109,11 @@ struct Motor {
     /// para mandar de volta. Clonada a cada tarefa nova: um `Sender` barato
     /// de clonar, e cada tarefa é dona da própria cópia.
     resultados_do_par_tx: mpsc::UnboundedSender<ResultadoDoPar>,
+    /// Por onde a tarefa que escoa a transmissão desta pessoa diz que acabou
+    /// com erro — ver [`FimComErroDaTela`] e [`Motor::a_tela_caiu`].
+    quedas_da_tela: mpsc::UnboundedReceiver<FimComErroDaTela>,
+    /// A metade de [`Self::quedas_da_tela`] que cada tarefa que escoa leva.
+    quedas_da_tela_tx: mpsc::UnboundedSender<FimComErroDaTela>,
     /// As tarefas soltas do caminho entre pares — a única coisa que alcança
     /// aquele caminho depois de ele ter começado.
     ///
@@ -4089,6 +4154,12 @@ struct Queda {
 struct TelaViva {
     /// O nome que o servidor deu a esta transmissão.
     tela: ScreenId,
+    /// O número desta transmissão no processo: o mesmo que o espelho carrega
+    /// no [`Aviso::TelaAbriu`]. É por ele que um fim com erro é casado com a
+    /// transmissão que está no ar — ver [`FimComErroDaTela`].
+    leitura: u64,
+    /// O que ela mostra, para o [`Aviso::TelaCaiu`] dizer.
+    origem: seele_proto::screen::ScreenSource,
     /// Quem produz os quadros. Largá-lo para a transmissão.
     produtor: Produtor,
     /// O que a pessoa escolheu, guardado porque o teto é recalculado a cada
@@ -4486,6 +4557,12 @@ impl Motor {
             // `select!`.
             let fila_da_midia = self.cliente.as_ref().and_then(Client::fila_da_midia);
             let mut pediram_chave_pela_midia = false;
+            // E o fim com erro da transmissão desta pessoa, pelo mesmo motivo
+            // de `resultados_do_par`: um campo próprio, disjunto do cliente.
+            // Encerrar a transmissão precisa do `self` inteiro, então o braço
+            // só anota, e ela é encerrada depois do `select!`.
+            let quedas_da_tela = &mut self.quedas_da_tela;
+            let mut a_tela_caiu = None;
 
             // Só há o que ler quando há conexão. Sem ela, a espera é o relógio.
             let houve_evento = match self.cliente.as_mut() {
@@ -4555,6 +4632,12 @@ impl Motor {
                         }
                         None
                     }
+                    // A tarefa que escoa a transmissão desta pessoa acabou com
+                    // erro. Ver `Motor::a_tela_caiu`.
+                    Some(fim) = quedas_da_tela.recv() => {
+                        a_tela_caiu = Some(fim);
+                        None
+                    }
                     comando = comandos.recv() => {
                         match comando {
                             Some(Comando::Sair) | None => return self.despedir().await,
@@ -4588,6 +4671,9 @@ impl Motor {
             if pediram_chave_pela_midia {
                 // O mesmo que um `KeyFrameRequested` do controle faz.
                 self.pedir_a_chave_da_tela();
+            }
+            if let Some(fim) = a_tela_caiu {
+                self.a_tela_caiu(fim).await;
             }
 
             if let Some(evento) = houve_evento {
@@ -7062,9 +7148,11 @@ impl Motor {
         };
 
         let avisos = self.avisos.clone();
-        // Uma leitura por transmissão própria, como a das alheias.
-        let leitura = nova_leitura_de_tela();
-        self.nascer_a_tela(tela, move |origem, mut eventos, pedido_de_chave| {
+        let quedas = self.quedas_da_tela_tx.clone();
+        let escoar = move |origem: seele_proto::screen::ScreenSource,
+                           mut eventos: mpsc::Receiver<crate::EventoDaBomba>,
+                           pedido_de_chave: crate::bomba::PedidoDeChave,
+                           leitura: u64| {
             // Numa tarefa própria pelo mesmo motivo de `Comando::Anexar`:
             // escoar dura o que a transmissão durar, e fazê-lo dentro do laço
             // pararia quem lê a conexão e atende comandos até a pessoa parar de
@@ -7117,10 +7205,83 @@ impl Motor {
                 // «nunca andou».
                 match fim {
                     Ok(contagem) => tracing::info!(?contagem, "a transmissão de tela acabou"),
-                    Err(erro) => tracing::warn!(%erro, "a transmissão de tela caiu"),
+                    Err(erro) => {
+                        let motivo = erro.motivo_de_queda();
+                        tracing::warn!(%erro, ?motivo, %tela, "a transmissão de tela caiu");
+                        // **O `warn` não basta, e era só ele que havia.** Quem
+                        // age é o laço do motor: encerra a transmissão, avisa o
+                        // servidor e diz à casca. Sem motor do outro lado a
+                        // sessão acabou, e não há a quem contar.
+                        let _ = quedas.send(FimComErroDaTela { leitura, motivo });
+                    }
                 }
             });
+        };
+        self.nascer_a_tela(tela, escoar);
+    }
+
+    /// A tarefa que escoa a transmissão desta pessoa acabou com erro: a
+    /// transmissão **acaba de verdade**, e a casca fica sabendo por quê.
+    ///
+    /// # O que o erro deixava de pé
+    ///
+    /// Tudo. [`Self::tela_viva`] continuava `Some`, com um produtor morto
+    /// dentro; o servidor continuava anunciando a transmissão — quem assistia
+    /// via o palco de alguém sem imagem, e quem entrava na sala recebia o
+    /// `ScreenShareStarted` de uma tela que não existia —; e a casca lia do
+    /// retrato que esta pessoa estava compartilhando.
+    ///
+    /// # Só a transmissão que está no ar
+    ///
+    /// Um fim com erro de uma transmissão que este motor **já encerrou** não é
+    /// queda: é o fluxo dela cortado por quem mandou parar (o botão, o
+    /// `ScreenShareStopped`, a queda do enlace). Todos esses caminhos tiram
+    /// [`Self::tela_viva`] antes de a tarefa poder acabar, então a conferência
+    /// é a identidade: a leitura do fim tem de ser a da transmissão viva.
+    ///
+    /// # O servidor ouve o mesmo de quem aperta parar
+    ///
+    /// `StopScreenShare`, e mais nada: a sala recebe o `ScreenShareStopped` de
+    /// uma parada comum, esta ponta inclusive — e é ele que tira a transmissão
+    /// do retrato. Uma mensagem nova para «caiu» obrigaria todo cliente a
+    /// aprender a ler um fim que já tem nome.
+    ///
+    /// # Sem recomeço
+    ///
+    /// Pela mesma decisão de [`Self::lembrar`]: uma transmissão que voltasse
+    /// sozinha poria a tela de alguém no ar sem aperto. A casca diz o que
+    /// houve, e quem recomeça é a pessoa.
+    async fn a_tela_caiu(&mut self, fim: FimComErroDaTela) {
+        let Some((tela, origem)) = self
+            .tela_viva
+            .as_ref()
+            .filter(|viva| viva.leitura == fim.leitura)
+            .map(|viva| (viva.tela, viva.origem))
+        else {
+            return;
+        };
+        self.parar_a_tela();
+        let avisou = match self.cliente.as_mut() {
+            Some(cliente) => cliente.stop_screen_share().await.is_ok(),
+            None => false,
+        };
+        tracing::warn!(
+            %tela,
+            motivo = ?fim.motivo,
+            avisou_o_servidor = avisou,
+            "a transmissão desta pessoa caiu e foi encerrada"
+        );
+        let _ = self.avisos.send(Aviso::TelaCaiu {
+            tela,
+            origem,
+            motivo: fim.motivo,
         });
+        // O controle que não escreve é o enlace que caiu: a sala fica sabendo
+        // pelo fim da sessão, e a bateria começa aqui em vez de na próxima
+        // leitura.
+        if !avisou && self.cliente.is_some() {
+            self.cair();
+        }
     }
 
     /// O pedido guardado vira bomba, e `escoar` recebe o canal dela.
@@ -7137,6 +7298,7 @@ impl Motor {
             seele_proto::screen::ScreenSource,
             mpsc::Receiver<crate::EventoDaBomba>,
             crate::bomba::PedidoDeChave,
+            u64,
         ),
     ) {
         if self.tela_viva.is_some() {
@@ -7146,6 +7308,12 @@ impl Motor {
             return;
         };
         self.semear_a_midia(&limites);
+        // Uma leitura por transmissão própria, como a das alheias: é o número
+        // que o espelho carrega no `TelaAbriu`, e é a identidade pela qual um
+        // fim com erro é casado com a transmissão que está no ar
+        // ([`FimComErroDaTela`]). Nasce aqui, com ela, para que quem escoa e
+        // [`TelaViva`] nunca tenham dois números para a mesma transmissão.
+        let leitura = nova_leitura_de_tela();
 
         let (biblioteca, captura, origem) = match *pedido {
             PedidoDeTela::DoSistema {
@@ -7154,7 +7322,7 @@ impl Motor {
                 origem,
             } => (biblioteca, captura, origem),
             PedidoDeTela::DeFora(quadros) => {
-                self.nascer_a_camera(tela, quadros, limites, escoar);
+                self.nascer_a_camera(tela, leitura, quadros, limites, escoar);
                 return;
             }
         };
@@ -7179,9 +7347,11 @@ impl Motor {
             }
         };
 
-        escoar(origem, eventos, bomba.pedido_de_chave());
+        escoar(origem, eventos, bomba.pedido_de_chave(), leitura);
         self.tela_viva = Some(TelaViva {
             tela,
+            leitura,
+            origem,
             produtor: Produtor::Bomba(bomba),
             limites,
         });
@@ -7199,12 +7369,14 @@ impl Motor {
     fn nascer_a_camera(
         &mut self,
         tela: ScreenId,
+        leitura: u64,
         quadros: crate::de_fora::QuadrosDeFora,
         limites: LimitesDeTela,
         escoar: impl FnOnce(
             seele_proto::screen::ScreenSource,
             mpsc::Receiver<crate::EventoDaBomba>,
             crate::bomba::PedidoDeChave,
+            u64,
         ),
     ) {
         let negociado = self.protocolo.load(std::sync::atomic::Ordering::Relaxed);
@@ -7232,9 +7404,12 @@ impl Motor {
             seele_proto::screen::ScreenSource::Camera,
             eventos,
             pedido_de_chave,
+            leitura,
         );
         self.tela_viva = Some(TelaViva {
             tela,
+            leitura,
+            origem: seele_proto::screen::ScreenSource::Camera,
             produtor: Produtor::DeFora(alca),
             limites,
         });
