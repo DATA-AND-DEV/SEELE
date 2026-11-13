@@ -502,7 +502,17 @@ async function naPaginaDeVerdade(browser, origem, casca, [largura, altura], falh
     try {
       await f();
     } catch (falha) {
-      falhas.push(`${onde} · ${caso}: ${falha.message.split("\n")[0]}`);
+      // **Onde parou, e como a página estava.** No Linux do CI o caso do toque
+      // venceu um prazo de 20 s duas vezes (13/11) e a frase não dizia em qual
+      // das esperas; no Mac ele passa.
+      const linha = (falha.stack ?? "").split("\n").find((l) => l.includes("recorte-do-perfil.cjs"))?.trim() ?? "sem linha";
+      const estado = await page.evaluate(() => JSON.stringify({
+        recorte: !document.getElementById("recorte").hidden,
+        perfil: !document.getElementById("perfil").hidden,
+        zoom: document.getElementById("recorte-zoom")?.value ?? null,
+        foco: document.activeElement?.id || document.activeElement?.tagName,
+      })).catch((e) => `sem resposta: ${e.message.split("\n")[0]}`);
+      falhas.push(`${onde} · ${caso}: ${falha.message.split("\n")[0]} [${linha}] ${estado}`);
       await retratar(page, `falha-${casca}-${largura}-${caso.replace(/[^a-z0-9]+/gi, "-")}`);
       // O caso seguinte começa do «Seu perfil» aberto, sem recorte por cima.
       await page.evaluate(async () => {
@@ -858,7 +868,17 @@ async function noAplicativo(browser, origem, [largura, altura], falhas) {
     try {
       await f();
     } catch (falha) {
-      falhas.push(`${onde} · ${caso}: ${falha.message.split("\n")[0]}`);
+      // **Onde parou, e como a página estava.** No Linux do CI o caso do toque
+      // venceu um prazo de 20 s duas vezes (13/11) e a frase não dizia em qual
+      // das esperas; no Mac ele passa.
+      const linha = (falha.stack ?? "").split("\n").find((l) => l.includes("recorte-do-perfil.cjs"))?.trim() ?? "sem linha";
+      const estado = await page.evaluate(() => JSON.stringify({
+        recorte: !document.getElementById("recorte").hidden,
+        perfil: !document.getElementById("perfil").hidden,
+        zoom: document.getElementById("recorte-zoom")?.value ?? null,
+        foco: document.activeElement?.id || document.activeElement?.tagName,
+      })).catch((e) => `sem resposta: ${e.message.split("\n")[0]}`);
+      falhas.push(`${onde} · ${caso}: ${falha.message.split("\n")[0]} [${linha}] ${estado}`);
       await retratar(page, `falha-aplicativo-${largura}-${caso.replace(/[^a-z0-9]+/gi, "-")}`);
       await page.evaluate(async () => {
         if (!document.getElementById("recorte").hidden) document.getElementById("recorte-cancelar").click();

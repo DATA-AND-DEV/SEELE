@@ -47,17 +47,21 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
     // WebKit do Mac. A causa não foi medida (não há WebKit de Linux fora do
     // CI); o que se sabe é que é intermitente e só de lá. Até três
     // tentativas, cada falha DITA, para a frequência ficar visível.
-    let codigoB;
-    for (let tentativa = 1; ; tentativa += 1) {
-     try { codigoB = await b.evaluate(() => meuCodigoPessoalWeb()); break; }
-     catch (falha) {
-      if (motor !== 'webkit' || process.platform !== 'linux' || tentativa >= 3) throw falha;
-      console.error(`PARCIAL (${motor}, linux): a tentativa ${tentativa} de criar o código falhou (${String(falha).split('\n')[0]}); tentando de novo`);
-      await new Promise(ok => setTimeout(ok, 500));
+    // E não é só a primeira: na execução 43488857435 a falha veio na chamada
+    // seguinte, que lê a mesma chave. As duas passam pela mesma nova tentativa.
+    const comNovaTentativa = async (oQue, f) => {
+     for (let tentativa = 1; ; tentativa += 1) {
+      try { return await f(); }
+      catch (falha) {
+       if (motor !== 'webkit' || process.platform !== 'linux' || tentativa >= 3 || !/OperationError/.test(String(falha))) throw falha;
+       console.error(`PARCIAL (${motor}, linux): a tentativa ${tentativa} de ${oQue} falhou (${String(falha).split('\n')[0]}); tentando de novo`);
+       await new Promise(ok => setTimeout(ok, 500));
+      }
      }
-    }
+    };
+    const codigoB = await comNovaTentativa('criar o código', () => b.evaluate(() => meuCodigoPessoalWeb()));
     const codigoA = codigos[0]; assert.notEqual(codigoA, codigoB);
-    await a.evaluate(async codigo => {
+    await comNovaTentativa('ler a chave e guardar os contatos', () => a.evaluate(async codigo => {
      const chave = (await identidadePessoalDoNavegador()).chave;
      let exportavel = true; try { await crypto.subtle.exportKey('pkcs8', chave.privateKey); } catch { exportavel = false; }
      if (exportavel) throw Error('chave privada exportável');
@@ -66,7 +70,7 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
      const outraChave = Array.from(new Uint8Array(await crypto.subtle.exportKey('raw', (await crypto.subtle.generateKey('Ed25519', false, ['sign','verify'])).publicKey)));
      const outro = await operarCodigoPessoalWeb({ acao: 'codigo_da_chave', chave: outraChave });
      await alterarContatoPessoalWeb(outro, c => ({ ...c, nome: 'Nome que eu escolhi', amigo: true }));
-    }, codigoB);
+    }, codigoB));
     await a.reload(); assert.equal(await a.evaluate(() => meuCodigoPessoalWeb()), codigoA);
     assert.equal(await a.evaluate(async () => (await servidorConhecido('servidor-antigo')).marcador), 173);
     const amigos = await a.evaluate(() => contatosPessoaisWeb(true)); assert.equal(amigos.length, 2); assert.ok(amigos.every(c => c.nome === 'Nome que eu escolhi')); assert.notEqual(amigos[0].codigo, amigos[1].codigo);
