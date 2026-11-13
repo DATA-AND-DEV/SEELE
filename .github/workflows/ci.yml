@@ -398,7 +398,20 @@ jobs:
       - name: cargo test -p seele-core · programa_sobras (Linux)
         if: ${{ !cancelled() && matrix.name == 'linux' }}
         timeout-minutes: 12
-        run: 'cargo test -p seele-core --test programa_sobras'
+        # **Num espaço de processos à parte.** Foi neste binário que o runner
+        # parou de responder cinco vezes (execução 43399009850 nomeou o passo):
+        # ele mata grupos de processos, e a suspeita é um sinal que alcança
+        # mais do que o grupo. Dentro de um espaço de PIDs próprio o pior sinal
+        # só alcança o que nasceu aqui: o runner vive, a saída fica, e a última
+        # linha diz em que teste foi. Um por vez e sem captura, para a ordem
+        # ser a da saída.
+        run: |
+          bin=$(cargo test -p seele-core --test programa_sobras --no-run --message-format=json | jq -r 'select(.executable != null and .target.name == "programa_sobras") | .executable')
+          echo "binário: $bin; procps: $(ps --version); kill: $(command -v kill)"
+          saida=0
+          sudo unshare --pid --fork --mount-proc sudo -u "$USER" env PATH="$PATH" HOME="$HOME" TMPDIR="${RUNNER_TEMP}" "$bin" --test-threads=1 --nocapture || saida=$?
+          echo "saída do binário: $saida (137 é morto por SIGKILL, 143 por SIGTERM)"
+          exit "$saida"
       - name: cargo test -p seele-core · teto_do_quadro_de_tela (Linux)
         if: ${{ !cancelled() && matrix.name == 'linux' }}
         timeout-minutes: 12
