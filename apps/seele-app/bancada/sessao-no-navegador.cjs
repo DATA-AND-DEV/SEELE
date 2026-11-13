@@ -487,6 +487,29 @@ const invocar = (aba, comando, args) =>
       `a voz da primeira não chegou à segunda: a enviou ${daA.enviados}, b recebeu ${chegou.pagina?.chegados} e decodificou ${chegou.pagina?.decodificados}`,
     );
 
+    // **A segunda mede o que ouve e relata ao servidor** (protocolo 13): o
+    // `.wasm` do worklet conta a perda e o jitter nos buffers de jitter, a
+    // volta da medida os leva ao retrato, e o `RelatoDeRecepcao` sai pelo fio
+    // da sessão uma vez por segundo. Antes disto a página dizia zero nos dois.
+    const mediu = await esperar(b.aba, async () => {
+      const telemetria = (await window.__TAURI__.core.invoke("snapshot")).telemetry;
+      return {
+        pronto: vozDaSessao.recepcao.relatos >= 2 && telemetria.jitter_ms > 0,
+        recepcao: { ...vozDaSessao.recepcao },
+        jitter_ms: telemetria.jitter_ms,
+        recusados: sessaoDaPonte.atual?.contas.naoSairam ?? null,
+      };
+    }, undefined, 15_000);
+    confere("4", mediu.pronto, `a segunda página não mediu ou não relatou a recepção: ${JSON.stringify(mediu)}`);
+    const relatado = mediu.recepcao?.ultimoRelato;
+    confere(
+      "4",
+      relatado && relatado.perda >= 0 && relatado.perda <= 1 && relatado.jitter_ms > 0 && relatado.jitter_ms < 1000,
+      `o relato não tem as unidades do protocolo (a perda de 0 a 1, o jitter em ms): ${JSON.stringify(relatado)}`,
+    );
+    confere("4", Math.abs(mediu.jitter_ms - mediu.recepcao.jitterMs) < 5, `o jitter do retrato não é o que a voz mediu: ${JSON.stringify(mediu)}`);
+    confere("4", mediu.recusados === 0, `o fio recusou ${mediu.recusados} mensagens com o relato saindo`);
+
     // O volume de quem fala: escolhido pelo apelido, aplicado pela alça.
     const desconhecida = await invocar(b.aba, "set_volume", { nickname: "ninguem", percent: 50 });
     confere("4", desconhecida.erro === "UnknownPerson", `o volume de quem não está: ${JSON.stringify(desconhecida)}`);

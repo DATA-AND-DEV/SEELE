@@ -528,6 +528,26 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
   const pedidosDeContas = new Map();
   let proximoPedido = 0;
 
+  /**
+   * **A recepção medida**: o jitter e a perda da voz que chega, contados nos
+   * buffers de jitter do `.wasm` do worklet (`Reproducao::recepcao`), pela
+   * mesma janela do desktop (`seele_voz::recepcao`). Quem chama pede a cada
+   * volta da medida; a resposta chega como o evento `recepcao` em
+   * `aoAcontecer`, com `{ jitter_ms, perda, relato }` — `null` no que não foi
+   * medido, e `relato` só na vez dele (uma por segundo, decidida no `.wasm`).
+   * O som da tela não é voz, e fica fora da conta.
+   *
+   * Cada recepção nova (entrar, a volta do enlace, sair) troca a geração: a
+   * resposta de um pedido de antes não é dita.
+   */
+  let geracaoDaRecepcao = 0;
+
+  function pedirARecepcao() {
+    if (!vivo.dentro || !vivo.reproducao) return false;
+    mandarAReproducao({ tipo: "recepcao", pedido: geracaoDaRecepcao, agora: performance.now(), fora: ALCA_DA_TELA });
+    return true;
+  }
+
   function ouvirAReproducao(no) {
     // Quanto o `.wasm` leva para compilar dentro do worklet, medido daqui: o
     // escopo do worklet não tem relógio de parede, e o de áudio pode nem ter
@@ -548,6 +568,10 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
         const resolver = pedidosDeContas.get(m.pedido);
         pedidosDeContas.delete(m.pedido);
         if (resolver) resolver(m);
+      } else if (m.tipo === "recepcao") {
+        // A resposta de uma recepção que já recomeçou (outra sala, a volta do
+        // enlace) mediu outra voz: não é dita.
+        if (m.pedido === geracaoDaRecepcao && vivo.dentro && m.medida) aoAcontecer({ tipo: "recepcao", medida: m.medida });
       } else if (m.tipo === "falha") {
         falha(m.onde, m.texto);
         if (m.texto.startsWith("o .wasm") || m.texto.startsWith("o worklet nasceu")) pronta(false);
@@ -991,6 +1015,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     w.voz_envio(numeroDaVoz, performance.timeOrigin + performance.now());
     w.voz_recepcao(numeroDaVoz);
     fecharDecoders();
+    geracaoDaRecepcao += 1;
     mandarAReproducao({ tipo: "recomecar" });
     controles.ganhos.clear();
     vestir();
@@ -1007,6 +1032,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     w.voz_reabrir(numeroDaVoz);
     w.voz_recepcao(numeroDaVoz);
     fecharDecoders();
+    geracaoDaRecepcao += 1;
     mandarAReproducao({ tipo: "recomecar" });
     controles.ganhos.clear();
     vestir();
@@ -1021,6 +1047,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     vivo.pararDeOuvir = null;
     vivo.transporte = null;
     fecharDecoders();
+    geracaoDaRecepcao += 1;
     mandarAReproducao({ tipo: "recomecar" });
   }
 
@@ -1155,6 +1182,8 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     sair,
     desligar,
     contas: lerContas,
+    /** Pede uma volta da medida da recepção; a resposta é o evento `recepcao`. */
+    pedirARecepcao,
     /** A promessa do `.wasm` compilado no worklet (`false` se falhou). */
     reproducaoPronta: () => vivo.reproducaoPronta,
     abrirTeste,

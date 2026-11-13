@@ -910,7 +910,16 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
   };
   sessao.aCadaVolta = () => {
     seguirOsVolumes().catch((falha) => console.warn("volumes na mistura:", falha));
+    // A recepção é medida na mistura, que toca só a sessão da voz: é ela que
+    // pede, a cada volta, e é ela que relata (`aRecepcaoMediu`).
+    if (vozDaSessao.dentro && aSessaoDaVoz() === sessao) vozDaPonte.atual?.pedirARecepcao();
   };
+  // O que a voz desta página mede do que ouve: zero fora da sala de voz, e
+  // nas sessões sem a voz (E3).
+  sessao.medidas = () =>
+    vozDaSessao.dentro && aSessaoDaVoz() === sessao
+      ? { jitterMs: vozDaSessao.recepcao.jitterMs, perda: vozDaSessao.recepcao.perda }
+      : { jitterMs: 0, perda: 0 };
   // **A queda e a volta**, como no desktop: a voz fica de pé na bateria (os
   // datagramas não saem, e ela segue no transporte novo), a tela que estava no
   // ar fecha com o transporte, e a volta repete o mudo e o isolamento. A sala
@@ -1063,6 +1072,21 @@ const vozDaSessao = {
   geracao: 0,
   abertura: "fora_de_sala",
   falando: false,
+  /**
+   * **A recepção desta página**: o jitter e a perda da voz que ela ouve, que o
+   * `.wasm` do worklet mede nos buffers de jitter (o evento `recepcao` da
+   * `voz-web.js`). Antes disto a página dizia zero nos dois, e o sinal dela
+   * refletia só o atraso.
+   *
+   * - `jitterMs` e `perda` vão ao retrato e ao sinal desta ponta, pela volta
+   *   da medida (`sessao.medidas`, no `ligacao_medir`). Sem fonte nenhuma o
+   *   jitter fica no último medido, como no desktop, e a perda volta a zero;
+   * - `relatos` conta os `RelatoDeRecepcao` que saíram para o servidor, e
+   *   `ultimoRelato` é o último: o `.wasm` do worklet decide a vez (uma por
+   *   segundo, e só com medida), e o da sessão decide se o servidor o ouve (o
+   *   protocolo 13).
+   */
+  recepcao: { jitterMs: 0, perda: 0, relatos: 0, ultimoRelato: null },
   /** Se o microfone desta abertura só abriu sem o cancelamento de eco (`semEcoPorque` do motor). */
   semEco: false,
   /** O volume (0 a 4) e o mudo do som da tela, como o desktop os guarda. */
@@ -1165,6 +1189,8 @@ function conferirAVozDaSessao(sessao) {
     voz.entrar(sessao.transporteDaVoz, numero);
     // A recepção recomeça as alças: os ganhos se aplicam de novo.
     ganhosAplicados.clear();
+    // E a medida recomeça com ela: o jitter da sala de antes não é o desta.
+    Object.assign(vozDaSessao.recepcao, { jitterMs: 0, perda: 0 });
     mudarAAbertura(comMicrofone ? "aberto" : "so_ouvindo");
   };
   vozDaSessao.ligando.then(
@@ -1259,9 +1285,33 @@ const ganhosAplicados = new Map();
  * cada volta, o ganho de quem tem volume escolhido, pela alça de agora (quem
  * voltou com outra voz ganha outra alça, e o mesmo ganho).
  */
+/** A sessão que tem a voz da página: a do foco (E3), ou a única. */
+const aSessaoDaVoz = () => sessoesDaPonte.get(focoDaPonte) ?? sessaoDaPonte.atual;
+
+/**
+ * Uma volta da medida da recepção chegou do worklet (`vozDaSessao.recepcao`):
+ * o de agora fica para o retrato, e o relato, quando é a vez dele, sai pelo
+ * fio da sessão que tem a voz.
+ */
+function aRecepcaoMediu(medida) {
+  const sessao = aSessaoDaVoz();
+  if (!sessao || !vozDaSessao.dentro || !medida) return;
+  const recepcao = vozDaSessao.recepcao;
+  if (Number.isFinite(medida.jitter_ms)) recepcao.jitterMs = medida.jitter_ms;
+  recepcao.perda = Number.isFinite(medida.perda) ? medida.perda : 0;
+  // Na bateria não há fio: o relato fica para a volta, e o servidor deixa o
+  // último envelhecer.
+  if (!medida.relato || sessao.acabou || sessao.voltando) return;
+  const lido = sessao.atender("relatar_recepcao", medida.relato);
+  if (lido?.resposta === true) {
+    recepcao.relatos += 1;
+    recepcao.ultimoRelato = medida.relato;
+  }
+}
+
 async function seguirOsVolumes() {
   // Os ganhos são da mistura, que toca só a sessão com o foco (E3).
-  const sessao = sessoesDaPonte.get(focoDaPonte) ?? sessaoDaPonte.atual;
+  const sessao = aSessaoDaVoz();
   const voz = vozDaPonte.atual;
   if (!sessao || !voz || !vozDaSessao.dentro) return;
   // **Os volumes estão na instância da SESSÃO, e as alças da mistura na da
@@ -1728,6 +1778,10 @@ const vozDaPonte = { atual: null, nascendo: null };
  * na sala de novo, com um gesto (`ligarOAudioNoGesto`).
  */
 function aoEventoDaVoz(evento) {
+  if (evento && evento.tipo === "recepcao") {
+    aRecepcaoMediu(evento.medida);
+    return;
+  }
   // O microfone que só abriu sem o cancelamento de eco (o motor tentou com ele,
   // e a faixa chegou encerrada): a sala diz isso a quem fala, em uma frase.
   if (evento && evento.tipo === "audio-ligado") {

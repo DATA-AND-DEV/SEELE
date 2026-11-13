@@ -543,6 +543,10 @@ mod tests {
                 "target/wasm32-unknown-unknown/release/seele_web.wasm",
             ),
             (
+                "recepcao-no-navegador.cjs",
+                "target/wasm32-unknown-unknown/release/seele_web.wasm",
+            ),
+            (
                 "identidade-no-navegador.cjs",
                 "target/wasm32-unknown-unknown/release/seele_web.wasm",
             ),
