@@ -572,6 +572,12 @@ Repetida no commit `6af9a691`, depois do relato de recepção do protocolo 13: 2
 com o Windows transmitindo e 2372 com o Mac, 0,0% congelado nos dois sentidos, a
 voz do outro tocada em 99,9%.
 
+Repetida no commit `86443242`, o código final da entrega (depois do conserto da
+porta herdada no Windows, da transmissão que cai e do relato da página): 2297 kbps
+com o Windows transmitindo e 2372 com o Mac, 0,0% congelado nos dois sentidos, um
+quadro-chave por rodada, a voz do outro tocada em 99,9% e 99,7%, a mídia RTP
+ligada nas quatro sessões.
+
 **O que esta conferência achou antes de dar isso**: no Windows o vídeo rodava a
 um terço da taxa (orçamento de 640 a 1723 kbps, numa rede local e até com tudo
 na mesma máquina). O laço do transporte acordava no tique de 15,6 ms do relógio
