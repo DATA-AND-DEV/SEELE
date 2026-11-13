@@ -159,6 +159,16 @@ const MOTIVOS = {
     "A CHAVE DO SERVIDOR MUDOU DURANTE A SESSÃO.\n" +
     "Confirme por outro canal antes de entrar de novo.",
 
+  // ---- o motor deste app que morreu ----
+  //
+  // A thread que bombeia a sessão entrou em pânico (`subir_a_thread_da_conexao`,
+  // no `seele-ffi`). É defeito do app, e a frase diz isso para ninguém procurar
+  // a causa na rede nem em quem hospeda. Era silêncio: a tela seguia mostrando
+  // uma sessão de pé, muda. O que o pânico disse fica no `seele.log`.
+  MotorCaiu:
+    "O SEELE FALHOU POR DENTRO, E ESTA SESSÃO CAIU.\n" +
+    "Não é a sua rede nem o servidor. Entre de novo; o motivo está no seele.log.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 

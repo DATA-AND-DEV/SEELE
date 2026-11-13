@@ -2350,43 +2350,41 @@ impl Connection {
 
         let thread_shared = Arc::clone(&shared);
         let thread_config = config.clone();
-        std::thread::Builder::new()
-            .name("seele-connection".into())
-            .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        tracing::error!(%error, "could not start the connection runtime");
-                        let _ = ready_tx.send(Err(ConnectionError::Unreachable.into()));
-                        return;
-                    }
-                };
-                runtime.block_on(drive(
-                    thread_config,
-                    alvo,
-                    key,
-                    pins,
-                    thread_shared,
-                    command_rx,
-                    &ready_tx,
-                    olhos,
-                    cancelamento,
-                ));
-                // **Antes de o runtime cair, e não depois.** `drive` voltou com
-                // a despedida do enlace feita (`Enlace::sair`), e é isso que
-                // `encerrar_e_esperar` espera. Soltar o runtime espera a piscina
-                // de bloqueio sem prazo — a bomba da tela é parada ali —, e um
-                // sinal depois dele seguraria a saída do app por isso.
-                let _ = encerrada_tx.send(());
-                drop(runtime);
-            })
-            .map_err(|error| {
-                tracing::error!(%error, "could not start the connection thread");
-                ConnectionError::Unreachable
-            })?;
+        subir_a_thread_da_conexao(Arc::clone(&shared), ready_tx, move |ready_tx| {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::error!(%error, "could not start the connection runtime");
+                    let _ = ready_tx.send(Err(ConnectionError::Unreachable.into()));
+                    return;
+                }
+            };
+            runtime.block_on(drive(
+                thread_config,
+                alvo,
+                key,
+                pins,
+                thread_shared,
+                command_rx,
+                ready_tx,
+                olhos,
+                cancelamento,
+            ));
+            // **Antes de o runtime cair, e não depois.** `drive` voltou com
+            // a despedida do enlace feita (`Enlace::sair`), e é isso que
+            // `encerrar_e_esperar` espera. Soltar o runtime espera a piscina
+            // de bloqueio sem prazo — a bomba da tela é parada ali —, e um
+            // sinal depois dele seguraria a saída do app por isso.
+            let _ = encerrada_tx.send(());
+            drop(runtime);
+        })
+        .map_err(|error| {
+            tracing::error!(%error, "could not start the connection thread");
+            ConnectionError::Unreachable
+        })?;
 
         // The thread reports the outcome of the handshake, then keeps running.
         let trust = ready_rx
@@ -6445,8 +6443,19 @@ async fn drive(
     // - com o cadeado ocupado, a despedida sai primeiro, e a voz cai numa
     //   thread à parte quando ele soltar — até lá, o microfone segue aberto.
     drop(porta);
+    largar_o_que_a_sessao_segurava(&shared);
+    client.sair().await;
+}
+
+/// O que a sessão segurava nesta máquina, largado no fim dela.
+///
+/// Uma função, e não o rabo de `drive`, porque o fim tem duas portas: `drive`
+/// que volta, e `drive` que entra em pânico ([`subir_a_thread_da_conexao`]). Na
+/// segunda nada do rabo dele roda, e o microfone ficava aberto atrás de uma
+/// sessão que já não existia.
+fn largar_o_que_a_sessao_segurava(shared: &Arc<Shared>) {
     shared.voice.marcar(AberturaDoAudio::ForaDeSala);
-    largar_sem_segurar(&shared, |shared| &shared.voice);
+    largar_sem_segurar(shared, |shared| &shared.voice);
     // E sai do foco de voz (E3): uma sessão que acabou não segura o microfone
     // da máquina, nem enquanto a casca ainda guarda a `Connection` dela.
     shared.voice.sair_do_foco();
@@ -6469,7 +6478,67 @@ async fn drive(
     if let Ok(mut tuneis) = shared.tuneis.lock() {
         tuneis.abertos.clear();
     }
-    client.sair().await;
+}
+
+/// Sobe a thread da conexão, a que bombeia a sessão (`drive`), e ampara o
+/// pânico dela.
+///
+/// # O pânico que ninguém via
+///
+/// `drive` roda numa thread só dele. Um pânico ali desenrolava a thread, e mais
+/// nada: `running` continuava `true`, o estado do enlace continuava
+/// `Verified`, nenhum [`Event::Ended`] saía, e a voz, que mora no `Shared`,
+/// continuava aberta. A tela mostrava uma sessão de pé que não recebia nem
+/// mandava nada, e a única pista era a linha do gancho de pânico no
+/// `seele.log`.
+///
+/// Agora o fim anormal é um fim: a linha no log diz o que o pânico disse, o
+/// que a sessão segurava é largado ([`largar_o_que_a_sessao_segurava`]), e a
+/// casca recebe o [`Event::Ended`] de sempre, com [`EndReason::MotorCaiu`]. Não
+/// é evento novo nem atravessa o fio: é o caminho da sessão encerrada, com um
+/// motivo local a mais, como [`EndReason::ServidorTrocouNaVolta`].
+///
+/// Um pânico **antes** do aperto de mão responde a quem espera em `abrir`
+/// (`Unreachable`); depois dele o envio não tem leitor, e é largado.
+///
+/// `corpo` recebe o `ready` emprestado porque quem ampara precisa dele depois
+/// do pânico.
+fn subir_a_thread_da_conexao(
+    shared: Arc<Shared>,
+    ready: std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>,
+    corpo: impl FnOnce(&std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>) + Send + 'static,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("seele-connection".into())
+        .spawn(move || {
+            // `AssertUnwindSafe`: depois de um pânico nada de `corpo` é lido de
+            // novo. O que sobra é o `Shared`, e cada cadeado dele já trata o
+            // envenenamento onde é pego.
+            let fim = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| corpo(&ready)));
+            let Err(carga) = fim else {
+                return;
+            };
+            let detalhe = carga
+                .downcast_ref::<&'static str>()
+                .map(|texto| (*texto).to_owned())
+                .or_else(|| carga.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "pânico sem mensagem de texto".to_owned());
+            tracing::error!(
+                %detalhe,
+                "a thread da conexão entrou em pânico: a sessão é dada como caída, a voz é \
+                 largada e a tela recebe o fim com o motivo MotorCaiu"
+            );
+            let _ = ready.send(Err(ConnectionError::Unreachable.into()));
+            shared.running.store(false, Ordering::Relaxed);
+            shared
+                .link_state
+                .store(link_state_byte(LinkTrust::Offline), Ordering::Relaxed);
+            largar_o_que_a_sessao_segurava(&shared);
+            shared.notify(&Event::Ended {
+                reason: EndReason::MotorCaiu,
+            });
+        })
+        .map(|_| ())
 }
 
 /// Um relatório do núcleo como a casca o lê: motivos por nome, a latência em
@@ -10092,6 +10161,11 @@ mod o_codigo_esperado;
 #[path = "testes/o_toque.rs"]
 #[cfg(test)]
 mod o_toque;
+
+/// O pânico da thread da conexão vira fim de sessão, com motivo, e não silêncio.
+#[path = "testes/o_panico_da_thread_da_conexao.rs"]
+#[cfg(test)]
+mod o_panico_da_thread_da_conexao;
 
 /// O carimbo de sessão (E3 da 0.17): quem é a sessão, em que volta do enlace
 /// ela está, e o que acontece com um comando ou um evento de outra.

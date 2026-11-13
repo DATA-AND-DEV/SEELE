@@ -328,6 +328,14 @@ pub enum EndReason {
     /// app», que é o que a pessoa faz com qualquer API que falte; quem precisa
     /// dos números é o launcher, na sessão do Plano 3.
     ModsDeOutraApi,
+    /// A thread que bombeia a sessão nesta máquina entrou em pânico.
+    ///
+    /// Local, como [`Self::ServidorTrocouNaVolta`]: nenhum servidor disse isto e
+    /// nada disto atravessa o fio. É defeito do app, e não da rede nem de quem
+    /// hospeda. Era silêncio: a thread morria, e a tela seguia mostrando uma
+    /// sessão de pé que não recebia nem mandava nada. O que o pânico disse fica
+    /// no `seele.log`; este enum é `Copy` e chega à tela só pelo nome.
+    MotorCaiu,
     /// The link died without the server saying why.
     LinkLost,
 }

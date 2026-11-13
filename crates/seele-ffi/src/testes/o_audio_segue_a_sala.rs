@@ -2070,16 +2070,21 @@ fn a_voz_cai_mesmo_com_o_cadeado_envenenado_na_thread_que_a_larga() {
 ///
 /// O teste acima prova o caminho; este prende que `drive` o usa. Antes da
 /// despedida, para o microfone fechar antes de o servidor saber da saída.
+///
+/// O desmonte mora em `largar_o_que_a_sessao_segurava` desde que o fim ganhou
+/// a segunda porta (a thread da conexão que entra em pânico): o guarda lê as
+/// duas pontas, `drive` chamando o desmonte antes da despedida e o desmonte
+/// largando a voz pelo caminho que não espera.
 #[test]
 fn o_fim_de_drive_larga_a_voz_antes_da_despedida_e_sem_esperar() {
     let (corpo, _, _, _) = pedacos_de_drive();
     let Some((_, fim)) = corpo.rsplit_once("shared.running.store(false") else {
         panic!("o fim de `drive` mudou de forma, e este guarda tem de mudar com ele");
     };
-    let Some(larga) = fim.find("largar_sem_segurar(&shared,") else {
+    let Some(larga) = fim.find("largar_o_que_a_sessao_segurava(&shared)") else {
         panic!(
-            "o fim de `drive` não larga mais a voz pelo caminho que não espera: uma \
-                 troca de aparelho presa no driver segura a despedida até o teto da casca"
+            "o fim de `drive` não chama mais o desmonte da sessão: a voz fica de pé \
+                 depois do fim, com o microfone aberto"
         );
     };
     let Some(sai) = fim.find("client.sair().await") else {
@@ -2090,11 +2095,23 @@ fn o_fim_de_drive_larga_a_voz_antes_da_despedida_e_sem_esperar() {
         "o fim de `drive` larga a voz depois da despedida: o microfone continua aberto \
              enquanto o servidor ainda ouve"
     );
+    let fonte = include_str!("../lib.rs");
+    let Some((_, depois)) = fonte.split_once("\nfn largar_o_que_a_sessao_segurava(") else {
+        panic!("o desmonte da sessão sumiu de `lib.rs`");
+    };
+    let desmonte = &depois[..depois.find("\n}\n").expect("o desmonte nunca fecha")];
     assert!(
-        !fim.contains("shared.voice.lock()"),
-        "o fim de `drive` voltou a esperar o cadeado da voz, que uma troca de aparelho \
-             no driver segura até o teto da casca"
+        desmonte.contains("largar_sem_segurar(shared,"),
+        "o desmonte da sessão não larga mais a voz pelo caminho que não espera: uma \
+             troca de aparelho presa no driver segura a despedida até o teto da casca"
     );
+    for onde in [fim, desmonte] {
+        assert!(
+            !onde.contains("shared.voice.lock()"),
+            "o fim de `drive` voltou a esperar o cadeado da voz, que uma troca de aparelho \
+                 no driver segura até o teto da casca"
+        );
+    }
 }
 
 /// Nenhum caminho abre a voz por fora da porta da sala.

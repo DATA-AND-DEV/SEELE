@@ -9506,6 +9506,35 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
     }
 }
 
+/// **O motor que morreu tem frase, e ela não culpa a rede.**
+///
+/// `EndReason::MotorCaiu` é o fim que o `seele-ffi` dá quando a thread da
+/// conexão entra em pânico. A tela de fim lê `MOTIVOS[motivo]`: sem a frase
+/// ela cai no texto genérico, e a queda volta a não dizer o que houve. O nome
+/// é o que a FFI escreve, lido da variante.
+#[test]
+fn o_motor_que_caiu_tem_frase_e_ela_nao_culpa_a_rede() {
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let motivos = sentences_of(&arquivo, "MOTIVOS");
+    let nome = nome_no_fio(&seele_ffi::EndReason::MotorCaiu);
+    let Some((_, frase)) = motivos.iter().find(|(variante, _)| *variante == nome) else {
+        panic!(
+            "`EndReason::{nome}` não tem frase em `MOTIVOS`: a thread da conexão que entra em \
+             pânico derruba a sessão e a tela de fim não diz o que houve"
+        );
+    };
+    for dito in ["SESSÃO CAIU", "seele.log"] {
+        assert!(
+            frase.contains(dito),
+            "a frase de `{nome}` não diz «{dito}»:\n{frase}"
+        );
+    }
+    assert!(
+        !frase.contains("ENLACE"),
+        "a frase de `{nome}` fala em enlace, e manda procurar na rede um defeito do app:\n{frase}"
+    );
+}
+
 #[test]
 fn a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo() {
     // `ServidorTrocouNaVolta` é o fim de duas recusas da volta da bateria: a
