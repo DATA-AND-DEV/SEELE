@@ -262,7 +262,7 @@ $("palco-de-mods-ver-o-palco").addEventListener("click", () => {
  */
 function desenharPalco(snapshot, voice_room) {
   const palco = $("palco");
-  const tela = snapshot ? snapshot.tela : null;
+  const tela = snapshot ? snapshot.tela ?? espelhoNoPalco(snapshot) : null;
 
   // **«Câmera» ou «tela», pelo que a abertura do fluxo declarou** — e nenhum
   // dos dois antes de ela chegar (`palavrasDaTransmissao`, em `camera.js`).
@@ -342,6 +342,27 @@ function desenharPalco(snapshot, voice_room) {
   // não passa por ele — é a prévia da mídia —, e o botão abriria um quadro
   // vazio em tela cheia.
   botaoDeCinema(!ehAMinhaCamera(tela.tela));
+}
+
+/**
+ * **A própria transmissão, quando é ela que está no palco.**
+ *
+ * Quem transmite não assiste a si mesmo pelo servidor: o retrato dele tem
+ * `tela: null` e `minha_transmissao` preenchida, e a imagem que ele vê é o
+ * espelho local, que abre pelo mesmo `ScreenOpened` de qualquer transmissão.
+ * O palco lia só `tela`, e por isso dizia «SEM COMPARTILHAMENTO» em cima da
+ * própria imagem, escondia o TELA CHEIA e mandava o cinema sair no redesenho
+ * seguinte: o duplo clique entrava e saía sozinho (relato do dono na 1.0.0,
+ * `bancada/tela-cheia-da-propria-transmissao.cjs`).
+ *
+ * Só quando o espelho está de fato aberto (`telaEmCurso`, de `palco-imagem.js`):
+ * a câmera desta janela não passa pelo decodificador, e uma tela anunciada
+ * cujo espelho ainda não abriu não tem imagem a mostrar.
+ */
+function espelhoNoPalco(snapshot) {
+  const minha = snapshot.minha_transmissao;
+  if (!minha || typeof telaEmCurso === "undefined" || telaEmCurso !== minha.tela) return null;
+  return { ...minha, e_minha: true };
 }
 
 /**

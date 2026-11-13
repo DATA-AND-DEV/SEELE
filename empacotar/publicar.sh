@@ -1468,6 +1468,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/notificacao-do-sistema.cjs
     uma_bancada node apps/seele-app/bancada/hotfix-0195.cjs
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
+    uma_bancada node apps/seele-app/bancada/tela-cheia-da-propria-transmissao.cjs
     uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/tunel-de-jogador.cjs
     uma_bancada node apps/seele-app/bancada/aceite-da-maquina.cjs
