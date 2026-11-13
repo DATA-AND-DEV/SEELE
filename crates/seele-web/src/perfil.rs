@@ -124,6 +124,51 @@ pub fn icone_nativo(bytes: &[u8]) -> Option<Vec<u8>> {
     seele_sessao::reducao::icone_do_perfil(bytes)
 }
 
+/// **A prévia do passo de recorte** de uma imagem escolhida, conferida antes
+/// (tamanho, tipo pelos bytes, HEIC nomeado), como ela atravessa a fronteira:
+/// a largura e a altura da imagem inteira (`u32`, little-endian), um byte que
+/// diz se é animação, e os bytes da prévia
+/// (`seele_sessao::reducao::previa_do_recorte`, a mesma do desktop).
+///
+/// # Errors
+///
+/// Os de [`conferir_imagem`]; [`ErroDoPerfil::TipoRecusado`] para o que não
+/// decodifica ou tem pixels demais.
+pub fn previa_do_recorte(bytes: &[u8]) -> Result<Vec<u8>, ErroDoPerfil> {
+    conferir_imagem(bytes)?;
+    let previa =
+        seele_sessao::reducao::previa_do_recorte(bytes).map_err(|_| ErroDoPerfil::TipoRecusado)?;
+    let mut saida = Vec::with_capacity(previa.bytes.len() + 9);
+    saida.extend_from_slice(&previa.largura.to_le_bytes());
+    saida.extend_from_slice(&previa.altura.to_le_bytes());
+    saida.push(u8::from(previa.animada));
+    saida.extend_from_slice(&previa.bytes);
+    Ok(saida)
+}
+
+/// **A imagem escolhida, recortada e dentro do teto do lado**, pelo mesmo
+/// código do desktop (`seele_sessao::reducao::imagem_do_perfil_recortada`): é o
+/// que sobe e o que fica guardado.
+///
+/// # Errors
+///
+/// [`ErroDoPerfil::Mudou`] para um recorte sem pixel nenhum dentro da imagem (a
+/// tela mediu outra imagem), e [`ErroDoPerfil::TipoRecusado`] para o que não
+/// decodifica ou tem pixels demais.
+pub fn recortada(
+    bytes: &[u8],
+    capa: bool,
+    recorte: seele_sessao::reducao::Recorte,
+) -> Result<Vec<u8>, ErroDoPerfil> {
+    seele_sessao::reducao::imagem_do_perfil_recortada(bytes, capa, recorte).map_err(|motivo| {
+        if motivo == seele_sessao::reducao::RECORTE_VAZIO {
+            ErroDoPerfil::Mudou
+        } else {
+            ErroDoPerfil::TipoRecusado
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
@@ -247,5 +292,45 @@ mod tests {
             Ok(())
         );
         assert!(icone_nativo(b"isto nao e imagem").is_none());
+    }
+
+    /// **O recorte do navegador é o do desktop**: a prévia diz as medidas da
+    /// imagem inteira à frente dos bytes, e o pedaço pedido sai. O HEIC é
+    /// nomeado antes de qualquer decodificação, e o recorte vazio é `Mudou`.
+    #[test]
+    fn a_previa_e_o_recorte_atravessam_a_fronteira() {
+        use seele_sessao::reducao::Recorte;
+
+        let previa = previa_do_recorte(PNG_4X4).unwrap();
+        assert_eq!(previa[..4], 4_u32.to_le_bytes());
+        assert_eq!(previa[4..8], 4_u32.to_le_bytes());
+        assert_eq!(previa[8], 0, "um PNG não é animação");
+        assert_eq!(previa[9..13], [0x89, b'P', b'N', b'G']);
+
+        let recorte = |x, y, largura, altura| Recorte {
+            x,
+            y,
+            largura,
+            altura,
+        };
+        let pedaco = recortada(PNG_4X4, false, recorte(1, 1, 2, 2)).unwrap();
+        assert_eq!(pedaco[..4], [0x89, b'P', b'N', b'G']);
+        // O `IHDR` diz 2 × 2: os bytes 16..24 são a largura e a altura.
+        assert_eq!(pedaco[16..24], [0, 0, 0, 2, 0, 0, 0, 2]);
+
+        assert_eq!(
+            recortada(PNG_4X4, false, recorte(9, 9, 2, 2)),
+            Err(ErroDoPerfil::Mudou)
+        );
+        assert_eq!(
+            recortada(b"isto nao e imagem", true, recorte(0, 0, 1, 1)),
+            Err(ErroDoPerfil::TipoRecusado)
+        );
+        let heic = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
+        assert_eq!(previa_do_recorte(heic), Err(ErroDoPerfil::Heic));
+        assert_eq!(
+            previa_do_recorte(b"isto nao e imagem"),
+            Err(ErroDoPerfil::TipoRecusado)
+        );
     }
 }

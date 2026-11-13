@@ -104,6 +104,10 @@
 //! | | 1 | `"IconNotAPicture"` |
 //! | `perfil_para_a_janela(capa, bytes)` | 0 | a imagem do perfil reduzida ao lugar em que aparece |
 //! | | 1 | `"TipoRecusado"` |
+//! | `perfil_previa_do_recorte(bytes)` | 0 | a largura e a altura da imagem inteira (u32), um byte «é animação», e a prévia do passo de recorte |
+//! | | 1 | o `ErroDoPerfil` (`"Heic"`, `"TipoRecusado"`…) |
+//! | `perfil_recortar(capa, x, y, largura, altura, bytes)` | 0 | a imagem recortada e dentro do teto do lado: o que sobe e fica guardado |
+//! | | 1 | o `ErroDoPerfil` (`"Mudou"`, `"TipoRecusado"`) |
 //! | `catalogo_endereco()` | 0 | o endereço do catálogo |
 //! | `catalogo_ler(catalogo, assinatura)` | 0 | nada: conferido e lido |
 //! | | 1 | a `FalhaNoCatalogo` do desktop |
@@ -1697,6 +1701,59 @@ pub unsafe extern "C" fn perfil_para_a_janela(capa: u32, ptr: *const u8, len: us
     match seele_sessao::reducao::imagem_do_perfil_para_a_janela(bytes, capa != 0) {
         Ok(reduzida) => dizer(reduzida, 0),
         Err(_) => dizer(b"\"TipoRecusado\"".to_vec(), 1),
+    }
+}
+
+/// **A prévia do passo de recorte** de uma imagem que a pessoa escolheu
+/// ([`crate::perfil::previa_do_recorte`]), **sem sessão**: conferida como num
+/// envio, e reduzida para o diálogo. Devolve 0 com a largura e a altura da
+/// imagem inteira (`u32`, little-endian), um byte que diz se é animação e os
+/// bytes da prévia; ou 1 com o `ErroDoPerfil` (`"Heic"`, `"TipoRecusado"`…).
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_previa_do_recorte(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    match crate::perfil::previa_do_recorte(bytes) {
+        Ok(previa) => dizer(previa, 0),
+        Err(erro) => erro_do_perfil(&erro),
+    }
+}
+
+/// **A imagem escolhida, recortada e dentro do teto do lado**
+/// ([`crate::perfil::recortada`]), pelo mesmo código do desktop, **sem
+/// sessão**. `capa` diferente de zero é a capa; zero, a foto. O recorte é em
+/// pixels da imagem inteira, como a prévia a mediu. Devolve 0 com os bytes que
+/// sobem e ficam guardados, ou 1 com o `ErroDoPerfil` (`"Mudou"` para um
+/// recorte sem pixel nenhum, `"TipoRecusado"`).
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn perfil_recortar(
+    capa: u32,
+    x: u32,
+    y: u32,
+    largura: u32,
+    altura: u32,
+    ptr: *const u8,
+    len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let recorte = seele_sessao::reducao::Recorte {
+        x,
+        y,
+        largura,
+        altura,
+    };
+    match crate::perfil::recortada(bytes, capa != 0, recorte) {
+        Ok(recortada) => dizer(recortada, 0),
+        Err(erro) => erro_do_perfil(&erro),
     }
 }
 

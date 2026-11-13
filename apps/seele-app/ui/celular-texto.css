@@ -236,6 +236,7 @@
 :where(:root[data-casca="celular"]) .pessoas-conta { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .roster-sala { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .membro-fora-do-ar { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .membro-fora-do-ar-abrir { font-size: inherit; }
 :where(:root[data-casca="celular"]) .roster-subgrupo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .sync-marca { font-size: 11px; }
@@ -561,6 +562,17 @@
 :where(:root[data-casca="celular"]) #perfil .perfil-cartao-codigo > .rotulo { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) #perfil #perfil-codigo { font-size: calc(15px * var(--cel-escala)); }
 
+/* camada-recorte.css */
+:where(:root[data-casca="celular"]) .recorte-titulo { font-size: calc(26px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-ajuda { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-zoom-rotulo { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-zoom-passo { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-zoom-valor { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .recorte-nota { font-size: calc(12px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .recorte-titulo { font-size: calc(22px * var(--cel-escala)); }
+}
+
 /* camada-mods.css */
 :where(:root[data-casca="celular"]) .mods-repo,
 :where(:root[data-casca="celular"]) .mods-hash { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
@@ -808,6 +820,7 @@
 :where(:root[data-casca="celular"]) .compartilhar-titulo { font-size: calc(32px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-fechar { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-pilula { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compartilhar-permissao-passos { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-permissao-diz,
 :where(:root[data-casca="celular"]) .compartilhar-modulo-diz { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compartilhar-modulo-onde { font-size: calc(12px * var(--cel-escala)); }

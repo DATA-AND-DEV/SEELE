@@ -149,6 +149,20 @@ let permissaoDeTela = null;
  */
 let erroDeTela = null;
 
+/**
+ * Se a decisão guardada do macOS foi apagada por REDEFINIR A PERMISSÃO nesta
+ * janela. Com ela, a caixa só oferece reabrir: este processo continua com a
+ * resposta velha até lá (o macOS só a refaz quando o app reabre), e pedir de
+ * novo daqui seria o botão que não faz nada.
+ */
+let permissaoRedefinida = false;
+
+/** O que a última saída da permissão fez, para dizer na caixa, ou `null`. */
+let feitoNaPermissao = null;
+
+/** Se uma saída da permissão está em curso (um segundo toque não roda outra). */
+let saidaDaPermissaoEmCurso = false;
+
 /** Pergunta ao sistema o que ele responde sobre gravar a tela, e guarda. */
 async function conferirPermissaoDeTela() {
   try {
@@ -224,15 +238,28 @@ function nomeDaResolucao(altura) {
 // Por isso as duas frases que precedem uma concessão mandam reabrir, e não só a
 // de recusa: quem chega pelo caminho «ainda não pediu» e resolve pelos ajustes
 // cai no mesmo cache.
+//
+// **E `Negada` é, no macOS, o estado em que se fica.** A 1.0.0 nunca o
+// mostrava: o pedido voltava negado, a consulta seguinte dizia «ainda não
+// perguntada» por cima, e a caixa voltava a oferecer o mesmo pedido, sem fim
+// (relato do dono em 13/11/2026: «fica num loop infinito»). Agora a consulta
+// do núcleo guarda o não (`seele-core/src/video.rs`, `MemoriaDoPedidoDeTela`),
+// esta tabela tira o botão de pedir e põe as saídas no lugar: os passos nos
+// Ajustes, abrir a página, redefinir a permissão e reabrir. `saidas` diz quais:
+// `"todas"`, ou `"reabrir"` depois de redefinir.
 const PERMISSAO_DE_TELA = {
   NaoPerguntada: {
-    diz: "ESTE APP AINDA NÃO PEDIU PARA GRAVAR A TELA",
+    get diz() {
+      return ambienteDasInstrucoes() === "macos"
+        ? FRASES_DA_GRAVACAO_DE_TELA.ainda.diz
+        : "ESTE APP AINDA NÃO PEDIU PARA GRAVAR A TELA";
+    },
     // Sem `**` nem nenhuma outra marcação: isto é escrito com `textContent`
     // (ver `mostrarPermissao`), então marcação aparece literal na tela. Foi o
     // que aconteceu aqui.
     get nota() {
       return ambienteDasInstrucoes() === "macos"
-        ? "Permita a gravação de tela do SEELE nos Ajustes do Sistema e reabra o app após conceder."
+        ? FRASES_DA_GRAVACAO_DE_TELA.ainda.nota
         : ambienteDasInstrucoes() === "web" ? "Escolha a tela no seletor do navegador e permita o compartilhamento."
         : "Permita a captura de tela do SEELE quando o sistema perguntar.";
     },
@@ -249,17 +276,46 @@ const PERMISSAO_DE_TELA = {
     pedir: false,
   },
   Negada: {
-    diz: "O SISTEMA NEGOU A GRAVAÇÃO DE TELA",
+    get diz() {
+      return ambienteDasInstrucoes() === "macos"
+        ? FRASES_DA_GRAVACAO_DE_TELA.negada.diz
+        : "O SISTEMA NEGOU A GRAVAÇÃO DE TELA";
+    },
     get nota() {
       const ambiente = ambienteDasInstrucoes();
-      if (ambiente === "macos") return "Abra Ajustes do Sistema · Privacidade e Segurança · Gravação de Tela, marque o SEELE e reabra o app.";
+      if (ambiente === "macos") return FRASES_DA_GRAVACAO_DE_TELA.negada.nota;
       if (ambiente === "windows") return "Confira as permissões de captura de tela do SEELE nas Configurações do Windows e tente novamente.";
       if (ambiente === "web") return "Confira a permissão de captura deste navegador e selecione a tela novamente.";
       return "Confira as permissões de captura do sistema e tente novamente.";
     },
     pedir: false,
+    // Só o macOS tem a página, a permissão guardada e a resposta presa ao
+    // processo; nos outros sistemas estes botões não teriam o que fazer.
+    get saidas() {
+      return ambienteDasInstrucoes() === "macos" ? "todas" : null;
+    },
   },
 };
+
+/**
+ * O que a caixa diz sobre a permissão agora: a entrada de `PERMISSAO_DE_TELA`,
+ * a do navegador que não compartilha, ou — depois de REDEFINIR A PERMISSÃO — a
+ * que só manda reabrir. `undefined` quando não há o que dizer (concedida).
+ */
+function oQueDizerDaPermissao(permissao) {
+  // No navegador, «não sabe» é do navegador, e não desta versão (caso 12).
+  if (permissao === "NaoSeSabe" && telaPeloNavegador()) {
+    return { diz: FRASES_DA_TELA_NO_NAVEGADOR.diz, nota: FRASES_DA_TELA_NO_NAVEGADOR.nota, pedir: false };
+  }
+  // A decisão antiga foi apagada e o processo ainda não reabriu: pedir daqui
+  // não muda a resposta, e mostrar de novo os passos dos Ajustes mandaria
+  // consertar o que já foi consertado.
+  if (permissaoRedefinida && permissao !== "Concedida" && ambienteDasInstrucoes() === "macos") {
+    const { diz, nota } = FRASES_DA_GRAVACAO_DE_TELA.redefinida;
+    return { diz, nota, pedir: false, saidas: "reabrir" };
+  }
+  return PERMISSAO_DE_TELA[permissao];
+}
 
 // ------------------------------------------------------------------- desenho
 
@@ -391,17 +447,47 @@ async function desenharModuloDeTela() {
 /** O bloco da permissão, ou nada quando não há o que dizer sobre ela. */
 function desenharPermissaoDeTela(permissao) {
   const bloco = $("compartilhar-permissao");
-  // No navegador, «não sabe» é do navegador, e não desta versão (caso 12).
-  const dito = permissao === "NaoSeSabe" && telaPeloNavegador()
-    ? { diz: FRASES_DA_TELA_NO_NAVEGADOR.diz, nota: FRASES_DA_TELA_NO_NAVEGADOR.nota, pedir: false }
-    : PERMISSAO_DE_TELA[permissao];
+  const dito = oQueDizerDaPermissao(permissao);
   bloco.hidden = !dito;
   $("compartilhar-pedir").hidden = !dito || !dito.pedir;
+  desenharSaidasDaPermissao(dito ? dito.saidas ?? null : null);
   if (!dito) return;
 
   $("compartilhar-permissao-diz").textContent = dito.diz;
   $("compartilhar-permissao-nota").textContent = dito.nota;
   $("compartilhar-permissao-nota").hidden = !dito.nota;
+}
+
+/**
+ * As saídas de quem o macOS negou: `"todas"` (os passos e os três botões),
+ * `"reabrir"` (só o REABRIR, depois de redefinir) ou `null` (nada).
+ *
+ * Com uma em curso, os três botões ficam desabilitados: abrir os Ajustes e
+ * redefinir ao mesmo tempo não é pedido que alguém faça de propósito.
+ */
+function desenharSaidasDaPermissao(saidas) {
+  $("compartilhar-permissao-saidas").hidden = !saidas;
+  if (!saidas) return;
+  const todas = saidas === "todas";
+
+  const passos = $("compartilhar-permissao-passos");
+  passos.hidden = !todas;
+  repovoar(passos, todas
+    ? FRASES_DA_GRAVACAO_DE_TELA.negada.passos.map((passo) => elemento("li", "", passo))
+    : []);
+
+  $("compartilhar-abrir-ajustes").hidden = !todas;
+  $("compartilhar-redefinir").hidden = !todas;
+  for (const id of ["compartilhar-abrir-ajustes", "compartilhar-redefinir", "compartilhar-reabrir"]) {
+    $(id).disabled = saidaDaPermissaoEmCurso;
+  }
+  // O que REDEFINIR faz só interessa enquanto o botão dele está na tela.
+  $("compartilhar-permissao-o-que-fazem").textContent = FRASES_DA_GRAVACAO_DE_TELA.oQueFazem;
+  $("compartilhar-permissao-o-que-fazem").hidden = !todas;
+
+  const feito = $("compartilhar-permissao-feito");
+  feito.hidden = feitoNaPermissao === null;
+  feito.textContent = feitoNaPermissao ?? "";
 }
 
 /**
@@ -730,6 +816,8 @@ ligarPilulas("compartilhar-quadros");
 async function abrirCompartilhar() {
   focoAntesDeCompartilhar = document.activeElement;
   erroDeTela = null;
+  // O «os Ajustes foram abertos» é de um aperto da abertura anterior.
+  feitoNaPermissao = null;
   try {
     const snapshot = await invoke("snapshot");
     // **`minha_transmissao`, e não `tela`.** A segunda é a que esta pessoa está
@@ -814,17 +902,100 @@ $("compartilhar-fontes").addEventListener("click", (evento) => {
  * No macOS isto abre o alerta do TCC, que só aparece uma vez na vida do app: um
  * alerta de sistema que aparece sem ninguém ter pedido é o que ensina a recusar
  * por reflexo, e daquela recusa não se volta de dentro deste app.
+ *
+ * **Um pedido negado não dispara outro.** O redesenho que segue consulta de
+ * novo, e a consulta agora responde `Negada` (o núcleo guarda o não desta
+ * execução): o botão de pedir sai, e as saídas entram no lugar dele.
  */
 $("compartilhar-pedir").addEventListener("click", async () => {
   erroDeTela = null;
+  feitoNaPermissao = null;
   try {
     permissaoDeTela = await invoke("pedir_permissao_de_tela");
   } catch (falha) {
     mostrarErroDeTela(falha);
   }
   await desenharCompartilhar({ relistar: true });
+  dizerAPermissaoQueMudou();
   await atualizarChamada();
 });
+
+/**
+ * Depois de um aperto que troca o que o bloco da permissão oferece: o botão
+ * apertado pode ter saído da tela, e o teclado iria com ele para o `<body>`,
+ * atrás da caixa. O foco volta à caixa, e a frase nova é dita a quem não a vê.
+ */
+function dizerAPermissaoQueMudou() {
+  if ($("compartilhar").hidden || $("compartilhar-permissao").hidden) return;
+  if (!focavel(document.activeElement)) $("compartilhar").focus();
+  anunciar(`${$("compartilhar-permissao-diz").textContent}. ${$("compartilhar-permissao-nota").textContent}`);
+}
+
+/**
+ * Uma saída da permissão, uma por vez: roda, guarda a falha (com a frase dela)
+ * ou o que foi feito, e redesenha. **Nenhuma pede a permissão de novo**: uma
+ * tentativa negada não dispara outra, e o que muda a resposta do macOS é
+ * reabrir.
+ */
+async function rodarSaidaDaPermissao(saida) {
+  if (saidaDaPermissaoEmCurso) return;
+  saidaDaPermissaoEmCurso = true;
+  erroDeTela = null;
+  feitoNaPermissao = null;
+  desenharSaidasDaPermissao(oQueDizerDaPermissao(permissaoDeTela)?.saidas ?? null);
+  try {
+    await saida();
+  } catch (falha) {
+    mostrarErroDeTela(falha);
+  } finally {
+    saidaDaPermissaoEmCurso = false;
+  }
+  await desenharCompartilhar();
+}
+
+/** Abre a página dos Ajustes em que o macOS lista quem pode gravar a tela. */
+$("compartilhar-abrir-ajustes").addEventListener("click", () => rodarSaidaDaPermissao(async () => {
+  await invoke("abrir_ajustes_da_gravacao_de_tela");
+  feitoNaPermissao = FRASES_DA_GRAVACAO_DE_TELA.ajustesAbertos;
+}));
+
+/**
+ * Apaga a decisão que o macOS guardou sobre o SEELE gravar a tela. Só por este
+ * aperto, com a linha embaixo dos botões dizendo o que acontece. Depois dele a
+ * caixa só oferece reabrir (`permissaoRedefinida`).
+ */
+$("compartilhar-redefinir").addEventListener("click", async () => {
+  await rodarSaidaDaPermissao(async () => {
+    await invoke("redefinir_permissao_de_tela");
+    permissaoRedefinida = true;
+  });
+  if (permissaoRedefinida) dizerAPermissaoQueMudou();
+});
+
+/**
+ * Fecha o SEELE e abre de novo, que é quando o macOS refaz a resposta.
+ *
+ * **Com um servidor no ar, pergunta antes**, pela mesma caixa e com a mesma
+ * frase de fechar a janela (`camada-hospedagem.js`): reabrir o tira do ar e
+ * leva junto quem estiver nele. A caixa de compartilhar fecha para a pergunta
+ * não abrir por cima de outra camada.
+ */
+$("compartilhar-reabrir").addEventListener("click", () => rodarSaidaDaPermissao(async () => {
+  let meu = null;
+  try {
+    meu = await invoke("meu_servidor");
+  } catch {
+    meu = null;
+  }
+  if (!meu) {
+    await invoke("reabrir_o_app");
+    return;
+  }
+  const nome = meu.nome || "O SEU SERVIDOR";
+  const f = FRASES_DA_GRAVACAO_DE_TELA.reabrirComServidor;
+  fecharCompartilhar();
+  abrirConfirmacao(f.titulo, f.consequencia(nome), f.rotulo(nome), () => invoke("reabrir_o_app"));
+}));
 
 /**
  * Buscar o módulo, depois de a pessoa ter lido o tamanho e a origem e apertado.

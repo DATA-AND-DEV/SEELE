@@ -617,6 +617,8 @@ const editorDoPerfil = {
   apelido: "",
   esperando: [],
   estadoDaImagem: { Foto: "", Capa: "" },
+  /** O lado cujo ESCOLHER espera o foco de volta, depois do passo de recorte; ou `null`. */
+  focoNoEscolher: null,
 };
 
 /** Os campos do editor, pelo nome do campo no fio (`CampoDoPerfil`). */
@@ -816,6 +818,13 @@ function desenharBlocoDaImagem(lado, imagens) {
   }
   $(`${prefixo}-remover`).disabled = !imagem || editorDoPerfil.estadoDaImagem[lado] === "enviando";
   $(`${prefixo}-escolher`).disabled = editorDoPerfil.estadoDaImagem[lado] === "enviando";
+  // Depois do passo de recorte, o foco volta ao ESCOLHER assim que ele religa
+  // (`escolherERecortar`) — se ninguém o levou para outro lugar nesse meio.
+  if (editorDoPerfil.focoNoEscolher === lado && !$(`${prefixo}-escolher`).disabled) {
+    editorDoPerfil.focoNoEscolher = null;
+    const solto = !document.activeElement || document.activeElement === document.body;
+    if (solto && !$("perfil").hidden) $(`${prefixo}-escolher`).focus({ preventScroll: true });
+  }
   // O estado do bloco: a recusa ou o andamento, e, sem nada disso, a pendência
   // da migração. Sempre no próprio bloco, onde se acabou de apertar.
   const estado = $(`${prefixo}-estado`);
@@ -836,17 +845,65 @@ function dizerNoBlocoDaImagem(lado, frase, tom = "") {
 }
 
 /**
- * **ESCOLHER manda na hora** (F4: o comando abre o seletor e sobe): o bloco
- * diz «Enviando…» e depois «enviada», ou a recusa — o HEIC pelo nome.
+ * **O seletor e, depois, o passo de recorte** (1.0.1, `camada-recorte.js`).
+ * `escolher_imagem_para_recortar` abre o seletor — é a primeira coisa que
+ * acontece no gesto, como o navegador exige —, confere a imagem e devolve a
+ * prévia; a camada de recorte devolve o pedaço. Resolve com
+ * `{ alca, recorte }`, o que os comandos de mandar e de guardar recebem, ou com
+ * `null` quando a pessoa desiste (do seletor ou do recorte): nada muda, e a
+ * imagem que esperava é solta. A recusa da imagem (o HEIC pelo nome) rejeita.
+ */
+async function escolherERecortar(lado) {
+  const escolhida = await invoke("escolher_imagem_para_recortar", { lado });
+  if (!escolhida?.escolheu) return null;
+  const recorte = await recortarAImagem({ lado, ...escolhida });
+  // **O teclado volta ao ESCOLHER do lado.** O botão fica desligado enquanto a
+  // imagem anda, e um botão desligado perde o foco: o recorte, ao fechar, não
+  // tem a quem devolvê-lo. Assim que o bloco o religar, é nele que se está.
+  editorDoPerfil.focoNoEscolher = lado;
+  if (!recorte) {
+    invoke("esquecer_imagem_a_recortar", { alca: escolhida.alca })
+      .catch((falha) => console.warn("esquecer_imagem_a_recortar:", falha));
+    return null;
+  }
+  return { alca: escolhida.alca, recorte };
+}
+
+/**
+ * **Devolve a vez à tela antes do trabalho pesado.** Recortar e reduzir, no
+ * navegador, é o `.wasm` na linha principal (uma foto grande leva um tempo que
+ * se vê): sem um quadro no meio, o diálogo de recorte que acabou de fechar
+ * ficaria parado na tela, e o «Enviando…» só apareceria quando já não
+ * adiantasse. O prazo é para a janela escondida, onde o quadro não vem.
+ */
+function depoisDeDesenhar() {
+  return new Promise((seguir) => {
+    requestAnimationFrame(() => requestAnimationFrame(seguir));
+    setTimeout(seguir, 120);
+  });
+}
+
+/**
+ * **ESCOLHER manda na hora, depois do recorte** (F4: a imagem sobe ao
+ * confirmar): o bloco diz «Abrindo a imagem…», «Enviando…» e depois «enviada»,
+ * ou a recusa — o HEIC pelo nome.
  */
 async function escolherImagemDoPerfil(lado) {
   // Na tela inicial, a imagem vai para o perfil padrão desta máquina.
   if (editorDoPerfil.modo === "padrao") return escolherImagemDoPadrao(lado);
   editorDoPerfil.estadoDaImagem[lado] = "enviando";
-  dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.enviando);
+  dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.abrindo);
   let feito;
   try {
-    feito = await invoke("enviar_imagem_do_perfil", { lado });
+    const escolhida = await escolherERecortar(lado);
+    if (!escolhida) {
+      editorDoPerfil.estadoDaImagem[lado] = "";
+      dizerNoBlocoDaImagem(lado, "");
+      return;
+    }
+    dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.enviando);
+    await depoisDeDesenhar();
+    feito = await invoke("enviar_imagem_do_perfil", { lado, alca: escolhida.alca, recorte: escolhida.recorte });
   } catch (falha) {
     console.warn(`enviar_imagem_do_perfil (${lado}):`, falha);
     editorDoPerfil.estadoDaImagem[lado] = "";
@@ -854,10 +911,6 @@ async function escolherImagemDoPerfil(lado) {
     return;
   }
   editorDoPerfil.estadoDaImagem[lado] = "";
-  if (!feito?.escolheu) {
-    dizerNoBlocoDaImagem(lado, "");
-    return;
-  }
   const nota = lado === "Foto" && feito.icone_nativo ? ` ${FRASES_DOS_PERFIS.iconeAntigo}` : "";
   dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.enviada(lado) + nota, "feito");
   anunciar(FRASES_DOS_PERFIS.enviada(lado));
@@ -865,25 +918,28 @@ async function escolherImagemDoPerfil(lado) {
   if (typeof deixarDeSeguirOPadrao === "function") deixarDeSeguirOPadrao();
 }
 
-/** ESCOLHER na tela inicial: o seletor, a conferência, e a imagem guardada no padrão. */
+/** ESCOLHER na tela inicial: o seletor, a conferência, o recorte, e a imagem guardada no padrão. */
 async function escolherImagemDoPadrao(lado) {
   editorDoPerfil.estadoDaImagem[lado] = "enviando";
-  dizerNoBlocoDaImagem(lado, "");
-  let feito;
+  dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.abrindo);
   try {
-    feito = await invoke("escolher_imagem_do_perfil_padrao", { lado });
-    if (feito?.escolheu) await lerOPerfilPadrao();
+    const escolhida = await escolherERecortar(lado);
+    if (!escolhida) {
+      editorDoPerfil.estadoDaImagem[lado] = "";
+      dizerNoBlocoDaImagem(lado, "");
+      return;
+    }
+    dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.padrao.guardando);
+    await depoisDeDesenhar();
+    await invoke("guardar_imagem_do_perfil_padrao", { lado, alca: escolhida.alca, recorte: escolhida.recorte });
+    await lerOPerfilPadrao();
   } catch (falha) {
-    console.warn(`escolher_imagem_do_perfil_padrao (${lado}):`, falha);
+    console.warn(`guardar_imagem_do_perfil_padrao (${lado}):`, falha);
     editorDoPerfil.estadoDaImagem[lado] = "";
     dizerNoBlocoDaImagem(lado, fraseDaImagemDoPerfil(falha), "erro");
     return;
   }
   editorDoPerfil.estadoDaImagem[lado] = "";
-  if (!feito?.escolheu) {
-    dizerNoBlocoDaImagem(lado, "");
-    return;
-  }
   dizerNoBlocoDaImagem(lado, FRASES_DOS_PERFIS.padrao.guardada(lado), "feito");
   atualizarEditorDoPerfil();
   anunciar(FRASES_DOS_PERFIS.padrao.guardada(lado));

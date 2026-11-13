@@ -302,9 +302,14 @@ curl -sS -X OPTIONS -D - -o /dev/null \
 **A origem da prévia sai quando o teste acabar**: ela é a de uma branch, e o
 que essa branch publicar passa a poder perguntar ao ponto. O CORS não protege
 o ponto (qualquer programa fala com ele); protege quem usa o navegador de uma
-página alheia lendo a resposta em nome dela. O arquivo do proxy ainda guarda
-três origens de prévias antigas (`21d72547`, `43f546e9`, `0fcd23f1`), das
-homologações da 0.17, que ninguém tirou.
+página alheia lendo a resposta em nome dela.
+
+**Em 13/11/2026 o proxy do ponto oficial ficou sem prévia nenhuma**, depois de a
+1.0.0 ser publicada: o bloco da `entrega-1-0` saiu (as três origens antigas das
+homologações da 0.17 tinham saído em 12/11), e o arquivo voltou a ter só o bloco
+geral. Conferido de fora: `https://seele.sh` recebe o cabeçalho de CORS, e a
+origem da prévia não recebe mais. O arquivo anterior ficou ao lado, em
+`Caddyfile.2026-11-13.antes-de-tirar-a-previa.bak`.
 
 E, para ele subir junto com a máquina, um serviço de systemd de nove linhas:
 

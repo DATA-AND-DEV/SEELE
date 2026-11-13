@@ -390,6 +390,14 @@ async function rodarCena(navegador, url, cena, pasta) {
     isMobile: Boolean(cena.toque) && navegador.browserType().name() !== "firefox",
     deviceScaleFactor: 1,
   });
+  // **A bancada não fala com a internet.** Com o `.wasm` da página presente em
+  // `ui/` (o empacotamento o deixa lá), a casca web sobe de verdade e pergunta
+  // ao ponto de encontro de PRODUÇÃO, que recusa a origem local por CORS: o
+  // navegador escreve o erro no console e a cena reprovava por um motivo que
+  // não é da tela (bateria de 13/11/2026, depois da publicação da 1.0.0; no CI,
+  // sem o arquivo, passava). Tudo o que não é o servidor da bancada é cortado
+  // aqui, e a página vê o que veria sem rede.
+  await contexto.route((endereco) => !/^(127\.0\.0\.1|localhost)$/.test(endereco.hostname), (rota) => rota.abort());
   const aba = await contexto.newPage();
   const erros = [];
   let retratando = false;

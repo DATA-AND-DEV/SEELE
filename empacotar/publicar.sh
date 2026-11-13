@@ -1382,6 +1382,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
     uma_bancada node apps/seele-app/bancada/recepcao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
     uma_bancada node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+    uma_bancada node apps/seele-app/bancada/recorte-do-perfil.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
     # O servidor de verdade da bancada da sessão pelo navegador (Tarefa 2.6 da F4).
     cargo build --quiet --package seele-server --example servidor_da_bancada ||
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS servidor_da_bancada"
@@ -1461,13 +1462,19 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/camera.cjs
     uma_bancada node apps/seele-app/bancada/transmissao-que-cai.cjs
     uma_bancada node apps/seele-app/bancada/previas-de-tela.cjs
+    uma_bancada node apps/seele-app/bancada/gravacao-de-tela-negada.cjs
     uma_bancada node apps/seele-app/bancada/apoio-na-ajuda.cjs
     uma_bancada node apps/seele-app/bancada/teste-de-conexao.cjs
     uma_bancada node apps/seele-app/bancada/instalavel.cjs
     uma_bancada node apps/seele-app/bancada/conversa-longa.cjs
+    uma_bancada node apps/seele-app/bancada/ficha-de-quem-esta-fora.cjs
+    uma_bancada node apps/seele-app/bancada/anexo-com-previa-aberta.cjs
+    uma_bancada node apps/seele-app/bancada/navegacao-estreita.cjs
     uma_bancada node apps/seele-app/bancada/notificacao-do-sistema.cjs
     uma_bancada node apps/seele-app/bancada/hotfix-0195.cjs
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
+    uma_bancada node apps/seele-app/bancada/tela-cheia-da-propria-transmissao.cjs
+    uma_bancada node apps/seele-app/bancada/faixa-do-toque.cjs
     uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/tunel-de-jogador.cjs
     uma_bancada node apps/seele-app/bancada/aceite-da-maquina.cjs

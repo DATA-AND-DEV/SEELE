@@ -12,15 +12,25 @@
 
 .toque {
   position: fixed;
-  left: 50%;
+  /* **Centrada pelas margens, e não por `left: 50%` + `translateX(-50%)`.** Um
+     elemento fixo posto em `left: 50%` só pode ter a largura que sobra dali
+     até a borda direita: a faixa tinha 450 px numa janela de 900, e o RECUSAR
+     caía sozinho numa segunda linha com a janela inteira livre (relato do dono
+     na 1.0.0, `bancada/faixa-do-toque.cjs`). Entre as duas bordas, com a
+     largura do conteúdo, ela usa a janela que tem. */
+  left: var(--seele-e2);
+  right: var(--seele-e2);
+  width: fit-content;
+  margin-inline: auto;
   top: var(--seele-e6);
-  transform: translateX(-50%);
   z-index: 19;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--seele-e2);
-  max-width: calc(100vw - var(--seele-e4));
+  justify-content: flex-end;
+  gap: var(--seele-e1) var(--seele-e2);
+  max-width: min(60rem, calc(100vw - var(--seele-e4)));
+  box-sizing: border-box;
   padding: var(--seele-e1) var(--seele-e2);
   background: color-mix(in srgb, var(--seele-osso) 4%, var(--seele-negro-painel));
   border: var(--seele-b) solid color-mix(in srgb, var(--seele-laranja-nerv) 60%, transparent);
@@ -28,9 +38,32 @@
 }
 
 .toque-texto {
+  /* O texto cede e quebra por dentro; os botões não encolhem. */
+  flex: 1 1 14rem;
+  min-width: 0;
   margin: 0;
   font-family: var(--seele-ui);
   color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+.toque > button {
+  flex: 0 0 auto;
+}
+
+/* **Os dois botões andam juntos.** Onde o texto e os dois não cabem numa
+   linha, o texto fica com a linha de cima inteira e os botões dividem a de
+   baixo: nunca um ao lado do texto e o outro sozinho. */
+@media (max-width: 700px) {
+  .toque {
+    width: auto;
+  }
+  .toque-texto {
+    flex-basis: 100%;
+  }
+  .toque > button {
+    flex: 1 1 0;
+  }
 }
 
 .toque-nota {

@@ -507,26 +507,71 @@ pub enum PermissaoDeTela {
     SemCaptura,
 }
 
+/// **O que esta execução já ouviu do sistema quando pediu.**
+///
+/// O macOS tem uma resposta só para «nunca perguntaram» e «perguntaram e eu
+/// disse não» (`CGPreflightScreenCaptureAccess` devolve falso nos dois), e
+/// quem sabe distingui-los é quem pediu. A 1.0.0 não guardava isso: o pedido
+/// negado dizia `Negada`, a consulta seguinte — a que toda tela faz ao se
+/// redesenhar — dizia `NaoPerguntada` por cima, e a caixa de compartilhar
+/// voltava a «este app ainda não pediu», com o botão de pedir, para sempre.
+/// Relatado assim pelo dono: «não habilita nunca, fica num loop infinito».
+///
+/// Do processo, e não de uma sessão: a resposta do TCC é do processo, e o
+/// sistema só a refaz quando o app reabre. Por isso também não vai ao disco —
+/// a execução seguinte pode ter outra resposta, e uma memória velha a negaria.
+#[cfg(any(target_os = "macos", test))]
+struct MemoriaDoPedidoDeTela(std::sync::atomic::AtomicBool);
+
+#[cfg(any(target_os = "macos", test))]
+impl MemoriaDoPedidoDeTela {
+    const fn nova() -> Self {
+        Self(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// A resposta de um **pedido**: o que o sistema disse, guardado.
+    fn anotar_o_pedido(&self, concedida: bool) -> PermissaoDeTela {
+        self.0
+            .store(!concedida, std::sync::atomic::Ordering::Release);
+        if concedida {
+            PermissaoDeTela::Concedida
+        } else {
+            PermissaoDeTela::Negada
+        }
+    }
+
+    /// A resposta de uma **consulta**: uma que nunca pediu não pode afirmar que
+    /// foi negada, e uma que já ouviu o não não pode dizer que ninguém pediu.
+    /// Concedida vence a memória: se o sistema passou a deixar, deixou.
+    fn consultar(&self, concedida: bool) -> PermissaoDeTela {
+        if concedida {
+            PermissaoDeTela::Concedida
+        } else if self.0.load(std::sync::atomic::Ordering::Acquire) {
+            PermissaoDeTela::Negada
+        } else {
+            PermissaoDeTela::NaoPerguntada
+        }
+    }
+}
+
+/// A memória deste processo. Ver [`MemoriaDoPedidoDeTela`].
+#[cfg(target_os = "macos")]
+static PEDIDO_DE_TELA: MemoriaDoPedidoDeTela = MemoriaDoPedidoDeTela::nova();
+
 /// Olha o que o sistema já concedeu, **sem** perguntar nada.
 ///
 /// Barato e sem efeito colateral: dá para chamar toda vez que a tela de
 /// escolher abre, e é o que se deve fazer — num app não assinado a concessão
 /// morre a cada build.
+///
+/// No macOS devolve `Negada`, e não `NaoPerguntada`, depois de um
+/// [`pedir_permissao_de_tela`] desta execução ter voltado negado: é o que tira
+/// a tela do laço. Ver `MemoriaDoPedidoDeTela`.
 #[must_use]
 pub fn permissao_de_tela() -> PermissaoDeTela {
     #[cfg(target_os = "macos")]
     {
-        // `Ausente` vira `NaoPerguntada` e não `Negada` **aqui**, e o
-        // contrário em `pedir_permissao_de_tela`. A ScreenCaptureKit tem uma
-        // resposta só para os dois estados, e quem sabe distingui-los é quem
-        // chamou: uma consulta que nunca perguntou não pode afirmar que foi
-        // negada, e um pedido que voltou vazio não pode dizer que ninguém
-        // perguntou.
-        if seele_video::captura::macos::permissao().concedida() {
-            PermissaoDeTela::Concedida
-        } else {
-            PermissaoDeTela::NaoPerguntada
-        }
+        PEDIDO_DE_TELA.consultar(seele_video::captura::macos::permissao().concedida())
     }
     // No Windows não há permissão de sistema para capturar a tela: a WGC
     // captura, e o único consentimento é o da nossa interface (§4).
@@ -545,15 +590,14 @@ pub fn permissao_de_tela() -> PermissaoDeTela {
 /// **Não é a mesma coisa que [`permissao_de_tela`]**, e o §4 é quem separa: no
 /// macOS o alerta do TCC aparece **uma vez só** por identidade assinada, então
 /// uma consulta que perguntasse gastaria a única chance que a pessoa tem.
+///
+/// A resposta fica guardada para as consultas seguintes desta execução: depois
+/// de um não, [`permissao_de_tela`] passa a dizer `Negada`.
 #[must_use]
 pub fn pedir_permissao_de_tela() -> PermissaoDeTela {
     #[cfg(target_os = "macos")]
     {
-        if seele_video::captura::macos::pedir_permissao().concedida() {
-            PermissaoDeTela::Concedida
-        } else {
-            PermissaoDeTela::Negada
-        }
+        PEDIDO_DE_TELA.anotar_o_pedido(seele_video::captura::macos::pedir_permissao().concedida())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -2391,6 +2435,50 @@ mod tests {
             erro,
             ErroDeCompartilhamento::Parado(MotivoDeParada::AbaixoDoPiso)
         ));
+    }
+}
+
+#[cfg(test)]
+mod a_memoria_do_pedido_de_tela {
+    use super::*;
+
+    /// **O laço da 1.0.0** (relato do dono em 13/11/2026: «não habilita nunca,
+    /// fica num loop infinito»): o pedido voltava negado, a consulta seguinte
+    /// dizia «ainda não perguntada» por cima, e a caixa de compartilhar
+    /// oferecia o mesmo pedido de novo, sem fim. Depois de um pedido negado, a
+    /// consulta desta execução diz `Negada`, que é a resposta com saída.
+    #[test]
+    fn a_consulta_depois_de_um_pedido_negado_diz_negada_e_nao_ainda_nao_perguntada() {
+        let memoria = MemoriaDoPedidoDeTela::nova();
+        assert_eq!(
+            memoria.consultar(false),
+            PermissaoDeTela::NaoPerguntada,
+            "uma consulta que nunca pediu não pode afirmar que foi negada"
+        );
+        assert_eq!(memoria.anotar_o_pedido(false), PermissaoDeTela::Negada);
+        for volta in 0..3 {
+            assert_eq!(
+                memoria.consultar(false),
+                PermissaoDeTela::Negada,
+                "a consulta {volta} depois do pedido negado voltou a dizer que ninguém pediu: \
+                 é o laço da 1.0.0"
+            );
+        }
+    }
+
+    /// Concedida vence a memória, nos dois sentidos: o sistema que passou a
+    /// deixar é lido como deixando, e um pedido atendido apaga o não de antes.
+    #[test]
+    fn a_concessao_vence_o_nao_que_ficou_guardado() {
+        let memoria = MemoriaDoPedidoDeTela::nova();
+        assert_eq!(memoria.anotar_o_pedido(false), PermissaoDeTela::Negada);
+        assert_eq!(memoria.consultar(true), PermissaoDeTela::Concedida);
+        assert_eq!(memoria.anotar_o_pedido(true), PermissaoDeTela::Concedida);
+        assert_eq!(
+            memoria.consultar(false),
+            PermissaoDeTela::NaoPerguntada,
+            "depois de um pedido atendido, o não antigo continuou guardado"
+        );
     }
 }
 

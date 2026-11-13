@@ -239,9 +239,44 @@
   margin-left: 16px;
 }
 
+/* As saídas de quem o macOS negou: os passos e os três botões ocupam a largura
+   inteira do aviso, embaixo da frase. A lista é numerada porque a ordem conta —
+   reabrir antes de mexer nos Ajustes não muda nada. */
+.compartilhar-permissao-saidas {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.compartilhar-permissao-saidas[hidden],
+.compartilhar-permissao-passos[hidden] { display: none; }
+
+.compartilhar-permissao-saidas > p { margin: 0; }
+
+.compartilhar-permissao-passos {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 4px;
+  font-family: var(--seele-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-osso);
+}
+
+.compartilhar-permissao-botoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compartilhar-permissao-feito { color: var(--seele-osso); }
+
 /* No desenho o botão do aviso é neutro e baixo: o laranja fica para o
    COMPARTILHAR do rodapé, que é a ação da caixa. */
 .compartilhar-modulo > button,
+.compartilhar-permissao-botoes > button,
 .compartilhar-permissao > button {
   min-height: 44px;
   background: var(--seele-controle);

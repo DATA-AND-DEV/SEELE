@@ -73,6 +73,7 @@
 <link rel="stylesheet" href="camada-travessia.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
+<link rel="stylesheet" href="camada-recorte.css">
 <link rel="stylesheet" href="camada-mods.css">
 <!--
   As superficies e os controles que um MOD desenha - ADR 0052. Depois de
@@ -4703,6 +4704,41 @@
   </div>
 </div>
 
+<!--
+  **O passo de recorte** (1.0.1, pedido do dono; `camada-recorte.js`). Depois
+  de ESCOLHER a foto ou a capa no «Seu perfil», a imagem aparece atrás de uma
+  moldura na proporção de destino: arrastar posiciona, o controle (a roda, a
+  pinça, `+` e `−`) aproxima, CONFIRMAR manda o pedaço e CANCELAR não muda
+  nada. O palco é um `application`: as setas são dele, e não do modo de leitura
+  do leitor de tela. Os textos vêm de `frases.js` (`FRASES_DOS_PERFIS.recorte`).
+-->
+<div id="recorte" class="camada-recorte" role="dialog" aria-modal="true"
+     aria-labelledby="recorte-titulo" aria-describedby="recorte-ajuda" data-lado="Foto" hidden>
+  <div class="recorte-caixa">
+    <div class="recorte-cabeca">
+      <h2 id="recorte-titulo" class="recorte-titulo"></h2>
+      <p id="recorte-ajuda" class="recorte-ajuda"></p>
+    </div>
+    <div id="recorte-palco" class="recorte-palco" role="application" tabindex="0"
+         aria-describedby="recorte-ajuda" data-arrastando="nao">
+      <img id="recorte-imagem" class="recorte-imagem" alt="" draggable="false">
+      <div id="recorte-moldura" class="recorte-moldura" aria-hidden="true"></div>
+    </div>
+    <div class="recorte-zoom">
+      <span id="recorte-zoom-rotulo" class="recorte-zoom-rotulo"></span>
+      <button id="recorte-menos" class="botao-fantasma recorte-zoom-passo" type="button"><span aria-hidden="true">−</span></button>
+      <input id="recorte-zoom" type="range" min="1" max="8" step="0.01" value="1" aria-labelledby="recorte-zoom-rotulo">
+      <button id="recorte-mais" class="botao-fantasma recorte-zoom-passo" type="button"><span aria-hidden="true">+</span></button>
+      <span id="recorte-zoom-valor" class="recorte-zoom-valor" aria-hidden="true"></span>
+    </div>
+    <p id="recorte-nota" class="recorte-nota" hidden></p>
+    <div class="recorte-acoes">
+      <button id="recorte-cancelar" class="botao-fantasma" type="button"></button>
+      <button id="recorte-confirmar" class="botao" type="button"></button>
+    </div>
+  </div>
+</div>
+
 <div id="perfil" class="camada-nomear" role="dialog" aria-modal="true"
      aria-labelledby="perfil-titulo" tabindex="-1" data-oficial="nao" hidden>
   <div class="nomear-caixa perfil-caixa">
@@ -4754,8 +4790,10 @@
       </div>
       <!--
         A foto (96px) e a capa (16:9) do perfil oficial. ESCOLHER abre o
-        seletor e sobe na hora (o comando `enviar_imagem_do_perfil`); o bloco
-        diz o andamento, a recusa (o HEIC pelo nome) e a pendência da migração.
+        seletor (`escolher_imagem_para_recortar`) e o passo de recorte
+        (`#recorte`); confirmado, o pedaço sobe na hora (o comando
+        `enviar_imagem_do_perfil`). O bloco diz o andamento, a recusa (o HEIC
+        pelo nome) e a pendência da migração.
       -->
       <div id="perfil-imagens" class="perfil-imagens" data-so-oficial hidden>
         <div class="perfil-bloco-imagem" data-lado="Foto">
@@ -5086,6 +5124,23 @@
         <p id="compartilhar-permissao-diz" class="compartilhar-permissao-diz"></p>
         <p id="compartilhar-permissao-nota" class="nota"></p>
         <button id="compartilhar-pedir" class="botao" type="button" hidden>PEDIR AO SISTEMA</button>
+        <!--
+          As saídas de quem o macOS negou (o laço relatado na 1.0.0): os passos
+          nos Ajustes, e três botões que fazem cada um uma coisa só — abrir a
+          página, apagar a decisão guardada deste app, reabrir. Nenhum roda
+          sozinho, e a linha abaixo deles diz o que cada um faz antes do aperto.
+          Os textos saem de `FRASES_DA_GRAVACAO_DE_TELA` (`frases.js`).
+        -->
+        <div id="compartilhar-permissao-saidas" class="compartilhar-permissao-saidas" hidden>
+          <ol id="compartilhar-permissao-passos" class="compartilhar-permissao-passos"></ol>
+          <div class="compartilhar-permissao-botoes">
+            <button id="compartilhar-abrir-ajustes" class="botao" type="button">ABRIR OS AJUSTES</button>
+            <button id="compartilhar-redefinir" class="botao" type="button">REDEFINIR A PERMISSÃO</button>
+            <button id="compartilhar-reabrir" class="botao" type="button">REABRIR O SEELE</button>
+          </div>
+          <p id="compartilhar-permissao-o-que-fazem" class="nota"></p>
+          <p id="compartilhar-permissao-feito" class="nota compartilhar-permissao-feito" role="status" hidden></p>
+        </div>
       </div>
 
       <!--
@@ -5800,6 +5855,12 @@
 <script src="identidade-web.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
+<!--
+  O passo de recorte antes de toda tela e de toda camada: com ele aberto, o
+  Esc e o Tab são dele, e os ouvintes de captura da janela correm na ordem em
+  que foram postos (`camada-recorte.js`, «o teclado»).
+-->
+<script src="camada-recorte.js"></script>
 <script src="tela-boot.js"></script>
 <script src="tela-sessao.js"></script>
 <script src="perfis.js"></script>

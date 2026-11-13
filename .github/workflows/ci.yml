@@ -686,6 +686,12 @@ jobs:
       - run: node apps/seele-app/bancada/previas-de-tela.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # A gravação de tela que o macOS negou (o laço relatado na 1.0.0): o não
+      # tira o botão de pedir e põe o caminho dos Ajustes e as três saídas, e
+      # nada redesenha de volta ao pedido.
+      - run: node apps/seele-app/bancada/gravacao-de-tela-negada.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/apoio-na-ajuda.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -696,6 +702,22 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/conversa-longa.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A ficha de um membro fora do ar (1.0.1): aberta pela página de perfis,
+      # ela atravessa os redesenhos da lista e só fecha quando a pessoa deixa de
+      # existir no servidor.
+      - run: node apps/seele-app/bancada/ficha-de-quem-esta-fora.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # O cartão do anexo com a prévia aberta (1.0.1): o nome do arquivo numa
+      # linha, o SALVAR na fileira dele, e a figura embaixo, na largura do cartão.
+      - run: node apps/seele-app/bancada/anexo-com-previa-aberta.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # As portas das gavetas na janela estreita (1.0.1): uma barra com a
+      # superfície dos painéis, na grade, com cada porta do lado do que ela abre.
+      - run: node apps/seele-app/bancada/navegacao-estreita.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       # A notificação do sistema na página de navegador, com a ponte de verdade e
@@ -709,6 +731,12 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/proporcao-tela-cheia.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/tela-cheia-da-propria-transmissao.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/faixa-do-toque.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       # Plataformas dos MODs (API 8): nos dois motores, por isso depois do
@@ -846,6 +874,16 @@ jobs:
       # a `prova` que o mesmo passo compilou, e o token da tentativa contra um
       # servidor de mentira. O mesmo teste de ordem segura esta.
       - run: node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # O passo de recorte da foto e da capa do perfil (1.0.1), com o mesmo
+      # `.wasm`: a página inteira, com a ponte, escolhe uma imagem gerada na
+      # hora, recorta, e confere pelos pixels do que o perfil padrão guardou
+      # que saiu o pedaço da moldura, na proporção e dentro do teto — nas três
+      # cascas e nos três tamanhos de janela. Quem recorta é o `.wasm`
+      # (`perfil_recortar`), e por isso ela mora aqui. O mesmo teste de ordem
+      # segura esta.
+      - run: node apps/seele-app/bancada/recorte-do-perfil.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       # A sessão pelo navegador de ponta a ponta (Tarefa 2.6 da F4): a página

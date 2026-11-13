@@ -22,6 +22,12 @@
 // 2. **A mídia que um MOD recebe do servidor** (`mod_midia_do_servidor`): sem
 //    uso, 1920 × 1080; como `fundo`, 1280 × 720; e a que declara pixels demais
 //    é `imagem-grande-demais-decodificada`, com os números.
+// 3. **O passo de recorte do perfil** (`perfil_previa_do_recorte`,
+//    `perfil_recortar`; 1.0.1): a prévia de uma imagem em 4K chega em 2048 ×
+//    1152, com as medidas da inteira à frente; o pedaço pedido sai dentro do
+//    teto do lado (a foto em 512, a capa em 1280 × 720); o recorte que é a
+//    imagem inteira de uma que já cabe devolve os mesmos bytes; o recorte sem
+//    pixel nenhum é `Mudou`, e a que declara pixels demais, `TipoRecusado`.
 import { readFileSync } from "node:fs";
 import zlib from "node:zlib";
 
@@ -135,8 +141,45 @@ confere(
   `a mídia de MOD que declara 30000x30000 não foi recusada pelo nome, com as medidas: ${JSON.stringify(daBomba.lida).slice(0, 300)}`,
 );
 
+// 3. O passo de recorte do perfil.
+const bytesDaSaida = () => Buffer.from(memoria().slice(e.saida_ptr(), e.saida_ptr() + e.saida_len()));
+const medidasDoPng = (bytes) => `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`;
+function previaDoRecorte(bytes) {
+  const codigo = comBlocos([bytes], (p, n) => e.perfil_previa_do_recorte(p, n));
+  return { codigo, saiu: bytesDaSaida() };
+}
+function recortar(capa, [x, y, largura, altura], bytes) {
+  const codigo = comBlocos([bytes], (p, n) => e.perfil_recortar(capa, x, y, largura, altura, p, n));
+  return { codigo, saiu: bytesDaSaida() };
+}
+const daGrande = previaDoRecorte(grande);
+confere(
+  daGrande.codigo === 0 && daGrande.saiu.readUInt32LE(0) === 3840 && daGrande.saiu.readUInt32LE(4) === 2160 && daGrande.saiu[8] === 0
+    && medidasDoPng(daGrande.saiu.subarray(9)) === "2048x1152",
+  `a prévia do recorte de uma imagem em 4K não diz 3840x2160 e chega em 2048x1152: código ${daGrande.codigo}, ${daGrande.saiu.subarray(0, 40).toString("hex")}`,
+);
+for (const [lado, capa, pedaco, esperado] of [
+  ["foto", 0, [2000, 200, 1800, 1800], "512x512"],
+  ["capa", 1, [100, 100, 3200, 1800], "1280x720"],
+  ["capa menor que o teto", 1, [100, 100, 640, 360], "640x360"],
+  ["capa inteira", 1, [0, 0, 3840, 2160], "1280x720"],
+]) {
+  const { codigo, saiu } = recortar(capa, pedaco, grande);
+  confere(codigo === 0 && medidasDoPng(saiu) === esperado,
+    `o recorte ${pedaco.join(",")} da ${lado} não saiu em ${esperado}: código ${codigo}, ${codigo === 0 ? medidasDoPng(saiu) : saiu.toString()}`);
+}
+const pequena = png(640, 360);
+const inteira = recortar(1, [0, 0, 640, 360], pequena);
+confere(inteira.codigo === 0 && inteira.saiu.equals(pequena), "o recorte que é a imagem inteira, numa que já cabe, não devolveu os mesmos bytes");
+const vazio = recortar(0, [5000, 0, 10, 10], grande);
+confere(vazio.codigo === 1 && vazio.saiu.toString() === '"Mudou"', `o recorte sem pixel nenhum não é Mudou: código ${vazio.codigo}, ${vazio.saiu.toString().slice(0, 80)}`);
+for (const [nome, lida] of [["a prévia", previaDoRecorte(bomba)], ["o recorte", recortar(1, [0, 0, 100, 100], bomba)]]) {
+  confere(lida.codigo === 1 && lida.saiu.toString() === '"TipoRecusado"',
+    `${nome} da imagem que declara 30000x30000 não é TipoRecusado: código ${lida.codigo}, ${lida.saiu.toString().slice(0, 80)}`);
+}
+
 if (falhas.length) {
   console.error(falhas.join("\n"));
   process.exit(1);
 }
-console.log("imagens no .wasm: a prévia e a mídia de MOD chegam reduzidas, e a que declara pixels demais é recusada com as medidas");
+console.log("imagens no .wasm: a prévia e a mídia de MOD chegam reduzidas, a que declara pixels demais é recusada com as medidas, e o recorte do perfil sai dentro do teto do lado");

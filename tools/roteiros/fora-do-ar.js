@@ -4,7 +4,7 @@
 // lista de membros).
 //
 // **Reprova** se o grupo não aparecer, se ele não for o último, se uma linha
-// carregar mais que o nome, se a lista for pedida de novo sem a revisão andar,
+// carregar mais que o nome (que é o botão que abre a ficha), se a lista for pedida de novo sem a revisão andar,
 // se a revisão andar e o grupo não trocar, ou se a lista de um servidor
 // aparecer na sessão do seguinte.
 SEELE_RESPOSTAS.membros_fora_do_ar = [
@@ -28,9 +28,16 @@ exigir(JSON.stringify(nomes()) === JSON.stringify(["kaji", "misato"]), "os nomes
 exigir(document.querySelector("#lista-roster > .roster-grupo:last-of-type") === grupo(),
   "o FORA DO AR não é o último grupo da lista de pessoas");
 
-// **Só o nome.** Sem horário, sem sinal, sem botão: a linha é o apelido.
+// **Só o nome, e ele abre a ficha** (1.1.0, pedido do dono). Sem horário, sem
+// sinal, sem ação de MOD: a linha é um botão do produto com o apelido dentro, e
+// mais nada. Antes da 1.1.0 nem o botão havia, e esta conferência reprovava com
+// ele; a regra que ela guarda continua a mesma — nada além do nome.
 for (const linha of grupo().querySelectorAll(".membro-fora-do-ar")) {
-  exigir(linha.children.length === 0, "uma linha do FORA DO AR carrega mais que o nome: " + linha.outerHTML);
+  const filhos = [...linha.children];
+  const botao = filhos[0];
+  exigir(filhos.length === 1 && botao.tagName === "BUTTON" && botao.type === "button" && botao.children.length === 0
+      && typeof botao.dataset.fichaPessoa === "string" && botao.textContent === linha.textContent,
+    "uma linha do FORA DO AR carrega mais que o nome que abre a ficha: " + linha.outerHTML);
 }
 // E não é a linha de quem está aqui, que MODs apresentam e o celular abre.
 exigir(grupo().querySelector("li.pessoa") === null, "uma linha do FORA DO AR virou `li.pessoa`");

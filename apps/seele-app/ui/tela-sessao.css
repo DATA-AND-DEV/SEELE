@@ -1905,15 +1905,20 @@ button.linha-nome:hover { text-decoration: underline; }
 }
 
 /* **FORA DO AR** (D-fio-4, P6): quem é membro e não está conectado. Apagado, e
-   só o nome — nada ali foi medido e nada ali responde.
+   só o nome — nada ali foi medido.
 
    Apagado com `--seele-rotulo-painel`, e não com `osso-apagado`: o nome é a
    única coisa que a linha diz, e aquele mede 4,11:1, que só vale para texto
    grande. Este mede 5,52:1 e continua abaixo do `osso` de quem está aqui, que
-   é a diferença que o grupo precisa mostrar. */
+   é a diferença que o grupo precisa mostrar.
+
+   **O nome é o botão que abre a ficha do membro** (1.0.1; `grupoForaDoAr`). O
+   recuo da linha passou para ele, que a ocupa inteira: o alvo do clique é a
+   linha, e não só as letras. A letra é a da linha (`font: inherit`), e o
+   contorno do foco fica por dentro, porque a linha corta o que passa dela. */
 .membro-fora-do-ar {
   border-bottom: 1px solid var(--seele-linha);
-  padding: 6px 10px;
+  padding: 0;
   font-size: 14px;
   letter-spacing: 0.02em;
   color: var(--seele-rotulo-painel);
@@ -1925,6 +1930,35 @@ button.linha-nome:hover { text-decoration: underline; }
   font-family: var(--seele-ui);
   opacity: 0.7;
 }
+.membro-fora-do-ar-abrir {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.membro-fora-do-ar-abrir:hover {
+  background: color-mix(in srgb, var(--seele-osso) 4%, transparent);
+}
+.membro-fora-do-ar-abrir:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+/* Com o foco do teclado, a linha deixa de estar apagada: o contorno a 70% não
+   é o contorno que o resto da lista mostra. */
+.membro-fora-do-ar:has(> .membro-fora-do-ar-abrir:focus-visible) { opacity: 1; }
 
 /* A região `pessoas.lista` (rascunho da API 6, §3): acima da lista, fechada e
    com teto de altura, como as outras regiões. */
@@ -3763,11 +3797,21 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .na-bateria .telemetria { opacity: 0.55; }
 
 /* O cartão do anexo do canvas: ícone, nome com o tamanho embaixo, e os verbos à
-   direita. Só o arranjo — os botões e o texto são os de sempre. */
+   direita. Só o arranjo — os botões e o texto são os de sempre.
+
+   **A prévia aberta tem a fileira dela** (`fig`; 1.0.1, relato do dono: «o nome
+   do arquivo fica em pé, uma letra por linha»). A figura não tinha área: com a
+   prévia aberta o botão PRÉVIA sai, a área `previa` fica vazia, e a grade punha
+   a figura nela — uma coluna `auto` do tamanho da imagem, ao lado do nome, que
+   tirava toda a largura da coluna `minmax(0, 1fr)` dele. O nome quebrava a
+   cada letra (`overflow-wrap: anywhere`), o «1.3 MB» em duas linhas, e o SALVAR
+   ia para o meio da altura. Agora a figura — e a frase da recusa, que caía no
+   mesmo lugar — fica embaixo da fileira do nome, na largura do cartão. A
+   bancada `anexo-com-previa-aberta.cjs` mede. */
 :root:not([data-casca="celular"]) .mensagem .anexo {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "ic nome salvar previa" "ic tam salvar previa" "est est est est";
+  grid-template-areas: "ic nome salvar previa" "ic tam salvar previa" "fig fig fig fig" "est est est est";
   align-items: center;
   column-gap: 12px;
   row-gap: 0;
@@ -3785,6 +3829,14 @@ button.linha-nome:hover { text-decoration: underline; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-salvar { grid-area: salvar; min-height: 36px; font-size: 12px; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-previa { grid-area: previa; min-height: 36px; font-size: 12px; }
 :root:not([data-casca="celular"]) .mensagem .anexo > .anexo-estado { grid-area: est; }
+:root:not([data-casca="celular"]) .mensagem .anexo > :is(.anexo-desenho, .anexo-recusa) { grid-area: fig; }
+/* Sem o botão PRÉVIA a coluna dele fica vazia, e o vão dela sobrava à direita
+   do SALVAR: com a prévia aberta, ele encosta na borda do cartão, alinhado com
+   a figura embaixo. */
+:root:not([data-casca="celular"]) .mensagem .anexo:has(> :is(.anexo-desenho, .anexo-recusa)) > .anexo-salvar {
+  grid-column: salvar-start / previa-end;
+  justify-self: end;
+}
 
 /* ---------- a reserva da coluna do «⋯» nas linhas de pessoa ----------
    Estas duas regras moravam em `mods-controles.css` (02a2c4af), mas `.roster` é
@@ -3860,12 +3912,56 @@ button.linha-nome:hover { text-decoration: underline; }
   padding-bottom: 0;
 }
 
-/* Navegação do desktop independente da vista de chat/chamada. */
-.sessao-navegacao { display: none; flex: 0 0 auto; gap: 8px; padding: 4px 16px 8px; }
+/* Navegação do desktop independente da vista de chat/chamada.
+
+   **Uma barra da grade, com a superfície dos painéis** (1.0.1, relato do dono:
+   «o botão PESSOAS aparece sozinho no canto, acima do trilho e dos painéis, uma
+   pílula de contorno fino sobre o fundo preto, sem relação com o resto»). A
+   navegação era uma fileira sem fundo, de borda a borda da janela, e as portas
+   vestiam o texto apagado e o contorno de régua direto sobre o preto — com a
+   PESSOAS à esquerda, do lado oposto ao da gaveta que ela abre.
+
+   Agora ela é o par da telemetria do rodapé: o vidro e a borda dos painéis, o
+   raio deles, da borda esquerda da trilha à borda direita da telemetria, a um
+   vão de grade dos painéis (os 8px daqui mais os 4px do alto de `.paineis`).
+   As portas são controles — `osso` sobre o fundo de controle — e cada uma fica
+   do lado do que abre: SALAS E CANAIS à esquerda, PESSOAS à direita, em cima
+   da gaveta dela. Fora de `@media` de propósito, como a aparência das portas
+   (`bancada/desktop-estreito.cjs`); a `bancada/navegacao-estreita.cjs` mede. */
+.sessao-navegacao {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 16px 8px;
+  padding: 4px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+}
 :root:not([data-casca="celular"]) #tela-sessao .paineis { position: relative; min-width: 0; }
 :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .sessao-navegacao { display: flex; }
 :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .linha-canais { display: inline-flex; }
-.sessao-navegacao button { min-height: 40px; border-radius: var(--seele-raio-pilula); padding: 0 14px; }
+.sessao-navegacao button {
+  min-height: 40px;
+  border-radius: var(--seele-raio-pilula);
+  padding: 0 16px;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+}
+.sessao-navegacao button:hover {
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+}
+/* Aberta, a porta diz isso na cor do acento, por cima do `:hover`. */
+.sessao-navegacao button[aria-expanded="true"] {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+.sessao-navegacao button:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+.sessao-navegacao .linha-pessoas { margin-left: auto; }
 @media (max-width: 1240px) {
   :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .sessao-navegacao { display: flex; }
 }
@@ -3875,7 +3971,8 @@ button.linha-nome:hover { text-decoration: underline; }
     padding: 4px 8px 8px; gap: 8px;
   }
   :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .paineis > .trilha { display: flex; }
-  :root:not([data-casca="celular"]) .sessao-navegacao { padding: 4px 8px; flex-wrap: wrap; }
+  /* A grade aqui tem 8px de margem e de vão: a barra acompanha. */
+  :root:not([data-casca="celular"]) .sessao-navegacao { margin: 4px 8px; flex-wrap: wrap; }
 }
 
 /* ==========================================================================
