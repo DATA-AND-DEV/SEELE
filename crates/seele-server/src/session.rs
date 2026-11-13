@@ -1137,7 +1137,18 @@ async fn consultar_portaria(
         // a portaria desligada, e perdoar um segredo errado por causa disso
         // abriria a porta de todo servidor que não usa portaria.
         if let Some(recusa) = recusa_adiada {
-            let conhecida = crate::portaria::ja_admitido(&guard, &impressao).unwrap_or(false);
+            // **Quem hospeda não precisa do segredo da própria casa.** O app
+            // entra no servidor que acabou de subir sem segredo nenhum, e num
+            // servidor com senha e **sem** a portaria o `ja_admitido` de baixo
+            // responde `false` (ele só vale com ela ligada): o dono era
+            // recusado na própria porta, com `CredentialRejected`, e o app não
+            // tem onde ele digitar a senha que ele mesmo escolheu. O dono é o
+            // que a máquina que hospeda declarou (`cargos::declarar_proprietario`,
+            // ADR 0064), e a impressão aqui já está provada. O guarda é
+            // `tests/dono_num_servidor_com_senha.rs`.
+            let dono = crate::cargos::e_o_proprietario(&guard, &impressao);
+            let conhecida =
+                dono || crate::portaria::ja_admitido(&guard, &impressao).unwrap_or(false);
             // **E quem ainda está na fila continua na fila, com o nome certo.**
             //
             // A tela de espera do cliente bate de novo a cada quinze segundos, e
@@ -1176,10 +1187,14 @@ async fn consultar_portaria(
                     detail: recusa,
                 });
             }
-            tracing::info!(
-                %impressao,
-                "segredo recusado, mas a portaria já admitiu esta chave; entra"
-            );
+            if dono {
+                tracing::info!(%impressao, "sem segredo, mas é quem hospeda; entra");
+            } else {
+                tracing::info!(
+                    %impressao,
+                    "segredo recusado, mas a portaria já admitiu esta chave; entra"
+                );
+            }
         }
 
         match crate::portaria::bater(&mut guard, &impressao, &nickname, segredo, &observacao) {
