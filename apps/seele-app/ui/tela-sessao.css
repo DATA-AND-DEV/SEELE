@@ -3878,12 +3878,56 @@ button.linha-nome:hover { text-decoration: underline; }
   padding-bottom: 0;
 }
 
-/* Navegação do desktop independente da vista de chat/chamada. */
-.sessao-navegacao { display: none; flex: 0 0 auto; gap: 8px; padding: 4px 16px 8px; }
+/* Navegação do desktop independente da vista de chat/chamada.
+
+   **Uma barra da grade, com a superfície dos painéis** (1.0.1, relato do dono:
+   «o botão PESSOAS aparece sozinho no canto, acima do trilho e dos painéis, uma
+   pílula de contorno fino sobre o fundo preto, sem relação com o resto»). A
+   navegação era uma fileira sem fundo, de borda a borda da janela, e as portas
+   vestiam o texto apagado e o contorno de régua direto sobre o preto — com a
+   PESSOAS à esquerda, do lado oposto ao da gaveta que ela abre.
+
+   Agora ela é o par da telemetria do rodapé: o vidro e a borda dos painéis, o
+   raio deles, da borda esquerda da trilha à borda direita da telemetria, a um
+   vão de grade dos painéis (os 8px daqui mais os 4px do alto de `.paineis`).
+   As portas são controles — `osso` sobre o fundo de controle — e cada uma fica
+   do lado do que abre: SALAS E CANAIS à esquerda, PESSOAS à direita, em cima
+   da gaveta dela. Fora de `@media` de propósito, como a aparência das portas
+   (`bancada/desktop-estreito.cjs`); a `bancada/navegacao-estreita.cjs` mede. */
+.sessao-navegacao {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 16px 8px;
+  padding: 4px;
+  background: var(--seele-vidro);
+  border: 1px solid var(--seele-vidro-borda);
+  border-radius: var(--seele-raio-painel);
+}
 :root:not([data-casca="celular"]) #tela-sessao .paineis { position: relative; min-width: 0; }
 :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .sessao-navegacao { display: flex; }
 :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]):has(#vista-chamada:not([hidden])) .linha-canais { display: inline-flex; }
-.sessao-navegacao button { min-height: 40px; border-radius: var(--seele-raio-pilula); padding: 0 14px; }
+.sessao-navegacao button {
+  min-height: 40px;
+  border-radius: var(--seele-raio-pilula);
+  padding: 0 16px;
+  color: var(--seele-osso);
+  background: var(--seele-controle);
+  border: 1px solid var(--seele-controle-borda);
+}
+.sessao-navegacao button:hover {
+  color: var(--seele-osso);
+  background: var(--seele-controle-hover);
+  border-color: var(--seele-controle-borda);
+}
+/* Aberta, a porta diz isso na cor do acento, por cima do `:hover`. */
+.sessao-navegacao button[aria-expanded="true"] {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
+}
+.sessao-navegacao button:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+.sessao-navegacao .linha-pessoas { margin-left: auto; }
 @media (max-width: 1240px) {
   :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .sessao-navegacao { display: flex; }
 }
@@ -3893,7 +3937,8 @@ button.linha-nome:hover { text-decoration: underline; }
     padding: 4px 8px 8px; gap: 8px;
   }
   :root:not([data-casca="celular"]) #tela-sessao:not([data-vista="ligacao"]) .paineis > .trilha { display: flex; }
-  :root:not([data-casca="celular"]) .sessao-navegacao { padding: 4px 8px; flex-wrap: wrap; }
+  /* A grade aqui tem 8px de margem e de vão: a barra acompanha. */
+  :root:not([data-casca="celular"]) .sessao-navegacao { margin: 4px 8px; flex-wrap: wrap; }
 }
 
 /* ==========================================================================

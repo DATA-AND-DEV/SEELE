@@ -709,6 +709,11 @@ jobs:
       - run: node apps/seele-app/bancada/anexo-com-previa-aberta.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # As portas das gavetas na janela estreita (1.0.1): uma barra com a
+      # superfície dos painéis, na grade, com cada porta do lado do que ela abre.
+      - run: node apps/seele-app/bancada/navegacao-estreita.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # A notificação do sistema na página de navegador, com a ponte de verdade e
       # um `Notification` de mentira: a opção nasce desligada, a permissão é
       # pedida dentro do clique, a recusa do navegador fica dita, e a menção e o
