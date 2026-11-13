@@ -474,6 +474,11 @@ anterior ficou ao lado, em `/opt/seele/seele-encontro.2026-11-12.bak`; voltar é
 copiá-lo de volta e `systemctl restart seele-encontro`. O reinício derrubou os
 registros em memória, que os anfitriões refazem sozinhos.
 
+**Reimplantado em 13/11/2026**, do commit `7ef9a3e3` (sha256 `719b94e0…`; o anterior ficou em
+`/opt/seele/seele-encontro.2026-11-13.bak`), pelo conserto da recusa cortada: o ponto engole a
+sobra do pedido antes de fechar. Conferido de fora: o `sondar` com `--exige-enc2 --exige-enc3`
+passou, e três pedidos de 30 kB ao `/sinal/1` voltaram `413` inteiros.
+
 Conferido de fora depois da troca: `sondar --exige-enc2 --exige-enc3` nas duas
 famílias, o sinal com o CORS de `https://seele.sh`, e a conferência prévia do
 `publicar.sh`. **A impressão DTLS no sinal não foi exercitada no ponto
