@@ -845,8 +845,10 @@ def entrada_desfechos(pg: Page) -> list[str]:
     if tomado["campo"] != {"valor": "", "invalido": "true"} or f["desfechos"]["apelido-tomado"][0] not in tomado["avisos"]:
         falhas.append(f"o apelido tomado não devolve o campo vazio e marcado: {tomado}")
     gasto = tentar("rafa2", '["CredentialRejected"]')
-    if gasto["avisos"][:1] != [f["desfechos"]["convite-gasto"][0]] or [t for t, _ in gasto["acoes"]] != [f["entrarEm"]["servidores"]]:
-        falhas.append(f"o convite gasto depois do apelido tomado diz {gasto['avisos']}, com {gasto['acoes']}")
+    # A credencial recusada não encerra (1.1.1): o servidor pode ter senha, e a
+    # tela diz as duas possibilidades e oferece ENTRAR COM A SENHA.
+    if gasto["avisos"][:1] != [f["desfechos"]["segredo-recusado"][0]] or [t for t, _ in gasto["acoes"]][:1] != [f["entrarEm"]["entrarComASenha"]]:
+        falhas.append(f"a credencial recusada depois do apelido tomado diz {gasto['avisos']}, com {gasto['acoes']}")
     tokens = pg.evaluate("window.__conexoes.map((c) => c.credencial)")
     if tokens != ["7K4MNPQRSTVWXYZ23456", "7K4MNPQRSTVWXYZ23456"]:
         falhas.append(f"as duas entradas levaram {tokens}")

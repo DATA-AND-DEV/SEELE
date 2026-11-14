@@ -2058,6 +2058,10 @@ const FRASES_DA_PORTA_AO_HOSPEDAR = Object.freeze({
  */
 const FRASES_DA_SENHA_NA_ENTRADA = Object.freeze({
   nota: "Se este servidor tem senha, digite-a aqui. Ela não vem no link: quem hospeda é quem a passa.",
+  // Os dois rótulos, para a entrada pelo link do navegador (`celular-entrada.js`);
+  // na entrada do app eles estão na marcação.
+  rotulo: "SENHA DO SERVIDOR",
+  entrar: "ENTRAR COM A SENHA",
 });
 
 /**
@@ -3707,6 +3711,11 @@ const FRASES_DO_CELULAR = Object.freeze({
       apelido: "COMO OS OUTROS VÃO TE CHAMAR",
       primeiraEntrada: "Sua identidade fica neste navegador. Não é transferida para outro aparelho.",
       entrar: "ENTRAR",
+      // A senha do servidor, pedida depois de uma credencial recusada: as
+      // mesmas palavras da entrada do app (`FRASES_DA_SENHA_NA_ENTRADA`).
+      senha: FRASES_DA_SENHA_NA_ENTRADA.rotulo,
+      senhaNota: FRASES_DA_SENHA_NA_ENTRADA.nota,
+      entrarComASenha: FRASES_DA_SENHA_NA_ENTRADA.entrar,
       agoraNao: "AGORA NÃO",
       servidores: "SERVIDORES DESTE APARELHO",
     }),
@@ -3779,8 +3788,11 @@ const FRASES_DO_CELULAR = Object.freeze({
         "A entrada parou para não perder sua chave. Mantenha esta página aberta e toque ENTRAR de novo."]),
       "apelido-tomado": Object.freeze(["ESTE APELIDO JÁ É DE OUTRA CHAVE NESTE SERVIDOR",
         "Se for outra pessoa, escolha outro. Se for você, este aparelho perdeu a identidade, e quem hospeda libera o nome. O convite continua valendo."]),
-      "convite-gasto": Object.freeze(["ESTE CONVITE JÁ FOI USADO",
-        "Cada convite entra uma vez. Peça um link novo a quem hospeda."]),
+      // O servidor recusa igual o convite já usado e a senha errada (spec 08),
+      // e a tela não sabe qual foi: diz as duas, e o campo da senha vem junto.
+      // Era «ESTE CONVITE JÁ FOI USADO», que num servidor com senha era falso.
+      "segredo-recusado": Object.freeze(["O SERVIDOR NÃO ACEITOU ESTA ENTRADA",
+        "Ou este convite já foi usado, ou o servidor tem senha. Com a senha, digite-a abaixo; sem ela, peça um link novo a quem hospeda."]),
       "convite-vencido": Object.freeze(["ESTE CONVITE VENCEU",
         "Peça um link novo a quem hospeda."]),
       // A PA-53: o navegador não separa servidor fora do ar de chave trocada.

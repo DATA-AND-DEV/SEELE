@@ -23,8 +23,10 @@
 //    haver tentativa, e nada mais chega ao servidor;
 // 4. os estados, em ordem de precedência, e nada conecta ao abrir;
 // 5. o `apelido-tomado` e o `sem-rede` não gastam a tentativa; o
-//    `CredentialRejected` encerra, como `convite-gasto` (na 0.17 o link não
-//    vence: não há certificados curtos);
+//    `CredentialRejected` também não a encerra (1.1.1): é `segredo-recusado`,
+//    porque o servidor pode ter senha, e a senha digitada vai no lugar do
+//    convite na tentativa seguinte (na 0.17 o link não vence: não há
+//    certificados curtos);
 // 6. o `persist()` é pedido antes de a chave nascer;
 // 7. o fragmento sai da barra na carga, e o link da carga é entregue uma vez;
 // 8. quem já é conhecido entra pela chave, sem gastar o convite;
@@ -417,25 +419,35 @@ async function principal() {
     // 5. O que segue e o que encerra.
     const outra2 = "22".repeat(32);
     const caso5 = await rodar(async (l) => {
-      window.servidor.roteiro = [{ Refused: { reason: "NicknameTaken" } }, "SemResposta", { Refused: { reason: "CredentialRejected" } }];
+      // A quarta entrada leva a senha digitada, a quinta é recusada de novo (a
+      // senha errada não é guardada), e a sexta volta ao convite do link.
+      window.servidor.roteiro = [{ Refused: { reason: "NicknameTaken" } }, "SemResposta", { Refused: { reason: "CredentialRejected" } },
+        { Refused: { reason: "CredentialRejected" } }];
       const identidade = await window.criar();
       await identidade.abrir(l);
-      return [await identidade.entrar("ana"), await identidade.entrar("ana2"), await identidade.entrar("ana3"), await identidade.entrar("ana4")];
+      const tres = [await identidade.entrar("ana"), await identidade.entrar("ana2"), await identidade.entrar("ana3")];
+      const pede = identidade.ler().credencialRecusada;
+      const comSenha = await identidade.entrar("ana3", "senha-digitada-1");
+      const pedeDeNovo = identidade.ler().credencialRecusada;
+      const semSenha = await identidade.entrar("ana3");
+      return [...tres, comSenha, semSenha, pede, pedeDeNovo];
     }, link({ fp: outra2 }));
     const caso5Hellos = await rodar(() => window.servidor.entradas.splice(0));
     confere("5", caso5[0].erro === "apelido-tomado" && caso5[1].erro === "sem-rede", `o que segue: ${JSON.stringify(caso5)}`);
-    confere("5", caso5[2].erro === "convite-gasto" && caso5[3].erro === "sem-tentativa", `o que encerra: ${JSON.stringify(caso5)}`);
-    confere("5", caso5Hellos.length === 3 && caso5Hellos.every((h) => h.token === TOKEN), `o apelido tomado e a rede gastaram a tentativa: ${JSON.stringify(caso5Hellos.map((h) => h.token))}`);
+    confere("5", caso5[2].erro === "segredo-recusado" && caso5[5] === true, `a credencial recusada encerrou a tentativa, ou não pede a senha: ${JSON.stringify(caso5)}`);
+    confere("5", caso5[3].erro === "segredo-recusado" && caso5[6] === true && caso5[4].ok === true, `a senha recusada, e a volta sem ela: ${JSON.stringify(caso5)}`);
+    confere("5", caso5Hellos.length === 5 && JSON.stringify(caso5Hellos.map((h) => h.token)) === JSON.stringify([TOKEN, TOKEN, TOKEN, "senha-digitada-1", TOKEN]),
+      `o que cada entrada levou como credencial: ${JSON.stringify(caso5Hellos.map((h) => h.token))}`);
     // Na 0.17 o link não vence: a recusa que o servidor dá igual a todo convite
-    // que não vale (spec 08) é sempre `convite-gasto`, mesmo com o relógio
-    // muito à frente.
+    // que não vale e a toda senha errada (spec 08) é sempre `segredo-recusado`,
+    // mesmo com o relógio muito à frente.
     const gasto = await rodar(async (l) => {
       window.servidor.roteiro = [{ Refused: { reason: "CredentialRejected" } }];
       const identidade = await window.criar({ agora: () => Date.now() + 400 * 86400_000 });
       await identidade.abrir(l);
       return identidade.entrar("ana");
     }, link({ fp: "33".repeat(32) }));
-    confere("5", gasto.erro === "convite-gasto", `o convite recusado com o relógio à frente: ${JSON.stringify(gasto)}`);
+    confere("5", gasto.erro === "segredo-recusado", `o convite recusado com o relógio à frente: ${JSON.stringify(gasto)}`);
     await rodar(() => window.servidor.entradas.splice(0));
 
     // 12. Outro link aberto no meio de uma entrada. Cada caso abre a tentativa

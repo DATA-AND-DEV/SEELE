@@ -320,8 +320,13 @@ function nascerAChave() {
  *   bancada.
  */
 function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPonte, agora = relogioDaPagina, instalado = estaInstalado, casca = cascaDaPagina }) {
-  /** O que é segredo nesta tentativa, e só aqui: o token e o link que o carrega. */
-  const segredos = { credencial: null, link: null };
+  /**
+   * O que é segredo nesta tentativa, e só aqui: o token e o link que o carrega,
+   * e a senha do servidor que a pessoa digitou depois de uma recusa (1.1.1). A
+   * senha fica só na memória da tentativa, para a volta do aceite de MODs e a
+   * do apelido tomado a levarem de novo; nenhuma delas vai ao banco.
+   */
+  const segredos = { credencial: null, link: null, senha: null };
   /** A tentativa: o link sem o token, o servidor já conhecido e a chave. */
   let tentativa = null;
   /** Quantas vezes a tentativa mudou: quem espera confere se ainda é a vez dele. */
@@ -331,6 +336,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   function esquecer() {
     segredos.credencial = null;
     segredos.link = null;
+    segredos.senha = null;
   }
 
   function encerrar() {
@@ -365,6 +371,9 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       valeAte: lido?.ate ?? null,
       podeInstalar: pedidoDeInstalar !== null,
       persistencia: tentativa.persistencia,
+      // O servidor recusou a credencial desta tentativa: a tela oferece a
+      // senha do servidor, e a ponte da casca larga a entrega ao `entrar`.
+      credencialRecusada: Boolean(tentativa.credencialRecusada),
     };
   }
 
@@ -457,15 +466,25 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     if (razao === "AdmissionDenied") return { erro: "admissao-recusada" };
     if (SEM_REDE.includes(razao)) return { erro: "sem-rede", segue: true };
     if (razao === "CredentialRejected") {
-      // O servidor responde igual a todo convite que não vale (spec 08): o
-      // que se sabe daqui é a validade do link.
-      return { erro: venceu(tentativa.lido) ? "convite-vencido" : "convite-gasto" };
+      // O servidor responde igual a todo convite que não vale e a toda senha
+      // errada (spec 08): o que se sabe daqui é a validade do link. Vencido, a
+      // tentativa acaba. Senão, **ela segue** (1.1.1): o servidor pode ter
+      // senha, o link não a leva (ADR 0006), e a tela oferece o campo dela.
+      // Era `convite-gasto`, que encerrava: num servidor com senha, quem
+      // entrava pela página lia «este convite já foi usado» e não tinha saída.
+      if (venceu(tentativa.lido)) return { erro: "convite-vencido" };
+      return { erro: "segredo-recusado", segue: true };
     }
     return { erro: "recusado", razao: typeof razao === "string" ? razao : JSON.stringify(razao) };
   }
 
-  /** Entra no servidor do link com `apelido`. A aba móvel é permitida, com aviso na UI. */
-  async function entrar(apelido) {
+  /**
+   * Entra no servidor do link com `apelido`. A aba móvel é permitida, com aviso na UI.
+   *
+   * `senha` é a senha do servidor, quando a pessoa a digitou depois de uma
+   * credencial recusada: vai no lugar do convite, e fica com a tentativa.
+   */
+  async function entrar(apelido, senha = null) {
     if (!tentativa || !tentativa.lido) return { erro: "sem-tentativa" };
     if (tentativa.bancoIndisponivel) return { erro: "armazenamento-indisponivel" };
     if (venceu(tentativa.lido)) {
@@ -482,6 +501,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     const substituida = () => vez !== minha || operacaoAtual !== controle;
     const esta = tentativa;
     const { lido } = esta;
+    if (senha != null) segredos.senha = senha;
+    esta.credencialRecusada = false;
     const preparo = { sinal: controle.signal, ate: Date.now() + PRAZO_DA_PREPARACAO_DA_ENTRADA_MS };
     let resposta = null;
     let soltou = false;
@@ -522,7 +543,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
         chave: esta.chave,
         conhecido: Boolean(esta.conhecido),
       };
-      const credencial = esta.conhecido ? null : segredos.credencial;
+      const credencial = segredos.senha ?? (esta.conhecido ? null : segredos.credencial);
       const registro = {
         impressao: lido.impressao,
         endereco: lido.alvo,
@@ -563,6 +584,11 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
         }
         if (!segue) encerrar();
         else if (resultado.erro === "mods-a-aceitar") tentativa.aguardaMods = true;
+        else if (resultado.erro === "segredo-recusado") {
+          // A senha que não abriu não é levada de novo; a tela pede outra.
+          segredos.senha = null;
+          tentativa.credencialRecusada = true;
+        }
         return { ...resultado, motivo: erro };
       }
       // A sessão já existe: cancelar a espera do banco a solta imediatamente.
@@ -638,7 +664,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
    * convite. Resolve como o `entrar`, e com `outra-linha` quando o servidor
    * guardado é de um Servidor 1 (a 0.16): a tela diz «abra a 0.16».
    */
-  async function entrarNoConhecido(impressao, apelido) {
+  async function entrarNoConhecido(impressao, apelido, senha = null) {
     const minha = vez;
     let registro = null;
     try {
@@ -673,7 +699,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     // dos dois a tentativa fica aberta, e a tela pede o nome no campo da «ENTRAR EM».
     const nome = (apelido ?? "").trim() || (registro.apelido ?? "").trim();
     if (!nome) return { erro: "pede-apelido" };
-    return entrar(nome);
+    return entrar(nome, senha);
   }
 
   /** O nome do servidor, que chega no primeiro retrato depois de entrar. */

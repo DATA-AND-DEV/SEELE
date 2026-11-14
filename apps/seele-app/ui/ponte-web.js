@@ -725,7 +725,7 @@ async function lerOLink(texto) {
  * um servidor deste aparelho. Um endereço que ela não conhece não traz a chave
  * que confere quem atendeu, e é recusado com a frase.
  */
-async function entrarPeloEndereco({ server, nickname } = {}) {
+async function entrarPeloEndereco({ server, nickname, joinSecret } = {}) {
   // **Uma pessoa, e não um servidor** (ADR 0068): `@CÓDIGO` entra na sala
   // pessoal de quem tem o app, como convidada. O alvo e o vocabulário da falha
   // são da identidade pessoal (`identidade-web.js`).
@@ -745,7 +745,11 @@ async function entrarPeloEndereco({ server, nickname } = {}) {
     await identidade.abrir(texto);
     resultado = await identidade.entrar(apelido);
   } else if (identidade.ler()?.endereco === server) {
-    resultado = await identidade.entrar(apelido);
+    // **A senha do servidor, digitada depois da recusa** (1.1.1): a casca
+    // larga a manda no `joinSecret`, como o desktop, e ela só é senha quando a
+    // tentativa aberta acabou de ter a credencial recusada. Fora disso o
+    // `joinSecret` é o convite, que a identidade já tem.
+    resultado = await identidade.entrar(apelido, identidade.ler().credencialRecusada ? joinSecret ?? null : null);
   } else {
     const conhecido = (await identidade.conhecidos()).find((servidor) => servidor.endereco === server);
     if (!conhecido) {
@@ -795,7 +799,7 @@ const RECUSA_ENDERECO_SOZINHO =
  */
 async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, preparacao } = {}) {
   if (!alvo || typeof alvo !== "object" || !alvo.chave) {
-    if (typeof server === "string") return entrarPeloEndereco({ server, nickname });
+    if (typeof server === "string") return entrarPeloEndereco({ server, nickname, joinSecret });
     return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
   }
   // **Várias sessões** (E3): uma entrada nova soma, e não recusa. Só duas

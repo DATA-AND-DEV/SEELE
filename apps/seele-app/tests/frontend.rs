@@ -12427,10 +12427,18 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // O token e o link só em `segredos`, e esquecidos juntos.
         (
             "identidade-web.js",
-            "const segredos = { credencial: null, link: null };",
+            "const segredos = { credencial: null, link: null, senha: null };",
         ),
         ("identidade-web.js", "segredos.credencial = null;"),
         ("identidade-web.js", "segredos.link = null;"),
+        // A senha do servidor que a pessoa digita depois de uma credencial
+        // recusada (1.1.1): fica com a tentativa, vai ao `conectar` no lugar
+        // do convite, é esquecida com ele, e a que não abriu é esquecida já.
+        ("identidade-web.js", "segredos.senha = null;"),
+        (
+            "identidade-web.js",
+            "if (senha != null) segredos.senha = senha;",
+        ),
         (
             "identidade-web.js",
             "segredos.credencial = convite ?? null;",
@@ -12439,7 +12447,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // Quem já é conhecido entra pela chave, e não gasta o convite.
         (
             "identidade-web.js",
-            "const credencial = esta.conhecido ? null : segredos.credencial;",
+            "const credencial = segredos.senha ?? (esta.conhecido ? null : segredos.credencial);",
         ),
         (
             "identidade-web.js",
@@ -12511,6 +12519,21 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, preparacao } = {}) {",
         ),
         ("ponte-web.js", "convite: joinSecret ?? null,"),
+        // A senha do servidor na casca larga (1.1.1): o `joinSecret` do
+        // `connect` desce ao `entrarPeloEndereco`, e dali só ao `entrar` da
+        // identidade, e só depois de uma credencial recusada.
+        (
+            "ponte-web.js",
+            "async function entrarPeloEndereco({ server, nickname, joinSecret } = {}) {",
+        ),
+        (
+            "ponte-web.js",
+            "resultado = await identidade.entrar(apelido, identidade.ler().credencialRecusada ? joinSecret ?? null : null);",
+        ),
+        (
+            "ponte-web.js",
+            "if (typeof server === \"string\") return entrarPeloEndereco({ server, nickname, joinSecret });",
+        ),
         (
             "ponte-web.js",
             "linkColadoDaPonte = { texto, alvo: lido.link.alvo, impressao: lido.link.impressao };",
