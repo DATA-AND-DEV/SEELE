@@ -12274,9 +12274,10 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
 ///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
 ///    ela sai.
-/// 3. **Só quatro chamadas de `conectar` passam credencial por argumento**: o
-///    link colado, o link do lançador, a volta que aceita os MODs e a entrada
-///    pelo navegador. O RECONECTAR, a batida da espera, o hospedar e a troca de
+/// 3. **Só cinco chamadas de `conectar` passam credencial por argumento**: o
+///    link colado, o link do lançador, a volta que aceita os MODs, a entrada
+///    pelo navegador e, desde a 1.1.1, a senha do servidor que a pessoa digita
+///    debaixo de CREDENCIAL RECUSADA (`oferecerASenhaNaEntrada`). O RECONECTAR, a batida da espera, o hospedar e a troca de
 ///    servidor não passam nenhuma — uma reconexão que a passasse gastaria de
 ///    novo o convite que a entrada gastou. Desde o lote W, `conectar` anexa por
 ///    conta própria a credencial que um apelido tomado deixou
@@ -12426,10 +12427,18 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // O token e o link só em `segredos`, e esquecidos juntos.
         (
             "identidade-web.js",
-            "const segredos = { credencial: null, link: null };",
+            "const segredos = { credencial: null, link: null, senha: null };",
         ),
         ("identidade-web.js", "segredos.credencial = null;"),
         ("identidade-web.js", "segredos.link = null;"),
+        // A senha do servidor que a pessoa digita depois de uma credencial
+        // recusada (1.1.1): fica com a tentativa, vai ao `conectar` no lugar
+        // do convite, é esquecida com ele, e a que não abriu é esquecida já.
+        ("identidade-web.js", "segredos.senha = null;"),
+        (
+            "identidade-web.js",
+            "if (senha != null) segredos.senha = senha;",
+        ),
         (
             "identidade-web.js",
             "segredos.credencial = convite ?? null;",
@@ -12438,7 +12447,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // Quem já é conhecido entra pela chave, e não gasta o convite.
         (
             "identidade-web.js",
-            "const credencial = esta.conhecido ? null : segredos.credencial;",
+            "const credencial = segredos.senha ?? (esta.conhecido ? null : segredos.credencial);",
         ),
         (
             "identidade-web.js",
@@ -12510,6 +12519,21 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, preparacao } = {}) {",
         ),
         ("ponte-web.js", "convite: joinSecret ?? null,"),
+        // A senha do servidor na casca larga (1.1.1): o `joinSecret` do
+        // `connect` desce ao `entrarPeloEndereco`, e dali só ao `entrar` da
+        // identidade, e só depois de uma credencial recusada.
+        (
+            "ponte-web.js",
+            "async function entrarPeloEndereco({ server, nickname, joinSecret } = {}) {",
+        ),
+        (
+            "ponte-web.js",
+            "resultado = await identidade.entrar(apelido, identidade.ler().credencialRecusada ? joinSecret ?? null : null);",
+        ),
+        (
+            "ponte-web.js",
+            "if (typeof server === \"string\") return entrarPeloEndereco({ server, nickname, joinSecret });",
+        ),
         (
             "ponte-web.js",
             "linkColadoDaPonte = { texto, alvo: lido.link.alvo, impressao: lido.link.impressao };",
@@ -12663,7 +12687,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         }
     }
 
-    // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
+    // 3. Só cinco chamadas de `conectar` passam credencial por argumento (a do
     //    apelido tomado, `conectar` anexa sozinho: ver a parte 6). A credencial é
     //    o terceiro argumento; o quarto é o link colado (parte 7, da F6), e o quinto
     //    a ligação (tarefa 28 da F7), que leva só o nome de quem é chamado, e uma chamada com `undefined` ou `null`
@@ -12682,6 +12706,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // tentativa. Só quem não é conhecido o leva. O quarto argumento da
         // identidade é somente { sinal, ate }, sem outro caminho para o token.
         ("identidade-web.js", "alvo, apelido, credencial, preparo"),
+        // A senha do servidor, digitada debaixo de CREDENCIAL RECUSADA (1.1.1):
+        // lida do campo no envio, e entregue aqui. Não é reconexão: é a pessoa
+        // respondendo à recusa, e uma senha não se gasta.
+        ("tela-boot.js", "alvo, apelido, senha"),
     ];
     let mut levam: Vec<(String, String)> = Vec::new();
     for nome in ui_files(".js") {
@@ -12731,8 +12759,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 .iter()
                 .any(|(dono, conhecidos)| dono == nome && conhecidos == argumentos),
             "`conectar` passou a levar credencial em `{nome}`: conectar({argumentos}).\n\
-             Só o link colado, o link do lançador, a volta que aceita os MODs e a \
-             entrada pelo navegador levam \
+             Só o link colado, o link do lançador, a volta que aceita os MODs, a \
+             entrada pelo navegador e a senha digitada depois da recusa levam \
              uma; uma reconexão que a levasse gastaria de novo o convite que a \
              entrada gastou."
         );
@@ -12740,7 +12768,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     assert_eq!(
         levam.len(),
         LEVAM.len(),
-        "as chamadas de `conectar` com credencial não são as quatro conhecidas: {levam:?}"
+        "as chamadas de `conectar` com credencial não são as cinco conhecidas: {levam:?}"
     );
     let reconectar = js_function(&read("ui/tela-fim.js"), "async function reconectar(");
     assert!(
@@ -13021,11 +13049,17 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         .map(str::trim)
         .filter(|linha| names(linha, "join_secret"))
         .collect();
+    // As duas últimas são de `testes/a_porta_de_um_servidor_novo.rs`: quem bate
+    // de outra máquina num servidor hospedado com senha, pela FFI, com a senha
+    // ou sem ela, e quem hospeda, sem. Um teste, que confere no rastro
+    // capturado que a senha não foi a registro nenhum.
     assert_eq!(
         nomeiam,
         [
             "join_secret: Option<String>,",
             "join_secret: join_secret.filter(|s| !s.trim().is_empty()),",
+            "join_secret: segredo.map(str::to_owned),",
+            "join_secret: None,",
         ],
         "o `main.rs` passou a nomear o `join_secret` fora do parâmetro do `connect` \
          e do campo da configuração; confira que ele não vai a `tracing`, a arquivo \
@@ -20685,6 +20719,61 @@ fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
     );
 }
 
+/// **O padrão do microfone desta instalação é assentado antes de a janela
+/// existir.** Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem
+/// tecla, e quem já usava e nunca escolheu continua nela.
+///
+/// O que separa os dois é a chave da identidade e o arquivo de preferências
+/// (`seele_ffi::assentar_o_padrao_do_microfone`; a FFI prova as duas contas em
+/// `quem_chega_numa_instalacao_nova_entra_com_o_microfone_por_voz` e
+/// `quem_ja_usava_e_nunca_escolheu_continua_na_tecla`). E a chave nasce quando a
+/// janela pede o código da pessoa ou conecta: assentado depois de a janela
+/// existir, toda instalação nova já teria chave, pareceria usada, e ficaria na
+/// tecla — o pedido deixaria de valer sem teste nenhum reprovar.
+///
+/// E a tela de entrada lê o modo que vai valer, e não só o escolhido: sem isso
+/// a configuração de quem nunca escolheu não marca nenhum dos três modos.
+#[test]
+fn o_padrao_do_microfone_e_assentado_antes_de_a_janela_existir() {
+    let principal = read("src/main.rs");
+    let Some(setup) = principal.find(".setup(move |app|") else {
+        panic!("o `setup` do app saiu do main.rs, e este guarda mediu outra coisa");
+    };
+    let depois = &principal[setup..];
+    let Some(janela) = depois.find("WebviewWindowBuilder::from_config(") else {
+        panic!("o `setup` não cria mais a janela, e este guarda mediu outra coisa");
+    };
+    let Some(assenta) = depois.find("assentar_o_padrao_do_microfone(app.handle())") else {
+        panic!(
+            "o `setup` não assenta mais o padrão do microfone: quem chega fica na tecla, \
+             que é o padrão de antes"
+        );
+    };
+    assert!(
+        assenta < janela,
+        "o padrão do microfone é assentado depois de a janela existir: ela já pode ter \
+         criado a chave, e a instalação nova passa por usada"
+    );
+    let assentar = body_of(&principal, "fn assentar_o_padrao_do_microfone(");
+    assert!(
+        assentar
+            .contains("seele_ffi::assentar_o_padrao_do_microfone(&config_dir(app), &mut ajustes)"),
+        "a casca não pergunta mais à FFI se a instalação já era usada"
+    );
+    let lido = body_of(&principal, "fn modo_de_voz_escolhido(");
+    assert!(
+        lido.contains("modo_do_microfone()"),
+        "a tela de entrada voltou a ler só o modo escolhido: para quem nunca escolheu, a \
+         configuração não marca nenhum dos três modos"
+    );
+    let conectar = body_of(&principal, "async fn connect(");
+    assert!(
+        !conectar.contains("assentar_o_padrao_do_microfone"),
+        "o `connect` assenta o padrão do microfone: ali a chave já existe, e toda \
+         instalação pareceria usada"
+    );
+}
+
 /// **A conversa pedida numa sessão não é escrita noutra.** Rodada 1 do lote
 /// I-b, M-1.
 ///
@@ -20783,6 +20872,13 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
             "geracaoDoAvisoDeFone",
             "da execução: a geração em que a faixa de fone acendeu, comparada com \
              `geracaoDaSessao`, que já muda a cada sessão",
+        ),
+        (
+            "avisoDoMicrofoneLido",
+            "desta máquina: se a pessoa já leu que o microfone abre por voz; é a cópia em \
+             memória de uma marca do armazenamento da janela, e a frase é sobre o microfone \
+             dela, e não sobre um servidor. Esquecida ao sair, a faixa voltaria em cada \
+             servidor para quem já disse ENTENDI",
         ),
         (
             "limiteDaMensagem",
@@ -31939,5 +32035,166 @@ fn a_opcao_das_notificacoes_nasce_desligada_ao_lado_dos_alertas() {
         !ouvinte.trim_start().starts_with("async") && !ouvinte.contains("await "),
         "o ouvinte da opção espera antes de `definir`: na página de navegador a permissão \
          sairia do gesto, e o navegador não a pergunta:\n{ouvinte}"
+    );
+}
+
+/// **Quem pode entrar num servidor novo se escolhe na tela de preparar, e a
+/// senha escolhida só vai ao `hospedar`** (pedido do dono, 13/11/2026).
+///
+/// O comportamento, com o teclado e as três janelas, é da bancada
+/// `porta-ao-hospedar.cjs`; que o servidor nasce com a senha antes da primeira
+/// conexão é de `a_porta_de_um_servidor_novo`, no `main.rs`. Aqui fica o que se
+/// lê do texto, e que uma edição distraída desfaz sem nenhuma delas rodar:
+///
+/// 1. **Um grupo de opções de verdade**, com o portão marcado: um `radiogroup`
+///    com nome, dois rádios nativos do mesmo `name`, cada um ligado à linha que
+///    o explica, e só o do portão com `checked`.
+/// 2. **Os campos da senha são de senha**, têm rótulo, não trazem valor nem
+///    `data-*` na marcação, e nascem escondidos.
+/// 3. **Cada linha de `tela-boot.js` que toca uma senha de servidor está na
+///    lista**: a de um servidor novo, e a que quem entra digita debaixo de
+///    CREDENCIAL RECUSADA. Uma linha nova — um `console.warn`, um `dataset`,
+///    um `localStorage`, um `registrarNoAnfitriao` — reprova aqui até alguém
+///    olhar para ela.
+/// 4. **O `hospedar` leva `senha`, e nenhum outro `invoke` do arquivo leva.**
+#[test]
+fn a_porta_de_um_servidor_novo_e_um_grupo_de_opcoes_e_a_senha_so_vai_ao_hospedar() {
+    let pagina = without_comments(&read("ui/index.html"));
+    let cartao = pagina
+        .split("<div class=\"area-cartao preparar-porta\">")
+        .nth(1)
+        .and_then(|resto| resto.split("<div id=\"preparar-versoes\"").next())
+        .unwrap_or_else(|| panic!("o cartão QUEM PODE ENTRAR saiu da tela de preparar"));
+    let antes = pagina
+        .split("<div class=\"area-cartao preparar-porta\">")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        antes.rfind("id=\"preparar-do-novo\"") > antes.rfind("id=\"tela-preparar\""),
+        "o cartão QUEM PODE ENTRAR saiu de `#preparar-do-novo`: quem adota o servidor que já \
+         estava aqui passaria a ganhar a pergunta de um servidor novo"
+    );
+
+    // 1. O grupo de opções.
+    assert!(
+        cartao.contains("role=\"radiogroup\" aria-labelledby=\"preparar-porta-titulo\"")
+            && cartao.contains("<h2 id=\"preparar-porta-titulo\""),
+        "a escolha de quem pode entrar não é um `radiogroup` com nome"
+    );
+    let radios: Vec<&str> = cartao
+        .split("<input type=\"radio\"")
+        .skip(1)
+        .map(|resto| resto.split('>').next().unwrap_or_default())
+        .collect();
+    assert_eq!(radios.len(), 2, "o grupo não tem duas opções: {radios:?}");
+    for (radio, nota) in radios
+        .iter()
+        .zip(["preparar-porta-portao-nota", "preparar-porta-senha-nota"])
+    {
+        assert!(
+            radio.contains("name=\"preparar-porta\"")
+                && radio.contains(&format!("aria-describedby=\"{nota}\""))
+                && cartao.contains(&format!("<span id=\"{nota}\"")),
+            "uma opção saiu do grupo, ou perdeu a linha que a explica: {radio}"
+        );
+    }
+    assert!(
+        names(radios[0], "checked")
+            && radios[0].contains("value=\"portao\"")
+            && !names(radios[1], "checked")
+            && radios[1].contains("value=\"senha\""),
+        "COM A SUA APROVAÇÃO não é a opção que vem marcada: {radios:?}"
+    );
+
+    // 2. Os campos da senha.
+    assert!(
+        cartao
+            .contains("<div id=\"preparar-senha-campos\" class=\"preparar-senha-campos\" hidden>"),
+        "os campos da senha não nascem escondidos"
+    );
+    for campo in ["preparar-senha", "preparar-senha-de-novo"] {
+        let marca = cartao
+            .split(&format!("<input id=\"{campo}\""))
+            .nth(1)
+            .and_then(|resto| resto.split('>').next())
+            .unwrap_or_else(|| panic!("o campo `{campo}` saiu do cartão"));
+        assert!(
+            marca.contains("type=\"password\"") && marca.contains("autocomplete=\"new-password\""),
+            "`{campo}` não é um campo de senha nova: {marca}"
+        );
+        assert!(
+            !marca.contains("value=") && !marca.contains("data-") && !marca.contains("name="),
+            "`{campo}` traz valor, `data-*` ou nome de formulário na marcação: {marca}"
+        );
+        let rotulo = cartao
+            .split(&format!("<input id=\"{campo}\""))
+            .next()
+            .and_then(|antes| {
+                antes
+                    .rsplit("<label class=\"preparar-senha-campo\">")
+                    .next()
+            })
+            .unwrap_or_default();
+        assert!(
+            rotulo.contains("<span class=\"rotulo\">") && !rotulo.contains("</label>"),
+            "`{campo}` não está dentro de um rótulo com texto"
+        );
+    }
+
+    // 3. Cada linha que toca a senha.
+    let script = without_comments(&read("ui/tela-boot.js"));
+    let tocam: Vec<&str> = script
+        .lines()
+        .map(str::trim)
+        .filter(|linha| {
+            // Sem os textos entre aspas: `"preparar-senha"` é o nome de um
+            // campo, e não a senha.
+            let sem_literais: String = linha.split('"').step_by(2).collect();
+            names(&sem_literais, "senhaDoNovo")
+                || names(&sem_literais, "senha")
+                || linha.contains("$(\"preparar-senha\").value")
+                || linha.contains("$(\"preparar-senha-de-novo\").value")
+        })
+        .collect();
+    assert_eq!(
+        tocam,
+        [
+            // Quem entra: a senha digitada debaixo de CREDENCIAL RECUSADA.
+            "const senha = campo.value;",
+            "if (!recusaPelaSenha || senha.trim() === \"\") {",
+            "conectar(alvo, apelido, senha).catch((falha) => console.warn(\"conectar:\", falha));",
+            // Quem hospeda: a senha de um servidor novo.
+            "async function hospedar(senhaDoNovo = null) {",
+            "senha: senhaDoNovo,",
+            "if (senhaDoNovo !== null && !subiu) {",
+            "if (!$(\"preparar-porta-senha\").checked) return { senha: null };",
+            "const senha = $(\"preparar-senha\").value;",
+            "if (senha.trim() === \"\") return { recusa: \"Vazia\", campo: \"preparar-senha\" };",
+            "if (senha.trim() !== senha) return { recusa: \"ComEspacoNaPonta\", campo: \"preparar-senha\" };",
+            "if (Number.isFinite(regrasDaSenha?.minimo) && [...senha].length < regrasDaSenha.minimo) {",
+            "if (Number.isFinite(regrasDaSenha?.maximo_em_bytes) && bytesDe(senha) > regrasDaSenha.maximo_em_bytes) {",
+            "if ($(\"preparar-senha-de-novo\").value !== senha) {",
+            "return { senha };",
+            "await hospedar(porta.senha);",
+        ],
+        "uma linha de `tela-boot.js` passou a tocar uma senha de servidor (ou deixou de). \
+         Confira que ela não vai a console, a registro, a `data-*`, a evento nem a \
+         armazenamento, e acerte a lista"
+    );
+
+    // 4. Só o `hospedar` a leva pela ponte.
+    let hospedar = script
+        .split("invoke(\"hospedar\", {")
+        .nth(1)
+        .and_then(|resto| resto.split("});").next())
+        .unwrap_or_else(|| panic!("o `invoke(\"hospedar\")` saiu de tela-boot.js"));
+    assert!(
+        hospedar.contains("senha: senhaDoNovo,"),
+        "o `hospedar` não leva a senha escolhida: o servidor subiria no portão"
+    );
+    assert_eq!(
+        script.matches("senhaDoNovo").count(),
+        3,
+        "a senha de um servidor novo passou a ser lida em mais um lugar de tela-boot.js"
     );
 }

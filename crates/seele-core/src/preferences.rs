@@ -59,6 +59,13 @@ const PLAYBACK: &str = "playback";
 /// Spelled once, for the reason [`CAPTURE`] gives.
 const VOICE_MODE: &str = "voice_mode";
 
+/// O nome, em disco, do padrão do microfone **desta instalação**.
+///
+/// Não é escolha de ninguém: é o que
+/// [`Preferences::assentar_o_padrao_do_microfone`] escreve uma vez, e o valor é
+/// um dos nomes de [`VoiceMode::as_str`].
+const PADRAO_DO_MICROFONE: &str = "padrao_do_microfone";
+
 /// The name of the push-to-talk key setting on disk.
 ///
 /// Spelled once, for the reason [`CAPTURE`] gives.
@@ -94,6 +101,12 @@ pub struct Preferences {
     capture: Option<String>,
     playback: Option<String>,
     voice_mode: Option<VoiceMode>,
+    /// O modo de quem não escolheu, **nesta instalação**. `None` é «ninguém
+    /// assentou ainda»: ver [`Preferences::assentar_o_padrao_do_microfone`].
+    padrao_do_microfone: Option<VoiceMode>,
+    /// Se o arquivo já existia quando foi aberto. Não vai para o disco: é uma
+    /// das duas provas de que esta instalação já era usada.
+    havia_arquivo: bool,
     push_to_talk_key: Option<String>,
     nickname: Option<String>,
     /// As duas metades do consentimento do caminho entre pares — §5.
@@ -190,6 +203,8 @@ impl Preferences {
             capture: None,
             playback: None,
             voice_mode: None,
+            padrao_do_microfone: None,
+            havia_arquivo: false,
             push_to_talk_key: None,
             nickname: None,
             pares_que_atende: None,
@@ -203,6 +218,7 @@ impl Preferences {
             notificacoes_do_sistema: None,
         };
         if let Some(bytes) = crate::arquivo_local::ler(&settings.path, arquivo_valido)? {
+            settings.havia_arquivo = true;
             let text = String::from_utf8(bytes)?;
             for line in text.lines() {
                 let Some((name, value)) = line.split_once('\t') else {
@@ -220,6 +236,12 @@ impl Preferences {
                     // `VoiceMode::from_name`.
                     VOICE_MODE => {
                         settings.voice_mode = value.as_deref().and_then(VoiceMode::from_name)
+                    }
+                    // Um nome que esta versão não conhece lê como não
+                    // assentado, pela mesma regra do `voice_mode` acima.
+                    PADRAO_DO_MICROFONE => {
+                        settings.padrao_do_microfone =
+                            value.as_deref().and_then(VoiceMode::from_name)
                     }
                     PUSH_TO_TALK_KEY => settings.push_to_talk_key = value,
                     NICKNAME => settings.nickname = value,
@@ -341,18 +363,20 @@ impl Preferences {
         self.write()
     }
 
-    /// How the microphone opens. `None` is what `specs/03-audio.md` defaults to.
+    /// How the person chose the microphone to open. `None` is «never chose»,
+    /// and what is in force then is [`Preferences::modo_do_microfone`].
     ///
-    /// Push-to-talk is the default *because it never false-triggers*, and that
-    /// argument is about a person who has not chosen. Somebody who has chosen
-    /// voice activation and finds push-to-talk again the next morning was not
-    /// protected by the default — they were ignored by it.
+    /// A default is an argument about a person who has not chosen. Somebody
+    /// who has chosen voice activation and finds push-to-talk again the next
+    /// morning — or the other way around — was not protected by the default:
+    /// they were ignored by it.
     #[must_use]
     pub const fn voice_mode(&self) -> Option<VoiceMode> {
         self.voice_mode
     }
 
-    /// Writes down how the microphone opens. `None` goes back to the default.
+    /// Writes down how the microphone opens. `None` goes back to the default
+    /// of this installation.
     ///
     /// # Errors
     ///
@@ -360,6 +384,78 @@ impl Preferences {
     pub fn set_voice_mode(&mut self, mode: Option<VoiceMode>) -> Result<()> {
         self.voice_mode = mode;
         self.write()
+    }
+
+    /// Como o microfone abre agora: o que a pessoa escolheu; sem escolha, o
+    /// padrão assentado nesta instalação.
+    ///
+    /// **Sem nenhum dos dois, a tecla** ([`VoiceMode::DE_QUEM_JA_USAVA`]), e
+    /// não o modo de quem chega. Uma instalação que ninguém assentou é uma de
+    /// que não se sabe nada — o disco recusou a escrita, ou quem abriu o
+    /// arquivo foi um cliente que não assenta —, e errar para o lado da tecla é
+    /// um microfone que espera; errar para o outro é um que abre sozinho na
+    /// máquina de quem nunca pediu.
+    #[must_use]
+    pub fn modo_do_microfone(&self) -> VoiceMode {
+        self.voice_mode
+            .or(self.padrao_do_microfone)
+            .unwrap_or(VoiceMode::DE_QUEM_JA_USAVA)
+    }
+
+    /// O padrão assentado nesta instalação, ou `None` se ninguém assentou.
+    #[must_use]
+    pub const fn padrao_do_microfone(&self) -> Option<VoiceMode> {
+        self.padrao_do_microfone
+    }
+
+    /// Se o arquivo de preferências já existia quando foi aberto.
+    ///
+    /// Uma das provas de que a instalação já era usada; a outra é a chave da
+    /// identidade, e quem sabe onde ela mora é quem chama.
+    #[must_use]
+    pub const fn havia_arquivo(&self) -> bool {
+        self.havia_arquivo
+    }
+
+    /// Assenta, **uma vez**, o modo de quem não escolheu nesta instalação, e o
+    /// devolve.
+    ///
+    /// # Por que isto é escrito, e não calculado
+    ///
+    /// O padrão passou da tecla para o microfone aberto, e o pedido é sobre quem chega: «o
+    /// padrão agora para novos usuários». A escolha só vai para o disco quando
+    /// a pessoa escolhe, então «nunca escolheu» é o estado de quem instalou
+    /// hoje **e** o de quem usa há um ano sem abrir a configuração. Trocar o
+    /// padrão sem separar os dois faria o microfone do segundo passar a abrir
+    /// sozinho depois de uma atualização, sem ele ter mexido em nada.
+    ///
+    /// O que separa os dois só existe na primeira abertura desta versão:
+    /// depois dela, a instalação nova também tem chave e arquivo. Por isso a
+    /// resposta é gravada na hora em que é verdadeira, e nunca mais refeita.
+    ///
+    /// `ja_usava` é de quem chama. Já assentado, não escreve nada e devolve o
+    /// que estava.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito. O valor **não** fica na
+    /// memória nesse caso: [`Self::modo_do_microfone`] continua respondendo a
+    /// tecla, que é o lado seguro.
+    pub fn assentar_o_padrao_do_microfone(&mut self, ja_usava: bool) -> Result<VoiceMode> {
+        if let Some(assentado) = self.padrao_do_microfone {
+            return Ok(assentado);
+        }
+        let padrao = if ja_usava {
+            VoiceMode::DE_QUEM_JA_USAVA
+        } else {
+            VoiceMode::DE_QUEM_CHEGA
+        };
+        self.padrao_do_microfone = Some(padrao);
+        if let Err(erro) = self.write() {
+            self.padrao_do_microfone = None;
+            return Err(erro);
+        }
+        Ok(padrao)
     }
 
     /// Which key opens the microphone in push-to-talk, or `None` for the space bar.
@@ -706,6 +802,9 @@ impl Preferences {
         // is how a second setting turns into a bug in the first one.
         let mut text = String::new();
         let modo = self.voice_mode.map(|mode| mode.as_str().to_owned());
+        let padrao_do_microfone = self
+            .padrao_do_microfone
+            .map(|mode| mode.as_str().to_owned());
         let pares = self.pares_que_atende.map(|n| n.to_string());
         let assiste = self
             .assiste_por_par
@@ -731,6 +830,7 @@ impl Preferences {
             (CAPTURE, &self.capture),
             (PLAYBACK, &self.playback),
             (VOICE_MODE, &modo),
+            (PADRAO_DO_MICROFONE, &padrao_do_microfone),
             (PUSH_TO_TALK_KEY, &self.push_to_talk_key),
             (NICKNAME, &self.nickname),
             (PARES_QUE_ATENDE, &pares),
@@ -893,6 +993,146 @@ mod tests {
         std::fs::write(&path, "voice_mode\tsussurro\n").expect("semear");
         let settings = Preferences::open(path).expect("open");
         assert_eq!(settings.voice_mode(), None);
+    }
+
+    // ---- o padrão de quem não escolheu (pedido do dono, 13/11/2026) ----
+
+    #[test]
+    fn quem_chega_numa_instalacao_nova_fala_sem_tecla() {
+        // O pedido: «o padrão agora para novos usuários […] é o microfone
+        // aberto, não usando o botão». Instalação nova é a que não tinha nem
+        // arquivo nem chave quando esta versão abriu pela primeira vez.
+        let path = scratch("padrao-de-quem-chega");
+        let mut settings = Preferences::open(path.clone()).expect("open");
+        assert!(!settings.havia_arquivo(), "a pasta nova já tinha arquivo");
+        assert_eq!(
+            settings
+                .assentar_o_padrao_do_microfone(false)
+                .expect("assentar"),
+            VoiceMode::DE_QUEM_CHEGA
+        );
+        assert_eq!(settings.modo_do_microfone(), VoiceMode::DE_QUEM_CHEGA);
+        // E não é escolha: a pessoa continua sem ter escolhido nada.
+        assert_eq!(settings.voice_mode(), None);
+        // O sempre aberto, e não a tecla (decisão do dono, 13/11/2026).
+        assert_eq!(VoiceMode::DE_QUEM_CHEGA, VoiceMode::Open);
+
+        // **A segunda abertura não muda de ideia.** Agora há arquivo (e, no
+        // produto, chave): refeita a conta, a instalação nova viraria uma que
+        // «já usava», e o microfone de quem chegou ontem voltaria para a tecla.
+        let mut de_novo = Preferences::open(path).expect("reopen");
+        assert!(de_novo.havia_arquivo());
+        assert_eq!(
+            de_novo
+                .assentar_o_padrao_do_microfone(true)
+                .expect("assentar de novo"),
+            VoiceMode::DE_QUEM_CHEGA,
+            "a segunda abertura refez a conta e devolveu a tecla a quem chegou ontem"
+        );
+        assert_eq!(de_novo.modo_do_microfone(), VoiceMode::DE_QUEM_CHEGA);
+    }
+
+    #[test]
+    fn quem_ja_usava_e_nunca_escolheu_continua_na_tecla() {
+        // O outro lado do mesmo pedido: a escolha só vai para o disco quando a
+        // pessoa escolhe, então quem usa há um ano sem abrir a configuração
+        // tem o mesmo arquivo de quem instalou hoje — sem `voice_mode`. Sem
+        // separar os dois, a atualização abriria o microfone dele sozinho.
+        let path = scratch("padrao-de-quem-ja-usava");
+        {
+            // Uma instalação de antes: tem apelido e microfone, e nenhum modo.
+            let mut antiga = Preferences::open(path.clone()).expect("open");
+            antiga.set_nickname(Some("marcela")).expect("write");
+            antiga.set_capture(Some("alsa:hw:1,0")).expect("write");
+        }
+        let mut settings = Preferences::open(path.clone()).expect("reopen");
+        assert!(settings.havia_arquivo());
+        assert_eq!(settings.voice_mode(), None);
+        assert_eq!(
+            settings
+                .assentar_o_padrao_do_microfone(settings.havia_arquivo())
+                .expect("assentar"),
+            VoiceMode::PushToTalk
+        );
+        assert_eq!(settings.modo_do_microfone(), VoiceMode::PushToTalk);
+        // Assentar não apagou o que já estava lá, e fica para a próxima abertura.
+        let depois = Preferences::open(path).expect("reopen");
+        assert_eq!(depois.nickname(), Some("marcela"));
+        assert_eq!(depois.capture(), Some("alsa:hw:1,0"));
+        assert_eq!(depois.padrao_do_microfone(), Some(VoiceMode::PushToTalk));
+        assert_eq!(depois.modo_do_microfone(), VoiceMode::PushToTalk);
+        assert_eq!(depois.voice_mode(), None);
+    }
+
+    #[test]
+    fn quem_escolheu_continua_com_o_que_escolheu() {
+        // Os três modos, nas duas instalações: o padrão é um argumento sobre
+        // quem não escolheu, e não toca em quem escolheu — inclusive em quem
+        // escolheu a tecla de propósito numa instalação nova, e em quem
+        // escolheu a voz numa antiga.
+        for ja_usava in [false, true] {
+            for modo in [
+                VoiceMode::PushToTalk,
+                VoiceMode::VoiceActivated,
+                VoiceMode::Open,
+            ] {
+                let path = scratch(&format!("escolhido-{}-{ja_usava}", modo.as_str()));
+                {
+                    let mut settings = Preferences::open(path.clone()).expect("open");
+                    settings.set_voice_mode(Some(modo)).expect("write");
+                }
+                let mut settings = Preferences::open(path.clone()).expect("reopen");
+                settings
+                    .assentar_o_padrao_do_microfone(ja_usava)
+                    .expect("assentar");
+                assert_eq!(settings.voice_mode(), Some(modo));
+                assert_eq!(settings.modo_do_microfone(), modo, "{}", modo.as_str());
+                let depois = Preferences::open(path).expect("reopen");
+                assert_eq!(depois.modo_do_microfone(), modo, "{}", modo.as_str());
+            }
+        }
+    }
+
+    #[test]
+    fn uma_instalacao_que_ninguem_assentou_fica_na_tecla() {
+        // O lado seguro de não saber. Sem escolha e sem padrão assentado — o
+        // disco recusou a escrita, ou o arquivo foi aberto por um cliente que
+        // não assenta —, o microfone espera a tecla: o engano para o outro lado
+        // é um microfone que abre sozinho na máquina de quem nunca pediu.
+        let settings = Preferences::open(scratch("ninguem-assentou")).expect("open");
+        assert_eq!(settings.padrao_do_microfone(), None);
+        assert_eq!(settings.modo_do_microfone(), VoiceMode::PushToTalk);
+
+        // E um padrão que esta versão não sabe ler é um que ninguém assentou.
+        let path = scratch("padrao-do-futuro");
+        Preferences::open(path.clone()).expect("criar o diretório");
+        std::fs::write(&path, "padrao_do_microfone\tsussurro\n").expect("semear");
+        let settings = Preferences::open(path).expect("open");
+        assert_eq!(settings.padrao_do_microfone(), None);
+        assert_eq!(settings.modo_do_microfone(), VoiceMode::PushToTalk);
+    }
+
+    #[test]
+    fn voltar_ao_padrao_volta_ao_padrao_desta_instalacao() {
+        // `set_voice_mode(None)` é «desfazer a escolha», e o que vale depois é
+        // o padrão assentado aqui, e não um padrão único para todo mundo.
+        for (ja_usava, esperado) in [
+            (false, VoiceMode::DE_QUEM_CHEGA),
+            (true, VoiceMode::DE_QUEM_JA_USAVA),
+        ] {
+            let path = scratch(&format!("volta-ao-padrao-{ja_usava}"));
+            let mut settings = Preferences::open(path.clone()).expect("open");
+            settings
+                .assentar_o_padrao_do_microfone(ja_usava)
+                .expect("assentar");
+            settings
+                .set_voice_mode(Some(VoiceMode::Open))
+                .expect("write");
+            assert_eq!(settings.modo_do_microfone(), VoiceMode::Open);
+            settings.set_voice_mode(None).expect("write");
+            let depois = Preferences::open(path).expect("reopen");
+            assert_eq!(depois.modo_do_microfone(), esperado);
+        }
     }
 
     #[test]

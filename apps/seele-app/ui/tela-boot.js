@@ -554,6 +554,12 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
         // Numa ligação pelo código não há oferta: o teste mede pelo convite de
         // um servidor, e quem liga por código não tem um para colar lá.
         oferecerOTesteNaEntrada(ligacao ? null : motivo);
+        // **A credencial recusada oferece o campo da senha do servidor**
+        // (1.1.1), depois da frase, como a oferta de cima. Numa ligação pelo
+        // código não: a sala pessoal não tem senha.
+        oferecerASenhaNaEntrada(
+          !ligacao && motivo?.Refused?.reason === "CredentialRejected" ? { alvo, apelido } : null,
+        );
         // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
         // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
         // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
@@ -819,6 +825,47 @@ function oferecerOTesteNaEntrada(erro) {
   fraseDaOfertaNaEntrada = ofereceu ? $("boot-erro").textContent : null;
 }
 
+/**
+ * A tentativa recusada a que a senha digitada volta, `{ alvo, apelido }`, e a
+ * frase de `#boot-erro` com que a oferta nasceu; `null` sem oferta na tela.
+ * **Não guarda segredo nenhum**: a senha é lida do campo no envio.
+ */
+let recusaPelaSenha = null;
+
+/**
+ * **O campo da senha do servidor debaixo de CREDENCIAL RECUSADA** (1.1.1), para
+ * a tentativa `{ alvo, apelido }` que o servidor acabou de recusar; com `null`,
+ * a oferta sai, e o que estava digitado sai com ela.
+ *
+ * O link não leva a senha (ADR 0006), e este app não tinha onde digitá-la: num
+ * servidor com senha, quem colava o link parava na frase vermelha.
+ */
+function oferecerASenhaNaEntrada(tentativa) {
+  $("boot-senha-valor").value = "";
+  $("boot-senha").hidden = tentativa === null;
+  if (tentativa === null) {
+    recusaPelaSenha = null;
+    return;
+  }
+  $("boot-senha-nota").textContent = FRASES_DA_SENHA_NA_ENTRADA.nota;
+  recusaPelaSenha = { ...tentativa, frase: $("boot-erro").textContent };
+}
+
+$("boot-senha").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  const campo = $("boot-senha-valor");
+  const senha = campo.value;
+  if (!recusaPelaSenha || senha.trim() === "") {
+    campo.focus();
+    return;
+  }
+  const { alvo, apelido } = recusaPelaSenha;
+  // Lida, a senha sai do campo e a oferta sai da tela: a tentativa que começa
+  // agora tem a frase dela, e uma recusa nova traz um campo vazio.
+  oferecerASenhaNaEntrada(null);
+  conectar(alvo, apelido, senha).catch((falha) => console.warn("conectar:", falha));
+});
+
 // **A oferta some quando a frase dela some.** `#boot-erro` tem meia dúzia de
 // escritores — esta tela, o HOSPEDAR, as camadas de MODs, de servidores e de
 // versões, a configuração do servidor —, e só o `conectar` sabe de rede. Um
@@ -826,8 +873,12 @@ function oferecerOTesteNaEntrada(erro) {
 // medir a rede de quem tem outra coisa a resolver. Vigiado aqui, e não por uma
 // chamada em cada escritor, que o próximo a escrever na linha esqueceria.
 new MutationObserver(() => {
-  if (fraseDaOfertaNaEntrada === null) return;
   const linha = $("boot-erro");
+  // A mesma regra para o campo da senha: ele é da frase com que nasceu.
+  if (recusaPelaSenha !== null && (linha.hidden || linha.textContent !== recusaPelaSenha.frase)) {
+    oferecerASenhaNaEntrada(null);
+  }
+  if (fraseDaOfertaNaEntrada === null) return;
   if (linha.hidden || linha.textContent !== fraseDaOfertaNaEntrada) oferecerOTesteNaEntrada(null);
 }).observe($("boot-erro"), {
   attributes: true,
@@ -837,7 +888,13 @@ new MutationObserver(() => {
   subtree: true,
 });
 
-async function hospedar() {
+/**
+ * `senhaDoNovo` é a senha que a tela de preparar escolheu para um servidor
+ * **novo**, ou `null` para o portão (e para todo servidor que já existe): ela
+ * vai ao `hospedar` do Rust, que a grava antes da primeira conexão, e não é
+ * guardada em lugar nenhum desta janela.
+ */
+async function hospedar(senhaDoNovo = null) {
   if (hospedandoAgora) {
     registrarNoAnfitriao("hospedar", "um segundo HOSPEDAR chegou com o primeiro ainda subindo, e foi ignorado", "aviso");
     return;
@@ -867,6 +924,7 @@ async function hospedar() {
       // backend (`escolhas_de_mods.rs`), e este `hospedar` as aplica depois da
       // cópia e da conversão.
       servidor: servidorEscolhido,
+      senha: senhaDoNovo,
     });
     servidorEscolhido = null;
     // A porta passa a ser de outra hospedagem: um diálogo da portaria aberto
@@ -932,6 +990,14 @@ async function hospedar() {
     }
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
+    // **A senha de um servidor novo que não subiu não foi gravada**, e a frase
+    // diz: o servidor já está na lista, e hospedá-lo por ela não pergunta de
+    // novo quem pode entrar. Sem isto, quem escolheu COM SENHA e esbarrou numa
+    // porta ocupada subiria, na segunda tentativa, um servidor no portão, e
+    // só descobriria com a primeira pessoa esperando aprovação.
+    if (senhaDoNovo !== null && !subiu) {
+      erro.textContent += `\n${FRASES_DA_PORTA_AO_HOSPEDAR.naoGravada}`;
+    }
     // O que ficou no ar é perguntado, e não suposto: uma falha depois da
     // subida deixa o servidor de pé, e uma antes não deixa nada.
     let noAr = null;
@@ -1578,6 +1644,11 @@ async function abrirPreparar(existente = null) {
   $("preparar-etapa").hidden = true;
   $("preparar-versao-aviso").hidden = true;
   pintarIconePreparado();
+  // Quem pode entrar volta ao portão, que é o padrão, e nenhuma senha de uma
+  // visita anterior a esta tela fica nos campos.
+  $("preparar-porta-portao").checked = true;
+  esquecerASenhaPreparada();
+  desenharAPortaPreparada();
 
   guardarFoco("tela-boot");
   $("tela-boot").hidden = true;
@@ -1609,16 +1680,148 @@ async function abrirPreparar(existente = null) {
     regra.textContent = "Uma foto maior é reduzida aqui mesmo.";
   }
 
+  // A regra da senha, pelo mesmo motivo: o mínimo é do Rust, que é quem recusa.
+  try {
+    regrasDaSenhaDoServidor = await invoke("regras_da_senha_do_server");
+  } catch (falha) {
+    console.warn("regras da senha:", falha);
+    regrasDaSenhaDoServidor = null;
+  }
+  desenharAPortaPreparada();
+
   await desenharVersoesParaHospedar();
 }
 
 /** Volta para a tela de entrada sem hospedar nada. */
 function fecharPreparar() {
+  esquecerASenhaPreparada();
   $("tela-preparar").hidden = true;
   const destino = prepararVeioDaLista ? "tela-servidores" : "tela-boot";
   $(destino).hidden = false;
   voltarParaTela(destino);
 }
+
+// ------------------------------------------- quem pode entrar no servidor novo
+//
+// A escolha da tela de preparar: COM A SUA APROVAÇÃO (a portaria, o padrão de
+// sempre) ou COM SENHA. O `hospedar` do Rust a grava antes da primeira conexão;
+// aqui se desenha, se confere e se esquece.
+
+/**
+ * A regra da senha, como o Rust a manda (`regras_da_senha_do_server`): o
+ * mínimo de caracteres e o teto em bytes. `null` até a resposta, e se ela não
+ * vier: a tela então não diz número nenhum, e quem recusa é o `hospedar`.
+ */
+let regrasDaSenhaDoServidor = null;
+
+/** Tira a senha dos dois campos, e os volta a pontos. */
+function esquecerASenhaPreparada() {
+  for (const campo of ["preparar-senha", "preparar-senha-de-novo"]) {
+    $(campo).value = "";
+    $(campo).type = "password";
+  }
+  const mostrar = $("preparar-senha-mostrar");
+  mostrar.setAttribute("aria-pressed", "false");
+  mostrar.textContent = FRASES_DA_PORTA_AO_HOSPEDAR.mostrar;
+  $("preparar-senha-erro").hidden = true;
+  $("preparar-senha-erro").textContent = "";
+}
+
+/** Escreve as duas linhas e a regra, e mostra os campos só com COM SENHA. */
+function desenharAPortaPreparada() {
+  const f = FRASES_DA_PORTA_AO_HOSPEDAR;
+  $("preparar-porta-portao-nota").textContent = f.notaDoPortao;
+  $("preparar-porta-senha-nota").textContent = f.notaDaSenha;
+  $("preparar-senha-regra").textContent = f.regra(Number(regrasDaSenhaDoServidor?.minimo));
+  const comSenha = $("preparar-porta-senha").checked;
+  $("preparar-senha-campos").hidden = !comSenha;
+  if (!comSenha) esquecerASenhaPreparada();
+}
+
+/**
+ * A senha escolhida, conferida como o Rust confere
+ * (`senha_do_servidor::conferir`): `{ senha }`, com `null` para o portão, ou
+ * `{ recusa, campo }` com o nome da recusa e o campo a que o foco volta.
+ *
+ * Conferida aqui também, e não só lá, porque o `criar_servidor` vem antes do
+ * `hospedar`: uma senha recusada só pelo Rust deixaria na lista um servidor
+ * que nunca subiu.
+ */
+function lerAPortaPreparada() {
+  if (!$("preparar-porta-senha").checked) return { senha: null };
+  const senha = $("preparar-senha").value;
+  const regrasDaSenha = regrasDaSenhaDoServidor;
+  if (senha.trim() === "") return { recusa: "Vazia", campo: "preparar-senha" };
+  if (senha.trim() !== senha) return { recusa: "ComEspacoNaPonta", campo: "preparar-senha" };
+  if (Number.isFinite(regrasDaSenha?.minimo) && [...senha].length < regrasDaSenha.minimo) {
+    return { recusa: "Curta", campo: "preparar-senha" };
+  }
+  if (Number.isFinite(regrasDaSenha?.maximo_em_bytes) && bytesDe(senha) > regrasDaSenha.maximo_em_bytes) {
+    return { recusa: "Longa", campo: "preparar-senha" };
+  }
+  if ($("preparar-senha-de-novo").value !== senha) {
+    return { recusa: "NaoConfere", campo: "preparar-senha-de-novo" };
+  }
+  return { senha };
+}
+
+/**
+ * Diz a recusa logo abaixo do campo, e leva o teclado a ele.
+ *
+ * **A frase é rolada à vista**: numa janela baixa o conteúdo desta tela rola,
+ * e o foco sozinho traz o campo e deixa a recusa debaixo da barra de ações —
+ * a pessoa via o cursor voltar ao campo sem saber por quê (visto no retrato de
+ * 900×600 da bancada `porta-ao-hospedar.cjs`).
+ */
+function recusarASenhaPreparada(recusa, campo) {
+  const erro = $("preparar-senha-erro");
+  erro.hidden = false;
+  erro.textContent = fraseDaSenhaRecusada(recusa, Number(regrasDaSenhaDoServidor?.minimo));
+  $(campo).focus();
+  erro.scrollIntoView({ block: "nearest" });
+}
+
+for (const opcao of ["preparar-porta-portao", "preparar-porta-senha"]) {
+  $(opcao).addEventListener("change", desenharAPortaPreparada);
+}
+
+// A recusa some quando a pessoa volta a digitar: ela é sobre o que estava no
+// campo, e não sobre o que está sendo escrito agora.
+for (const campo of ["preparar-senha", "preparar-senha-de-novo"]) {
+  $(campo).addEventListener("input", () => {
+    $("preparar-senha-erro").hidden = true;
+  });
+}
+
+$("preparar-senha-mostrar").addEventListener("click", () => {
+  const botao = $("preparar-senha-mostrar");
+  const mostrando = botao.getAttribute("aria-pressed") !== "true";
+  botao.setAttribute("aria-pressed", String(mostrando));
+  botao.textContent = mostrando
+    ? FRASES_DA_PORTA_AO_HOSPEDAR.ocultar
+    : FRASES_DA_PORTA_AO_HOSPEDAR.mostrar;
+  for (const campo of ["preparar-senha", "preparar-senha-de-novo"]) {
+    $(campo).type = mostrando ? "text" : "password";
+  }
+});
+
+// **Enter segue e Esc volta**, na tela inteira: Enter num campo ou numa opção
+// é o HOSPEDAR da barra de baixo, e Esc é o VOLTAR. Num botão o Enter continua
+// sendo o do botão, e com o HOSPEDAR apagado (uma subida em curso) nenhum dos
+// dois faz nada.
+$("tela-preparar").addEventListener("keydown", (evento) => {
+  if (evento.defaultPrevented || evento.isComposing) return;
+  if ($("preparar-confirmar").disabled) return;
+  if (evento.key === "Escape") {
+    evento.preventDefault();
+    fecharPreparar();
+    return;
+  }
+  if (evento.key === "Enter" && evento.target instanceof HTMLInputElement) {
+    evento.preventDefault();
+    confirmarPreparar().catch((falha) => console.warn("hospedar:", falha));
+  }
+});
 
 /** Desenha a prévia da imagem escolhida, ou a ausência dela. */
 function pintarIconePreparado() {
@@ -1713,7 +1916,7 @@ function escolherVersaoParaHospedar(l, porque = "") {
     aviso.textContent =
       porque +
       "Quem hospeda é outra janela do SEELE, com as conversas daquela versão. " +
-      `${CONVERSAS_NAO_PASSAM} O nome e a imagem você define lá.` +
+      `${CONVERSAS_NAO_PASSAM} O nome, a imagem e quem pode entrar você define lá.` +
       (l.perde_conversas ? " Nesta máquina ele ainda não tem conversa nenhuma." : "");
   }
   $("preparar-confirmar").textContent =
@@ -1810,14 +2013,24 @@ async function confirmarPreparar() {
       $("preparar-nome").focus();
       return;
     }
+    // **Quem pode entrar, conferido antes de registrar o servidor**: uma senha
+    // que não serve é dita ao lado do campo, e nada é criado nem sobe.
+    const porta = lerAPortaPreparada();
+    if (porta.recusa) {
+      recusarASenhaPreparada(porta.recusa, porta.campo);
+      return;
+    }
     const guardado = await invoke("criar_servidor", { nome });
     servidorEscolhido = guardado.id;
+    // Lida, a senha sai dos campos: daqui em diante ela só existe nesta
+    // chamada, até o `hospedar` do Rust.
+    esquecerASenhaPreparada();
 
     // A entrada volta, e com ela o foco: `hospedar()` desenha o progresso lá.
     $("tela-preparar").hidden = true;
     $("tela-boot").hidden = false;
     voltarParaTela("tela-boot");
-    await hospedar();
+    await hospedar(porta.senha);
 
     // Depois de conectar, e só depois: os dois viajam pela conexão.
     if (nome !== "") await invoke("renomear_server", { name: nome });

@@ -62,6 +62,9 @@ mod recorte;
 // A redução de imagem de MOD mora no `seele-sessao` desde a Tarefa 2.6 da F4.
 use seele_ffi::reducao;
 mod sala;
+// A senha do servidor, como quem hospeda a escolhe: a regra, uma só, da tela
+// de preparar e do painel A PORTA.
+mod senha_do_servidor;
 mod servidores;
 // O ANTES DE HOSPEDAR e o portão da conversão: a cópia de segurança do estado
 // atual antes de converter um banco (E2 da 0.17).
@@ -1801,10 +1804,12 @@ async fn connect<R: tauri::Runtime>(
     // O modo de microfone, a supressão de ruído e a sensibilidade gravados,
     // aplicados assim que há o que aplicar.
     //
-    // Aqui e não num campo de `connect`: a sessão nasce no padrão da spec —
-    // push-to-talk, microfone fechado — e só então abre para o que a pessoa
-    // escolheu. A ordem é a segura; a inversa teria um instante em que um
-    // microfone poderia estar aberto antes de alguém ter dito que podia.
+    // Aqui e não num campo de `connect`: a sessão nasce fechada — push-to-talk
+    // — e só então abre para o que a pessoa escolheu ou, sem escolha, para o
+    // padrão desta instalação (a voz para quem chegou, a tecla para quem já
+    // usava: `assentar_o_padrao_do_microfone`, no `setup`). A ordem é a segura;
+    // a inversa teria um instante em que um microfone poderia estar aberto
+    // antes de alguém ter dito que podia.
     //
     // **Os três, e não só o modo** (acréscimo A do lote I-b). A supressão e a
     // sensibilidade gravadas ficavam de fora, e a sessão começava nos padrões
@@ -2784,7 +2789,32 @@ enum FalhaAoHospedar {
         /// `(id, api)`, na ordem do banco.
         mods: Vec<(String, Option<u32>)>,
     },
+    /// **A senha escolhida na tela de preparar não serve**, e por quê.
+    ///
+    /// Recusada antes de o servidor subir, como o nome: subir e depois recusar
+    /// deixaria no ar, no modo portão, um servidor que quem hospeda pediu com
+    /// senha. O motivo, e nunca a senha (`senha_do_servidor::SenhaRecusada`).
+    SenhaRecusada(senha_do_servidor::SenhaRecusada),
+    /// **A senha de um servidor novo chegou a um servidor que já tinha a porta
+    /// dele**: uma senha, ou a portaria já decidida. Nada subiu e nada mudou.
+    /// A tela de preparar só pergunta ao criar; a senha de um servidor que já
+    /// existe se troca em CONFIGURAÇÕES · A PORTA, com ele de pé.
+    PortaJaEscolhida,
 }
+
+/// A senha de um servidor novo chegou a um servidor que já tinha a porta dele
+/// (`FalhaAoHospedar::PortaJaEscolhida`): o erro do `antes_de_aceitar`, que o
+/// [`classificar`] reconhece na cadeia.
+#[derive(Debug)]
+struct PortaJaEscolhida;
+
+impl std::fmt::Display for PortaJaEscolhida {
+    fn fmt(&self, formatador: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatador.write_str("este servidor já tem a porta escolhida")
+    }
+}
+
+impl std::error::Error for PortaJaEscolhida {}
 
 impl From<versoes::RecusaDestaVersao> for FalhaAoHospedar {
     fn from(recusa: versoes::RecusaDestaVersao) -> Self {
@@ -3176,6 +3206,9 @@ async fn hospedar(
     // Qual servidor guardado levantar. `None` é o banco de sempre — o que toda
     // máquina que já hospedou antes desta versão tem.
     servidor: Option<String>,
+    // A senha de um servidor novo. `None` é o portão de sempre. Com ela o
+    // servidor nasce com senha e sem a portaria. Ver o `PedidoDeHospedar`.
+    senha: Option<String>,
 ) -> Result<Anfitriao, FalhaAoHospedar> {
     let config = config_dir(&app);
     let atualizador = versoes::atualizador_do_app(&app);
@@ -3183,12 +3216,30 @@ async fn hospedar(
         &session,
         &config,
         atualizador.as_ref(),
-        nome_publico,
-        servidor,
+        PedidoDeHospedar {
+            nome_publico,
+            servidor,
+            senha,
+        },
         PORTA_PADRAO,
         modo_local(),
     )
     .await
+}
+
+/// O que quem hospeda pediu ao `hospedar`: os três argumentos do comando.
+///
+/// **Sem `Debug`, de propósito**: `senha` é a senha crua, como a pessoa a
+/// digitou, e só existe até a primeira linha do [`hospedar_em`], que a troca
+/// por um `SenhaDoServidor`.
+#[derive(Default)]
+struct PedidoDeHospedar {
+    /// O nome público do link. Vazio é o link numérico de sempre.
+    nome_publico: Option<String>,
+    /// Qual servidor guardado levantar. `None` é o banco de sempre.
+    servidor: Option<String>,
+    /// A senha de um servidor novo. `None` é o portão.
+    senha: Option<String>,
 }
 
 /// **O corpo do `hospedar`**, sem o `AppHandle`: a pasta de dados, o
@@ -3200,11 +3251,24 @@ async fn hospedar_em(
     session: &Session,
     config: &str,
     atualizador: Option<&versoes::Atualizador>,
-    nome_publico: Option<String>,
-    servidor: Option<String>,
+    pedido: PedidoDeHospedar,
     porta: u16,
     local: bool,
 ) -> Result<Anfitriao, FalhaAoHospedar> {
+    let PedidoDeHospedar {
+        nome_publico,
+        servidor,
+        senha,
+    } = pedido;
+    // **A senha de um servidor novo, conferida antes de qualquer coisa subir**,
+    // como o nome logo abaixo: uma senha que não serve recusada depois deixaria
+    // no ar, no modo portão, o servidor que quem hospeda pediu com senha. Daqui
+    // em diante ela é um `SenhaDoServidor`, que não se imprime.
+    let senha = senha
+        .as_deref()
+        .map(senha_do_servidor::conferir)
+        .transpose()
+        .map_err(FalhaAoHospedar::SenhaRecusada)?;
     // Conferido **antes** de subir o servidor. Ver `FalhaAoHospedar::NomeRecusado`.
     //
     // Um campo em branco não é um nome recusado: é alguém que não quis um nome.
@@ -3336,8 +3400,13 @@ async fn hospedar_em(
     // laço já no ar: num banco novo a portaria nasce desligada, e quem
     // chegasse nesse intervalo virava a primeira conta, e a primeira conta
     // vira a Comandante. Ver `crates/seele-server/tests/janela_do_comandante.rs`.
+    //
+    // **E a senha de um servidor novo junto**: gravada aqui, com o laço de
+    // aceitação ainda parado, e não por um `definir_senha_do_server` depois de
+    // subir. Um servidor pedido com senha não passa nem um instante no ar sem
+    // ela. O guarda é `a_senha_e_gravada_antes_de_o_servidor_aceitar`.
     let antes_de_aceitar = move |persistence: &mut seele_server::persistence::Persistence| {
-        preparar_a_casa_de_quem_hospeda(persistence, &minha)
+        preparar_a_casa_de_quem_hospeda(persistence, &minha, senha.as_ref())
     };
     let server = subir_o_guardado(porta, local_do_banco, raizes, antes_de_aceitar, local)
         .await
@@ -3410,22 +3479,48 @@ async fn subir_o_guardado(
 
 /// **O que o `hospedar` faz no banco já convertido, antes da primeira
 /// conexão** (o `antes_de_aceitar` dele; D-seg-1, a janela do Comandante): a
-/// portaria semeada ligada (ADR 0030) e o dono admitido na própria casa. As
-/// escolhas de MOD estagiadas já foram aplicadas antes da subida, depois do
-/// portão da cópia (`escolhas_de_mods::aplicar_depois_do_portao`).
+/// porta do servidor — a portaria semeada ligada (ADR 0030), ou a senha que
+/// quem hospeda escolheu para um servidor novo — e o dono admitido na própria
+/// casa. As escolhas de MOD estagiadas já foram aplicadas antes da subida,
+/// depois do portão da cópia (`escolhas_de_mods::aplicar_depois_do_portao`).
+///
+/// # A senha de um servidor novo
+///
+/// Com `senha`, o servidor nasce **com senha e sem a portaria**: quem tem a
+/// senha entra direto, e quem não tem é recusado antes de bater
+/// (`admissao::Politica`). São as mesmas duas funções do painel A PORTA —
+/// `admissao::definir_senha` e `portaria::ligar` —, chamadas aqui, com o laço
+/// de aceitação parado. Qualquer falha delas é falha de hospedar: um servidor
+/// pedido com senha não sobe sem ela.
+///
+/// **Só num servidor que ainda não tem porta escolhida**: sem senha gravada e
+/// sem decisão sobre a portaria. Num que já tem, a escolha de servidor novo é
+/// recusada ([`PortaJaEscolhida`]) e nada muda: ele já tem a configuração dele,
+/// e trocá-la é do painel A PORTA.
 fn preparar_a_casa_de_quem_hospeda(
     persistence: &mut seele_server::persistence::Persistence,
     minha: &str,
+    senha: Option<&senha_do_servidor::SenhaDoServidor>,
 ) -> anyhow::Result<()> {
-    // A porta se fecha no mesmo gesto de hospedar, antes do primeiro
-    // pacote — ADR 0030. O `seeled` continua subindo aberto, porque
-    // quem digita `seeled` aceitou cerimônia; quem apertou um botão
-    // não, e para ele o padrão é perguntar.
-    //
-    // Semear, e não ligar: isto roda toda vez que a janela sobe um
-    // servidor, e um interruptor que se rearma sozinho é um
-    // interruptor quebrado.
-    if let Err(erro) = seele_server::portaria::semear_ligada(persistence) {
+    if let Some(senha) = senha {
+        let ja_tem_senha = seele_server::admissao::Politica::carregar(persistence)?.tem_senha();
+        if ja_tem_senha || seele_server::portaria::decidida(persistence)? {
+            return Err(anyhow::Error::new(PortaJaEscolhida));
+        }
+        seele_server::admissao::definir_senha(persistence, Some(senha.texto()))?;
+        // Desligada de propósito, e gravada: o `semear_ligada` de toda subida
+        // seguinte deste servidor não a religa por cima da escolha.
+        seele_server::portaria::ligar(persistence, false)?;
+    } else if let Err(erro) = seele_server::portaria::semear_ligada(persistence) {
+        // A porta se fecha no mesmo gesto de hospedar, antes do primeiro
+        // pacote — ADR 0030. O `seeled` continua subindo aberto, porque
+        // quem digita `seeled` aceitou cerimônia; quem apertou um botão
+        // não, e para ele o padrão é perguntar.
+        //
+        // Semear, e não ligar: isto roda toda vez que a janela sobe um
+        // servidor, e um interruptor que se rearma sozinho é um
+        // interruptor quebrado.
+        //
         // Não impede de hospedar. Um servidor no ar com a portaria
         // desligada é o comportamento de antes deste ADR, e a tela diz
         // em que estado a porta está.
@@ -3454,6 +3549,16 @@ fn preparar_a_casa_de_quem_hospeda(
 #[path = "testes/quem_hospeda_e_o_dono.rs"]
 #[cfg(test)]
 mod quem_hospeda_e_o_dono;
+
+/// **A porta de um servidor novo se escolhe antes de ele subir**: pelo corpo
+/// de verdade do comando, com gente de outra máquina batendo pela FFI. Com
+/// senha, o servidor a exige desde a primeira conexão e quem a tem entra
+/// direto; sem senha, nasce no portão, como sempre. A senha que não serve é
+/// recusada antes de subir, não cai sobre um servidor que já tinha a porta
+/// dele, e não aparece no registro.
+#[path = "testes/a_porta_de_um_servidor_novo.rs"]
+#[cfg(test)]
+mod a_porta_de_um_servidor_novo;
 
 /// **A ordem do CTA, no `hospedar` de verdade** (P1 da 0.17). Os testes do
 /// `mods.rs` provam cada passo com bancos reais; este prende que o comando os
@@ -3861,6 +3966,10 @@ const PORTA_PADRAO: u16 = 8383;
 /// esconde a única falha que a pessoa consegue resolver sozinha.
 fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
     for causa in erro.chain() {
+        // A senha de um servidor novo num servidor que já tinha a porta dele.
+        if causa.downcast_ref::<PortaJaEscolhida>().is_some() {
+            return FalhaAoHospedar::PortaJaEscolhida;
+        }
         // O banco de uma versão mais nova: a outra falha com conserto que a
         // pessoa consegue fazer, que é atualizar.
         if let Some(futuro) = causa.downcast_ref::<seele_server::persistence::BancoDoFuturo>() {
@@ -6200,6 +6309,15 @@ async fn baixar_modulo_de_video(app: AppHandle) -> Result<String, seele_ffi::Con
     let caminho = seele_ffi::instalar_modulo_de_video(&pasta, &bytes)?;
     tracing::info!(caminho, "o módulo de vídeo está instalado");
     Ok(caminho)
+}
+
+/// A regra da senha do servidor, para a tela escrevê-la **antes** de alguém
+/// digitar: o mínimo de caracteres e o teto em bytes. A mesma que o `hospedar`
+/// confere (`senha_do_servidor::conferir`): um limite que só aparece na recusa
+/// é um limite que a pessoa descobre errando.
+#[tauri::command]
+const fn regras_da_senha_do_server() -> senha_do_servidor::Regras {
+    senha_do_servidor::regras()
 }
 
 /// Quanto pesa e quão grande é a imagem que o servidor aceita.
@@ -10779,10 +10897,9 @@ fn segurar_a_fala(session: &Session, talking: bool) {
 /// valer amanhã, a aplicação é o que faz valer agora.
 ///
 /// Antes daqui só existia a segunda, e o preço tinha duas faces. Quem escolhia
-/// voz achava push-to-talk de volta no dia seguinte — e o padrão é
-/// push-to-talk *porque nunca dispara sozinho*, argumento que vale para quem
-/// não escolheu e não para quem escolheu. E, por exigir sessão, não dava para
-/// escolher o modo na tela de entrada; agora dá.
+/// voz achava push-to-talk de volta no dia seguinte — e um padrão é argumento
+/// sobre quem não escolheu, e não sobre quem escolheu. E, por exigir sessão,
+/// não dava para escolher o modo na tela de entrada; agora dá.
 ///
 /// # Errors
 ///
@@ -10811,16 +10928,40 @@ fn set_voice_mode(
     Ok(())
 }
 
-/// Qual modo de microfone está escolhido, ou `None` para o padrão da spec.
+/// Como o microfone vai abrir na próxima sessão: o modo escolhido, ou, sem
+/// escolha, o padrão desta instalação. `None` só se as preferências não abrem.
+///
+/// **O padrão também, e não só a escolha.** Antes daqui quem nunca escolheu
+/// recebia `None`, e a configuração aberta pela entrada desenhava os três modos
+/// sem nenhum marcado — uma tela que não dizia o que ia valer. Com a voz de
+/// padrão para quem chega, é ali que a pessoa descobre que há uma tecla a
+/// escolher, e ela precisa ver qual dos três está valendo. É também o que a
+/// página responde por este nome (`modoDeVozGuardado`, em `ponte-web.js`).
 ///
 /// Do disco e não do `Snapshot`, pela mesma razão que [`microfone_escolhido`]:
 /// esta pergunta tem resposta sem sessão nenhuma, e é a que a tela de entrada
 /// precisa fazer.
 #[tauri::command]
 fn modo_de_voz_escolhido(app: AppHandle) -> Option<VoiceMode> {
-    preferencias(&app)
-        .and_then(|p| p.voice_mode())
-        .map(VoiceMode::from)
+    preferencias(&app).map(|p| VoiceMode::from(p.modo_do_microfone()))
+}
+
+/// Assenta o padrão do microfone desta instalação: a voz para quem chega, a
+/// tecla para quem já usava. Uma vez; depois disso, só relê.
+///
+/// Chamado no `setup`, **antes** de a janela existir — ver lá. Sem preferências
+/// (o arquivo não abre) ou com o disco recusando, nada é assentado, e a sessão
+/// fica na tecla, que é o lado seguro de não saber.
+fn assentar_o_padrao_do_microfone<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let Some(mut ajustes) = preferencias(app) else {
+        tracing::warn!("sem preferências: o padrão do microfone não foi assentado");
+        return;
+    };
+    let ja_assentado = ajustes.padrao_do_microfone().is_some();
+    let padrao = seele_ffi::assentar_o_padrao_do_microfone(&config_dir(app), &mut ajustes);
+    if !ja_assentado {
+        tracing::info!(?padrao, "padrão do microfone desta instalação assentado");
+    }
 }
 
 // ------------------------------------------------- qualidade de voz (F01, F02)
@@ -12282,6 +12423,10 @@ enum FalhaNaPortaria {
         /// A hospedagem de pé agora.
         agora: HospedagemDaPorta,
     },
+    /// **A senha digitada no painel A PORTA não serve**, e por quê: a mesma
+    /// regra da senha de um servidor novo (`senha_do_servidor::conferir`).
+    /// Nada foi gravado, e a senha de antes, se havia, continua valendo.
+    SenhaRecusada(senha_do_servidor::SenhaRecusada),
 }
 
 /// Em que estado está a porta do servidor que esta janela hospeda.
@@ -12516,15 +12661,31 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
 }
 
 /// Põe ou tira a senha do servidor. `None` tira. ADR 0021.
+///
+/// **A senha passa pela mesma regra da de um servidor novo**
+/// (`senha_do_servidor::conferir`), antes de qualquer outra coisa. O painel
+/// aceitava tudo que não fosse o campo vazio: uma senha só de espaços fechava
+/// o servidor com um segredo que nenhum app manda (o `connect` joga fora um
+/// segredo em branco), e quatro algarismos caem em horas para quem adivinha.
 #[tauri::command]
 async fn definir_senha_do_server(
     session: State<'_, Session>,
     senha: Option<String>,
 ) -> Result<(), FalhaNaPortaria> {
+    let senha = senha
+        .as_deref()
+        .map(senha_do_servidor::conferir)
+        .transpose()
+        .map_err(FalhaNaPortaria::SenhaRecusada)?;
     let persistence = persistence_hospedada(&session)?;
     let mut persistence = persistence.lock().await;
-    seele_server::admissao::definir_senha(&mut persistence, senha.as_deref())
-        .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
+    seele_server::admissao::definir_senha(
+        &mut persistence,
+        senha
+            .as_ref()
+            .map(senha_do_servidor::SenhaDoServidor::texto),
+    )
+    .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
 }
 
 /// Gera um convite de uso único e devolve o link inteiro para mandar.
@@ -13552,6 +13713,15 @@ fn main() {
             audio_de_mentira::relatar(app.handle().clone());
             let primeira = versoes::primeira_abertura(&config_dir(app.handle()));
             let houve_0_15 = primeira.houve_0_15();
+            // **O padrão do microfone desta instalação, assentado antes de a
+            // janela existir.** Quem chega fala sem tecla; quem já usava e
+            // nunca escolheu continua nela (pedido do dono, 13/11/2026). O que
+            // separa os dois é a chave e o arquivo de preferências, e é a
+            // janela que cria a chave (o código da pessoa, o `connect`):
+            // perguntado depois dela, toda instalação nova pareceria usada. Ver
+            // `seele_ffi::assentar_o_padrao_do_microfone` e o guarda
+            // `o_padrao_do_microfone_e_assentado_antes_de_a_janela_existir`.
+            assentar_o_padrao_do_microfone(app.handle());
             app.manage(versoes::EstadoDaPrimeiraAbertura(std::sync::Mutex::new(
                 Some(versoes::PrimeiraAbertura {
                     dados: primeira,
@@ -13949,6 +14119,7 @@ fn main() {
             estado_da_porta,
             estado_do_servidor,
             definir_senha_do_server,
+            regras_da_senha_do_server,
             criar_convite_do_server,
             link_do_navegador,
             ligar_portaria,

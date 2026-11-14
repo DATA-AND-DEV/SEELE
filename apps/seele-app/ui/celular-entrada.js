@@ -238,7 +238,7 @@
     const bloqueia = BLOQUEIAM.includes(estado);
     // Um desfecho que encerrou a tentativa (o convite gasto ou vencido, a
     // recusa) não deixa ENTRAR de novo: o mesmo link não serve mais.
-    const encerrou = desfecho && !["apelido-tomado", "sem-rede", "espera-de-admissao", "pede-apelido", "preparacao-expirada", "armazenamento-indisponivel"].includes(desfecho.erro);
+    const encerrou = desfecho && !["apelido-tomado", "sem-rede", "espera-de-admissao", "pede-apelido", "preparacao-expirada", "armazenamento-indisponivel", "segredo-recusado"].includes(desfecho.erro);
 
     const avisoDoEstado = doEstado && aviso(
       [typeof doEstado.titulo === "function" ? doEstado.titulo(dia(lido.valeAte)) : doEstado.titulo, doEstado.corpo],
@@ -272,11 +272,30 @@
       entradaIniciada = true;
       entrar(lido, campo.value.trim());
     };
-    if (campo) campo.addEventListener("keydown", (evento) => {
-      if (evento.key !== "Enter" || evento.isComposing || evento.repeat) return;
-      evento.preventDefault();
-      iniciar();
+    // **A senha do servidor, depois de uma credencial recusada** (1.1.1). O
+    // servidor recusa igual o convite que não vale e a senha errada, e o link
+    // não leva senha: o campo aparece junto do aviso, e ENTRAR COM A SENHA a
+    // entrega à identidade, no lugar do convite. Lida, ela sai do campo.
+    const campoDaSenha = podeEntrar && desfecho?.erro === "segredo-recusado" && h("input", {
+      type: "password", id: "cel-entrada-senha", class: "cel-entrada-campo-texto",
+      autocomplete: "off", autocapitalize: "none", spellcheck: "false", enterkeyhint: "go",
+      "aria-describedby": "cel-entrada-senha-nota",
     });
+    const iniciarComASenha = () => {
+      if (entradaIniciada || !campoDaSenha?.isConnected) return;
+      const senha = campoDaSenha.value;
+      if (senha.trim() === "") return campoDaSenha.focus();
+      entradaIniciada = true;
+      campoDaSenha.value = "";
+      entrar(lido, campo.value.trim(), senha);
+    };
+    for (const [onde, seguir] of [[campo, () => (campoDaSenha ? iniciarComASenha() : iniciar())], [campoDaSenha, iniciarComASenha]]) {
+      if (onde) onde.addEventListener("keydown", (evento) => {
+        if (evento.key !== "Enter" || evento.isComposing || evento.repeat) return;
+        evento.preventDefault();
+        seguir();
+      });
+    }
 
     // **Uma batida na portaria não é erro** (0.19): o pedido está na porta do
     // servidor, e esperar é o caminho de toda pessoa nova. O aviso é o laranja
@@ -308,7 +327,7 @@
       acoes.push(repetir, botao(f.agoraNao, agoraNao, "botao-fantasma"));
     } else if (estado === "numa-aba" && !encerrou) {
       const e = PALAVRAS.estados["numa-aba"];
-      acoes.push(botao(f.entrar, iniciar));
+      acoes.push(campoDaSenha ? botao(f.entrarComASenha, iniciarComASenha) : botao(f.entrar, iniciar));
       acoes.push(botao(e.copiar, async () => {
         let copiou = false;
         try {
@@ -323,7 +342,7 @@
       if (lido.podeInstalar) acoes.push(botao(e.instalar, () => identidade.instalar(), "botao botao-secundario"));
       acoes.push(botao(f.agoraNao, sair, "botao-fantasma"));
     } else if (podeEntrar) {
-      acoes.push(botao(f.entrar, iniciar));
+      acoes.push(campoDaSenha ? botao(f.entrarComASenha, iniciarComASenha) : botao(f.entrar, iniciar));
       acoes.push(botao(f.agoraNao, sair, "botao-fantasma"));
     } else {
       acoes.push(botao(f.servidores, sair, "botao-fantasma"));
@@ -337,11 +356,14 @@
       avisoDoEstado,
       ficha,
       campo && [h("label", { class: "cel-entrada-campo", for: "cel-entrada-apelido" }, rotulo(f.apelido)), campo],
+      campoDaSenha && [h("label", { class: "cel-entrada-campo", for: "cel-entrada-senha" }, rotulo(f.senha)), campoDaSenha,
+        h("p", { class: "cel-entrada-nota", id: "cel-entrada-senha-nota", text: f.senhaNota })],
       podeEntrar && (estado === "pronto" || estado === "numa-aba") && h("p", { class: "cel-entrada-nota", text: f.primeiraEntrada }),
       lido.persistencia && h("p", { class: "cel-entrada-nota", text: PALAVRAS.persistencia[lido.persistencia] }),
     ], acoes);
     tela.dataset.tipo = "entrar-em";
     if (desfecho?.erro === "apelido-tomado") campo?.focus();
+    if (campoDaSenha) campoDaSenha.focus();
   }
 
   /**
@@ -427,6 +449,9 @@
     // Sem apelido para entrar pela lista: a tentativa segue aberta na identidade,
     // e a «ENTRAR EM» pede o nome no campo de sempre.
     if (desfecho?.erro === "pede-apelido" && identidade.ler()) return entrarEm(identidade.ler(), desfecho);
+    // O servidor da lista recusou a credencial: ele pode ter senha, e quem volta
+    // por aqui não trouxe nenhuma. A tentativa segue aberta, e a «ENTRAR EM» a pede.
+    if (desfecho?.erro === "segredo-recusado" && identidade.ler()) return entrarEm(identidade.ler(), desfecho);
     return inicio(conhecido && desfecho);
   }
 
@@ -494,8 +519,8 @@
     vigiaDaFrase.observe(texto);
   }
 
-  async function entrar(lido, apelido) {
-    await conectando(lido.endereco, async () => ({ ...(await identidade.entrar(apelido)), apelido }), lido);
+  async function entrar(lido, apelido, senha = null) {
+    await conectando(lido.endereco, async () => ({ ...(await identidade.entrar(apelido, senha)), apelido }), lido);
   }
 
   /** O símbolo inteiro, lido do arquivo da `ui/` para o enlace poder ser desenhado. */

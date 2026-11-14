@@ -105,6 +105,12 @@ const ANTES_DE_HOSPEDAR_015 = {
     caminho: "lancador/dados/servidor-0.15", do_estado_atual: false }],
 };
 
+/** A regra da senha do servidor, na forma de `senha_do_servidor::Regras`. */
+const REGRAS_DA_SENHA = { minimo: 8, maximo_em_bytes: 128 };
+
+/** Na tela de preparar de um servidor novo, escolhe COM SENHA como um clique faria. */
+const ESCOLHER_COM_SENHA = `{ const o = document.getElementById("preparar-porta-senha"); o.checked = true; o.dispatchEvent(new Event("change", { bubbles: true })); }`;
+
 /** Abre os DETALHES TÉCNICOS e leva a rolagem até eles. */
 const ABRIR_DETALHES = `const d = document.getElementById("antes-detalhes"); d.open = true; d.scrollIntoView({ block: "center" });`;
 
@@ -200,9 +206,26 @@ const CENAS = [
   { nome: "app-hospedar-lista", casca: "app",
     resposta: { servidores_guardados: [ADOTADO, guardado("srv-2", "Oficina", "0.16.0"), guardado("srv-3", "Turno da Noite", "0.17.0")] },
     passos: `abrirHospedagem()` },
+  // O passo de preparar de um servidor NOVO pergunta quem pode entrar: COM A
+  // SUA APROVAÇÃO vem marcado, e COM SENHA abre os campos (1.1.1). O
+  // comportamento é da `porta-ao-hospedar.cjs`; aqui ficam os retratos.
   { nome: "app-hospedar-preparar-novo", casca: "app",
-    resposta: { linhas_para_hospedar: LINHAS_017, regras_do_icone_do_server: { limite_bytes: 262144, lado: 512 } },
+    resposta: { linhas_para_hospedar: LINHAS_017, regras_do_icone_do_server: { limite_bytes: 262144, lado: 512 }, regras_da_senha_do_server: REGRAS_DA_SENHA },
     passos: `abrirPreparar()` },
+  { nome: "app-hospedar-preparar-novo-senha", casca: "app",
+    resposta: { linhas_para_hospedar: LINHAS_017, regras_do_icone_do_server: { limite_bytes: 262144, lado: 512 }, regras_da_senha_do_server: REGRAS_DA_SENHA },
+    passos: `await abrirPreparar(); ${ESCOLHER_COM_SENHA}` },
+  // A senha recusada: a frase logo abaixo do campo, com o foco nele.
+  { nome: "app-hospedar-preparar-novo-senha-recusada", casca: "app",
+    resposta: { linhas_para_hospedar: LINHAS_017, regras_do_icone_do_server: { limite_bytes: 262144, lado: 512 }, regras_da_senha_do_server: REGRAS_DA_SENHA },
+    passos: `await abrirPreparar(); ${ESCOLHER_COM_SENHA} for (const c of ["preparar-senha", "preparar-senha-de-novo"]) document.getElementById(c).value = "1234"; await confirmarPreparar();` },
+  // Na janela mínima do app o conteúdo rola acima da barra de ações.
+  { nome: "app-minima-hospedar-preparar-novo", casca: "app", viewport: MINIMA,
+    resposta: { linhas_para_hospedar: LINHAS_017, regras_do_icone_do_server: { limite_bytes: 262144, lado: 512 }, regras_da_senha_do_server: REGRAS_DA_SENHA },
+    passos: `await abrirPreparar(); document.getElementById("preparar-porta-portao").scrollIntoView({ block: "center" });` },
+  { nome: "app-minima-hospedar-preparar-novo-senha", casca: "app", viewport: MINIMA,
+    resposta: { linhas_para_hospedar: LINHAS_017, regras_do_icone_do_server: { limite_bytes: 262144, lado: 512 }, regras_da_senha_do_server: REGRAS_DA_SENHA },
+    passos: `await abrirPreparar(); ${ESCOLHER_COM_SENHA} document.getElementById("preparar-senha-regra").scrollIntoView({ block: "end" });` },
   { nome: "app-hospedar-preparar-adotado", casca: "app",
     resposta: { linhas_para_hospedar: LINHAS_017, servidores_guardados: [ADOTADO] },
     passos: `abrirPreparar("principal")` },

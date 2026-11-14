@@ -23,6 +23,16 @@ fn nenhuma_tela_le_um_limite_de_imagem_que_nao_existe() {
         panic!("`RegrasDoIcone` tem de serializar para objeto");
     };
     let chaves: std::collections::BTreeSet<&str> = mapa.keys().map(String::as_str).collect();
+    // **E a regra da senha do servidor** (1.1.1), pela mesma razão e do mesmo
+    // jeito: as chaves de um `senha_do_servidor::Regras` serializado de
+    // verdade. Quem a lê, na tela de preparar, tem `regrasDaSenha` no nome.
+    let Ok(serde_json::Value::Object(da_senha)) =
+        serde_json::to_value(crate::senha_do_servidor::regras())
+    else {
+        panic!("`senha_do_servidor::Regras` tem de serializar para objeto");
+    };
+    let chaves_da_senha: std::collections::BTreeSet<&str> =
+        da_senha.keys().map(String::as_str).collect();
 
     let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
     let mut culpados = Vec::new();
@@ -45,16 +55,22 @@ fn nenhuma_tela_le_um_limite_de_imagem_que_nao_existe() {
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
                 .collect();
-            if !campo.is_empty() && !chaves.contains(campo.as_str()) {
-                culpados.push(format!("{arquivo}: regras.{campo}"));
+            let validas = if resto.starts_with("regrasDaSenha") {
+                &chaves_da_senha
+            } else {
+                &chaves
+            };
+            if !campo.is_empty() && !validas.contains(campo.as_str()) {
+                culpados.push(format!("{arquivo}: {}.{campo}", &resto[..ponto]));
             }
         }
     }
 
     assert!(
         culpados.is_empty(),
-        "estas telas leem um limite de imagem que o Rust não serializa, e o que \
-             chega é `undefined`: {culpados:?}. As chaves que existem são {chaves:?}"
+        "estas telas leem um limite que o Rust não serializa, e o que chega é `undefined`: \
+         {culpados:?}. As chaves que existem são {chaves:?} (a imagem) e {chaves_da_senha:?} \
+         (a senha do servidor, lida por um nome que começa com `regrasDaSenha`)"
     );
 }
 

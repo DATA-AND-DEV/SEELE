@@ -369,6 +369,24 @@ pub fn declarar_proprietario(persistence: &Persistence, impressao: &str) -> Resu
     Ok(())
 }
 
+/// Se esta impressão é a do proprietário declarado deste servidor.
+///
+/// Para a porta: quem hospeda não precisa do segredo da própria casa
+/// (`session::consultar_portaria`). Só vale com a impressão **já provada** pela
+/// assinatura; quem chama é quem garante isso. Sem dono declarado, ou com o
+/// banco sem responder, a resposta é `false`: a dúvida não abre porta.
+#[must_use]
+pub fn e_o_proprietario(persistence: &Persistence, impressao: &str) -> bool {
+    match banco::impressao_do_proprietario(persistence.connection()) {
+        Ok(Some(dono)) => dono == impressao.to_ascii_lowercase(),
+        Ok(None) => false,
+        Err(erro) => {
+            tracing::warn!(%erro, "cargos: o banco não disse quem é o proprietário; ninguém é");
+            false
+        }
+    }
+}
+
 /// O erro acionável de um servidor sem proprietário declarado, para o
 /// `seeled` registrar no arranque. `None` quando há dono.
 #[must_use]

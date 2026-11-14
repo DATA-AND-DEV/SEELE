@@ -578,11 +578,13 @@ mod tests {
         }
     }
 
-    /// **A bancada da sessão pelo navegador lê os `.wasm` e o servidor que o
-    /// job acabou de compilar** (Tarefa 2.6 da F4): depois do `cargo xtask web`
-    /// (o `seele-web` e o motor dos MODs), e depois do build do exemplo
-    /// `servidor_da_bancada`, com os três caminhos. Antes de qualquer um, ela
-    /// entraria num servidor, numa página ou num motor do cache.
+    /// **As bancadas da página contra o servidor de verdade leem os `.wasm` e
+    /// o servidor que o job acabou de compilar**: a da sessão pelo navegador
+    /// (Tarefa 2.6 da F4) e a das várias vozes ao mesmo tempo (o relato de
+    /// 13/11/2026). Depois do `cargo xtask web` (o `seele-web` e o motor dos
+    /// MODs), e depois do build do exemplo `servidor_da_bancada`, com os três
+    /// caminhos. Antes de qualquer um, elas entrariam num servidor, numa página
+    /// ou num motor do cache.
     #[test]
     fn a_bancada_da_sessao_roda_depois_do_wasm_e_do_servidor_compilados() {
         let passos = passos_do_job("bancadas-de-mod");
@@ -596,25 +598,23 @@ mod tests {
         let servidor = posicao_do_run(
             "cargo build --quiet --package seele-server --example servidor_da_bancada",
         );
-        let roda = posicao_do_run(
-            "node apps/seele-app/bancada/sessao-no-navegador.cjs \
-             target/wasm32-unknown-unknown/release/seele_web.wasm \
-             target/debug/examples/servidor_da_bancada \
-             target/wasm32-wasip1/release/seele_motor_web.wasm",
-        );
-        assert!(
-            wasm < roda && servidor < roda,
-            "ci.yml: a `sessao-no-navegador.cjs` roda antes do `.wasm` ou do servidor que ela lê"
-        );
-        assert!(
-            ler("empacotar/publicar.sh").contains(
-                "uma_bancada node apps/seele-app/bancada/sessao-no-navegador.cjs \
+        for bancada in ["sessao-no-navegador.cjs", "varias-vozes-no-navegador.cjs"] {
+            let comando = format!(
+                "node apps/seele-app/bancada/{bancada} \
                  target/wasm32-unknown-unknown/release/seele_web.wasm \
                  target/debug/examples/servidor_da_bancada \
                  target/wasm32-wasip1/release/seele_motor_web.wasm"
-            ),
-            "a bateria do `publicar.sh` não roda a `sessao-no-navegador.cjs` com os três caminhos"
-        );
+            );
+            let roda = posicao_do_run(&comando);
+            assert!(
+                wasm < roda && servidor < roda,
+                "ci.yml: a `{bancada}` roda antes do `.wasm` ou do servidor que ela lê"
+            );
+            assert!(
+                ler("empacotar/publicar.sh").contains(&format!("uma_bancada {comando}")),
+                "a bateria do `publicar.sh` não roda a `{bancada}` com os três caminhos"
+            );
+        }
     }
 
     /// O comando que roda os roteiros da casca, nos dois lugares que os rodam:

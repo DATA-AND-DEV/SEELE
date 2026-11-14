@@ -193,6 +193,18 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     decodificados: 0,
     semCabecalho: 0,
     esquecidas: 0,
+    /**
+     * **Quantas vezes esta página estragou a voz que chegou inteira**: um
+     * quadro decodificado que ficou sem o cabeçalho dele, um decodificador que
+     * falhou, a mistura do worklet que recusou um quadro ou não misturou. Não
+     * é perda de rede (o datagrama chegou) nem o buffer de jitter ocultando um
+     * quadro que faltou: é desta página, e soa igual às duas. Só cresce; quem
+     * quer saber se está acontecendo **agora** olha se cresceu (a ponte, que
+     * acende o «ÁUDIO LOCAL FALHANDO» do rodapé, como o `FalhaLocal` do
+     * desktop). No relato de 13/11/2026 a página deixou metade dos quadros sem
+     * cabeçalho, contou isso em `semCabecalho`, e não disse a ninguém.
+     */
+    tropecosDaEscuta: 0,
     falhas: [],
   };
 
@@ -388,20 +400,50 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
 
   // ------------------------------------------------------ o que chega
 
-  /** O número de cada pedaço de Opus → o cabeçalho dele, até o som sair. */
-  const chegadas = new Map();
-  let proximaChegada = 0;
+  /**
+   * O decodificador de uma alça e, **só dele**, o número de cada pedaço de Opus
+   * → o cabeçalho desse pedaço, até o som sair.
+   *
+   * **A conta é por decodificador, e não uma só para a página.** O
+   * `AudioDecoder` do Chromium não devolve o instante do pedaço que entrou:
+   * ele guarda o do primeiro e soma 20 ms a cada som que sai (medido em
+   * 13/11/2026, no Chromium 151: entraram 0, 40 000, 80 000, 120 000 e
+   * 400 000 µs, saíram 0, 20 000, 40 000, 60 000 e 80 000). Com um contador só
+   * para todas as alças, o som de cada uma saía com o número seguido dela, e o
+   * cabeçalho guardado nesse número era o de outro pedaço, quase sempre de
+   * outra pessoa: com uma voz só os números coincidiam, e a partir da segunda
+   * metade dos quadros ficava sem cabeçalho e o resto ia ao buffer de jitter
+   * com a sequência e o carimbo de outra voz (o relato de 13/11/2026, «todos
+   * os áudios pipocados depois que alguém entrou»; a
+   * `bancada/varias-vozes-no-navegador.cjs` mediu 252 quadros sem cabeçalho em
+   * 504 com duas vozes, e a primeira muda). Contando de zero em cada
+   * decodificador, o número que sai é o que entrou nos dois jeitos de carimbar:
+   * o do Chromium, e o de um navegador que devolve o instante que recebeu.
+   */
+  function criarDecoder(alca) {
+    const dele = { decoder: null, chegadas: new Map(), proxima: 0 };
+    dele.decoder = new AudioDecoder({
+      output: (dados) => decodificado(alca, dele, dados),
+      error: (erro) => {
+        contas.tropecosDaEscuta++;
+        falha(`decodificador da alça ${alca}`, erro);
+      },
+    });
+    dele.decoder.configure(cfg.decoder);
+    return dele;
+  }
 
-  function decodificado(alca, dados) {
+  function decodificado(alca, dele, dados) {
     const numero = numeroDoQuadro(dados.timestamp);
-    const info = chegadas.get(numero);
-    chegadas.delete(numero);
+    const info = dele.chegadas.get(numero);
+    dele.chegadas.delete(numero);
     const pcm = new Float32Array(dados.numberOfFrames);
     try {
       // Mono: o plano 0 é o som inteiro, em `f32` ou `f32-planar`.
       const formato = dados.format === "f32" || dados.format === "f32-planar" ? {} : { format: "f32-planar" };
       dados.copyTo(pcm, { planeIndex: 0, ...formato });
     } catch (erro) {
+      contas.tropecosDaEscuta++;
       falha(`decodificador da alça ${alca}`, erro);
       return;
     } finally {
@@ -409,6 +451,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     }
     if (!info) {
       contas.semCabecalho++;
+      contas.tropecosDaEscuta++;
       return;
     }
     contas.decodificados++;
@@ -416,16 +459,26 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
   }
 
   function decoderDe(alca) {
-    let decoder = vivo.decoders.get(alca);
-    if (!decoder) {
-      decoder = new AudioDecoder({
-        output: (dados) => decodificado(alca, dados),
-        error: (erro) => falha(`decodificador da alça ${alca}`, erro),
-      });
-      decoder.configure(cfg.decoder);
-      vivo.decoders.set(alca, decoder);
+    let dele = vivo.decoders.get(alca);
+    if (!dele) {
+      dele = criarDecoder(alca);
+      vivo.decoders.set(alca, dele);
     }
-    return decoder;
+    return dele;
+  }
+
+  /**
+   * Um pedaço de Opus da alça `alca`, com o cabeçalho dele: o cabeçalho fica
+   * guardado no número do pedaço **neste decodificador**, e o pedaço entra com
+   * esse número como instante.
+   */
+  function decodificar(alca, info, opus) {
+    const dele = decoderDe(alca);
+    const numero = dele.proxima++;
+    dele.chegadas.set(numero, info);
+    // Um decodificador que engolisse pedaços sem saída deixaria o mapa crescer.
+    if (dele.chegadas.size > 500) dele.chegadas.delete(dele.chegadas.keys().next().value);
+    dele.decoder.decode(new EncodedAudioChunk({ type: "key", timestamp: numero * 20000, data: opus }));
   }
 
   /** Um pacote do transporte: bytes opacos, que só o `.wasm` lê. */
@@ -444,12 +497,10 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     const bytes = saida();
     const vista = new DataView(bytes.buffer);
     const alca = vista.getUint32(0, true);
-    const numero = proximaChegada++;
-    chegadas.set(numero, { seq: vista.getUint16(4, true), carimbo: vista.getUint32(6, true), chegada: agora });
-    if (chegadas.size > 500) chegadas.delete(chegadas.keys().next().value);
     try {
-      decoderDe(alca).decode(new EncodedAudioChunk({ type: "key", timestamp: numero * 20000, data: bytes.subarray(10) }));
+      decodificar(alca, { seq: vista.getUint16(4, true), carimbo: vista.getUint32(6, true), chegada: agora }, bytes.subarray(10));
     } catch (erro) {
+      contas.tropecosDaEscuta++;
       falha(`decodificador da alça ${alca}`, erro);
     }
   }
@@ -476,15 +527,14 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
       somDaTela.tela = tela;
       aplicarOGanhoDaTela();
     }
-    const numero = proximaChegada++;
-    chegadas.set(numero, { seq: somDaTela.seq, carimbo: somDaTela.carimbo, chegada: performance.now() });
-    if (chegadas.size > 500) chegadas.delete(chegadas.keys().next().value);
+    const info = { seq: somDaTela.seq, carimbo: somDaTela.carimbo, chegada: performance.now() };
     somDaTela.seq = (somDaTela.seq + 1) & 0xffff;
     somDaTela.carimbo = (somDaTela.carimbo + cfg.quadro) >>> 0;
     somDaTela.quadros += 1;
     try {
-      decoderDe(ALCA_DA_TELA).decode(new EncodedAudioChunk({ type: "key", timestamp: numero * 20000, data: opus }));
+      decodificar(ALCA_DA_TELA, info, opus);
     } catch (erro) {
+      contas.tropecosDaEscuta++;
       falha("decodificador do som da tela", erro);
     }
   }
@@ -514,9 +564,9 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
   }
 
   function fecharDecoder(alca) {
-    const decoder = vivo.decoders.get(alca);
+    const dele = vivo.decoders.get(alca);
     vivo.decoders.delete(alca);
-    if (decoder && decoder.state !== "closed") decoder.close();
+    if (dele && dele.decoder.state !== "closed") dele.decoder.close();
   }
 
   // --------------------------------------------------------- o worklet
@@ -557,12 +607,19 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     vivo.reproducaoPronta = new Promise((resolve) => {
       pronta = resolve;
     });
+    // As falhas da mistura que este worklet já contou: ele diz o total, uma
+    // vez por segundo, e o que cresceu é tropeço da escuta.
+    let falhasDaMisturaVistas = 0;
     no.port.onmessage = (evento) => {
       const m = evento.data;
       if (m.tipo === "pronto") {
         aoAcontecer({ tipo: "reproducao-pronta", compilouEmMs: performance.now() - nasceu });
         pronta(true);
       } else if (m.tipo === "andamento") {
+        if (m.falhasDaMistura > falhasDaMisturaVistas) {
+          contas.tropecosDaEscuta += m.falhasDaMistura - falhasDaMisturaVistas;
+          falhasDaMisturaVistas = m.falhasDaMistura;
+        }
         esquecerCaladas();
       } else if (m.tipo === "contas") {
         const resolver = pedidosDeContas.get(m.pedido);
@@ -573,6 +630,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
         // enlace) mediu outra voz: não é dita.
         if (m.pedido === geracaoDaRecepcao && vivo.dentro && m.medida) aoAcontecer({ tipo: "recepcao", medida: m.medida });
       } else if (m.tipo === "falha") {
+        contas.tropecosDaEscuta++;
         falha(m.onde, m.texto);
         if (m.texto.startsWith("o .wasm") || m.texto.startsWith("o worklet nasceu")) pronta(false);
       }
@@ -999,7 +1057,6 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
 
   function fecharDecoders() {
     for (const alca of [...vivo.decoders.keys()]) fecharDecoder(alca);
-    chegadas.clear();
   }
 
   /**
@@ -1184,6 +1241,8 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {}, porOnd
     contas: lerContas,
     /** Pede uma volta da medida da recepção; a resposta é o evento `recepcao`. */
     pedirARecepcao,
+    /** Quantas vezes esta página estragou a voz que chegou (`contas.tropecosDaEscuta`). */
+    tropecosDaEscuta: () => contas.tropecosDaEscuta,
     /** A promessa do `.wasm` compilado no worklet (`false` se falhou). */
     reproducaoPronta: () => vivo.reproducaoPronta,
     abrirTeste,

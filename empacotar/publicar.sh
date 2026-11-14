@@ -1387,6 +1387,7 @@ todas_as_bancadas_de_navegador() {
     cargo build --quiet --package seele-server --example servidor_da_bancada ||
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS servidor_da_bancada"
     uma_bancada node apps/seele-app/bancada/sessao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm
+    uma_bancada node apps/seele-app/bancada/varias-vozes-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm
     # A portaria-da-bancada, fora do workspace, como o passo do ci.yml a monta.
     # **O binário é o recém-montado, e a falta do fonte é vermelho.** Um
     # `target/debug/portaria-da-bancada` de outra rodada seria executado e
@@ -1434,6 +1435,8 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/aviso-antes-de-atualizar.cjs
     uma_bancada node apps/seele-app/bancada/copia-antes-de-converter.cjs
     uma_bancada node apps/seele-app/bancada/hospedar-com-servidor-no-ar.cjs
+    uma_bancada node apps/seele-app/bancada/porta-ao-hospedar.cjs
+    uma_bancada node apps/seele-app/bancada/senha-na-entrada.cjs
     uma_bancada node apps/seele-app/bancada/espera-e-carregando.cjs
     uma_bancada node apps/seele-app/bancada/diagnostico-0151.cjs
     uma_bancada node apps/seele-app/bancada/estado-por-sessao.cjs
@@ -1475,6 +1478,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
     uma_bancada node apps/seele-app/bancada/tela-cheia-da-propria-transmissao.cjs
     uma_bancada node apps/seele-app/bancada/faixa-do-toque.cjs
+    uma_bancada node apps/seele-app/bancada/microfone-por-voz.cjs
     uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/tunel-de-jogador.cjs
     uma_bancada node apps/seele-app/bancada/aceite-da-maquina.cjs
@@ -1490,6 +1494,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/tres-sessoes-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
     uma_bancada node apps/seele-app/bancada/vista-com-dois-servidores.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm chromium playwright
     uma_bancada node apps/seele-app/bancada/portaria-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm target/debug/portaria-da-bancada chromium playwright
+    uma_bancada node apps/seele-app/bancada/senha-pelo-link-do-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-credito.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright

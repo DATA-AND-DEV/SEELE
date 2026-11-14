@@ -565,6 +565,58 @@ fn arquivo_da_identidade(home: &Path) -> PathBuf {
     arquivo_da_identidade_com(home, std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref())
 }
 
+/// Assenta o padrão do microfone desta instalação, e devolve o modo que ficou
+/// valendo para quem não escolheu. `None` se o disco recusou a escrita.
+///
+/// # Quem é instalação nova
+///
+/// O padrão de quem chega passou a ser a voz (pedido do dono, 13/11/2026), e
+/// quem já usava e nunca escolheu fica na tecla — ver
+/// `seele_core::preferences::Preferences::assentar_o_padrao_do_microfone`, que
+/// é quem grava. Aqui é decidido só o «já usava», pelas duas coisas que uma
+/// instalação usada deixa e uma nova não tem:
+///
+/// - **a chave da identidade**, na pasta da identidade (ADR 0061). Ela nasce
+///   na primeira vez que o app mostra o código da pessoa ou conecta, e é uma
+///   por máquina: uma linha aberta pelo launcher, com a pasta de dados dela, a
+///   acha no mesmo lugar;
+/// - **o arquivo de preferências**, que só existe depois de a pessoa (ou o
+///   app) gravar alguma coisa nele.
+///
+/// # Quando chamar
+///
+/// **No arranque, antes de existir janela.** É a janela que pede a impressão e
+/// o `connect`, e os dois criam a chave: chamada depois, toda instalação nova
+/// pareceria usada. A casca chama isto no `setup`.
+pub fn assentar_o_padrao_do_microfone(
+    home: &str,
+    ajustes: &mut preferences::Preferences,
+) -> Option<VoiceMode> {
+    assentar_o_padrao_do_microfone_com(
+        home,
+        std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref(),
+        ajustes,
+    )
+}
+
+/// O mesmo, com o valor de `SEELE_IDENTIDADE` dito por quem chama, pela razão
+/// de [`impressao_com`].
+fn assentar_o_padrao_do_microfone_com(
+    home: &str,
+    variavel: Option<&str>,
+    ajustes: &mut preferences::Preferences,
+) -> Option<VoiceMode> {
+    let ja_usava =
+        ajustes.havia_arquivo() || arquivo_da_identidade_com(Path::new(home), variavel).exists();
+    match ajustes.assentar_o_padrao_do_microfone(ja_usava) {
+        Ok(padrao) => Some(padrao.into()),
+        Err(erro) => {
+            tracing::warn!(%erro, "não consegui gravar o padrão do microfone desta instalação");
+            None
+        }
+    }
+}
+
 /// How often measurements are refreshed.
 const TICK: Duration = Duration::from_millis(250);
 
@@ -5053,10 +5105,12 @@ impl AudioState {
     ///
     /// **O mudo, o isolamento e o modo são os escolhidos**, e não os de uma voz
     /// recém-aberta: pela pendência 52, fora de sala não há voz, e o botão de
-    /// mudo que a pessoa apertou ali tem de continuar apertado na tela. O padrão
-    /// de [`ControlesGuardados`] continua sendo push-to-talk — `specs/03-audio.md`
-    /// escolhe o modo que nunca dispara sozinho, e um padrão `Open` desenharia
-    /// um microfone aberto numa sessão que não tem nenhum.
+    /// mudo que a pessoa apertou ali tem de continuar apertado na tela. A sessão
+    /// que ninguém vestiu continua nascendo em push-to-talk
+    /// ([`ControlesGuardados::de_partida`]) — o modo que nunca dispara sozinho,
+    /// e um nascimento em `Open` desenharia um microfone aberto numa sessão que
+    /// não tem nenhum. O padrão de quem chega (a voz) entra depois, pelo disco:
+    /// [`vestir_com_o_disco`].
     fn sem_voz(escolhida: &ControlesGuardados, abertura: AberturaDoAudio) -> Self {
         Self {
             available: false,
@@ -6971,6 +7025,11 @@ impl ControlesGuardados {
     /// Push-to-talk, supressão inteira e a sensibilidade no padrão: os mesmos de
     /// `Controls::novos`, no núcleo. Uma voz que vestisse outra coisa por padrão
     /// abriria diferente da que se abria antes da pendência 52.
+    ///
+    /// **Não é o padrão do produto para quem chega**, que é a voz: esse depende
+    /// de a instalação ser nova, quem sabe é o disco, e ele entra por
+    /// [`vestir_com_o_disco`] logo depois do `connect`. Aqui é o nascimento, e
+    /// o nascimento é fechado.
     fn de_partida(aparelhos: seele_core::DeviceChoice) -> Self {
         Self {
             mudo: false,
@@ -7045,17 +7104,22 @@ fn vestir_inteira<V: VozViva>(voz: &V, guardados: &ControlesGuardados) {
 /// Veste a voz desta sessão com o que está gravado em disco: o modo, a
 /// supressão de ruído e a sensibilidade. Acréscimo A do lote I-b.
 ///
-/// Só o que está gravado: um ajuste que a pessoa nunca escolheu fica no padrão
-/// da sessão. Gravado em [`VozDaSala`], e por isso vale fora de sala e na
-/// primeira abertura do áudio, como tudo o que se escolhe lá (pendência 52).
+/// A supressão e a sensibilidade, só se gravadas: a que a pessoa nunca escolheu
+/// fica no padrão da sessão. **O modo, sempre**: sem escolha, o que vale é o
+/// padrão desta instalação — a voz para quem chegou, a tecla para quem já
+/// usava —, e é o disco que sabe qual
+/// (`seele_core::preferences::Preferences::modo_do_microfone`). A sessão nasce
+/// na tecla ([`ControlesGuardados::de_partida`]), e é aqui que quem chegou
+/// passa a falar sem ela.
+///
+/// Gravado em [`VozDaSala`], e por isso vale fora de sala e na primeira
+/// abertura do áudio, como tudo o que se escolhe lá (pendência 52).
 fn vestir_com_o_disco<V: VozViva>(
     voz: &VozDaSala<V>,
     ajustes: &seele_core::preferences::Preferences,
 ) {
     voz.escolher(|escolhida| {
-        if let Some(modo) = ajustes.voice_mode() {
-            escolhida.modo = modo;
-        }
+        escolhida.modo = ajustes.modo_do_microfone();
         if let Some(forca) = ajustes.supressao_de_ruido() {
             escolhida.supressao = forca.clamp(0.0, 1.0);
         }

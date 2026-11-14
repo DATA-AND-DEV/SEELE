@@ -1274,6 +1274,129 @@
   gap: 12px;
 }
 
+/* ---------- a senha do servidor, de quem entra ----------
+   Debaixo da frase vermelha: o campo e o ENTRAR lado a lado quando cabem, e a nota na linha inteira. */
+.boot-senha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.boot-senha-campo {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.boot-senha-campo input { width: 100%; }
+
+.boot-senha > button {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: 40px;
+}
+
+.boot-senha > .nota {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+/* ---------- quem pode entrar (preparar) ----------
+   Duas opções, cada uma uma linha inteira clicável: o rádio nativo à esquerda (o teclado troca com as setas, o leitor diz «1 de 2»), o nome
+   e a frase que diz o que ela faz. A escolhida é dita pelo rádio marcado, e a borda laranja só repete. Os campos da senha vêm logo abaixo, e
+   só com COM SENHA escolhido. */
+#tela-preparar .preparar-porta { gap: 16px; }
+
+.preparar-porta-opcoes {
+  display: grid;
+  gap: 10px;
+}
+
+.preparar-porta-opcao {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  cursor: pointer;
+}
+
+.preparar-porta-opcao input {
+  grid-row: 1 / span 2;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.preparar-porta-opcao:has(input:checked) {
+  border-color: var(--seele-laranja-nerv);
+  background: color-mix(in srgb, var(--seele-laranja-nerv) 10%, transparent);
+}
+
+.preparar-porta-opcao:has(input:focus-visible) {
+  outline: var(--seele-b-forte) solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
+.preparar-porta-nome {
+  font-family: var(--seele-ui);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso);
+}
+
+.preparar-porta-nota {
+  grid-column: 2;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--seele-osso-apagado);
+}
+
+/* Os dois campos lado a lado quando cabem, o MOSTRAR ao lado deles, e a regra e a recusa na linha inteira, abaixo. Estreito, empilham. */
+.preparar-senha-campos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.preparar-senha-campo {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.preparar-senha-campo input { width: 100%; }
+
+.preparar-senha-campos > button {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: 40px;
+}
+
+.preparar-senha-campos > p {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+/* Largo: a identidade e quem pode entrar empilham na coluna da esquerda, e a versão ocupa a da direita, de cima a baixo. */
+@media (min-width: 901px) {
+  #tela-preparar .area-grade:not(:has(#preparar-do-novo[hidden])) .preparar-identidade { grid-column: 1; grid-row: 1; }
+  #tela-preparar .area-grade:not(:has(#preparar-do-novo[hidden])) .preparar-porta { grid-column: 1; grid-row: 2; }
+  #tela-preparar .area-grade:not(:has(#preparar-do-novo[hidden])) #preparar-versoes { grid-column: 2; grid-row: 1 / span 2; }
+}
+
 #tela-preparar #preparar-lista-versoes .server-dispositivo {
   padding: 16px;
   border: 1px solid var(--seele-linha-forte);

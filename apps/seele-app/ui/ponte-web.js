@@ -166,6 +166,9 @@ const RECUSAS_NOMEADAS = new Map([
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
   ["reabrir_o_app", RECUSA_GRAVACAO_DE_TELA],
   ["redefinir_permissao_de_tela", RECUSA_GRAVACAO_DE_TELA],
+  // A regra da senha de um servidor novo é da tela de preparar, que só existe
+  // em quem hospeda.
+  ["regras_da_senha_do_server", RECUSA_HOSPEDAR],
   ["remover_versao", RECUSA_VERSOES],
   // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
   // tarefa 13 do plano da F3, Step 5b): mexem no banco de um servidor guardado
@@ -722,7 +725,7 @@ async function lerOLink(texto) {
  * um servidor deste aparelho. Um endereço que ela não conhece não traz a chave
  * que confere quem atendeu, e é recusado com a frase.
  */
-async function entrarPeloEndereco({ server, nickname } = {}) {
+async function entrarPeloEndereco({ server, nickname, joinSecret } = {}) {
   // **Uma pessoa, e não um servidor** (ADR 0068): `@CÓDIGO` entra na sala
   // pessoal de quem tem o app, como convidada. O alvo e o vocabulário da falha
   // são da identidade pessoal (`identidade-web.js`).
@@ -742,7 +745,11 @@ async function entrarPeloEndereco({ server, nickname } = {}) {
     await identidade.abrir(texto);
     resultado = await identidade.entrar(apelido);
   } else if (identidade.ler()?.endereco === server) {
-    resultado = await identidade.entrar(apelido);
+    // **A senha do servidor, digitada depois da recusa** (1.1.1): a casca
+    // larga a manda no `joinSecret`, como o desktop, e ela só é senha quando a
+    // tentativa aberta acabou de ter a credencial recusada. Fora disso o
+    // `joinSecret` é o convite, que a identidade já tem.
+    resultado = await identidade.entrar(apelido, identidade.ler().credencialRecusada ? joinSecret ?? null : null);
   } else {
     const conhecido = (await identidade.conhecidos()).find((servidor) => servidor.endereco === server);
     if (!conhecido) {
@@ -792,7 +799,7 @@ const RECUSA_ENDERECO_SOZINHO =
  */
 async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, preparacao } = {}) {
   if (!alvo || typeof alvo !== "object" || !alvo.chave) {
-    if (typeof server === "string") return entrarPeloEndereco({ server, nickname });
+    if (typeof server === "string") return entrarPeloEndereco({ server, nickname, joinSecret });
     return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
   }
   // **Várias sessões** (E3): uma entrada nova soma, e não recusa. Só duas
@@ -923,7 +930,10 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, prepa
     seguirOsVolumes().catch((falha) => console.warn("volumes na mistura:", falha));
     // A recepção é medida na mistura, que toca só a sessão da voz: é ela que
     // pede, a cada volta, e é ela que relata (`aRecepcaoMediu`).
-    if (vozDaSessao.dentro && aSessaoDaVoz() === sessao) vozDaPonte.atual?.pedirARecepcao();
+    if (vozDaSessao.dentro && aSessaoDaVoz() === sessao) {
+      vozDaPonte.atual?.pedirARecepcao();
+      olharOsTropecosDaVoz();
+    }
   };
   // O que a voz desta página mede do que ouve: zero fora da sala de voz, e
   // nas sessões sem a voz (E3).
@@ -980,7 +990,7 @@ function retratoDaSessao(sessao) {
   const comAVoz = !focoDaPonte || focoDaPonte === sessao.idDaPonte;
   const voz = comAVoz
     ? vozDaSessao
-    : { ...vozDaSessao, bitrate: 0, nivel: 0, recusados: 0, falando: false, abertura: "fora_de_sala" };
+    : { ...vozDaSessao, bitrate: 0, nivel: 0, recusados: 0, falando: false, abertura: "fora_de_sala", falhaLocal: false };
   return {
     // O carimbo junto, achatado, como o `RetratoNaSessao` do app.
     carimbo: sessao.idDaPonte ? carimboDaPonte(sessao) : undefined,
@@ -999,7 +1009,8 @@ function retratoDaSessao(sessao) {
       ...lido.telemetria,
       bitrate_bps: voz.bitrate,
       input_level: voz.nivel,
-      local_fault: false,
+      // O que a voz desta página estraga do que chegou (`olharOsTropecosDaVoz`): a máquina, e não a rede.
+      local_fault: voz.dentro === true && voz.falhaLocal === true,
       frames_refused: voz.recusados,
       microfone_entrega_silencio_digital: false,
       cancelamento_de_eco_desligado: voz.semEco === true && voz.abertura === "aberto",
@@ -1098,6 +1109,13 @@ const vozDaSessao = {
    *   protocolo 13).
    */
   recepcao: { jitterMs: 0, perda: 0, relatos: 0, ultimoRelato: null },
+  /**
+   * **Esta página está estragando a voz que chegou, agora** (`olharOsTropecosDaVoz`): é o `local_fault` do retrato, que o rodapé diz como
+   * «ÁUDIO LOCAL FALHANDO». `tropecos` é a régua: o total que a voz contava na última olhada, até quando o aviso fica aceso, e em que
+   * abertura da voz ela foi posta.
+   */
+  falhaLocal: false,
+  tropecos: { visto: 0, ate: 0, geracao: null },
   /** Se o microfone desta abertura só abriu sem o cancelamento de eco (`semEcoPorque` do motor). */
   semEco: false,
   /** O volume (0 a 4) e o mudo do som da tela, como o desktop os guarda. */
@@ -1318,6 +1336,39 @@ function aRecepcaoMediu(medida) {
     recepcao.relatos += 1;
     recepcao.ultimoRelato = medida.relato;
   }
+}
+
+/** Por quanto tempo o aviso de falha local fica aceso depois do último tropeço: as oito olhadas quietas do `FalhaLocal` do desktop. */
+const FALHA_LOCAL_DURA_MS = 4000;
+
+/**
+ * **A página que estraga a voz que chegou diz que é ela** (o relato de 13/11/2026: a página deixava metade dos quadros decodificados sem
+ * cabeçalho, contava, e o rodapé seguia dizendo que estava tudo bem — a perda medida era zero, porque o datagrama tinha chegado).
+ *
+ * A voz conta os tropeços da escuta (`tropecosDaEscuta`, na `voz-web.js`): o quadro sem cabeçalho, o decodificador que falhou, a
+ * mistura que recusou. Aqui, a cada volta da medida da sessão com a voz, a regra é a do `FalhaLocal` do desktop: falha é o contador
+ * **crescer** entre duas olhadas; o aviso acende enquanto acontece e apaga sozinho quando para. Uma abertura nova da voz só põe a régua
+ * (o que a anterior contou não é falha desta), e um total menor que o visto também.
+ *
+ * Quando acende, o que cresceu vai ao console, que é onde o registro da página mora (`registrar_da_janela`).
+ */
+function olharOsTropecosDaVoz(agora = performance.now()) {
+  const voz = vozDaPonte.atual;
+  const regua = vozDaSessao.tropecos;
+  const total = voz?.tropecosDaEscuta?.() ?? 0;
+  if (regua.geracao !== vozDaSessao.geracao) {
+    Object.assign(regua, { visto: total, ate: 0, geracao: vozDaSessao.geracao });
+  } else if (total > regua.visto) {
+    if (!vozDaSessao.falhaLocal) {
+      console.warn(`ponte: a voz que chegou não está tocando inteira nesta página (a máquina, e não a rede): ${total - regua.visto} tropeços da escuta desde a última olhada, ${total} ao todo`);
+    }
+    regua.ate = agora + FALHA_LOCAL_DURA_MS;
+  }
+  regua.visto = total;
+  const acesa = agora < regua.ate;
+  if (acesa === vozDaSessao.falhaLocal) return;
+  vozDaSessao.falhaLocal = acesa;
+  emitirNaPonte("seele://event", "TelemetryChanged");
 }
 
 async function seguirOsVolumes() {

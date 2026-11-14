@@ -60,15 +60,48 @@ const TELEMETRY_EVERY: Duration = Duration::from_millis(250);
 /// How the microphone decides to open. `specs/03-audio.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceMode {
-    /// A key is held. Never false-triggers, so it is the default.
+    /// A key is held. Never false-triggers.
+    ///
+    /// It was the default for everybody up to 1.1.0, and it still is three
+    /// things: what an installation that already existed keeps
+    /// ([`VoiceMode::DE_QUEM_JA_USAVA`]), what an unknown byte reads as, and
+    /// what a voice is born with before anybody dresses it. All three for the
+    /// same reason — it is the one mode that cannot put a microphone on the
+    /// air by itself.
     PushToTalk,
     /// The level decides, with hysteresis and hangover.
     VoiceActivated,
-    /// Always open. A recording setup, never a default.
+    /// Always open.
+    ///
+    /// What a person who arrives gets ([`VoiceMode::DE_QUEM_CHEGA`]): no key
+    /// to learn and no threshold to cross before being heard. It was «a
+    /// recording setup, never a default» up to 1.1.0; the owner made it the
+    /// newcomer's default on 13/11/2026, knowing it puts the whole room on
+    /// the air.
     Open,
 }
 
 impl VoiceMode {
+    /// O modo de quem chega: instalação nova, e a pessoa ainda não escolheu.
+    ///
+    /// Decisão do dono em 13/11/2026: «o padrão agora para novos usuários,
+    /// quando eles forem usar pela primeira vez, é o microfone aberto, não
+    /// usando o botão». A primeira leitura foi a ativação por voz, porque o
+    /// sempre aberto transmite o ambiente inteiro o tempo todo; perguntado, o
+    /// dono respondeu no mesmo dia: «sempre aberto». A redução de ruído
+    /// continua ligada por padrão, e a tela diz a quem chega que o microfone
+    /// está aberto e onde se troca.
+    ///
+    /// **Só vale onde está escrito que a instalação é nova** — ver
+    /// `Preferences::assentar_o_padrao_do_microfone`. Um microfone que passa a
+    /// abrir sozinho na máquina de quem sempre segurou a tecla é o defeito que
+    /// esta separação existe para não ter.
+    pub const DE_QUEM_CHEGA: Self = Self::Open;
+
+    /// O modo de quem já usava o SEELE quando o padrão mudou e nunca escolheu:
+    /// o de antes. É também o de uma instalação que ninguém assentou.
+    pub const DE_QUEM_JA_USAVA: Self = Self::PushToTalk;
+
     fn to_gate(self) -> GateMode {
         match self {
             Self::PushToTalk => GateMode::PushToTalk,
@@ -835,9 +868,11 @@ impl Controls {
             muted: AtomicBool::new(false),
             total_isolation: AtomicBool::new(false),
             key_held: AtomicBool::new(false),
-            // specs/03-audio.md makes push-to-talk the default because it never
-            // false-triggers, and a client that transmits a room by accident is
-            // worse than one that misses a word.
+            // A voice is born closed, whatever the product default is: a
+            // client that transmits a room by accident is worse than one that
+            // misses a word. The mode the person gets — chosen, or the default
+            // of the installation — is put on by whoever opened it
+            // (`Preferences::modo_do_microfone`, through the shell).
             mode: AtomicU8::new(VoiceMode::PushToTalk.as_byte()),
             bitrate: AtomicU32::new(DEFAULT_BITRATE_BPS),
             speaking: AtomicBool::new(false),
@@ -3406,10 +3441,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_is_push_to_talk() {
-        // specs/03-audio.md picks it because it never false-triggers, and a
-        // client that broadcasts a room by accident is the worse failure.
+    fn a_voice_is_born_on_push_to_talk() {
+        // Not the product default any more — that is `DE_QUEM_CHEGA`, and it
+        // is put on from the preferences — but still what a voice nobody
+        // dressed does: a client that broadcasts a room by accident is the
+        // worse failure.
         assert_eq!(VoiceMode::from_byte(0), VoiceMode::PushToTalk);
+        assert_eq!(
+            VoiceMode::from_byte(Controls::novos().mode.load(Ordering::Relaxed)),
+            VoiceMode::PushToTalk,
+            "uma voz que ninguém vestiu nasceu com o microfone podendo abrir sozinho"
+        );
+    }
+
+    #[test]
+    fn quem_chega_fala_de_microfone_aberto_e_quem_ja_usava_fica_na_tecla() {
+        // Decisão do dono (13/11/2026): quem usa pela primeira vez não precisa
+        // de tecla, e o microfone fica sempre aberto (e não por voz).
+        assert_eq!(VoiceMode::DE_QUEM_CHEGA, VoiceMode::Open);
+        assert_eq!(VoiceMode::DE_QUEM_JA_USAVA, VoiceMode::PushToTalk);
     }
 
     #[test]

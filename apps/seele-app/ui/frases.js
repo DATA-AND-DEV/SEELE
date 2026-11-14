@@ -510,6 +510,40 @@ const MICROFONE_EM_SILENCIO_NO_MACOS =
 const AVISO_DE_FONE = "";
 
 /**
+ * O microfone que abre por voz, dito a quem entra numa sala de voz e ainda não
+ * leu isto. (Quem chega entra com o sempre aberto, e lê a frase de baixo; esta
+ * é a de quem está por voz sem ter passado por CONFIGURAÇÕES.)
+ *
+ * Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem tecla. Um
+ * padrão que põe a pessoa no ar sem ela apertar nada tem de dizer três coisas
+ * no instante em que passa a valer: que o microfone abre sozinho, onde ela vê
+ * que está sendo ouvida (o nome dela na sala ganha «fala»: `linhaDeQuemEstaDentro`),
+ * e onde se troca para a tecla — pelo nome que o botão de lá tem.
+ *
+ * Vazia, a faixa não acende: é o que a casca do celular faz, que não tem tecla
+ * (`CASCA.avisoDoMicrofonePorVoz`, em `base.js`).
+ */
+const AVISO_DO_MICROFONE_POR_VOZ =
+  "SEU MICROFONE ABRE QUANDO VOCÊ FALA.\n" +
+  "Enquanto os outros ouvem você, o seu nome na sala diz «fala». " +
+  "Para falar só segurando uma tecla: CONFIGURAÇÕES · MICROFONE E SOM · SEGURAR TECLA.";
+
+/**
+ * O microfone sempre aberto, dito a quem entra numa sala de voz e ainda não
+ * leu isto. É o modo de quem instala o SEELE agora (decisão do dono,
+ * 13/11/2026: «sempre aberto», e não por voz).
+ *
+ * Diz o que a de cima diz, e uma coisa a mais, que só este modo tem: o som em
+ * volta vai junto, o tempo todo. Por isso o primeiro lugar que ela aponta é o
+ * botão que cala, e só depois os outros dois modos, pelos nomes que os botões
+ * de CONFIGURAÇÕES têm.
+ */
+const AVISO_DO_MICROFONE_ABERTO =
+  "SEU MICROFONE ESTÁ SEMPRE ABERTO.\n" +
+  "Todos na sala ouvem você e o som em volta, sem você apertar nada. Para calar, o botão do microfone. " +
+  "Para abrir só quando você fala, ou só segurando uma tecla: CONFIGURAÇÕES · MICROFONE E SOM · AO FALAR ou SEGURAR TECLA.";
+
+/**
  * Com que nome entra quem fecha a pergunta do nome sem responder.
  *
  * **Não diz o nome**, e não é descuido: ele é derivado em Rust, dentro do
@@ -1438,6 +1472,12 @@ function fraseDeErro(erro, apelido, deOnde) {
     if (erro.NomeRecusado) {
       return NOMES_RECUSADOS[erro.NomeRecusado] ?? "ESTE NOME NÃO PODE VIRAR LINK";
     }
+    // `FalhaAoHospedar::SenhaRecusada`: o Rust conferiu de novo a senha que a
+    // tela de preparar já tinha conferido, e a recusou. O motivo, e nunca a
+    // senha: ela não vem no erro.
+    if (erro.SenhaRecusada) {
+      return fraseDaSenhaRecusada(erro.SenhaRecusada);
+    }
     if (erro.Refused) {
       // **O apelido recusado entra na frase**, e é conserto de uma coisa cruel.
       //
@@ -1698,6 +1738,11 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O SERVIDOR AQUI",
+    // A senha de um servidor novo chegou a um servidor que já tinha a porta
+    // dele (uma senha, ou a portaria decidida): o Rust recusa e não muda nada.
+    PortaJaEscolhida:
+      "ESTE SERVIDOR JÁ TINHA A PORTA DELE, E A SENHA ESCOLHIDA NÃO FOI GRAVADA.\n" +
+      "Nada subiu. Hospede-o pela lista e troque a senha em CONFIGURAÇÕES · A PORTA.",
     // ADR 0046: a lista de revogação que chegou não abriu, ou é mais velha que
     // a guardada nesta máquina — a forma de alguém esconder uma revogação é
     // servir uma lista antiga. O ato para em vez de seguir calado. A outra
@@ -1910,6 +1955,32 @@ const FRASES = {
 // `const FRASES` do arquivo.
 
 /**
+ * **Por que a conversa direta acabou sem ninguém desligar** (a conversa pelo
+ * código ou pelo link, na página: `pessoal-web-entrada.js`).
+ *
+ * O SEELE não tem servidor no meio da conversa (ADR 0063: «o que o direto não
+ * alcança fica sem caminho, e isso é dito»). Até a 1.1.0 não era
+ * dito: medido na página publicada em 13/11/2026, com um dos dois navegadores
+ * sem UDP, eram 30 s de «Conectando…» e depois só «Conversa encerrada», nos
+ * dois lados. A página já tinha na mão a etapa em que parou e quantos
+ * candidatos cada lado juntou, e é isso que escolhe a frase: quem não juntou
+ * nenhum é quem está atrás da rede que bloqueia.
+ */
+const FRASES_DA_CONVERSA_DIRETA = Object.freeze({
+  semCaminhoDaqui:
+    "NÃO DEU PARA CONECTAR. Este navegador não achou por onde abrir uma conexão direta: a rede daqui bloqueia " +
+    "(acontece com VPN, rede de empresa e extensão de privacidade). Tente por outra rede.",
+  semCaminhoDeLa: (nome) =>
+    `NÃO DEU PARA CONECTAR. ${nome || "A outra pessoa"} não achou por onde abrir uma conexão direta: a rede de lá bloqueia ` +
+    "(acontece com VPN, rede de empresa e extensão de privacidade). Peça para tentar por outra rede.",
+  semCaminho:
+    "NÃO DEU PARA CONECTAR. As redes de vocês dois não deixam passar uma conexão direta entre elas, o que é comum em rede de celular e de empresa. " +
+    "O SEELE não passa a conversa por um servidor no meio: tente com um dos dois em outra rede.",
+  semCombinar: "NÃO DEU PARA CONECTAR. A ligação foi atendida, mas os dois lados não terminaram de combinar a conexão a tempo. Ligue de novo.",
+  caiu: "A CONEXÃO CAIU e não voltou. Ligue de novo.",
+});
+
+/**
  * O servidor que esta máquina hospeda, visto da entrada (`camada-hospedagem.js`).
  * O HOSPEDAR AQUI muda de rótulo com ele no ar: o clique leva a ele, e nunca
  * hospeda um segundo (revisão do Codex).
@@ -1945,6 +2016,77 @@ const FRASES_DA_HOSPEDAGEM = Object.freeze({
     fechar: "FECHAR",
   }),
 });
+
+/**
+ * **Quem pode entrar num servidor novo**, escolhido na tela de preparar, antes
+ * de ele subir (`tela-boot.js`; pedido do dono, 13/11/2026).
+ *
+ * Cada linha diz o que o servidor faz de verdade (`admissao.rs` e
+ * `portaria.rs`, no `seele-server`):
+ *
+ * - **com a sua aprovação** é a portaria ligada, o que HOSPEDAR sempre fez:
+ *   quem chega fica pendente, quem hospeda decide uma vez por pessoa, e a
+ *   decisão vale nas próximas entradas;
+ * - **com senha** é a senha gravada e a portaria desligada: a senha certa entra
+ *   sem pedido nenhum, e sem ela a recusa vem antes de qualquer batida.
+ *
+ * As recusas têm os nomes de `senha_do_servidor::SenhaRecusada`, do Rust, que
+ * confere de novo o que a tela conferiu. `NaoConfere` é só daqui: os dois
+ * campos não chegam ao Rust. O mínimo vem da regra que o Rust manda
+ * (`regras_da_senha_do_server`), e nenhum número é escrito à mão.
+ */
+const FRASES_DA_PORTA_AO_HOSPEDAR = Object.freeze({
+  notaDoPortao:
+    "Quem chega pelo link bate à porta e espera. Você aprova cada pessoa uma vez, e depois ela entra sozinha.",
+  notaDaSenha:
+    "Quem tem a senha entra direto, sem esperar a sua aprovação. Sem a senha, ninguém entra.",
+  regra: (minimo) =>
+    (Number.isFinite(minimo) ? `Pelo menos ${minimo} caracteres. ` : "") +
+    "A senha não viaja no link: passe-a às pessoas por fora. Dá para trocá-la depois, em CONFIGURAÇÕES · A PORTA.",
+  mostrar: "MOSTRAR",
+  ocultar: "OCULTAR",
+  recusas: Object.freeze({
+    Vazia: () => "DIGITE A SENHA DO SERVIDOR.\nPara hospedar sem senha, escolha COM A SUA APROVAÇÃO.",
+    ComEspacoNaPonta: () =>
+      "A SENHA COMEÇA OU TERMINA COM ESPAÇO.\nQuem a recebe por mensagem não vê o espaço. Tire-o.",
+    Curta: (minimo) =>
+      "A SENHA É CURTA DEMAIS." + (Number.isFinite(minimo) ? `\nEla precisa de pelo menos ${minimo} caracteres.` : ""),
+    Longa: () => "A SENHA É LONGA DEMAIS.\nEncurte-a.",
+    NaoConfere: () => "AS DUAS SENHAS NÃO SÃO IGUAIS.\nDigite de novo, ou aperte MOSTRAR para conferir.",
+  }),
+  // O servidor não subiu, e a senha escolhida não foi gravada em lugar nenhum:
+  // ele já está na lista, e a subida seguinte, por ela, não pergunta de novo.
+  naoGravada:
+    "A senha escolhida não foi gravada: o servidor não chegou a subir. " +
+    "Hospedado de novo pela lista, ele nasce COM A SUA APROVAÇÃO, e a senha se põe em CONFIGURAÇÕES · A PORTA.",
+});
+
+/**
+ * **A senha do servidor, de quem entra** (`oferecerASenhaNaEntrada`, em
+ * `tela-boot.js`): a nota debaixo de CREDENCIAL RECUSADA. O servidor recusa
+ * igual a senha errada, o convite gasto e o vencido, e a nota não afirma que
+ * ele tem senha.
+ */
+const FRASES_DA_SENHA_NA_ENTRADA = Object.freeze({
+  nota: "Se este servidor tem senha, digite-a aqui. Ela não vem no link: quem hospeda é quem a passa.",
+  // Os dois rótulos, para a entrada pelo link do navegador (`celular-entrada.js`);
+  // na entrada do app eles estão na marcação.
+  rotulo: "SENHA DO SERVIDOR",
+  entrar: "ENTRAR COM A SENHA",
+});
+
+/**
+ * A frase de uma senha de servidor recusada.
+ *
+ * `recusa` é o nome da recusa, quando quem recusou foi a tela (com o `minimo`
+ * da regra que o Rust mandou), ou a recusa como o Rust a manda: o nome, ou
+ * `{ Curta: { minimo } }`, que traz o número consigo.
+ */
+function fraseDaSenhaRecusada(recusa, minimo) {
+  const nome = typeof recusa === "string" ? recusa : Object.keys(recusa ?? {})[0];
+  const frase = FRASES_DA_PORTA_AO_HOSPEDAR.recusas[nome];
+  return frase ? frase(Number(recusa?.[nome]?.minimo ?? minimo)) : "ESTA SENHA NÃO SERVE.";
+}
 
 /**
  * **A sala de espera da portaria, e a saída dela** (`tela-auth.js`,
@@ -3379,6 +3521,15 @@ const SEM_CANCELAMENTO_DE_ECO =
 const AVISO_DE_FONE_CELULAR = "";
 
 /**
+ * O aviso do microfone por voz, no celular: nenhum.
+ *
+ * O do desktop (`AVISO_DO_MICROFONE_POR_VOZ`) manda trocar para SEGURAR TECLA, e
+ * o celular não tem tecla; o padrão dele já era a voz desde a F8, e o botão do
+ * microfone fica na faixa de voz, sempre à vista. Vazia, a faixa não acende.
+ */
+const AVISO_DO_MICROFONE_POR_VOZ_NO_CELULAR = "";
+
+/**
  * O que só o app do SEELE faz, a lista canônica da matriz: a mesma nas duas
  * cascas, e só o aparelho que não repassa a tela muda de nome. O terceiro campo
  * põe o link para baixar o app ao lado da frase.
@@ -3571,6 +3722,11 @@ const FRASES_DO_CELULAR = Object.freeze({
       apelido: "COMO OS OUTROS VÃO TE CHAMAR",
       primeiraEntrada: "Sua identidade fica neste navegador. Não é transferida para outro aparelho.",
       entrar: "ENTRAR",
+      // A senha do servidor, pedida depois de uma credencial recusada: as
+      // mesmas palavras da entrada do app (`FRASES_DA_SENHA_NA_ENTRADA`).
+      senha: FRASES_DA_SENHA_NA_ENTRADA.rotulo,
+      senhaNota: FRASES_DA_SENHA_NA_ENTRADA.nota,
+      entrarComASenha: FRASES_DA_SENHA_NA_ENTRADA.entrar,
       agoraNao: "AGORA NÃO",
       servidores: "SERVIDORES DESTE APARELHO",
     }),
@@ -3643,8 +3799,11 @@ const FRASES_DO_CELULAR = Object.freeze({
         "A entrada parou para não perder sua chave. Mantenha esta página aberta e toque ENTRAR de novo."]),
       "apelido-tomado": Object.freeze(["ESTE APELIDO JÁ É DE OUTRA CHAVE NESTE SERVIDOR",
         "Se for outra pessoa, escolha outro. Se for você, este aparelho perdeu a identidade, e quem hospeda libera o nome. O convite continua valendo."]),
-      "convite-gasto": Object.freeze(["ESTE CONVITE JÁ FOI USADO",
-        "Cada convite entra uma vez. Peça um link novo a quem hospeda."]),
+      // O servidor recusa igual o convite já usado e a senha errada (spec 08),
+      // e a tela não sabe qual foi: diz as duas, e o campo da senha vem junto.
+      // Era «ESTE CONVITE JÁ FOI USADO», que num servidor com senha era falso.
+      "segredo-recusado": Object.freeze(["O SERVIDOR NÃO ACEITOU ESTA ENTRADA",
+        "Ou este convite já foi usado, ou o servidor tem senha. Com a senha, digite-a abaixo; sem ela, peça um link novo a quem hospeda."]),
       "convite-vencido": Object.freeze(["ESTE CONVITE VENCEU",
         "Peça um link novo a quem hospeda."]),
       // A PA-53: o navegador não separa servidor fora do ar de chave trocada.

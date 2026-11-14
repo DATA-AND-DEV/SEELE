@@ -503,6 +503,33 @@
     -->
     <div id="boot-teste-de-conexao" hidden></div>
     <!--
+      **A senha do servidor, de quem foi recusado na porta** (1.1.1).
+
+      O servidor aceita uma senha desde o ADR 0021, e o link não a leva, de
+      propósito (ADR 0006: «quem usa senha digita a senha»). Só que este app
+      nunca teve onde digitá-la: quem colava o link de um servidor com senha lia
+      CREDENCIAL RECUSADA e não tinha o que fazer. Com HOSPEDAR oferecendo COM
+      SENHA logo de cara, esse beco passou a ser o caminho principal.
+
+      Escondida até a frase de cima ser a de uma credencial recusada, e some
+      quando a frase muda (`oferecerASenhaNaEntrada`, em `tela-boot.js`). A
+      recusa do servidor é a mesma para senha errada, convite gasto e convite
+      vencido (`specs/08`), e por isso a nota diz «se este servidor tem senha»:
+      o app não sabe se tem.
+
+      Um formulário, para o Enter do campo ser o ENTRAR. A senha sai do campo
+      ao ser enviada, vai ao `connect` e a nenhum outro lugar.
+    -->
+    <form id="boot-senha" class="boot-senha" hidden>
+      <label class="boot-senha-campo">
+        <span class="rotulo">SENHA DO SERVIDOR</span>
+        <input id="boot-senha-valor" type="password" autocomplete="off" spellcheck="false"
+               autocapitalize="none" aria-describedby="boot-senha-nota">
+      </label>
+      <button id="boot-senha-entrar" type="submit" class="botao-fantasma">ENTRAR COM A SENHA</button>
+      <p id="boot-senha-nota" class="nota"></p>
+    </form>
+    <!--
       As saídas de quem hospeda com um MOD de API antiga moravam aqui, debaixo
       da frase vermelha. Foram para a tela ANTES DE HOSPEDAR (E2 da 0.17), no
       bloco dos MODs: a entrada não é lugar de decidir MOD de servidor.
@@ -674,6 +701,64 @@
         <button id="preparar-icone-escolher" class="botao-fantasma" type="button">ESCOLHER IMAGEM</button>
         <button id="preparar-icone-tirar" class="botao-fantasma" type="button" hidden>TIRAR</button>
       </div>
+    </div>
+    </div>
+
+    <!--
+      **QUEM PODE ENTRAR, escolhido antes de o servidor subir** (pedido do
+      dono, 13/11/2026: «quando você hospeda um servidor, já tem que mostrar se
+      ele quer senha ou não na hora de configurar»).
+
+      HOSPEDAR subia sempre no portão, e a senha só existia depois, em
+      CONFIGURAÇÕES · A PORTA, com o servidor já no ar. Aqui a escolha é feita
+      antes, e o `hospedar` a grava antes da primeira conexão
+      (`preparar_a_casa_de_quem_hospeda`, no `main.rs`): não há instante em que
+      um servidor pedido com senha esteja no ar sem ela.
+
+      Um grupo de opções de verdade: rádios nativos, com o mesmo `name`, dentro
+      de um `radiogroup` com nome. As setas trocam a escolha, e o leitor de tela
+      diz «1 de 2» e lê a linha que explica cada uma (`aria-describedby`). As
+      duas linhas e a regra da senha são escritas por `tela-boot.js`, das
+      frases de `frases.js` e da regra que o Rust manda.
+
+      Só de um servidor novo: mora em `#preparar-do-novo`, que some quando a
+      tela pergunta só a versão do servidor que já estava aqui. Aquele já tem
+      a porta dele.
+    -->
+    <div class="area-cartao preparar-porta">
+    <h2 id="preparar-porta-titulo" class="hospedagem-bloco-titulo">Quem pode entrar</h2>
+    <div class="preparar-porta-opcoes" role="radiogroup" aria-labelledby="preparar-porta-titulo">
+      <label class="preparar-porta-opcao">
+        <input type="radio" name="preparar-porta" id="preparar-porta-portao" value="portao" checked
+               aria-describedby="preparar-porta-portao-nota">
+        <span class="preparar-porta-nome">COM A SUA APROVAÇÃO</span>
+        <span id="preparar-porta-portao-nota" class="preparar-porta-nota"></span>
+      </label>
+      <label class="preparar-porta-opcao">
+        <input type="radio" name="preparar-porta" id="preparar-porta-senha" value="senha"
+               aria-describedby="preparar-porta-senha-nota">
+        <span class="preparar-porta-nome">COM SENHA</span>
+        <span id="preparar-porta-senha-nota" class="preparar-porta-nota"></span>
+      </label>
+    </div>
+    <!-- Os campos da senha só existem com COM SENHA escolhido. A regra é dita
+         antes de alguém digitar, e a recusa aparece aqui, logo abaixo do campo
+         (acima da regra, para caber com ele numa janela baixa), e não na barra
+         de baixo. -->
+    <div id="preparar-senha-campos" class="preparar-senha-campos" hidden>
+      <label class="preparar-senha-campo">
+        <span class="rotulo">SENHA DO SERVIDOR</span>
+        <input id="preparar-senha" type="password" autocomplete="new-password" spellcheck="false"
+               autocapitalize="none" aria-describedby="preparar-senha-regra preparar-senha-erro">
+      </label>
+      <label class="preparar-senha-campo">
+        <span class="rotulo">REPITA A SENHA</span>
+        <input id="preparar-senha-de-novo" type="password" autocomplete="new-password" spellcheck="false"
+               autocapitalize="none" aria-describedby="preparar-senha-erro">
+      </label>
+      <button id="preparar-senha-mostrar" class="botao-fantasma" type="button" aria-pressed="false">MOSTRAR</button>
+      <p id="preparar-senha-erro" class="erro" role="alert" hidden></p>
+      <p id="preparar-senha-regra" class="server-frase"></p>
     </div>
     </div>
 
@@ -1119,6 +1204,28 @@
   <div id="aviso-fone" class="veredito" role="status" hidden>
     <span id="aviso-fone-texto" class="veredito-texto"></span>
     <button id="aviso-fone-fechar" class="botao-fantasma" type="button">dispensar</button>
+  </div>
+
+  <!--
+    O microfone que abre por voz, dito a quem entra numa sala de voz e ainda
+    não leu isto (pedido do dono, 13/11/2026: quem usa pela primeira vez fala
+    sem tecla).
+
+    Um padrão que põe a pessoa no ar sem ela apertar nada tem de dizer que o
+    fez, e onde se troca: a linha do operador diz «microfone abre por voz», e
+    não diz que existe uma tecla nem onde ela mora. A frase é
+    `AVISO_DO_MICROFONE_POR_VOZ`, de `frases.js`, e quem a escreve é
+    `desenharAvisoDoMicrofonePorVoz` (`tela-sessao.js`), do retrato a cada
+    quadro: só com o modo em voz, só dentro de uma sala.
+
+    ENTENDI guarda que foi lida, nesta máquina, e ela não volta; escolher um
+    modo em CONFIGURAÇÕES também guarda, porque quem escolheu achou o lugar.
+
+    As classes do veredito, pela razão da faixa de fone acima.
+  -->
+  <div id="aviso-microfone" class="veredito" role="status" hidden>
+    <span id="aviso-microfone-texto" class="veredito-texto"></span>
+    <button id="aviso-microfone-fechar" class="botao-fantasma" type="button">entendi</button>
   </div>
 
   <!--
@@ -3308,14 +3415,15 @@
               <!--
                 Como o microfone abre. O comp trata isto como uma chave de sim ou
                 não — «falar só enquanto segura a tecla» —, e o produto tem três
-                modos, não dois: `specs/03-audio.md` faz da tecla o padrão porque
-                ela nunca dispara sozinha. Uma chave de dois lados esconderia o
-                terceiro estado, que é justamente o perigoso.
+                modos, não dois. Uma chave de dois lados esconderia o terceiro
+                estado, que é justamente o perigoso.
 
-                É da sessão e não do disco: `set_voice_mode` fala com um connection
-                inserido. Sem sessão os três ficam apagados, com o motivo no
-                `title` — a exceção que esta tela abre para um controle morto, e
-                ela é temporária por natureza, não estrutural.
+                **Um dos três está sempre marcado**, com ou sem sessão: com ela,
+                o que o microfone está fazendo; sem ela, o que vai valer na
+                próxima (`modo_de_voz_escolhido`, que devolve a escolha ou, sem
+                escolha, o padrão desta instalação — a voz para quem chegou, a
+                tecla para quem já usava). É aqui que quem chegou falando sem
+                tecla descobre que há uma tecla a escolher.
               -->
               <div class="server-campo">
                 <h4 class="rotulo">COMO O MICROFONE ABRE</h4>
@@ -3625,9 +3733,15 @@
               <li class="server-atalho">
                 <span class="server-atalho-texto">
                   <span class="server-atalho-acao">Falar enquanto segura</span>
-                  <span class="server-atalho-desc">o microfone abre com a tecla
-                    pressionada, fora de um campo de texto. Clique na tecla ao
-                    lado para trocá-la</span>
+                  <!--
+                    «com o microfone em SEGURAR TECLA» entrou com o padrão por
+                    voz (13/11/2026): para quem chega, o microfone não abre por
+                    tecla, e esta linha prometia que abria. O modo se escolhe em
+                    MICROFONE E SOM, com o nome que o botão de lá tem.
+                  -->
+                  <span class="server-atalho-desc">com o microfone em SEGURAR
+                    TECLA, ele abre com a tecla pressionada, fora de um campo de
+                    texto. Clique na tecla ao lado para trocá-la</span>
                 </span>
                 <!--
                   A única linha desta lista que é botão, e é de propósito.
@@ -5017,6 +5131,15 @@
           <dd class="ajuda-diz">Quem é membro deste servidor e não está conectado agora. Só o nome: ninguém vê quando cada um saiu.</dd>
           <dt class="ajuda-termo">MUDO</dt>
           <dd class="ajuda-diz">Seu microfone fechado. Ninguém ouve você enquanto ele estiver assim.</dd>
+          <!--
+            Como o microfone abre, e onde se troca. Entrou com o padrão sem
+            tecla (13/11/2026): quem chega fala de microfone aberto, e a ajuda era o único
+            lugar que falava de tecla — em AS TECLAS, como se fosse o jeito de
+            todo mundo. Dito sem afirmar qual dos dois vale: depende do que a
+            pessoa escolheu, e quem diz isso é a linha do operador.
+          -->
+          <dt class="ajuda-termo">MICROFONE</dt>
+          <dd class="ajuda-diz">Fica sempre aberto, abre quando você fala, ou só enquanto você segura a tecla de falar. Você escolhe em CONFIGURAÇÕES · MICROFONE E SOM. Enquanto os outros ouvem você, o seu nome na sala de voz diz «fala».</dd>
           <dt class="ajuda-termo">SINAL</dt>
           <dd class="ajuda-diz">Quanto da sua voz está chegando inteira do outro lado.</dd>
           <dt class="ajuda-termo">CONEXÃO SEGURA</dt>
