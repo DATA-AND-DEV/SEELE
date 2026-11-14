@@ -224,7 +224,9 @@ pub enum GateMode {
     PushToTalk,
     /// The level decides, with hysteresis and hangover.
     VoiceActivated,
-    /// Always transmitting. Useful for a recording setup, never a default.
+    /// Always transmitting. It was «a recording setup, never a default» up to
+    /// 1.1.0, and is what a new installation of the app gets since then
+    /// (`VoiceMode::DE_QUEM_CHEGA`, in `seele-core`).
     Open,
 }
 

@@ -422,7 +422,7 @@ impl Preferences {
     ///
     /// # Por que isto é escrito, e não calculado
     ///
-    /// O padrão passou da tecla para a voz, e o pedido é sobre quem chega: «o
+    /// O padrão passou da tecla para o microfone aberto, e o pedido é sobre quem chega: «o
     /// padrão agora para novos usuários». A escolha só vai para o disco quando
     /// a pessoa escolhe, então «nunca escolheu» é o estado de quem instalou
     /// hoje **e** o de quem usa há um ano sem abrir a configuração. Trocar o
@@ -1009,13 +1009,13 @@ mod tests {
             settings
                 .assentar_o_padrao_do_microfone(false)
                 .expect("assentar"),
-            VoiceMode::VoiceActivated
+            VoiceMode::DE_QUEM_CHEGA
         );
-        assert_eq!(settings.modo_do_microfone(), VoiceMode::VoiceActivated);
+        assert_eq!(settings.modo_do_microfone(), VoiceMode::DE_QUEM_CHEGA);
         // E não é escolha: a pessoa continua sem ter escolhido nada.
         assert_eq!(settings.voice_mode(), None);
-        // Por voz, e não o sempre aberto: o segundo nunca é padrão.
-        assert_ne!(VoiceMode::DE_QUEM_CHEGA, VoiceMode::Open);
+        // O sempre aberto, e não a tecla (decisão do dono, 13/11/2026).
+        assert_eq!(VoiceMode::DE_QUEM_CHEGA, VoiceMode::Open);
 
         // **A segunda abertura não muda de ideia.** Agora há arquivo (e, no
         // produto, chave): refeita a conta, a instalação nova viraria uma que
@@ -1026,10 +1026,10 @@ mod tests {
             de_novo
                 .assentar_o_padrao_do_microfone(true)
                 .expect("assentar de novo"),
-            VoiceMode::VoiceActivated,
+            VoiceMode::DE_QUEM_CHEGA,
             "a segunda abertura refez a conta e devolveu a tecla a quem chegou ontem"
         );
-        assert_eq!(de_novo.modo_do_microfone(), VoiceMode::VoiceActivated);
+        assert_eq!(de_novo.modo_do_microfone(), VoiceMode::DE_QUEM_CHEGA);
     }
 
     #[test]
@@ -1037,7 +1037,7 @@ mod tests {
         // O outro lado do mesmo pedido: a escolha só vai para o disco quando a
         // pessoa escolhe, então quem usa há um ano sem abrir a configuração
         // tem o mesmo arquivo de quem instalou hoje — sem `voice_mode`. Sem
-        // separar os dois, a atualização abriria o microfone dele por voz.
+        // separar os dois, a atualização abriria o microfone dele sozinho.
         let path = scratch("padrao-de-quem-ja-usava");
         {
             // Uma instalação de antes: tem apelido e microfone, e nenhum modo.
@@ -1117,8 +1117,8 @@ mod tests {
         // `set_voice_mode(None)` é «desfazer a escolha», e o que vale depois é
         // o padrão assentado aqui, e não um padrão único para todo mundo.
         for (ja_usava, esperado) in [
-            (false, VoiceMode::VoiceActivated),
-            (true, VoiceMode::PushToTalk),
+            (false, VoiceMode::DE_QUEM_CHEGA),
+            (true, VoiceMode::DE_QUEM_JA_USAVA),
         ] {
             let path = scratch(&format!("volta-ao-padrao-{ja_usava}"));
             let mut settings = Preferences::open(path.clone()).expect("open");

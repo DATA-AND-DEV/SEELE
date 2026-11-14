@@ -1358,25 +1358,19 @@ fn arrancar_e_conectar(
 /// E a resposta fica gravada: no segundo arranque a chave já existe (o
 /// `connect` a criou), e refazer a conta devolveria a tecla a quem chegou ontem.
 #[test]
-fn quem_chega_numa_instalacao_nova_entra_com_o_microfone_por_voz() {
+fn quem_chega_numa_instalacao_nova_entra_com_o_microfone_aberto() {
     let home = pasta_de_dados("nova");
     assert_eq!(
         arrancar_e_conectar(&home, None),
-        (
-            Some(crate::VoiceMode::VoiceActivated),
-            VoiceMode::VoiceActivated
-        ),
-        "a instalação nova não entrou com o microfone abrindo por voz"
+        (Some(crate::VoiceMode::Open), VoiceMode::DE_QUEM_CHEGA),
+        "a instalação nova não entrou com o microfone aberto"
     );
 
     // O segundo arranque, com a chave que a primeira conexão deixou.
     std::fs::write(home.join("identity.key"), [7_u8; 32]).expect("a chave");
     assert_eq!(
         arrancar_e_conectar(&home, None),
-        (
-            Some(crate::VoiceMode::VoiceActivated),
-            VoiceMode::VoiceActivated
-        ),
+        (Some(crate::VoiceMode::Open), VoiceMode::DE_QUEM_CHEGA),
         "o segundo arranque tratou a instalação de ontem como uma que já usava a tecla"
     );
     let _ = std::fs::remove_dir_all(&home);
@@ -1397,7 +1391,7 @@ fn quem_ja_usava_e_nunca_escolheu_continua_na_tecla() {
     assert_eq!(
         arrancar_e_conectar(&home, None),
         na_tecla,
-        "a atualização abriu por voz o microfone de quem já tinha chave"
+        "a atualização abriu sozinha o microfone de quem já tinha chave"
     );
     let _ = std::fs::remove_dir_all(&home);
 
@@ -1410,7 +1404,7 @@ fn quem_ja_usava_e_nunca_escolheu_continua_na_tecla() {
     assert_eq!(
         arrancar_e_conectar(&home, None),
         na_tecla,
-        "a atualização abriu por voz o microfone de quem já tinha preferências"
+        "a atualização abriu sozinha o microfone de quem já tinha preferências"
     );
     let _ = std::fs::remove_dir_all(&home);
 

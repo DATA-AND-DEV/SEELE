@@ -494,9 +494,11 @@ function marcarOAvisoDoMicrofoneComoLido() {
 }
 
 /**
- * A faixa que diz que o microfone abre por voz, a quem entra numa sala de voz.
+ * A faixa que diz que o microfone abre sem tecla (sempre aberto, ou por voz), a
+ * quem entra numa sala de voz.
  *
- * Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem tecla. A
+ * Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem tecla, com o
+ * microfone sempre aberto. A
  * faixa é a outra metade desse padrão — a pessoa passa a ir ao ar sem apertar
  * nada, e precisa saber disso, ver onde aparece que está sendo ouvida, e achar
  * onde se troca para a tecla.
@@ -511,9 +513,11 @@ function marcarOAvisoDoMicrofoneComoLido() {
  * de escrita, como a do fone.
  */
 function desenharAvisoDoMicrofonePorVoz(snapshot) {
-  const frase = CASCA.avisoDoMicrofonePorVoz();
+  // Os dois modos que põem a pessoa no ar sem tecla: o sempre aberto, que é o
+  // de quem chega, e o por voz. Cada um com a frase dele.
+  const semTecla = ["Open", "VoiceActivated"].includes(snapshot.voice_mode);
+  const frase = semTecla ? CASCA.avisoDoMicrofonePorVoz(snapshot.voice_mode) : "";
   const mostrar = Boolean(frase)
-    && snapshot.voice_mode === "VoiceActivated"
     && snapshot.audio_available === true
     && snapshot.voice_rooms.some((sala) => sala.occupied_by_us)
     && !oAvisoDoMicrofoneFoiLido();

@@ -70,11 +70,14 @@ pub enum VoiceMode {
     /// air by itself.
     PushToTalk,
     /// The level decides, with hysteresis and hangover.
+    VoiceActivated,
+    /// Always open.
     ///
     /// What a person who arrives gets ([`VoiceMode::DE_QUEM_CHEGA`]): no key
-    /// to learn before being heard.
-    VoiceActivated,
-    /// Always open. A recording setup, never a default.
+    /// to learn and no threshold to cross before being heard. It was «a
+    /// recording setup, never a default» up to 1.1.0; the owner made it the
+    /// newcomer's default on 13/11/2026, knowing it puts the whole room on
+    /// the air.
     Open,
 }
 
@@ -83,15 +86,17 @@ impl VoiceMode {
     ///
     /// Decisão do dono em 13/11/2026: «o padrão agora para novos usuários,
     /// quando eles forem usar pela primeira vez, é o microfone aberto, não
-    /// usando o botão». Por voz, e não [`VoiceMode::Open`]: o segundo
-    /// transmite a sala inteira o tempo todo, e o que o pedido quer é falar sem
-    /// tecla.
+    /// usando o botão». A primeira leitura foi a ativação por voz, porque o
+    /// sempre aberto transmite o ambiente inteiro o tempo todo; perguntado, o
+    /// dono respondeu no mesmo dia: «sempre aberto». A redução de ruído
+    /// continua ligada por padrão, e a tela diz a quem chega que o microfone
+    /// está aberto e onde se troca.
     ///
     /// **Só vale onde está escrito que a instalação é nova** — ver
     /// `Preferences::assentar_o_padrao_do_microfone`. Um microfone que passa a
     /// abrir sozinho na máquina de quem sempre segurou a tecla é o defeito que
     /// esta separação existe para não ter.
-    pub const DE_QUEM_CHEGA: Self = Self::VoiceActivated;
+    pub const DE_QUEM_CHEGA: Self = Self::Open;
 
     /// O modo de quem já usava o SEELE quando o padrão mudou e nunca escolheu:
     /// o de antes. É também o de uma instalação que ninguém assentou.
@@ -3450,10 +3455,10 @@ mod tests {
     }
 
     #[test]
-    fn quem_chega_fala_por_voz_e_quem_ja_usava_fica_na_tecla() {
-        // Pedido do dono (13/11/2026): quem usa pela primeira vez não precisa
-        // de tecla. Por voz, e não o sempre aberto, que nunca é padrão.
-        assert_eq!(VoiceMode::DE_QUEM_CHEGA, VoiceMode::VoiceActivated);
+    fn quem_chega_fala_de_microfone_aberto_e_quem_ja_usava_fica_na_tecla() {
+        // Decisão do dono (13/11/2026): quem usa pela primeira vez não precisa
+        // de tecla, e o microfone fica sempre aberto (e não por voz).
+        assert_eq!(VoiceMode::DE_QUEM_CHEGA, VoiceMode::Open);
         assert_eq!(VoiceMode::DE_QUEM_JA_USAVA, VoiceMode::PushToTalk);
     }
 

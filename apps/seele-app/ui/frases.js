@@ -511,7 +511,8 @@ const AVISO_DE_FONE = "";
 
 /**
  * O microfone que abre por voz, dito a quem entra numa sala de voz e ainda não
- * leu isto.
+ * leu isto. (Quem chega entra com o sempre aberto, e lê a frase de baixo; esta
+ * é a de quem está por voz sem ter passado por CONFIGURAÇÕES.)
  *
  * Pedido do dono (13/11/2026): quem usa pela primeira vez fala sem tecla. Um
  * padrão que põe a pessoa no ar sem ela apertar nada tem de dizer três coisas
@@ -526,6 +527,21 @@ const AVISO_DO_MICROFONE_POR_VOZ =
   "SEU MICROFONE ABRE QUANDO VOCÊ FALA.\n" +
   "Enquanto os outros ouvem você, o seu nome na sala diz «fala». " +
   "Para falar só segurando uma tecla: CONFIGURAÇÕES · MICROFONE E SOM · SEGURAR TECLA.";
+
+/**
+ * O microfone sempre aberto, dito a quem entra numa sala de voz e ainda não
+ * leu isto. É o modo de quem instala o SEELE agora (decisão do dono,
+ * 13/11/2026: «sempre aberto», e não por voz).
+ *
+ * Diz o que a de cima diz, e uma coisa a mais, que só este modo tem: o som em
+ * volta vai junto, o tempo todo. Por isso o primeiro lugar que ela aponta é o
+ * botão que cala, e só depois os outros dois modos, pelos nomes que os botões
+ * de CONFIGURAÇÕES têm.
+ */
+const AVISO_DO_MICROFONE_ABERTO =
+  "SEU MICROFONE ESTÁ SEMPRE ABERTO.\n" +
+  "Todos na sala ouvem você e o som em volta, sem você apertar nada. Para calar, o botão do microfone. " +
+  "Para abrir só quando você fala, ou só segurando uma tecla: CONFIGURAÇÕES · MICROFONE E SOM · AO FALAR ou SEGURAR TECLA.";
 
 /**
  * Com que nome entra quem fecha a pergunta do nome sem responder.

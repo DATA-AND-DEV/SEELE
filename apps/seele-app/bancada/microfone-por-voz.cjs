@@ -145,70 +145,77 @@ async function modosNaConfiguracao(aba, origem) {
       const onde = `${largura}×${altura}`;
 
       // ---------------------------------------------------- quem chegou
+      // Os dois modos sem tecla: o sempre aberto, que é o de quem instala agora
+      // (decisão do dono, 13/11/2026), e o por voz.
+      for (const modo of ["Open", "VoiceActivated"]) {
+      const onde = `${largura}×${altura}, ${modo}`;
+      const daLinha = modo === "Open" ? "microfone aberto" : "microfone abre por voz";
       const contexto = await browser.newContext({ viewport: { width: largura, height: altura } });
-      const { aba, erros } = await abrir(contexto, url, "VoiceActivated");
-      const frase = await aba.evaluate(() => AVISO_DO_MICROFONE_POR_VOZ);
+      const { aba, erros } = await abrir(contexto, url, modo);
+      const frase = await aba.evaluate((m) => (m === "Open" ? AVISO_DO_MICROFONE_ABERTO : AVISO_DO_MICROFONE_POR_VOZ), modo);
 
       // 1. Sem sessão, a configuração marca o modo que vai valer.
       const naEntrada = await modosNaConfiguracao(aba, "tela-boot");
-      assert.deepEqual(naEntrada.marcados, ["VoiceActivated"],
-        `${onde}: sem sessão, quem chegou não vê AO FALAR marcado: ${JSON.stringify(naEntrada.marcados)}`);
+      assert.deepEqual(naEntrada.marcados, [modo],
+        `${onde}: sem sessão, a configuração não marca o modo que vai valer: ${JSON.stringify(naEntrada.marcados)}`);
       // E a linha da tecla diz que ela depende do modo, com o nome do botão.
       assert.ok(naEntrada.atalho.includes(naEntrada.nomes.PushToTalk),
         `${onde}: a linha «Falar enquanto segura» promete a tecla sem dizer o modo: «${naEntrada.atalho}»`);
       await aba.evaluate(() => fecharServer());
 
       // 2. Fora de sala, nada; na sala, a faixa.
-      await desenhar(aba, foraDeSala("VoiceActivated"));
+      await desenhar(aba, foraDeSala(modo));
       assert.equal((await ler(aba)).faixaAVista, false, `${onde}: a faixa acendeu fora de sala`);
-      await desenhar(aba, naSala("VoiceActivated"));
+      await desenhar(aba, naSala(modo));
       let lido = await ler(aba);
       assert.ok(lido.faixaAVista, `${onde}: quem entrou na sala com o microfone por voz não foi avisado`);
       assert.equal(lido.faixaDiz, frase, `${onde}: a faixa não diz a frase do frases.js`);
       // Os nomes da frase são os da configuração: é para lá que ela manda.
-      for (const nome of ["CONFIGURAÇÕES", naEntrada.secao, naEntrada.nomes.PushToTalk]) {
+      for (const nome of ["CONFIGURAÇÕES", naEntrada.secao, naEntrada.nomes.PushToTalk, ...(modo === "Open" ? [naEntrada.nomes.VoiceActivated, "SEMPRE ABERTO"] : [])]) {
         assert.ok(lido.faixaDiz.includes(nome), `${onde}: a faixa não diz «${nome}»: «${lido.faixaDiz}»`);
       }
       assert.ok(lido.faixaCabe, `${onde}: a faixa (ou o ENTENDI) sai da janela`);
-      assert.ok(lido.linha.startsWith("microfone abre por voz"), `${onde}: a linha do operador diz «${lido.linha}»`);
-      assert.equal(lido.botao, "MICROFONE ABRE POR VOZ", `${onde}: o botão do microfone diz «${lido.botao}»`);
+      assert.ok(lido.linha.startsWith(daLinha), `${onde}: a linha do operador diz «${lido.linha}»`);
+      assert.equal(lido.botao, daLinha.toUpperCase(), `${onde}: o botão do microfone diz «${lido.botao}»`);
       assert.equal(lido.minhaMarca, null, `${onde}: calada, a pessoa aparece como «${lido.minhaMarca}»`);
       if (process.env.SEELE_CAPTURAS) {
-        await aba.screenshot({ path: require("node:path").join(process.env.SEELE_CAPTURAS, `microfone-por-voz-${largura}x${altura}.png`) });
+        await aba.screenshot({ path: require("node:path").join(process.env.SEELE_CAPTURAS, `microfone-${modo === "Open" ? "aberto" : "por-voz"}-${largura}x${altura}.png`) });
       }
 
       // 3. Falando, ela se vê no ar: o nome dela na sala, a linha e o botão.
-      await desenhar(aba, falando("VoiceActivated"));
+      await desenhar(aba, falando(modo));
       lido = await ler(aba);
       assert.equal(lido.minhaMarca, "fala", `${onde}: falando, o nome da pessoa na sala não diz «fala»`);
-      assert.ok(lido.faixaDiz.includes(`«${lido.minhaMarca}»`), `${onde}: a faixa promete uma marca que a sala não mostra`);
+      // A frase do por voz aponta a marca; a do sempre aberto aponta o botão que cala.
+      if (modo === "VoiceActivated") assert.ok(lido.faixaDiz.includes(`«${lido.minhaMarca}»`), `${onde}: a faixa promete uma marca que a sala não mostra`);
       assert.ok(lido.linha.endsWith("no ar"), `${onde}: falando, a linha do operador diz «${lido.linha}»`);
-      assert.equal(lido.botao, "MICROFONE ABRE POR VOZ · NO AR", `${onde}: falando, o botão diz «${lido.botao}»`);
+      assert.equal(lido.botao, `${daLinha.toUpperCase()} · NO AR`, `${onde}: falando, o botão diz «${lido.botao}»`);
 
       // Sair da sala apaga; voltar sem ter lido acende de novo.
-      await desenhar(aba, foraDeSala("VoiceActivated"));
+      await desenhar(aba, foraDeSala(modo));
       assert.equal((await ler(aba)).faixaAVista, false, `${onde}: a faixa ficou acesa fora de sala`);
-      await desenhar(aba, naSala("VoiceActivated"));
+      await desenhar(aba, naSala(modo));
       assert.ok((await ler(aba)).faixaAVista, `${onde}: a faixa não voltou para quem ainda não a leu`);
 
       // 6. Com o microfone que não abriu, ela se cala.
-      await desenhar(aba, naSala("VoiceActivated", { audio_available: false }));
-      assert.equal((await ler(aba)).faixaAVista, false, `${onde}: a faixa diz «abre quando você fala» de um microfone fechado`);
-      await desenhar(aba, naSala("VoiceActivated"));
+      await desenhar(aba, naSala(modo, { audio_available: false }));
+      assert.equal((await ler(aba)).faixaAVista, false, `${onde}: a faixa diz que o microfone está aberto de um microfone fechado`);
+      await desenhar(aba, naSala(modo));
 
       // 4. ENTENDI guarda, e ela não volta: nem no quadro seguinte, nem recarregando.
       await aba.click("#aviso-microfone-fechar");
       lido = await ler(aba);
       assert.equal(lido.faixaAVista, false, `${onde}: o ENTENDI não apagou a faixa`);
       assert.equal(lido.lido, "sim", `${onde}: o ENTENDI não guardou que a faixa foi lida`);
-      await desenhar(aba, naSala("VoiceActivated"));
+      await desenhar(aba, naSala(modo));
       assert.equal((await ler(aba)).faixaAVista, false, `${onde}: a faixa voltou no quadro seguinte ao ENTENDI`);
       await aba.reload();
       await aba.waitForTimeout(500);
-      await desenhar(aba, naSala("VoiceActivated"));
+      await desenhar(aba, naSala(modo));
       assert.equal((await ler(aba)).faixaAVista, false, `${onde}: a faixa voltou depois de recarregar`);
       assert.deepEqual(erros, [], `${onde}: erros de página: ${erros.join(" | ")}`);
       await contexto.close();
+      }
 
       // ------------------------- quem chegou, e escolheu em CONFIGURAÇÕES
       const outro = await browser.newContext({ viewport: { width: largura, height: altura } });
@@ -261,7 +268,7 @@ async function modosNaConfiguracao(aba, origem) {
       `a ajuda não diz como o microfone abre nem onde se escolhe: «${diz}»`);
     await ajuda.close();
 
-    console.log("ok: quem chega fala por voz e é avisado uma vez (onde se vê no ar, onde se troca); quem ficou na tecla não vê nada; sem sessão a configuração marca o modo que vale");
+    console.log("ok: quem chega fala de microfone aberto (ou por voz) e é avisado uma vez (onde se vê no ar, onde se troca); quem ficou na tecla não vê nada; sem sessão a configuração marca o modo que vale");
   } finally {
     await browser.close();
     server.close();
