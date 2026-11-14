@@ -2026,12 +2026,7 @@ const FRASES_DA_PORTA_AO_HOSPEDAR = Object.freeze({
     "Quem tem a senha entra direto, sem esperar a sua aprovação. Sem a senha, ninguém entra.",
   regra: (minimo) =>
     (Number.isFinite(minimo) ? `Pelo menos ${minimo} caracteres. ` : "") +
-    "A senha não viaja no link: passe-a às pessoas por fora. " +
-    // O link do navegador entra pela `identidade-web.js`, que lê a recusa da
-    // credencial como convite gasto e não tem campo de senha: dito aqui, para
-    // quem hospeda não mandar esse link a quem vai precisar da senha.
-    "Quem entra pelo link do navegador ainda não tem onde digitá-la: com senha, a entrada é pelo app. " +
-    "Dá para trocá-la depois, em CONFIGURAÇÕES · A PORTA.",
+    "A senha não viaja no link: passe-a às pessoas por fora. Dá para trocá-la depois, em CONFIGURAÇÕES · A PORTA.",
   mostrar: "MOSTRAR",
   ocultar: "OCULTAR",
   recusas: Object.freeze({
