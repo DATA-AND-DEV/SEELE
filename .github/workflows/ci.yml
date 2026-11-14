@@ -962,6 +962,12 @@ jobs:
       - run: node apps/seele-app/bancada/portaria-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm target/debug/portaria-da-bancada chromium playwright
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # A senha do servidor pelo link do navegador (1.1.1), contra o
+      # `servidor_da_bancada` subido com `--senha`: a identidade, a casca de
+      # celular e a larga, com o `.wasm` de produto.
+      - run: node apps/seele-app/bancada/senha-pelo-link-do-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # O enlace WebRTC da página (`ui/rtc-web.js`) contra o enlace de produto
       # (`crates/seele-enlace/examples/eco.rs`) e contra o `seele-encontro`, no
       # Chromium. O eco e o ponto de encontro são compilados aqui mesmo.

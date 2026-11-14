@@ -2,7 +2,12 @@
 //! como o app hospeda (`Hospedagem::iniciar`), com o banco numa pasta
 //! temporária.
 //!
-//!     cargo run -p seele-server --example servidor_da_bancada [--local] [--proprietario <hex64>] [pasta-de-um-mod]
+//!     cargo run -p seele-server --example servidor_da_bancada [--local] [--proprietario <hex64>] [--senha <senha>] [pasta-de-um-mod]
+//!
+//! **`--senha <senha>`**: o servidor nasce com esta senha e sem a portaria,
+//! como o app o sobe quando quem hospeda escolhe COM SENHA (as mesmas duas
+//! funções, no `antes_de_aceitar`). Para a bancada da senha pelo link do
+//! navegador (`senha-pelo-link-do-navegador.cjs`).
 //!
 //! **`--local`**: o modo local (E9, `Hospedagem::iniciar_local`). Atende só em
 //! `127.0.0.1` e não sobe a escada, sem UPnP, PCP nem ponto de encontro. A
@@ -66,8 +71,19 @@ async fn main() -> Result<()> {
     let mut proprietario: Option<String> = None;
     let mut origem = None;
     let mut local = false;
+    let mut senha: Option<String> = None;
     let mut argumentos = std::env::args_os().skip(1);
     while let Some(argumento) = argumentos.next() {
+        if argumento == "--senha" {
+            senha = Some(
+                argumentos
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("`--senha` precisa da senha"))?
+                    .into_string()
+                    .map_err(|_| anyhow::anyhow!("`--senha`: a senha não é texto"))?,
+            );
+            continue;
+        }
         if argumento == "--proprietario" {
             let impressao = argumentos
                 .next()
@@ -108,6 +124,10 @@ async fn main() -> Result<()> {
     let antes_de_aceitar = move |persistence: &mut Persistence| {
         if let Some(impressao) = &dono {
             seele_server::cargos::declarar_proprietario(persistence, impressao)?;
+        }
+        if let Some(senha) = &senha {
+            seele_server::admissao::definir_senha(persistence, Some(senha))?;
+            seele_server::portaria::ligar(persistence, false)?;
         }
         Ok(())
     };

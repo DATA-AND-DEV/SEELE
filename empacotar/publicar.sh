@@ -1494,6 +1494,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/tres-sessoes-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
     uma_bancada node apps/seele-app/bancada/vista-com-dois-servidores.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm chromium playwright
     uma_bancada node apps/seele-app/bancada/portaria-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm target/debug/portaria-da-bancada chromium playwright
+    uma_bancada node apps/seele-app/bancada/senha-pelo-link-do-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-credito.cjs target/debug/examples/eco chromium playwright
     uma_bancada node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright
