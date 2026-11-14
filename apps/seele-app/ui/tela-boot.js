@@ -1750,13 +1750,13 @@ function desenharAPortaPreparada() {
 function lerAPortaPreparada() {
   if (!$("preparar-porta-senha").checked) return { senha: null };
   const senha = $("preparar-senha").value;
-  const regras = regrasDaSenhaDoServidor;
+  const regrasDaSenha = regrasDaSenhaDoServidor;
   if (senha.trim() === "") return { recusa: "Vazia", campo: "preparar-senha" };
   if (senha.trim() !== senha) return { recusa: "ComEspacoNaPonta", campo: "preparar-senha" };
-  if (Number.isFinite(regras?.minimo) && [...senha].length < regras.minimo) {
+  if (Number.isFinite(regrasDaSenha?.minimo) && [...senha].length < regrasDaSenha.minimo) {
     return { recusa: "Curta", campo: "preparar-senha" };
   }
-  if (Number.isFinite(regras?.maximo_em_bytes) && bytesDe(senha) > regras.maximo_em_bytes) {
+  if (Number.isFinite(regrasDaSenha?.maximo_em_bytes) && bytesDe(senha) > regrasDaSenha.maximo_em_bytes) {
     return { recusa: "Longa", campo: "preparar-senha" };
   }
   if ($("preparar-senha-de-novo").value !== senha) {
